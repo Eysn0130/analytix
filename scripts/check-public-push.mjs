@@ -101,11 +101,15 @@ export function checkPublicCandidate({ cwd = process.cwd(), revision = 'HEAD', p
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    if (process.argv.slice(2).join(' ') === '--candidate') {
+    const args = process.argv.slice(2)
+    if (args.length === 1 && args[0] === '--candidate') {
       const result = checkPublicCandidate()
       console.log(`PASS public ancestry, excluded paths and blob limits: ${result.files} current files; ${result.checkedObjects} post-baseline objects. Not a content secret scan.`)
-    } else if (process.argv.length === 2) checkPublicPush(readFileSync(0, 'utf8'))
-    else throw new Error('Push refused: unsupported inspection arguments.')
+    } else if (args.length === 0 || (args.length === 2 && !args[0].startsWith('--'))) {
+      // Git supplies remote name and location to pre-push. The policy consumes
+      // ref updates on stdin; do not log or otherwise use remote credential data.
+      checkPublicPush(readFileSync(0, 'utf8'))
+    } else throw new Error('Push refused: unsupported inspection arguments.')
   } catch (error) {
     console.error(error instanceof Error && error.message.startsWith('Push refused:')
       ? error.message : 'Push refused: public history inspection failed. Fetch full history and check the local Git configuration.')

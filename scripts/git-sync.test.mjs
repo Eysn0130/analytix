@@ -120,8 +120,12 @@ test('empty pushes and feature-branch deletions work; deleting main is refused',
 function installFixtureHook(f) {
   const hooksPath = join(f.cwd, '.githooks')
   mkdirSync(hooksPath)
-  writeFileSync(join(hooksPath, 'pre-push'), '#!/bin/sh\nexit 0\n')
+  // Exercise Git's actual hook argv/stdin contract, not an always-green stub.
+  writeFileSync(join(hooksPath, 'pre-push'), readFileSync(new URL('../.githooks/pre-push', import.meta.url)))
   chmodSync(join(hooksPath, 'pre-push'), 0o755)
+  mkdirSync(join(f.cwd, 'scripts'))
+  writeFileSync(join(f.cwd, 'scripts/check-public-push.mjs'), readFileSync(new URL('./check-public-push.mjs', import.meta.url)))
+  writeFileSync(join(f.cwd, 'scripts/public-source-policy.json'), JSON.stringify(f.policy))
   return hooksPath
 }
 
@@ -160,6 +164,8 @@ test('two clones can pull, commit and push; divergent pull preserves both histor
   run(f.directory, 'clone', bare, peer)
   run(peer, 'config', 'user.name', 'Analytix Synthetic Peer')
   run(peer, 'config', 'user.email', 'peer@example.invalid')
+  const peerFixture = { ...f, cwd: peer }
+  setupGitSync({ ...peerFixture, hooksPath: installFixtureHook(peerFixture) })
   writeFileSync(join(peer, 'incoming.txt'), 'synthetic incoming change\n')
   run(peer, 'add', 'incoming.txt')
   run(peer, '-c', 'commit.gpgsign=false', 'commit', '-m', 'Synthetic peer change')
@@ -180,4 +186,16 @@ test('two clones can pull, commit and push; divergent pull preserves both histor
   assert.equal(run(f.cwd, 'rev-parse', 'HEAD'), local)
   assert.equal(readFileSync(join(f.cwd, 'uncommitted.txt'), 'utf8'), 'preserve local work\n')
   assert.equal(run(f.cwd, 'rev-parse', 'origin/main'), run(peer, 'rev-parse', 'HEAD'))
+})
+
+test('the installed hook consumes Git stdin and blocks private files before remote mutation', t => {
+  const f = fixture(t)
+  const bare = join(f.directory, 'remote.git')
+  run(f.directory, 'init', '--bare', '-b', 'main', bare)
+  run(f.cwd, 'remote', 'add', 'origin', bare)
+  setupGitSync({ ...f, hooksPath: installFixtureHook(f) })
+  run(f.cwd, 'push', '-u', 'origin', 'main')
+  f.commit('.env.local', 'SYNTHETIC_VALUE=not-a-real-secret\n')
+  assert.throws(() => run(f.cwd, 'push'), /excluded local file/)
+  assert.equal(run(bare, 'rev-parse', 'refs/heads/main'), f.publicRoot)
 })

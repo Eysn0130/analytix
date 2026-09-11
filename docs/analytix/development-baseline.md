@@ -281,7 +281,7 @@ Go source-set assertions and CI private-directory creation); they do not erase
 that baseline failure or prove all remaining tests have passed.
 
 The 2026-09-12 stabilization candidate based on `52b5874` was verified locally
-on macOS ARM64: 40 baseline tests, native doctor, TypeScript checks, source
+on macOS ARM64: 41 baseline tests, native doctor, TypeScript checks, source
 build/layout smoke, two deterministic Funds contracts, Darwin/Linux/Windows Go
 source-selection tests, and the complete affected Go evidence/reasoning packages
 in ordinary and production modes passed. Targeted updater, isolation and
@@ -289,6 +289,9 @@ non-disclosure fixture tests passed; these are not a full application-suite
 result. A fresh isolated Python 3.11 environment installed from `backend/uv.lock`
 passed all **1,617 backend tests** (two dependency deprecation warnings).
 Workflow lint passed. Installer and live Provider checks were not executed.
+The Git round-trip regression installs the real pre-push hook in both synthetic
+clones, including its argv/stdin handling and rejection before remote mutation;
+an always-successful hook stub is not evidence of the protected push path.
 
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
