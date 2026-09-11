@@ -8,7 +8,7 @@ function run(command, args, options = {}) {
   })
 }
 
-require('./ensure-runtime-install.cjs')
+require('./ensure-runtime-install.cjs').ensureAnalytixInstall()
 
 const buildAnalytix = run('npm', ['--prefix', 'packages/runtime', 'run', 'build'])
 if (buildAnalytix.status !== 0) {

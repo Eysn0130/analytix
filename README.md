@@ -126,16 +126,23 @@ Analytix 探索的是“需求 -> 设计 -> 计划 -> 编码 -> 验证”的下�
 
 | 依赖 | 版本 |
 | --- | --- |
-| Node.js | 22.12+ |
-| npm | 随 Node.js 安装 |
-| Go | 1.22+ 兼容工具链（仅源码开发；发布包已携带 native runtime-server） |
+| Node.js | 已验证基线 22.22.1，见 `.node-version` |
+| npm | 10.9.4，按 lockfile 安装 |
+| Go | CI / 当前原生基线 1.26.4；`go.mod` 的 1.22 是语言最低版本 |
+| 原生开发 | Rust 1.94.1、匹配的 SDK / 主机构建 authority 与 runtime 资源，见下方开发基线 |
 | 模型服务 | 运行模型任务时需要可用的本地 Provider 连接；普通启动不要求 Hub 账号 |
 
 ```bash
 cd /path/to/analytix
-npm ci
-npm run dev
+# 配置的 Owner macOS 主机须先在同一 zsh source 缓存脚本
+npm run bootstrap
+npm run verify:baseline
 ```
+
+以上验证源码开发基线，不等于完整安装包就绪。原生资源和主机条件满足后，使用
+`npm run doctor -- --native`、`npm run dev` 启动完整开发链路。公开 clone 的
+资源准备、平台限制、CI 和封包状态见
+[开发基线](docs/analytix/development-baseline.md)；不把 `dev:fast` 当作完整初始化。
 
 ### macOS 本机开发缓存
 
@@ -163,10 +170,12 @@ npm ci --registry=https://registry.npmmirror.com
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run dev` | 构建 TypeScript runtime launcher/contracts 并启动 Electron 开发环境 |
+| `npm run bootstrap` | 安装 Git 同步保护、刷新 root/runtime 锁定依赖、检查开发输入 |
+| `npm run verify:baseline` | 开发输入、同步回归、类型检查、源码构建及输出 smoke |
+| `npm run dev` | 先构建原生数据工具和 TypeScript launcher/contracts，再启动 Electron 开发环境 |
 | `npm run build:runtime` | 构建 `packages/runtime` launcher/contracts，不验证 Go core |
 | `(cd packages/runtime-go && go test ./...)` | 运行 Go runtime 测试 |
-| `npm run build` | 生产构建 |
+| `npm run build` | Electron / TypeScript 源码构建；不等于完整原生包验收 |
 | `npm run typecheck` | TypeScript 类型检查 |
 | `npm run lint` | ESLint 检查 |
 | `npm run test` | 运行 Vitest 测试 |

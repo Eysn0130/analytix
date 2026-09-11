@@ -2,13 +2,19 @@
 
 - Status: Operational
 - Applies to: local development, validation, packaging, and startup diagnosis
-- Current as of: 2026-08-05; verify the current worktree before use
+- Current as of: 2026-09-12; verify the current worktree before use
 - Source of truth: `package.json`, package scripts, build configuration, and
   `scripts/`
 
 This page routes commands; a listed command is not evidence that it passed.
 Record the current worktree, platform, command, exit status, skips, and relevant
 environment whenever the result supports a present-tense claim.
+
+For the public `main` development loop, dependency refresh after `pull`,
+portable source checks, runtime-resource preparation and CI/package status,
+start with [Development baseline](development-baseline.md). The configured
+macOS storage procedures below are host-specific, not prerequisites for every
+public source checkout.
 
 ## Preserve The Worktree
 

@@ -6,6 +6,8 @@
 
 ## 当前交接与整理入口
 
+- [`development-baseline.md`](development-baseline.md) 是当前公开主线开发入口：
+  `pull` 后的依赖更新、工具链、资源准备、CI 与封包的已实现边界。
 - [`git-workflow.md`](git-workflow.md) 是 canonical 与 GitHub 公开主线的
   `pull` / `commit` / `push` 操作入口，也说明保留的私有历史与资源排除范围。
 - [`handovers/README.md`](handovers/README.md) 是跨线程暂停和恢复的操作入口。
@@ -253,6 +255,10 @@ Supersedes / Superseded by: <path, when applicable>
   present-tense claim 依赖可执行事实时，才补跑对应的最小测试/构建/命令。
 
 ## 2026-07-10 审计后续
+
+以下是当时的历史记录，不代表当前 remote、跟踪文件或验收状态。
+当前已配置 GitHub `origin/main`；`managed-chrome/` 和部分 native 资源已排除
+于公开树，现状及准备方法见 [Development baseline](development-baseline.md)。
 
 以下事项最初由文档审计发现，随后通过独立 owner、OpenSpec scope 和验证完成，
 或保留为明确的外部边界：

@@ -36,7 +36,8 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 | `docs/legacy/` | Historical | 只作为迁移/来源历史，不作为当前实现。 |
 | `重构升级方案.md` | Historical decision ledger | 只读顶部 currentness；长编号章节不能覆盖代码/spec。 |
 | `plugins/*/references/` | Plugin reference | 不等于 production contract；重复副本需哈希核对。 |
-| `build/`、`dist*`、`output/`、`release/legacy/` | Generated/historical | 不作为 maintained source 或当前验证入口。 |
+| `build/` 中被跟踪的 entitlements、icons、NSIS 脚本 | Maintained build source | 是安装包输入，不能作为缓存删除。 |
+| `build/` 中生成的 native/backend 资源、`dist*`、`output/`、`release/legacy/` | Generated/historical | 不是 maintained source；精确区分当前资源、可再生输出与需保留的历史证据。 |
 
 ## 3. 高风险大文档
 

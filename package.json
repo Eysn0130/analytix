@@ -5,7 +5,19 @@
   "description": "Electron workbench for the analytix runtime (HTTP/SSE)",
   "main": "./out/main/index.js",
   "type": "module",
+  "packageManager": "npm@10.9.4",
+  "engines": {
+    "node": ">=22.22.1 <23",
+    "npm": ">=10.9.4 <11"
+  },
   "scripts": {
+    "bootstrap": "npm run git:setup && npm ci && npm run doctor",
+    "doctor": "node ./scripts/development-doctor.mjs",
+    "assets:verify": "node ./scripts/runtime-assets.mjs verify",
+    "assets:prepare": "node ./scripts/runtime-assets.mjs prepare",
+    "test:baseline": "node --test ./scripts/git-sync.test.mjs ./scripts/ensure-runtime-install.test.mjs ./scripts/runtime-assets.test.mjs ./scripts/development-doctor.test.mjs ./scripts/source-build-smoke.test.mjs ./scripts/package-candidate-smoke.test.mjs",
+    "verify:baseline": "npm run doctor && npm run test:baseline && npm run typecheck && npm run build && npm run smoke:source",
+    "smoke:source": "node ./scripts/source-build-smoke.mjs",
     "dev": "npm run build:data-native:development && npm run build:runtime && electron-vite dev",
     "dev:fast": "electron-vite dev",
     "dev:test-account": "node ./scripts/dev-test-account-launcher.mjs --dev",

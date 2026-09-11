@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "description": "Exact existing runtime payloads. Verification metadata only; does not supply missing artifacts or grant release authority.",
+  "targets": {
+    "darwin-arm64": {
+      "supply": "explicit-owner-archive",
+      "files": [
+        {
+          "path": "vendor/analytix-computer-use/dist/Analytix Computer Use.app/Contents/Info.plist",
+          "bytes": 1117,
+          "sha256": "078eb65196a8c3ff14fcf60377e70204130e1b8dc2b9beb4837a391e337424ef",
+          "executable": false
+        },
+        {
+          "path": "vendor/analytix-computer-use/dist/Analytix Computer Use.app/Contents/MacOS/OpenComputerUse",
+          "bytes": 1297456,
+          "sha256": "afc1d155d45645ef65535a2997d06cf0eb23c82cc1d1097b5a8aa32a21bd4e52",
+          "executable": true
+        },
+        {
+          "path": "vendor/analytix-computer-use/dist/Analytix Computer Use.app/Contents/Resources/AnalytixComputerUse.icns",
+          "bytes": 2418336,
+          "sha256": "957f0e0e91e2f292118004e3fa3cb56a2e9ec23102a85d03ec62ce292d9029f7",
+          "executable": false
+        },
+        {
+          "path": "vendor/analytix-computer-use/dist/Analytix Computer Use.app/Contents/Resources/official-software-cursor-window-252.png",
+          "bytes": 27013,
+          "sha256": "a85784a3f438da110c42b509b0b27b90d47b85812274a9d329f3f27b9bd8965f",
+          "executable": false
+        },
+        {
+          "path": "vendor/analytix-computer-use/dist/Analytix Computer Use.app/Contents/_CodeSignature/CodeResources",
+          "bytes": 2754,
+          "sha256": "3b461b4f3b3dce57ee58c1c3565fcdcb2e59040a96c83db443951f8b205150db",
+          "executable": false
+        }
+      ]
+    },
+    "win32-x64": {
+      "supply": "explicit-owner-archive",
+      "files": [
+        {
+          "path": "managed-chrome/chrome/extension-host/windows/x64/extension-host.exe",
+          "bytes": 591360,
+          "sha256": "18441894b9d65257700e4516ca1a45a63d1835730e3522e13af8ca71cf3b2c36",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/chrome/scripts/browser-client.mjs",
+          "bytes": 851736,
+          "sha256": "d5042b9473491c3112f203a4b980f3b20798d07104781feafeec3a1b4d515f36",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/assets/popup-DrRf5S_a.css",
+          "bytes": 56098,
+          "sha256": "4ae37c4ab295fabaf5bf5bb6bfbab84633e5c4d3ba5f864aaa2aa257e2aa00e3",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/background.js",
+          "bytes": 55631,
+          "sha256": "6e110babdc77c2d715e443e153205b544a5d2c0129e65fbdaa3e74e9044dd8a9",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/chunks/popup-47nmQnIc.js",
+          "bytes": 200410,
+          "sha256": "de96529a690287e765e5d6121f1aab42714745313b6bbb412533bebc132599c2",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/content-scripts/codex.js",
+          "bytes": 21755,
+          "sha256": "daa383cb2fa673cd3c98bd80b9d1135787d0a9a0a60cbdbce35a8853c952da8e",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/images/cursor-chat.png",
+          "bytes": 1843,
+          "sha256": "c575bc277bab1b09518433aa465be98a8c04b305fe78ed674bf016bfa350e491",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/images/icon128.png",
+          "bytes": 3770,
+          "sha256": "8df511968441f58f607fb6c14b256a4133bb6fd3b0f16b5fa4e9fc94133f7089",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/images/icon16.png",
+          "bytes": 511,
+          "sha256": "4b2f03c6599043d7534d8ce4dd1d61dd192903040cee386ddb681d81d5356c6c",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/images/icon32.png",
+          "bytes": 1010,
+          "sha256": "e046f48828e1b3296e3cbd75ff981f057425e6f383b2a24cd19470e60b95e438",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/images/icon48.png",
+          "bytes": 1476,
+          "sha256": "894678a559000b1f1481bb6f69c6695bb8b05254f89fa86f167b19c98077f426",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/manifest.json",
+          "bytes": 1257,
+          "sha256": "9cf506a22c965cd400e9572f6c01e404f1a8c68cb43c98901f2de79451bdaf0a",
+          "executable": false
+        },
+        {
+          "path": "managed-chrome/codex-extension/popup.html",
+          "bytes": 442,
+          "sha256": "4da942ec275ec5d312bececef06d9ce84343f0ff0fe56b6470e0e7f0fae2f673",
+          "executable": false
+        },
+        {
+          "path": "vendor/analytix-computer-use/dist/windows/amd64/analytix-computer-use.exe",
+          "bytes": 2633728,
+          "sha256": "516eff551fe27445304266b2f28ab5298d9f63f473b06f078ca6293611d2947d",
+          "executable": false
+        }
+      ]
+    }
+  }
+}

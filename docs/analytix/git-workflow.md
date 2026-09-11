@@ -12,6 +12,13 @@ git status --short --branch
 git pull
 ```
 
+Then refresh changed dependencies and build outputs; `pull` does not do that
+for you. `npm run bootstrap` performs locked installation, and
+`npm run verify:baseline` checks the source-development baseline. On the
+configured Owner macOS host, source `./scripts/use-analytix-cache.sh` in the
+same shell first. See [Development baseline](development-baseline.md) for
+tools, native resources, CI and packaging limits.
+
 After editing and running the checks appropriate to the change:
 
 ```sh
@@ -73,12 +80,18 @@ branches. Extract only reviewed source changes when recovering older work.
 
 The 57 previously excluded files are recorded in
 [`scripts/public-source-policy.json`](../../scripts/public-source-policy.json).
-They remain available in the Owner's existing local checkout and private
-history, but are no longer tracked by the public mainline. The list includes
+They remain recoverable in Owner-private history/archives, but are no longer
+tracked by the public mainline. The list includes
 generated diagnostics, screenshots, Python metadata, a compiled test binary,
 extracted managed-browser resources and the native Computer Use application.
 Those resources were not newly removed from the public repository by this
 alignment. `.gitignore` prevents accidental staging; do not force-add them.
+
+The subsequent baseline cleanup archived and hash-verified 38 generated or
+dated-evidence files before removing those exact local copies. The 18 required
+browser/native resources and one local launch configuration remain in place.
+An empty, unused root Clang analyzer report was also archived and retired.
+No product source, test or resource capability was deleted.
 
 Consequently, public source synchronization does not establish complete
 installer reproducibility: managed-browser/native Computer Use packaging

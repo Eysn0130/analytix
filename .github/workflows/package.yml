@@ -1,0 +1,81 @@
+name: macOS package candidate (no release)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-package-candidate
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main and an explicitly qualified dedicated packaging runner
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          PACKAGE_RUNNER_READY: ${{ vars.ANALYTIX_MACOS_PACKAGE_RUNNER_READY }}
+        run: |
+          test "$DISPATCH_REF" = refs/heads/main || { echo 'Dispatch from main only.'; exit 1; }
+          test "$PACKAGE_RUNNER_READY" = true || {
+            echo 'NOT_CONFIGURED: dedicated macOS ARM64 packaging runner, pinned toolchains and verified runtime assets are required.'
+            echo 'Do not register a personal workstation or bypass native build authority to satisfy this check.'
+            exit 1
+          }
+
+  package:
+    needs: preflight
+    runs-on: [self-hosted, macOS, ARM64, analytix-packaging]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: zsh {0}
+    env:
+      ANALYTIX_DIST_DIR: dist-package-ci
+      ANALYTIX_UPDATE_CHANNEL: beta
+      # Candidate-only metadata; this workflow never promotes an update feed.
+      ANALYTIX_UPDATE_FEED_URL: https://example.invalid/analytix/package-candidate/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require explicitly staged, hash-verified resources
+        run: |
+          set -e
+          source ./scripts/use-analytix-cache.sh
+          test ! -e dist-package-ci || { print -u2 'A fresh package output directory is required'; exit 1; }
+          test -n "$ANALYTIX_RUNTIME_ASSET_ARCHIVE" || { print -u2 'Explicit runtime asset archive required'; exit 1; }
+          node scripts/runtime-assets.mjs prepare --from "$ANALYTIX_RUNTIME_ASSET_ARCHIVE" --target darwin-arm64
+      - name: Install and validate exact source
+        run: |
+          set -e
+          source ./scripts/use-analytix-cache.sh
+          npm ci
+          npm run doctor -- --native
+          npm run verify:baseline
+          npm test
+      - name: Build DMG with existing native, security and lifecycle guards
+        run: |
+          set -e
+          source ./scripts/use-analytix-cache.sh
+          npm run dist:mac:arm64:dmg
+      - name: Verify installer container and packaged resource layout
+        run: |
+          set -e
+          source ./scripts/use-analytix-cache.sh
+          node scripts/package-candidate-smoke.mjs dist-package-ci
+      - name: Upload only verified installer and checksum (not a GitHub Release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: analytix-macos-arm64-${{ github.sha }}
+          path: |
+            dist-package-ci/analytix-*-mac-arm64.dmg
+            dist-package-ci/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7

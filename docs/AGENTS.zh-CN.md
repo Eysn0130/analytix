@@ -37,9 +37,9 @@
   `analytix serve` Go launcher；其中退役的 loop/server/model 源码只用于测试、
   conformance 或迁移对照，不是生产扩展入口。
 - `ANALYTIX_RUNTIME_BACKEND=typescript` 不能启动 TypeScript agent runtime。
-- 普通 packaged 首次启动由 Analytix Hub 账号就绪状态和 main-process gateway
-  credential 门控，不再由“缺少手工 API key”门控；自定义 Provider 仍是
-  Settings 中的可选能力。
+- 普通启动使用本地 Provider Registry / Secret Store 与正常 Provider 引导；
+  Hub 只在显式兼容操作中延迟加载，不是普通启动的凭据 authority。此项以已接受的
+  `local-provider-credential-authority` 和 `hub-auth-test-bootstrap` 规范为准。
 - canonical identity 是 `analytix`；official Standard Windows 只在 display
   copy 使用 `Analytix灵鉴`，artifact 使用 `analytix-standard-*`，不改
   executable/app id/CLI/env/protocol。

@@ -125,16 +125,28 @@ Requirements:
 
 | Dependency | Version |
 | --- | --- |
-| Node.js | 22.12+ |
-| npm | Ships with Node.js |
-| Go | A Go 1.22+ compatible toolchain (source development only; release packages ship a native runtime-server) |
+| Node.js | Verified baseline 22.22.1; see `.node-version` |
+| npm | 10.9.4 with locked installation |
+| Go | CI / current native baseline 1.26.4; `go.mod` 1.22 is the minimum language version |
+| Native development | Rust 1.94.1, matching SDK / host build authority and runtime assets; see the development baseline |
 | Model service | A usable local Provider connection for model tasks; ordinary startup does not require a Hub account |
 
 ```bash
 cd /path/to/analytix
-npm ci
-npm run dev
+# On the configured Owner macOS host, source the cache helper in the same zsh first
+npm run bootstrap
+npm run verify:baseline
 ```
+
+This verifies source development, not complete installer readiness. With native
+resources and host prerequisites prepared, use `npm run doctor -- --native`
+and `npm run dev` for the full development chain. See the
+[development baseline](docs/analytix/development-baseline.md) for asset supply,
+platform limits, CI and packaging. `dev:fast` is not full initialization.
+
+On the configured Owner macOS host only, source
+`./scripts/use-analytix-cache.sh` before install/test/build commands. Other
+public checkout hosts do not need that Owner-specific storage layout.
 
 For slower network access in mainland China, use an npm mirror:
 
@@ -146,10 +158,12 @@ npm ci --registry=https://registry.npmmirror.com
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Build the TypeScript runtime launcher/contracts and start the Electron dev app |
+| `npm run bootstrap` | Install Git sync guards, refresh locked app/runtime dependencies and check inputs |
+| `npm run verify:baseline` | Check inputs, sync regressions, types, source build and output smoke |
+| `npm run dev` | Build native data tools and TS launcher/contracts, then start the Electron dev app |
 | `npm run build:runtime` | Build the `packages/runtime` launcher/contracts; this does not validate the Go core |
 | `(cd packages/runtime-go && go test ./...)` | Run the Go runtime tests |
-| `npm run build` | Production build |
+| `npm run build` | Electron / TypeScript source build, not complete native package acceptance |
 | `npm run typecheck` | TypeScript type checking |
 | `npm run lint` | ESLint checks |
 | `npm run test` | Vitest tests |
