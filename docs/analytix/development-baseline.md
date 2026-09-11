@@ -12,6 +12,7 @@ git status --short --branch
 git pull
 # Configured Owner macOS host only, in the same zsh:
 source ./scripts/use-analytix-cache.sh
+# Fresh clone or changed dependency manifests/lockfiles only:
 npm run bootstrap
 npm run verify:baseline
 ```
@@ -157,3 +158,39 @@ with real artifacts. Windows/Linux candidate jobs must not be advertised as
 working until their resource supply and native host authority are implemented
 and verified. The current work does not redesign mature product code to bypass
 these boundaries.
+
+## Verification snapshot and remaining work
+
+The first [public CI run at e4fe8e0](https://github.com/Eysn0130/analytix/actions/runs/34628860194)
+passed source baseline and all **1,617 backend tests**. Application tests
+reported **6,088 passed, 59 failed and 15 pre-existing skips**; full Go tests
+also failed. These are recorded failures, not release approval. Subsequent
+commits must use their own CI results rather than inheriting this snapshot.
+
+That run exposed three misnamed non-Darwin Go files: the `_darwin.go` filename
+suffix contradicted their build constraints. Their implementation bytes were
+preserved while correcting platform selection, with a dedicated regression
+test. This is a compile/source-selection correction, not a new security design
+or a claim that Linux native authority and all platform tests are qualified.
+The corrected files passed platform-selection tests, the three existing Darwin
+path/alias security regressions, and a Linux x64 `analytix_prod` runtime-server
+cross-build. Cross-compilation is not Linux runtime or package acceptance.
+
+Remaining work has distinct owners and acceptance criteria:
+
+- Platform-aware test fixtures and source-set assertions: preserve their
+  privacy/authority assertions; explicitly model the platform under test.
+- Package tests and supply: make resource fixtures self-contained; real
+  browser/native resources still need a verified supply route and a qualified
+  dedicated builder. Do not replace missing real payloads with empty files.
+- Historical formal-evidence tests: reconcile public-baseline fixtures with
+  their actual contracts, without importing private history or fabricated
+  acceptance receipts.
+- Dependency security: the first enabled Dependabot inventory had 78 open
+  advisories (33 high, 42 medium, 3 low), often multiple advisories for one
+  package. Review minimal compatible fixes with regression tests; enabling
+  scanning is not a claim of zero vulnerabilities. CodeQL default setup also
+  completed successfully for Actions, Go, JavaScript/TypeScript and Python.
+- Full installer/GUI/upgrade acceptance remains unexecuted. The package
+  workflow's missing-runner preflight was exercised and correctly rejected
+  packaging as `NOT_CONFIGURED`; it did not produce or publish an installer.

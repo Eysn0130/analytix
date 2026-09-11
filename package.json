@@ -15,7 +15,7 @@
     "doctor": "node ./scripts/development-doctor.mjs",
     "assets:verify": "node ./scripts/runtime-assets.mjs verify",
     "assets:prepare": "node ./scripts/runtime-assets.mjs prepare",
-    "test:baseline": "node --test ./scripts/git-sync.test.mjs ./scripts/ensure-runtime-install.test.mjs ./scripts/runtime-assets.test.mjs ./scripts/development-doctor.test.mjs ./scripts/source-build-smoke.test.mjs ./scripts/package-candidate-smoke.test.mjs",
+    "test:baseline": "node --test ./scripts/git-sync.test.mjs ./scripts/ensure-runtime-install.test.mjs ./scripts/runtime-assets.test.mjs ./scripts/development-doctor.test.mjs ./scripts/source-build-smoke.test.mjs ./scripts/package-candidate-smoke.test.mjs ./scripts/go-platform-files.test.mjs",
     "verify:baseline": "npm run doctor && npm run test:baseline && npm run typecheck && npm run build && npm run smoke:source",
     "smoke:source": "node ./scripts/source-build-smoke.mjs",
     "dev": "npm run build:data-native:development && npm run build:runtime && electron-vite dev",
