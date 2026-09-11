@@ -17,6 +17,7 @@ type MockUpdater = EventEmitter & {
 let updater: MockUpdater
 let nativeUpdater: EventEmitter
 let originalEnv: NodeJS.ProcessEnv
+let originalPlatform: PropertyDescriptor
 let appVersion: string
 let mockedFiles: Map<string, string>
 let showMessageBox: ReturnType<typeof vi.fn>
@@ -38,6 +39,7 @@ function createUpdater(): MockUpdater {
 
 beforeEach(() => {
   originalEnv = { ...process.env }
+  originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
   vi.useFakeTimers()
   vi.resetModules()
   updater = createUpdater()
@@ -78,6 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env = originalEnv
+  Object.defineProperty(process, 'platform', originalPlatform)
   vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -106,7 +109,14 @@ describe('checkGuiUpdate feed URL', () => {
     expect(updater.checkForUpdates).not.toHaveBeenCalled()
   })
 
-  it('projects manual metadata fetch failures without copying network exceptions', async () => {
+  it.each([
+    { platform: 'darwin', code: 'unsupported', automaticChecks: 0 },
+    { platform: 'linux', code: 'not_configured', automaticChecks: 1 },
+    { platform: 'win32', code: 'not_configured', automaticChecks: 1 }
+  ])('projects manual metadata fetch failures without copying network exceptions ($platform)', async ({ platform, code, automaticChecks }) => {
+    // Unsupported unsigned macOS and an unconfigured updater on other hosts
+    // reach the same safe manual projection through different public states.
+    Object.defineProperty(process, 'platform', { value: platform })
     delete process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES
     // Exercise the network-error projection, not an absent-feed early return.
     // A clean CI checkout has no Owner update configuration.
@@ -122,13 +132,13 @@ describe('checkGuiUpdate feed URL', () => {
     expect(result).toMatchObject({
       ok: false,
       currentVersion: '0.1.0',
-      code: 'unsupported',
+      code,
       channel: 'stable',
       message: expect.stringContaining('Could not read GUI update metadata for the stable channel.')
     })
     expect(JSON.stringify(result)).not.toContain(sentinel)
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(updater.checkForUpdates).not.toHaveBeenCalled()
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(automaticChecks)
   })
 
   it('uses the configured analytix release base URL', async () => {

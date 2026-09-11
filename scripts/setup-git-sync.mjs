@@ -36,7 +36,7 @@ export function setupGitSync({ cwd = process.cwd(), policy = publicSourcePolicy,
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     setupGitSync()
-    console.log('Configured origin/main tracking, fast-forward-only pull, simple push and the public-history hook.')
+    console.log('Configured origin/main tracking, fast-forward-only pull and the PR-only-main/public-history hook. Push a codex/* branch, then open a PR.')
   } catch (error) {
     console.error(error.message)
     process.exitCode = 1

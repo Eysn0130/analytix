@@ -3,13 +3,15 @@
 Status: Operational. Applies to public-source development and candidate
 packaging. Commands and CI results, not this document, establish readiness.
 
-## Pull, install, verify, edit, commit, push
+## Update main, branch, install, verify, commit, PR
 
 Use one public `main`, not a second snapshot checkout. Before editing:
 
 ```sh
 git status --short --branch
-git pull
+git switch main
+git pull --ff-only
+git switch --no-track -c codex/<short-task-name>
 # Configured Owner macOS host only, in the same zsh:
 source ./scripts/use-analytix-cache.sh
 # Fresh clone or changed dependency manifests/lockfiles only:
@@ -66,13 +68,15 @@ git diff --check
 git add <reviewed-task-owned-files>
 git diff --cached
 git commit -m "Describe the change"
-git push
+git push -u origin HEAD
+gh pr create --base main
 ```
 
 Changing business logic still requires its contract-specific tests. Source
 baseline success is not a substitute for full regression, live Provider,
-privacy, packaged GUI or installer acceptance. For larger work, use a
-`codex/<name>` branch and review CI before integrating. Do not merge private
+privacy, packaged GUI or installer acceptance. Normal development uses a
+short-lived `codex/*` branch and PR; merge only after current CI and applicable
+acceptance pass. Do not push directly to main, bypass a check, or merge private
 archive ancestry, force push, or push all local branches/tags.
 
 ## Development modes and real limits
@@ -166,7 +170,7 @@ history; fix misleading current entrypoints rather than rewriting old evidence.
 
 ## CI and package candidates
 
-`.github/workflows/ci.yml` runs on main/codex pushes, PRs and manual dispatch:
+`.github/workflows/ci.yml` runs on main pushes, PRs and manual dispatch:
 source baseline, actual candidate history/path/blob policy, two deterministic
 Funds contracts, application tests, bounded-concurrency full Go suites
 (default and `analytix_prod`), locked Python backend tests and four Rust component unit
@@ -183,10 +187,14 @@ patch development-tool updates can be grouped; major framework updates remain
 separate reviewable PRs. No automatic merge is enabled. Existing large upgrade
 PRs are not safe to merge merely because the new grouping is narrower.
 
-The public main ruleset rejects force updates and deletion, while retaining
-ordinary fast-forward `commit` / `push`. CI reports are visible, not an enforced
-PR-only approval gate that would silently break the requested direct-main
-workflow. Review red checks before building further changes on that result.
+The public main ruleset requires PR integration and a successful `Development
+gate` from GitHub Actions on a candidate up to date with main. That aggregate
+fails if any required suite fails, is cancelled, is skipped or is missing.
+Force updates/deletion remain forbidden; no bypass actor is configured.
+Commit/push targets the feature branch, never main. PR CI runs once per PR
+update instead of duplicating the same expensive suites on both branch-push
+and PR events. A merge triggers separate CI for the resulting main commit.
+See [Git workflow](git-workflow.md) for accepted-PR updates and conflict handling.
 
 `package.yml` is **manual, main-only, macOS ARM64, candidate-only**. It checks
 explicit readiness before queuing a dedicated runner, stages hash-pinned
@@ -265,7 +273,7 @@ the whole product stable because `verify:baseline` passes:
 
 | Work package | Completion evidence |
 | --- | --- |
-| Development loop | Fresh locked install → doctor → isolated dev profile → edit/rebuild → focused regression → reviewed commit/push; restart preserves only that dev profile. |
+| Development loop | Update main → short-lived codex branch → locked install/doctor → edit/rebuild/regression → branch commit/push → PR CI/acceptance → merge main. Isolated dev restart must preserve only its own profile. |
 | CI portability | Separate real product failures from platform/toolchain/private-storage fixture assumptions. Make fixtures explicit; keep original negative security assertions and execute all suites. No skip/continue-on-error or fake receipt as package evidence. |
 | Security maintenance | Verify each alert's reachable behavior; apply minimal compatible patches. Do not merge the mixed major Electron/TypeScript/Vite/Tailwind PR as one batch. Content digests are not password hashes. |
 | Reproducible inputs | Keep npm/Cargo/Go/Python locks current through reviewed updates; retain hashes and approved supply for excluded resources. Independent native builder profiles need their own storage/toolchain qualification; an environment variable must not impersonate the Owner volume. |

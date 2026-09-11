@@ -3,13 +3,20 @@
 Status: Operational. The canonical checkout and GitHub `main` share the public
 history rooted at `eed7dfb1a1e6cdd50002f7ce8fcb2e2888b0547d`.
 
-## Daily use
+## Branch → PR → CI/acceptance → Merge main
 
-In the project directory, before editing:
+`main` is the shared canonical integration baseline, not the working branch for
+normal changes. Features, Runtime, Plugin, security, dependencies and cross-layer
+changes use short-lived `codex/*` branches. This supersedes the earlier direct-main
+push workflow without rewriting commits already published under that workflow.
+
+In a clean project checkout, before editing:
 
 ```sh
 git status --short --branch
-git pull
+git switch main
+git pull --ff-only
+git switch --no-track -c codex/<short-task-name>
 ```
 
 Then refresh changed dependencies and build outputs; `pull` does not do that
@@ -27,8 +34,15 @@ git diff
 git add <only-the-files-you-intend-to-publish>
 git diff --cached
 git commit -m "Describe the change"
-git push
+git push -u origin HEAD
+gh pr create --base main
 ```
+
+First push sets the feature branch's own upstream. Later `git pull --ff-only`
+and `git push` synchronize that branch, **not** `main`. To incorporate a newer
+main into an open branch, first preserve/commit current work, then use
+`git fetch origin` and a reviewed `git merge origin/main`; rerun affected checks.
+Do not automatically rebase or force-push a published branch.
 
 `pull` downloads and integrates remote changes. `commit` records local changes;
 `push` uploads committed changes. Uncommitted or ignored files are not uploaded.
@@ -37,11 +51,38 @@ normal synchronization. Review for secrets and private data before committing.
 
 Pull is configured as fast-forward-only: if local and remote both gained
 commits, Git stops without choosing a merge or rewriting local commits. Keep
-local edits safe, inspect `git log --oneline --left-right main...origin/main`,
-then deliberately reconcile the public branches (for example, rebase only
-unpublished local commits). Do not reset away work or merge the private archive.
-For a new feature branch, use `git switch -c codex/<name>` followed by
-`git push -u origin codex/<name>` after committing.
+local edits safe, inspect `git log --oneline --left-right HEAD...@{upstream}`,
+then deliberately reconcile the public branches. Do not reset away work or
+merge the private archive. Starting another task from a merged branch is not a
+substitute for returning to and updating `main`.
+
+## Merge acceptance
+
+Open a draft PR when work or acceptance is incomplete. Record scope, exact HEAD,
+commands/results, relevant security/privacy/persistence checks and unresolved
+gaps in the PR. The template is an evidence checklist, not automatic approval.
+Do not merge with failed, cancelled, skipped or missing required CI jobs.
+
+The `Development gate` check aggregates Source baseline, Application tests,
+both Go modes, Backend tests and all Rust component jobs. The main ruleset
+requires a PR, that check from GitHub Actions, an up-to-date candidate and resolved
+review conversations. It retains force-update/deletion protection with no bypass
+actor. It does not invent an extra mandatory second approver; applicable review
+and product acceptance still need real evidence. CI success alone is not live
+Provider, installer or release acceptance. Existing baseline failures remain
+failures and must be repaired on branches, not exempted to merge this workflow.
+
+After approval and successful current checks, merge through GitHub's normal PR
+operation; never use an administrative bypass. Then, in a clean checkout:
+
+```sh
+git switch main
+git pull --ff-only
+# For the next task, create a new codex/* branch from this main.
+```
+
+Reports must identify `Branch`, `PR URL`, `HEAD`, `CI status` and `Can merge`.
+An open/green PR is not a claim that main already contains its changes.
 
 ## A new clone
 
@@ -58,7 +99,7 @@ Authenticate with your own GitHub account using your normal Git credential
 helper or SSH setup; never put a token in a tracked file or remote URL. Configure
 your own commit name and public/noreply email before your first commit.
 
-The hook refuses private/unrelated history, non-fast-forward updates, the
+The hook refuses direct main updates, private/unrelated history, non-fast-forward updates, the
 existing local-only file exclusions, private-key/env file names and oversized
 Git blobs. It inspects outgoing commits, not only the final tree. A deletion in
 a later commit does not make an earlier private blob safe to publish. Full

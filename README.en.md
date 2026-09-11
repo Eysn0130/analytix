@@ -240,8 +240,10 @@ License and attribution obligations for bundled third-party material are recorde
 ## Source synchronization
 
 This project and [GitHub main](https://github.com/Eysn0130/analytix) share the
-public mainline. Run `git pull` in the project directory to get updates; record
-local changes with `git commit`, then upload them with `git push`. Run
-`npm run git:setup` once in a new clone. See the [Git workflow](docs/analytix/git-workflow.md)
+public mainline. Development follows **Branch → PR → CI/acceptance → Merge main**.
+Fast-forward a clean `main`, create a short-lived `codex/*` branch, and commit/push
+that branch. Merge its PR only after CI and applicable acceptance pass; do not
+push directly to `main`. Run `npm run git:setup` once in a new clone.
+See the [Git workflow](docs/analytix/git-workflow.md)
 for safe synchronization, private-history protection and resources not included
 in the public source tree.

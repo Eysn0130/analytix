@@ -29,7 +29,7 @@ function fixture(t) {
   const publicRoot = commit('README.md')
   return { directory, cwd, commit, publicRoot, policy: { publicRoot, excludedPaths: ['local-only.bin'], maxBlobBytes: 1024 } }
 }
-const update = (tip, base = zero, ref = 'refs/heads/main') => `refs/heads/main ${tip} ${ref} ${base}\n`
+const update = (tip, base = zero, ref = 'refs/heads/codex/feature') => `refs/heads/main ${tip} ${ref} ${base}\n`
 
 test('normal public descendants and new feature branches are accepted', t => {
   const f = fixture(t)
@@ -114,7 +114,14 @@ test('empty pushes and feature-branch deletions work; deleting main is refused',
   const f = fixture(t)
   assert.equal(checkPublicPush('', f).updates, 0)
   assert.equal(checkPublicPush(update(zero, f.publicRoot, 'refs/heads/codex/feature'), f).updates, 0)
-  assert.throws(() => checkPublicPush(update(zero, f.publicRoot), f), /deleting main/)
+  assert.throws(() => checkPublicPush(update(zero, f.publicRoot, 'refs/heads/main'), f), /deleting main/)
+})
+
+test('direct main updates are refused while the same candidate remains inspectable', t => {
+  const f = fixture(t)
+  const tip = f.commit('source.txt')
+  assert.throws(() => checkPublicPush(update(tip, f.publicRoot, 'refs/heads/main'), f), /main is PR-only/)
+  assert.equal(checkPublicCandidate(f).files, 2)
 })
 
 function installFixtureHook(f) {
@@ -152,30 +159,39 @@ test('setup will not silently replace existing hooks', t => {
   assert.throws(() => setupGitSync({ ...f, hooksPath }), /existing hooksPath/)
 })
 
-test('two clones can pull, commit and push; divergent pull preserves both histories and local work', t => {
+test('two clones use branches and accepted PR updates; divergent branch pull preserves local work', t => {
   const f = fixture(t)
   const bare = join(f.directory, 'remote.git')
   run(f.directory, 'init', '--bare', '-b', 'main', bare)
   run(f.cwd, 'remote', 'add', 'origin', bare)
-  const hooksPath = installFixtureHook(f)
-  setupGitSync({ ...f, hooksPath })
+  // Seed the already-published baseline before installing normal-development
+  // guards. Subsequent pushes use the real hook; no always-green stub.
   run(f.cwd, 'push', '-u', 'origin', 'main')
+  setupGitSync({ ...f, hooksPath: installFixtureHook(f) })
   const peer = join(f.directory, 'peer')
   run(f.directory, 'clone', bare, peer)
   run(peer, 'config', 'user.name', 'Analytix Synthetic Peer')
   run(peer, 'config', 'user.email', 'peer@example.invalid')
   const peerFixture = { ...f, cwd: peer }
   setupGitSync({ ...peerFixture, hooksPath: installFixtureHook(peerFixture) })
+  run(peer, 'switch', '-c', 'codex/incoming')
   writeFileSync(join(peer, 'incoming.txt'), 'synthetic incoming change\n')
   run(peer, 'add', 'incoming.txt')
   run(peer, '-c', 'commit.gpgsign=false', 'commit', '-m', 'Synthetic peer change')
-  run(peer, 'push')
+  run(peer, 'push', '-u', 'origin', 'HEAD')
+  // Model GitHub accepting that PR in the disposable bare fixture only.
+  // Production main updates belong to GitHub's required-check ruleset.
+  run(bare, 'update-ref', 'refs/heads/main', run(peer, 'rev-parse', 'HEAD'), f.publicRoot)
   run(f.cwd, 'pull')
   assert.equal(readFileSync(join(f.cwd, 'incoming.txt'), 'utf8'), 'synthetic incoming change\n')
+  run(f.cwd, 'switch', '-c', 'codex/outgoing')
   const published = f.commit('outgoing.txt')
-  run(f.cwd, 'push')
+  run(f.cwd, 'push', '-u', 'origin', 'HEAD')
+  run(bare, 'update-ref', 'refs/heads/main', published, run(peer, 'rev-parse', 'HEAD'))
+  run(peer, 'switch', 'main')
   run(peer, 'pull', '--ff-only')
   assert.equal(run(peer, 'rev-parse', 'HEAD'), published)
+  run(peer, 'switch', '-c', 'codex/outgoing', '--track', 'origin/codex/outgoing')
   const local = f.commit('local-branch.txt')
   writeFileSync(join(peer, 'remote-branch.txt'), 'synthetic competing change\n')
   run(peer, 'add', 'remote-branch.txt')
@@ -185,7 +201,7 @@ test('two clones can pull, commit and push; divergent pull preserves both histor
   assert.throws(() => run(f.cwd, 'pull'))
   assert.equal(run(f.cwd, 'rev-parse', 'HEAD'), local)
   assert.equal(readFileSync(join(f.cwd, 'uncommitted.txt'), 'utf8'), 'preserve local work\n')
-  assert.equal(run(f.cwd, 'rev-parse', 'origin/main'), run(peer, 'rev-parse', 'HEAD'))
+  assert.equal(run(f.cwd, 'rev-parse', 'origin/codex/outgoing'), run(peer, 'rev-parse', 'HEAD'))
 })
 
 test('the installed hook consumes Git stdin and blocks private files before remote mutation', t => {
@@ -193,9 +209,22 @@ test('the installed hook consumes Git stdin and blocks private files before remo
   const bare = join(f.directory, 'remote.git')
   run(f.directory, 'init', '--bare', '-b', 'main', bare)
   run(f.cwd, 'remote', 'add', 'origin', bare)
-  setupGitSync({ ...f, hooksPath: installFixtureHook(f) })
   run(f.cwd, 'push', '-u', 'origin', 'main')
+  setupGitSync({ ...f, hooksPath: installFixtureHook(f) })
+  run(f.cwd, 'switch', '-c', 'codex/private-fixture')
   f.commit('.env.local', 'SYNTHETIC_VALUE=not-a-real-secret\n')
-  assert.throws(() => run(f.cwd, 'push'), /excluded local file/)
+  assert.throws(() => run(f.cwd, 'push', '-u', 'origin', 'HEAD'), /excluded local file/)
+  assert.equal(run(bare, 'rev-parse', 'refs/heads/main'), f.publicRoot)
+})
+
+test('the installed hook rejects a direct main push before remote mutation', t => {
+  const f = fixture(t)
+  const bare = join(f.directory, 'remote.git')
+  run(f.directory, 'init', '--bare', '-b', 'main', bare)
+  run(f.cwd, 'remote', 'add', 'origin', bare)
+  run(f.cwd, 'push', '-u', 'origin', 'main')
+  setupGitSync({ ...f, hooksPath: installFixtureHook(f) })
+  f.commit('source.txt')
+  assert.throws(() => run(f.cwd, 'push'), /main is PR-only/)
   assert.equal(run(bare, 'rev-parse', 'refs/heads/main'), f.publicRoot)
 })

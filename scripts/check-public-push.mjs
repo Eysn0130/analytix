@@ -34,7 +34,7 @@ export function isPrivateSourcePath(name, policy = publicSourcePolicy) {
 
 // Check the actual objects being pushed, including an excluded file added and
 // deleted in separate commits. This does not scan or print credential values.
-export function checkPublicPush(input, { cwd = process.cwd(), policy = publicSourcePolicy } = {}) {
+function checkPublicUpdates(input, { cwd = process.cwd(), policy = publicSourcePolicy } = {}) {
   const candidates = new Map()
   let updates = 0
   for (const line of input.split(/\r?\n/).filter(Boolean)) {
@@ -82,11 +82,23 @@ export function checkPublicPush(input, { cwd = process.cwd(), policy = publicSou
   return { updates, checkedObjects: candidates.size }
 }
 
+export function checkPublicPush(input, options) {
+  const result = checkPublicUpdates(input, options)
+  for (const line of input.split(/\r?\n/).filter(Boolean)) {
+    const [, local, remoteRef] = line.trim().split(/\s+/)
+    if (remoteRef === 'refs/heads/main' && local !== zero) {
+      throw new Error('Push refused: main is PR-only. Push a codex/* branch, complete CI/acceptance, then merge the PR without bypassing checks.')
+    }
+  }
+  return result
+}
+
 // CI has no pre-push hook invocation. Inspect its real candidate, not just the
 // hook's unit tests; include the tip even when the baseline itself is the tip.
 export function checkPublicCandidate({ cwd = process.cwd(), revision = 'HEAD', policy = publicSourcePolicy } = {}) {
   const tip = gitRead(cwd, ['rev-parse', '--verify', `${revision}^{commit}`]).trim()
-  const result = checkPublicPush(`refs/heads/main ${tip} refs/heads/main ${zero}\n`, { cwd, policy })
+  // Inspect a candidate without attempting the now-forbidden direct main push.
+  const result = checkPublicUpdates(`refs/heads/main ${tip} refs/heads/main ${zero}\n`, { cwd, policy })
   let files = 0
   for (const entry of gitRead(cwd, ['ls-tree', '-r', '-l', '-z', tip]).split('\0').filter(Boolean)) {
     const match = entry.match(/^\d{6} (\w+) [a-f0-9]{40}\s+(\d+|-)\t([\s\S]+)$/)
