@@ -995,9 +995,21 @@ func assertLegacySnapshotSourceUnavailable(t *testing.T, serverURL string, threa
 	if stringField(turn, "status") != "completed" || stringField(turn, "pendingId") != "" || stringField(turn, "pendingKind") != "" {
 		t.Fatalf("legacy snapshot did not terminate without pending authority: %#v", turn)
 	}
-	record, err := domainevidence.ParseAcceptedFinalRecord(turn["acceptedFinal"])
-	if err != nil || record.Variant != domainevidence.SourceUnavailableAnswer || record.TerminalReason != "source_unavailable" || record.RegistrySequence != 0 || record.PublicationSnapshotProofDigest != "" {
-		t.Fatalf("legacy snapshot did not produce an empty-registry SourceUnavailable final: record=%#v err=%v turn=%#v", record, err, turn)
+	if _, exposed := turn["acceptedFinal"]; exposed {
+		t.Fatalf("legacy snapshot exposed the private accepted final: %#v", turn)
+	}
+	view, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(turn["acceptedFinalView"])
+	if err != nil ||
+		view.Variant != domainevidence.SourceUnavailableAnswer ||
+		view.TerminalReason != "source_unavailable" ||
+		view.BlockerCode != "current_case_source_unavailable" ||
+		view.CoverageStatus != domainevidence.AcceptedFinalCoverageUnavailable ||
+		view.CheckedScopeDigest != "" ||
+		view.MissingScopeCount != 0 ||
+		view.ClaimCount != 0 || len(view.ClaimTypes) != 0 ||
+		view.ReceiptMetadata.Count != 0 || len(view.ReceiptMetadata.Citations) != 0 ||
+		view.NoHitWording != "" {
+		t.Fatalf("legacy snapshot did not produce a claim-free SourceUnavailable public final: view=%#v err=%v turn=%#v", view, err, turn)
 	}
 	assertIncidentAcceptedFinal(t, serverURL, threadID, turnID, apploop.CaseFundSourceUnavailableAnswer())
 }

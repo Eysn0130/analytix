@@ -1,27 +1,12 @@
 import { desktopCapturer, shell, systemPreferences } from 'electron'
 import { selectHostControlBackend } from '../../../packages/runtime/src/adapters/computer-use/backend-factory.js'
 import { getChromeBrowserUseStatus } from './chrome-browser-use-service'
+import { readHostPermissionSnapshot } from './computer-use-permission-status'
+import { createPermissionEnrollment } from './computer-use-permission-access'
+import type { ComputerUsePermissionKind, ComputerUsePermissions as PermissionSnapshot } from '../../shared/analytix-api'
 
-export type ComputerUsePermissionState = 'granted' | 'denied' | 'unknown'
-
-export type ComputerUsePermissions = {
-  platform: NodeJS.Platform
-  /** Whether the host backend can run on this platform at all. */
-  supported: boolean
-  /** Whether the OS gates input/capture behind a permission prompt (macOS). */
-  needsPermission: boolean
-  /** Accessibility permission (controls mouse/keyboard injection on macOS). */
-  accessibility: ComputerUsePermissionState
-  /** Screen Recording permission (controls screenshots on macOS). */
-  screenRecording: ComputerUsePermissionState
-  /**
-   * macOS only: Accessibility is enabled in System Settings, but the running
-   * process still reports untrusted because AXIsProcessTrusted is cached until
-   * relaunch. The UI shows a "restart to take effect" hint instead of "not
-   * granted" so the granted-but-stale state is not mistaken for a failure.
-   */
-  accessibilityNeedsRestart: boolean
-}
+export type { ComputerUsePermissionState } from '../../shared/analytix-api'
+export type ComputerUsePermissions = PermissionSnapshot & { platform: NodeJS.Platform }
 
 export type ComputerUseDoctorCheck = {
   id: string
@@ -41,129 +26,34 @@ export type ComputerUseDoctorResult = {
   checks: ComputerUseDoctorCheck[]
 }
 
-/**
- * The native macOS permission helper bundled with @computer-use/nut-js.
- * Its `askFor*` calls use the canonical TCC registration APIs
- * (AXIsProcessTrustedWithOptions / CGRequestScreenCaptureAccess), which
- * proactively add the app to the Accessibility / Screen Recording lists.
- */
-type MacPermissions = {
-  getAuthStatus(type: 'accessibility' | 'screen'): string
-  askForAccessibilityAccess(): unknown
-  askForScreenCaptureAccess(openPreferences?: boolean): unknown
-}
+const permissionEnrollment = createPermissionEnrollment({
+  importNative: async () => {
+    // Resolve the native addon at runtime; it must stay outside the JS bundle.
+    const nativePackage = '@computer-use/node-mac-permissions'
+    return import(/* @vite-ignore */ nativePackage)
+  },
+  promptAccessibility: () => systemPreferences.isTrustedAccessibilityClient(true),
+  promptScreenCapture: () => desktopCapturer.getSources({
+    types: ['screen'], thumbnailSize: { width: 1, height: 1 }
+  }),
+  openScreenSettings: () => shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+  )
+})
 
-let macPermissionsLoaded = false
-let macPermissions: MacPermissions | null = null
-
-async function loadMacPermissions(): Promise<MacPermissions | null> {
-  if (!macPermissionsLoaded) {
-    macPermissionsLoaded = true
-    try {
-      // node-mac-permissions is a transitive native dep (a .node addon), so it
-      // is NOT externalized by electron-vite's direct-deps plugin. Load it via
-      // a variable specifier + @vite-ignore so Rollup leaves it as a runtime
-      // import instead of trying to bundle the native binary.
-      const specifier = '@computer-use/node-mac-permissions'
-      const ns = (await import(/* @vite-ignore */ specifier)) as Record<string, unknown>
-      macPermissions = ((ns as { default?: unknown }).default ?? ns) as MacPermissions
-    } catch {
-      macPermissions = null
-    }
-  }
-  return macPermissions
-}
-
-function normalizeState(status: string | undefined): ComputerUsePermissionState {
-  if (status === 'authorized' || status === 'granted') return 'granted'
-  if (status === 'not determined' || status === 'not-determined' || status === undefined) return 'unknown'
-  return 'denied'
-}
-
-/**
- * Report the host-control OS permission status. On macOS, computer-use needs
- * Accessibility (input injection) and Screen Recording (capture); on
- * Windows/Linux no special permission gate applies. Checks are read-only.
- */
 export async function getComputerUsePermissions(): Promise<ComputerUsePermissions> {
-  const platform = process.platform
-  if (platform !== 'darwin') {
-    return {
-      platform,
-      supported: true,
-      needsPermission: false,
-      accessibility: 'granted',
-      screenRecording: 'granted',
-      accessibilityNeedsRestart: false
-    }
-  }
-
-  let liveTrust = false
-  try {
-    liveTrust = systemPreferences.isTrustedAccessibilityClient(false)
-  } catch {
-    liveTrust = false
-  }
-
-  let accessibilityGrantedInSettings = false
-  try {
-    const native = await loadMacPermissions()
-    accessibilityGrantedInSettings = native?.getAuthStatus('accessibility') === 'authorized'
-  } catch {
-    accessibilityGrantedInSettings = false
-  }
-
-  let screenRecording: ComputerUsePermissionState = 'unknown'
-  try {
-    screenRecording = normalizeState(systemPreferences.getMediaAccessStatus('screen'))
-  } catch {
-    screenRecording = 'unknown'
-  }
-
-  return {
-    platform,
-    supported: true,
-    needsPermission: true,
-    accessibility: liveTrust ? 'granted' : 'denied',
-    screenRecording,
-    accessibilityNeedsRestart: !liveTrust && accessibilityGrantedInSettings
-  }
+  return readHostPermissionSnapshot({
+    platform: process.platform,
+    liveAccessibility: () => systemPreferences.isTrustedAccessibilityClient(false),
+    configuredAccessibility: permissionEnrollment.configuredAccessibility,
+    screenCapture: () => systemPreferences.getMediaAccessStatus('screen')
+  })
 }
 
-/**
- * Proactively enroll Analytix in the relevant macOS permission list and open
- * the settings pane. Prefers the native node-mac-permissions APIs; falls back
- * to Electron primitives if the native module is unavailable.
- */
 export async function requestComputerUsePermission(
-  kind: 'accessibility' | 'screenRecording'
+  kind: ComputerUsePermissionKind
 ): Promise<ComputerUsePermissions> {
-  if (process.platform !== 'darwin') return getComputerUsePermissions()
-  const native = await loadMacPermissions()
-  try {
-    if (kind === 'accessibility') {
-      if (native?.askForAccessibilityAccess) {
-        native.askForAccessibilityAccess()
-      } else {
-        systemPreferences.isTrustedAccessibilityClient(true)
-      }
-    } else {
-      if (native?.askForScreenCaptureAccess) {
-        native.askForScreenCaptureAccess(true)
-      } else {
-        try {
-          await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
-        } catch {
-          // Best effort.
-        }
-      }
-      await shell.openExternal(
-        'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
-      )
-    }
-  } catch {
-    // Best effort; fall through to returning the current status.
-  }
+  await permissionEnrollment.request(kind, process.platform)
   return getComputerUsePermissions()
 }
 

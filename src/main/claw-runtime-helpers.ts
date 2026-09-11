@@ -12,8 +12,7 @@ import type {
   ScheduleTaskFromTextResult
 } from '../shared/app-settings'
 import { CLAW_FEISHU_INBOUND_MESSAGE_HEADING } from '../shared/app-settings'
-import { PublicRuntimeEventFilter, sanitizePublicSerializedText } from '../shared/public-runtime-content'
-import { projectPublicRuntimeSseBlock, takePublicRuntimeSseBlock } from '../shared/public-runtime-sse'
+import { sanitizePublicSerializedText } from '../shared/public-runtime-content'
 import type { JsonSettingsStore } from './settings-store'
 import type { TelegramRuntime } from './telegram-runtime'
 import type {
@@ -620,116 +619,4 @@ export type RuntimeSseEvent = {
   [key: string]: unknown
 }
 
-export async function subscribeRuntimeThreadEvents(input: {
-  baseUrl: string
-  threadId: string
-  headers: Record<string, string>
-  onEvent: (event: RuntimeSseEvent) => void
-  signal: AbortSignal
-  logError?: (category: string, message: string, detail?: unknown) => void
-}): Promise<{ close: () => void }> {
-  const { baseUrl, threadId, headers, onEvent, signal, logError } = input
-  const ac = new AbortController()
-  const onAbort = (): void => ac.abort()
-  signal.addEventListener('abort', onAbort, { once: true })
-  let nextSinceSeq = 0
-  let closed = false
-  let reconnectDelayMs = 750
-  const publicEventFilter = new PublicRuntimeEventFilter()
-  const close = (): void => {
-    if (closed) return
-    closed = true
-    ac.abort()
-    signal.removeEventListener('abort', onAbort)
-  }
-  const emitAuthorityUnavailable = (): void => {
-    close()
-    try {
-      onEvent({
-        schemaVersion: 1,
-        kind: 'public_projection_revoked',
-        threadId,
-        historyAuthority: 'case_boundary_only_v1',
-        code: 'case_public_authority_unavailable',
-        action: 'purge_case_projection',
-        terminal: true
-      })
-    } catch {
-      logError?.('sse', 'SSE authority-loss callback failed', {
-        code: 'public_projection_revoked_callback_failed'
-      })
-    }
-  }
-  void (async () => {
-    while (!closed && !ac.signal.aborted) {
-      const url = new URL(`${baseUrl.replace(/\/+$/, '')}/v1/threads/${encodeURIComponent(threadId)}/events`)
-      url.searchParams.set('since_seq', String(nextSinceSeq))
-      try {
-        const res = await fetch(url, { signal: ac.signal, headers: { ...headers, Accept: 'text/event-stream' } })
-        if (!res.ok || !res.body) {
-          if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
-            emitAuthorityUnavailable()
-            logError?.('sse', 'SSE connection refused', { statusCode: res.status })
-            return
-          }
-          await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, reconnectDelayMs))
-          reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000)
-          continue
-        }
-        reconnectDelayMs = 750
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let protocolViolationReason = ''
-        while (!closed && !ac.signal.aborted) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          let next: { block: string; rest: string } | null
-          while ((next = takePublicRuntimeSseBlock(buffer)) !== null) {
-            buffer = next.rest
-            const decision = projectPublicRuntimeSseBlock(next.block, threadId, publicEventFilter)
-            if (decision === null) continue
-            if (decision.status === 'revoke') {
-              close()
-              try {
-                onEvent(decision.event as RuntimeSseEvent)
-              } catch {
-                logError?.('sse', 'SSE authority-revocation callback failed', {
-                  code: 'public_projection_revoked_callback_failed'
-                })
-              }
-              return
-            }
-            if (decision.status !== 'emit') {
-              protocolViolationReason = decision.reason
-              break
-            }
-            onEvent(decision.event as RuntimeSseEvent)
-            nextSinceSeq = Math.max(nextSinceSeq, decision.seq)
-          }
-          if (protocolViolationReason) break
-        }
-        if (protocolViolationReason) {
-          try {
-            await reader.cancel()
-          } catch {
-            // The source may already be closed; the subscription still fails closed.
-          }
-          emitAuthorityUnavailable()
-          logError?.('sse', 'SSE event rejected', {
-            code: 'sse_event_rejected',
-            reasonCode: protocolViolationReason
-          })
-          return
-        }
-      } catch {
-        if (closed || ac.signal.aborted) return
-        logError?.('sse', 'SSE stream error', { code: 'stream_error' })
-        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, reconnectDelayMs))
-        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000)
-      }
-    }
-  })()
-  return { close }
-}
+export { startRuntimeThreadSubscription as subscribeRuntimeThreadEvents } from './runtime/runtime-thread-subscription'

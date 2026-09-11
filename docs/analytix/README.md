@@ -6,6 +6,8 @@
 
 ## 当前交接与整理入口
 
+- [`git-workflow.md`](git-workflow.md) 是 canonical 与 GitHub 公开主线的
+  `pull` / `commit` / `push` 操作入口，也说明保留的私有历史与资源排除范围。
 - [`handovers/README.md`](handovers/README.md) 是跨线程暂停和恢复的操作入口。
 - 当前保留的最新交接快照是
   [`handovers/2026-09-10-owner-replacement.md`](handovers/2026-09-10-owner-replacement.md)。

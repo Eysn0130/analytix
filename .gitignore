@@ -66,7 +66,8 @@ TestResults.xml
 ### Internal docs
 docs/R2_RELEASE.md
 
-# Private source snapshot exclusions. Preserve canonical originals separately.
+### Local-only material excluded from the public source baseline
+# Keep these files locally; never force-add them to a public commit.
 /managed-chrome/
 /vendor/analytix-computer-use/dist/
 /packages/runtime-go/runtime-go.test
@@ -78,6 +79,8 @@ docs/R2_RELEASE.md
 /backend/*.egg-info/
 /docs/screenshots/
 /docs/analytix/qa/*.png
+/computer-use-demo-screenshot.png
+/google-openai-search.png
+/page1_qa.png
 *.keychain-db
-*.p12
 *.pfx

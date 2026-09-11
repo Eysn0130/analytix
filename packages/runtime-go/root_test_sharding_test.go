@@ -75,13 +75,14 @@ func runRuntimeServerRootTestShards() (int, bool) {
 	childTestLogParent, uncacheableRun := runtimeServerRootTestChildLogParent(args, parentTestLog)
 	shards := buildRuntimeServerRootTestShards(tests)
 	defer cleanupRuntimeServerRootTestLogs(shards)
+	workerCount, err := runtimeServerRootTestWorkers(args, len(shards))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "analytix root test worker limit is invalid:", err)
+		return 2, true
+	}
 
 	jobs := make(chan int)
 	var workers sync.WaitGroup
-	workerCount := runtimeServerRootTestShardWorkerCount
-	if workerCount > len(shards) {
-		workerCount = len(shards)
-	}
 	for worker := 0; worker < workerCount; worker++ {
 		workers.Add(1)
 		go func() {
@@ -142,6 +143,18 @@ func runRuntimeServerRootTestShards() (int, bool) {
 		fmt.Fprintln(os.Stdout, "PASS")
 	}
 	return 0, true
+}
+
+func runtimeServerRootTestWorkers(args []string, total int) (int, error) {
+	limit := runtimeServerRootTestShardWorkerCount
+	if value := runtimeServerRootTestFlagValue(args, "-test.parallel"); value != "" {
+		requested, err := strconv.Atoi(value)
+		if err != nil || requested < 1 {
+			return 0, fmt.Errorf("-test.parallel must be a positive integer, got %q", value)
+		}
+		limit = min(limit, requested)
+	}
+	return min(limit, total), nil
 }
 
 func runRuntimeServerRootTestShard(

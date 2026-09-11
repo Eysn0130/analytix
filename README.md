@@ -1,5 +1,3 @@
-> **PRIVATE_SOURCE_SNAPSHOT / NOT_OPEN_SOURCE / NOT_RC_RELEASE** — This private snapshot retains Kun-derived restricted upstream material under private-access limits; it is not all Apache-2.0 and is not cleared for public or commercial redistribution. Identified restricted packaged assets and private data are omitted. See [PRIVATE_SNAPSHOT.md](PRIVATE_SNAPSHOT.md) for exact scope and unresolved obligations.
-
 <p align="center">
   <img src="src/asset/brand/analytix-app-icon-512.png" width="104" alt="Analytix icon">
 </p>
@@ -23,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; upstream restrictions apply"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; third-party terms also apply"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white" alt="Electron 34">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
@@ -232,9 +230,16 @@ npm ci --registry=https://registry.npmmirror.com
 
 ## 许可证
 
-Analytix 自有的第一方代码适用 [Apache License 2.0](./LICENSE)。本私有源码快照同时保留 Kun-derived baseline，分类为 `RESTRICTED_UPSTREAM / NOT_APACHE / NOT_FOR_PUBLICATION`；其公共或商业再发布及完整归属尚未闭合。Apache-2.0 不适用于这些受限上游材料，也不构成对整个快照进行公开或商业分发的授权。具体边界见 [PRIVATE_SNAPSHOT.md](PRIVATE_SNAPSHOT.md)。
+Analytix 自有第一方代码适用 [Apache License 2.0](./LICENSE)。现存第三方材料仍受各自条款约束；仓库公开及 Git 同步不代表所有代码均为 Apache-2.0，也不授予额外的第三方商业使用或再分发权利。
 
 Analytix 的第一方版权人及 Project Owner 是 Guoqin He，其公开 GitHub
 账号为 [Eysn0130](https://github.com/Eysn0130)。
 
-第三方材料继续受各自许可与归属条件约束，见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) 和 [来源记录](docs/analytix/upstreams/)。第一方 Apache-2.0 声明不重新许可第三方代码，也不解除本快照的访问和再发布限制。
+随包第三方材料的许可与归属要求单独记录在 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)；该文件不改变 Analytix 自身的 Apache-2.0 许可证。
+
+## 源码同步
+
+本项目与 [GitHub main](https://github.com/Eysn0130/analytix) 使用同一公开主线。
+在项目目录执行 `git pull` 获取更新；本地修改后用 `git commit` 记录，再用
+`git push` 上传。新 clone 请先运行 `npm run git:setup`。操作方法、私有历史保护和
+未随公开源码提供的资源见[Git 工作流程](docs/analytix/git-workflow.md)。

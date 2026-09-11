@@ -10,6 +10,34 @@ import (
 	"time"
 )
 
+func TestRuntimeServerRootTestWorkersRespectCallerLimit(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		total   int
+		want    int
+		invalid bool
+	}{
+		{name: "default maximum", total: 100, want: runtimeServerRootTestShardWorkerCount},
+		{name: "available work", total: 2, want: 2},
+		{name: "sequential", args: []string{"-test.parallel=1"}, total: 100, want: 1},
+		{name: "bounded", args: []string{"-test.parallel", "2"}, total: 100, want: 2},
+		{name: "never exceeds maximum", args: []string{"-test.parallel=64"}, total: 100, want: runtimeServerRootTestShardWorkerCount},
+		{name: "never exceeds inventory", args: []string{"-test.parallel=4"}, total: 1, want: 1},
+		{name: "empty inventory", total: 0, want: 0},
+		{name: "zero rejected", args: []string{"-test.parallel=0"}, total: 100, invalid: true},
+		{name: "negative rejected", args: []string{"-test.parallel=-1"}, total: 100, invalid: true},
+		{name: "malformed rejected", args: []string{"-test.parallel=no"}, total: 100, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := runtimeServerRootTestWorkers(test.args, test.total)
+			if (err != nil) != test.invalid || got != test.want {
+				t.Fatalf("workers = %d, error = %v; want %d, invalid = %t", got, err, test.want, test.invalid)
+			}
+		})
+	}
+}
+
 func TestRuntimeServerRootTestShardsAreDeterministicAndExhaustive(t *testing.T) {
 	tests := []string{"TestDelta", "TestAlpha", "TestCharlie", "TestBravo", "TestEcho"}
 	shards := buildRuntimeServerRootTestShards(tests)

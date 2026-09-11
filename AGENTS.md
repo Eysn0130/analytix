@@ -168,6 +168,13 @@ unsafe logs, or unverified claims.
 
 - Before repository-grounded review, diagnosis, implementation, or mutation,
   run `git status --short --branch` and preserve existing user changes.
+- The canonical `main` tracks `origin/main` in the public repository. Follow
+  `docs/analytix/git-workflow.md` for pull/commit/push and new-clone setup.
+  Keep the pre-public history, archived branches and local-only resources
+  private. Never merge unrelated archive history, force-add excluded files,
+  or use `push --all` / `--mirror` to synchronize this repository. The installed
+  pre-push hook checks outgoing history and excluded paths; it is not a secret
+  scanner or a license/release acceptance gate.
 - `/Users/sun/Projects/analytix` is the only canonical source and release
   repository. Apply product source changes to this repository and land them in
   its Git history. `/Volumes/AnalytixCache` extends build-storage capacity; it

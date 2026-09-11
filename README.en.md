@@ -1,5 +1,3 @@
-> **PRIVATE_SOURCE_SNAPSHOT / NOT_OPEN_SOURCE / NOT_RC_RELEASE** — This private snapshot retains Kun-derived restricted upstream material under private-access limits; it is not all Apache-2.0 and is not cleared for public or commercial redistribution. Identified restricted packaged assets and private data are omitted. See [PRIVATE_SNAPSHOT.md](PRIVATE_SNAPSHOT.md) for exact scope and unresolved obligations.
-
 <p align="center">
   <img src="src/asset/brand/analytix-app-icon-512.png" width="104" alt="Analytix icon">
 </p>
@@ -22,7 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; upstream restrictions apply"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; third-party terms also apply"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white" alt="Electron 34">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
@@ -215,9 +213,18 @@ Before committing local changes, run `npm run typecheck`, `npm run build`, and `
 
 ## License
 
-Analytix-owned first-party code is licensed under the [Apache License 2.0](./LICENSE). This private snapshot also retains the Kun-derived baseline as `RESTRICTED_UPSTREAM / NOT_APACHE / NOT_FOR_PUBLICATION`. Public/commercial redistribution and complete inherited-file attribution remain unresolved. Apache-2.0 does not relicense that restricted upstream material or authorize public/commercial distribution of this entire snapshot. See [PRIVATE_SNAPSHOT.md](PRIVATE_SNAPSHOT.md).
+Analytix-owned first-party code is licensed under the [Apache License 2.0](./LICENSE). Existing third-party material remains subject to its own terms. Public availability and Git synchronization do not mean that all code is Apache-2.0 or grant additional third-party commercial-use or redistribution rights.
 
 Analytix's first-party copyright owner and Project Owner is Guoqin He,
 publicly operating under the GitHub account [Eysn0130](https://github.com/Eysn0130).
 
-Third-party material remains governed by its own license and attribution terms in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) and [provenance records](docs/analytix/upstreams/). The first-party Apache-2.0 statement does not relicense third-party code or remove this snapshot’s access and redistribution restrictions.
+License and attribution obligations for bundled third-party material are recorded separately in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); that file does not change Analytix's Apache-2.0 license.
+
+## Source synchronization
+
+This project and [GitHub main](https://github.com/Eysn0130/analytix) share the
+public mainline. Run `git pull` in the project directory to get updates; record
+local changes with `git commit`, then upload them with `git push`. Run
+`npm run git:setup` once in a new clone. See the [Git workflow](docs/analytix/git-workflow.md)
+for safe synchronization, private-history protection and resources not included
+in the public source tree.
