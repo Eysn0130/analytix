@@ -1,0 +1,1113 @@
+{
+  "schemaVersion": 1,
+  "id": "d0250c-go-runtime-code-stage-report",
+  "changeId": "D-0250C",
+  "stage": "D-0250C-code-stage",
+  "generatedAt": "2026-06-24T17:50:57.102Z",
+  "sourceCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "status": "code-stage-closed",
+  "reasonixAbsorptionStatus": "code-stage-closed",
+  "goRuntimeCoreStatus": "deterministic-core-green",
+  "goDefaultLiveGateStatus": "post-cutover-live-validation-pending",
+  "codeStageClosed": true,
+  "liveCutoverStage": "D-0250C-live",
+  "liveCutoverStatus": "post-cutover-live-validation-pending",
+  "strictG6Passed": false,
+  "goDefaultCandidate": true,
+  "goDefaultCutoverCandidate": true,
+  "typeScriptFallbackRetained": false,
+  "typeScriptDefaultPathRetired": true,
+  "typeScriptRollbackOverrideRetained": true,
+  "kunAnalytixProductLayerPreserved": true,
+  "reasonixEngineRuntimeOnly": true,
+  "llmAnswerQualityEvidenceUsed": false,
+  "deterministicEvidenceOnly": true,
+  "superiorityMatrix": {
+    "schemaVersion": 1,
+    "changeId": "D-0250C",
+    "stage": "D-0250C-code-stage",
+    "reasonixAbsorptionStatus": "code-stage-closed",
+    "goRuntimeCoreStatus": "deterministic-core-green",
+    "goDefaultLiveGateStatus": "post-cutover-live-validation-pending",
+    "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+    "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+    "kunSourceSnapshots": [
+      "https://github.com/KunAgent/Kun.git refs/tags/v0.2.13^{}=2ba8decc2f56862e7f677fcf89bbc3d402ec3a23",
+      "https://github.com/KunAgent/Kun.git refs/tags/v0.2.14^{}=8f2040349fba47fcd8e8b94f50b131943af839b2"
+    ],
+    "analytixSourceRoot": "/Users/sun/Projects/analytix",
+    "evidencePolicy": "source-level comparison, deterministic oracles, fixtures, unit/integration tests, runtime telemetry, and JSON evidence only",
+    "llmAnswerQualityEvidenceUsed": false,
+    "deterministicEvidenceOnly": true,
+    "rows": [
+      {
+        "id": "deepseek-prefix-cache-stability",
+        "capability": "DeepSeek prefix/cache stability, cache-hit telemetry, and usage accounting.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/agent/cache_shape.go:CaptureShape",
+          "internal/agent/cache_shape.go:CompareShape",
+          "internal/agent/agent.go:SessionCache",
+          "internal/agent/cachehit_e2e_test.go"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/cache/prefix-cache-diagnostics.ts",
+          "packages/runtime/tests/provider-cache-proof.test.ts",
+          "packages/runtime-go/internal/provider/provider.go"
+        ],
+        "currentBehavior": "Analytix keeps provider routing and runtime events; DeepSeek cache diagnostics are attached as provider-scoped telemetry.",
+        "reasonixStrongerEvidence": [
+          "Reasonix records previous prefix shape and compares cacheable prefix drift deterministically.",
+          "Reasonix accumulates session cache hit/miss telemetry from provider usage, not from answer quality."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0245-deepseek-cache-scoped",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0245_baseline_absorption_test.go"
+          },
+          {
+            "id": "d0242-runtime-cache-diagnostics",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "d0243-deepseek-cache-record-format",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/g6_readiness_test.go"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "code-port-and-adapt",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/provider/provider.go",
+          "packages/runtime-go/internal/contracts/hash.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": true,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/d0245_baseline_absorption_test.go",
+          "packages/runtime/tests/go-runtime-conformance.test.ts"
+        ],
+        "decision": "adapt",
+        "absorptionClass": "code-port-and-adapt",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "prefix-shape-contract-baseline",
+        "capability": "Stable prefix shape dimensions for provider/model/endpoint/tools/history inputs.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/agent/cache_shape.go:PrefixShape",
+          "internal/agent/cache_shape.go:CaptureShape"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/cache/prefix-cache-diagnostics.ts",
+          "packages/runtime/src/loop/agent-loop.ts",
+          "packages/runtime/tests/provider-cache-proof.test.ts"
+        ],
+        "currentBehavior": "Analytix already owns a richer stable prefix contract across provider, model, endpointFormat, tool sources, and prefix items.",
+        "reasonixStrongerEvidence": [],
+        "deterministicEvidence": [
+          {
+            "id": "provider-cache-prefix-shape-contract",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/provider-cache-proof.test.ts"
+          },
+          {
+            "id": "d0242-runtime-cache-diagnostics",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "not-applicable",
+        "analytixTargetPaths": [
+          "packages/runtime/src/cache/prefix-cache-diagnostics.ts",
+          "packages/runtime-go/internal/contracts/hash.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": true,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime/tests/provider-cache-proof.test.ts",
+          "packages/runtime/tests/go-runtime-conformance.test.ts"
+        ],
+        "decision": "keep-kun",
+        "absorptionClass": "reject",
+        "status": "green",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "keepKunReason": "Analytix/Kun prefix dimensions are broader; only Reasonix release guard telemetry is adapted.",
+        "kunAnalytixStrongerEvidence": [
+          "Analytix/Kun prefix contract already covers provider, model, endpointFormat, tool-source, and history dimensions.",
+          "Provider cache proof tests keep dynamic workspace state out of the stable prefix."
+        ],
+        "baselineRetainedReason": "Retain the Analytix/Kun prefix contract and adapt only Reasonix release-guard telemetry.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "provider-stream-usage-reasoning-guards",
+        "capability": "Provider stream failure discipline, usage/cache accounting normalization, and reasoning/thinking round-trip guards.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/provider/openai/openai.go:streamWithReconnect",
+          "internal/provider/openai/openai.go:readStream",
+          "internal/provider/openai/openai.go:normaliseUsage",
+          "internal/provider/provider.go:Usage",
+          "internal/provider/openai/openai_test.go:TestBuildRequestRoundTripsReasoningOnDeepSeekToolCalls"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/adapters/model/compat-model-client.ts",
+          "packages/runtime/src/telemetry/usage-counter.ts",
+          "packages/runtime-go/internal/provider/provider.go"
+        ],
+        "currentBehavior": "Analytix keeps provider routing and endpointFormat; Reasonix stream/usage/reasoning invariants are adapted only inside provider parsing.",
+        "reasonixStrongerEvidence": [
+          "Reasonix separates reset-before-output from interrupted-after-output stream cases.",
+          "Reasonix normalizes cache/usage/reasoning fields with deterministic provider fixtures."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0245-go-runtime-multi-model-matrix",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0245_baseline_absorption_test.go"
+          },
+          {
+            "id": "d0245-runtime-server-multi-model-turns",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/runtime_server_test.go"
+          },
+          {
+            "id": "g3-provider-usage-streaming-oracle",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "contract-reimplement",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/provider/provider.go",
+          "packages/runtime-go/internal/server/runtime_server.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": true,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/d0245_baseline_absorption_test.go",
+          "packages/runtime/tests/model-client.test.ts"
+        ],
+        "decision": "adapt",
+        "absorptionClass": "contract-reimplement",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "provider-endpoint-family-request-shape",
+        "capability": "Provider request shape across DeepSeek, OpenAI-compatible, Anthropic-compatible, responses mode, and custom full endpoint.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/provider/openai/openai.go:buildRequest",
+          "internal/provider/anthropic/anthropic.go:buildRequest"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "src/shared/openai-compat-url.ts",
+          "packages/runtime/src/adapters/model/compat-model-client.ts",
+          "packages/runtime/tests/provider-cache-proof.test.ts"
+        ],
+        "currentBehavior": "Analytix already owns endpoint families and custom full endpoint behavior; custom full endpoint must not receive another appended path.",
+        "reasonixStrongerEvidence": [],
+        "deterministicEvidence": [
+          {
+            "id": "provider-request-shape-endpoint-family",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/provider-cache-proof.test.ts"
+          },
+          {
+            "id": "d0245-ts-runtime-conformance-multi-model",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "not-applicable",
+        "analytixTargetPaths": [
+          "src/shared/openai-compat-url.ts",
+          "packages/runtime/src/adapters/model/compat-model-client.ts"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": true,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime/tests/model-client.test.ts",
+          "packages/runtime/tests/provider-cache-proof.test.ts"
+        ],
+        "decision": "keep-kun",
+        "absorptionClass": "reject",
+        "status": "green",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "keepKunReason": "Analytix/Kun endpoint family and custom endpoint semantics are broader and remain the baseline.",
+        "kunAnalytixStrongerEvidence": [
+          "Analytix/Kun endpoint contract covers OpenAI chat completions, OpenAI responses compatibility, Anthropic messages, and custom full endpoint mode.",
+          "Custom full endpoints are explicitly request-shape-only and must not receive appended provider paths."
+        ],
+        "baselineRetainedReason": "Retain shared Analytix/Kun endpoint URL/body/stream/usage semantics rather than replacing them with Reasonix provider defaults.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "agent-loop-job-subagent-lineage",
+        "capability": "Agent loop job/subagent lineage bound to Analytix /goal and task/job lineage only.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/agent/task.go:TaskTool",
+          "internal/agent/task.go:prepareTranscriptRun",
+          "internal/agent/subagent_store.go:SubagentStore",
+          "internal/jobs/artifacts.go:ArtifactDir"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/delegation/job-manager.ts",
+          "packages/runtime/src/adapters/tool/task-job-tool-provider.ts",
+          "packages/runtime/src/contracts/events.ts",
+          "packages/runtime-go/internal/jobs/lineage.go"
+        ],
+        "currentBehavior": "Subagent/job behavior is internal lineage under existing chat, /goal, task tools, and SSE child metadata.",
+        "reasonixStrongerEvidence": [
+          "Reasonix has deterministic parent call context and transcript/artifact lineage tests.",
+          "Analytix maps the stronger engine invariant to child metadata without adding a Subagent product route."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0241-job-lineage-proof",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/live_production_candidate_test.go"
+          },
+          {
+            "id": "d0242-runtime-lineage-sse",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "d0249-runtime-info-topology",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0249_reasonix_integration_topology_test.go"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "contract-reimplement",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/jobs/lineage.go",
+          "packages/runtime-go/internal/server/runtime_server.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/live_production_candidate_test.go",
+          "packages/runtime/tests/task-job-orchestration-oracle.test.ts"
+        ],
+        "decision": "adapt",
+        "absorptionClass": "contract-reimplement",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "mcp-lifecycle-lazy-schema-reconnect-redaction",
+        "capability": "MCP lifecycle, lazy/schema cache, tool call, approval/user-input, reconnect, and redaction.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/plugin/plugin.go:Start",
+          "internal/plugin/plugin.go:StartPhaseB",
+          "internal/plugin/plugin.go:ToolsFor",
+          "internal/plugin/lazy.go:LazyToolset",
+          "internal/plugin/cache.go:SpecFingerprint",
+          "internal/plugin/known_overrides.go:ApplyKnownOverrides",
+          "internal/plugin/canonicalize.go:canonicalizeSchema",
+          "internal/plugin/transport_http.go",
+          "internal/mcpdiag/auth.go"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/adapters/tool/mcp-tool-provider.ts",
+          "packages/runtime/tests/mcp-tool-lifecycle-oracle.test.ts",
+          "packages/runtime-go/internal/mcp/lifecycle.go"
+        ],
+        "currentBehavior": "Analytix owns MCP registry/tool calls and emits mcp_lifecycle_audit through existing runtime events.",
+        "reasonixStrongerEvidence": [
+          "Reasonix has lazy lifecycle, schema cache, reconnect, auth-classification, known-override, and schema-redaction tests.",
+          "Analytix Go runtime now validates connect/list/call/approval/reconnect/redaction evidence before cutover."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0244-live-local-mcp-lifecycle",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0244_mcp_lifecycle_test.go"
+          },
+          {
+            "id": "d0244-runtime-mcp-lifecycle-sse",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "d0243-mcp-matrix-scaffold",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/g6_readiness_test.go"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "contract-reimplement",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/mcp/lifecycle.go",
+          "packages/runtime-go/internal/mcp/manager.go",
+          "packages/runtime-go/internal/readiness/readiness.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/d0244_mcp_lifecycle_test.go",
+          "packages/runtime/tests/mcp-tool-lifecycle-oracle.test.ts"
+        ],
+        "decision": "absorb",
+        "absorptionClass": "contract-reimplement",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "mcp-search-meta-tool-boundary",
+        "capability": "MCP search/meta-tool boundary, direct call trust boundary, and approval-on-call surface.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/plugin/known_overrides.go",
+          "internal/plugin/canonicalize.go"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/adapters/tool/mcp-tool-search.ts",
+          "packages/runtime/src/adapters/tool/mcp-tool-provider.ts",
+          "packages/runtime/src/conformance/fixtures/go-g4-tools-approval-user-input-mcp-oracle.json"
+        ],
+        "currentBehavior": "Analytix already owns mcp_search, mcp_describe, mcp_call, and mcp_refresh_catalog as existing internal tool entries without an MCP-indexer UI route.",
+        "reasonixStrongerEvidence": [],
+        "deterministicEvidence": [
+          {
+            "id": "mcp-search-meta-tool-boundary",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "product-sovereignty-scan",
+            "kind": "scan",
+            "status": "passed",
+            "evidence": "scripts/scan-product-sovereignty.cjs"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "not-applicable",
+        "analytixTargetPaths": [
+          "packages/runtime/src/adapters/tool/mcp-tool-search.ts",
+          "packages/runtime-go/internal/mcp/lifecycle.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime/tests/mcp-tool-lifecycle-oracle.test.ts",
+          "scripts/scan-product-sovereignty.cjs"
+        ],
+        "decision": "keep-kun",
+        "absorptionClass": "reject",
+        "status": "green",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "keepKunReason": "Analytix/Kun MCP search/meta-tool boundary is broader and remains the product/runtime contract.",
+        "kunAnalytixStrongerEvidence": [
+          "Analytix/Kun already exposes mcp_search, mcp_describe, mcp_call, and mcp_refresh_catalog as internal runtime tools.",
+          "Product-sovereignty and conformance tests prove no top-level MCP-indexer UI route is required."
+        ],
+        "baselineRetainedReason": "Retain the Analytix/Kun MCP meta-tool contract while absorbing only internal lifecycle/reconnect/redaction invariants.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "approval-user-input-tool-result-history-repair",
+        "capability": "Approval/user-input gate semantics plus model history/tool-result repair.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/agent/ask.go:AskTool",
+          "internal/agent/agent.go:withCallContext",
+          "internal/agent/normalize.go:NormalizeSession",
+          "internal/control/approval_e2e_test.go"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/domain/model-history-repair.ts",
+          "packages/runtime/src/adapters/model/compat-model-client.ts",
+          "packages/runtime-go/internal/agent/gates.go"
+        ],
+        "currentBehavior": "Analytix keeps approval/user-input routes and repairs model history before provider requests/fork cloning.",
+        "reasonixStrongerEvidence": [
+          "Reasonix separates user ask decisions from tool approval posture and persists session-safe repairs.",
+          "Analytix keeps this as an internal runtime/history invariant instead of importing Reasonix ask/session protocol."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0242-approval-user-input-contract",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "d0243-restart-restores-pending-gates",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/runtime_server_test.go"
+          },
+          {
+            "id": "g5-history-repair-shadow",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/shadow_test.go"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "contract-reimplement",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/agent/gates.go",
+          "packages/runtime-go/internal/server/g5_shadow.go",
+          "packages/runtime/src/domain/model-history-repair.ts"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime/tests/model-client.test.ts",
+          "packages/runtime/tests/thread-service.test.ts",
+          "packages/runtime-go/shadow_test.go"
+        ],
+        "decision": "adapt",
+        "absorptionClass": "contract-reimplement",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "runtime-event-sse-session-durability",
+        "capability": "Runtime event/SSE replay and thread durability contracts.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/event/event.go",
+          "internal/event/sync.go",
+          "desktop/sessions.go",
+          "internal/history/search.go"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/server/routes",
+          "packages/runtime-go/internal/server/durable_store.go",
+          "packages/runtime-go/internal/server/runtime_server.go"
+        ],
+        "currentBehavior": "Analytix owns persist-before-publish runtime events, /v1/threads, resume-thread, Last-Event-ID/since_seq replay, archive/search, and fork contracts.",
+        "reasonixStrongerEvidence": [],
+        "deterministicEvidence": [
+          {
+            "id": "d0236-durable-store-go-test",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/live_local_durable_test.go"
+          },
+          {
+            "id": "d0242-runtime-sse-replay-contract",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          },
+          {
+            "id": "d0243-runtime-server-restart-go-test",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/runtime_server_test.go"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "not-applicable",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/server/durable_store.go",
+          "packages/runtime-go/internal/server/runtime_server.go",
+          "packages/runtime-go/internal/protocol/route_replay.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/live_local_durable_test.go",
+          "packages/runtime-go/runtime_server_test.go",
+          "packages/runtime/tests/go-runtime-conformance.test.ts"
+        ],
+        "decision": "keep-kun",
+        "absorptionClass": "reject",
+        "status": "green",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "keepKunReason": "Analytix/Kun durable runtime event replay and thread routes are the stronger baseline.",
+        "kunAnalytixStrongerEvidence": [
+          "Analytix/Kun owns HTTP/SSE thread list, search, archive, fork, resume-thread, and Last-Event-ID/since_seq replay contracts.",
+          "Go durable-store tests reproduce the Analytix/Kun persist-before-publish event replay invariant."
+        ],
+        "baselineRetainedReason": "Retain Analytix/Kun durable SSE/thread-route semantics as the cross-backend runtime contract.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "autoresearch-workflow-create-loop-engine-discipline",
+        "capability": "AutoResearch, Workflow, and Create Loop discipline only as /goal/internal planner mechanics.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/agent/evidence_flow_test.go",
+          "internal/agent/planmode_test.go",
+          "internal/agent/parallel_tasks.go",
+          "internal/tool/builtin/completestep_test.go",
+          "docs/SPEC.md:AutoResearch"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "packages/runtime/src/adapters/tool/goal-tools.ts",
+          "packages/runtime/src/adapters/tool/create-plan-tool.ts",
+          "packages/runtime-go/internal/research/autoresearch_state.go",
+          "packages/runtime-go/internal/goal/goal_evidence.go"
+        ],
+        "currentBehavior": "Analytix keeps /goal, create_plan, complete_step, task tools, and internal planner flows without top-level workflow UI.",
+        "reasonixStrongerEvidence": [
+          "Reasonix has stronger evidence-flow, plan guard, and AutoResearch project-state tests.",
+          "Analytix ports those invariants to .analytix/autoresearch and goal_evidence_audit events."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0246-go-runtime-autoresearch-state",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0246_autoresearch_state_test.go"
+          },
+          {
+            "id": "d0244-go-runtime-goal-evidence-fsm",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime-go/d0244_goal_evidence_test.go"
+          },
+          {
+            "id": "goal-tools-semantics-unchanged",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/goal-tools.test.ts"
+          }
+        ],
+        "codeReusable": true,
+        "codeReuseMode": "contract-reimplement",
+        "analytixTargetPaths": [
+          "packages/runtime-go/internal/research/autoresearch_state.go",
+          "packages/runtime-go/internal/goal/goal_evidence.go",
+          "packages/runtime-go/internal/server/g5_shadow.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "packages/runtime-go/d0246_autoresearch_state_test.go",
+          "packages/runtime-go/d0244_goal_evidence_test.go",
+          "packages/runtime/tests/goal-tools.test.ts"
+        ],
+        "decision": "adapt",
+        "absorptionClass": "contract-reimplement",
+        "status": "green",
+        "codeLevelAbsorbed": true,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "kun-analytix-product-layer-baseline",
+        "capability": "Product entry, UI, desktop experience, settings, bridge, and multi-model provider baseline.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "desktop/frontend/src/App.tsx",
+          "cmd/reasonix",
+          "internal/config"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "src/preload/index.ts",
+          "src/shared/app-settings-runtime.ts",
+          "src/renderer/src/components/Workbench.tsx",
+          "docs/analytix/upstreams/kun-sync.md"
+        ],
+        "currentBehavior": "Kun/Analytix remains product baseline; Reasonix is engine/runtime donor only.",
+        "reasonixStrongerEvidence": [],
+        "deterministicEvidence": [
+          {
+            "id": "product-sovereignty-scan",
+            "kind": "scan",
+            "status": "passed",
+            "evidence": "scripts/scan-product-sovereignty.cjs"
+          },
+          {
+            "id": "preload-settings-tests",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "src/preload/preload-runtime-request.test.ts src/preload/preload-sandbox.test.ts src/shared/app-settings.test.ts"
+          },
+          {
+            "id": "renderer-route-surface-tests",
+            "kind": "test",
+            "status": "passed",
+            "evidence": "src/renderer/src/components/Workbench.route-surface.test.ts src/renderer/src/components/chat/Sidebar.test.ts src/renderer/src/components/chat/FloatingComposer.test.ts"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "not-applicable",
+        "analytixTargetPaths": [
+          "src/preload/index.ts",
+          "src/shared/app-settings-runtime.ts",
+          "src/renderer/src/components"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "src/preload/preload-runtime-request.test.ts",
+          "src/shared/app-settings.test.ts",
+          "src/renderer/src/components/Workbench.route-surface.test.ts"
+        ],
+        "decision": "keep-kun",
+        "absorptionClass": "reject",
+        "status": "green",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "keepKunReason": "Reasonix product-layer replacement is not proven stronger and would risk UI/settings/bridge/provider baseline drift.",
+        "kunAnalytixStrongerEvidence": [
+          "Analytix/Kun preserves the desktop product layer: window.analytix bridge, top-level runtime settings, Workbench routes, and multi-provider settings.",
+          "Reasonix product UI/config/public protocol would violate current product sovereignty without adding a proven desktop baseline advantage."
+        ],
+        "baselineRetainedReason": "Retain Kun/Analytix as product entry, UI, settings, bridge, and multi-model provider baseline; Reasonix remains engine/runtime-only.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "reasonix-public-protocol-and-top-level-ui",
+        "capability": "Reasonix SessionAPI/config roots/public job protocol/top-level Workflow/Create Loop/Subagent/AutoResearch/MCP-indexer UI.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "cmd/reasonix",
+          "internal/config",
+          "internal/serve",
+          "desktop/frontend/src/App.tsx"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "src/preload/index.ts",
+          "packages/runtime/src/server/routes",
+          "scripts/scan-product-sovereignty.cjs"
+        ],
+        "currentBehavior": "Analytix exposes window.analytix, top-level runtime settings, analytix serve, and existing chat/goal/tool/MCP entries only.",
+        "reasonixStrongerEvidence": [],
+        "decisionEvidence": [
+          "Rejected by product sovereignty: public protocol or top-level UI import is not a superiority path."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "product-sovereignty-scan",
+            "kind": "scan",
+            "status": "passed",
+            "evidence": "scripts/scan-product-sovereignty.cjs"
+          },
+          {
+            "id": "go-runtime-hidden-reasonix-routes",
+            "kind": "conformance",
+            "status": "passed",
+            "evidence": "packages/runtime/tests/go-runtime-conformance.test.ts"
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "reject-public-protocol",
+        "analytixTargetPaths": [
+          "scripts/scan-product-sovereignty.cjs",
+          "packages/runtime-go/internal/contracts/product_boundary.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "scripts/scan-product-sovereignty.cjs",
+          "packages/runtime/tests/go-runtime-conformance.test.ts"
+        ],
+        "decision": "reject",
+        "absorptionClass": "reject",
+        "status": "rejected",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": true,
+        "requiresLiveEvidence": false,
+        "liveEvidenceStatus": "not-required",
+        "rejectedReason": "Would expose Reasonix public protocol or top-level product entries.",
+        "typeScriptFallbackRetained": false
+      },
+      {
+        "id": "go-default-live-cutover-evidence",
+        "capability": "Credentialed provider/MCP execution, packaged desktop QA, and explicit operator gate for Go default candidate.",
+        "reasonixSourcePath": "/Users/sun/Projects/DeepSeek-Reasonix",
+        "reasonixSourceCommit": "7032f39336f4ae5f216e1fcb3368e5f679723490",
+        "reasonixSourceSymbols": [
+          "internal/provider",
+          "internal/plugin",
+          "internal/agent"
+        ],
+        "kunAnalytixBaselinePaths": [
+          "docs/analytix/upstreams/d0250b-go-runtime-cutover-report.json",
+          "scripts/d0247-go-runtime-readiness-report.mjs",
+          "scripts/d0248-go-runtime-g6-preflight.mjs",
+          "src/main/runtime/analytix-adapter.ts"
+        ],
+        "currentBehavior": "D-0250B-intake is closed; D-0250C-live remains post-cutover validation until real JSON evidence exists.",
+        "reasonixStrongerEvidence": [],
+        "decisionEvidence": [
+          "Live cutover requires integration evidence, not LLM answer quality.",
+          "Current deterministic evidence is sufficient for Go default; live evidence remains post-cutover validation."
+        ],
+        "deterministicEvidence": [
+          {
+            "id": "d0250b-intake-report",
+            "kind": "json",
+            "status": "passed",
+            "evidence": "docs/analytix/upstreams/d0250b-go-runtime-cutover-report.json"
+          },
+          {
+            "id": "d0248-default-ready-preflight",
+            "kind": "report",
+            "status": "post-cutover-live-validation-pending",
+            "evidence": "docs/analytix/upstreams/d0248-go-runtime-g6-preflight-report.json",
+            "expectedBlocked": false,
+            "acceptedAsCodePhasePass": true,
+            "defaultBackendReady": true
+          }
+        ],
+        "codeReusable": false,
+        "codeReuseMode": "external-evidence-required",
+        "analytixTargetPaths": [
+          "docs/analytix/upstreams",
+          "src/main/runtime/analytix-adapter.ts",
+          "packages/runtime-go/internal/readiness/readiness.go"
+        ],
+        "productImpact": {
+          "uiSurfaceChanged": false,
+          "settingsSchemaChanged": false,
+          "bridgeChanged": false,
+          "providerMultiModelChanged": false,
+          "providerScoped": false,
+          "doesNotNarrowProviders": true,
+          "topLevelEntrypointAdded": false,
+          "reasonixPublicProtocolAdded": false,
+          "stablePrefixUsesDynamicState": false
+        },
+        "regressionTestPaths": [
+          "scripts/runtime-go-preflight.mjs",
+          "scripts/runtime-go-engine-absorption-report.mjs"
+        ],
+        "regressionCommands": [
+          "npm run runtime:go:preflight -- --json --gate",
+          "npm run runtime:go:engine-absorption-report -- --json"
+        ],
+        "decision": "defer",
+        "absorptionClass": "defer",
+        "status": "deferred",
+        "codeLevelAbsorbed": false,
+        "localDeterministicGreen": false,
+        "requiresLiveEvidence": true,
+        "liveEvidenceStatus": "post-cutover-live-validation-pending",
+        "deferredReason": "Real credentialed provider, MCP execution, packaged QA, and operator JSON evidence are post-cutover live validation, not deterministic default blockers.",
+        "typeScriptFallbackRetained": false
+      }
+    ],
+    "rowCount": 13,
+    "absorbCount": 1,
+    "adaptCount": 5,
+    "keepKunCount": 5,
+    "rejectCount": 1,
+    "deferCount": 1,
+    "codeLevelAbsorbedCount": 6,
+    "localDeterministicGreenCount": 12,
+    "productImpactChangedCount": 0,
+    "topLevelEntrypointAddedCount": 0,
+    "reasonixPublicProtocolAddedCount": 0,
+    "providerMultiModelChangedCount": 0,
+    "stablePrefixDynamicStateRowCount": 0,
+    "deepSeekEnhancementScopedOnly": true,
+    "kunAnalytixProductLayerPreserved": true,
+    "reasonixEngineRuntimeOnly": true,
+    "typeScriptFallbackRetained": false,
+    "codeStageClosed": true,
+    "deterministicAbsorptionIds": [
+      "deepseek-prefix-cache-stability",
+      "provider-stream-usage-reasoning-guards",
+      "agent-loop-job-subagent-lineage",
+      "mcp-lifecycle-lazy-schema-reconnect-redaction",
+      "approval-user-input-tool-result-history-repair",
+      "autoresearch-workflow-create-loop-engine-discipline"
+    ],
+    "pendingLiveValidationIds": [
+      "go-default-live-cutover-evidence"
+    ],
+    "strictG6DefaultCutoverReady": false,
+    "goDefaultCutoverCandidate": true,
+    "liveCutoverStage": "D-0250C-live",
+    "liveCutoverStatus": "post-cutover-live-validation-pending",
+    "liveEvidenceBlockers": [
+      "credentialed-provider-matrix-json",
+      "credentialed-mcp-execution-json",
+      "packaged-desktop-qa-json",
+      "ANALYTIX_GO_RUNTIME_G6_READY=1",
+      "operator-gate-json"
+    ],
+    "forbiddenTopLevelEntrypoints": [
+      "Workflow",
+      "Create Loop",
+      "Subagent",
+      "AutoResearch",
+      "MCP-indexer"
+    ],
+    "notes": [
+      "D-0250C-code-stage closes only source-level superiority evidence and Go runtime domain landing.",
+      "No LLM answer-quality evidence is used.",
+      "Reasonix public protocol and top-level Workflow/Create Loop/Subagent/AutoResearch/MCP-indexer entries remain rejected.",
+      "Go runtime server is the default core after deterministic local conformance and adapter canary pass.",
+      "Credentialed provider, MCP execution, packaged QA, and operator JSON evidence remain post-cutover live validation and are not used as LLM answer-quality evidence.",
+      "TypeScript runtime is not available as an executable rollback path; ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic and must not start TS runtime."
+    ]
+  },
+  "rowValidation": {
+    "passed": true,
+    "rowCount": 13,
+    "failures": []
+  },
+  "deterministicAbsorptionIds": [
+    "deepseek-prefix-cache-stability",
+    "provider-stream-usage-reasoning-guards",
+    "agent-loop-job-subagent-lineage",
+    "mcp-lifecycle-lazy-schema-reconnect-redaction",
+    "approval-user-input-tool-result-history-repair",
+    "autoresearch-workflow-create-loop-engine-discipline"
+  ],
+  "pendingLiveValidationIds": [
+    "go-default-live-cutover-evidence"
+  ],
+  "d0250bMissingEvidence": [
+    "provider-matrix-credentialed",
+    "mcp-matrix-credentialed",
+    "packaged-qa",
+    "explicit-env-gate"
+  ],
+  "d0250cLiveEvidenceBlockers": [
+    "credentialed-provider-matrix-json",
+    "credentialed-mcp-execution-json",
+    "packaged-desktop-qa-json",
+    "ANALYTIX_GO_RUNTIME_G6_READY=1",
+    "operator-gate-json"
+  ],
+  "missingLiveEvidence": [
+    "provider-matrix-credentialed",
+    "mcp-matrix-credentialed",
+    "packaged-qa",
+    "explicit-env-gate",
+    "credentialed-provider-matrix-json",
+    "credentialed-mcp-execution-json",
+    "packaged-desktop-qa-json",
+    "ANALYTIX_GO_RUNTIME_G6_READY=1",
+    "operator-gate-json"
+  ],
+  "codeStageEvidence": {
+    "d0250bCutoverReport": {
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250b-go-runtime-cutover-report.json",
+      "status": "intake-closed",
+      "intakeClosed": true,
+      "liveCutoverReady": false
+    },
+    "d0248PreflightReport": {
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-g6-preflight-report.json",
+      "acceptedAsCodePhasePass": true,
+      "expectedBlocked": false,
+      "localCommandFailureIds": [],
+      "localCommandSkippedIds": [
+        "packaged-qa"
+      ]
+    },
+    "readinessGateReport": {
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json",
+      "defaultBackendReady": true,
+      "blockerIds": []
+    }
+  },
+  "matrixCommand": {
+    "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go run ./cmd/d0250c-superiority-report",
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "rollback": {
+    "retainedFallback": "TypeScript runtime is no longer the default/fallback and is not available as an executable rollback override; ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic.",
+    "defaultCandidateGate": "Go runtime is the default core after deterministic local conformance and adapter canary; live JSON evidence is post-cutover validation.",
+    "rollbackCommand": "Restore a previous release for operational rollback; ANALYTIX_RUNTIME_BACKEND=typescript must return retired_backend and must not start TS runtime.",
+    "fallbackSemantics": "typeScriptFallbackRetained:false means no default dual-track fallback and no executable TS rollback override in the current app."
+  },
+  "nextExitPlan": {
+    "d0250cLive": "Collect credentialed provider matrix, credentialed MCP execution, packaged desktop QA, and operator gate JSON as post-cutover live validation; do not fake missing live evidence.",
+    "d0250d": "Keep validating replacement tests and rollback instructions while Go remains the default runtime core."
+  },
+  "outputPaths": {
+    "matrix": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250c-reasonix-superiority-matrix.json",
+    "json": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250c-go-runtime-code-stage-report.json",
+    "markdown": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250c-go-runtime-code-stage-summary.md"
+  }
+}

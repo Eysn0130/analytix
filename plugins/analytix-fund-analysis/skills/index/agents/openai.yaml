@@ -1,0 +1,6 @@
+interface:
+  display_name: "案件资金研判总入口"
+  short_description: "将当前案件资金问题分流至对应经侦核验能力"
+  default_prompt: "请把当前案件资金问题转为经侦事实核验，不展示内部过程。"
+policy:
+  allow_implicit_invocation: true

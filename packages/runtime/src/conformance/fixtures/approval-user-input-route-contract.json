@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "id": "approval-user-input-route-api-gates-v1",
+  "runtimeToken": "tok-1",
+  "threadId": "thr_gui_gates",
+  "turnId": "turn_gui_gates",
+  "approval": {
+    "id": "appr_route_deny_1",
+    "itemId": "item_appr_route_deny_1",
+    "toolName": "bash",
+    "summary": "Run a guarded command",
+    "decisionRequest": {
+      "decision": "deny",
+      "reason": "denied by GUI gate fixture"
+    },
+    "expectedResponse": {
+      "status": 200,
+      "body": {
+        "approvalId": "appr_route_deny_1",
+        "decision": "deny",
+        "status": "denied"
+      }
+    },
+    "secondDecisionStatus": 409,
+    "pendingBefore": 1,
+    "pendingAfter": 0
+  },
+  "userInput": {
+    "id": "input_route_cancel_1",
+    "itemId": "item_input_route_cancel_1",
+    "prompt": "Choose deployment channel",
+    "questions": [
+      {
+        "header": "Channel",
+        "id": "channel",
+        "question": "Which channel should continue?",
+        "options": [
+          {
+            "label": "stable",
+            "description": "Use the stable channel."
+          },
+          {
+            "label": "beta",
+            "description": "Use the beta channel."
+          }
+        ]
+      }
+    ],
+    "resolveRequest": {
+      "cancelled": true
+    },
+    "expectedResponse": {
+      "status": 200,
+      "body": {
+        "inputId": "input_route_cancel_1",
+        "status": "cancelled"
+      }
+    },
+    "secondResolveStatus": 404,
+    "pendingBefore": 1,
+    "pendingAfter": 0
+  },
+  "submittedUserInput": {
+    "threadId": "thr_gui_submit",
+    "id": "input_route_submit_1",
+    "itemId": "item_input_route_submit_1",
+    "prompt": "Select review outcome",
+    "questions": [
+      {
+        "header": "Outcome",
+        "id": "outcome",
+        "question": "Which outcome should be recorded?",
+        "options": [
+          {
+            "label": "approve",
+            "description": "Continue with approval."
+          },
+          {
+            "label": "revise",
+            "description": "Return for revision."
+          }
+        ]
+      }
+    ],
+    "resolveRequest": {
+      "answers": [
+        {
+          "id": "outcome",
+          "label": "approve",
+          "value": "approval recorded"
+        }
+      ]
+    },
+    "expectedResolution": {
+      "status": "submitted",
+      "answers": [
+        {
+          "id": "outcome",
+          "label": "approve",
+          "value": "approval recorded"
+        }
+      ]
+    },
+    "expectedResponse": {
+      "status": 200,
+      "body": {
+        "inputId": "input_route_submit_1",
+        "status": "submitted",
+        "answers": [
+          {
+            "id": "outcome",
+            "label": "approve",
+            "value": "approval recorded"
+          }
+        ]
+      }
+    },
+    "pendingBefore": 1,
+    "pendingAfter": 0,
+    "resolvedEvent": {
+      "kind": "user_input_resolved",
+      "status": "submitted",
+      "includesAnswers": false
+    }
+  },
+  "resumePendingGates": {
+    "sourceThreadId": "thr_resume_pending_gates",
+    "approvalId": "appr_resume_pending_1",
+    "userInputId": "input_resume_pending_1",
+    "expectedSourceStatuses": {
+      "approval": "pending",
+      "userInput": "pending"
+    },
+    "expectedResumedStatuses": {
+      "approval": "expired",
+      "userInput": "cancelled"
+    }
+  },
+  "abortCleanup": {
+    "approvalId": "appr_abort_cleanup_1",
+    "userInputId": "input_abort_cleanup_1",
+    "expectedApprovalStatus": "expired",
+    "expectedUserInputStatus": "cancelled",
+    "lateApprovalDecisionStatus": 409,
+    "lateUserInputResolveStatus": 404,
+    "expectedReplayKinds": [
+      "approval_requested",
+      "approval_resolved",
+      "user_input_requested",
+      "user_input_resolved"
+    ]
+  },
+  "replay": {
+    "sinceSeq": 0,
+    "expectedKindsInOrder": [
+      "approval_requested",
+      "approval_resolved",
+      "user_input_requested",
+      "user_input_resolved"
+    ]
+  },
+  "remoteEntry": {
+    "threadId": "thr_remote_entry_gate",
+    "startRequest": {
+      "prompt": "remote entry should keep GUI gates",
+      "disableUserInput": true
+    },
+    "expectedPortKeys": [
+      "approvals",
+      "lifecycle",
+      "turns"
+    ],
+    "forbiddenPortKeys": [
+      "goal",
+      "checkpointRewindService",
+      "memoryStore",
+      "sessionStore",
+      "threadService",
+      "threadStore",
+      "toolHost"
+    ],
+    "rejectedOverride": {
+      "approvalPolicy": "never"
+    }
+  }
+}

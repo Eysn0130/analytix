@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "d0250b-go-runtime-operator-gate",
+  "upgradesChangeId": "D-0251",
+  "generatedAt": "2026-06-24T17:51:00.863Z",
+  "status": "live_blocked",
+  "passed": false,
+  "operatorGate": "ANALYTIX_GO_RUNTIME_G6_READY=1",
+  "explicitEnvGate": false,
+  "credentialedEvidenceReviewed": false,
+  "defaultCandidateApproved": false,
+  "goDefaultCandidateApproved": false,
+  "commitHash": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "evidenceTargetCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "provider": "52500f51845c054761f5c70a21172a58284924034957b06bb7370d10fbf596c8",
+    "mcp": "076203a884ebdc573da7ac610ec946228b67b9919222fa8f03b4058ec6b7de82",
+    "packaged": "90d4d8ce154518d7241af3ddf147a347cb3d3d6a4434038e58b5ed5667d792cb"
+  },
+  "reportPaths": {
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json"
+  },
+  "evidenceReviewed": [
+    {
+      "id": "provider-matrix-credentialed",
+      "status": "live_blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json"
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "status": "live_blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json"
+    },
+    {
+      "id": "packaged-qa",
+      "status": "live_blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json"
+    }
+  ],
+  "typeScriptFallbackRetained": false,
+  "goDefaultBackendEnabled": true,
+  "rendererVisibleGoSwitcher": false,
+  "reasonixEngineRuntimeOnly": true,
+  "failureReasons": [
+    "provider matrix evidence is not passed",
+    "MCP execution evidence is not passed",
+    "packaged desktop QA evidence is not passed",
+    "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1",
+    "operator post-cutover live-validation approval env is not set"
+  ]
+}

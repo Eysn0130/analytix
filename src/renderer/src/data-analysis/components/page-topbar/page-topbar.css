@@ -1,0 +1,276 @@
+.page-topbar {
+  --page-topbar-tool-size: 36px;
+  --page-topbar-tool-radius: 8px;
+  --page-topbar-tool-badge-bg: color-mix(in oklab, var(--color-danger) 82%, var(--color-bg-elevated));
+  --page-topbar-tool-badge-color: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-text) 12%);
+  --page-topbar-tool-badge-border: color-mix(in oklab, var(--page-topbar-bg, var(--program-shell-bg)) 80%, var(--color-bg-elevated) 20%);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  height: 50px;
+  min-height: 50px;
+  padding: 0 22px;
+  background: var(--page-topbar-bg, var(--program-shell-bg));
+  border-bottom: 1px solid
+    var(--page-topbar-border, color-mix(in oklab, var(--program-shell-border) 78%, transparent));
+  box-shadow: none;
+  isolation: isolate;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__drag-region {
+  position: relative;
+  z-index: 0;
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.data-analysis-surface[data-theme="dark"] .page-topbar {
+  --page-topbar-bg: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-bg));
+  --page-topbar-border: color-mix(in oklab, var(--color-border) 72%, transparent);
+  --page-topbar-tab-color: color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text) 14%);
+  --page-topbar-tab-hover: color-mix(in oklab, var(--color-text) 88%, var(--color-accent) 12%);
+  --page-topbar-tool-bg: color-mix(in oklab, var(--color-bg-elevated) 84%, var(--color-bg-subtle));
+  --page-topbar-tool-bg-hover: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-subtle));
+  --page-topbar-tool-border: color-mix(in oklab, var(--color-border) 72%, transparent);
+  --page-topbar-tool-border-hover: color-mix(in oklab, var(--color-accent) 34%, var(--color-border));
+  --page-topbar-tool-color: color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text));
+  --page-topbar-tool-color-hover: color-mix(in oklab, var(--color-accent-strong) 62%, var(--color-text));
+  --page-topbar-tool-badge-border: color-mix(in oklab, var(--page-topbar-bg) 82%, transparent);
+}
+
+.page-topbar__tabs {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: stretch;
+  align-self: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+  gap: 38px;
+  height: 100%;
+  min-height: 0;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__middle {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tabs *,
+.page-topbar__middle * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-width: var(--page-topbar-indicator-width, 70px);
+  min-height: 0;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  color: var(--page-topbar-tab-color, color-mix(in oklab, var(--color-text-muted) 88%, var(--color-text) 12%));
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 140ms ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tab::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: var(--page-topbar-indicator-width, 70px);
+  height: 2px;
+  border-radius: 999px;
+  background: var(--page-topbar-accent, var(--color-accent));
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+.page-topbar__tab:hover:not(:disabled),
+.page-topbar__tab:focus-visible {
+  color: var(--page-topbar-tab-hover, color-mix(in oklab, var(--color-text) 92%, var(--page-topbar-accent, var(--color-accent)) 8%));
+  outline: none;
+}
+
+.page-topbar__tab.is-active {
+  color: var(--page-topbar-accent, var(--color-accent));
+}
+
+.page-topbar__tab.is-active::after {
+  transform: translateX(-50%) scaleX(1);
+  opacity: 1;
+}
+
+.page-topbar__tab.is-static {
+  cursor: default;
+}
+
+.page-topbar__tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.page-topbar__tools {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  gap: 6px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tools * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--page-topbar-tool-size);
+  width: var(--page-topbar-tool-size);
+  height: var(--page-topbar-tool-size);
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--page-topbar-tool-border, color-mix(in oklab, var(--program-shell-border) 72%, transparent));
+  border-radius: var(--page-topbar-tool-radius);
+  background: var(--page-topbar-tool-bg, color-mix(in oklab, var(--color-bg-elevated) 92%, var(--program-shell-bg)));
+  color: var(--page-topbar-tool-color, color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text) 14%));
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 44%, transparent),
+    0 1px 2px color-mix(in oklab, var(--color-shadow, #0f172a) 7%, transparent);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.page-topbar__tool svg {
+  width: 15px;
+  height: 15px;
+}
+
+.page-topbar__tool:hover:not(:disabled),
+.page-topbar__tool:focus-visible {
+  border-color: var(
+    --page-topbar-tool-border-hover,
+    color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 22%, var(--program-shell-border))
+  );
+  background: var(
+    --page-topbar-tool-bg-hover,
+    color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 8%, var(--program-shell-bg))
+  );
+  color: var(
+    --page-topbar-tool-color-hover,
+    color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 68%, var(--color-text))
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 54%, transparent),
+    0 2px 5px color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 8%, transparent);
+  outline: none;
+}
+
+.page-topbar__tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.page-topbar__tool.is-alert {
+  color: color-mix(in oklab, var(--color-danger) 62%, var(--page-topbar-tool-color, var(--color-text-muted)));
+}
+
+.page-topbar__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--page-topbar-tool-badge-border);
+  border-radius: 999px;
+  background: var(--page-topbar-tool-badge-bg);
+  color: var(--page-topbar-tool-badge-color);
+  font-size: 7.5px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .page-topbar {
+    height: auto;
+    min-height: 56px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+  }
+
+  .page-topbar__tabs {
+    gap: 22px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .page-topbar__tab {
+    height: 40px;
+    font-size: 14px;
+  }
+
+  .page-topbar__middle {
+    order: 3;
+    width: 100%;
+  }
+
+  .page-topbar__tool {
+    --page-topbar-tool-size: 44px;
+  }
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "报告事实结论复核"
+  short_description: "复核报告事实判断、金额统计范围、资金路径、图表和附件措辞"
+  default_prompt: "请复核报告事实判断、金额统计范围、资金路径和图表措辞。"
+policy:
+  allow_implicit_invocation: true
+  preserve_delivery_skeletons: "保留报告事实结论复核结构、逐项核验状态、来源边界、资金流核验意见、禁用表述和补证动作。"

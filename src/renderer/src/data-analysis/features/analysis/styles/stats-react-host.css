@@ -1,0 +1,81 @@
+.stats-react-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--program-shell-bg);
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stats-react-shell input,
+.stats-react-shell textarea,
+.stats-react-shell [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.stats-react-shell .app {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+}
+
+.stats-react-shell .left .item .cb,
+.stats-react-shell .left .gHead .cb,
+.stats-react-shell .gridHeader .cb,
+.stats-react-shell .gridCanvas .cb {
+  padding: 0;
+  cursor: pointer;
+}
+
+.stats-react-shell .gridCanvas .row {
+  user-select: none;
+}
+
+.stats-react-shell .gridCanvas .row .cell.txnLink {
+  user-select: none;
+}
+
+.stats-react-shell .gridCanvas .row:not(.placeholder) .cell:not(.sel),
+.stats-react-shell .gridCanvas .row:not(.placeholder) .cell:not(.sel) * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.stats-react-shell .gridCanvas .row .cell.sel,
+.stats-react-shell .gridCanvas .row .cell.sel * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stats-react-shell .stats-txn-modal {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stats-react-shell .stats-txn-modal .txnTable tbody tr.txnRow td,
+.stats-react-shell .stats-txn-modal .txnTable tbody tr.txnRow td * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.statsDateEditorPopover {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stats-react-shell .gridHeader .hCell .resizer,
+.stats-react-shell .txnTable th .resizer {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stats-react-shell input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.74;
+}

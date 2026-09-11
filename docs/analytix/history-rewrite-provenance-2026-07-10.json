@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "rewrittenAt": "2026-07-10",
+  "scope": "analytix-local-commit-identifiers-only",
+  "rules": {
+    "datedEvidence": "Preserve the recorded pre-rewrite commit and resolve it through this map.",
+    "currentManifests": "Use the retained post-rewrite commit.",
+    "externalUpstreams": "Never remap an upstream commit, tag, or blob through this file."
+  },
+  "mappings": [
+    {
+      "preRewriteCommit": "0d66123a402fee3e48362b5cb2cd1e4b4c400151",
+      "postRewriteCommit": "89ea4a3011f133d5c037d8df90f018ccc71a1f5d"
+    },
+    {
+      "preRewriteCommit": "0fefec063934c79375acde933731276b0f889e82",
+      "postRewriteCommit": "62c4f6adb86984c1fc0cefc36683f3b797a34451"
+    },
+    {
+      "preRewriteCommit": "1327277366b156cf1ec68ff96faa59006f710960",
+      "postRewriteCommit": "554261682fb0cb8a5d33184afd235ab8db6e7e26"
+    },
+    {
+      "preRewriteCommit": "1cf92bb6298ae1fafbb22f9dd8f510c69d8979d3",
+      "postRewriteCommit": "45a9dae8eb20f57b22f5d71410268b83248a97dc"
+    },
+    {
+      "preRewriteCommit": "3921dd9bea923c37e8df0a504c24c77f9a6a21d0",
+      "postRewriteCommit": "8b214f738f0a9a602e1a69d01e0de12fa1ef5f40"
+    },
+    {
+      "preRewriteCommit": "4f47031f189b0896a8ea51a75f583886dd7f296e",
+      "postRewriteCommit": "4a7a55aad5567da627c66daa5f7737c6a2a418fc"
+    },
+    {
+      "preRewriteCommit": "4f515daa9745b1006f5e1a7e3431cd423a8d8ef3",
+      "postRewriteCommit": "390ed7c27fcdbc3afa9b55d5c26290474d62ca95"
+    },
+    {
+      "preRewriteCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+      "postRewriteCommit": "0b065d626dfe993ac0703b4c3c20c30ad625c29f"
+    },
+    {
+      "preRewriteCommit": "80e068ffd7d07112b8fcce2262cccb5d0fba3675",
+      "postRewriteCommit": "3b3ee26132bf8309d170a67ee9fa0cd1aae24bd2"
+    },
+    {
+      "preRewriteCommit": "8ddfdfd1fda2a744eaca1ad6a99fe5a48354a448",
+      "postRewriteCommit": "99ba683f517fb4a58ed26f9d5e9f06b104f1613d"
+    },
+    {
+      "preRewriteCommit": "96b43ed0c3afc6d7d4a8e7dd9e88b0a34c2844d9",
+      "postRewriteCommit": "ea3f16d2e21b51bf205fb1ebfb333936647b8ce9"
+    },
+    {
+      "preRewriteCommit": "9b309921f41425d96a8a7952d0e2939652fd34be",
+      "postRewriteCommit": "302f9c3208feb401886ac979a17bfebe4fc863cf"
+    },
+    {
+      "preRewriteCommit": "a067049fbae6b4cc189fc409a1bb1750588250e7",
+      "postRewriteCommit": "992c1fbd113986602ffed595eb6fc4337e1da7eb"
+    },
+    {
+      "preRewriteCommit": "b3e16741d6741512ad2f25a10c7af211527f10db",
+      "postRewriteCommit": "38f5ee3cc598f29f2ca4e7d44e87f406d6b1253c"
+    },
+    {
+      "preRewriteCommit": "e0050d6b5e7791ae3bbed261c7367fc25e6e7fdf",
+      "postRewriteCommit": "e7a180ed846836426f1736ef7be455997fb7a1ff"
+    },
+    {
+      "preRewriteCommit": "ede841eb002444ad5948084cf9d2dc1f2d3846d4",
+      "postRewriteCommit": "70e99c36421bc611317f59dd1949ed4fb430b2f5"
+    },
+    {
+      "preRewriteCommit": "fd0c5d0417c80f22105a02293e135bc950df17c5",
+      "postRewriteCommit": "4fe392660aca7d30d2f351a9a779e0cce57960b3"
+    }
+  ]
+}

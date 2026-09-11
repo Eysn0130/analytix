@@ -1,0 +1,2999 @@
+.stats-react-shell.ui-classic-refined-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  background: var(--program-shell-bg);
+  --workbench-ui-card-radius: 10px;
+  --stats-tree-secondary-title-size: 11.5px;
+  --stats-table-font-size: var(--stats-tree-secondary-title-size);
+  --stats-table-row-font-size: 11px;
+  --stats-toolbar-button-pad-x: 10px;
+  --left-control-radius: 7px;
+  --left-control-inner-radius: 6px;
+  --left-control-border: color-mix(in oklab, var(--sidebar-control-border) 84%, #d5deef);
+}
+
+.data-analysis-surface[data-active-item="stats"] {
+  overflow: hidden;
+  background: var(--program-shell-bg);
+}
+
+.stats-react-shell > .page-topbar.stats-header {
+  flex: 0 0 auto;
+  width: 100%;
+  gap: 6px;
+  padding: 0 18px 0 14px;
+  border-bottom-color: color-mix(in oklab, var(--sidebar-control-border) 66%, transparent);
+  background: color-mix(in oklab, var(--sidebar-surface) 98%, var(--color-bg-elevated));
+  box-shadow: none;
+  --page-topbar-accent: var(--sidebar-segment-active-end);
+  --stats-topbar-control-height: 36px;
+  --stats-topbar-control-radius: 8px;
+  --stats-topbar-control-border: color-mix(in oklab, var(--sidebar-control-border) 76%, var(--color-border));
+  --stats-topbar-control-bg: color-mix(in oklab, var(--color-bg-elevated) 93%, var(--sidebar-surface));
+  --stats-topbar-control-bg-hover: color-mix(in oklab, var(--color-bg-elevated) 86%, #fff);
+  --stats-topbar-control-shadow: inset 0 1px 0 color-mix(in oklab, white 30%, transparent);
+  --page-topbar-tool-size: var(--stats-topbar-control-height);
+  --page-topbar-tool-radius: var(--stats-topbar-control-radius);
+  --page-topbar-tool-border: var(--stats-topbar-control-border);
+  --page-topbar-tool-bg: var(--stats-topbar-control-bg);
+  --page-topbar-tool-bg-hover: var(--stats-topbar-control-bg-hover);
+  --page-topbar-tool-border-hover: color-mix(
+    in oklab,
+    var(--page-topbar-accent, var(--color-accent)) 22%,
+    var(--stats-topbar-control-border)
+  );
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell > .page-topbar.stats-header {
+  border-bottom-color: color-mix(in oklab, var(--color-border) 72%, transparent);
+  background: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-bg));
+  --page-topbar-accent: color-mix(in oklab, var(--color-accent-strong, #aebcff) 82%, #ffffff 18%);
+  --page-topbar-tab-color: color-mix(in oklab, var(--color-text-muted) 62%, var(--color-text) 38%);
+  --page-topbar-tab-hover: color-mix(in oklab, var(--color-text) 84%, var(--page-topbar-accent) 16%);
+  --stats-topbar-control-border: color-mix(in oklab, var(--color-border) 72%, transparent);
+  --stats-topbar-control-bg: color-mix(in oklab, var(--color-bg-elevated) 84%, var(--color-bg-subtle));
+  --stats-topbar-control-bg-hover: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-subtle));
+  --stats-topbar-control-shadow: inset 0 1px 0 color-mix(in oklab, white 8%, transparent);
+  --page-topbar-tool-color: color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text));
+  --page-topbar-tool-color-hover: color-mix(in oklab, var(--color-accent-strong) 62%, var(--color-text));
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell > .page-topbar.stats-header .page-topbar__tab.is-active {
+  color: #b9c5ff !important;
+}
+
+.stats-react-shell[data-theme="dark"] > .page-topbar.stats-header,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] > .page-topbar.stats-header {
+  border-bottom-color: color-mix(in oklab, var(--color-border) 72%, transparent);
+  background: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-bg));
+  --page-topbar-accent: color-mix(in oklab, var(--color-accent-strong, #aebcff) 82%, #ffffff 18%);
+  --page-topbar-tab-color: color-mix(in oklab, var(--color-text-muted) 62%, var(--color-text) 38%);
+  --page-topbar-tab-hover: color-mix(in oklab, var(--color-text) 84%, var(--page-topbar-accent) 16%);
+  --stats-topbar-control-border: color-mix(in oklab, var(--color-border) 72%, transparent);
+  --stats-topbar-control-bg: color-mix(in oklab, var(--color-bg-elevated) 84%, var(--color-bg-subtle));
+  --stats-topbar-control-bg-hover: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-subtle));
+  --stats-topbar-control-shadow: inset 0 1px 0 color-mix(in oklab, white 8%, transparent);
+  --page-topbar-tool-color: color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text));
+  --page-topbar-tool-color-hover: color-mix(in oklab, var(--color-accent-strong) 62%, var(--color-text));
+}
+
+.stats-react-shell[data-theme="dark"] > .page-topbar.stats-header .page-topbar__tab.is-active,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] > .page-topbar.stats-header .page-topbar__tab.is-active {
+  color: #b9c5ff !important;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tabs {
+  gap: clamp(16px, 2.2vw, 28px);
+  z-index: 5;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__middle {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools {
+  min-width: 0;
+  margin-left: auto;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.stats-react-shell > .page-topbar.stats-header {
+  --stats-page-topbar-filter-shift: 0px;
+  -webkit-app-region: no-drag !important;
+  app-region: no-drag !important;
+}
+
+.stats-react-shell > .page-topbar.stats-header.stats-header--stats {
+  --stats-page-topbar-filter-shift: 0px;
+}
+
+.stats-react-shell > .page-topbar.stats-header.stats-header--charts {
+  --stats-page-topbar-filter-shift: 4px;
+}
+
+.stats-react-shell .stats-page-topbar__cluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools,
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools *,
+.stats-react-shell .stats-page-topbar__cluster,
+.stats-react-shell .stats-page-topbar__cluster *,
+.stats-react-shell .stats-page-topbar__rail,
+.stats-react-shell .stats-page-topbar__rail *,
+.stats-react-shell .stats-page-topbar__content,
+.stats-react-shell .stats-page-topbar__content *,
+.stats-react-shell .stats-page-topbar__actions,
+.stats-react-shell .stats-page-topbar__actions * {
+  -webkit-app-region: no-drag !important;
+  app-region: no-drag !important;
+}
+
+.stats-react-shell > .page-topbar.stats-header .dateRangeField,
+.stats-react-shell > .page-topbar.stats-header .dateRangeFieldText,
+.stats-react-shell > .page-topbar.stats-header .dateRangeValueInput,
+.stats-react-shell > .page-topbar.stats-header .dateRangeFieldTail {
+  pointer-events: auto;
+}
+
+.stats-react-shell > .page-topbar.stats-header .dateRangeWrap,
+.stats-react-shell > .page-topbar.stats-header .dateRangeWrap * {
+  -webkit-app-region: no-drag !important;
+  app-region: no-drag !important;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools,
+.stats-react-shell .stats-page-topbar__cluster,
+.stats-react-shell .stats-page-topbar__rail,
+.stats-react-shell .stats-page-topbar__content,
+.stats-react-shell .stats-page-topbar__content .filters,
+.stats-react-shell .stats-page-topbar__content .dateRangeWrap,
+.stats-react-shell .stats-page-topbar__content .dateRangeGroup {
+  position: relative;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools,
+.stats-react-shell .stats-page-topbar__cluster,
+.stats-react-shell .stats-page-topbar__rail,
+.stats-react-shell .stats-page-topbar__content,
+.stats-react-shell .stats-page-topbar__content .filters {
+  z-index: 3;
+}
+
+.stats-react-shell .stats-page-topbar__content .dateRangeWrap,
+.stats-react-shell .stats-page-topbar__content .dateRangeGroup {
+  z-index: 4;
+}
+
+.stats-react-shell .stats-page-topbar__rail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-react-shell .stats-page-topbar__rail:focus-within {
+  box-shadow: none;
+}
+
+.stats-react-shell .stats-page-topbar__railLabel {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  flex: 0 0 auto;
+  padding: 0 4px 0 0;
+  color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 64%, var(--color-text-muted));
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tool {
+  box-shadow: var(--stats-topbar-control-shadow);
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tools > .page-topbar__tool:first-of-type {
+  margin-left: 0;
+  border-top-left-radius: var(--page-topbar-tool-radius);
+  border-bottom-left-radius: var(--page-topbar-tool-radius);
+}
+
+.stats-react-shell > .page-topbar.stats-header .page-topbar__tool svg {
+  width: 15px;
+  height: 15px;
+}
+
+.stats-react-shell .stats-page-topbar__content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-right: calc(var(--stats-page-topbar-filter-shift) * -1);
+}
+
+.stats-react-shell .stats-page-topbar__content .filters {
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.stats-react-shell .stats-page-topbar__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.stats-react-shell .stats-page-topbar__content .filtersSwitchWrap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-left: 0;
+}
+
+.stats-react-shell .titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.stats-react-shell .titleInline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.stats-react-shell .titleMeta {
+  font-size: 10px;
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.stats-react-shell .panelEyebrow {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: color-mix(in oklab, var(--color-accent) 82%, #6b7fd9);
+}
+
+.stats-react-shell .gTitleRow,
+.stats-react-shell .gMetaRow,
+.stats-react-shell .iTopRow,
+.stats-react-shell .iMetaList,
+.stats-react-shell .topBarMeta,
+.stats-react-shell .modePanelMeta,
+.stats-react-shell .mTags,
+.stats-react-shell .summaryStrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stats-react-shell .summaryCard {
+  min-width: 0;
+  flex: 1 1 0;
+  padding: 12px 14px;
+  border-radius: 15px;
+  border: 1px solid var(--sidebar-control-border);
+  background: color-mix(in oklab, var(--sidebar-subtle) 94%, var(--color-bg-elevated));
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-react-shell .summaryLabel {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .summaryCard strong {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .topBarTitle,
+.stats-react-shell .modePanelTitle {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .gTitleRow {
+  justify-content: space-between;
+}
+
+.stats-react-shell .gType,
+.stats-react-shell .iBadge,
+.stats-react-shell .mTag,
+.stats-react-shell .iMetaPill,
+.stats-react-shell .summaryPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: none;
+  background: var(--sidebar-badge-muted);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  color: #6f7f9a;
+}
+
+.stats-react-shell .summaryPill {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.stats-react-shell .summaryPill.warn {
+  background: var(--sidebar-badge-warn);
+  color: #ce8a23;
+}
+
+.stats-react-shell .summaryPill.ok {
+  background: color-mix(in oklab, var(--color-success) 14%, var(--sidebar-subtle));
+  color: color-mix(in oklab, var(--color-success) 88%, var(--color-text));
+}
+
+.stats-react-shell .summaryPill.info {
+  background: var(--sidebar-badge-accent);
+  color: #4662f0;
+}
+
+.stats-react-shell .gAside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.stats-react-shell .gExtra,
+.stats-react-shell .gSelected {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .modePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 16px 10px;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--sidebar-control-border) 60%, transparent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-react-shell .modePanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stats-react-shell .modePanelMeta {
+  justify-content: flex-end;
+}
+
+.stats-react-shell .modeCard .mText {
+  min-width: 0;
+  flex: 1;
+}
+
+.stats-react-shell .modeCard .mLead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.stats-react-shell .modeCard .mIconStack {
+  position: relative;
+  width: 42px;
+  height: 42px;
+}
+
+.stats-react-shell .modeCard .mIconBadge {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+.stats-react-shell .modeCard .mIconBadge svg {
+  width: 18px;
+  height: 18px;
+}
+
+.stats-react-shell .modeCard .mIconBadgePrimary {
+  inset: 0 8px 8px 0;
+  border-radius: 10px;
+}
+
+.stats-react-shell .modeCard .mIconBadgeSecondary {
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+}
+
+.stats-react-shell .modeCard .mIconBadgeSecondary svg {
+  width: 12px;
+  height: 12px;
+}
+
+.stats-react-shell .modeCard .mTags {
+  margin-top: 10px;
+}
+
+.stats-react-shell .app.left-collapsed .panelEyebrow {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--program-shell-bg);
+  --left-control-radius: 7px;
+  --left-control-inner-radius: 6px;
+  --left-control-border: color-mix(in oklab, var(--sidebar-control-border) 84%, #d5deef);
+}
+
+.stats-react-shell .app.ui-classic-refined > .card {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .left {
+  border-right: 1px solid color-mix(in oklab, var(--sidebar-control-border) 70%, transparent);
+  background: color-mix(in oklab, var(--sidebar-surface) 98%, var(--color-bg-elevated));
+  min-height: 100%;
+}
+
+.stats-react-shell .app.ui-classic-refined .right {
+  background: var(--program-shell-bg);
+  min-height: 100%;
+}
+
+.stats-react-shell .app.ui-classic-refined .right.right--charts {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftHeader {
+  padding: 10px 18px 0;
+  background: transparent;
+  border-bottom: none;
+  position: relative;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftHeader::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 1px;
+  margin-top: 9px;
+  background: var(--sidebar-separator);
+  opacity: 0.55;
+}
+
+.stats-react-shell .app.ui-classic-refined .titleRow {
+  align-items: center;
+  min-height: 24px;
+}
+
+.stats-react-shell .app.ui-classic-refined .titleInline {
+  align-items: flex-end;
+  gap: 0 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .titleBlock {
+  gap: 2px;
+}
+
+.stats-react-shell .app.ui-classic-refined .title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 0.96;
+  letter-spacing: 0.01em;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .titleMeta {
+  display: inline-flex;
+  align-self: flex-end;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: color-mix(in oklab, var(--color-accent) 82%, #6b7fd9);
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .titleCaption {
+  font-size: 9px;
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: color-mix(in oklab, var(--color-text-muted) 86%, #9aa6bc);
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .titleMeta {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .titleCaption {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .leftHeader {
+  padding: 0;
+  min-height: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .leftHeader::after {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .titleRow {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedPanel {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .left > .leftCollapsedPanel {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 10px 8px 12px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedCard,
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionCard {
+  position: relative;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 86%, #d4deef);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--sidebar-surface) 96%, #ffffff) 0%,
+    color-mix(in oklab, var(--sidebar-subtle) 92%, #eef3ff) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 8px 14px rgba(64, 82, 126, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedCard {
+  min-height: 58px;
+  padding: 8px 6px;
+  gap: 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedCardLabel {
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: color-mix(in oklab, var(--color-text-muted) 90%, #8ea0bc);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedCardValue {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionCard {
+  flex: 0 0 auto;
+  min-height: 142px;
+  padding: 12px 6px;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionCard.has-selection {
+  border-color: color-mix(in oklab, var(--color-accent) 24%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionTitle {
+  width: 100%;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+  color: color-mix(in oklab, var(--color-text-muted) 90%, #94a3b8);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionRows {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionRow {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--sidebar-badge-accent) 46%, #f4f7ff);
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 76%, #d8e1f0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionKey {
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: color-mix(in oklab, var(--color-text-muted) 90%, #8ea0bc);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftCollapsedSelectionValue {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftControlsBar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 18px 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftToolbarRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitch {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  border-radius: var(--left-control-radius);
+  border: none;
+  background: color-mix(in oklab, var(--sidebar-segment-surface) 95%, #fff);
+  height: 30px;
+  box-shadow:
+    inset 0 0 0 1px var(--left-control-border),
+    0 1px 0 rgba(180, 191, 214, 0.16);
+  overflow: hidden;
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchIndicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  border-radius: var(--left-control-radius);
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
+  box-shadow: var(--sidebar-segment-active-shadow);
+  transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitch.is-by-card .treeSwitchIndicator {
+  transform: translateX(100%);
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchChip {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sidebar-segment-inactive);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  padding: 0;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchChip:first-of-type {
+  border-top-left-radius: var(--left-control-radius);
+  border-bottom-left-radius: var(--left-control-radius);
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchChip:last-of-type {
+  border-top-right-radius: var(--left-control-radius);
+  border-bottom-right-radius: var(--left-control-radius);
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchChip.active {
+  color: #fff;
+}
+
+.stats-react-shell .app.ui-classic-refined .treeSwitchChip:hover:not(.active) {
+  background: color-mix(in oklab, var(--color-accent) 6%, transparent);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearch {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearch {
+  padding-top: 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearchField {
+  position: relative;
+  width: 100%;
+}
+
+.stats-react-shell .app.ui-classic-refined .input {
+  min-height: 30px;
+  border-radius: var(--left-control-radius);
+  border: 1px solid var(--left-control-border);
+  background: color-mix(in oklab, var(--sidebar-surface) 95%, var(--color-bg-elevated));
+  box-shadow: none;
+  color: var(--color-text);
+  font-size: 11px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearchField .input {
+  padding-left: 8px;
+  padding-right: 24px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.stats-react-shell .app.ui-classic-refined .input::placeholder {
+  color: color-mix(in oklab, var(--color-text-muted) 86%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearchField .input::placeholder {
+  font-size: 9px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  opacity: 0.92;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftSearchField .input:focus::placeholder {
+  opacity: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .inputClearBtn {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .inputClearBtn:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .inputClearBtn:disabled {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .iconBtn,
+.stats-react-shell .app.ui-classic-refined .btn,
+.stats-react-shell .app.ui-classic-refined .chipBtn,
+.stats-react-shell .app.ui-classic-refined .qBtn {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--sidebar-control-border);
+  border-radius: 11px;
+  background: var(--sidebar-subtle);
+  box-shadow: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .btn.sm {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 12px;
+}
+
+.stats-react-shell .app.ui-classic-refined .iconBtn {
+  width: 40px;
+  padding: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .iconBtn:hover,
+.stats-react-shell .app.ui-classic-refined .btn:hover,
+.stats-react-shell .app.ui-classic-refined .chipBtn:hover,
+.stats-react-shell .app.ui-classic-refined .qBtn:hover {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .btn.primary,
+.stats-react-shell .app.ui-classic-refined .qBtn.active {
+  border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
+  color: #fff;
+  box-shadow: var(--sidebar-segment-active-shadow);
+}
+
+.stats-react-shell .app.ui-classic-refined .btn.ghost,
+.stats-react-shell .app.ui-classic-refined .chipBtn.ghost {
+  background: color-mix(in oklab, var(--sidebar-subtle) 86%, var(--sidebar-hover));
+}
+
+.stats-react-shell .app.ui-classic-refined .btn.danger {
+  border-color: color-mix(in oklab, var(--color-danger) 26%, var(--sidebar-control-border));
+  background: color-mix(in oklab, var(--color-danger) 6%, var(--sidebar-subtle));
+  color: color-mix(in oklab, var(--color-danger) 74%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .btn:disabled,
+.stats-react-shell .app.ui-classic-refined .chipBtn:disabled,
+.stats-react-shell .app.ui-classic-refined .qBtn:disabled,
+.stats-react-shell .app.ui-classic-refined .iconBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftTools {
+  width: 100%;
+  padding: 0;
+  min-height: 30px;
+  min-width: 0;
+  position: relative;
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.navStyle,
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle {
+  position: relative;
+  min-width: 40px;
+  min-height: 30px;
+  padding: 0 var(--stats-toolbar-button-pad-x);
+  border-radius: var(--left-control-radius);
+  border: 1px solid var(--left-control-border);
+  background: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated));
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.stats-react-shell .txnModal .chipBtn.navStyle {
+  position: relative;
+  min-width: 40px;
+  min-height: 30px;
+  padding: 0 var(--stats-toolbar-button-pad-x);
+  border-radius: var(--left-control-radius);
+  border: 1px solid var(--left-control-border);
+  background: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated));
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.navStyle:hover:not(:disabled),
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle:hover:not(:disabled),
+.stats-react-shell .txnModal .chipBtn.navStyle:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+  transform: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.navStyle.ghost,
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle.ghost,
+.stats-react-shell .txnModal .chipBtn.navStyle.ghost,
+.stats-react-shell .txnModal .chipBtn.navStyle.workbench-ui-btn--ghost {
+  background: color-mix(in oklab, var(--sidebar-surface) 88%, var(--sidebar-subtle));
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.navStyle.danger,
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle.danger,
+.stats-react-shell .txnModal .chipBtn.navStyle.danger {
+  border-color: color-mix(in oklab, var(--color-danger) 26%, var(--left-control-border));
+  background: color-mix(in oklab, var(--color-danger) 6%, var(--sidebar-surface));
+  color: color-mix(in oklab, var(--color-danger) 72%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.navStyle.danger:hover:not(:disabled),
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle.danger:hover:not(:disabled),
+.stats-react-shell .txnModal .chipBtn.navStyle.danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-danger) 10%, var(--sidebar-hover));
+  color: color-mix(in oklab, var(--color-danger) 78%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtn.withBadge {
+  padding-right: 14px;
+}
+
+.stats-react-shell .app.ui-classic-refined .chipBtnBadge {
+  position: absolute;
+  top: -1px;
+  right: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--sidebar-badge-accent);
+  color: #4662f0;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--program-shell-bg);
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarActionGrid,
+.stats-react-shell .app.ui-classic-refined .toolbarSearchField {
+  position: absolute;
+  inset: 0;
+  transition:
+    opacity var(--motion-fast) ease,
+    transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow var(--motion-fast) ease;
+  transform-origin: right center;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarActionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarActionBtn {
+  width: 100%;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: center;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarActionBtn.workbench-ui-btn--with-badge {
+  padding-right: 14px;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarActionBtn .workbench-ui-btn__badge {
+  top: 2px;
+  right: 3px;
+}
+
+.stats-react-shell .app.ui-classic-refined .leftTools.is-search-open .toolbarActionGrid {
+  opacity: 0;
+  transform: scaleX(0.92);
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--left-control-border);
+  border-radius: var(--left-control-radius);
+  background: color-mix(in oklab, var(--sidebar-surface) 96%, var(--color-bg-elevated));
+  color: var(--color-text-muted);
+  opacity: 0;
+  transform: scaleX(0.86);
+  pointer-events: none;
+  box-shadow: 0 1px 0 rgba(180, 191, 214, 0.16);
+}
+
+.stats-react-shell .app.ui-classic-refined .leftTools.is-search-open .toolbarSearchField {
+  opacity: 1;
+  transform: scaleX(1);
+  pointer-events: auto;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchField:focus-within {
+  border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 64%, var(--left-control-border));
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--sidebar-segment-active-end) 18%, transparent),
+    0 12px 24px rgba(49, 78, 207, 0.12);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  outline: none;
+  padding: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchInput::placeholder {
+  color: color-mix(in oklab, var(--color-text-muted) 78%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchClear {
+  flex: 0 0 auto;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchClear svg {
+  flex: 0 0 auto;
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchClear:hover {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .toolbarSearchClear:disabled {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .tree {
+  padding: 8px 12px 10px;
+  background: transparent;
+}
+
+.stats-react-shell .app.ui-classic-refined .group {
+  margin: 0 0 6px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .group.open {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 18%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .gHead {
+  display: grid;
+  grid-template-columns: 18px 24px minmax(0, 1fr);
+  align-items: center;
+  padding: 10px 10px;
+  column-gap: 8px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.stats-react-shell .app.ui-classic-refined .gHead:hover {
+  background: var(--sidebar-hover);
+}
+
+.stats-react-shell .app.ui-classic-refined .gHead:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 28%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .group.open .gHead {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 54%, var(--sidebar-subtle));
+}
+
+.stats-react-shell .app.ui-classic-refined .gArrow,
+.stats-react-shell .app.ui-classic-refined .cb {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 86%, #cfd9ec);
+  background: color-mix(in oklab, var(--sidebar-surface) 96%, #fff);
+}
+
+.stats-react-shell .app.ui-classic-refined .gArrow {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .gAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: color-mix(in oklab, var(--color-accent) 82%, var(--color-text));
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 78%, var(--sidebar-surface));
+}
+
+.stats-react-shell .app.ui-classic-refined .gHead > .cb,
+.stats-react-shell .app.ui-classic-refined .gHead > .gAvatar {
+  margin-top: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .gAvatar.card {
+  color: color-mix(in oklab, var(--color-text) 72%, var(--color-accent));
+  background: color-mix(in oklab, var(--sidebar-subtle) 90%, var(--sidebar-hover));
+}
+
+.stats-react-shell .app.ui-classic-refined .gAvatar svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+
+.stats-react-shell .app.ui-classic-refined .cb.checked {
+  background: color-mix(in oklab, var(--color-accent) 12%, var(--sidebar-subtle));
+  border-color: color-mix(in oklab, var(--color-accent) 36%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .cb.indeterminate {
+  background: color-mix(in oklab, var(--color-warning) 10%, var(--sidebar-subtle));
+  border-color: color-mix(in oklab, var(--color-warning) 28%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .gMain {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title aside"
+    "meta meta";
+  row-gap: 3px;
+  column-gap: 6px;
+  align-items: start;
+}
+
+.stats-react-shell .app.ui-classic-refined .gTitle {
+  grid-area: title;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sidebar-nav-active-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .gMeta,
+.stats-react-shell .app.ui-classic-refined .gExtra,
+.stats-react-shell .app.ui-classic-refined .gSelected {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-react-shell .app.ui-classic-refined .gMeta {
+  grid-area: meta;
+  display: block;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.stats-react-shell .app.ui-classic-refined .gExtra,
+.stats-react-shell .app.ui-classic-refined .gSelected {
+  grid-area: meta;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: initial;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.stats-react-shell .app.ui-classic-refined .gAside {
+  grid-area: aside;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  justify-self: end;
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip {
+  min-width: 30px;
+  min-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 5px 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 58%, transparent);
+  background: color-mix(in oklab, var(--sidebar-badge-muted) 78%, var(--sidebar-surface));
+  color: color-mix(in oklab, var(--color-text-muted) 90%, #64789a);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 44%, transparent);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip:hover {
+  background: color-mix(in oklab, var(--sidebar-hover) 84%, var(--sidebar-surface));
+  border-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 16%, var(--sidebar-control-border));
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip:active {
+  transform: translateY(0.5px);
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 24%, var(--sidebar-control-border));
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 46%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip.open {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 38%, var(--sidebar-surface));
+  border-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 18%, var(--sidebar-control-border));
+  color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 68%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChipCount {
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip svg {
+  width: 8px;
+  height: 8px;
+  stroke: currentColor;
+  opacity: 0.86;
+  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .gToggleChip.open svg {
+  opacity: 1;
+  transform: rotate(180deg);
+}
+
+.stats-react-shell .app.ui-classic-refined .gBody {
+  position: relative;
+  margin-left: 8px;
+  padding: 3px 0 1px 4px;
+  border-top: none;
+  background: transparent;
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .gBody.open {
+  display: block;
+}
+
+.stats-react-shell .app.ui-classic-refined .gBody::before {
+  content: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 2px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+  min-height: 42px;
+}
+
+.stats-react-shell .app.ui-classic-refined .item > .cb {
+  margin-top: 2px;
+}
+
+.stats-react-shell .app.ui-classic-refined .item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 6px;
+  height: 1px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--sidebar-control-border) 66%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .item:hover {
+  background: var(--sidebar-hover);
+}
+
+.stats-react-shell .app.ui-classic-refined .item.selected {
+  background: var(--sidebar-nav-active-bg);
+  border-color: color-mix(in oklab, var(--color-accent) 24%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .item.selected::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-accent) 72%, #2e55be);
+}
+
+.stats-react-shell .app.ui-classic-refined .iMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stats-react-shell .app.ui-classic-refined .iTitle {
+  font-size: var(--stats-tree-secondary-title-size);
+  font-weight: 580;
+  line-height: 1.2;
+  color: var(--sidebar-nav-active-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-react-shell .app.ui-classic-refined .iSub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  line-height: 1.32;
+  color: var(--color-text-muted);
+  margin-top: 0;
+  min-width: 0;
+  overflow: visible;
+  text-align: left;
+}
+
+.stats-react-shell .app.ui-classic-refined .iSubText {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .iCopyBtn {
+  width: 17px;
+  height: 17px;
+  flex-basis: 17px;
+  border-radius: 6px;
+  border-color: color-mix(in oklab, var(--color-accent) 20%, transparent);
+  color: color-mix(in oklab, var(--color-accent) 82%, #516486);
+  background: color-mix(in oklab, var(--color-accent) 7%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .iCopyBtn:hover {
+  border-color: color-mix(in oklab, var(--color-accent) 34%, transparent);
+  color: color-mix(in oklab, var(--color-accent) 96%, #223a78);
+  background: color-mix(in oklab, var(--color-accent) 13%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .iCopyBtn svg {
+  width: 11px;
+  height: 11px;
+}
+
+.stats-react-shell .app.ui-classic-refined .gapToggle {
+  left: calc(var(--statsLeftW) - 1px);
+  width: 20px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 90%, #d4def1);
+  background: color-mix(in oklab, var(--sidebar-surface) 97%, #ffffff);
+  color: color-mix(in oklab, var(--color-text-muted) 90%, #6f82a8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 4px 10px rgba(64, 82, 126, 0.08);
+}
+
+.stats-react-shell .app.ui-classic-refined.left-collapsed .gapToggle {
+  left: 63px;
+}
+
+.stats-react-shell .app.ui-classic-refined .gapToggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.stats-react-shell .app.ui-classic-refined .right {
+  background: var(--program-shell-bg);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar {
+  margin: 0;
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--sidebar-control-border) 62%, transparent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarInfo,
+.stats-react-shell .app.ui-classic-refined .topBarMain,
+.stats-react-shell .app.ui-classic-refined .topBarAside {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarInfo {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 0 4px;
+  flex: 0 0 auto;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarMain {
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: visible;
+}
+
+.stats-react-shell .app.ui-classic-refined .filters {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 0;
+  width: auto;
+}
+
+.stats-react-shell .stats-page-topbar__content .filters {
+  justify-content: flex-end;
+}
+
+.stats-react-shell .stats-page-topbar__content .filters > .stats-page-topbar__actions {
+  margin-left: 2px;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeGroup,
+.stats-react-shell .stats-page-topbar__content .dateRangeGroup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: var(--stats-topbar-control-height);
+  border-radius: var(--stats-topbar-control-radius);
+  border: 1px solid var(--stats-topbar-control-border);
+  background: var(--stats-topbar-control-bg);
+  box-shadow: var(--stats-topbar-control-shadow);
+  overflow: hidden;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeWrap,
+.stats-react-shell .stats-page-topbar__content .dateRangeWrap {
+  position: relative;
+  flex: 0 1 clamp(320px, 26vw, 392px);
+  max-width: min(392px, 100%);
+  min-width: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTrigger,
+.stats-react-shell .stats-page-topbar__content .dateRangeTrigger {
+  width: 100%;
+  text-align: left;
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTrigger:hover,
+.stats-react-shell .stats-page-topbar__content .dateRangeTrigger:hover {
+  background: var(--stats-topbar-control-bg-hover);
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTrigger.open,
+.stats-react-shell .stats-page-topbar__content .dateRangeTrigger.open {
+  border-color: color-mix(in oklab, var(--color-accent) 22%, var(--left-control-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 40%, transparent),
+    0 8px 20px rgba(31, 54, 120, 0.06);
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeGroup:focus-within,
+.stats-react-shell .stats-page-topbar__content .dateRangeGroup:focus-within {
+  border-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 26%, var(--left-control-border));
+  box-shadow:
+    var(--stats-topbar-control-shadow),
+    0 0 0 1px color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 9%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeField,
+.stats-react-shell .stats-page-topbar__content .dateRangeField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldText,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldText {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  overflow: hidden;
+  padding: 0 10px 0 12px;
+  cursor: text;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldTail,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldTail {
+  appearance: none;
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 34px;
+  min-width: 34px;
+  flex: 0 0 34px;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid color-mix(in oklab, var(--sidebar-control-border) 70%, transparent);
+  background: color-mix(in oklab, var(--stats-topbar-control-bg) 92%, var(--sidebar-subtle));
+  color: inherit;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+  pointer-events: auto;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField {
+  border: none;
+  background: transparent;
+  cursor: text;
+  text-align: left;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField.active,
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField:hover,
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField:focus-within,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField.active,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField:hover,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField:focus-within {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 26%, transparent);
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField.active .dateRangeFieldTail,
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField:hover .dateRangeFieldTail,
+.stats-react-shell .app.ui-classic-refined .dateRangeTriggerField:focus-within .dateRangeFieldTail,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField.active .dateRangeFieldTail,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField:hover .dateRangeFieldTail,
+.stats-react-shell .stats-page-topbar__content .dateRangeTriggerField:focus-within .dateRangeFieldTail {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 30%, var(--stats-topbar-control-bg));
+  border-left-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 18%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldTail:hover,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldTail:hover {
+  background: color-mix(in oklab, var(--sidebar-hover) 74%, var(--stats-topbar-control-bg));
+  border-left-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 16%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldTail:active,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldTail:active {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 34%, var(--stats-topbar-control-bg));
+  color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 76%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldTail:focus-visible,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldTail:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 34%, transparent);
+  background: color-mix(in oklab, var(--sidebar-hover) 72%, var(--stats-topbar-control-bg));
+  border-left-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 24%, var(--sidebar-control-border));
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldTail.is-open,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldTail.is-open {
+  background: color-mix(in oklab, var(--sidebar-nav-active-bg) 34%, var(--stats-topbar-control-bg));
+  border-left-color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 22%, var(--sidebar-control-border));
+  color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 76%, var(--color-text));
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeField label,
+.stats-react-shell .stats-page-topbar__content .dateRangeField label {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeField input,
+.stats-react-shell .stats-page-topbar__content .dateRangeField input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeHint,
+.stats-react-shell .stats-page-topbar__content .dateRangeHint {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  color: color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 52%, var(--color-text-muted));
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeDivider,
+.stats-react-shell .stats-page-topbar__content .dateRangeDivider {
+  width: 1px;
+  background: color-mix(in oklab, var(--sidebar-control-border) 78%, transparent);
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldChevron,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: color-mix(in oklab, var(--color-text-muted) 86%, var(--page-topbar-accent, var(--color-accent)) 14%);
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeFieldChevron svg,
+.stats-react-shell .stats-page-topbar__content .dateRangeFieldChevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeValueInput,
+.stats-react-shell .stats-page-topbar__content .dateRangeValueInput {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  width: 10ch;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  caret-color: var(--color-accent);
+  cursor: text;
+  appearance: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeValueInput::-webkit-calendar-picker-indicator,
+.stats-react-shell .stats-page-topbar__content .dateRangeValueInput::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  width: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeValueInput::-webkit-datetime-edit,
+.stats-react-shell .stats-page-topbar__content .dateRangeValueInput::-webkit-datetime-edit {
+  padding: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .dateRangeValueInput::-webkit-datetime-edit-fields-wrapper,
+.stats-react-shell .stats-page-topbar__content .dateRangeValueInput::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.statsDateEditorPopover {
+  --stats-datepicker-border: var(--left-control-border, #dbe4f3);
+  --stats-datepicker-text: var(--sidebar-nav-active-text, var(--color-text, #1d2a44));
+  --stats-datepicker-muted: var(--color-text-muted, #68758f);
+  --stats-datepicker-surface: #ffffff;
+  --stats-datepicker-surface-muted: var(--sidebar-surface, #f8fafc);
+  --stats-datepicker-hover: var(--sidebar-hover, #f2f6fd);
+  --stats-datepicker-range: var(--sidebar-nav-active-bg, #e8efff);
+  --stats-datepicker-accent-start: var(--sidebar-segment-active-start, #5b73ff);
+  --stats-datepicker-accent-end: var(--sidebar-segment-active-end, #425bed);
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2200;
+  width: 258px;
+  max-width: min(72vw, 258px);
+  padding: 7px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--stats-datepicker-border) 86%, #dbe4f3);
+  background: var(--stats-datepicker-surface);
+  color: var(--color-text, #0f172a);
+  box-shadow:
+    0 24px 56px rgba(15, 23, 42, 0.2),
+    0 6px 18px rgba(15, 23, 42, 0.1);
+}
+
+.statsDateEditorPopover .dateCalendarPanel {
+  margin-top: 0;
+}
+
+.statsDateEditorPopover .dateCalendarHead {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  gap: 6px;
+}
+
+.statsDateEditorPopover .dateCalendarMonthLabel {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--stats-datepicker-text);
+}
+
+.statsDateEditorPopover .dateCalendarNavBtn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--stats-datepicker-border);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--stats-datepicker-surface-muted) 95%, var(--stats-datepicker-surface));
+  color: var(--stats-datepicker-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.statsDateEditorPopover .dateCalendarNavBtn:hover {
+  background: var(--stats-datepicker-hover);
+  color: var(--color-text, #0f172a);
+}
+
+.statsDateEditorPopover .dateCalendarNavBtn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 24%, transparent);
+  outline-offset: 2px;
+}
+
+.statsDateEditorPopover .dateCalendarNavBtn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.statsDateEditorPopover .dateCalendarNavBtn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.statsDateEditorPopover .dateCalendarWeekdays,
+.statsDateEditorPopover .dateCalendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.statsDateEditorPopover .dateCalendarWeekdays {
+  margin-top: 6px;
+}
+
+.statsDateEditorPopover .dateCalendarWeekdays > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--stats-datepicker-muted);
+}
+
+.statsDateEditorPopover .dateCalendarGrid {
+  margin-top: 2px;
+}
+
+.statsDateEditorPopover .dateCalendarCell {
+  min-height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--stats-datepicker-text);
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.statsDateEditorPopover .dateCalendarCell.current:hover {
+  background: color-mix(in oklab, var(--stats-datepicker-range) 36%, transparent);
+}
+
+.statsDateEditorPopover .dateCalendarCell:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--page-topbar-accent, var(--color-accent)) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.statsDateEditorPopover .dateCalendarCell.adjacent {
+  color: color-mix(in oklab, var(--stats-datepicker-muted) 72%, transparent);
+}
+
+.statsDateEditorPopover .dateCalendarCell.disabled {
+  color: color-mix(in oklab, var(--stats-datepicker-muted) 58%, transparent);
+  cursor: not-allowed;
+}
+
+.statsDateEditorPopover .dateCalendarCell.today {
+  border-color: color-mix(in oklab, var(--color-accent, #4d63f1) 26%, var(--stats-datepicker-border));
+}
+
+.statsDateEditorPopover .dateCalendarCell.in-range {
+  background: color-mix(in oklab, var(--stats-datepicker-range) 52%, var(--stats-datepicker-surface));
+}
+
+.statsDateEditorPopover .dateCalendarCell.range-start,
+.statsDateEditorPopover .dateCalendarCell.range-end {
+  background: linear-gradient(136deg, var(--stats-datepicker-accent-start) 0%, var(--stats-datepicker-accent-end) 100%);
+  color: #fff;
+}
+
+.statsDateEditorPopover .dateCalendarCell.anchor-active {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+.stats-react-shell .app.ui-classic-refined .fItem {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 4px 8px;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-control-border) 82%, var(--color-border));
+  background: color-mix(in oklab, var(--sidebar-surface) 95%, var(--color-bg-elevated));
+  box-shadow: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .fItem label {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .app.ui-classic-refined .fItem input {
+  width: 122px;
+  font-size: 12px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar .summaryStrip {
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar .summaryCard {
+  min-width: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar .summaryLabel {
+  font-size: 10px;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar .summaryCard strong {
+  font-size: 15px;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarMeta .summaryPill {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarAside .actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBar .panelEyebrow,
+.stats-react-shell .app.ui-classic-refined .modePanel .panelEyebrow {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarTitle,
+.stats-react-shell .app.ui-classic-refined .modePanelTitle {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitch,
+.stats-react-shell .stats-page-topbar__content .quickSwitch {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  flex: 0 0 auto;
+  min-width: 0;
+  margin: 0;
+  border-radius: var(--stats-topbar-control-radius);
+  border: none;
+  background: var(--stats-topbar-control-bg);
+  height: var(--stats-topbar-control-height);
+  box-shadow:
+    inset 0 0 0 1px var(--stats-topbar-control-border),
+    var(--stats-topbar-control-shadow);
+  overflow: hidden;
+}
+
+.stats-react-shell .stats-page-topbar__content .quickSwitch {
+  width: clamp(152px, 14.2vw, 184px);
+  min-width: 152px;
+}
+
+.stats-react-shell .txnModal .quickSwitch {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin: 0;
+  border-radius: var(--left-control-radius);
+  border: none;
+  background: color-mix(in oklab, var(--sidebar-segment-surface) 95%, #fff);
+  height: 30px;
+  box-shadow:
+    inset 0 0 0 1px var(--left-control-border),
+    0 1px 0 rgba(180, 191, 214, 0.16);
+  overflow: hidden;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchIndicator,
+.stats-react-shell .stats-page-topbar__content .quickSwitchIndicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 25%;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
+  box-shadow: 0 5px 12px color-mix(in oklab, var(--sidebar-segment-active-end) 16%, transparent);
+  transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1), opacity var(--motion-fast) ease;
+}
+
+.stats-react-shell .txnModal .quickSwitchIndicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: var(--left-control-radius);
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
+  box-shadow: var(--sidebar-segment-active-shadow);
+  transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1), opacity var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitch.is-180 .quickSwitchIndicator,
+.stats-react-shell .stats-page-topbar__content .quickSwitch.is-180 .quickSwitchIndicator {
+  transform: translateX(100%);
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitch.is-365 .quickSwitchIndicator,
+.stats-react-shell .stats-page-topbar__content .quickSwitch.is-365 .quickSwitchIndicator {
+  transform: translateX(200%);
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitch.is-all .quickSwitchIndicator,
+.stats-react-shell .stats-page-topbar__content .quickSwitch.is-all .quickSwitchIndicator {
+  transform: translateX(300%);
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitch.is-none .quickSwitchIndicator,
+.stats-react-shell .stats-page-topbar__content .quickSwitch.is-none .quickSwitchIndicator {
+  opacity: 0;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchChip,
+.stats-react-shell .stats-page-topbar__content .quickSwitchChip,
+.stats-react-shell .txnModal .quickSwitchChip {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sidebar-segment-inactive);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  padding: 0 8px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchChip:first-of-type,
+.stats-react-shell .stats-page-topbar__content .quickSwitchChip:first-of-type,
+.stats-react-shell .txnModal .quickSwitchChip:first-of-type {
+  border-top-left-radius: var(--left-control-radius);
+  border-bottom-left-radius: var(--left-control-radius);
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchChip:last-of-type,
+.stats-react-shell .stats-page-topbar__content .quickSwitchChip:last-of-type,
+.stats-react-shell .txnModal .quickSwitchChip:last-of-type {
+  border-top-right-radius: var(--left-control-radius);
+  border-bottom-right-radius: var(--left-control-radius);
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchChip.active,
+.stats-react-shell .stats-page-topbar__content .quickSwitchChip.active,
+.stats-react-shell .txnModal .quickSwitchChip.active,
+.stats-react-shell .txnModal .quickSwitchChip.workbench-ui-segmented__option--active {
+  color: #fff;
+}
+
+.stats-react-shell .app.ui-classic-refined .quickSwitchChip:hover:not(.active),
+.stats-react-shell .stats-page-topbar__content .quickSwitchChip:hover:not(.active),
+.stats-react-shell .txnModal .quickSwitchChip:hover:not(.active):not(.workbench-ui-segmented__option--active) {
+  background: color-mix(in oklab, var(--color-accent) 6%, transparent);
+  color: var(--color-text);
+}
+
+.stats-react-shell .stats-page-topbar__actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle {
+  min-height: var(--stats-topbar-control-height);
+  margin-left: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: var(--stats-topbar-control-radius);
+  border-color: var(--stats-topbar-control-border);
+  background: var(--stats-topbar-control-bg);
+  box-shadow: var(--stats-topbar-control-shadow);
+  white-space: nowrap;
+}
+
+.stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle:hover:not(:disabled) {
+  background: var(--stats-topbar-control-bg-hover);
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarAside {
+  align-items: flex-end;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarAside .actions {
+  flex-wrap: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .topBarAside .actions .chipBtn.navStyle {
+  min-height: 30px;
+  padding-left: var(--stats-toolbar-button-pad-x);
+  padding-right: var(--stats-toolbar-button-pad-x);
+  white-space: nowrap;
+}
+
+.stats-react-shell .txnModal .txnModalToolbarActions > .chipBtn.navStyle {
+  min-height: 30px;
+  padding-left: var(--stats-toolbar-button-pad-x);
+  padding-right: var(--stats-toolbar-button-pad-x);
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .rowActions .chipBtn.navStyle {
+  min-height: 28px;
+  padding-left: var(--stats-toolbar-button-pad-x);
+  padding-right: var(--stats-toolbar-button-pad-x);
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .modePanel {
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 14px 4px;
+}
+
+.stats-react-shell .app.ui-classic-refined .modePanelHead {
+  align-items: center;
+  gap: 2px;
+}
+
+.stats-react-shell .app.ui-classic-refined .modePanelHead > div:first-child {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .modePanelMeta {
+  gap: 6px;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard,
+.stats-react-shell .app.ui-classic-refined .workbench-ui-mode-card.modeCard {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 64px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--left-control-border) 72%, #edf2fa);
+  background: color-mix(in oklab, #ffffff 94%, #f7f9fd);
+  box-shadow: 0 1px 0 rgba(180, 191, 214, 0.14);
+  color: #66748b;
+  text-align: left;
+  transition:
+    transform var(--motion-fast) ease,
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--color-accent) 16%, var(--left-control-border));
+  background: #ffffff;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard.active {
+  border-color: color-mix(in oklab, var(--color-accent) 22%, #cdd9f8);
+  background: #f0f5ff;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 14%, transparent),
+    0 10px 24px rgba(68, 92, 233, 0.08);
+  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-accent) 34%, #c5d5ff);
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--color-accent) 18%, transparent),
+    0 10px 24px rgba(68, 92, 233, 0.08);
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard .mText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  width: 100%;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgePrimary {
+  background: color-mix(in oklab, var(--sidebar-subtle) 86%, #f4f7fc);
+  border: 1px solid color-mix(in oklab, var(--left-control-border) 76%, #e5ebf6);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgeSecondary {
+  background: #ffffff;
+  border: 1px solid color-mix(in oklab, var(--left-control-border) 74%, #e4ebf8);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgePrimary {
+  background: color-mix(in oklab, var(--color-accent) 12%, #ffffff);
+  border-color: color-mix(in oklab, var(--color-accent) 18%, #d1dcfa);
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgeSecondary {
+  background: color-mix(in oklab, var(--color-accent) 8%, #ffffff);
+  border-color: color-mix(in oklab, var(--color-accent) 16%, #d6e0fb);
+}
+
+.stats-react-shell .app.ui-classic-refined .mTitle {
+  color: #4f5f78;
+  font-size: 15px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard.active .mTitle {
+  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+  font-weight: 700;
+}
+
+.stats-react-shell .app.ui-classic-refined .mMetaLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: #8a96ab;
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.stats-react-shell .app.ui-classic-refined .modeCard.active .mMetaLine {
+  color: color-mix(in oklab, var(--color-accent) 56%, #7283a2);
+}
+
+.stats-react-shell .app.ui-classic-refined .mMetaSep {
+  color: #b4bfd2;
+}
+
+.statsDateEditorPopover[data-theme="dark"],
+.data-analysis-surface[data-theme="dark"] .statsDateEditorPopover {
+  --stats-datepicker-border: var(--color-border, #313b50);
+  --stats-datepicker-text: var(--color-text, #ecf2ff);
+  --stats-datepicker-muted: var(--color-text-muted, #9baaca);
+  --stats-datepicker-surface: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 94%, var(--color-bg-subtle, #232c3b));
+  --stats-datepicker-surface-muted: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 88%, var(--color-bg-subtle, #232c3b));
+  --stats-datepicker-hover: color-mix(in oklab, var(--color-accent, #5f74ff) 12%, var(--color-bg-subtle, #232c3b));
+  --stats-datepicker-range: color-mix(in oklab, var(--color-accent, #5f74ff) 18%, var(--color-bg-elevated, #181f2b));
+  --stats-datepicker-accent-start: color-mix(in oklab, var(--color-accent, #5f74ff) 88%, #ffffff 12%);
+  --stats-datepicker-accent-end: color-mix(in oklab, var(--color-accent-strong, #8ea0ff) 86%, var(--color-accent, #5f74ff));
+  border-color: var(--stats-datepicker-border);
+  background: var(--stats-datepicker-surface);
+  color: var(--stats-datepicker-text);
+  box-shadow:
+    0 24px 56px rgba(3, 8, 15, 0.46),
+    0 6px 18px rgba(3, 8, 15, 0.32);
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .workbench-ui-mode-card.modeCard {
+  border-color: var(--stats-topbar-control-border);
+  background: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-bg-subtle));
+  color: var(--color-text-muted);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard:hover {
+  border-color: color-mix(in oklab, var(--color-accent) 32%, var(--color-border));
+  background: color-mix(in oklab, var(--color-accent) 10%, var(--color-bg-subtle));
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard.active {
+  border-color: color-mix(in oklab, var(--color-accent) 46%, var(--color-border));
+  background: color-mix(in oklab, var(--color-accent) 18%, var(--color-bg-elevated));
+  color: color-mix(in oklab, var(--color-accent-strong) 52%, var(--color-text));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 22%, transparent),
+    0 12px 26px rgba(3, 8, 15, 0.28);
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgePrimary,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgeSecondary {
+  border-color: color-mix(in oklab, var(--color-border) 72%, transparent);
+  background: color-mix(in oklab, var(--color-bg-subtle) 82%, var(--color-bg-elevated));
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgePrimary,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgeSecondary {
+  border-color: color-mix(in oklab, var(--color-accent) 38%, var(--color-border));
+  background: color-mix(in oklab, var(--color-accent) 18%, var(--color-bg-elevated));
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .mTitle {
+  color: var(--color-text);
+}
+
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .mMetaLine,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell .app.ui-classic-refined .mMetaSep {
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .app.ui-classic-refined .tableCard {
+  margin: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableToolbar {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  justify-content: flex-end;
+  background: transparent;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableFooter {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}
+
+.stats-react-shell .app.ui-classic-refined .pill {
+  border-radius: 999px;
+  border: none;
+  background: var(--sidebar-badge-muted);
+  color: #6f7f9a;
+}
+
+.stats-react-shell .app.ui-classic-refined .pill.warn {
+  background: var(--sidebar-badge-warn);
+  color: #ce8a23;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableSearchField {
+  width: 248px;
+  max-width: min(30vw, 340px);
+  flex: 0 0 auto;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableToolbarSearchField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--left-control-border);
+  border-radius: var(--left-control-radius);
+  background: color-mix(in oklab, var(--sidebar-surface) 96%, var(--color-bg-elevated));
+  color: var(--color-text-muted);
+  box-shadow: 0 1px 0 rgba(180, 191, 214, 0.16);
+}
+
+.stats-react-shell .app.ui-classic-refined .tableToolbarSearchField:focus-within {
+  border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 64%, var(--left-control-border));
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--sidebar-segment-active-end) 18%, transparent),
+    0 12px 24px rgba(49, 78, 207, 0.12);
+  color: var(--color-text);
+}
+
+.stats-react-shell .app.ui-classic-refined .tableToolbarSearchInput {
+  min-height: 28px;
+  height: 28px;
+}
+
+.stats-react-shell .app.ui-classic-refined .tRight {
+  min-width: 0;
+  gap: 6px;
+}
+
+.stats-react-shell .app.ui-classic-refined .rowActions {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .rowActions::-webkit-scrollbar {
+  display: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .rowActions .chipBtn.navStyle {
+  min-height: 26px;
+}
+
+.stats-react-shell .app.ui-classic-refined .gridHeader {
+  background: var(--stats-table-head-bg);
+  border-bottom-color: var(--stats-table-head-border);
+}
+
+.stats-react-shell .app.ui-classic-refined .hCell,
+.stats-react-shell .app.ui-classic-refined .hSort,
+.stats-react-shell .app.ui-classic-refined .tableFooter {
+  font-size: var(--stats-table-font-size);
+}
+
+.stats-react-shell .app.ui-classic-refined .cell,
+.stats-react-shell .app.ui-classic-refined .tag {
+  font-size: var(--stats-table-row-font-size);
+}
+
+.stats-react-shell .app.ui-classic-refined .hCell {
+  padding: 6px 8px;
+  color: var(--stats-table-head-text);
+  border-right-color: var(--stats-table-head-divider);
+}
+
+.stats-react-shell .app.ui-classic-refined .hCell:hover {
+  background: var(--stats-table-head-hover);
+}
+
+.stats-react-shell .app.ui-classic-refined .hSort {
+  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+}
+
+.stats-react-shell .app.ui-classic-refined .row {
+  height: 32px;
+}
+
+.stats-react-shell .app.ui-classic-refined .row.placeholder {
+  cursor: default;
+  pointer-events: none;
+}
+
+.stats-react-shell .app.ui-classic-refined .cell {
+  padding: 0 7px;
+}
+
+.stats-react-shell .app.ui-classic-refined .row.placeholder .cell.sel {
+  cursor: default;
+}
+
+.stats-react-shell .app.ui-classic-refined .tag {
+  gap: 4px;
+  padding: 3px 6px;
+}
+
+.stats-react-shell .app.ui-classic-refined .cell,
+.stats-react-shell .app.ui-classic-refined .tableFooter {
+  line-height: 1.1;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableFooter {
+  padding: 5px 12px;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.stats-react-shell .app.ui-classic-refined .right {
+  container-type: inline-size;
+}
+
+.stats-react-shell .app.ui-classic-refined .tableFooter > div {
+  white-space: nowrap;
+}
+
+.stats-react-shell .app.ui-classic-refined .footMono {
+  font-size: inherit;
+}
+
+.stats-react-shell .txnModal .tableToolbar,
+.stats-react-shell .txnModal .tableFooter,
+.stats-react-shell .txnModal .txnTable th,
+.stats-react-shell .txnModal .txnSortIcon {
+  font-size: var(--stats-table-font-size);
+}
+
+.stats-react-shell .txnModal .txnTable,
+.stats-react-shell .txnModal .txnTable td,
+.stats-react-shell .txnModal .txnDir {
+  font-size: var(--stats-table-row-font-size);
+}
+
+.stats-react-shell .txnModal .tableToolbar {
+  padding: 6px 12px;
+  gap: 12px;
+}
+
+.stats-react-shell .txnModal .tableFooter {
+  padding: 5px 12px;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.stats-react-shell .txnModal .txnModalToolbarTitle {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--sidebar-nav-active-text);
+}
+
+.stats-react-shell .txnModal .txnModalToolbarMeta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.stats-react-shell .txnModal .txnModalFilterSwitchWrap {
+  flex: 0 0 auto;
+  min-width: 168px;
+}
+
+.stats-react-shell .txnModal .txnModalFilterSwitchWrap > .quickSwitch {
+  min-width: 168px;
+}
+
+.stats-react-shell .txnModal .txnTableWrap {
+  overscroll-behavior: contain;
+}
+
+.stats-react-shell .txnModal .txnTable th {
+  height: auto;
+  min-height: 32px;
+  padding: 6px 8px;
+  line-height: 1.2;
+}
+
+.stats-react-shell .txnModal .txnTable td {
+  height: 32px;
+  padding: 0 7px;
+  line-height: 1.1;
+}
+
+.stats-react-shell .txnModal .txnModalFooterSummary,
+.stats-react-shell .txnModal .footMono {
+  font-size: inherit;
+}
+
+.stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb {
+  color: #dbe7ff !important;
+  border-color: color-mix(in oklab, var(--color-border) 84%, transparent);
+  background: color-mix(in oklab, var(--color-bg-elevated) 76%, var(--color-bg-subtle));
+  box-shadow: inset 0 1px 0 color-mix(in oklab, #ffffff 8%, transparent);
+}
+
+.stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb svg,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb svg {
+  color: currentColor;
+  stroke: currentColor;
+}
+
+.stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb.checked,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb.checked {
+  color: #dbe7ff !important;
+  border-color: color-mix(in oklab, var(--color-accent-strong) 58%, var(--color-border));
+  background: color-mix(in oklab, var(--color-accent) 18%, var(--color-bg-elevated));
+}
+
+.stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb.indeterminate,
+.data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] .app.ui-classic-refined .cb.indeterminate {
+  color: #facc15 !important;
+  border-color: color-mix(in oklab, #facc15 50%, var(--color-border));
+  background: color-mix(in oklab, #facc15 14%, var(--color-bg-elevated));
+}
+
+@container (max-width: 760px) {
+  .stats-react-shell .app.ui-classic-refined .topBar {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-react-shell .app.ui-classic-refined .topBarAside {
+    align-items: flex-start;
+  }
+
+  .stats-react-shell .app.ui-classic-refined .topBarAside .actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1200px) {
+  .stats-react-shell > .page-topbar.stats-header {
+    height: 50px;
+    min-height: 50px;
+    padding: 0 10px 0 12px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    --stats-topbar-control-height: 34px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tools {
+    width: auto;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .stats-react-shell .stats-page-topbar__cluster {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .stats-react-shell .stats-page-topbar__rail {
+    flex-wrap: nowrap;
+    width: auto;
+    justify-content: flex-end;
+    padding: 0;
+    gap: 4px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content {
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    width: auto;
+    gap: 4px;
+    margin-right: 0;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .filters {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .filters > .stats-page-topbar__actions {
+    margin-left: 0;
+  }
+
+  .stats-react-shell .stats-page-topbar__actions {
+    justify-content: flex-end;
+    gap: 4px;
+    padding-left: 0;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tab {
+    min-width: 70px;
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .stats-react-shell .stats-page-topbar__railLabel {
+    display: none;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeWrap {
+    flex: 1 1 304px;
+    max-width: 360px;
+    min-width: 292px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeFieldText {
+    gap: 5px;
+    padding-left: 10px;
+    padding-right: 7px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeField {
+    grid-template-columns: minmax(0, 1fr) 30px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeFieldTail {
+    width: 30px;
+    min-width: 30px;
+    flex-basis: 30px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitch {
+    width: 152px;
+    min-width: 152px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitchChip {
+    padding-inline: 4px;
+    font-size: 9.5px;
+  }
+
+  .stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle {
+    padding-left: 7px;
+    padding-right: 7px;
+    font-size: 10.5px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tools > .page-topbar__tool:first-of-type,
+  .stats-react-shell .stats-page-topbar__content .filtersSwitchWrap,
+  .stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle {
+    margin-left: 0;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeGroup,
+  .stats-react-shell .stats-page-topbar__content .quickSwitch,
+  .stats-react-shell .stats-page-topbar__actions .chipBtn.navStyle,
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tools > .page-topbar__tool:first-of-type {
+    border-radius: var(--stats-topbar-control-radius);
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitchIndicator {
+    border-radius: 6px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitchChip:first-of-type {
+    border-top-left-radius: var(--left-control-radius);
+    border-bottom-left-radius: var(--left-control-radius);
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitchChip:last-of-type {
+    border-top-right-radius: var(--left-control-radius);
+    border-bottom-right-radius: var(--left-control-radius);
+  }
+
+  .stats-react-shell .app.ui-classic-refined .iMain {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .stats-react-shell .app.ui-classic-refined .iMetaList {
+    justify-content: flex-start;
+  }
+
+  .stats-react-shell .summaryStrip {
+    width: 100%;
+  }
+
+  .stats-react-shell .summaryCard {
+    flex: 1 1 0;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1100px) {
+  .stats-react-shell > .page-topbar.stats-header {
+    height: auto;
+    min-height: 92px;
+    align-content: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tabs,
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__drag-region {
+    align-self: auto;
+    height: 34px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tools {
+    order: 3;
+    flex: 0 0 100%;
+    width: 100%;
+    margin-left: 0;
+    overflow: visible;
+    justify-content: flex-start;
+  }
+
+  .stats-react-shell .stats-page-topbar__cluster,
+  .stats-react-shell .stats-page-topbar__rail,
+  .stats-react-shell .stats-page-topbar__content,
+  .stats-react-shell .stats-page-topbar__content .filters {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .stats-react-shell .stats-page-topbar__content,
+  .stats-react-shell .stats-page-topbar__content .filters {
+    justify-content: flex-start;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeWrap {
+    flex: 1 1 304px;
+    max-width: 360px;
+    min-width: 260px;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitch {
+    width: 150px;
+    min-width: 150px;
+  }
+}
+
+@media (max-width: 760px) {
+  .stats-react-shell > .page-topbar.stats-header {
+    height: auto;
+    min-height: 132px;
+    align-content: flex-start;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 6px 10px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tabs,
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__drag-region {
+    align-self: auto;
+    height: 34px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tabs {
+    gap: 14px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tab {
+    min-width: 68px;
+    padding-inline: 4px;
+    font-size: 11px;
+  }
+
+  .stats-react-shell > .page-topbar.stats-header .page-topbar__tools {
+    order: 3;
+    flex: 0 0 100%;
+    width: 100%;
+    margin-left: 0;
+    overflow: visible;
+    justify-content: flex-start;
+  }
+
+  .stats-react-shell .stats-page-topbar__cluster,
+  .stats-react-shell .stats-page-topbar__rail,
+  .stats-react-shell .stats-page-topbar__content,
+  .stats-react-shell .stats-page-topbar__content .filters {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .stats-react-shell .stats-page-topbar__rail,
+  .stats-react-shell .stats-page-topbar__content,
+  .stats-react-shell .stats-page-topbar__content .filters {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .stats-react-shell .stats-page-topbar__railLabel {
+    display: none;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .dateRangeWrap {
+    flex: 1 1 220px;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .stats-react-shell .stats-page-topbar__content .quickSwitch {
+    width: 150px;
+    min-width: 0;
+    flex: 0 1 150px;
+  }
+
+  .stats-react-shell .stats-page-topbar__actions {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 620px) {
+  .stats-react-shell .app.ui-classic-refined .modeRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

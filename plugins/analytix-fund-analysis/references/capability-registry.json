@@ -1,0 +1,2123 @@
+{
+  "schema_version": "capability-registry-v1",
+  "plugin": {
+    "name": "analytix-fund-analysis",
+    "version": "0.16.16",
+    "distribution": "analytix-hub",
+    "runtime_boundary": "Analytix-owned runtime only; no system Codex hooks, config, cache, or plugin state."
+  },
+  "focused_skills": [
+    {
+      "id": "index",
+      "use_when": [
+        "broad plugin entry",
+        "bare /analytix",
+        "capability orientation"
+      ],
+      "not_for": [
+        "full-case analysis",
+        "report writing",
+        "object dossier once task is clear"
+      ],
+      "commands": [
+        "/analytix",
+        "/analytix ask"
+      ],
+      "completion_standard": "current case/status, available lanes, and next focused skill suggestions; no full-case/report gate"
+    },
+    {
+      "id": "case-context",
+      "use_when": [
+        "current case",
+        "scope map",
+        "coverage",
+        "account-opening coverage",
+        "contact/address coverage",
+        "task feedback coverage",
+        "coercive-measure coverage",
+        "casegraph context",
+        "transaction-environment coverage",
+        "IP/MAC coverage",
+        "merchant/channel coverage"
+      ],
+      "not_for": [
+        "object dossier",
+        "report writing",
+        "claim review"
+      ],
+      "commands": [
+        "/analytix scope",
+        "/analytix map",
+        "/analytix casegraph"
+      ],
+      "completion_standard": "Case Scope Card with coverage, quality boundaries, and next focused skill choices"
+    },
+    {
+      "id": "data-quality",
+      "use_when": [
+        "import cleaning coverage",
+        "account-opening coverage",
+        "contact/address coverage",
+        "task feedback coverage",
+        "coercive-measure coverage",
+        "same-fact duplicate",
+        "card replacement",
+        "missing holder/counterparty",
+        "amount source/scope support",
+        "transaction-environment coverage",
+        "IP/MAC coverage",
+        "merchant/channel coverage",
+        "missing environment fields"
+      ],
+      "not_for": [
+        "report generation",
+        "broad object dossier"
+      ],
+      "commands": [
+        "/analytix audit",
+        "/analytix duplicates",
+        "/analytix compare-scopes",
+        "/analytix qa"
+      ],
+      "completion_standard": "复核意见应列明已有数据支持的事实、待核线索风险、当前证据不足的统计项和补充核验方向"
+    },
+    {
+      "id": "quick-fact",
+      "use_when": [
+        "single fact",
+        "Top ranking",
+        "biggest account holder counterparty",
+        "bounded low-risk amount/count"
+      ],
+      "not_for": [
+        "object dossier",
+        "full-case analysis",
+        "formal report",
+        "Pair Amount or amount challenge"
+      ],
+      "commands": [
+        "/analytix rank",
+        "/analytix ask"
+      ],
+      "completion_standard": "一轮内给出低风险事实快查结论，写明指标、方向、范围、覆盖情况、金额/笔数和证据边界；特定双方资金往来核验和金额争议必须转交 pair-amount-investigation。"
+    },
+    {
+      "id": "pair-amount-investigation",
+      "use_when": [
+        "Pair Amount",
+        "A transferred how much to B",
+        "amount challenge",
+        "duplicate/card-replacement amount dispute",
+        "same-fact amount reconciliation",
+        "raw vs effective/dedup amount basis"
+      ],
+      "not_for": [
+        "ordinary Top ranking",
+        "object dossier",
+        "full-case analysis",
+        "formal report writing"
+      ],
+      "commands": [
+        "/analytix amount",
+        "/analytix ask"
+      ],
+      "completion_standard": "特定双方资金往来核验研判 with conclusion, period, raw/effective/dedup amount and count, large-transaction table, duplicate/key safety, account/time concentration, difference explanation, abnormal features, relationship/purpose leads, unsupported limits, and downstream/evidence requests."
+    },
+    {
+      "id": "account-dossier",
+      "use_when": [
+        "card fund analysis",
+        "account profile",
+        "account-opening facts",
+        "linked contact/address clues",
+        "account role classification",
+        "account anomaly features",
+        "transaction-environment clues",
+        "IP/MAC/channel clues",
+        "merchant/platform clues"
+      ],
+      "not_for": [
+        "simple ranking",
+        "full-case analysis"
+      ],
+      "commands": [
+        "/analytix account <account>",
+        "/analytix destination"
+      ],
+      "completion_standard": "账户资金画像 with opening/registry facts, linked contact/address clues, transaction-environment/IP/MAC/channel clues, scope, time span, inflow/outflow, Top counterparties, account role leads, behavior, anomalies, source/destination, evidence gaps, and investigation next steps"
+    },
+    {
+      "id": "subject-dossier",
+      "use_when": [
+        "person fund analysis",
+        "company fund analysis",
+        "holder profile",
+        "one-person-one-file",
+        "account leads needing proof",
+        "per-account roles",
+        "contact/address correlation",
+        "device/IP/MAC/channel correlation",
+        "group-association lead"
+      ],
+      "not_for": [
+        "single-account dossier",
+        "formal report writing"
+      ],
+      "commands": [
+        "/analytix holder <name>",
+        "/analytix owner <name>"
+      ],
+      "completion_standard": "主体资金画像 with identity/opening facts, contact/address/employer and device/IP/MAC/channel correlation, registered accounts, account leads needing proof, per-account roles, account structure, inflow/outflow, Top accounts/counterparties, source/destination, group-association leads, anomalies, evidence gaps, and investigation next steps"
+    },
+    {
+      "id": "counterparty-analysis",
+      "use_when": [
+        "counterparty ranking",
+        "common counterparties",
+        "associated fund channel",
+        "missing counterparty",
+        "subpoena priority",
+        "payment/merchant/platform channel",
+        "virtual-asset-like counterparty",
+        "shared channel lead"
+      ],
+      "not_for": [
+        "full path tracing",
+        "report generation"
+      ],
+      "commands": [
+        "/analytix destination",
+        "/analytix outflows",
+        "/analytix payment"
+      ],
+      "completion_standard": "counterparty priorities, evidence status, account/missing-boundary separation, payment/merchant/platform leads, and subpoena targets"
+    },
+    {
+      "id": "fund-tracing",
+      "use_when": [
+        "source tracing",
+        "destination tracing",
+        "continue one more hop",
+        "next hop",
+        "return flow",
+        "cash bridge candidate",
+        "asset/financial/payment/cross-border endpoint",
+        "merchant/platform endpoint",
+        "virtual-asset endpoint",
+        "payment-channel endpoint"
+      ],
+      "not_for": [
+        "simple Top ranking",
+        "unsupported narrative arrows"
+      ],
+      "commands": [
+        "/analytix path <seed>",
+        "/analytix outflows"
+      ],
+      "completion_standard": "列明可证实交易边、待核停顿点、现金/资产/理财/支付/商户/平台/虚拟资产/跨境端点边界、余额承接缺口和补调核验动作"
+    },
+    {
+      "id": "investigation-lab",
+      "use_when": [
+        "open-ended hypothesis",
+        "suspicious pattern",
+        "account role classification",
+        "identity/contact/address correlation",
+        "living-card normality",
+        "transit/convergence account",
+        "cash break",
+        "financial product lead",
+        "asset/project/litigation/cross-border lead",
+        "public-to-private two-layer statistics",
+        "cost normality review",
+        "negative search",
+        "device/IP/MAC correlation",
+        "group-association lead",
+        "payment/merchant/platform lead",
+        "virtual-asset lead",
+        "tax/contract lead"
+      ],
+      "not_for": [
+        "simple Top fact",
+        "formal report writing"
+      ],
+      "commands": [
+        "/analytix lab",
+        "/analytix discovery",
+        "/analytix probe",
+        "/analytix pattern",
+        "/analytix cash",
+        "/analytix financial",
+        "/analytix topic",
+        "/analytix cash-bridge",
+        "/analytix crypto",
+        "/analytix role",
+        "/analytix asset",
+        "/analytix control",
+        "/analytix device",
+        "/analytix group",
+        "/analytix platform",
+        "/analytix tax"
+      ],
+      "completion_standard": "hypothesis queue with evidence status, account role candidates, contact/address/device/IP/MAC leads, group-association leads, payment/merchant/platform/virtual-asset leads, total-vs-classified splits, cost-normality findings, normality downgrades, verified facts, forbidden-as-fact items, and next actions"
+    },
+    {
+      "id": "full-case-analysis",
+      "use_when": [
+        "full-case analysis",
+        "全案分析",
+        "完整研判",
+        "complete investigation",
+        "run analysis tree",
+        "run full analysis tree",
+        "systematic case review",
+        "transaction-environment coverage",
+        "group-association leads",
+        "platform/virtual-asset leads",
+        "tax/contract leads"
+      ],
+      "not_for": [
+        "report writing unless explicitly requested"
+      ],
+      "commands": [
+        "/analytix plan"
+      ],
+      "completion_standard": "Full-case fact tree with data scale, cleaned/index/report coverage, account/contact/address/transaction-environment/task feedback/coercive coverage, subject/account/counterparty rankings, group-association leads, account roles, cash/asset/financial/payment/merchant/platform/virtual-asset/cross-border/tax-contract leads, two-layer public-to-private stats, cost normality, supported flows, gaps, and continuation queue"
+    },
+    {
+      "id": "report-builder",
+      "use_when": [
+        "generate report",
+        "formal material",
+        "report draft",
+        "attachment materialization"
+      ],
+      "not_for": [
+        "ordinary full-case analysis",
+        "quick fact"
+      ],
+      "commands": [
+        "/analytix report"
+      ],
+      "completion_standard": "report draft/materialization boundary with verified facts, corrected claims, unsupported claims, and source boundaries"
+    },
+    {
+      "id": "evidence-request",
+      "use_when": [
+        "supplementary evidence request",
+        "subpoena priorities",
+        "follow-up investigation list",
+        "补调清单",
+        "续调清单",
+        "取证清单",
+        "evidence pack",
+        "verification request list"
+      ],
+      "not_for": [
+        "new investigation fact generation",
+        "report writing",
+        "legal conclusion"
+      ],
+      "commands": [
+        "/analytix evidence"
+      ],
+      "completion_standard": "prioritized evidence request list with target, request item, field/time scope, linked lead or gap, expected proof value, priority, evidence boundary, and next action"
+    },
+    {
+      "id": "analysis-critique",
+      "use_when": [
+        "analysis critique",
+        "missing investigative lanes",
+        "wrong focused-skill routing",
+        "mechanical answer review",
+        "completion package critique",
+        "next skill recommendation"
+      ],
+      "not_for": [
+        "new investigation fact generation",
+        "data-source quality audit",
+        "report conclusion review"
+      ],
+      "commands": [
+        "/analytix critique"
+      ],
+      "completion_standard": "critique verdict with missing lanes, weak evidence boundaries, wrong-route risks, overclaims, and recommended next focused skill or command"
+    },
+    {
+      "id": "claim-review",
+      "use_when": [
+        "claim review",
+        "amount/path/graph/legal wording check",
+        "attachment list QA",
+        "report QA"
+      ],
+      "not_for": [
+        "new investigation fact generation",
+        "full-case analysis"
+      ],
+      "commands": [
+        "/analytix qa",
+        "/analytix review"
+      ],
+      "completion_standard": "给出可采信/当前证据不足/需降级的复核意见、修正表述、来源边界、未支持链路边界和下一步补证事项"
+    },
+    {
+      "id": "delivery-qc",
+      "use_when": [
+        "delivery quality check",
+        "professional economic-investigation wording",
+        "non-template output review",
+        "engineering-word leakage check",
+        "fact-correct but no judgment output"
+      ],
+      "not_for": [
+        "new investigation fact generation",
+        "source-quality audit from scratch"
+      ],
+      "commands": [
+        "/analytix qc"
+      ],
+      "completion_standard": "阻断或修正缺少查什么、结论、依据、异常、案件意义、不能认定事项、下一步取证，或泄露工程词的低质输出。"
+    },
+    {
+      "id": "graph-visualization",
+      "use_when": [
+        "casegraph",
+        "fund-flow graph",
+        "资金流向图",
+        "relation graph",
+        "visual graph QA"
+      ],
+      "not_for": [
+        "待核路径写成已证实路径",
+        "report writing"
+      ],
+      "commands": [
+        "/analytix flowgraph"
+      ],
+      "completion_standard": "只展示可证实交易边，另列待核线索、证据缺口和升级为确定路径所需补证材料"
+    },
+    {
+      "id": "visual-evidence",
+      "use_when": [
+        "evidence tables",
+        "Top20 tables",
+        "feature tables",
+        "flow tables",
+        "charts",
+        "dashboard cards",
+        "appendix workbook",
+        "visual/table QA"
+      ],
+      "not_for": [
+        "new investigation fact generation",
+        "path proof from scratch",
+        "formal report writing"
+      ],
+      "commands": [
+        "/analytix visual"
+      ],
+      "completion_standard": "evidence-bound tables, charts, dashboard cards, or appendix/workbook inventory with scope, unit, time window, metric, direction, evidence status, unsupported visual claims, and next owner skill"
+    },
+    {
+      "id": "case-workbench",
+      "use_when": [
+        "explicit SQL request",
+        "case notebook request",
+        "cleaned-detail export or evidence-base-table delivery",
+        "custom口径 computation",
+        "reproducible analysis gap",
+        "semantic MCP tool insufficient for a bounded current-case-project analysis"
+      ],
+      "not_for": [
+        "ordinary ranking or quick fact",
+        "account or subject dossier covered by semantic tools",
+        "fund tracing covered by semantic tools",
+        "full-case analysis or report generation",
+        "weak-source substitution, unverified calculations, fake delivery, or fc_*_raw used as ordinary evidence"
+      ],
+      "commands": [
+        "/analytix sql",
+        "/analytix notebook",
+        "/analytix export"
+      ],
+      "completion_standard": "专项资金核算 result or gap note, or a user-confirmed current-case cleaned export whose CSV/XLSX file was generated and read-checked; no weak-source substitution, unverified production fact, arbitrary-directory write, or fake delivery"
+    }
+  ],
+  "task_taxonomy": [
+    {
+      "id": "entry_status",
+      "label": "Entry / Status",
+      "use_when": [
+        "bare /analytix",
+        "current case status",
+        "available lane orientation"
+      ],
+      "focused_skills": [
+        "index"
+      ],
+      "commands": [
+        "/analytix"
+      ],
+      "completion_standard": "current case/status and next focused skill suggestions only; no full-case analysis or report generation"
+    },
+    {
+      "id": "case_context",
+      "label": "Case Context",
+      "use_when": [
+        "current case",
+        "scope map",
+        "coverage",
+        "casegraph context"
+      ],
+      "focused_skills": [
+        "case-context"
+      ],
+      "commands": [
+        "/analytix scope",
+        "/analytix map",
+        "/analytix casegraph"
+      ],
+      "completion_standard": "scope, coverage, quality boundaries, and next focused skill choices"
+    },
+    {
+      "id": "quick_fact",
+      "label": "Quick Fact",
+      "use_when": [
+        "single bounded fact",
+        "single amount/count",
+        "plain-language fact question"
+      ],
+      "focused_skills": [
+        "quick-fact",
+        "index"
+      ],
+      "commands": [
+        "/analytix ask"
+      ],
+      "completion_standard": "deterministic answer with metric, scope, coverage, evidence status, and boundary"
+    },
+    {
+      "id": "pair_amount",
+      "label": "Pair Amount / 特定双方资金往来核验",
+      "use_when": [
+        "A 转给 B 多少钱",
+        "two-party amount challenge",
+        "raw/effective/dedup dispute",
+        "same-fact duplicate amount risk"
+      ],
+      "focused_skills": [
+        "pair-amount-investigation"
+      ],
+      "commands": [
+        "/analytix amount",
+        "/analytix ask"
+      ],
+      "completion_standard": "以经侦小研判材料回答两方资金事实：先讲清完整期间、金额/笔数、账户、逐笔构成、主要集中转账与集中交易以外逐笔往来的业务含义，再用金额表/重点交易表固定依据，解释原明细/有效去重/重复或证据不足金额、账户/时间集中、竞争金额差异、异常特征、案件意义、暂不能认定事项和已见下游/补证尾部；不得只填固定标题。"
+    },
+    {
+      "id": "ranking",
+      "label": "Ranking",
+      "use_when": [
+        "Top account",
+        "Top holder",
+        "Top counterparty",
+        "largest amount or turnover"
+      ],
+      "focused_skills": [
+        "quick-fact"
+      ],
+      "commands": [
+        "/analytix rank"
+      ],
+      "completion_standard": "rank dimension, metric, direction, rows, coverage counts, and boundary without broad frontdoor takeover"
+    },
+    {
+      "id": "data_quality",
+      "label": "Data Quality",
+      "use_when": [
+        "import cleaning",
+        "same-fact duplicate",
+        "scope reconciliation",
+        "amount challenge"
+      ],
+      "focused_skills": [
+        "data-quality"
+      ],
+      "commands": [
+        "/analytix audit",
+        "/analytix duplicates",
+        "/analytix compare-scopes"
+      ],
+      "completion_standard": "数据质量事实、重复/待核边界、修正后统计范围和补充核验动作"
+    },
+    {
+      "id": "object_dossier",
+      "label": "资金画像",
+      "use_when": [
+        "card/account fund analysis",
+        "person/company fund analysis",
+        "holder profile"
+      ],
+      "focused_skills": [
+        "account-dossier",
+        "subject-dossier"
+      ],
+      "commands": [
+        "/analytix account <account>",
+        "/analytix holder <name>",
+        "/analytix owner <name>"
+      ],
+      "completion_standard": "完整账户或主体资金画像，覆盖范围、时间跨度、资金流入流出、重点对手方、异常特征、证据缺口和核查建议"
+    },
+    {
+      "id": "counterparty",
+      "label": "Counterparty",
+      "use_when": [
+        "destination ranking",
+        "common counterparties",
+        "associated channels",
+        "missing counterparty leads"
+      ],
+      "focused_skills": [
+        "counterparty-analysis"
+      ],
+      "commands": [
+        "/analytix destination",
+        "/analytix payment"
+      ],
+      "completion_standard": "区分已核对手方、缺失户名记录和待核补调对象"
+    },
+    {
+      "id": "trace_continuation",
+      "label": "Trace / Continuation",
+      "use_when": [
+        "fund path",
+        "fund source",
+        "upstream source",
+        "资金来源",
+        "next hop",
+        "continue one more hop",
+        "return flow"
+      ],
+      "focused_skills": [
+        "fund-tracing"
+      ],
+      "commands": [
+        "/analytix outflows",
+        "/analytix path <seed>"
+      ],
+      "completion_standard": "列明可见上游/下游来源、可证实交易链路、待核停顿点、余额承接缺口和补调核验动作"
+    },
+    {
+      "id": "investigation_lab",
+      "label": "Investigation Lab",
+      "use_when": [
+        "open hypothesis",
+        "suspicious pattern",
+        "negative search",
+        "cash/asset/financial product leads"
+      ],
+      "focused_skills": [
+        "investigation-lab"
+      ],
+      "commands": [
+        "/analytix discovery",
+        "/analytix lab",
+        "/analytix probe",
+        "/analytix pattern",
+        "/analytix cash",
+        "/analytix financial",
+        "/analytix topic",
+        "/analytix cash-bridge",
+        "/analytix crypto",
+        "/analytix role",
+        "/analytix asset",
+        "/analytix control",
+        "/analytix device",
+        "/analytix group",
+        "/analytix platform",
+        "/analytix tax"
+      ],
+      "completion_standard": "hypothesis queue with evidence status, verified facts, forbidden-as-fact items, and next actions"
+    },
+    {
+      "id": "full_case_analysis",
+      "label": "Full Case Analysis",
+      "use_when": [
+        "full-case analysis",
+        "全案分析",
+        "完整研判",
+        "complete investigation",
+        "run analysis tree",
+        "run full analysis tree"
+      ],
+      "focused_skills": [
+        "full-case-analysis"
+      ],
+      "commands": [
+        "/analytix plan"
+      ],
+      "completion_standard": "full-case fact tree with data volume, time span, cleaning coverage, rankings, suspicious features, supported flows, leads, gaps, and continuation queue"
+    },
+    {
+      "id": "report",
+      "label": "Report",
+      "use_when": [
+        "generate report",
+        "formal material",
+        "report draft"
+      ],
+      "focused_skills": [
+        "report-builder"
+      ],
+      "commands": [
+        "/analytix report"
+      ],
+      "completion_standard": "report materialization only after explicit report intent and claim review boundary"
+    },
+    {
+      "id": "claim_qa",
+      "label": "Claim / QA",
+      "use_when": [
+        "claim review",
+        "amount/path/graph/legal wording check",
+        "evidence/appendix QA",
+        "analysis critique",
+        "missing investigative lanes",
+        "next skill recommendation",
+        "supplementary evidence request",
+        "subpoena priorities",
+        "follow-up investigation list"
+      ],
+      "focused_skills": [
+        "claim-review",
+        "data-quality",
+        "analysis-critique",
+        "evidence-request"
+      ],
+      "commands": [
+        "/analytix qa",
+        "/analytix evidence",
+        "/analytix critique"
+      ],
+      "completion_standard": "给出可采信/当前证据不足/需降级/需改走其他核验路径的意见、修正表述或路径、来源边界、未支持链路边界、取证清单、遗漏分析角度和下一步补证方向"
+    },
+    {
+      "id": "delivery_qc",
+      "label": "Delivery QC / 研判材料交付复核",
+      "use_when": [
+        "professional delivery QA",
+        "non-template output review",
+        "engineering-word leak check"
+      ],
+      "focused_skills": [
+        "delivery-qc"
+      ],
+      "commands": [
+        "/analytix qc"
+      ],
+      "completion_standard": "结论、证据、异常、案件意义、边界、补证动作齐备且无工程词。"
+    },
+    {
+      "id": "graph_visualization",
+      "label": "Graph Visualization",
+      "use_when": [
+        "casegraph",
+        "fund-flow graph",
+        "资金流向图",
+        "relation graph QA"
+      ],
+      "focused_skills": [
+        "graph-visualization"
+      ],
+      "commands": [
+        "/analytix flowgraph"
+      ],
+      "completion_standard": "图中只画可证实交易边，另列待核线索、证据缺口和升级为确定路径所需补证材料"
+    },
+    {
+      "id": "visual_evidence",
+      "label": "Visual Evidence",
+      "use_when": [
+        "evidence tables",
+        "Top20 tables",
+        "charts",
+        "dashboard cards",
+        "appendix workbook",
+        "visual/table QA"
+      ],
+      "focused_skills": [
+        "visual-evidence"
+      ],
+      "commands": [
+        "/analytix visual"
+      ],
+      "completion_standard": "reader-facing evidence tables, charts, dashboards, or appendices with scope, unit, time window, metric, direction, evidence status, and unsupported visual-claim boundaries"
+    },
+    {
+      "id": "passive_nonintervention",
+      "label": "Passive Nonintervention",
+      "use_when": [
+        "non-funds task",
+        "copy edit",
+        "generic Excel/formula/import prep",
+        "do not query case"
+      ],
+      "focused_skills": [],
+      "commands": [],
+      "completion_standard": "do not call Analytix tools, do not mention case facts, and complete the ordinary user task"
+    },
+    {
+      "id": "case_workbench",
+      "label": "专项资金核算",
+      "use_when": [
+        "explicit SQL or notebook request",
+        "database-site diagnostic request",
+        "custom口径 current-case-project analysis",
+        "reproducible computation",
+        "field coverage, empty result, query failure, or SQL plan risk",
+        "chart-ready bounded extract",
+        "user-confirmed cleaned-detail export",
+        "semantic tool gap that must not become weak-source substitution"
+      ],
+      "focused_skills": [
+        "case-workbench"
+      ],
+      "commands": [
+        "/analytix sql",
+        "/analytix notebook",
+        "/analytix export"
+      ],
+      "completion_standard": "当前案件只读清洗/分析范围内的 SQL 或 notebook 结果、限量预览、证据边界、明确能力缺口，或已生成并读取检查的清洗明细文件"
+    }
+  ],
+  "tool_discovery_contract": {
+    "priority_tools": [
+      "get_current_case",
+      "investigate_pair_amount",
+      "get_case_scope_map",
+      "get_scope_coverage",
+      "get_casegraph",
+      "build_fund_flow_graph",
+      "rank_accounts",
+      "rank_holders",
+      "rank_counterparties",
+      "analyze_account_full",
+      "analyze_holder_full",
+      "trace_subject_top_outflows",
+      "trace_fund_next_hop",
+      "trace_fund",
+      "hypothesis_probe",
+      "audit_case_data_quality",
+      "resolve_duplicate_families",
+      "validate_continuation_list",
+      "get_evidence_pack",
+      "validate_report_claims",
+      "funds_investigate",
+      "plan_case_analysis",
+      "run_investigation_lab",
+      "resolve_owner_scope",
+      "resolve_account_scope",
+      "audit_unindexed_sources",
+      "inspect_case_schema",
+      "profile_case_schema",
+      "get_case_reconciliation",
+      "classify_missing_counterparty_business",
+      "run_full_case_analysis",
+      "export_cleaned_case_data",
+      "explain_case_sql",
+      "diagnose_case_sql",
+      "count_case_rows",
+      "preview_case_rows",
+      "inspect_workbench_history",
+      "case_sql_recipes",
+      "run_case_sql",
+      "create_case_notebook"
+    ],
+    "default_visible_tools": [
+      "get_current_case",
+      "investigate_pair_amount",
+      "get_case_scope_map",
+      "get_scope_coverage",
+      "get_casegraph",
+      "build_fund_flow_graph",
+      "rank_accounts",
+      "rank_holders",
+      "rank_counterparties",
+      "analyze_account_full",
+      "analyze_holder_full",
+      "trace_subject_top_outflows",
+      "trace_fund_next_hop",
+      "trace_fund",
+      "hypothesis_probe",
+      "audit_case_data_quality",
+      "resolve_duplicate_families",
+      "validate_continuation_list",
+      "get_evidence_pack",
+      "validate_report_claims",
+    "funds_investigate",
+      "inspect_case_schema",
+      "profile_case_schema",
+      "explain_case_sql",
+      "diagnose_case_sql",
+      "count_case_rows",
+      "preview_case_rows",
+      "inspect_workbench_history",
+    "case_sql_recipes",
+    "run_case_sql"
+    ],
+    "frontdoor_report_only_tools": [
+      "funds_investigate",
+      "validate_report_claims"
+    ],
+    "full_discovery_env_vars": [
+      "ANALYTIX_FUNDS_EXPOSE_ALL_TOOLS",
+      "ANALYTIX_FUNDS_DISCOVERY_MODE"
+    ],
+    "max_default_visible_tools": 33
+  },
+  "capabilities": [
+    {
+      "id": "frontdoor-qa",
+      "lane": "frontdoor",
+      "intent": "low_context_front_door",
+      "commands": [
+        "/analytix",
+        "/analytix ask"
+      ],
+      "primary_tools": [
+        "funds_investigate",
+        "investigate_pair_amount",
+        "get_current_case",
+        "get_case_scope_map",
+        "get_casegraph",
+        "rank_accounts",
+        "rank_holders",
+        "rank_counterparties",
+        "analyze_account_full",
+        "analyze_holder_full",
+        "trace_subject_top_outflows",
+        "build_fund_flow_graph",
+        "hypothesis_probe",
+        "audit_case_data_quality"
+      ],
+      "required_gates": [
+        "current case",
+        "deterministic fact origin",
+        "opaque refs hidden"
+      ],
+      "stop_conditions": [
+        "current route hint is sufficient for this turn",
+        "requested fact is unsupported"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "answer_card facts",
+          "amount/count/account/holder/counterparty facts with support status"
+        ],
+        "must_state_boundaries": [
+          "casegraph gate boundary",
+          "data-quality or unsupported-flow boundary"
+        ],
+        "forbidden_as_facts": [
+          "candidate account as owned account",
+          "unsupported path as verified path"
+        ],
+        "next_queries": [
+          "use the suggested semantic fact tool when the user asks to continue, rescope, rank, profile, trace, or test a hypothesis"
+        ],
+        "stop_conditions": [
+          "do not repeat funds_investigate for the same unchanged question; a new scope, hypothesis, target, or continuation may choose any default semantic tool",
+          "bare /analytix remains entry/status and must not trigger full-case analysis or report generation"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "large/raw payloads stay in local audit artifacts and MCP _meta"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "default tool discovery",
+        "answer_card_protocol_fields",
+        "evidence_ledger_internal_contract"
+      ],
+      "score_dimensions": [
+        "amount_accuracy",
+        "ownership_boundary",
+        "tool_budget"
+      ]
+    },
+    {
+      "id": "scope-casegraph",
+      "lane": "scope",
+      "intent": "casegraph_v1",
+      "commands": [
+        "/analytix casegraph",
+        "/analytix scope",
+        "/analytix map"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "get_scope_coverage",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "get_casegraph",
+        "inspect_case_schema",
+        "audit_unindexed_sources",
+        "get_case_data_pipeline_overview",
+        "get_case_reconciliation",
+        "compare_analysis_scopes"
+      ],
+      "conditional_tools": [
+        "funds_investigate"
+      ],
+      "required_gates": [
+        "scope graph",
+        "source/schema audit",
+        "duplicate/data-quality boundary",
+        "coverage"
+      ],
+      "stop_conditions": [
+        "mandatory gate needs proof before report-grade wording",
+        "coverage excludes rows"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "scope graph summary",
+          "top entity previews",
+          "coverage/reconciliation facts"
+        ],
+        "must_state_boundaries": [
+          "source/import coverage vs cleaned detail vs analysis index vs report scope"
+        ],
+        "forbidden_as_facts": [
+          "unindexed source rows as analyzed facts"
+        ],
+        "next_queries": [
+          "source/schema audit repair",
+          "scope comparison",
+          "targeted rank/profile/trace/hypothesis tool"
+        ],
+        "stop_conditions": [
+          "do not scan every specialist tool when scope facts identify one targeted semantic tool"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "casegraph summaries are compact; full scope payloads stay in local artifacts"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "command metadata coverage",
+        "casegraph_roadmap_smoke",
+        "mcp resources"
+      ],
+      "score_dimensions": [
+        "scope_correctness",
+        "boundary_precision",
+        "source_audit"
+      ]
+    },
+    {
+      "id": "fundgraph-path",
+      "lane": "path",
+      "intent": "deterministic_fund_flow_graph",
+      "commands": [
+        "/analytix flowgraph"
+      ],
+      "primary_tools": [
+        "build_fund_flow_graph",
+        "trace_fund_next_hop",
+        "trace_fund",
+        "validate_continuation_list"
+      ],
+      "conditional_tools": [
+        "funds_investigate"
+      ],
+      "required_gates": [
+        "txn_id",
+        "txn_time",
+        "amount",
+        "direction",
+        "endpoint labels",
+        "data-backed transaction edge"
+      ],
+      "stop_conditions": [
+        "no supported flow_graph.edges are returned",
+        "edge_status is needs_evidence"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "supported transaction edges only",
+          "amount/time/direction endpoints"
+        ],
+        "must_state_boundaries": [
+          "visible source/destination is not final origin or final ownership",
+          "unmatched endpoint",
+          "aggregate counterparty total is not a transaction edge"
+        ],
+        "forbidden_as_facts": [
+          "narrative-only graph arrow",
+          "unsupported downstream path"
+        ],
+        "next_queries": [
+          "validate continuation list for appendix targets"
+        ],
+        "stop_conditions": [
+          "draw no graph arrow when transaction-edge evidence is absent"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "flow graph edge evidence must be traceable through ledger entries"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "via_one_hop_frontdoor_card",
+        "via_continuation_frontdoor_card",
+        "renderer_strips_opaque_refs"
+      ],
+      "score_dimensions": [
+        "edge_support",
+        "mermaid_safety",
+        "continuation_boundary"
+      ]
+    },
+    {
+      "id": "visual-evidence-artifacts",
+      "lane": "delivery",
+      "intent": "evidence_tables_charts_dashboards_and_appendices",
+      "commands": [
+        "/analytix visual"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "rank_accounts",
+        "rank_holders",
+        "rank_counterparties",
+        "trace_subject_top_outflows",
+        "build_fund_flow_graph",
+        "get_evidence_pack",
+        "validate_continuation_list",
+        "validate_report_claims"
+      ],
+      "conditional_tools": [
+        "analyze_account_full",
+        "analyze_holder_full",
+        "hypothesis_probe",
+        "audit_case_data_quality"
+      ],
+      "required_gates": [
+        "reviewed source facts",
+        "fresh delivery pack uses scope map plus evidence pack, not full-case analysis",
+        "scope",
+        "unit",
+        "time window",
+        "metric and direction",
+        "evidence status"
+      ],
+      "stop_conditions": [
+        "facts are missing and must be produced by the owner focused skill",
+        "scope map, evidence pack, and one optional targeted table tool have answered the delivery-pack request",
+        "visual would imply unsupported path/control/legal conclusion",
+        "report-grade visual claim lacks claim review"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "source fact inventory",
+          "table/chart purpose",
+          "scope/unit/time window/metric/direction",
+          "evidence status",
+          "recommended visual form",
+          "evidence gaps",
+          "next owner skill"
+        ],
+        "must_state_boundaries": [
+          "ranking or matrix is not a transaction path",
+          "heatmap, dashboard, appendix, and workbook are not transaction paths",
+          "candidate links need proof",
+          "visual outputs must not be written as control relations",
+          "chart shape is not legal conclusion"
+        ],
+        "forbidden_as_facts": [
+          "visual inference as new fact",
+          "Top ranking as transaction edge",
+          "heatmap or dashboard card as control proof"
+        ],
+        "next_queries": [
+          "fact owner skill for missing rows",
+          "graph-visualization for data-backed fund-flow graph",
+          "claim-review for report-grade visual claim",
+          "evidence-request for appendix/subpoena rows",
+          "full-case-analysis only when the user changes task to full-case analysis"
+        ],
+        "stop_conditions": [
+          "deliver only after the visual/table has an evidence status and reader-facing scope",
+          "do not call run_full_case_analysis, hypothesis_probe, dossier tools, or report validation just to assemble a visual pack"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "tables, chart-ready extracts, dashboards, and workbooks stay evidence-bound; source detail rows and internal ids remain in artifacts"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "command metadata coverage",
+        "focused_skill_product_surface"
+      ],
+      "score_dimensions": [
+        "visual_evidence_quality",
+        "table_scope_precision",
+        "visual_overclaim_blocking"
+      ]
+    },
+    {
+      "id": "full-case-analysis",
+      "lane": "commander",
+      "intent": "full_case_analysis_tree",
+      "commands": [
+        "/analytix plan"
+      ],
+      "primary_tools": [
+        "plan_case_analysis",
+        "get_current_case"
+      ],
+      "required_gates": [
+        "explicit full-case analysis intent",
+        "P0 full-case execution quarantine",
+        "host-issued same-case same-turn same-snapshot evidence receipts",
+        "host final evidence gate",
+        "no full-case fact or report draft while the gate is unavailable"
+      ],
+      "stop_conditions": [
+        "run_full_case_analysis is not advertised or executable",
+        "return capability and evidence boundary only"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [],
+        "must_state_boundaries": [
+          "P0 quarantined capability",
+          "checked scope",
+          "missing evidence lanes",
+          "proof actions"
+        ],
+        "forbidden_as_facts": [
+          "any whole-case fact without host evidence receipts",
+          "full-case analysis as formal report",
+          "lead path as transaction edge",
+          "unverified lead as fact"
+        ],
+        "next_queries": [
+          "bounded focused evidence lane only after the user narrows scope",
+          "evidence acquisition and source recovery"
+        ],
+        "stop_conditions": [
+          "do not create a full-case fact tree, report draft, or file during P0 containment"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "P0 containment creates no full-case fact artifact or report file"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 1
+      },
+      "doctor_checks": [
+        "focused_skill_product_surface",
+        "full_case_analysis_eval_task"
+      ],
+      "score_dimensions": [
+        "full_case_analysis",
+        "tool_budget",
+        "output_pollution_blocking"
+      ]
+    },
+    {
+      "id": "report-claim-gate",
+      "lane": "commander",
+      "intent": "full_case_report",
+      "commands": [
+        "/analytix report"
+      ],
+      "primary_tools": [
+        "get_current_case"
+      ],
+      "conditional_tools": [],
+      "required_gates": [
+        "P0 report execution quarantine",
+        "host-issued same-case evidence and claim verifier receipts",
+        "host-issued PublicationReceipt",
+        "atomic publication"
+      ],
+      "stop_conditions": [
+        "run_full_case_analysis is not advertised or executable",
+        "PublicationReceipt pipeline is unavailable",
+        "return capability and evidence boundary only"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [],
+        "must_state_boundaries": [
+          "missing source boundary",
+          "data quality boundary",
+          "unsupported flow boundary"
+        ],
+        "forbidden_as_facts": [
+          "unsupported claim",
+          "legal conclusion without evidence",
+          "already verified wording without claim support"
+        ],
+        "next_queries": [
+          "next_review_actions"
+        ],
+        "stop_conditions": [
+          "do not issue report-grade wording before claim verifier passes"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "P0 containment creates no report draft, staging artifact, or published file",
+        "claim_review_risk_markers": [
+          "amount_without_fact_anchor",
+          "unsupported_mermaid_or_arrow_flow",
+          "forbidden_legal_phrasing",
+          "candidate_account_as_owned_account",
+          "cash_or_asset_destination_without_supported_flow",
+          "missing_counterparty_or_cash_break_as_verified",
+          "claim_without_source_anchor"
+        ]
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 1
+      },
+      "doctor_checks": [
+        "claim_review_card_contract_fields",
+        "model_eval_antipattern_gates",
+        "agent_ui_auth_preflight"
+      ],
+      "score_dimensions": [
+        "claim_support",
+        "forbidden_phrasing",
+        "report_gate"
+      ]
+    },
+    {
+      "id": "qa-source-review",
+      "lane": "qa",
+      "intent": "source_quality_and_appendix_review",
+      "commands": [
+        "/analytix audit",
+        "/analytix duplicates",
+        "/analytix compare-scopes",
+        "/analytix evidence",
+        "/analytix qa",
+        "/analytix review",
+        "/analytix critique"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "inspect_case_schema",
+        "audit_unindexed_sources",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "compare_analysis_scopes",
+        "get_case_reconciliation",
+        "get_scope_coverage",
+        "generate_followup_investigation_list",
+        "trace_subject_top_outflows",
+        "scan_case_risks",
+        "get_evidence_pack",
+        "validate_continuation_list",
+        "validate_report_claims"
+      ],
+      "conditional_tools": [
+        "funds_investigate"
+      ],
+      "required_gates": [
+        "schema/source audit",
+        "same-fact duplicate family",
+        "coverage",
+        "appendix validation",
+        "completion package comparison",
+        "route critique",
+        "target institution/person/system",
+        "expected proof value",
+        "forbidden upgrade boundary"
+      ],
+      "stop_conditions": [
+        "dedupe policy is unresolved",
+        "appendix fields are blank",
+        "claim-review validation card already supplies corrections, unsupported-flow boundaries, or max_additional_tools=0",
+        "conclusions lacking proof remain"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "quality warnings",
+          "duplicate family policy",
+          "follow-up targets",
+          "missing lane critique",
+          "recommended focused skill",
+          "evidence request target",
+          "expected proof value",
+          "priority reason"
+        ],
+        "must_state_boundaries": [
+          "manual merge required",
+          "blank required fields",
+          "coverage gap",
+          "not a new fact generator",
+          "route recommendation boundary",
+          "requested record is not yet proven"
+        ],
+        "forbidden_as_facts": [
+          "deducted total without dedupe policy",
+          "appendix item without validation",
+          "critique recommendation as verified case fact",
+          "requested evidence as already obtained proof"
+        ],
+        "next_queries": [
+          "validate continuation list",
+          "source repair",
+          "next focused skill",
+          "bank/payment/platform/asset/tax request"
+        ],
+        "stop_conditions": [
+          "block report-grade output when QA gates fail",
+          "stop same-turn tool use when claim-review validation card is complete"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "QA source details remain in local artifacts unless summarized"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "model_eval_antipattern_gates",
+        "eval_fixture_isolation"
+      ],
+      "score_dimensions": [
+        "duplicate_policy",
+        "coverage_boundary",
+        "appendix_validation",
+        "route_selection",
+        "missing_lane_coverage",
+        "evidence_request_priority",
+        "proof_value_boundary"
+      ]
+    },
+    {
+      "id": "delivery-qc",
+      "lane": "delivery_qc",
+      "intent": "delivery_quality_check",
+      "commands": [
+        "/analytix qc"
+      ],
+      "primary_tools": [
+        "validate_report_claims"
+      ],
+      "conditional_tools": [
+        "get_evidence_pack",
+        "validate_continuation_list"
+      ],
+      "required_gates": [
+        "substantive answer covers the investigative spine",
+        "engineering/tool/schema words are hidden from user-facing delivery",
+        "artifact delivery is real or explicitly blocked",
+        "report-sensitive amounts, paths, graph text, and legal wording are validated before final wording"
+      ],
+      "stop_conditions": [
+        "validated claim-review card already supplies corrections or boundaries",
+        "the draft lacks source facts and must be returned for evidence repair",
+        "requested delivery artifact is unavailable; state the delivery gap instead of pretending completion"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "what was checked",
+          "final conclusion quality",
+          "evidence anchors or missing anchors",
+          "abnormality and case significance",
+          "unsupported limits and next proof action"
+        ],
+        "must_state_boundaries": [
+          "review does not create new case facts",
+          "unsupported wording must be downgraded",
+          "artifact gap is not a completed delivery"
+        ],
+        "forbidden_as_facts": [
+          "tool names, schema fields, audit checklist, or template labels as user-facing findings",
+          "fact-correct but conclusion-free output as completed delivery",
+          "unvalidated graph/path/legal-sensitive wording"
+        ],
+        "next_queries": [
+          "claim-review validation for report text",
+          "evidence pack for missing anchors",
+          "visual-evidence or report-builder handoff after wording passes QC"
+        ],
+        "stop_conditions": [
+          "stop after QC verdict and correction list unless the user asks for rewritten delivery material",
+          "do not run broad investigation tools from a delivery-quality review alone"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "QC verdicts summarize evidence and delivery gaps; source payloads remain in artifacts"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "model_eval_antipattern_gates",
+        "claim_review_card_contract_fields",
+        "user_visible_language_smoke"
+      ],
+      "score_dimensions": [
+        "delivery_completeness",
+        "evidence_boundary",
+        "professional_wording",
+        "no_engineering_leak"
+      ]
+    },
+    {
+      "id": "ranking-subject",
+      "lane": "ranking",
+      "intent": "deterministic_rankings",
+      "commands": [
+        "/analytix rank"
+      ],
+      "primary_tools": [
+        "rank_accounts",
+        "rank_holders",
+        "rank_counterparties"
+      ],
+      "conditional_tools": [
+        "get_scope_coverage",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "compare_analysis_scopes",
+        "inspect_case_schema",
+        "run_case_sql",
+        "funds_investigate"
+      ],
+      "required_gates": [
+        "deterministic ranking metric",
+        "scope/coverage boundary returned by the rank result",
+        "Pair Amount/amount challenge is a compact amount-review answer that reconciles controlling source, holder/account scope, counterparty grain, detail/effective/dedup basis, time window, duplicate/card-replacement risk, 核验状态、数据来源边界、交付边界, verified amount, unverified amount, difference reason, account/time concentration, relation or role lead, and next-hop or Top-counterparty verification before final amount"
+      ],
+      "stop_conditions": [
+        "rank result is missing rows, scope boundary, or coverage warning before all-case Top claims"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "ranking metric",
+          "amount/count",
+          "scope boundary"
+        ],
+        "must_state_boundaries": [
+          "analysis scope",
+          "role lead wording",
+          "Pair Amount controlling source and dedupe boundary"
+        ],
+        "forbidden_as_facts": [
+          "candidate role as determined role",
+          "rank_counterparties row as final Pair Amount without targeted reconciliation",
+          "one bare amount as a complete Pair Amount answer when raw/dedup/effective amounts or duplicate risk differ"
+        ],
+        "next_queries": [
+          "scope coverage repair",
+          "switch ranking metric or scope when the user changes口径",
+          "targeted cleaned/analysis-scope workbench aggregate when semantic tools cannot settle Pair Amount"
+        ],
+        "stop_conditions": [
+          "do not infer Top rankings from profile tools or bounded rows",
+          "do not add scope/quality/profile/navigator tools after an ordinary low-risk rank result unless the user asks for those boundaries; this does not apply to Pair Amount/amount challenge"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "ranking rows may be summarized; full rows stay in artifacts"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 4,
+        "max_command_audit_tool_calls": 4
+      },
+      "doctor_checks": [
+        "frontdoor_support_material_coverage",
+        "default tool discovery"
+      ],
+      "score_dimensions": [
+        "ranking_accuracy",
+        "scope_boundary",
+        "tool_budget"
+      ]
+    },
+    {
+      "id": "pair-amount",
+      "lane": "pair_amount",
+      "intent": "pair_amount_investigation",
+      "commands": [
+        "/analytix amount"
+      ],
+      "primary_tools": [
+        "investigate_pair_amount",
+        "rank_counterparties",
+        "run_case_sql"
+      ],
+      "conditional_tools": [
+        "funds_investigate",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "trace_subject_top_outflows",
+        "trace_fund_next_hop",
+        "get_evidence_pack"
+      ],
+      "required_gates": [
+        "pair-amount-investigation owns the final answer",
+        "rank_counterparties and funds_investigate are locator/support facts only",
+        "raw detail amount/count and effective/dedup amount/count stay separated",
+        "duplicate/card-replacement and placeholder transaction-id risk are stated before final amount",
+        "visible answer includes conclusion, abnormality, case significance, limits, and next evidence"
+      ],
+      "stop_conditions": [
+        "semantic tools settle the pair amount with scope and warnings",
+        "controlled cleaned/analysis-scope aggregate is blocked or unavailable; return a capability gap instead of local SQL",
+        "duplicate policy is unresolved and would change the amount; label unsupported amount explicitly"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "pair and time window",
+          "amount and count by raw/effective/dedup basis",
+          "large transaction rows or stated row unavailability",
+          "account/time concentration",
+          "difference reason and duplicate risk"
+        ],
+        "must_state_boundaries": [
+          "locator rank is not final proof",
+          "frontdoor generates structured support facts and no answer draft",
+          "unsupported or duplicate-amplified amount cannot be verified fact",
+          "relationship/purpose is a lead unless external proof exists"
+        ],
+        "forbidden_as_facts": [
+          "one bare amount without scope/basis/count",
+          "placeholder transaction ids as standalone dedupe keys",
+          "support card title or answer draft as final answer",
+          "local DuckDB/file search outside controlled workbench"
+        ],
+        "next_queries": [
+          "duplicate family review when amount turns on same-fact risk",
+          "one bounded receiver-side continuation check for material high-share 主要集中转账",
+          "next-hop tracing for supported high-value edges",
+          "evidence pack or source repair for unsupported gaps"
+        ],
+        "stop_conditions": [
+          "answer after the controlling pair-amount fact path and, when required, one bounded continuation fact path unless user asks for a broader audit",
+          "do not escalate to full-case analysis or report writing for a pair amount question"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "pair amount details may be summarized; controlled SQL/notebook details stay in artifacts with scope and row limits"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 2,
+        "report_max_tool_calls": 4,
+        "max_command_audit_tool_calls": 4
+      },
+      "doctor_checks": [
+        "pair_amount_contract",
+        "controlled_case_workbench_schema",
+        "frontdoor_support_material_coverage"
+      ],
+      "score_dimensions": [
+        "pair_amount_reconciliation",
+        "dedupe_boundary",
+        "evidence_status",
+        "delivery_spine"
+      ]
+    },
+    {
+      "id": "holder-account-scope",
+      "lane": "holder",
+      "intent": "holder_or_account_scope",
+      "commands": [
+        "/analytix account <account>",
+        "/analytix owner <name>",
+        "/analytix holder <name>",
+        "/analytix control",
+        "/analytix role"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "resolve_account_scope",
+        "resolve_owner_scope",
+        "get_scope_coverage",
+        "analyze_account_full",
+        "analyze_holder_full",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "rank_accounts",
+        "rank_counterparties",
+        "hypothesis_probe"
+      ],
+      "conditional_tools": [
+        "funds_investigate",
+        "get_case_reconciliation",
+        "query_account_txn_rows",
+        "get_analysis_dashboard",
+        "get_account_stats",
+        "scan_case_risks",
+        "get_evidence_pack",
+        "validate_continuation_list"
+      ],
+      "required_gates": [
+        "direct account set",
+        "account lead split",
+        "same-holder duplicate boundary",
+        "coverage"
+      ],
+      "stop_conditions": [
+        "account-lead ownership cannot be deterministically verified"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "direct accounts",
+          "candidate accounts",
+          "holder/account aggregate"
+        ],
+        "must_state_boundaries": [
+          "account-lead ownership guard",
+          "same-holder duplicate family"
+        ],
+        "forbidden_as_facts": [
+          "candidate account as owned account",
+          "control lead as confirmed control"
+        ],
+        "next_queries": [
+          "validate continuation list when appendix is requested"
+        ],
+        "stop_conditions": [
+          "do not repeat the same resolved owner-scope question after a complete answer card; new scope or continuation requests may re-enter the front door"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "account dossiers keep detailed rows in artifacts"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "frontdoor_repeat_suppression_protocol",
+        "frontdoor_repeat_smoke"
+      ],
+      "score_dimensions": [
+        "ownership_boundary",
+        "amount_accuracy",
+        "candidate_downgrade"
+      ]
+    },
+    {
+      "id": "investigation-lab",
+      "lane": "hypothesis_lab",
+      "intent": "old_thread_style_free_investigation",
+      "commands": [
+        "/analytix discovery",
+        "/analytix lab",
+        "/analytix probe"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "hypothesis_probe",
+        "trace_subject_top_outflows",
+        "rank_counterparties",
+        "audit_case_data_quality",
+        "resolve_duplicate_families"
+      ],
+      "conditional_tools": [
+        "funds_investigate",
+        "resolve_owner_scope",
+        "run_discovery_scan",
+        "get_evidence_pack",
+        "validate_continuation_list",
+        "validate_report_claims"
+      ],
+      "required_gates": [
+        "investigation intent",
+        "hypothesis status",
+        "verified facts",
+        "evidence gaps",
+        "forbidden-as-facts"
+      ],
+      "stop_conditions": [
+        "hypothesis has no data-backed transaction edge or deterministic statistic"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "investigation_intent",
+          "hypothesis_queue",
+          "hypothesis_status",
+          "verified_facts"
+        ],
+        "must_state_boundaries": [
+          "duplicate/same fact risk",
+          "cash break",
+          "missing counterparty",
+          "asset clue boundary"
+        ],
+        "forbidden_as_facts": [
+          "lead as verified fact",
+          "downgraded hypothesis as conclusion"
+        ],
+        "next_queries": [
+          "bounded continuation paths",
+          "negative search fields",
+          "rescope/recompute variants"
+        ],
+        "stop_conditions": [
+          "stop only after the current bounded answer; ordinary multi-subject turns should use hypothesis_probe plus at most one targeted trace/rank tool; preserve the next investigation queue for new turns"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "hypothesis evidence rows stay in artifacts; cards expose status and next queries"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "investigation_lab_card_contract_fields"
+      ],
+      "score_dimensions": [
+        "hypothesis_quality",
+        "evidence_status",
+        "downgrade_safety"
+      ]
+    },
+    {
+      "id": "subject-outflow-tracing",
+      "lane": "subject_outflow_tracing",
+      "intent": "destination_and_next_hop",
+      "commands": [
+        "/analytix destination",
+        "/analytix outflows",
+        "/analytix path <seed>"
+      ],
+      "primary_tools": [
+        "trace_subject_top_outflows",
+        "trace_fund_next_hop",
+        "trace_fund",
+        "build_fund_flow_graph",
+        "rank_counterparties",
+        "get_current_case",
+        "resolve_account_scope",
+        "validate_continuation_list"
+      ],
+      "conditional_tools": [
+        "funds_investigate",
+        "get_evidence_pack",
+        "validate_continuation_list"
+      ],
+      "required_gates": [
+        "subject scope",
+        "top outflow deterministic ranking",
+        "next-hop transaction fields",
+        "appendix validation"
+      ],
+      "stop_conditions": [
+        "one-hop amount question is fully answered",
+        "unmatched endpoint lacks downstream evidence"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "source-to-counterparty amount",
+          "top outflows",
+          "supported next-hop edges"
+        ],
+        "must_state_boundaries": [
+          "missing counterparty",
+          "payment account boundary",
+          "cash break"
+        ],
+        "forbidden_as_facts": [
+          "unmatched endpoint as final destination",
+          "narrative continuation as verified path"
+        ],
+        "next_queries": [
+          "validate continuation list",
+          "next-hop trace seed",
+          "candidate terminal补调"
+        ],
+        "stop_conditions": [
+          "one-hop amount answers may stop for this turn, but continuation or rescope requests may use trace tools directly only when a user-supplied or graph-returned seed_txn_id, seed_account_id, or account_id is available"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "next-hop rows stay in artifacts; answer cards expose supported boundaries"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "via_continuation_frontdoor_card",
+        "destination_skips_default_casegraph"
+      ],
+      "score_dimensions": [
+        "path_accuracy",
+        "continuation_boundary",
+        "tool_budget"
+      ]
+    },
+    {
+      "id": "pattern-and-asset-leads",
+      "lane": "pattern",
+      "intent": "pattern_detection_asset_and_typology_leads",
+      "commands": [
+        "/analytix pattern",
+        "/analytix cash",
+        "/analytix financial",
+        "/analytix topic",
+        "/analytix cash-bridge",
+        "/analytix payment",
+        "/analytix crypto",
+        "/analytix asset",
+        "/analytix platform",
+        "/analytix device",
+        "/analytix group",
+        "/analytix tax"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "get_casegraph",
+        "resolve_owner_scope",
+        "audit_case_data_quality",
+        "resolve_duplicate_families",
+        "hypothesis_probe",
+        "rank_counterparties",
+        "trace_subject_top_outflows",
+        "classify_missing_counterparty_business",
+        "detect_cash_breakpoints",
+        "detect_financial_product_flows",
+        "detect_project_litigation_asset_leads",
+        "get_rule_hits",
+        "query_txn_slice",
+        "get_evidence_pack",
+        "validate_continuation_list"
+      ],
+      "required_gates": [
+        "rule or keyword hit",
+        "bounded evidence rows",
+        "unit/amount guard",
+        "lead downgrade"
+      ],
+      "stop_conditions": [
+        "weak evidence must be downgraded",
+        "cash bridge pairing is only candidate"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "rule hits",
+          "bounded evidence rows",
+          "amount/time clues",
+          "feature family",
+          "typology lens",
+          "downgrade reason",
+          "next proof"
+        ],
+        "must_state_boundaries": [
+          "cash breakpoint",
+          "financial product clue",
+          "asset/consumption lead",
+          "virtual asset weak-evidence boundary"
+        ],
+        "forbidden_as_facts": [
+          "candidate cash bridge as closed path",
+          "weak keyword as legal conclusion",
+          "typology lens as legal conclusion"
+        ],
+        "next_queries": [
+          "evidence pack",
+          "bounded hypothesis probe"
+        ],
+        "stop_conditions": [
+          "state clue/需核实 when deterministic evidence is absent"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "pattern evidence rows stay in artifacts; cards carry leads and downgrades"
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 1,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "model_eval_antipattern_gates"
+      ],
+      "score_dimensions": [
+        "lead_downgrade",
+        "amount_unit_guard",
+        "evidence_pack"
+      ]
+    },
+    {
+      "id": "controlled-case-workbench",
+      "lane": "workbench",
+      "intent": "custom_reproducible_case_analysis",
+      "commands": [
+        "/analytix sql",
+        "/analytix notebook",
+        "/analytix export"
+      ],
+      "primary_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "inspect_case_schema",
+        "profile_case_schema",
+        "audit_case_data_quality",
+        "case_sql_recipes",
+        "explain_case_sql",
+        "diagnose_case_sql",
+        "count_case_rows",
+        "preview_case_rows",
+        "inspect_workbench_history",
+        "run_case_sql"
+      ],
+      "conditional_tools": [
+        "profile_case_schema",
+        "explain_case_sql",
+        "diagnose_case_sql",
+        "count_case_rows",
+        "preview_case_rows",
+        "inspect_workbench_history",
+        "case_sql_recipes",
+        "run_case_sql",
+        "get_evidence_pack",
+        "validate_report_claims"
+      ],
+      "required_gates": [
+        "explicit semantic tool gap",
+        "current case",
+        "read-only",
+        "cleaned fc_*_norm and analysis_* scope only",
+        "row_limit <= 500",
+        "purpose tag",
+        "structured SQL guardrail before execution",
+        "auditable artifact or bounded result",
+        "evidence boundary required",
+        "P0 notebook and export execution quarantine"
+      ],
+      "stop_conditions": [
+        "semantic MCP tool can answer the same bounded fact without workbench and no custom口径, conflict, or user-requested SQL escalation is present",
+        "query touches fc_*_raw, source files, cross-case data, DDL/DML, external file/network functions, or unbounded export",
+        "notebook/export request; return a P0 capability boundary without creating files or jobs",
+        "backend tool and local current-case DuckDB fallback are both unavailable; return capability gap card",
+        "preview request lacks table/filter/purpose or asks for more than 20 rows"
+      ],
+      "answer_card_contract": {
+        "must_write_facts": [
+          "why workbench was needed",
+          "current case and scope boundary",
+          "allowed cleaned/analysis source views",
+          "row limit and result mode",
+          "diagnostic state when schema/profile/explain/diagnose/preview was used",
+          "supported bounded result or capability gap"
+        ],
+        "must_state_boundaries": [
+          "not a weak-source substitute",
+          "not full-case totals unless aggregate query and scope support it",
+          "workbench result must be validated before report-grade claim wording"
+        ],
+        "forbidden_as_facts": [
+          "unapproved source table result as production fact",
+          "bounded preview as full-case total",
+          "schema profile or query plan as amount/path proof",
+          "custom query as supported transaction path",
+          "workbench gap as zero result"
+        ],
+        "next_queries": [
+          "productize recurring custom analysis as semantic MCP tool",
+          "handoff to visual-evidence for chart/table delivery",
+          "handoff to claim-review for report-grade wording"
+        ],
+        "stop_conditions": [
+          "return 专项资金核算缺口说明 only when backend execution and local current-case DuckDB fallback are unavailable or blocked by policy"
+        ]
+      },
+      "evidence_contract": {
+        "ledger_required": true,
+        "supported_edge_required_for_mermaid": true,
+        "user_visible_opaque_refs_allowed": false,
+        "artifact_policy": "P0 permits bounded SQL results only; notebook/export artifacts and jobs are disabled. Query plans, raw previews, recipes, history, and debug fields stay out of ordinary output."
+      },
+      "tool_budget": {
+        "ordinary_max_tool_calls": 2,
+        "report_max_tool_calls": 2
+      },
+      "doctor_checks": [
+        "controlled_case_workbench_schema",
+        "workbench_source_guardrail",
+        "semantic_tool_gap_eval"
+      ],
+      "score_dimensions": [
+        "semantic_gap_routing",
+        "workbench_boundary",
+        "evidence_status",
+        "no_unaudited_local_sql_discovery"
+      ]
+    }
+  ]
+}

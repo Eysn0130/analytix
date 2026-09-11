@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "analytix-computer-use": {
+      "command": "analytix-computer-use",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

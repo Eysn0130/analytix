@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "analytix-computer-use": {
+      "command": "analytix-computer-use",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "OPEN_COMPUTER_USE_DISABLE_APP_AGENT_PROXY": "1"
+      }
+    }
+  }
+}

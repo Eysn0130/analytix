@@ -1,0 +1,5063 @@
+/* Extra styles for 可视化分析 (reuses most of 统计分析 via ../analysis_stats/app.css) */
+
+.app {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body,
+body input,
+body textarea,
+body [contenteditable="true"],
+body [contenteditable=""],
+body [contenteditable="plaintext-only"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.left,
+.gapToggle {
+  display: none !important;
+}
+
+/* Top toolbar card */
+.toolBarCard {
+  padding: 6px 8px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  height: 92px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.toolBarCard.ribbon {
+  scrollbar-width: thin;
+}
+
+.toolBarCard.ribbon::-webkit-scrollbar {
+  height: 6px;
+}
+
+.toolBarCard.ribbon::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.22);
+  border-radius: 999px;
+}
+
+.ribbonGroup {
+  display: grid;
+  grid-template-rows: 1fr 0;
+  align-items: stretch;
+  gap: 0;
+  min-height: 100%;
+  flex: 0 0 auto;
+}
+
+.ribbonGroupBody {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ribbonDivider {
+  width: 1px;
+  background: rgba(15, 23, 42, 0.14);
+  align-self: stretch;
+  margin: 4px 2px;
+}
+
+.ribbonSubDivider {
+  align-self: center;
+  margin: 0 1px;
+  color: rgba(15, 23, 42, 0.28);
+  font-size: 15px;
+  line-height: 1;
+  user-select: none;
+}
+
+.ribbonCaption {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.45);
+  text-align: center;
+  letter-spacing: 0.2px;
+}
+
+.styleBlocks {
+  gap: 1px;
+  align-items: stretch;
+}
+
+.styleBlocks .ribbonSubDivider {
+  margin: 0;
+}
+
+.ribbonSub {
+  display: grid;
+  grid-template-rows: 1fr 0;
+  gap: 0;
+  align-items: stretch;
+}
+
+.ribbonSubLined {
+  grid-template-rows: 1fr 0;
+  gap: 0;
+}
+
+.ribbonSubCaption {
+  font-size: 10px;
+  color: rgba(2, 6, 23, 0.45);
+  text-align: center;
+}
+
+.ribbonSubBaseline {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+}
+
+:root {
+  --ribbon-row: 32px;
+}
+
+.ribbonSubBody {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+}
+
+.ribbonSubLined .ribbonSubBody {
+  width: 100%;
+  align-self: stretch;
+}
+
+.typoGrid {
+  display: grid;
+  grid-template-rows: 32px 30px;
+  gap: 6px;
+  align-items: center;
+}
+
+.textBlock .typoGrid {
+  width: 100%;
+}
+
+.textBlock {
+  width: 236px;
+}
+
+.typoRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.textBlock .typoRow {
+  display: grid;
+  min-width: 0;
+}
+
+.textBlock .typoRow.top {
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 0.7fr);
+}
+
+.textBlock .typoRow.bottom {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.edgeGrid {
+  grid-template-columns: 68px;
+  grid-template-rows: repeat(3, 22px);
+  gap: 1px;
+}
+
+.edgeBlock {
+  width: 82px;
+}
+
+.edgeBlock .edgeGrid {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.edgeGrid .ribbonCellBtn {
+  height: 22px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 0 4px;
+}
+
+.edgeBlock .ribbonCellBtn {
+  width: 100%;
+}
+
+.edgeGrid .ribbonCellBtn:hover {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(2, 6, 23, 0.12);
+}
+
+.edgeGrid .ribbonCellBtn:active {
+  background: rgba(2, 6, 23, 0.1);
+  border-color: rgba(2, 6, 23, 0.18);
+  transform: translateY(1px);
+}
+
+.nodeBlock {
+  --node-col: 68px;
+  --node-gap: 1px;
+  --node-split-gap: 16px;
+  width: max-content;
+}
+
+.nodeGrid {
+  position: relative;
+  width: 100%;
+  grid-template-columns: repeat(2, var(--node-col));
+  grid-template-rows: repeat(3, 22px);
+  column-gap: var(--node-split-gap);
+  row-gap: var(--node-gap);
+}
+
+.nodeGrid::before {
+  content: "｜";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 15px;
+  line-height: 1;
+  color: rgba(15, 23, 42, 0.28);
+  user-select: none;
+  pointer-events: none;
+}
+
+.nodeGrid .ribbonCellBtn {
+  height: 22px;
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 6px;
+  padding: 0 4px;
+}
+
+.nodeGrid .ribbonCellBtn:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(31, 111, 235, 0.45);
+}
+
+.nodeGrid .ribbonCellBtn:active {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(31, 111, 235, 0.45);
+  transform: translateY(1px);
+}
+
+.nodeGrid .nodeCell-shape,
+.nodeGrid .nodeCell-size,
+.nodeGrid .nodeCell-style {
+  border-color: transparent;
+  background: transparent;
+}
+
+.nodeGrid .nodeCell-shape:hover,
+.nodeGrid .nodeCell-size:hover,
+.nodeGrid .nodeCell-style:hover {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(2, 6, 23, 0.12);
+}
+
+.nodeGrid .nodeCell-shape:active,
+.nodeGrid .nodeCell-size:active,
+.nodeGrid .nodeCell-style:active {
+  background: rgba(2, 6, 23, 0.1);
+  border-color: rgba(2, 6, 23, 0.18);
+}
+
+.nodeGrid .nodeCell-new,
+.nodeGrid .nodeCell-link {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.nodeGrid .nodeCell-new:hover,
+.nodeGrid .nodeCell-link:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.nodeGrid .nodeCell-new:active,
+.nodeGrid .nodeCell-link:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.layoutGrid .ribbonTile.layoutBtn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+  flex-direction: row;
+  gap: 6px;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.layoutGrid .ribbonTile.layoutBtn:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.layoutGrid .ribbonTile.layoutBtn:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.ribbonSplitTile {
+  --split-trigger-width: 20px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--split-trigger-width);
+  align-items: stretch;
+  height: var(--ribbon-row);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(2, 6, 23, 0.86);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+}
+
+.layoutGrid .ribbonSplitTile.layoutSplit,
+.opsGrid .ribbonSplitTile.mergeSplit {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.ribbonSplitTile:hover,
+.ribbonSplitTile.menu-open,
+.ribbonSplitTile.active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.ribbonSplitTile:focus-within {
+  outline: none;
+  border-color: rgba(31, 111, 235, 0.3);
+  box-shadow: var(--focus), 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.ribbonSplitTile:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.ribbonSplitMain,
+.ribbonSplitTrigger {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.ribbonSplitMain {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 5px 0 8px;
+}
+
+.ribbonSplitTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.ribbonSplitTrigger .ico.caret {
+  width: 10px;
+  height: 10px;
+  opacity: 0.7;
+}
+
+.ribbonSplitMain:focus-visible,
+.ribbonSplitTrigger:focus-visible {
+  outline: none;
+}
+
+.analyzeGrid .analysisBtn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+  flex-direction: row;
+  gap: 6px;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.analyzeGrid .analysisBtn:hover,
+.analyzeGrid .analysisBtn.active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.analyzeGrid .analysisBtn:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+.nodeGrid .ribbonColorBtn.compact.nodeFillBtn {
+  height: 22px;
+  min-height: 22px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.nodeCell-shape {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.nodeCell-fill {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.nodeCell-size {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.nodeCell-new {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.nodeCell-style {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.nodeCell-link {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+
+.ribbonSubCaption.dual {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, var(--node-col));
+  column-gap: var(--node-split-gap);
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.ribbonSubCaption.dual span:first-child {
+  grid-column: 1;
+}
+
+.ribbonSubCaption.dual span:last-child {
+  grid-column: 2;
+}
+
+
+.comboField {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr;
+  height: 32px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  width: 100%;
+  min-width: 220px;
+}
+
+.comboField:hover {
+  border-color: rgba(15, 23, 42, 0.28);
+  background: #ffffff;
+}
+
+.comboField:focus-within {
+  border-color: rgba(31, 111, 235, 0.55);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.25);
+}
+
+.comboBtn {
+  height: 100%;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(2, 6, 23, 0.88);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.comboBtn .caret {
+  margin-left: 4px;
+}
+
+.comboBtn:hover {
+  background: rgba(2, 6, 23, 0.04);
+}
+
+.comboBtn.narrow {
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.comboBtn + .comboBtn {
+  border-left: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.comboLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92px;
+}
+
+.splitBtns {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  width: 100%;
+  align-items: center;
+}
+
+.toggleRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+  width: max-content;
+}
+
+.textBlock .toggleRow,
+.textBlock .colorRow,
+.textBlock .comboField,
+.textBlock .splitBtns {
+  width: 100%;
+  min-width: 0;
+}
+
+.textBlock .toggleRow {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.ribbonMini {
+  height: var(--ribbon-row);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+  color: rgba(2, 6, 23, 0.86);
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, transform 0.08s ease;
+}
+
+.ribbonMini.sizeBtn {
+  height: 31px;
+  width: 26px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.textBlock .ribbonMini.sizeBtn,
+.textBlock .ribbonMini.toggle {
+  width: 100%;
+}
+
+.ribbonMini.sizeBtn .ico {
+  width: 20px;
+  height: 20px;
+}
+
+.ribbonMini.sizeBtn:hover {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(2, 6, 23, 0.12);
+}
+
+.ribbonMini.sizeBtn:active {
+  background: rgba(2, 6, 23, 0.1);
+  border-color: rgba(2, 6, 23, 0.18);
+  transform: translateY(1px);
+}
+
+.ribbonMini.toggle {
+  height: 26px;
+  border-radius: 6px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 13px;
+  width: 26px;
+}
+
+.ribbonMini.toggle:hover {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(2, 6, 23, 0.12);
+}
+
+.ribbonMini.toggle:active {
+  background: rgba(2, 6, 23, 0.1);
+  border-color: rgba(2, 6, 23, 0.18);
+  transform: translateY(1px);
+}
+
+.ribbonMini.sizeBtn:focus-visible {
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.25);
+}
+
+.ribbonMini.toggle.active {
+  background: rgba(31, 111, 235, 0.16);
+  border-color: rgba(31, 111, 235, 0.45);
+  color: #1f6feb;
+}
+
+.ribbonMini:hover,
+.comboBtn:hover,
+.ribbonCellBtn:hover,
+.ribbonTile:hover,
+.ribbonColorBtn:hover {
+  border-color: rgba(31, 111, 235, 0.45);
+}
+
+.ribbonColorBtn {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.72);
+  cursor: pointer;
+  width: 100%;
+}
+
+.colorRow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  width: max-content;
+}
+
+
+.ribbonColorBtn.compact {
+  height: 30px;
+  border-radius: 7px;
+  padding: 0 6px;
+  font-size: 10px;
+  gap: 4px;
+}
+
+.ribbonColorBtn.compact .colorLabel {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 52px;
+}
+
+.typography .ribbonColorBtn.compact {
+  width: 100%;
+  margin-left: 0;
+  padding-left: 8px;
+}
+
+
+.colorSwatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: #0f172a;
+}
+
+.colorLabel {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.75);
+}
+
+.ribbonCellBtn {
+  height: var(--ribbon-row);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 10px;
+  color: rgba(2, 6, 23, 0.82);
+  cursor: pointer;
+  position: relative;
+  padding: 0 6px;
+}
+
+.ribbonCellBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ribbonCellBtn:disabled .caret {
+  opacity: 0.35;
+}
+
+.ribbonCellBtn.inline {
+  flex-direction: row;
+  gap: 4px;
+  justify-content: center;
+}
+
+.ribbonCellBtn.inline .caret {
+  position: static;
+  width: 10px;
+  height: 10px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.ribbonCellBtn .caret {
+  width: 10px;
+  height: 10px;
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  opacity: 0.7;
+}
+
+.cellSwatch {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: #1f2937;
+}
+
+.btnText {
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.layoutGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 96px);
+  grid-template-rows: repeat(2, var(--ribbon-row));
+  gap: 6px;
+}
+
+.analyzeGrid {
+  display: grid;
+  grid-template-rows: repeat(2, var(--ribbon-row));
+  gap: 6px;
+  --analyze-col: 90px;
+  --analyze-gap: 6px;
+  --analysis-cmd-col: 82px;
+  --analysis-combo-col: 52px;
+  width: max-content;
+}
+
+.opsGrid {
+  display: grid;
+  grid-template-rows: repeat(2, var(--ribbon-row));
+  gap: 6px;
+}
+
+.ribbonRow {
+  display: grid;
+  gap: 6px;
+}
+
+.ribbonRow.row2 {
+  grid-template-columns: repeat(2, 94px);
+}
+
+.ribbonRow.row3 {
+  grid-template-columns: repeat(3, 90px);
+}
+
+.ribbonRow.row4 {
+  grid-template-columns: repeat(3, 90px);
+}
+
+.analyzeGrid .ribbonRow.row3 {
+  grid-template-columns: repeat(3, var(--analyze-col));
+  gap: var(--analyze-gap);
+}
+
+.analyzeTopRow {
+  display: grid;
+  grid-template-columns: repeat(2, var(--analysis-cmd-col)) repeat(2, var(--analysis-combo-col));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  column-gap: 4px;
+  row-gap: 1px;
+}
+
+.analyzeTopRow #btnAnalysisFilter {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.analyzeTopRow [data-analysis-slot="filter"] {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.analyzeTopRow #btnAnalysisCollapse {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.analyzeTopRow [data-analysis-slot="collapse"] {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.analyzeTopRow #btnGroup1 {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.analyzeTopRow [data-analysis-slot="group1"] {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.analyzeTopRow #btnGroup2 {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.analyzeTopRow [data-analysis-slot="group2"] {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.analyzeTopRow #btnGroup3 {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.analyzeTopRow [data-analysis-slot="group3"] {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.analyzeTopRow #btnGroupOps {
+  grid-column: 4;
+  grid-row: 2;
+}
+
+.analyzeTopRow [data-analysis-slot="groupOps"] {
+  grid-column: 4;
+  grid-row: 2;
+}
+
+.analyzeTopRow .ribbonTile.comboBtn {
+  width: var(--analysis-combo-col);
+  height: 100%;
+  align-self: stretch;
+  flex-direction: row;
+  gap: 2px;
+  justify-content: center;
+  padding: 0 2px;
+}
+
+.analyzeTopRow .comboBtn + .comboBtn {
+  border-left: none;
+}
+
+.analyzeTopRow .comboBtn.drop .caret {
+  position: static;
+  right: auto;
+  bottom: auto;
+  margin-left: 1px;
+}
+
+.analyzeBottomRow {
+  width: calc(var(--analyze-col) * 3 + var(--analyze-gap) * 2);
+}
+
+.opsGrid .row2 {
+  grid-template-columns: repeat(3, 82px);
+}
+
+.opsGrid .row3 {
+  grid-template-columns: repeat(3, 94px);
+}
+
+.ribbonTile {
+  height: var(--ribbon-row);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 10px;
+  color: rgba(2, 6, 23, 0.86);
+  cursor: pointer;
+  transition: background 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease;
+  position: relative;
+  padding: 0 6px;
+}
+
+.opsGrid .mergeBtn,
+.opsGrid .detailBtn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.analyzeGrid .analysisCmdBtn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 3px rgba(15, 23, 42, 0.12);
+  flex-direction: row;
+  gap: 6px;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.analyzeGrid .analysisCmdBtn:hover,
+.analyzeGrid .analysisCmdBtn.active,
+.analyzeGrid .analysisCmdBtn.popover-open {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.analyzeGrid .analysisCmdBtn:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.opsGrid .mergeBtn:hover,
+.opsGrid .mergeBtn.active,
+.opsGrid .detailBtn:hover,
+.opsGrid .detailBtn.active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.opsGrid .mergeBtn:active,
+.opsGrid .detailBtn:active {
+  background: rgba(239, 242, 248, 0.92);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.ribbonTile.drop .caret {
+  width: 10px;
+  height: 10px;
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  opacity: 0.7;
+}
+
+.ribbonTile.comboBtn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  height: calc(var(--ribbon-row) - 13.5px);
+  width: 64px;
+  justify-self: center;
+  border-radius: 6px;
+}
+
+.ribbonTile.comboBtn.active {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ribbonTile.comboBtn .btnText {
+  font-weight: 400;
+}
+
+.ribbonTile.comboBtn:hover {
+  background: rgba(2, 6, 23, 0.06);
+  border-color: rgba(2, 6, 23, 0.12);
+}
+
+.ribbonTile.comboBtn:active {
+  background: rgba(2, 6, 23, 0.1);
+  border-color: rgba(2, 6, 23, 0.18);
+  transform: translateY(1px);
+}
+
+.ribbonTile:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.layoutBtn.active {
+  background: rgba(31, 111, 235, 0.16);
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 6px 14px rgba(31, 111, 235, 0.18);
+  transform: translateY(-1px);
+}
+
+.layoutGrid .layoutBtn.active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+  transform: none;
+}
+
+.layoutGrid .ribbonSplitTile.active,
+.opsGrid .ribbonSplitTile.active,
+.opsGrid .ribbonSplitTile.menu-open {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.95));
+  border-color: rgba(31, 111, 235, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+
+.ribbonTile.active {
+  background: rgba(31, 111, 235, 0.12);
+  border-color: rgba(31, 111, 235, 0.45);
+}
+
+.ico {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+}
+
+.ico.caret {
+  width: 12px;
+  height: 12px;
+}
+
+/* Ribbon popovers */
+.ribbonPopover {
+  position: fixed;
+  z-index: 1006;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.18);
+  display: none;
+}
+
+.amountFilterPanel {
+  width: min(280px, 72vw);
+  display: grid;
+  gap: 10px;
+}
+
+.amountFilterTitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(2, 6, 23, 0.86);
+}
+
+.amountFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.amountFilterField {
+  display: grid;
+  gap: 4px;
+}
+
+.amountFilterField label {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.56);
+}
+
+.amountFilterInput {
+  height: 30px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.88);
+  background: #ffffff;
+}
+
+.amountFilterInput:focus {
+  outline: none;
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.2);
+}
+
+.amountFilterHint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.amountFilterActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.amountFilterClear {
+  height: 26px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.72);
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.amountFilterClear:hover {
+  border-color: rgba(31, 111, 235, 0.36);
+  background: rgba(31, 111, 235, 0.08);
+}
+
+/* Drill popover */
+.drillPopover {
+  position: fixed;
+  z-index: 1007;
+  min-width: 250px;
+  max-width: 340px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.2), 0 2px 6px rgba(2, 6, 23, 0.08);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  display: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.drillPopover[aria-hidden="false"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.drillTitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(2, 6, 23, 0.86);
+  margin-bottom: 10px;
+  letter-spacing: 0.2px;
+}
+
+.drillSection {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.drillOption {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.86);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.drillOption:hover {
+  border-color: rgba(31, 111, 235, 0.22);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
+  transform: translateY(-1px);
+}
+
+.drillOption input {
+  margin: 2px 0 0 0;
+  accent-color: rgba(31, 111, 235, 0.95);
+}
+
+.drillOptionMain {
+  font-weight: 700;
+  display: block;
+}
+
+.drillOptionSub {
+  display: block;
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+  margin-left: 0;
+}
+
+.drillOption input:checked ~ .drillOptionMain {
+  color: rgba(31, 111, 235, 0.98);
+}
+
+.drillOption input:checked ~ .drillOptionSub {
+  color: rgba(31, 111, 235, 0.72);
+}
+
+.drillRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.drillLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.75);
+}
+
+.drillInput {
+  width: 90px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.drillInput:focus {
+  outline: none;
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.12);
+}
+
+.drillHint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.drillActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.drillBtn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.75);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.drillBtn:hover {
+  border-color: rgba(2, 6, 23, 0.22);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
+  transform: translateY(-1px);
+}
+
+.drillBtn.primary {
+  border-color: rgba(31, 111, 235, 0.4);
+  background: linear-gradient(180deg, rgba(31, 111, 235, 0.18), rgba(31, 111, 235, 0.12));
+  color: rgba(31, 111, 235, 0.95);
+}
+
+.drillBtn.ghost {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* Node info popover */
+.nodeInfoPopover {
+  position: fixed;
+  z-index: 1008;
+  min-width: 320px;
+  max-width: 420px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.2), 0 2px 6px rgba(2, 6, 23, 0.08);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  display: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.nodeInfoPopover[aria-hidden="false"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Edge info popover */
+.edgeInfoPopover {
+  position: fixed;
+  z-index: 1008;
+  min-width: 360px;
+  max-width: 560px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.2), 0 2px 6px rgba(2, 6, 23, 0.08);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  display: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.edgeInfoPopover[aria-hidden="false"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.nodeInfoGrid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.nodeInfoLeft {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: 100%;
+}
+
+.nodePreview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  line-height: 0;
+  flex: 0 0 auto;
+}
+
+.nodePreviewGraphic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.nodeCategoryLabel {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+  width: 100%;
+  text-align: center;
+}
+
+.nodeCategoryValue {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(2, 6, 23, 0.85);
+  margin-top: 2px;
+  width: 100%;
+  text-align: center;
+}
+
+.nodeInfoRight {
+  display: grid;
+  gap: 8px;
+}
+
+.nodeInfoRow {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(15, 23, 42, 0.08);
+}
+
+.nodeInfoRow:last-child {
+  border-bottom: none;
+}
+
+.nodeInfoLabel {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.nodeInfoValue {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.85);
+  word-break: break-all;
+}
+
+.nodeInfoValue.mono {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.3px;
+}
+
+.nodeInfoList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  align-items: center;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.nodeInfoTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.85);
+  white-space: nowrap;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.2px;
+}
+
+.nodeInfoMore {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed rgba(15, 23, 42, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.6);
+}
+
+.popoverTitle {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+  margin: 4px 2px 6px;
+}
+
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.colorCell {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: var(--swatch);
+  cursor: pointer;
+}
+
+.colorCell.empty {
+  background: transparent;
+  border-style: dashed;
+  cursor: default;
+}
+
+.colorCustomRow {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.colorCustomRow input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  padding: 0;
+  background: transparent;
+}
+
+.popoverList {
+  display: grid;
+  gap: 4px;
+}
+
+.popoverItem {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.popoverItem.withIcon {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.popoverIcon {
+  flex: 0 0 auto;
+  display: block;
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.popoverIcon--line,
+.popoverIcon--arrow {
+  width: 56px;
+  height: 20px;
+}
+
+.popoverIcon--shape {
+  width: 24px;
+  height: 24px;
+}
+
+.popoverLabel {
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.popoverItem.active,
+.popoverItem:hover {
+  border-color: rgba(31, 111, 235, 0.5);
+  background: rgba(31, 111, 235, 0.12);
+}
+
+.exportGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.exportGrid .popoverItem {
+  width: 100%;
+  text-align: center;
+}
+
+.exportScale {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.exportScale button {
+  flex: 1 1 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.exportScale button.active {
+  background: rgba(31, 111, 235, 0.12);
+  border-color: rgba(31, 111, 235, 0.45);
+  color: #1f6feb;
+}
+
+.iconPopover {
+  display: grid;
+  gap: 8px;
+}
+
+.iconTabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.iconTab {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.iconTab.active {
+  background: rgba(31, 111, 235, 0.12);
+  border-color: rgba(31, 111, 235, 0.5);
+  color: #1f6feb;
+}
+
+.iconSearch input {
+  width: 100%;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.iconGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.iconBtn {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.iconBtn:hover,
+.iconBtn.active {
+  border-color: rgba(31, 111, 235, 0.5);
+  background: rgba(31, 111, 235, 0.12);
+}
+
+/* Tabs strip attached to graph area (browser-like) */
+.tabsBar {
+  padding: 6px 8px 0 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  overflow: visible;
+  border-bottom: none;
+  position: relative; /* anchor ::after baseline + keep tabs above the canvas */
+  z-index: 5;
+  isolation: isolate; /* ensure z-index layering is stable inside QWebEngine */
+  background: linear-gradient(180deg, rgba(210, 213, 218, 0.92), rgba(210, 213, 218, 0.58));
+}
+
+/* Tab tuning knobs (edit these) */
+:root {
+  --tab-min-width: 170px; /* inactive tab width */
+  --tab-min-width-active: var(--tab-min-width); /* active tab width (keep consistent with tabs) */
+  --tab-overhang: 0px; /* keep 0: active white shape should NOT extend under neighbors */
+  --tab-top-radius: 16px; /* active tab top corner radius */
+  --tab-seam-overlap: 2px; /* how much active tab overlaps the canvas seam */
+}
+
+.tabsBar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: rgba(15, 23, 42, 0.14);
+  z-index: 0;
+}
+
+.viewsScroll {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: hidden; /* no scrollbars */
+  padding: 2px 4px 0 2px; /* keep tabs sitting on the baseline (no gap) */
+  width: 100%;
+  scrollbar-width: none;
+}
+
+.viewsScroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.tabSep {
+  padding: 0 8px;
+  color: rgba(2, 6, 23, 0.18);
+  font-size: 18px;
+  line-height: 1;
+  user-select: none;
+}
+
+.viewTab {
+  min-width: var(--tab-min-width);
+  height: 34px;
+  padding: 0 14px 0 46px; /* leave room for hover close */
+  border-radius: 0;
+  border: none;
+  background-color: transparent; /* inactive tabs are transparent; hover highlights */
+  box-shadow: none;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  margin-bottom: -1px; /* connect with graph surface */
+  position: relative;
+  flex: 0 1 auto;
+}
+
+.viewTab:active {
+  cursor: grabbing;
+}
+
+.viewTab:hover:not(.active) {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.viewTab.active {
+  border-color: transparent;
+  background-color: #ffffff; /* rounded top + straight bottom */
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.10);
+  border-radius: 14px 14px 0 0;
+  min-width: var(--tab-min-width-active);
+  z-index: 3;
+  margin-bottom: -1px; /* lightly overlap the baseline */
+}
+
+.tabBridge {
+  display: none;
+}
+
+.viewTab > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Capsule style: no extra mask/ears */
+.viewTab.active::before,
+.viewTab.active::after {
+  content: none;
+}
+
+.viewTab.dragOverLeft {
+  background-image: linear-gradient(90deg, rgba(31, 111, 235, 0.95) 0 2px, transparent 2px);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.viewTab.dragOverRight {
+  background-image: linear-gradient(90deg, transparent calc(100% - 2px), rgba(31, 111, 235, 0.95) calc(100% - 2px));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* Active tab ears/bridge removed in favor of the single masked silhouette above. */
+
+.viewTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(2, 6, 23, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.viewClose {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, transform 0.12s ease;
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.98);
+}
+
+.viewTab:hover .viewClose {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
+.viewClose:hover {
+  background: rgba(2, 6, 23, 0.06);
+}
+
+.viewTab.dragging {
+  opacity: 0.55;
+}
+
+.tabsBar.compact .viewTab {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px 0 30px;
+  flex: 1 1 0; /* unlimited compression */
+}
+
+.tabsBar.compact .viewTitle {
+  font-size: 11px;
+  max-width: none;
+  min-width: 0;
+}
+
+.tabsBar.compact .viewTab.active {
+  min-width: 0;
+}
+
+.tabsBar.compact .tabSep {
+  padding: 0 4px;
+  font-size: 14px;
+}
+
+.tabsBar.compact .viewClose {
+  width: 20px;
+  height: 20px;
+  left: 6px;
+}
+
+/* Toolbar controls (I2-like) */
+.graphToolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.toolGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.06);
+}
+
+.toolLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.72);
+}
+
+.swatchRow {
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+}
+
+.colorInput {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: transparent;
+}
+
+.toolActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.viewAdd {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.7);
+  font-weight: 700;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.viewEmpty {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.5);
+  padding: 6px 4px;
+}
+
+.btn.sm {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.graphSearchFloat {
+  position: absolute;
+  right: 14px;
+  top: 12px; /* inside the graph canvas area (not the top toolbar) */
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  width: clamp(170px, 16vw, 230px);
+  opacity: 0.58; /* stay subtle; keep user's attention on the graph */
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.1));
+  box-shadow: 0 10px 26px rgba(2, 6, 23, 0.10);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  transform: translateZ(0);
+  transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, width 0.18s ease;
+}
+
+/* Only slightly reveal on hover; primary focus stays on the canvas. */
+.graphSearchFloat:hover {
+  opacity: 0.72;
+}
+
+.graphSearchFloat:focus-within {
+  opacity: 0.96;
+  width: clamp(200px, 18vw, 280px);
+  border-color: rgba(31, 111, 235, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.26));
+  box-shadow: 0 18px 46px rgba(2, 6, 23, 0.18);
+}
+
+.graphSearchFloat .input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 2px;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.graphSearchFloat .input::placeholder {
+  color: rgba(2, 6, 23, 0.42);
+}
+
+.graphSearchFloat:focus-within .input::placeholder {
+  color: rgba(2, 6, 23, 0.52);
+}
+
+/* Clear (X) only appears when there is text. */
+#graphSearchClear {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.92);
+  background: rgba(255, 255, 255, 0.0);
+  border: none;
+  transition: opacity 0.14s ease, transform 0.14s ease, background 0.14s ease;
+}
+
+#graphSearch:not(:placeholder-shown) + #graphSearchClear {
+  opacity: 0.38;
+  pointer-events: auto;
+}
+
+.graphSearchFloat:focus-within #graphSearch:not(:placeholder-shown) + #graphSearchClear {
+  opacity: 0.62;
+}
+
+#graphSearchClear:hover {
+  opacity: 1;
+  transform: scale(1);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.graphStatsFloat {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  opacity: 0.46;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.1);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  transform: translateZ(0);
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(2, 6, 23, 0.62);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  max-width: min(78%, 420px);
+}
+
+.graphStatsItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.graphStatsLabel {
+  font-weight: 500;
+  color: rgba(2, 6, 23, 0.45);
+}
+
+.graphStatsValue {
+  font-weight: 600;
+  color: rgba(2, 6, 23, 0.82);
+}
+
+.ghostFloat {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  transform: translate3d(-9999px, -9999px, 0);
+}
+
+.ghostFloat.visible {
+  opacity: 1;
+}
+
+.ghostFloatNode {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid rgba(31, 111, 235, 0.9);
+  background: rgba(31, 111, 235, 0.12);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.18);
+  opacity: 0.75;
+}
+
+.modalMask {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.28);
+  z-index: 2100;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.modalMask.show {
+  display: flex;
+}
+
+.modalCard {
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  background: #fff;
+  border-radius: 16px;
+  padding: 16px 16px 14px 16px;
+  box-shadow: 0 20px 60px rgba(2, 6, 23, 0.18);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.modalTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 10px;
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modalHint {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#edgeLabelCard.edgeTxnMode {
+  width: 620px;
+  max-width: calc(100vw - 52px);
+}
+
+.edgeTxnReadonly {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #0f172a;
+}
+
+.edgeTxnHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.edgeTxnCategory {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.4;
+}
+
+.edgeTxnSummary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.edgeTxnMetric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.edgeTxnMetricLabel {
+  font-size: 11px;
+  color: rgba(2, 6, 23, 0.55);
+  line-height: 1.2;
+}
+
+.edgeTxnMetricValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.edgeTxnCountLink {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  color: rgba(31, 111, 235, 0.95);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.edgeTxnCountLink:hover {
+  color: rgba(29, 78, 216, 0.98);
+}
+
+.txnModalWrap .modalBody {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+}
+
+.txnModalWrap .modalHint {
+  white-space: nowrap;
+}
+
+.txnModalWrap .txnTableWrap {
+  overscroll-behavior: contain;
+}
+
+.edgeTxnMetricValue--in {
+  color: #15803d;
+}
+
+.edgeTxnMetricValue--out {
+  color: #dc2626;
+}
+
+.edgeTxnSectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.72);
+}
+
+.edgeTxnList {
+  max-height: 250px;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.9);
+  overscroll-behavior: contain;
+}
+
+/* Edge detail: cap the viewport around 5 rows, keep all loaded rows scrollable */
+.edgeTxnList--cap5 {
+  max-height: 180px;
+}
+
+.edgeTxnRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.edgeTxnRow:last-child {
+  border-bottom: none;
+}
+
+.edgeTxnTime {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.75);
+  white-space: nowrap;
+}
+
+.edgeTxnAmount {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.edgeTxnAmount--in {
+  color: #15803d;
+}
+
+.edgeTxnAmount--out {
+  color: #dc2626;
+}
+
+.edgeTxnEmpty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.confirmMask .modalCard {
+  width: 380px;
+  padding: 18px 18px 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+  box-shadow: 0 24px 70px rgba(2, 6, 23, 0.22);
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.confirmMask.show .modalCard {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.confirmHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.confirmIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(239, 68, 68, 0.12);
+  color: rgba(239, 68, 68, 0.95);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.7);
+}
+
+.confirmIcon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.confirmTitleWrap .modalTitle {
+  margin-bottom: 2px;
+}
+
+.confirmSubtitle {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.confirmMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.04);
+  margin-bottom: 10px;
+}
+
+.confirmName {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(2, 6, 23, 0.88);
+}
+
+.confirmTag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.12);
+  color: rgba(239, 68, 68, 0.95);
+}
+
+.confirmTag.saved {
+  background: rgba(31, 111, 235, 0.12);
+  color: rgba(31, 111, 235, 0.95);
+}
+
+.confirmBody {
+  gap: 6px;
+}
+
+.confirmMessage {
+  font-size: 13px;
+  color: rgba(2, 6, 23, 0.78);
+}
+
+.confirmHint {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.5);
+}
+
+.nodeHoverTip {
+  position: fixed;
+  z-index: 60;
+  display: none;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+  max-width: 320px;
+}
+
+.nodeHoverTipTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #e2e8f0;
+}
+
+.nodeHoverTipList {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.nodeHoverTipItem {
+  font-variant-numeric: tabular-nums;
+  font-family: "DIN Alternate", "DIN", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui;
+  color: #f1f5f9;
+  letter-spacing: 0.2px;
+}
+
+.minimapFloat {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  width: 220px;
+  height: 160px;
+  padding: 10px 10px 8px 10px;
+  border-radius: 16px;
+  opacity: 0.52; /* subtle by default */
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.10);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  transform: translateZ(0);
+  transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  user-select: none;
+}
+
+.minimapFloat:hover {
+  opacity: 0.72;
+}
+
+.minimapTitle {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgba(2, 6, 23, 0.42);
+  margin: 0 0 6px 2px;
+  opacity: 0.7;
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+
+.minimapFloat:hover .minimapTitle {
+  opacity: 0.9;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.minimapBox {
+  width: 100%;
+  height: calc(100% - 18px);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.leftOpts {
+  padding: 12px 16px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.optRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.optLabel {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.55);
+  width: 56px;
+  flex: 0 0 auto;
+}
+
+.optValue {
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.72);
+  font-weight: 800;
+  min-width: 22px;
+  text-align: right;
+}
+
+.segSmall {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.05);
+  gap: 4px;
+}
+
+.segMini {
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: transparent;
+  color: rgba(2, 6, 23, 0.72);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.segMini:hover {
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.segMini.active {
+  background: rgba(31, 111, 235, 0.14);
+  color: rgba(31, 111, 235, 0.96);
+}
+
+.input.sm {
+  height: 34px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.range.sm {
+  width: 110px;
+}
+
+.range {
+  width: 100%;
+}
+
+.leftBottom {
+  padding: 12px 16px 16px 16px;
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.btn.full {
+  flex: 1;
+}
+
+.graphCard {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
+.graphToolbar {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.graphWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.graphWrap::before {
+  content: "";
+  position: absolute;
+  inset: -12% -8%;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(54% 46% at 18% 14%, rgba(31, 111, 235, 0.095), rgba(31, 111, 235, 0) 66%),
+    radial-gradient(48% 42% at 86% 20%, rgba(16, 185, 129, 0.075), rgba(16, 185, 129, 0) 70%),
+    radial-gradient(52% 48% at 44% 92%, rgba(59, 130, 246, 0.05), rgba(59, 130, 246, 0) 74%);
+  opacity: 0.72;
+  transform: translateZ(0);
+}
+
+.graphWrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.05) 0,
+      rgba(255, 255, 255, 0.05) 1px,
+      rgba(255, 255, 255, 0) 1px,
+      rgba(255, 255, 255, 0) 3px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(2, 6, 23, 0.03) 0,
+      rgba(2, 6, 23, 0.03) 1px,
+      rgba(2, 6, 23, 0) 1px,
+      rgba(2, 6, 23, 0) 4px
+    );
+  mix-blend-mode: soft-light;
+  opacity: 0.22;
+}
+
+.graphContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background-color: rgb(244, 246, 251);
+  background-image: radial-gradient(600px 320px at 30% 20%, rgba(31, 111, 235, 0.08), transparent 60%),
+    radial-gradient(520px 280px at 85% 35%, rgba(16, 185, 129, 0.06), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.2));
+}
+
+.graphPointLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.92;
+}
+
+.graphWebglCanvas {
+  z-index: 0;
+}
+
+.graphLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+body.stable .graphLoading {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.loadingCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 60px rgba(2, 6, 23, 0.18);
+}
+
+.loadingDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 4px rgba(31, 111, 235, 0.16);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.loadingText {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(2, 6, 23, 0.8);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+}
+
+/* Edge label modal: remove blue focus glow/background */
+#edgeLabelModal .input:focus {
+  border-color: var(--border);
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+/* Program-shell refinement: connect flow zones to the global navigation shell,
+   increase canvas area, and keep canvas chrome permanently visible. */
+.app {
+  padding: 0;
+  gap: 0;
+  background: var(--flow-program-shell-bg, var(--program-shell-bg, #f4f6fb));
+}
+
+.right {
+  gap: 0;
+}
+
+.card,
+.cardSolid,
+.toolBarCard,
+.graphCard {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.toolBarCard,
+.graphCard {
+  border-left: none;
+  border-right: none;
+}
+
+.toolBarCard {
+  height: var(--flow-program-toolbar-height, 72px);
+  padding: var(--flow-program-toolbar-padding-top, 2px) var(--flow-program-toolbar-padding-x, 9px) 0;
+  gap: var(--flow-program-toolbar-gap, 4px);
+  border-top: none;
+  border-bottom: 1px solid var(--flow-program-shell-border, rgba(15, 23, 42, 0.12));
+  background: var(
+    --flow-program-toolbar-bg,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.985), rgba(246, 249, 252, 0.97))
+  );
+}
+
+.toolBarCard.ribbon::-webkit-scrollbar {
+  height: 4px;
+}
+
+.ribbonGroup {
+  gap: 3px;
+}
+
+.ribbonGroupBody,
+.ribbonSub,
+.typoGrid,
+.ribbonRow,
+.layoutGrid,
+.analyzeGrid,
+.opsGrid {
+  gap: 4px;
+}
+
+:root {
+  --ribbon-row: 24px;
+  --tab-min-width: 142px;
+  --tab-min-width-active: 142px;
+  --flow-program-shell-bg: var(--program-shell-bg, #f4f6fb);
+  --flow-program-shell-border: rgba(15, 23, 42, 0.12);
+  --flow-program-toolbar-height: 72px;
+  --flow-program-toolbar-padding-top: 2px;
+  --flow-program-toolbar-padding-x: 9px;
+  --flow-program-toolbar-gap: 4px;
+  --flow-program-toolbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.985), rgba(246, 249, 252, 0.97));
+  --flow-program-tabs-bg: linear-gradient(180deg, rgba(245, 248, 251, 0.98), rgba(242, 246, 250, 0.94));
+  --flow-program-canvas-bg: linear-gradient(180deg, rgba(244, 247, 250, 0.98), rgba(242, 246, 250, 1));
+  --flow-minimap-width: 188px;
+}
+
+.comboField {
+  height: 26px;
+  min-width: 182px;
+  border-radius: 9px;
+}
+
+.comboBtn {
+  padding: 0 8px;
+  font-size: 10.2px;
+}
+
+.comboLabel {
+  max-width: 76px;
+}
+
+.ribbonMini {
+  font-size: 10.2px;
+}
+
+.ribbonMini.sizeBtn {
+  height: 26px;
+  width: 22px;
+}
+
+.ribbonMini.toggle {
+  height: 22px;
+  width: 22px;
+}
+
+.ribbonColorBtn,
+.ribbonColorBtn.compact,
+.ribbonCellBtn,
+.ribbonTile {
+  border-radius: 7px;
+}
+
+.ribbonColorBtn {
+  height: 26px;
+  padding: 0 5px;
+}
+
+.ribbonColorBtn.compact {
+  height: 24px;
+  padding: 0 4px;
+}
+
+.ribbonCellBtn,
+.ribbonTile {
+  padding: 0 4px;
+}
+
+.ribbonSplitTile {
+  --split-trigger-width: 18px;
+  border-radius: 7px;
+}
+
+.btnText,
+.colorLabel,
+.ribbonCaption,
+.ribbonSubCaption {
+  font-size: 8.25px;
+}
+
+.layoutGrid {
+  grid-template-columns: repeat(2, 78px);
+}
+
+.ribbonRow.row2 {
+  grid-template-columns: repeat(2, 76px);
+}
+
+.ribbonRow.row3 {
+  grid-template-columns: repeat(3, 72px);
+}
+
+.analyzeGrid {
+  --analyze-col: 72px;
+  --analyze-gap: 3px;
+  --analysis-cmd-col: 66px;
+  --analysis-combo-col: 44px;
+}
+
+.opsGrid .row2 {
+  grid-template-columns: repeat(3, 68px);
+}
+
+.graphCard {
+  background: transparent;
+  border-top: none;
+}
+
+.tabsBar {
+  min-height: 36px;
+  max-height: 38px;
+  padding: 3px 10px 0;
+  gap: 6px;
+  background: var(
+    --flow-program-tabs-bg,
+    linear-gradient(180deg, rgba(245, 248, 251, 0.98), rgba(242, 246, 250, 0.94))
+  );
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  transform-origin: top center;
+  transition:
+    max-height 220ms ease,
+    padding 220ms ease,
+    background 220ms ease,
+    border-color 220ms ease;
+}
+
+.tabsBar::after {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.tabsBar[data-views-mode="collapsed"] {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 16;
+  width: 100%;
+  min-height: 0;
+  max-height: 0;
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.tabsBar[data-views-mode="collapsed"]::after {
+  opacity: 0;
+}
+
+#graphWrap > [data-shell-mount="empty-view"] {
+  inset: 16px auto auto 18px;
+  width: auto;
+  height: auto;
+  overflow: visible;
+}
+
+#graphWrap > [data-shell-mount="empty-view"] > * {
+  pointer-events: auto;
+}
+
+#graphToolbar[data-views-mode="expanded"] {
+  border-bottom: none;
+}
+
+#graphCard[data-views-mode="collapsed"] .graphWrap {
+  margin-top: 0;
+}
+
+.analytix-react-views-bar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.analytix-react-views-bar.is-collapsed {
+  width: auto;
+  height: auto;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.analytix-react-views-bar.is-expanded {
+  animation: flowViewsBarReveal 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes flowViewsBarReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.viewTab {
+  min-width: var(--tab-min-width);
+  height: 29px;
+  padding: 0 11px 0 36px;
+  border-radius: 11px 11px 0 0;
+}
+
+.viewTab.active {
+  border-radius: 11px 11px 0 0;
+}
+
+.viewTitle {
+  font-size: 10.5px;
+  max-width: 148px;
+}
+
+.viewClose {
+  width: 20px;
+  height: 20px;
+  left: 7px;
+}
+
+.viewAdd {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.viewAddSolo {
+  width: auto;
+  min-width: 102px;
+  height: 29px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(246, 248, 251, 0.82));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.viewAddSoloIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(31, 111, 235, 0.12);
+  color: rgba(31, 111, 235, 0.96);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.viewAddSoloText {
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.graphWrap {
+  background: var(
+    --flow-program-canvas-bg,
+    linear-gradient(180deg, rgba(244, 247, 250, 0.98), rgba(242, 246, 250, 1))
+  );
+}
+
+.graphWrap::before {
+  inset: -8% -4%;
+  opacity: 0.28;
+}
+
+.graphWrap::after {
+  opacity: 0.08;
+}
+
+.graphContainer {
+  background-color: var(--flow-program-shell-bg, var(--program-shell-bg, rgb(244, 246, 251)));
+  background-image:
+    radial-gradient(520px 280px at 22% 12%, rgba(31, 111, 235, 0.038), transparent 64%),
+    radial-gradient(420px 220px at 84% 24%, rgba(16, 185, 129, 0.03), transparent 68%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.12));
+}
+
+.analytix-react-shell-active #graphSearchFloat > .analytix-react-shell-host,
+.analytix-react-shell-active #graphStatsFloat > .analytix-react-shell-host {
+  display: block !important;
+  visibility: visible !important;
+}
+
+.graphSearchFloat,
+.graphStatsFloat,
+.minimapFloat {
+  z-index: 14;
+}
+
+.graphSearchFloat {
+  right: 12px;
+  top: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: clamp(140px, 10vw, 156px);
+  min-height: 26px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  opacity: 0.72;
+  border-color: rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.68));
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition:
+    opacity 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    width 180ms ease;
+}
+
+.graphSearchFloat:hover {
+  opacity: 0.82;
+}
+
+.graphSearchFloat:focus-within {
+  width: clamp(146px, 10.5vw, 164px);
+  opacity: 0.94;
+  border-color: rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 249, 252, 0.78));
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+}
+
+.graphSearchFloat > .analytix-react-shell-host {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.analytix-react-graph-search {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.graphSearchFloat .analytix-react-graph-search {
+  gap: 0;
+}
+
+.graphSearchFloat .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 16px;
+  padding: 0 1px;
+  font-size: 10px;
+  line-height: 16px;
+  background: transparent;
+  text-align: left;
+}
+
+.graphSearchFloat .input::placeholder {
+  color: rgba(100, 116, 139, 0.7);
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.graphSearchFloat .iconBtn.sm,
+.analytix-react-graph-search-clear {
+  width: 0;
+  min-width: 0;
+  height: 14px;
+  padding: 0;
+  margin-left: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.analytix-react-graph-search.has-value .analytix-react-graph-search-clear {
+  width: 14px;
+  min-width: 14px;
+  margin-left: 1px;
+}
+
+.analytix-react-graph-search-action {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.28);
+  color: rgba(15, 23, 42, 0.72);
+  opacity: 0.8;
+}
+
+.analytix-react-graph-search-action:hover:not(:disabled),
+.analytix-react-graph-search-action:focus-visible:not(:disabled) {
+  opacity: 1;
+  border-color: rgba(31, 111, 235, 0.28);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.analytix-react-graph-search-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.graphStatsFloat {
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  opacity: 0.72;
+  border-color: rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(246, 248, 251, 0.66));
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 9.5px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.graphStatsFloat > .analytix-react-shell-host {
+  width: auto !important;
+  height: auto !important;
+}
+
+.analytix-react-graph-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  width: auto;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+
+.graphStatsItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: auto;
+  flex: 0 0 auto;
+  padding: 0 8px 0 0;
+  margin-right: 8px;
+  border-right: 1px solid rgba(203, 213, 225, 0.42);
+  background: transparent;
+}
+
+.graphStatsItem:last-child {
+  padding-right: 0;
+  margin-right: 0;
+  border-right: none;
+}
+
+.graphStatsItem-amount {
+  max-width: none;
+}
+
+.graphStatsLabel,
+.graphStatsValue {
+  line-height: 1;
+}
+
+.graphStatsLabel {
+  font-size: 9px;
+  color: rgba(100, 116, 139, 0.66);
+}
+
+.graphStatsValue {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.78);
+  white-space: nowrap;
+}
+
+.minimapFloat {
+  right: 12px;
+  bottom: 12px;
+  width: var(--flow-minimap-width, 188px);
+  height: 136px;
+  padding: 8px 8px 6px;
+  border-radius: 12px;
+  opacity: 0.8;
+  border-color: rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(248, 250, 252, 0.78));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.toastWrap {
+  left: 50%;
+  right: auto;
+  bottom: 18px;
+  transform: translateX(-50%);
+  align-items: center;
+  z-index: 18;
+}
+
+.minimapTitle {
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.minimapBox {
+  height: calc(100% - 16px);
+  border-radius: 10px;
+}
+
+@media (max-width: 1440px) {
+  :root {
+    --flow-minimap-width: 176px;
+  }
+}
+
+/* Statistics-aligned visual refinements for the graph workspace. */
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --panelSolid: #ffffff;
+  --border: #dce3f1;
+  --shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
+  --shadow2: 0 10px 24px rgba(15, 23, 42, 0.05);
+  --focus: 0 0 0 3px rgba(31, 111, 235, 0.14);
+  --flow-program-shell-bg: #f5f7fb;
+  --flow-program-shell-border: #dce3f1;
+  --flow-program-toolbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(250, 251, 255, 0.96));
+  --flow-program-tabs-bg: linear-gradient(180deg, rgba(250, 252, 255, 0.98), rgba(247, 249, 253, 0.96));
+  --flow-program-canvas-bg: linear-gradient(180deg, rgba(250, 252, 255, 0.98), rgba(245, 247, 251, 1));
+  --flow-floating-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(249, 251, 255, 0.68));
+  --flow-floating-border: rgba(220, 227, 241, 0.72);
+  --flow-floating-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  --flow-active-bg: rgba(31, 111, 235, 0.12);
+  --flow-active-border: rgba(31, 111, 235, 0.24);
+  --flow-active-text: rgba(31, 111, 235, 0.98);
+  --flow-view-divider: rgba(220, 227, 241, 0.92);
+  --flow-view-tab-text: rgba(15, 23, 42, 0.58);
+  --flow-view-tab-hover-text: rgba(31, 111, 235, 0.86);
+  --flow-view-tab-active-bg: rgba(255, 255, 255, 0.72);
+  --flow-view-tab-active-text: rgba(15, 23, 42, 0.88);
+}
+
+body {
+  background:
+    radial-gradient(920px 460px at 12% -6%, rgba(31, 111, 235, 0.08), transparent 58%),
+    radial-gradient(860px 420px at 94% 2%, rgba(16, 185, 129, 0.05), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0)),
+    #f5f7fb;
+}
+
+.toolBarCard {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.graphCard {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.comboField,
+.ribbonMini,
+.ribbonColorBtn,
+.ribbonCellBtn,
+.ribbonTile,
+.viewAdd,
+.viewAddSolo {
+  border-color: var(--border);
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+
+.comboField:hover,
+.ribbonMini:hover,
+.ribbonColorBtn:hover,
+.ribbonCellBtn:hover,
+.ribbonTile:hover,
+.viewAdd:hover,
+.viewAddSolo:hover {
+  border-color: rgba(31, 111, 235, 0.18);
+  background: #ffffff;
+}
+
+.comboField:focus-within,
+.ribbonMini:focus-visible,
+.ribbonColorBtn:focus-visible,
+.ribbonCellBtn:focus-visible,
+.ribbonTile:focus-visible,
+.viewAdd:focus-visible,
+.viewAddSolo:focus-visible {
+  outline: none;
+  border-color: rgba(31, 111, 235, 0.3);
+  box-shadow: var(--focus), 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.comboBtn:hover {
+  background: rgba(31, 111, 235, 0.05);
+}
+
+.ribbonMini.sizeBtn,
+.ribbonMini.toggle,
+.ribbonTile.comboBtn {
+  border-color: var(--border);
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+
+.ribbonMini.sizeBtn:hover,
+.ribbonMini.toggle:hover,
+.ribbonTile.comboBtn:hover {
+  background: rgba(31, 111, 235, 0.06);
+  border-color: rgba(31, 111, 235, 0.18);
+}
+
+.ribbonTile.comboBtn {
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--ribbon-row) - 2px);
+  border-radius: 8px;
+}
+
+.ribbonTile.comboBtn .btnText {
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.analyzeTopRow .ribbonTile.comboBtn {
+  width: 100%;
+  height: 100%;
+}
+
+.segBtn.active,
+.segMini.active,
+.ribbonMini.toggle.active,
+.layoutGrid .layoutBtn.active,
+.analyzeGrid .analysisBtn.active,
+.analyzeGrid .analysisCmdBtn.active,
+.analyzeGrid .analysisCmdBtn.popover-open,
+.opsGrid .mergeBtn.active,
+.opsGrid .detailBtn.active,
+.ribbonTile.active,
+.ribbonTile.comboBtn.active,
+.popoverItem.active,
+.iconTab.active,
+.iconBtn.active {
+  border-color: var(--flow-active-border);
+  background: var(--flow-active-bg);
+  color: var(--flow-active-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 18px rgba(31, 111, 235, 0.08);
+}
+
+.segBtn.active,
+.segMini.active {
+  box-shadow: none;
+}
+
+.cb.checked {
+  background: var(--flow-active-bg);
+  border-color: var(--flow-active-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.tabsBar {
+  min-height: 34px;
+  max-height: 34px;
+  padding: 0 16px;
+  align-items: stretch;
+  gap: 10px;
+  background: transparent;
+  border-bottom: 1px solid var(--flow-view-divider);
+}
+
+.tabsBar::after {
+  display: none;
+}
+
+.viewsScroll {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tabSep {
+  display: none;
+}
+
+.viewTab {
+  min-width: 0;
+  max-width: 188px;
+  height: 34px;
+  margin-bottom: 0;
+  padding: 0 10px 0 12px;
+  gap: 6px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid rgba(220, 227, 241, 0.78);
+  background: transparent;
+  box-shadow: none;
+  flex: 1 1 0;
+}
+
+.viewTab:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.viewTab.active {
+  margin-bottom: 0;
+  background: var(--flow-view-tab-active-bg);
+  box-shadow: inset 0 -2px 0 rgba(31, 111, 235, 0.18);
+}
+
+.viewTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--flow-view-tab-text);
+}
+
+.viewTab:hover .viewTitle {
+  color: rgba(15, 23, 42, 0.74);
+}
+
+.viewTab.active .viewTitle {
+  color: var(--flow-view-tab-active-text);
+}
+
+.viewClose {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.28);
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: none;
+}
+
+.viewTab.active .viewClose,
+.viewTab:hover .viewClose {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.viewClose svg,
+.viewAdd svg,
+.viewAddSoloIcon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.viewClose:hover {
+  background: rgba(31, 111, 235, 0.06);
+  color: rgba(31, 111, 235, 0.9);
+}
+
+.viewAdd {
+  width: 24px;
+  height: 24px;
+  margin: 5px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--flow-floating-radius-compact);
+  background: transparent;
+  box-shadow: none;
+  color: rgba(15, 23, 42, 0.4);
+}
+
+.viewAdd.viewAddSolo {
+  width: auto;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  gap: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  background: transparent;
+  color: rgba(100, 116, 139, 0.84);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.viewAddSoloIcon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  background: transparent;
+  color: inherit;
+}
+
+.viewAdd:hover,
+.viewAddSolo:hover {
+  background: transparent;
+  color: var(--flow-view-tab-hover-text);
+}
+
+.viewAdd:focus-visible,
+.viewAddSolo:focus-visible {
+  border: none;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+  color: var(--flow-view-tab-hover-text);
+}
+
+.viewAddSoloText {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.graphWrap {
+  background: var(--flow-program-canvas-bg);
+}
+
+.graphWrap::before {
+  inset: -8% -4%;
+  background:
+    radial-gradient(48% 42% at 18% 14%, rgba(31, 111, 235, 0.05), rgba(31, 111, 235, 0) 70%),
+    radial-gradient(44% 38% at 84% 18%, rgba(16, 185, 129, 0.04), rgba(16, 185, 129, 0) 72%),
+    radial-gradient(48% 42% at 48% 96%, rgba(59, 130, 246, 0.03), rgba(59, 130, 246, 0) 72%);
+  opacity: 0.6;
+}
+
+.graphWrap::after {
+  opacity: 0.1;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(220, 227, 241, 0.38) 0,
+      rgba(220, 227, 241, 0.38) 1px,
+      rgba(220, 227, 241, 0) 1px,
+      rgba(220, 227, 241, 0) 24px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(220, 227, 241, 0.38) 0,
+      rgba(220, 227, 241, 0.38) 1px,
+      rgba(220, 227, 241, 0) 1px,
+      rgba(220, 227, 241, 0) 24px
+    );
+  mix-blend-mode: normal;
+}
+
+.graphContainer {
+  background-color: #f5f7fb;
+  background-image:
+    radial-gradient(560px 300px at 24% 14%, rgba(31, 111, 235, 0.04), transparent 64%),
+    radial-gradient(460px 240px at 84% 24%, rgba(16, 185, 129, 0.025), transparent 68%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.12));
+}
+
+.graphSearchFloat,
+.graphStatsFloat,
+.minimapFloat {
+  opacity: 1;
+  border: 1px solid var(--flow-floating-border);
+  border-radius: var(--flow-floating-radius);
+  background: var(--flow-floating-bg);
+  box-shadow: var(--flow-floating-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transform: translateZ(0);
+}
+
+.graphSearchFloat:hover,
+.graphSearchFloat:focus-within,
+.graphStatsFloat:hover,
+.minimapFloat:hover {
+  border-color: rgba(31, 111, 235, 0.18);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.graphSearchFloat {
+  top: 14px;
+  right: 14px;
+  width: clamp(180px, 11vw, 220px);
+  min-height: 36px;
+  padding: 4px 8px;
+}
+
+.graphSearchFloat:focus-within {
+  width: clamp(196px, 12vw, 236px);
+  background: var(--flow-floating-bg);
+}
+
+.graphSearchFloat .input {
+  height: 24px;
+  padding: 0;
+  border-radius: var(--flow-floating-radius-inner);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+  line-height: 24px;
+  color: rgba(15, 23, 42, 0.8);
+}
+
+.graphSearchFloat .input::placeholder {
+  color: rgba(100, 116, 139, 0.64);
+}
+
+.graphSearchFloat .iconBtn.sm,
+.analytix-react-graph-search-clear {
+  width: 0;
+  min-width: 0;
+  height: 18px;
+  margin-left: 0;
+  border-radius: var(--flow-floating-radius-compact);
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.analytix-react-graph-search.has-value .analytix-react-graph-search-clear {
+  width: 18px;
+  min-width: 18px;
+  margin-left: 4px;
+}
+
+.analytix-react-graph-search-action {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  border-radius: var(--flow-floating-radius-compact);
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(15, 23, 42, 0.72);
+  opacity: 0.72;
+}
+
+.analytix-react-graph-search-action:hover:not(:disabled),
+.analytix-react-graph-search-action:focus-visible:not(:disabled) {
+  opacity: 1;
+  border-color: transparent;
+  background: color-mix(in oklab, var(--flow-toolbar-text) 4%, transparent);
+}
+
+.analytix-react-graph-search-action:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.graphStatsFloat {
+  left: 14px;
+  bottom: 14px;
+  min-height: 28px;
+  padding: 0 7px;
+  border-color: var(--flow-floating-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(249, 251, 255, 0.42));
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.03);
+}
+
+.graphStatsFloat:hover {
+  border-color: rgba(31, 111, 235, 0.09);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.graphStatsItem {
+  gap: 2px;
+  padding: 0 5px 0 0;
+  margin-right: 5px;
+  border-right: 1px solid rgba(220, 227, 241, 0.54);
+}
+
+.graphStatsLabel {
+  font-size: 9px;
+  color: rgba(15, 23, 42, 0.26);
+}
+
+.graphStatsValue {
+  font-size: 10px;
+  color: rgba(15, 23, 42, 0.56);
+}
+
+.minimapFloat {
+  right: 14px;
+  bottom: 14px;
+  border-color: var(--flow-floating-border);
+  background: var(--flow-floating-bg);
+}
+
+.minimapTitle {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.42);
+  opacity: 1;
+}
+
+.minimapBox {
+  border: 1px solid var(--border);
+  border-radius: var(--flow-floating-radius-inner);
+  background: rgba(248, 251, 255, 0.76);
+}
+
+/* Toolbar normalization, responsiveness, and final polish */
+:root {
+  --bg: var(--color-bg, #f5f7fb);
+  --panel: var(--color-bg-elevated, #ffffff);
+  --panelSolid: var(--color-bg-elevated, #ffffff);
+  --border: color-mix(in oklab, var(--color-border, #dce3f1) 88%, transparent);
+  --shadow: var(--shadow-card, 0 14px 32px rgba(15, 23, 42, 0.06));
+  --shadow2: 0 10px 24px color-mix(in oklab, var(--color-text, #1a2740) 8%, transparent);
+  --focus: 0 0 0 3px color-mix(in oklab, var(--color-accent, #4f63ff) 24%, transparent);
+  --flow-toolbar-surface: color-mix(in oklab, var(--color-bg-elevated, #ffffff) 96%, var(--color-bg-subtle, #edf1f8));
+  --flow-toolbar-surface-subtle: color-mix(in oklab, var(--color-bg-subtle, #edf1f8) 72%, var(--color-bg-elevated, #ffffff));
+  --flow-toolbar-surface-hover: color-mix(in oklab, var(--color-accent, #4f63ff) 6%, var(--flow-toolbar-surface) 94%);
+  --flow-toolbar-border: color-mix(in oklab, var(--color-border, #dce3f1) 86%, var(--flow-toolbar-surface) 14%);
+  --flow-toolbar-border-strong: color-mix(in oklab, var(--color-accent, #4f63ff) 28%, var(--flow-toolbar-border) 72%);
+  --flow-toolbar-text: var(--color-text, #1a2740);
+  --flow-toolbar-text-muted: var(--color-text-muted, #657690);
+  --flow-toolbar-text-subtle: color-mix(in oklab, var(--flow-toolbar-text-muted) 88%, var(--flow-toolbar-text) 12%);
+  --flow-toolbar-accent: var(--color-accent, #4f63ff);
+  --flow-toolbar-accent-strong: var(--color-accent-strong, #3448df);
+  --flow-toolbar-accent-surface: color-mix(in oklab, var(--flow-toolbar-accent) 11%, var(--flow-toolbar-surface) 89%);
+  --flow-toolbar-accent-surface-strong: color-mix(in oklab, var(--flow-toolbar-accent) 16%, var(--flow-toolbar-surface) 84%);
+  --flow-toolbar-shadow: var(--shadow-card, 0 14px 32px rgba(15, 23, 42, 0.06));
+  --flow-toolbar-shadow-strong: var(--shadow-elevated, 0 20px 44px rgba(15, 23, 42, 0.12));
+  --flow-toolbar-shell-height: 72px;
+  --flow-toolbar-shell-pad-y: 4px;
+  --flow-toolbar-shell-pad-x: 8px;
+  --flow-toolbar-group-gap: 8px;
+  --flow-toolbar-subgroup-gap: 6px;
+  --flow-toolbar-caption-size: 8.5px;
+  --flow-toolbar-label-size: 8.5px;
+  --flow-toolbar-caption-color: color-mix(in oklab, var(--flow-toolbar-text-muted) 78%, var(--flow-toolbar-text) 22%);
+  --flow-toolbar-label-color: color-mix(in oklab, var(--flow-toolbar-text-muted) 82%, var(--flow-toolbar-text) 18%);
+  --flow-toolbar-combo-height: 26px;
+  --flow-toolbar-combo-min-width: 182px;
+  --flow-toolbar-combo-label-max: 76px;
+  --flow-toolbar-control-radius: 4px;
+  --flow-toolbar-control-radius-compact: 4px;
+  --flow-toolbar-mini-size: 22px;
+  --flow-toolbar-mini-tall-size: 26px;
+  --flow-toolbar-color-height: 26px;
+  --flow-toolbar-color-compact-height: 24px;
+  --flow-toolbar-popover-control-height: 34px;
+  --flow-toolbar-palette-swatch-size: 28px;
+  --flow-toolbar-edge-fade-width: 20px;
+  --flow-toolbar-layout-col: 78px;
+  --flow-toolbar-row2-col: 76px;
+  --flow-toolbar-row3-col: 72px;
+  --flow-toolbar-analyze-col: 72px;
+  --flow-toolbar-analyze-gap: 3px;
+  --flow-toolbar-analyze-command-col: 66px;
+  --flow-toolbar-analyze-combo-col: 44px;
+  --flow-toolbar-ops-col: 68px;
+  --ribbon-row: 24px;
+  --tab-min-width: 142px;
+  --tab-min-width-active: 142px;
+  --flow-program-shell-bg: var(--bg);
+  --flow-program-shell-border: var(--flow-toolbar-border);
+  --flow-program-toolbar-bg: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--flow-toolbar-surface) 96%, white 4%),
+    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 94%, var(--bg) 6%)
+  );
+  --flow-program-tabs-bg: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--flow-toolbar-surface) 92%, var(--bg) 8%),
+    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 90%, var(--bg) 10%)
+  );
+  --flow-program-canvas-bg: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--flow-toolbar-surface) 66%, var(--bg) 34%),
+    color-mix(in oklab, var(--bg) 92%, var(--flow-toolbar-surface-subtle) 8%)
+  );
+  --flow-floating-bg: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--flow-toolbar-surface) 84%, transparent),
+    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 76%, transparent)
+  );
+  --flow-floating-border: color-mix(in oklab, var(--flow-toolbar-border) 82%, transparent);
+  --flow-floating-shadow: var(--flow-toolbar-shadow);
+  --flow-floating-radius: 10px;
+  --flow-floating-radius-inner: 7px;
+  --flow-floating-radius-compact: 5px;
+  --flow-active-bg: var(--flow-toolbar-accent-surface-strong);
+  --flow-active-border: color-mix(in oklab, var(--flow-toolbar-accent) 34%, var(--flow-toolbar-border) 66%);
+  --flow-active-text: color-mix(in oklab, var(--flow-toolbar-accent-strong) 58%, var(--flow-toolbar-text) 42%);
+  --flow-view-divider: color-mix(in oklab, var(--flow-toolbar-border) 92%, transparent);
+  --flow-view-tab-text: color-mix(in oklab, var(--flow-toolbar-text-muted) 82%, var(--flow-toolbar-text) 18%);
+  --flow-view-tab-hover-text: var(--flow-toolbar-accent-strong);
+  --flow-view-tab-active-bg: color-mix(in oklab, var(--flow-toolbar-surface) 94%, transparent);
+  --flow-view-tab-active-text: var(--flow-toolbar-text);
+}
+
+body {
+  color: var(--flow-toolbar-text);
+  background: var(--gradient-atmosphere), var(--bg);
+}
+
+.toolBarCard {
+  padding: var(--flow-toolbar-shell-pad-y) var(--flow-toolbar-shell-pad-x);
+  gap: var(--flow-toolbar-group-gap);
+  height: var(--flow-toolbar-shell-height);
+  min-height: var(--flow-toolbar-shell-height);
+  align-items: stretch;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--flow-program-toolbar-bg);
+  border-bottom: 1px solid var(--flow-program-shell-border);
+}
+
+#graphToolbar :is(button, .comboField, .ribbonSplitTile, .ribbonSplitMain, .ribbonSplitTrigger) {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.toolBarCard,
+.toolBarCard *,
+#graphToolbar,
+#graphToolbar * {
+  -webkit-app-region: no-drag !important;
+  app-region: no-drag !important;
+}
+
+#graphToolbar :is(.comboLabel, .colorLabel) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#graphToolbar .btnText {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+#graphToolbar :is(svg.ico, .colorSwatch) {
+  flex: 0 0 auto;
+}
+
+#graphToolbar .ribbonSplitMain {
+  gap: 4px;
+  padding-inline: 4px;
+}
+
+#graphToolbar .ribbonSplitMain > .ico:not(.caret),
+#graphToolbar .analyzeGrid .analysisBtn > .ico {
+  width: 16px;
+  height: 16px;
+}
+
+#graphToolbar .analyzeGrid .analysisBtn {
+  gap: 4px;
+  padding-inline: 4px;
+}
+
+#graphToolbar .analyzeGrid .analysisCmdBtn {
+  display: grid;
+  grid-template-columns: 16px max-content;
+  align-items: center;
+  justify-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding-inline: 6px;
+}
+
+#graphToolbar .analyzeGrid .analysisCmdBtn.drop {
+  grid-template-columns: 16px max-content 10px;
+}
+
+#graphToolbar .analyzeGrid .analysisCmdBtn > .ico {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+}
+
+#graphToolbar .analyzeGrid .analysisCmdBtn > .ico.caret {
+  position: static;
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  margin: 0;
+}
+
+#graphToolbar .analyzeGrid .analysisCmdBtn .btnText {
+  min-width: 2em;
+}
+
+#graphToolbar.toolBarCard {
+  border-bottom-color: transparent;
+  height: calc(var(--flow-toolbar-shell-height) + 3px);
+  min-height: calc(var(--flow-toolbar-shell-height) + 3px);
+}
+
+.toolBarCard.ribbon {
+  position: relative;
+  isolation: isolate;
+  scrollbar-color: color-mix(in oklab, var(--flow-toolbar-border-strong) 58%, transparent) transparent;
+  scrollbar-gutter: stable both-edges;
+}
+
+.toolBarCard.ribbon::before,
+.toolBarCard.ribbon::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--flow-toolbar-edge-fade-width);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 160ms) ease;
+  z-index: 2;
+}
+
+.toolBarCard.ribbon::before {
+  left: 0;
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--flow-toolbar-surface) 96%, var(--bg) 4%), transparent),
+    linear-gradient(90deg, color-mix(in oklab, var(--flow-toolbar-border) 30%, transparent), transparent);
+}
+
+.toolBarCard.ribbon::after {
+  right: 0;
+  background:
+    linear-gradient(270deg, color-mix(in oklab, var(--flow-toolbar-surface) 96%, var(--bg) 4%), transparent),
+    linear-gradient(270deg, color-mix(in oklab, var(--flow-toolbar-border) 30%, transparent), transparent);
+}
+
+.toolBarCard.ribbon[data-toolbar-overflowing="true"][data-toolbar-scroll-start="false"]::before,
+.toolBarCard.ribbon[data-toolbar-overflowing="true"][data-toolbar-scroll-end="false"]::after {
+  opacity: 1;
+}
+
+.toolBarCard.ribbon::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--flow-toolbar-border-strong) 54%, transparent);
+}
+
+.ribbonDivider {
+  background: color-mix(in oklab, var(--flow-toolbar-border) 92%, transparent);
+}
+
+.ribbonSubDivider {
+  align-self: center;
+  width: 1px;
+  min-width: 1px;
+  height: 34px;
+  margin: 0 7px;
+  overflow: hidden;
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+  background: color-mix(in oklab, var(--flow-toolbar-text-muted) 26%, transparent);
+}
+
+.ribbonCaption,
+.ribbonSubCaption {
+  font-size: var(--flow-toolbar-caption-size);
+  color: var(--flow-toolbar-caption-color);
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+}
+
+.ribbonCaption {
+  font-weight: 600;
+}
+
+.ribbonSubCaption {
+  font-weight: 550;
+}
+
+.styleBlocks .ribbonSubDivider {
+  margin: 0 8px;
+}
+
+.ribbonGroupShell {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.ribbonGroupShell > .ribbonGroupBody {
+  align-self: end;
+}
+
+.ribbonGroupShell--style {
+  grid-template-rows: 1fr;
+}
+
+.ribbonGroupShell--lined {
+  grid-template-rows: 1fr 0;
+  row-gap: 0;
+}
+
+.ribbonGroupBody {
+  flex-wrap: nowrap;
+  gap: var(--flow-toolbar-subgroup-gap);
+}
+
+.styleGroup {
+  grid-template-rows: 1fr;
+  gap: 0;
+}
+
+.layoutGroup,
+.analyzeGroup,
+.opsGroup {
+  grid-template-rows: 1fr 0;
+  gap: 0;
+}
+
+.styleGroup > .ribbonGroupBody,
+.layoutGroup > .ribbonGroupBody,
+.analyzeGroup > .ribbonGroupBody,
+.opsGroup > .ribbonGroupBody {
+  align-self: end;
+}
+
+.ribbonSubLined {
+  grid-template-rows: 1fr 0;
+  gap: 0;
+}
+
+.ribbonSubLined .ribbonSubBody {
+  width: 100%;
+  align-self: stretch;
+}
+
+.ribbonSubBaseline {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+}
+
+.ribbonCaptionBaseline {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  letter-spacing: 0;
+  user-select: none;
+}
+
+.ribbonCaptionGhost {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  letter-spacing: 0;
+}
+
+.typoGrid {
+  grid-template-rows: 26px 24px;
+  gap: 4px;
+}
+
+.textBlock .typoGrid {
+  min-height: 66px;
+  width: 100%;
+  grid-template-rows: repeat(2, 30px);
+  gap: 6px;
+}
+
+.textBlock {
+  width: 236px;
+}
+
+.textBlock .colorRow {
+  width: calc(100% - 10px);
+  justify-self: end;
+}
+
+.textBlock .colorRow .ribbonColorBtn {
+  min-width: 0;
+}
+
+.textBlock .colorRow .ribbonColorBtn.compact {
+  gap: 2px;
+  padding-inline: 3px;
+}
+
+.textBlock .colorRow .ribbonColorBtn.compact .colorSwatch {
+  width: 12px;
+  height: 12px;
+}
+
+.textBlock .colorRow .ribbonColorBtn.compact .colorLabel {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.textBlock .colorRow .ribbonColorBtn.compact .ico.caret {
+  width: 10px;
+  height: 10px;
+}
+
+.typoRow,
+.toggleRow {
+  gap: 6px;
+}
+
+.textBlock .typoRow {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+}
+
+.textBlock .typoRow.top {
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 0.7fr);
+}
+
+.textBlock .typoRow.bottom {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.textBlock .toggleRow,
+.textBlock .colorRow,
+.textBlock .comboField,
+.textBlock .splitBtns {
+  width: 100%;
+  min-width: 0;
+}
+
+.textBlock .toggleRow {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.textBlock .ribbonMini.sizeBtn,
+.textBlock .ribbonMini.toggle {
+  width: 100%;
+}
+
+.textBlock .comboField,
+.textBlock .ribbonMini.sizeBtn,
+.textBlock .ribbonMini.toggle,
+.textBlock .ribbonColorBtn.compact {
+  min-height: 30px;
+  height: 30px;
+}
+
+.comboField,
+.ribbonMini,
+.ribbonColorBtn,
+.ribbonCellBtn,
+.ribbonTile,
+.viewAdd,
+.viewAddSolo,
+.ribbonSplitTile,
+.ribbonPopover,
+.popoverItem,
+.iconTab,
+.iconBtn,
+.exportScale button,
+.amountFilterInput {
+  border-radius: var(--flow-toolbar-control-radius);
+  border-color: var(--flow-toolbar-border);
+  background: var(--flow-toolbar-surface);
+  box-shadow: var(--flow-toolbar-shadow);
+  color: var(--flow-toolbar-text);
+}
+
+:is(
+  .comboField,
+  .ribbonMini,
+  .ribbonMini.sizeBtn,
+  .ribbonMini.toggle,
+  .ribbonColorBtn,
+  .ribbonColorBtn.compact,
+  .ribbonCellBtn,
+  .ribbonTile,
+  .ribbonTile.comboBtn,
+  .viewAdd,
+  .viewAddSolo,
+  .ribbonSplitTile,
+  .popoverItem,
+  .iconTab,
+  .iconBtn,
+  .exportScale button,
+  .amountFilterInput,
+  .nodeGrid .ribbonColorBtn.compact.nodeFillBtn
+) {
+  border-radius: var(--flow-toolbar-control-radius);
+}
+
+.comboField {
+  height: var(--flow-toolbar-combo-height);
+  min-width: var(--flow-toolbar-combo-min-width);
+}
+
+.comboField:hover,
+.ribbonMini:hover,
+.ribbonColorBtn:hover,
+.ribbonCellBtn:hover,
+.ribbonTile:hover,
+.viewAdd:hover,
+.viewAddSolo:hover,
+.ribbonSplitTile:hover,
+.ribbonSplitTile.menu-open,
+.ribbonSplitTile.active,
+.popoverItem:hover,
+.iconTab:hover,
+.iconBtn:hover,
+.exportScale button:hover {
+  border-color: var(--flow-toolbar-border-strong);
+  background: var(--flow-toolbar-surface-hover);
+}
+
+.comboField:focus-within,
+.ribbonMini:focus-visible,
+.ribbonColorBtn:focus-visible,
+.ribbonCellBtn:focus-visible,
+.ribbonTile:focus-visible,
+.viewAdd:focus-visible,
+.viewAddSolo:focus-visible,
+.ribbonSplitTile:focus-within,
+.popoverItem:focus-visible,
+.colorCell:focus-visible,
+.iconTab:focus-visible,
+.iconBtn:focus-visible,
+.exportScale button:focus-visible,
+.amountFilterInput:focus-visible {
+  outline: none;
+  border-color: var(--flow-toolbar-border-strong);
+  box-shadow: var(--focus), var(--flow-toolbar-shadow);
+}
+
+.comboField:has(.comboBtn.popover-open) {
+  border-color: var(--flow-active-border);
+  background: var(--flow-active-bg);
+  box-shadow: var(--focus), var(--flow-toolbar-shadow);
+}
+
+.comboBtn,
+.popoverLabel,
+.amountFilterTitle,
+.amountFilterField label,
+.amountFilterInput {
+  color: var(--flow-toolbar-text);
+}
+
+.comboBtn:hover,
+.ribbonMini.sizeBtn:hover,
+.ribbonMini.toggle:hover,
+.ribbonTile.comboBtn:hover,
+.edgeGrid .ribbonCellBtn:hover {
+  background: var(--flow-toolbar-surface-hover);
+}
+
+.comboBtn {
+  padding: 0 8px;
+  font-size: 10.2px;
+}
+
+.comboBtn.narrow {
+  min-width: 58px;
+}
+
+.comboLabel {
+  max-width: var(--flow-toolbar-combo-label-max);
+}
+
+.ribbonMini.sizeBtn {
+  width: var(--flow-toolbar-mini-size);
+  height: var(--flow-toolbar-mini-tall-size);
+}
+
+.ribbonMini.toggle {
+  width: var(--flow-toolbar-mini-size);
+  height: var(--flow-toolbar-mini-size);
+}
+
+.ribbonMini.toggle.active,
+.layoutGrid .layoutBtn.active,
+.analyzeGrid .analysisBtn.active,
+.analyzeGrid .analysisCmdBtn.active,
+.analyzeGrid .analysisCmdBtn.popover-open,
+.opsGrid .mergeBtn.active,
+.opsGrid .detailBtn.active,
+.ribbonTile.active,
+.ribbonTile.comboBtn.active,
+.ribbonCellBtn.popover-open,
+.ribbonColorBtn.popover-open,
+.ribbonTile.popover-open,
+.popoverItem.active,
+.iconTab.active,
+.iconBtn.active,
+.exportScale button.active {
+  border-color: var(--flow-active-border);
+  background: var(--flow-active-bg);
+  color: var(--flow-active-text);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 72%, transparent), var(--flow-toolbar-shadow);
+}
+
+.ribbonMini.toggle.active {
+  color: var(--flow-active-text);
+}
+
+.btnText,
+.colorLabel {
+  font-size: var(--flow-toolbar-label-size);
+  color: var(--flow-toolbar-label-color);
+  line-height: 1.08;
+}
+
+:is(
+  .layoutGrid .layoutBtn.active,
+  .analyzeGrid .analysisBtn.active,
+  .analyzeGrid .analysisCmdBtn.active,
+  .analyzeGrid .analysisCmdBtn.popover-open,
+  .opsGrid .mergeBtn.active,
+  .opsGrid .detailBtn.active,
+  .ribbonTile.active,
+  .ribbonTile.comboBtn.active,
+  .ribbonCellBtn.popover-open,
+  .ribbonColorBtn.popover-open,
+  .ribbonTile.popover-open
+) .btnText,
+:is(.ribbonColorBtn.popover-open) .colorLabel,
+:is(.popoverItem.active, .iconTab.active, .iconBtn.active, .exportScale button.active) .popoverLabel {
+  color: var(--flow-active-text);
+}
+
+.comboBtn.popover-open,
+.comboBtn.popover-open .comboLabel,
+.comboBtn.popover-open .caret {
+  color: var(--flow-active-text);
+}
+
+.ribbonTile,
+.ribbonCellBtn,
+.ribbonColorBtn,
+.ribbonColorBtn.compact {
+  min-height: var(--ribbon-row);
+}
+
+.ribbonTile,
+.ribbonCellBtn {
+  transition:
+    background var(--motion-fast, 160ms) ease,
+    border-color var(--motion-fast, 160ms) ease,
+    box-shadow var(--motion-fast, 160ms) ease,
+    transform var(--motion-fast, 160ms) ease;
+}
+
+.edgeGrid {
+  grid-template-rows: repeat(3, 22px);
+}
+
+.edgeBlock {
+  width: 82px;
+}
+
+.edgeBlock .edgeGrid {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.edgeGrid .ribbonCellBtn {
+  height: 22px;
+}
+
+.edgeBlock .ribbonCellBtn {
+  width: 100%;
+}
+
+.ribbonGroupBody,
+.ribbonSubBody {
+  align-self: end;
+}
+
+.ribbonColorBtn {
+  height: var(--flow-toolbar-color-height);
+  padding: 0 5px;
+}
+
+.ribbonColorBtn.compact {
+  height: var(--flow-toolbar-color-compact-height);
+  padding: 0 4px;
+}
+
+.ribbonCellBtn,
+.ribbonTile {
+  padding: 0 4px;
+}
+
+.layoutGrid {
+  grid-template-columns: repeat(2, var(--flow-toolbar-layout-col));
+  grid-template-rows: repeat(2, 30px);
+  min-height: 66px;
+  align-content: start;
+}
+
+.ribbonRow.row2 {
+  grid-template-columns: repeat(2, var(--flow-toolbar-row2-col));
+}
+
+.ribbonRow.row3 {
+  grid-template-columns: repeat(3, var(--flow-toolbar-row3-col));
+}
+
+.analyzeGrid {
+  --analyze-col: var(--flow-toolbar-analyze-col);
+  --analyze-gap: var(--flow-toolbar-analyze-gap);
+  --analysis-cmd-col: var(--flow-toolbar-analyze-command-col);
+  --analysis-combo-col: var(--flow-toolbar-analyze-combo-col);
+  grid-template-rows: repeat(2, 30px);
+  min-height: 66px;
+  gap: 6px;
+  align-content: start;
+}
+
+.analyzeTopRow {
+  grid-template-columns: repeat(2, var(--analysis-cmd-col)) repeat(2, var(--analysis-combo-col));
+}
+
+.analyzeTopRow .ribbonTile.comboBtn {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 2px;
+  gap: 2px;
+}
+
+.analyzeBottomRow {
+  width: 100%;
+}
+
+.opsGrid .row2 {
+  grid-template-columns: repeat(3, var(--flow-toolbar-ops-col));
+}
+
+.opsGrid {
+  grid-template-rows: repeat(2, 30px);
+  min-height: 66px;
+  align-content: start;
+}
+
+.opsGrid .ribbonRow {
+  height: 30px;
+}
+
+.layoutGrid > .ribbonTile,
+.layoutGrid > .ribbonSplitTile,
+.opsGrid .ribbonTile,
+.opsGrid .ribbonSplitTile,
+.analyzeGrid .analysisBtn,
+.analyzeGrid .analysisCmdBtn {
+  min-height: 30px;
+  height: 30px;
+}
+
+.ribbonTile.comboBtn {
+  width: 100%;
+  height: 100%;
+  min-width: 44px;
+  background: color-mix(in oklab, var(--flow-toolbar-surface-subtle) 88%, var(--flow-toolbar-surface) 12%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 72%, transparent),
+    0 1px 2px color-mix(in oklab, var(--flow-toolbar-text) 8%, transparent);
+}
+
+.ribbonTile.comboBtn .btnText {
+  color: var(--flow-toolbar-text-subtle);
+  font-weight: 600;
+}
+
+.nodeGrid {
+  row-gap: 0;
+}
+
+.nodeGrid .ribbonCellBtn,
+.nodeGrid .ribbonColorBtn.compact.nodeFillBtn {
+  min-height: 22px;
+  height: 22px;
+}
+
+.nodeGrid .nodeCell-link {
+  box-shadow: none;
+}
+
+.analyzeTopRow .ribbonTile.comboBtn,
+.analyzeTopRow .ribbonTile.comboBtn:hover,
+.analyzeTopRow .ribbonTile.comboBtn.active,
+.analyzeTopRow .ribbonTile.comboBtn:active,
+.analyzeTopRow .ribbonTile.comboBtn:focus-visible {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none;
+}
+
+.analyzeTopRow .ribbonTile.comboBtn {
+  min-height: 0;
+  height: 18px;
+  align-self: center;
+  margin-top: 3.5px;
+  padding: 0;
+  gap: 3px;
+}
+
+.analyzeTopRow .ribbonTile.comboBtn .btnText {
+  color: var(--flow-toolbar-text-muted);
+  font-weight: 500;
+}
+
+.analyzeTopRow .ribbonTile.comboBtn:hover .btnText,
+.analyzeTopRow .ribbonTile.comboBtn.active .btnText {
+  color: var(--flow-toolbar-text);
+}
+
+.analyzeTopRow .comboBtn.drop .caret {
+  opacity: 0.56;
+}
+
+.ribbonPopover {
+  border-radius: 14px;
+  background: var(--flow-toolbar-surface);
+  box-shadow: var(--flow-toolbar-shadow-strong);
+}
+
+.amountFilterPanel,
+.amountFilterGrid,
+.amountFilterField {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.amountFilterField label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amountFilterInput {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.popoverTitle,
+.amountFilterHint {
+  color: var(--flow-toolbar-text-muted);
+}
+
+.colorCell {
+  width: var(--flow-toolbar-palette-swatch-size);
+  height: var(--flow-toolbar-palette-swatch-size);
+  border-radius: 8px;
+  border-color: var(--flow-toolbar-border);
+}
+
+.colorCell.active {
+  border-color: var(--flow-active-border);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, white 76%, transparent),
+    var(--focus);
+}
+
+.colorCustomRow input[type="color"] {
+  width: var(--flow-toolbar-popover-control-height);
+  height: var(--flow-toolbar-popover-control-height);
+  border-color: var(--flow-toolbar-border);
+}
+
+.popoverItem {
+  min-height: var(--flow-toolbar-popover-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.exportScale button {
+  min-height: var(--flow-toolbar-popover-control-height);
+}
+
+.iconTab,
+.iconBtn {
+  min-height: var(--flow-toolbar-popover-control-height);
+}
+
+.iconTab {
+  padding: 4px 10px;
+}
+
+.iconSearch input {
+  border-color: var(--flow-toolbar-border);
+  background: var(--flow-toolbar-surface);
+  color: var(--flow-toolbar-text);
+}
+
+.amountFilterTitle {
+  color: var(--flow-toolbar-text);
+}
+
+.amountFilterField label {
+  color: var(--flow-toolbar-text-muted);
+}
+
+.amountFilterInput {
+  background: var(--flow-toolbar-surface);
+}
+
+.viewAdd {
+  width: var(--flow-toolbar-mini-tall-size);
+  height: var(--flow-toolbar-mini-tall-size);
+  border-radius: 8px;
+  color: var(--flow-toolbar-text-muted);
+}
+
+.viewAdd.viewAddSolo {
+  min-height: var(--flow-toolbar-mini-tall-size);
+  height: auto;
+  padding-inline: 5px;
+  border-radius: 8px;
+}
+
+.viewAddSoloText {
+  color: var(--flow-toolbar-text-muted);
+}
+
+.viewAdd:focus-visible,
+.viewAddSolo:focus-visible {
+  box-shadow: var(--focus);
+}
+
+@media (max-width: 1520px) {
+  .toolBarCard {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: none;
+  }
+
+  .ribbonGroup {
+    min-height: 100%;
+  }
+}
+
+@media (max-width: 1280px) {
+  :root {
+    --ribbon-row: 24px;
+  }
+
+  .toolBarCard {
+    max-height: none;
+    padding: 6px 8px;
+  }
+
+  .comboField {
+    min-width: 182px;
+  }
+
+  .ribbonGroupBody {
+    flex-wrap: nowrap;
+  }
+}
+
+@media (max-width: 1120px) {
+  .toolBarCard {
+    max-height: none;
+  }
+
+  .ribbonGroup {
+    flex-basis: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  :root {
+    --ribbon-row: 40px;
+    --flow-toolbar-shell-height: 124px;
+    --flow-toolbar-combo-height: 44px;
+    --flow-toolbar-combo-min-width: 220px;
+    --flow-toolbar-mini-size: 44px;
+    --flow-toolbar-mini-tall-size: 44px;
+    --flow-toolbar-color-height: 44px;
+    --flow-toolbar-color-compact-height: 44px;
+    --flow-toolbar-popover-control-height: 44px;
+    --flow-toolbar-palette-swatch-size: 44px;
+  }
+
+  .toolBarCard {
+    flex-wrap: nowrap;
+    min-height: var(--flow-toolbar-shell-height);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .comboField {
+    min-width: var(--flow-toolbar-combo-min-width);
+  }
+
+  .viewAdd.viewAddSolo {
+    min-height: var(--flow-toolbar-mini-tall-size);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolBarCard,
+  .comboField,
+  .comboBtn,
+  .ribbonMini,
+  .ribbonColorBtn,
+  .ribbonCellBtn,
+  .ribbonTile,
+  .ribbonSplitTile,
+  .viewAdd,
+  .viewAddSolo,
+  .ribbonPopover,
+  .popoverItem,
+  .colorCell,
+  .iconTab,
+  .iconBtn,
+  .exportScale button {
+    transition: none !important;
+  }
+}
+
+:root:not([data-theme="dark"]) {
+  --flow-program-shell-bg: var(--program-shell-bg, var(--color-bg-elevated, #ffffff));
+  --flow-program-toolbar-bg: var(--flow-program-shell-bg);
+  --flow-program-tabs-bg: var(--flow-program-shell-bg);
+  --flow-program-canvas-bg: var(--flow-program-shell-bg);
+}
+
+:root:not([data-theme="dark"]) .graphWrap::before,
+:root:not([data-theme="dark"]) .graphWrap::after {
+  opacity: 0;
+}
+
+:root:not([data-theme="dark"]) .graphContainer {
+  background-color: var(--flow-program-shell-bg);
+  background-image: none;
+}
+
+:root:not([data-theme="dark"]) .toolBarCard.ribbon::before {
+  background:
+    linear-gradient(90deg, var(--flow-program-toolbar-bg) 0%, transparent 100%),
+    linear-gradient(90deg, color-mix(in oklab, var(--flow-program-shell-border) 30%, transparent), transparent);
+}
+
+:root:not([data-theme="dark"]) .toolBarCard.ribbon::after {
+  background:
+    linear-gradient(270deg, var(--flow-program-toolbar-bg) 0%, transparent 100%),
+    linear-gradient(270deg, color-mix(in oklab, var(--flow-program-shell-border) 30%, transparent), transparent);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: var(--color-bg, #111620);
+  --panel: var(--color-bg-elevated, #181f2b);
+  --panelSolid: var(--color-bg-elevated, #181f2b);
+  --border: color-mix(in oklab, var(--color-border, #313b50) 82%, transparent);
+  --shadow: 0 18px 42px rgba(3, 8, 15, 0.44);
+  --shadow2: 0 14px 30px rgba(3, 8, 15, 0.34);
+  --flow-toolbar-surface: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 90%, #101827);
+  --flow-toolbar-surface-subtle: color-mix(in oklab, var(--color-bg-subtle, #232c3b) 76%, #111827);
+  --flow-toolbar-surface-hover: color-mix(in oklab, var(--color-accent, #5f74ff) 12%, var(--flow-toolbar-surface-subtle));
+  --flow-toolbar-border: color-mix(in oklab, var(--color-border, #313b50) 76%, transparent);
+  --flow-toolbar-border-strong: color-mix(in oklab, var(--color-accent, #5f74ff) 38%, var(--flow-toolbar-border));
+  --flow-toolbar-text: var(--color-text, #ecf2ff);
+  --flow-toolbar-text-muted: var(--color-text-muted, #9baaca);
+  --flow-toolbar-text-subtle: color-mix(in oklab, var(--flow-toolbar-text-muted) 82%, var(--flow-toolbar-text) 18%);
+  --flow-toolbar-accent-surface: color-mix(in oklab, var(--flow-toolbar-accent) 16%, var(--flow-toolbar-surface));
+  --flow-toolbar-accent-surface-strong: color-mix(in oklab, var(--flow-toolbar-accent) 22%, var(--flow-toolbar-surface));
+  --flow-program-shell-bg: var(--color-bg, #111620);
+  --flow-program-shell-border: color-mix(in oklab, var(--color-border, #313b50) 78%, transparent);
+  --flow-program-toolbar-bg: linear-gradient(180deg, var(--flow-toolbar-surface), var(--flow-toolbar-surface-subtle));
+  --flow-program-tabs-bg: linear-gradient(180deg, color-mix(in oklab, var(--flow-toolbar-surface) 90%, var(--bg)), var(--bg));
+  --flow-program-canvas-bg: linear-gradient(180deg, color-mix(in oklab, var(--flow-toolbar-surface-subtle) 74%, var(--bg)), var(--bg));
+  --flow-floating-bg: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--flow-toolbar-surface) 88%, transparent),
+    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 80%, transparent)
+  );
+  --flow-floating-border: color-mix(in oklab, var(--flow-toolbar-border) 86%, transparent);
+  --flow-floating-shadow: 0 16px 34px rgba(3, 8, 15, 0.38);
+  --flow-active-bg: color-mix(in oklab, var(--flow-toolbar-accent) 22%, var(--flow-toolbar-surface));
+  --flow-active-border: color-mix(in oklab, var(--flow-toolbar-accent) 42%, var(--flow-toolbar-border));
+  --flow-active-text: color-mix(in oklab, var(--flow-toolbar-accent-strong) 62%, var(--flow-toolbar-text));
+  --flow-view-divider: color-mix(in oklab, var(--flow-toolbar-border) 86%, transparent);
+  --flow-view-tab-text: color-mix(in oklab, var(--flow-toolbar-text-muted) 82%, var(--flow-toolbar-text) 18%);
+  --flow-view-tab-hover-text: color-mix(in oklab, var(--flow-toolbar-accent-strong) 72%, var(--flow-toolbar-text));
+  --flow-view-tab-active-bg: color-mix(in oklab, var(--flow-toolbar-surface) 86%, transparent);
+  --flow-view-tab-active-text: var(--flow-toolbar-text);
+}
+
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .app,
+:root[data-theme="dark"] .right,
+:root[data-theme="dark"] .graphCard,
+:root[data-theme="dark"] .graphContainer {
+  color: var(--flow-toolbar-text);
+  background: var(--flow-program-shell-bg);
+}
+
+:root[data-theme="dark"] .toolBarCard,
+:root[data-theme="dark"] .toolBarCard.ribbon,
+:root[data-theme="dark"] .viewsTabsStrip {
+  background: var(--flow-program-toolbar-bg);
+  border-color: var(--flow-program-shell-border);
+}
+
+:root[data-theme="dark"] .graphContainer {
+  background-color: var(--flow-program-shell-bg);
+  background-image: var(--flow-program-canvas-bg);
+}
+
+:root[data-theme="dark"] .graphWrap::before,
+:root[data-theme="dark"] .graphWrap::after {
+  opacity: 0.24;
+}
+
+:root[data-theme="dark"] .ribbonGroup,
+:root[data-theme="dark"] .toolGroup,
+:root[data-theme="dark"] .ribbonPopover,
+:root[data-theme="dark"] .contextMenu,
+:root[data-theme="dark"] .settingsPanel,
+:root[data-theme="dark"] .modalCard,
+:root[data-theme="dark"] .loadingCard {
+  color: var(--flow-toolbar-text);
+  background: var(--flow-floating-bg);
+  border-color: var(--flow-floating-border);
+  box-shadow: var(--flow-floating-shadow);
+}
+
+:root[data-theme="dark"] .ribbonCaption,
+:root[data-theme="dark"] .toolLabel,
+:root[data-theme="dark"] .minimapTitle,
+:root[data-theme="dark"] .viewEmpty,
+:root[data-theme="dark"] .fieldLabel,
+:root[data-theme="dark"] .colorLabel,
+:root[data-theme="dark"] .amountFilterTitle,
+:root[data-theme="dark"] .popoverHint,
+:root[data-theme="dark"] .loadingText {
+  color: var(--flow-toolbar-text-muted);
+}
+
+:root[data-theme="dark"] .viewTab.active,
+:root[data-theme="dark"] .viewAdd,
+:root[data-theme="dark"] .comboField,
+:root[data-theme="dark"] .ribbonSplitTile,
+:root[data-theme="dark"] .ribbonColorBtn,
+:root[data-theme="dark"] .ribbonColorBtn.compact,
+:root[data-theme="dark"] .ribbonCellBtn,
+:root[data-theme="dark"] .ribbonTile,
+:root[data-theme="dark"] .ribbonMini,
+:root[data-theme="dark"] .analysisBtn,
+:root[data-theme="dark"] .popoverItem,
+:root[data-theme="dark"] .iconTab,
+:root[data-theme="dark"] .iconBtn,
+:root[data-theme="dark"] .amountFilterInput,
+:root[data-theme="dark"] .colorCustomRow input[type="color"],
+:root[data-theme="dark"] .layoutGrid .ribbonTile.layoutBtn,
+:root[data-theme="dark"] .nodeGrid .nodeCell-new,
+:root[data-theme="dark"] .nodeGrid .nodeCell-link,
+:root[data-theme="dark"] .exportScale button,
+:root[data-theme="dark"] .input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  color: var(--flow-toolbar-text);
+  background: var(--flow-toolbar-surface);
+  border-color: var(--flow-toolbar-border);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+}
+
+:root[data-theme="dark"] .viewClose {
+  color: color-mix(in oklab, var(--flow-toolbar-text-muted) 76%, var(--flow-toolbar-text) 24%);
+  background: transparent;
+}
+
+:root[data-theme="dark"] .viewTab.active .viewClose,
+:root[data-theme="dark"] .viewTab:hover .viewClose {
+  color: color-mix(in oklab, var(--flow-toolbar-text-muted) 68%, var(--flow-toolbar-text) 32%);
+}
+
+:root[data-theme="dark"] .viewClose:hover {
+  color: var(--flow-toolbar-accent-strong);
+  background: color-mix(in oklab, var(--flow-toolbar-accent) 14%, transparent);
+}
+
+:root[data-theme="dark"] .viewTab:hover,
+:root[data-theme="dark"] .viewAdd:hover,
+:root[data-theme="dark"] .comboField:hover,
+:root[data-theme="dark"] .ribbonSplitTile:hover,
+:root[data-theme="dark"] .ribbonSplitTile.menu-open,
+:root[data-theme="dark"] .ribbonSplitTile.active,
+:root[data-theme="dark"] .ribbonColorBtn:hover,
+:root[data-theme="dark"] .ribbonCellBtn:hover,
+:root[data-theme="dark"] .ribbonTile:hover,
+:root[data-theme="dark"] .ribbonMini:hover,
+:root[data-theme="dark"] .analysisBtn:hover,
+:root[data-theme="dark"] .analysisBtn.active,
+:root[data-theme="dark"] .layoutGrid .ribbonTile.layoutBtn:hover,
+:root[data-theme="dark"] .nodeGrid .nodeCell-new:hover,
+:root[data-theme="dark"] .nodeGrid .nodeCell-link:hover,
+:root[data-theme="dark"] .exportScale button:hover {
+  color: var(--flow-active-text);
+  background: var(--flow-toolbar-surface-hover);
+  border-color: var(--flow-toolbar-border-strong);
+  box-shadow: 0 8px 18px rgba(3, 8, 15, 0.24);
+}
+
+:root[data-theme="dark"] .ribbonMini.active,
+:root[data-theme="dark"] .ribbonTile.active,
+:root[data-theme="dark"] .ribbonColorBtn.active,
+:root[data-theme="dark"] .exportScale button.active {
+  color: var(--flow-active-text);
+  background: var(--flow-active-bg);
+  border-color: var(--flow-active-border);
+}
+
+:root[data-theme="dark"] .graphSearchFloat,
+:root[data-theme="dark"] .graphStatsFloat,
+:root[data-theme="dark"] .minimapFloat,
+:root[data-theme="dark"] .statusFloat,
+:root[data-theme="dark"] .floatingPanel {
+  color: var(--flow-toolbar-text);
+  background: var(--flow-floating-bg);
+  border-color: var(--flow-floating-border);
+  box-shadow: var(--flow-floating-shadow);
+}
+
+:root[data-theme="dark"] .graphSearchFloat .input,
+:root[data-theme="dark"] .graphSearchFloat .input::placeholder {
+  color: var(--flow-toolbar-text-muted);
+}
+
+:root[data-theme="dark"] .graphStatsItem {
+  border-right-color: color-mix(in oklab, var(--flow-toolbar-border) 78%, transparent);
+}
+
+:root[data-theme="dark"] .graphStatsLabel {
+  color: color-mix(in oklab, var(--flow-toolbar-text-muted) 88%, var(--flow-toolbar-text));
+}
+
+:root[data-theme="dark"] .graphStatsValue {
+  color: var(--flow-toolbar-text);
+}
+
+:root[data-theme="dark"] .minimapBox {
+  background: color-mix(in oklab, var(--flow-toolbar-surface-subtle) 82%, var(--flow-program-shell-bg));
+  border-color: var(--flow-toolbar-border);
+}

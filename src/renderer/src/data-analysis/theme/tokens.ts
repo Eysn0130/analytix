@@ -1,0 +1,102 @@
+export type ThemeName = "light" | "dark";
+
+export type ThemeTokens = Record<string, string>;
+
+export const THEME_TOKENS: Record<ThemeName, ThemeTokens> = {
+  light: {
+    "color-bg": "#edf1f8",
+    "color-bg-elevated": "#ffffff",
+    "color-bg-subtle": "#e9eef8",
+    "color-text": "#1a2740",
+    "color-text-muted": "#657690",
+    "color-border": "#d6deec",
+    "color-accent": "#4f63ff",
+    "color-accent-strong": "#3448df",
+    "color-success": "#199f62",
+    "color-warning": "#cd8a22",
+    "color-danger": "#d94a4a",
+    "shadow-card": "0 16px 40px rgba(20, 34, 62, 0.09)",
+    "shadow-elevated": "0 34px 72px rgba(20, 34, 62, 0.14)",
+    "gradient-atmosphere": "radial-gradient(circle at 14% 0%, rgba(79, 99, 255, 0.2), rgba(79, 99, 255, 0) 40%), radial-gradient(circle at 100% 0%, rgba(16, 47, 88, 0.13), rgba(16, 47, 88, 0) 36%)",
+    "sidebar-surface": "#fdfdff",
+    "sidebar-subtle": "#ffffff",
+    "sidebar-hover": "#f4f6fb",
+    "sidebar-icon": "#dde5f2",
+    "sidebar-control-border": "#e4e8f1",
+    "sidebar-active-start": "#5262ff",
+    "sidebar-active-end": "#4254e5",
+    "sidebar-active-shadow": "0 10px 20px rgba(82, 97, 244, 0.28)",
+    "sidebar-segment-surface": "#ffffff",
+    "sidebar-segment-border": "#e7ebf3",
+    "sidebar-segment-inactive": "#687793",
+    "sidebar-segment-active-start": "#5464ff",
+    "sidebar-segment-active-end": "#4355e6",
+    "sidebar-segment-active-shadow": "0 12px 24px rgba(77, 95, 246, 0.34)",
+    "sidebar-nav-active-bg": "#f0f2f7",
+    "sidebar-nav-active-text": "#1f2d46",
+    "sidebar-icon-color": "#60708f",
+    "sidebar-icon-active-color": "#1f2d46",
+    "sidebar-badge-accent": "#e3e7ff",
+    "sidebar-badge-warn": "#f0e6d8",
+    "sidebar-badge-muted": "#e2e7f1",
+    "sidebar-separator": "rgba(189, 198, 217, 0.52)",
+    "sidebar-soft-shadow": "0 20px 44px rgba(34, 49, 80, 0.1)",
+    "sidebar-soft-inset": "none"
+  },
+  dark: {
+    "color-bg": "#111620",
+    "color-bg-elevated": "#181f2b",
+    "color-bg-subtle": "#232c3b",
+    "color-text": "#ecf2ff",
+    "color-text-muted": "#9baaca",
+    "color-border": "#313b50",
+    "color-accent": "#5f74ff",
+    "color-accent-strong": "#8ea0ff",
+    "color-success": "#48c981",
+    "color-warning": "#dfb059",
+    "color-danger": "#ff7a87",
+    "shadow-card": "0 18px 42px rgba(3, 8, 15, 0.44)",
+    "shadow-elevated": "0 32px 68px rgba(2, 7, 16, 0.62)",
+    "gradient-atmosphere": "radial-gradient(circle at 10% 0%, rgba(95, 116, 255, 0.22), rgba(95, 116, 255, 0) 40%), radial-gradient(circle at 100% 0%, rgba(54, 102, 188, 0.14), rgba(54, 102, 188, 0) 38%)",
+    "sidebar-surface": "#1f232c",
+    "sidebar-subtle": "#242a35",
+    "sidebar-hover": "#2b3240",
+    "sidebar-icon": "#32394a",
+    "sidebar-control-border": "#353d4c",
+    "sidebar-active-start": "#5262ff",
+    "sidebar-active-end": "#4254e5",
+    "sidebar-active-shadow": "0 10px 20px rgba(83, 105, 255, 0.32)",
+    "sidebar-segment-surface": "#222834",
+    "sidebar-segment-border": "#31394a",
+    "sidebar-segment-inactive": "#a5b0c5",
+    "sidebar-segment-active-start": "#6072ff",
+    "sidebar-segment-active-end": "#4a5ce5",
+    "sidebar-segment-active-shadow": "0 12px 24px rgba(86, 106, 255, 0.4)",
+    "sidebar-nav-active-bg": "#2b313c",
+    "sidebar-nav-active-text": "#f2f6ff",
+    "sidebar-icon-color": "#c2cadc",
+    "sidebar-icon-active-color": "#ecf2ff",
+    "sidebar-badge-accent": "#364690",
+    "sidebar-badge-warn": "#665534",
+    "sidebar-badge-muted": "#3a4356",
+    "sidebar-separator": "rgba(88, 100, 126, 0.52)",
+    "sidebar-soft-shadow": "0 24px 56px rgba(4, 9, 20, 0.58)",
+    "sidebar-soft-inset": "none"
+  }
+};
+
+export const RADIUS_TOKENS: Record<string, string> = {
+  "radius-sm": "8px",
+  "radius-md": "14px",
+  "radius-lg": "20px",
+  "radius-xl": "30px"
+};
+
+export const SPACE_TOKENS: Record<string, string> = {
+  "space-1": "4px",
+  "space-2": "8px",
+  "space-3": "12px",
+  "space-4": "16px",
+  "space-5": "24px",
+  "space-6": "32px"
+};

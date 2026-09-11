@@ -1,0 +1,6 @@
+interface:
+  display_name: "案件数据范围核验"
+  short_description: "核验当前案件、数据范围、覆盖情况和关系上下文"
+  default_prompt: "请说明当前案件范围、数据覆盖情况和核验意见。"
+policy:
+  allow_implicit_invocation: true

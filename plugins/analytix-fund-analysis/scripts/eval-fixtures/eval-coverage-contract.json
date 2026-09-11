@@ -1,0 +1,410 @@
+{
+  "schema_version": "eval-coverage-contract-v1",
+  "eval_coverage_contract": {
+    "min_tasks": 38,
+    "min_passive_nonfunds_tasks": 6,
+    "min_passive_near_miss_tasks": 2,
+    "passive_near_miss_terms": [
+      "资金",
+      "流水",
+      "账户",
+      "账号",
+      "银行卡号"
+    ],
+    "min_cases": 3,
+    "min_tasks_per_required_case": 2,
+    "min_report_claim_review_tasks": 4,
+    "min_report_claim_review_cases": 3,
+    "required_case_ids": [
+      "be6a1df3d3c4",
+      "3c72e755b1f2",
+      "e7e3a55350b4"
+    ],
+    "required_task_ids": [
+      "top_account",
+      "data_quality",
+      "holder_scope",
+      "liuwenliang_to_zhangjinzhi",
+      "zhangjinzhi_continuation",
+      "old_thread_patterns",
+      "outflow_continuation",
+      "full_report_gate",
+      "case_3c72_top_rankings",
+      "case_3c72_report_claim_review",
+      "case_e7e3_top_rankings",
+      "case_e7e3_quality_boundary",
+      "investigation_lab_cash_asset_hypotheses",
+      "passive_nonfunds_import_guidance",
+      "passive_nonfunds_copy_edit",
+      "passive_nonfunds_excel_formula",
+      "passive_nonfunds_meeting_todos",
+      "passive_nonfunds_fund_concept",
+      "passive_nonfunds_account_masking",
+      "replay_import_clean_coverage",
+      "replay_multisubject_trace",
+      "replay_rescope_recompute",
+      "replay_negative_search",
+      "replay_continue_one_more_hop",
+      "replay_report_materialize",
+      "replay_amount_challenge",
+      "report_mermaid_legal_guard",
+      "report_candidate_cash_boundary_guard",
+      "account_dossier_card",
+      "subject_dossier_person",
+      "full_case_analysis_tree",
+      "report_builder_generation",
+      "bare_analytix_entry_status",
+      "case_context_card",
+      "graph_visualization_supported_edges",
+      "visual_evidence_delivery_pack",
+      "case_notebook_controlled_query"
+    ],
+    "passive_nonfunds_task_ids": [
+      "passive_nonfunds_import_guidance",
+      "passive_nonfunds_copy_edit",
+      "passive_nonfunds_excel_formula",
+      "passive_nonfunds_meeting_todos",
+      "passive_nonfunds_fund_concept",
+      "passive_nonfunds_account_masking"
+    ],
+    "functional_closure_contract": {
+      "task_ids": [
+        "account_dossier_card",
+        "subject_dossier_person",
+        "full_case_analysis_tree",
+        "replay_continue_one_more_hop",
+        "report_builder_generation",
+        "case_3c72_report_claim_review",
+        "passive_nonfunds_copy_edit",
+        "bare_analytix_entry_status",
+        "case_context_card",
+        "graph_visualization_supported_edges",
+        "visual_evidence_delivery_pack",
+        "case_notebook_controlled_query"
+      ],
+      "required_modes": [
+        "current_plugin"
+      ],
+      "optional_modes": [
+        "manual_frontdoor",
+        "direct_mcp_smoke",
+        "workbench_closure"
+      ],
+      "required_product_surfaces": [
+        {
+          "id": "graph_visualization",
+          "task_ids": [
+            "graph_visualization_supported_edges"
+          ]
+        },
+        {
+          "id": "visual_evidence",
+          "task_ids": [
+            "visual_evidence_delivery_pack"
+          ]
+        },
+        {
+          "id": "case_context",
+          "task_ids": [
+            "case_context_card"
+          ]
+        },
+        {
+          "id": "entry_status",
+          "task_ids": [
+            "bare_analytix_entry_status"
+          ]
+        },
+        {
+          "id": "object_dossier",
+          "task_ids": [
+            "account_dossier_card",
+            "subject_dossier_person"
+          ]
+        },
+        {
+          "id": "full_case_analysis",
+          "task_ids": [
+            "full_case_analysis_tree"
+          ]
+        },
+        {
+          "id": "trace_continuation",
+          "task_ids": [
+            "replay_continue_one_more_hop"
+          ]
+        },
+        {
+          "id": "report_builder",
+          "task_ids": [
+            "report_builder_generation"
+          ]
+        },
+        {
+          "id": "claim_review",
+          "task_ids": [
+            "case_3c72_report_claim_review"
+          ]
+        },
+        {
+          "id": "passive_nonintervention",
+          "task_ids": [
+            "passive_nonfunds_copy_edit"
+          ]
+        },
+        {
+          "id": "case_workbench",
+          "task_ids": [
+            "case_notebook_controlled_query"
+          ]
+        }
+      ],
+      "allow_release_without_functional_closure": false,
+      "auto_fail_markers": [
+        "blueprint",
+        "execution plan",
+        "/goal",
+        "doctor",
+        "score",
+        "diagnostic label",
+        "internal id",
+        "raw rows",
+        "large JSON",
+        "fixed sample facts",
+        "golden",
+        "oracle",
+        "rubric",
+        "write_blocked",
+        "report gate"
+      ]
+    },
+    "required_dimensions": [
+      {
+        "id": "deterministic_rankings",
+        "task_ids": [
+          "top_account",
+          "case_3c72_top_rankings",
+          "case_e7e3_top_rankings"
+        ]
+      },
+      {
+        "id": "source_quality_boundaries",
+        "task_ids": [
+          "data_quality",
+          "case_e7e3_quality_boundary",
+          "replay_import_clean_coverage"
+        ]
+      },
+      {
+        "id": "holder_ownership_boundary",
+        "task_ids": [
+          "holder_scope"
+        ]
+      },
+      {
+        "id": "destination_and_continuation",
+        "task_ids": [
+          "liuwenliang_to_zhangjinzhi",
+          "zhangjinzhi_continuation",
+          "outflow_continuation",
+          "replay_continue_one_more_hop",
+          "replay_amount_challenge"
+        ]
+      },
+      {
+        "id": "investigation_lab",
+        "task_ids": [
+          "old_thread_patterns",
+          "investigation_lab_cash_asset_hypotheses",
+          "replay_multisubject_trace",
+          "replay_negative_search"
+        ]
+      },
+      {
+        "id": "report_claim_review",
+        "task_ids": [
+          "full_report_gate",
+          "case_3c72_report_claim_review",
+          "report_mermaid_legal_guard",
+          "report_candidate_cash_boundary_guard",
+          "replay_report_materialize",
+          "report_builder_generation"
+        ]
+      },
+      {
+        "id": "old_thread_behavior_replay",
+        "task_ids": [
+          "replay_import_clean_coverage",
+          "replay_multisubject_trace",
+          "replay_rescope_recompute",
+          "replay_negative_search",
+          "replay_continue_one_more_hop",
+          "replay_report_materialize",
+          "replay_amount_challenge"
+        ]
+      },
+      {
+        "id": "model_output_pollution_blocking",
+        "task_ids": [
+          "old_thread_patterns",
+          "outflow_continuation",
+          "replay_multisubject_trace",
+          "replay_continue_one_more_hop",
+          "replay_amount_challenge",
+          "account_dossier_card",
+          "subject_dossier_person",
+          "full_case_analysis_tree",
+          "report_builder_generation",
+          "bare_analytix_entry_status",
+          "case_context_card",
+          "graph_visualization_supported_edges",
+          "visual_evidence_delivery_pack"
+        ]
+      },
+      {
+        "id": "passive_nonintervention",
+        "task_ids": [
+          "passive_nonfunds_import_guidance",
+          "passive_nonfunds_copy_edit",
+          "passive_nonfunds_excel_formula",
+          "passive_nonfunds_meeting_todos",
+          "passive_nonfunds_fund_concept",
+          "passive_nonfunds_account_masking"
+        ]
+      },
+      {
+        "id": "object_dossier",
+        "task_ids": [
+          "account_dossier_card",
+          "subject_dossier_person"
+        ]
+      },
+      {
+        "id": "full_case_analysis",
+        "task_ids": [
+          "full_case_analysis_tree"
+        ]
+      },
+      {
+        "id": "entry_status",
+        "task_ids": [
+          "bare_analytix_entry_status"
+        ]
+      },
+      {
+        "id": "case_context",
+        "task_ids": [
+          "case_context_card"
+        ]
+      },
+      {
+        "id": "graph_visualization",
+        "task_ids": [
+          "graph_visualization_supported_edges"
+        ]
+      },
+      {
+        "id": "visual_evidence",
+        "task_ids": [
+          "visual_evidence_delivery_pack"
+        ]
+      },
+      {
+        "id": "case_workbench_controlled_analysis",
+        "task_ids": [
+          "case_notebook_controlled_query"
+        ]
+      }
+    ]
+  },
+  "capability_eval_tasks": {
+    "frontdoor-qa": [
+      "top_account",
+      "holder_scope",
+      "liuwenliang_to_zhangjinzhi",
+      "passive_nonfunds_import_guidance",
+      "passive_nonfunds_copy_edit",
+      "passive_nonfunds_excel_formula",
+      "passive_nonfunds_meeting_todos",
+      "passive_nonfunds_fund_concept",
+      "passive_nonfunds_account_masking",
+      "bare_analytix_entry_status"
+    ],
+    "scope-casegraph": [
+      "data_quality",
+      "case_3c72_top_rankings",
+      "replay_import_clean_coverage",
+      "case_context_card"
+    ],
+    "fundgraph-path": [
+      "zhangjinzhi_continuation",
+      "outflow_continuation",
+      "graph_visualization_supported_edges"
+    ],
+    "visual-evidence-artifacts": [
+      "visual_evidence_delivery_pack",
+      "replay_case_delivery_pack",
+      "report_builder_generation"
+    ],
+    "report-claim-gate": [
+      "full_report_gate",
+      "case_3c72_report_claim_review",
+      "report_mermaid_legal_guard",
+      "report_candidate_cash_boundary_guard",
+      "replay_report_materialize",
+      "report_builder_generation"
+    ],
+    "qa-source-review": [
+      "data_quality",
+      "case_e7e3_quality_boundary",
+      "full_report_gate"
+    ],
+    "ranking-subject": [
+      "top_account",
+      "case_3c72_top_rankings",
+      "case_e7e3_top_rankings",
+      "account_dossier_card",
+      "subject_dossier_person"
+    ],
+    "holder-account-scope": [
+      "holder_scope",
+      "account_dossier_card",
+      "subject_dossier_person"
+    ],
+    "investigation-lab": [
+      "old_thread_patterns",
+      "investigation_lab_cash_asset_hypotheses",
+      "replay_multisubject_trace",
+      "replay_negative_search",
+      "account_dossier_card",
+      "subject_dossier_person"
+    ],
+    "subject-outflow-tracing": [
+      "liuwenliang_to_zhangjinzhi",
+      "zhangjinzhi_continuation",
+      "outflow_continuation",
+      "replay_rescope_recompute",
+      "replay_continue_one_more_hop",
+      "replay_amount_challenge"
+    ],
+    "pattern-and-asset-leads": [
+      "old_thread_patterns",
+      "outflow_continuation",
+      "investigation_lab_cash_asset_hypotheses"
+    ],
+    "full-case-analysis": [
+      "full_case_analysis_tree",
+      "report_builder_generation"
+    ],
+    "controlled-case-workbench": [
+      "case_notebook_controlled_query"
+    ],
+    "pair-amount": [
+      "replay_amount_challenge"
+    ],
+    "delivery-qc": [
+      "report_builder_generation",
+      "case_3c72_report_claim_review"
+    ]
+  }
+}

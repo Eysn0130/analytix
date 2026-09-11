@@ -1,0 +1,8 @@
+interface:
+  display_name: "资金来源去向追踪"
+  short_description: "追踪资金来源、去向、下一层流向、未调取端点和资金断点"
+  default_prompt: "请追踪当前案件资金来源、去向、未调取端点和资金断点。下游续查必须写“暂不能认定”边界句；若需进度，只能逐字写“正在核验当前案件事实。”，不得改写。"
+policy:
+  allow_implicit_invocation: true
+  user_visible_language_contract: "默认静默核验；如必须发工具前进度，只能逐字写“正在核验当前案件事实。”。最终答案只用公安经侦业务语言，不得出现工具名、技能名、SQL、DuckDB、Shell、本地路径、流程说明、资金边或内部字段。"
+  source_boundary: "普通资金追踪以当前案件语义事实为事实层：主体下游用 trace_subject_top_outflows 一次取得出账金额、笔数、主要去向和断点后应直接成稿；金额先保留元、再括号写万元，表格列名用主要对手方/去向，不把已返回名称改写成第1下游对象。答案先写结论，并使用结论、下游去向、资金断点、暂不能认定、下一步核查建议等业务段落，最后一段标题必须包含核查；结论或下游段必须写明资金链路/接续链路。命名双方起点未固定时最多补一次特定双方资金往来核验。除用户明确要求资金流向图，不调用 build_fund_flow_graph；普通下游续查不得调用 inspect_case_schema、run_case_sql、get_evidence_pack、analyze_holder_full、analyze_account_full、rank_accounts/rank_counterparties、hypothesis_probe、funds_investigate、Shell、Python、本地案件库或历史文件补事实。事实不足就写资金断点、需复核、需补证和下一步核查建议。"

@@ -1,0 +1,6 @@
+interface:
+  display_name: "重点对手方研判"
+  short_description: "研判重点对手方、关联通道、缺失对手方和补证优先级"
+  default_prompt: "请研判当前案件重点对手方及关联资金通道，并给出补证优先级。"
+policy:
+  allow_implicit_invocation: true

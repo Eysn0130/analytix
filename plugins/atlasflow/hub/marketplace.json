@@ -1,0 +1,46 @@
+{
+  "name": "analytix-hub",
+  "interface": {
+    "displayName": "Analytix Hub"
+  },
+  "platform": "mac-arm64",
+  "plugins": [
+    {
+      "name": "atlasflow",
+      "version": "2.10.0-analytix.1",
+      "source": {
+        "source": "download",
+        "url": "https://analytix.top/api/agent/plugins/packages/atlasflow-2.10.0-analytix.1.tar.gz",
+        "sha256": "908316ed25d6c269895259d1139b44c8658851ac9f10504d3878c5d98dc1fb88"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "AtlasFlow",
+        "shortDescription": "生成专业架构图、流程图、数据流、案件图谱和公文/公安业务图。",
+        "longDescription": "AtlasFlow 是 tt-a1i 的专业图谱生成插件。核心 Skill 提供 architecture、workflow、sequence、dataflow、lifecycle 五类图和独立 HTML/SVG/PNG 导出能力；AtlasFlow analytix domain Skill 增加公安、公文、案件和通用业务场景路由，可把人员关系、案件关联、证据材料、资金分析图谱、关联图谱、股权穿透图谱、资金流向图等任务转换为 AtlasFlow 标准 JSON IR 并渲染成可交付图稿。",
+        "developerName": "tt-a1i",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Interactive"
+        ],
+        "websiteURL": "https://analytix.top/plugins/atlasflow",
+        "privacyPolicyURL": "https://analytix.top/privacy",
+        "termsOfServiceURL": "https://analytix.top/terms",
+        "brandColor": "#08BDEB",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png",
+        "defaultPrompt": [
+          "使用 AtlasFlow 生成当前案件的资金流向图，突出主路径、中转账户、金额和证据来源。",
+          "使用 AtlasFlow 生成证据材料链图，区分来源、固定、解析、支撑事实和待补证环节。",
+          "使用 AtlasFlow 生成公文收文办理流程图，包含签收、登记、拟办、批办、承办、归档。"
+        ]
+      }
+    }
+  ]
+}

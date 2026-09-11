@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 2,
+  "id": "d0248-go-runtime-readiness-gate",
+  "legacyId": "d0247-go-runtime-readiness-report",
+  "changeId": "D-0248",
+  "upgradesChangeId": "D-0247",
+  "generatedAt": "2026-06-24T17:50:50.526Z",
+  "sourceCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "mode": "strict-gate",
+  "strictGate": true,
+  "dryRun": false,
+  "dryRunCannotAuthorizeCutover": true,
+  "skippedCountsAsPassed": false,
+  "fakeMatrixCountsAsCredentialedPass": false,
+  "goDefaultBackendEnabled": true,
+  "rendererVisibleGoSwitcher": false,
+  "defaultBackendReady": true,
+  "hardGateIds": [
+    "go-server-conformance",
+    "durable-restart-proof",
+    "provider-matrix-local",
+    "mcp-matrix-local",
+    "product-sovereignty",
+    "typecheck",
+    "build-runtime"
+  ],
+  "checks": [
+    {
+      "id": "go-server-conformance",
+      "label": "Go server conformance",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_GO_SERVER_CONFORMANCE_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./... && npm --prefix packages/runtime run test -- tests/go-runtime-conformance.test.ts --no-file-parallelism --maxWorkers=1 && npm run test -- src/main/runtime/analytix-adapter.test.ts --run"
+    },
+    {
+      "id": "durable-restart-proof",
+      "label": "Durable restart proof",
+      "status": "passed",
+      "message": "ANALYTIX_D0243_DURABLE_RESTART_PROOF=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./... && npm --prefix packages/runtime run test -- tests/go-runtime-conformance.test.ts --no-file-parallelism --maxWorkers=1"
+    },
+    {
+      "id": "provider-matrix-local",
+      "label": "Local fake provider matrix",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_PROVIDER_FAKE_MATRIX_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./..."
+    },
+    {
+      "id": "provider-matrix-credentialed",
+      "label": "Credentialed provider matrix",
+      "status": "skipped",
+      "message": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation",
+      "reason": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation",
+      "required": false,
+      "countsTowardDefaultBackend": false,
+      "evidence": "",
+      "evidencePath": "",
+      "command": ""
+    },
+    {
+      "id": "mcp-matrix-local",
+      "label": "Local fake MCP matrix",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_MCP_FAKE_MATRIX_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./..."
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "label": "Credentialed MCP matrix",
+      "status": "skipped",
+      "message": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation",
+      "reason": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation",
+      "required": false,
+      "countsTowardDefaultBackend": false,
+      "evidence": "",
+      "evidencePath": "",
+      "command": ""
+    },
+    {
+      "id": "packaged-qa",
+      "label": "Packaged QA",
+      "status": "skipped",
+      "message": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation",
+      "reason": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation",
+      "required": false,
+      "countsTowardDefaultBackend": false,
+      "evidence": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-packaged-go-runtime-qa-report.json",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-packaged-go-runtime-qa-report.json",
+      "command": ""
+    },
+    {
+      "id": "product-sovereignty",
+      "label": "Product sovereignty scan",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_PRODUCT_SOVEREIGNTY_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "npm run scan:product-sovereignty"
+    },
+    {
+      "id": "typecheck",
+      "label": "Typecheck",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_TYPECHECK_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "npm run typecheck"
+    },
+    {
+      "id": "build-runtime",
+      "label": "Runtime package build",
+      "status": "passed",
+      "message": "ANALYTIX_D0247_BUILD_RUNTIME_STATUS=passed",
+      "reason": "",
+      "required": true,
+      "countsTowardDefaultBackend": true,
+      "evidence": "",
+      "evidencePath": "",
+      "command": "npm run build:runtime"
+    },
+    {
+      "id": "explicit-env-gate",
+      "label": "Explicit G6 env gate",
+      "status": "missing",
+      "message": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation",
+      "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation",
+      "required": false,
+      "countsTowardDefaultBackend": false,
+      "evidence": "",
+      "evidencePath": "",
+      "command": ""
+    }
+  ],
+  "blockerIds": [],
+  "evidencePaths": [
+    "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-packaged-go-runtime-qa-report.json"
+  ],
+  "runCommands": [
+    "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./... && npm --prefix packages/runtime run test -- tests/go-runtime-conformance.test.ts --no-file-parallelism --maxWorkers=1 && npm run test -- src/main/runtime/analytix-adapter.test.ts --run",
+    "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./... && npm --prefix packages/runtime run test -- tests/go-runtime-conformance.test.ts --no-file-parallelism --maxWorkers=1",
+    "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./...",
+    "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./...",
+    "npm run scan:product-sovereignty",
+    "npm run typecheck",
+    "npm run build:runtime"
+  ],
+  "failureReasons": [
+    {
+      "id": "provider-matrix-credentialed",
+      "status": "skipped",
+      "reason": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation"
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "status": "skipped",
+      "reason": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation"
+    },
+    {
+      "id": "packaged-qa",
+      "status": "skipped",
+      "reason": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation"
+    },
+    {
+      "id": "explicit-env-gate",
+      "status": "missing",
+      "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation"
+    }
+  ],
+  "notes": [
+    "D-0244/D-0245 matrix green is absorption readiness only; deterministic local gates now authorize the default Go backend.",
+    "Dry-run reports are audit previews and cannot substitute for recorded command evidence.",
+    "Skipped or missing local hard gates are blockers in --gate/--strict mode.",
+    "Credentialed provider/MCP, packaged desktop QA, and operator evidence remain post-cutover live validation and do not block the default local gate.",
+    "DeepSeek cache/prefix-hit proof is a DeepSeek-specific enhancement; OpenAI-compatible, Anthropic-compatible, and custom endpoint request semantics remain separate."
+  ],
+  "passed": true
+}

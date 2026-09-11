@@ -1,0 +1,83 @@
+### Node / Electron
+node_modules/
+out/
+dist/
+/dist-standard-win*/
+/output/
+/validation-evidence/
+.cache/
+.deepseek/
+*.log
+.DS_Store
+
+### Local environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+backend/.venv/
+/runtime/
+
+### Python
+__pycache__/
+*.py[cod]
+
+### Go runtime build artifacts
+packages/runtime-go/runtime-server
+/packages/runtime-go/output/
+tools/**/target/
+build/windows-backend-runtime/
+/dist-local-nonpublishable/
+
+### Local release secrets
+scripts/release.local.env
+release.local.env
+.env.analytix-e2e.local
+*.p12
+*.p8
+*.pem
+*.key
+*.mobileprovision
+
+### AL ###
+#Template for AL projects for Dynamics 365 Business Central
+#launch.json folder
+.vscode/
+#Cache folder
+.alcache/
+#Symbols folder
+.alpackages/
+#Snapshots folder
+.snapshots/
+#Testing Output folder
+.output/
+#Extension App-file
+*.app
+#Rapid Application Development File
+rad.json
+#Translation Base-file
+*.g.xlf
+#License-files
+*.bclicense
+*.flf
+#Test results file
+TestResults.xml
+
+### Internal docs
+docs/R2_RELEASE.md
+
+# Private source snapshot exclusions. Preserve canonical originals separately.
+/managed-chrome/
+/vendor/analytix-computer-use/dist/
+/packages/runtime-go/runtime-go.test
+/.playwright-cli/
+/.playwright-mcp/
+/.analytix/
+/.bench/
+/.claude/launch.json
+/backend/*.egg-info/
+/docs/screenshots/
+/docs/analytix/qa/*.png
+*.keychain-db
+*.p12
+*.pfx

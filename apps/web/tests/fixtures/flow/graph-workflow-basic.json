@@ -1,0 +1,239 @@
+{
+  "baseGraphData": {
+    "runtime_graph": {
+      "runtime_revision": 1,
+      "nodes": [
+        {
+          "id": "node:a",
+          "title": "Alpha",
+          "display_id": "A",
+          "ntype": "seed",
+          "projection_visible": true,
+          "nodeRenderMode": "dot"
+        },
+        {
+          "id": "node:b",
+          "title": "Beta",
+          "display_id": "B",
+          "projection_visible": true,
+          "nodeRenderMode": "dot"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge:ab",
+          "source": "node:a",
+          "target": "node:b",
+          "relation_type": "owns",
+          "tx_count": 2,
+          "amount_total": 2500,
+          "amount": 2500
+        }
+      ]
+    },
+    "nodes": [],
+    "edges": [],
+    "stats": {},
+    "graph_tier": "basic",
+    "result_snapshot_ref": {
+      "snapshot_id": "snap-1",
+      "graph_hash": "snap-1",
+      "node_count": 2,
+      "edge_count": 1,
+      "stored_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "deltaPatch": {
+    "patch_kind": "delta",
+    "base_runtime_revision": 1,
+    "runtime_revision": 2,
+    "result_snapshot_ref": {
+      "snapshot_id": "snap-2",
+      "graph_hash": "snap-2",
+      "node_count": 3,
+      "edge_count": 2,
+      "stored_at": "2026-01-01T00:00:01Z"
+    },
+    "runtime_graph_patch": {
+      "upsert_nodes": [
+        {
+          "id": "node:c",
+          "title": "Gamma",
+          "display_id": "C",
+          "projection_visible": false,
+          "nodeRenderMode": "dot"
+        }
+      ],
+      "upsert_edges": [
+        {
+          "edge_id": "edge:bc",
+          "source": "node:b",
+          "target": "node:c",
+          "relation_type": "pays",
+          "tx_count": 1,
+          "amount_total": 80,
+          "amount": 80
+        }
+      ]
+    },
+    "nodes": [],
+    "edges": [
+      {
+        "edge_id": "edge:ab",
+        "source": "node:a",
+        "target": "node:b",
+        "relation_type": "owns",
+        "tx_count": 2,
+        "amount_total": 2500,
+        "amount": 2500
+      },
+      {
+        "edge_id": "edge:bc",
+        "source": "node:b",
+        "target": "node:c",
+        "relation_type": "pays",
+        "tx_count": 1,
+        "amount_total": 80,
+        "amount": 80
+      }
+    ],
+    "stats": {},
+    "graph_tier": "basic"
+  },
+  "searchContract": {
+    "query": "Alpha",
+    "limit": 5,
+    "expectedNodeIds": ["node:a"]
+  },
+  "filterContract": {
+    "minAmount": 100,
+    "collapseChildren": false,
+    "expectedEdgeIds": ["edge:ab"],
+    "expectedNodeIds": ["node:a", "node:b"]
+  },
+  "layoutProjectionContract": {
+    "snapshotId": "snap-layout",
+    "mode": "runtime",
+    "viewport": {
+      "center": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 100,
+        "height": 100
+      },
+      "zoom": 1
+    },
+    "nodePositions": [
+      {
+        "id": "node:b",
+        "x": 20,
+        "y": 5,
+        "nodeRenderMode": "dot",
+        "projection_visible": true
+      },
+      {
+        "id": "node:a",
+        "x": 10,
+        "y": 15,
+        "nodeRenderMode": "dot",
+        "projection_visible": true
+      },
+      {
+        "id": "node:c",
+        "x": 30,
+        "y": 25,
+        "nodeRenderMode": "dot",
+        "projection_visible": false
+      }
+    ],
+    "expectedNodeOrder": ["node:a", "node:b", "node:c"],
+    "expectedSyncRows": [
+      {
+        "cluster_node": false,
+        "id": "node:a",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": true,
+        "x": 10,
+        "y": 15
+      },
+      {
+        "cluster_node": false,
+        "id": "node:b",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": true,
+        "x": 20,
+        "y": 5
+      },
+      {
+        "cluster_node": false,
+        "id": "node:c",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": false,
+        "x": 30,
+        "y": 25
+      }
+    ],
+    "expectedBounds": {
+      "maxX": 30,
+      "maxY": 25,
+      "minX": 10,
+      "minY": 5
+    },
+    "expectedSignature": "snap-layout::n:3::z:1::c:0,0::s:100x100::b:10,30,5,25::m:node:a:10:15:dot|node:b:20:5:dot|node:c:30:25:dot"
+  },
+  "expectedRuntimeGraph": {
+    "edges": [
+      {
+        "amount": 2500,
+        "amount_total": 2500,
+        "edge_id": "edge:ab",
+        "relation_type": "owns",
+        "source": "node:a",
+        "target": "node:b",
+        "tx_count": 2
+      },
+      {
+        "amount": 80,
+        "amount_total": 80,
+        "edge_id": "edge:bc",
+        "relation_type": "pays",
+        "source": "node:b",
+        "target": "node:c",
+        "tx_count": 1
+      }
+    ],
+    "nodes": [
+      {
+        "display_id": "A",
+        "id": "node:a",
+        "nodeRenderMode": "dot",
+        "ntype": "seed",
+        "projection_visible": true,
+        "title": "Alpha"
+      },
+      {
+        "display_id": "B",
+        "id": "node:b",
+        "nodeRenderMode": "dot",
+        "projection_visible": true,
+        "title": "Beta"
+      },
+      {
+        "display_id": "C",
+        "id": "node:c",
+        "nodeRenderMode": "dot",
+        "projection_visible": false,
+        "title": "Gamma"
+      }
+    ],
+    "runtime_revision": 2
+  }
+}

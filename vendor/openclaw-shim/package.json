@@ -1,0 +1,26 @@
+{
+  "name": "openclaw",
+  "version": "2026.6.6+analytix.shim.0",
+  "description": "analytix compatibility shim for @tencent-weixin/openclaw-weixin peer imports.",
+  "author": "Guoqin He (GitHub: Eysn0130)",
+  "maintainers": [
+    "Guoqin He (GitHub: Eysn0130)"
+  ],
+  "contributors": [
+    "OpenClaw contributors (upstream v2026.5.18; https://github.com/openclaw/openclaw)"
+  ],
+  "license": "MIT",
+  "analytixProvenance": {
+    "upstreamRepository": "https://github.com/openclaw/openclaw",
+    "upstreamTag": "v2026.5.18",
+    "upstreamTagObject": "0c5e335df4311f135a36f7f72fcd87784dd01c96",
+    "upstreamCommit": "50a2481652b6a62d573ece3cead60400dc77020d"
+  },
+  "type": "module",
+  "exports": {
+    "./plugin-sdk/account-id": "./plugin-sdk/account-id.js",
+    "./plugin-sdk/infra-runtime": "./plugin-sdk/infra-runtime.js",
+    "./plugin-sdk/config-runtime": "./plugin-sdk/config-runtime.js",
+    "./plugin-sdk/channel-config-schema": "./plugin-sdk/channel-config-schema.js"
+  }
+}

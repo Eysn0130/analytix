@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "d0252-go-default-candidate-report",
+  "changeId": "D-0252",
+  "stage": "D-0252-go-default-candidate",
+  "generatedAt": "2026-06-24T17:51:04.868Z",
+  "status": "blocked",
+  "passed": false,
+  "goDefaultCandidateReady": false,
+  "goDefaultBackendEnabled": true,
+  "typeScriptFallbackRetained": false,
+  "typeScriptDefaultPathRetired": true,
+  "typeScriptRollbackOverrideRetained": true,
+  "rendererVisibleGoSwitcher": false,
+  "llmAnswerQualityEvidenceUsed": false,
+  "deterministicEvidenceOnly": true,
+  "checks": [
+    {
+      "id": "d0251-live-evidence",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/d0251-live-evidence-report.json",
+      "reason": "D-0251 aggregate is not candidate-ready; missing/invalid: status, passed, missingExternalInputs:58:provider:deepseek|provider:openai-compatible|provider:anthropic-compatible|provider:custom-endpoint|mcp:credentialed-execution|packaged:packaged-app-startup|packaged:health|packaged:runtime-info|...(+50), componentStatus.provider:live_blocked, componentStatus.mcp:live_blocked, componentStatus.packaged:live_blocked, componentStatus.operator:live_blocked"
+    },
+    {
+      "id": "strict-g6-readiness",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json",
+      "reason": "strict G6 readiness missing/invalid: hardGate:provider-matrix-credentialed, hardGate:mcp-matrix-credentialed, hardGate:packaged-qa, hardGate:explicit-env-gate, check:provider-matrix-credentialed, check:mcp-matrix-credentialed, check:packaged-qa, check:explicit-env-gate"
+    },
+    {
+      "id": "d0250c-live-cutover-ready",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250c-go-runtime-code-stage-report.json",
+      "reason": "D-0250C live cutover evidence missing/invalid: strictG6Passed, liveCutoverStatus, missingLiveEvidence:provider-matrix-credentialed|mcp-matrix-credentialed|packaged-qa|explicit-env-gate|credentialed-provider-matrix-json|credentialed-mcp-execution-json|packaged-desktop-qa-json|ANALYTIX_GO_RUNTIME_G6_READY=1|...(+1), d0250bMissingEvidence:provider-matrix-credentialed|mcp-matrix-credentialed|packaged-qa|explicit-env-gate, d0250cLiveEvidenceBlockers:credentialed-provider-matrix-json|credentialed-mcp-execution-json|packaged-desktop-qa-json|ANALYTIX_GO_RUNTIME_G6_READY=1|operator-gate-json"
+    },
+    {
+      "id": "typescript-fallback-retired",
+      "status": "passed",
+      "reason": ""
+    },
+    {
+      "id": "renderer-go-switcher-hidden",
+      "status": "passed",
+      "reason": ""
+    },
+    {
+      "id": "go-default-backend-enabled",
+      "status": "passed",
+      "reason": ""
+    },
+    {
+      "id": "provider-matrix-json",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json",
+      "reason": "provider matrix must be passed D-0251 evidence"
+    },
+    {
+      "id": "mcp-execution-json",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json",
+      "reason": "MCP execution must be passed D-0251 evidence"
+    },
+    {
+      "id": "packaged-qa-json",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json",
+      "reason": "packaged QA must be passed D-0251 d0243-packaged-go-runtime-qa evidence"
+    },
+    {
+      "id": "operator-gate-json",
+      "status": "blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/operator-gate.json",
+      "reason": "operator gate missing/invalid for D-0250B/D-0251/D-0252 gate: status, passed, explicitEnvGate, credentialedEvidenceReviewed, goDefaultCandidateApproved"
+    },
+    {
+      "id": "operator-candidate-approval",
+      "status": "blocked",
+      "reason": "D-0252 requires explicit operator candidate approval or a passed D-0251 operator gate"
+    }
+  ],
+  "blockerIds": [
+    "d0251-live-evidence",
+    "strict-g6-readiness",
+    "d0250c-live-cutover-ready",
+    "provider-matrix-json",
+    "mcp-execution-json",
+    "packaged-qa-json",
+    "operator-gate-json",
+    "operator-candidate-approval"
+  ],
+  "evidencePaths": {
+    "d0251LiveEvidence": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/d0251-live-evidence-report.json",
+    "readinessGate": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json",
+    "d0250cReport": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0250c-go-runtime-code-stage-report.json"
+  },
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "d0251LiveEvidence": "8802c13b07f8dd1c89bb5ef432624a320264a1e803150ab0cce9535dc3348322",
+    "readinessGate": "1d5cb1833e01f90bb1da9801ca39a3b91b719a7f5075dd9e6ade1162090c78e8",
+    "d0250cReport": "16a69c4e439a4512f7a7c3a7374b61f798f2948010eb2758432246ac7f0cb625"
+  },
+  "sourceCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "adapterCandidateEnv": {},
+  "requiredExternalCandidateEnv": [],
+  "rollback": {
+    "retainedFallback": "TypeScript executable runtime fallback is retired; ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic.",
+    "rollbackCommand": "Restore a previous release for operational rollback; ANALYTIX_RUNTIME_BACKEND=typescript must not start TS runtime.",
+    "rollbackEvidenceRequiredForD0253": false,
+    "fallbackSemantics": "typeScriptFallbackRetained:false means no TypeScript default-path fallback and no executable TS rollback override in the current app."
+  },
+  "nextExitPlan": {
+    "d0252Candidate": "Supply passed D-0251 live evidence, strict G6 readiness, D-0250C live-ready report, and operator validation approval.",
+    "d0253Retirement": "Continue replacement and rollback evidence without restoring TypeScript as the default path."
+  },
+  "outputPaths": {
+    "json": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0252-candidate/d0252-go-default-candidate-report.json",
+    "markdown": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0252-candidate/d0252-go-default-candidate-summary.md"
+  }
+}

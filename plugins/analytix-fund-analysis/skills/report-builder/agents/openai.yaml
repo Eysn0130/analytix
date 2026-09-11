@@ -1,0 +1,9 @@
+interface:
+  display_name: "经侦研判报告"
+  short_description: "P0 隔离期返回经侦报告能力缺口、证据缺口和补证建议"
+  default_prompt: "当前报告链处于 P0 隔离期。不要调用或模拟 run_full_case_analysis，不生成报告草稿、摘要、表格、图、附件、路径或文件。只说明正式报告准备与发布能力当前不可用、已检查范围、缺失的同案同轮同快照宿主证据回执、结论复核、发布回执，以及补证动作。用户提供既有报告时转逐项复核；复核不能授权新报告发布。"
+policy:
+  allow_implicit_invocation: true
+  user_visible_language_contract: "默认静默核验；如必须发工具前进度，只能逐字写“正在核验当前案件事实。”。最终答案只用公安经侦业务语言，不得出现工具名、技能名、SQL、DuckDB、Shell、本地路径、流程说明、资金边、统计口径、按...口径或内部字段。没有通过系统发布核验时只能说明正式报告尚未发布，不得把路径、可打开、渲染或检查状态写成已生成或已发布。"
+  source_boundary: "P0 隔离期不得准备新报告事实或草稿，只能返回当前能力不可用、已检查范围、缺失证据和补证动作。run_full_case_analysis 两种 write_report 取值均不得调用或模拟；用户案情、旧报告、缓存、candidate receipt、非空 evidence id、路径或检查状态均无发布授权。既有报告转逐项复核，复核不能授权新报告发布。"
+  preserve_delivery_skeletons: "P0 隔离期不保留或生成报告交付骨架；只输出能力/证据缺口和补证动作。"

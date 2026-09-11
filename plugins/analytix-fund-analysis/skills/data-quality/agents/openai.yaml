@@ -1,0 +1,6 @@
+interface:
+  display_name: "数据质量与口径复核"
+  short_description: "复核导入清洗、重复交易、金额统计范围和核验意见"
+  default_prompt: "请复核当前案件数据质量、重复交易风险和金额统计范围边界。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,194 @@
+#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const platformPackages = {
+  "darwin-arm64": {
+    "executablePath": [
+      "dist",
+      "Analytix Computer Use.app",
+      "Contents",
+      "MacOS",
+      "OpenComputerUse"
+    ]
+  },
+  "darwin-x64": {
+    "executablePath": [
+      "dist",
+      "Analytix Computer Use.app",
+      "Contents",
+      "MacOS",
+      "OpenComputerUse"
+    ]
+  },
+  "linux-arm64": {
+    "executablePath": [
+      "dist",
+      "linux",
+      "arm64",
+      "analytix-computer-use"
+    ]
+  },
+  "linux-x64": {
+    "executablePath": [
+      "dist",
+      "linux",
+      "amd64",
+      "analytix-computer-use"
+    ]
+  },
+  "win32-arm64": {
+    "executablePath": [
+      "dist",
+      "windows",
+      "arm64",
+      "analytix-computer-use.exe"
+    ]
+  },
+  "win32-x64": {
+    "executablePath": [
+      "dist",
+      "windows",
+      "amd64",
+      "analytix-computer-use.exe"
+    ]
+  }
+};
+const packageRoot = path.resolve(__dirname, "..");
+const args = process.argv.slice(2);
+const command = args[0] || "";
+const installCommands = new Map([
+  ["install-claude-mcp", "install-claude-mcp.sh"],
+  ["install-clauce-mcp", "install-claude-mcp.sh"],
+  ["install-gemini-mcp", "install-gemini-mcp.sh"],
+  ["install-opencode-mcp", "install-opencode-mcp.sh"],
+]);
+
+function printLauncherHelp() {
+  console.log(`Analytix Computer Use
+
+用法:
+  analytix-computer-use [command] [options]
+  analytix-computer-use
+
+命令:
+  mcp                  启动 stdio MCP server。
+  doctor               输出权限状态；macOS 缺权限时打开授权引导。
+  list-apps            输出正在运行或最近使用的应用。
+  snapshot <app>       输出指定应用当前 accessibility 快照。
+  call <tool>          调用单个 tool，或运行 JSON tool-call 数组。
+  turn-ended           通知正在运行的 MCP 进程当前 host turn 已结束。
+  install-claude-mcp   将 MCP server 写入当前项目的 ~/.claude.json。
+  install-gemini-mcp   将 MCP server 写入 Gemini CLI 配置。
+  install-opencode-mcp 将 MCP server 写入 ~/.config/opencode。
+  help [command]       查看通用帮助或命令帮助。
+  version              输出 CLI 版本。
+
+全局选项:
+  -h, --help           显示帮助。
+  -v, --version        显示版本。
+
+说明:
+  此 npm 包内置受支持平台的 native runtime，并在启动时按当前 os-arch 自动选择。
+  使用 'analytix-computer-use help <command>' 查看命令专用帮助。`);
+}
+
+function printInstallHelp(scriptName, usage) {
+  console.log(`用法:
+  ${usage}
+
+此辅助脚本会更新本地 MCP 或插件配置，使其运行:
+  analytix-computer-use mcp
+
+脚本:
+  ${scriptName}`);
+}
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function spawnAndExit(executable, executableArgs) {
+  const child = spawn(executable, executableArgs, {
+    stdio: "inherit",
+    windowsHide: false,
+  });
+
+  child.on("error", (error) => {
+    fail(`启动 ${executable} 失败: ${error.message}`);
+  });
+
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      child.kill(signal);
+    });
+  }
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.exit(1);
+    }
+    process.exit(code ?? 0);
+  });
+}
+
+function runInstallCommand(scriptName, scriptArgs) {
+  if (process.platform === "win32") {
+    fail(`${command} 当前需要 POSIX shell。Windows 上请把 MCP client 配置为 command "analytix-computer-use" 和 args ["mcp"]。`);
+  }
+
+  const scriptPath = path.join(packageRoot, "scripts", scriptName);
+  if (!fs.existsSync(scriptPath)) {
+    fail(`缺少安装辅助脚本: ${scriptPath}。`);
+  }
+
+  spawnAndExit(scriptPath, scriptArgs);
+}
+
+function resolveNativeExecutable() {
+  const platformKey = `${process.platform}-${process.arch}`;
+  const target = platformPackages[platformKey];
+  if (!target) {
+    const supported = Object.keys(platformPackages).sort().join(", ");
+    fail(`不支持的平台 ${platformKey}。受支持平台: ${supported}。`);
+  }
+
+  const executablePath = path.join(packageRoot, ...target.executablePath);
+  if (!fs.existsSync(executablePath)) {
+    fail(`缺少 ${platformKey} 对应的内置 native runtime: ${executablePath}。
+
+请重新安装:
+  npm install -g analytix-computer-use`);
+  }
+
+  return executablePath;
+}
+
+if (command === "-h" || command === "--help" || (command === "help" && args.length <= 1)) {
+  printLauncherHelp();
+  process.exit(0);
+}
+
+if (command === "help" && args[1] === "install-gemini-mcp") {
+  printInstallHelp("install-gemini-mcp.sh", "analytix-computer-use install-gemini-mcp [--scope project|user]");
+  process.exit(0);
+}
+
+if (command === "help" && args[1] === "install-opencode-mcp") {
+  printInstallHelp("install-opencode-mcp.sh", "analytix-computer-use install-opencode-mcp");
+  process.exit(0);
+}
+
+if (command === "help" && (args[1] === "install-claude-mcp" || args[1] === "install-clauce-mcp")) {
+  printInstallHelp("install-claude-mcp.sh", "analytix-computer-use install-claude-mcp");
+  process.exit(0);
+}
+
+if (installCommands.has(command)) {
+  const scriptName = installCommands.get(command);
+  runInstallCommand(scriptName, args.slice(1));
+} else {
+  spawnAndExit(resolveNativeExecutable(), args);
+}

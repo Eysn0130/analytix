@@ -1,0 +1,387 @@
+import { existsSync } from 'node:fs'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CapabilityRegistry } from '../src/tool-test-support/tool/capability-registry.js'
+import { LocalToolHost } from '../src/tool-test-support/tool/local-tool-host.js'
+import {
+  buildMusicGenToolProviders,
+  buildSpeechGenToolProviders,
+  buildVideoGenToolProviders,
+  MimoSpeechClient,
+  MiniMaxMusicClient,
+  MiniMaxSpeechClient,
+  MiniMaxVideoClient,
+  type MusicGenClient,
+  type SpeechGenClient,
+  type VideoGenClient
+} from '../src/tool-test-support/tool/media-gen-tool-provider.js'
+import { AnalytixCapabilitiesConfig } from '../src/contracts/capabilities.js'
+import type { ToolExecutionUpdate, ToolHostContext } from '../src/ports/tool-host.js'
+
+let workspace: string
+
+function buildContext(): ToolHostContext {
+  return {
+    threadId: 'thr_1',
+    turnId: 'turn_1',
+    workspace,
+    threadMode: 'agent',
+    approvalPolicy: 'auto',
+    abortSignal: new AbortController().signal,
+    awaitApproval: async () => 'allow'
+  }
+}
+
+function fixedNow() {
+  return '2026-06-10T00:00:00.000Z'
+}
+
+describe('Media gen tool provider', () => {
+  beforeEach(async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'analytix-mediagen-'))
+  })
+
+  afterEach(async () => {
+    vi.unstubAllGlobals()
+    await rm(workspace, { recursive: true, force: true })
+  })
+
+  it('reports unavailable media providers without tools when configuration is incomplete', () => {
+    const config = AnalytixCapabilitiesConfig.parse({
+      speechGen: { enabled: true, baseUrl: 'https://media.example.test/v1', model: 'speech-test' },
+      musicGen: { enabled: true, baseUrl: 'https://media.example.test/v1', model: 'music-test' },
+      videoGen: { enabled: true, baseUrl: 'https://media.example.test/v1', model: 'video-test' }
+    })
+
+    const speech = buildSpeechGenToolProviders(config.speechGen)
+    const music = buildMusicGenToolProviders(config.musicGen)
+    const video = buildVideoGenToolProviders(config.videoGen)
+
+    expect(speech.available).toBe(false)
+    expect(music.available).toBe(false)
+    expect(video.available).toBe(false)
+    expect(speech.providers[0]).toMatchObject({ id: 'speechGen', available: false, tools: [] })
+    expect(music.providers[0]).toMatchObject({ id: 'musicGen', available: false, tools: [] })
+    expect(video.providers[0]).toMatchObject({ id: 'videoGen', available: false, tools: [] })
+    expect(speech.diagnostics[0].reason).toMatch(/missing apiKey/)
+    expect(music.diagnostics[0].reason).toMatch(/missing apiKey/)
+    expect(video.diagnostics[0].reason).toMatch(/missing apiKey/)
+  })
+
+  it('generates speech, music, and video files through configured media tools', async () => {
+    const speechCalls: unknown[] = []
+    const musicCalls: unknown[] = []
+    const videoCalls: unknown[] = []
+    const speechClient: SpeechGenClient = {
+      id: 'fake-speech',
+      async generate(request) {
+        speechCalls.push(request)
+        return { data: Buffer.from('speech-bytes'), mimeType: 'audio/mpeg', extension: 'mp3' }
+      }
+    }
+    const musicClient: MusicGenClient = {
+      id: 'fake-music',
+      async generate(request) {
+        musicCalls.push(request)
+        return { data: Buffer.from('music-bytes'), mimeType: 'audio/mpeg', extension: 'mp3' }
+      }
+    }
+    const videoClient: VideoGenClient = {
+      id: 'fake-video',
+      async generate(request) {
+        videoCalls.push(request)
+        await request.onUpdate?.({ output: { status: 'submitted', provider: 'fake-video' } })
+        return { data: Buffer.from('video-bytes'), mimeType: 'video/mp4', extension: 'mp4' }
+      }
+    }
+    const config = AnalytixCapabilitiesConfig.parse({
+      speechGen: {
+        enabled: true,
+        baseUrl: 'https://media.example.test/v1',
+        apiKey: 'sk-speech',
+        model: 'speech-test',
+        voice: 'voice-1',
+        format: 'mp3'
+      },
+      musicGen: {
+        enabled: true,
+        baseUrl: 'https://media.example.test/v1',
+        apiKey: 'sk-music',
+        model: 'music-test',
+        format: 'mp3'
+      },
+      videoGen: {
+        enabled: true,
+        baseUrl: 'https://media.example.test/v1',
+        apiKey: 'sk-video',
+        model: 'video-test',
+        defaultDuration: 6,
+        defaultResolution: '1080P'
+      }
+    })
+    const providers = [
+      ...buildSpeechGenToolProviders(config.speechGen, { speechClient, nowIso: fixedNow }).providers,
+      ...buildMusicGenToolProviders(config.musicGen, { musicClient, nowIso: fixedNow }).providers,
+      ...buildVideoGenToolProviders(config.videoGen, { videoClient, nowIso: fixedNow }).providers
+    ]
+    const host = new LocalToolHost({ registry: new CapabilityRegistry(providers) })
+    const context = buildContext()
+
+    expect((await host.listTools(context)).map((tool) => tool.name)).toEqual([
+      'generate_speech',
+      'generate_music',
+      'generate_video'
+    ])
+
+    const speech = await host.execute({
+      callId: 'call_speech',
+      toolName: 'generate_speech',
+      arguments: { text: 'hello world' }
+    }, context)
+    const music = await host.execute({
+      callId: 'call_music',
+      toolName: 'generate_music',
+      arguments: { prompt: 'bright synth pop', instrumental: true }
+    }, context)
+    const updates: ToolExecutionUpdate[] = []
+    const video = await host.execute({
+      callId: 'call_video',
+      toolName: 'generate_video',
+      arguments: { prompt: 'a product demo', duration: 8, resolution: '768P' }
+    }, context, (item) => {
+      if (item.kind === 'tool_result') updates.push({ output: item.output, isError: item.isError })
+    })
+
+    const speechOutput = outputFor(speech.item)
+    const musicOutput = outputFor(music.item)
+    const videoOutput = outputFor(video.item)
+    expect(speechOutput).toMatchObject({ model: 'speech-test', voice: 'voice-1', format: 'mp3' })
+    expect(musicOutput).toMatchObject({ model: 'music-test', format: 'mp3' })
+    expect(videoOutput).toMatchObject({ model: 'video-test', duration: 8, resolution: '768P' })
+    await expectFile(speechOutput, '.analytix-audio/', 'audio/mpeg', 'speech-bytes')
+    await expectFile(musicOutput, '.analytix-music/', 'audio/mpeg', 'music-bytes')
+    await expectFile(videoOutput, '.analytix-videos/', 'video/mp4', 'video-bytes')
+    expect(speechCalls[0]).toMatchObject({ text: 'hello world', model: 'speech-test', voice: 'voice-1' })
+    expect(musicCalls[0]).toMatchObject({ prompt: 'bright synth pop', instrumental: true, model: 'music-test' })
+    expect(videoCalls[0]).toMatchObject({ prompt: 'a product demo', duration: 8, resolution: '768P', model: 'video-test' })
+    expect(updates[0]).toMatchObject({ output: { status: 'submitted', provider: 'fake-video' } })
+  })
+
+  it('posts MiniMax speech and music requests to the documented endpoints and decodes hex audio', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>
+      })
+      return new Response(JSON.stringify({
+        base_resp: { status_code: 0, status_msg: 'success' },
+        data: { audio: Buffer.from(requests.length === 1 ? 'speech' : 'music').toString('hex') }
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }))
+    const signal = new AbortController().signal
+
+    const speech = await new MiniMaxSpeechClient('https://api.minimax.io', 'sk-test').generate({
+      text: 'Hello from MiniMax',
+      model: 'speech-2.8-hd',
+      voice: 'female-shaonv',
+      format: 'mp3',
+      timeoutMs: 120000,
+      signal
+    })
+    const music = await new MiniMaxMusicClient('https://api.minimax.io', 'sk-test').generate({
+      prompt: 'Pop, bright, upbeat',
+      lyrics: 'hello\nworld',
+      model: 'music-2.6',
+      format: 'mp3',
+      timeoutMs: 300000,
+      signal
+    })
+
+    expect(speech.data.toString('utf8')).toBe('speech')
+    expect(music.data.toString('utf8')).toBe('music')
+    expect(requests[0].url).toBe('https://api.minimax.io/v1/t2a_v2')
+    expect(requests[0].headers.get('authorization')).toBe('Bearer sk-test')
+    expect(requests[0].body).toMatchObject({
+      model: 'speech-2.8-hd',
+      text: 'Hello from MiniMax',
+      output_format: 'hex',
+      voice_setting: { voice_id: 'female-shaonv' },
+      audio_setting: { format: 'mp3' }
+    })
+    expect(requests[1].url).toBe('https://api.minimax.io/v1/music_generation')
+    expect(requests[1].body).toMatchObject({
+      model: 'music-2.6',
+      prompt: 'Pop, bright, upbeat',
+      lyrics: 'hello\nworld',
+      output_format: 'hex',
+      audio_setting: { format: 'mp3' }
+    })
+  })
+
+  it('posts MiMo TTS as a chat completion with assistant speech text and decodes base64 audio', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>
+      })
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            audio: { data: Buffer.from('mimo-audio').toString('base64') }
+          }
+        }]
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }))
+
+    const media = await new MimoSpeechClient('https://api.xiaomimimo.com/v1', 'sk-mimo').generate({
+      text: 'The target text is in the assistant message.',
+      model: 'mimo-v2.5-tts',
+      voice: 'Chloe',
+      style: 'Bright and upbeat.',
+      format: 'wav',
+      timeoutMs: 120000,
+      signal: new AbortController().signal
+    })
+
+    expect(media.data.toString('utf8')).toBe('mimo-audio')
+    expect(media.mimeType).toBe('audio/wav')
+    expect(requests[0].url).toBe('https://api.xiaomimimo.com/v1/chat/completions')
+    expect(requests[0].headers.get('api-key')).toBe('sk-mimo')
+    expect(requests[0].body).toEqual({
+      model: 'mimo-v2.5-tts',
+      messages: [
+        { role: 'user', content: 'Bright and upbeat.' },
+        { role: 'assistant', content: 'The target text is in the assistant message.' }
+      ],
+      audio: {
+        format: 'wav',
+        voice: 'Chloe'
+      }
+    })
+  })
+
+  it('polls MiniMax video generation and downloads the finished file', async () => {
+    const requests: Array<{ url: string; method?: string; body?: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const href = String(url)
+      requests.push({
+        url: href,
+        method: init?.method,
+        ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {})
+      })
+      if (href.endsWith('/v1/video_generation')) {
+        return new Response(JSON.stringify({
+          base_resp: { status_code: 0, status_msg: 'success' },
+          task_id: 'task-1'
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (href.includes('/v1/query/video_generation')) {
+        return new Response(JSON.stringify({
+          base_resp: { status_code: 0, status_msg: 'success' },
+          status: 'success',
+          file_id: 'file-1'
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (href.includes('/v1/files/retrieve')) {
+        return new Response(JSON.stringify({
+          base_resp: { status_code: 0, status_msg: 'success' },
+          file: { download_url: 'https://cdn.example.test/video.mp4' }
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      expect(href).toBe('https://cdn.example.test/video.mp4')
+      return new Response(new Uint8Array(Buffer.from('video')), {
+        status: 200,
+        headers: { 'content-type': 'video/mp4' }
+      })
+    }))
+    const updates: ToolExecutionUpdate[] = []
+
+    const media = await new MiniMaxVideoClient('https://api.minimax.io', 'sk-video').generate({
+      prompt: 'A calm product reveal',
+      model: 'MiniMax-Hailuo-2.3',
+      duration: 6,
+      resolution: '1080P',
+      timeoutMs: 120000,
+      pollIntervalMs: 1,
+      signal: new AbortController().signal,
+      onUpdate: (update) => {
+        updates.push(update)
+      }
+    })
+
+    expect(media.data.toString('utf8')).toBe('video')
+    expect(requests[0]).toMatchObject({
+      url: 'https://api.minimax.io/v1/video_generation',
+      method: 'POST',
+      body: {
+        model: 'MiniMax-Hailuo-2.3',
+        prompt: 'A calm product reveal',
+        duration: 6,
+        resolution: '1080P'
+      }
+    })
+    expect(requests[1].url).toBe('https://api.minimax.io/v1/query/video_generation?task_id=task-1')
+    expect(requests[2].url).toBe('https://api.minimax.io/v1/files/retrieve?file_id=file-1')
+    expect(updates).toEqual([
+      { output: { status: 'submitted', taskId: 'task-1', provider: 'minimax-video' } },
+      { output: { status: 'success', taskId: 'task-1', provider: 'minimax-video' } }
+    ])
+  })
+})
+
+function outputFor(item: unknown): {
+  files: Array<{ relativePath: string; absolutePath: string; mimeType: string; byteSize: number }>
+  model: string
+  voice?: string
+  format?: string
+  duration?: number
+  resolution?: string
+} {
+  expect(item).toMatchObject({ kind: 'tool_result', isError: false })
+  const output = (item as { output: unknown }).output
+  expect(output).toMatchObject({ files: expect.any(Array) })
+  return output as {
+    files: Array<{ relativePath: string; absolutePath: string; mimeType: string; byteSize: number }>
+    model: string
+    voice?: string
+    format?: string
+    duration?: number
+    resolution?: string
+  }
+}
+
+async function expectFile(
+  output: { files: Array<{ relativePath: string; absolutePath: string; mimeType: string; byteSize: number }> },
+  prefix: string,
+  mimeType: string,
+  contents: string
+) {
+  expect(output.files).toHaveLength(1)
+  const file = output.files[0]
+  expect(file.relativePath.startsWith(prefix)).toBe(true)
+  expect(file.mimeType).toBe(mimeType)
+  expect(file.byteSize).toBe(Buffer.byteLength(contents))
+  expect(existsSync(file.absolutePath)).toBe(true)
+  await expect(readFile(file.absolutePath, 'utf8')).resolves.toBe(contents)
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "账户资金画像"
+  short_description: "形成银行卡或账户的资金画像、对手方、异常特征和核验意见"
+  default_prompt: "请对当前案件指定银行卡或账户形成资金画像，并说明核验意见和补证建议。"
+policy:
+  allow_implicit_invocation: true

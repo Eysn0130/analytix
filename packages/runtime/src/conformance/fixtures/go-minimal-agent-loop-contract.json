@@ -1,0 +1,582 @@
+{
+  "schemaVersion": 1,
+  "id": "go-minimal-agent-loop-contract-v1",
+  "stage": "D-0237",
+  "mode": "conformance-only-minimal-agent-loop",
+  "runtimeToken": "tok-1",
+  "sourceContractIds": [
+    "go-g2-route-replay-contract-v1",
+    "provider-cache-prefix-matrix-v1",
+    "go-g3-provider-streaming-usage-cache-contract-v1",
+    "go-g4-tools-approval-user-input-mcp-contract-v1",
+    "approval-user-input-route-api-gates-v1",
+    "mcp-tool-lifecycle-fixture-v1",
+    "go-durable-sidecar-contract-v1"
+  ],
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false,
+    "tempDurableStorePrototype": true,
+    "minimalAgentLoopPrototype": true,
+    "fixtureBackedLoopOnly": true
+  },
+  "threadId": "thr_go_loop_minimal",
+  "turnId": "turn_go_loop_1",
+  "cancelThreadId": "thr_go_loop_cancel",
+  "resumeThreadId": "thr_go_loop_resume",
+  "userInput": {
+    "itemId": "item_user_loop_1",
+    "role": "user",
+    "text": "Summarize the fixture and request approval before shell access.",
+    "singleTurn": true
+  },
+  "stablePrefix": {
+    "prefixHash": "c1ca29dab3a1a82e",
+    "systemHash": "781e4439d0d5ff79",
+    "prefixItemsHash": "e45922fbe42606d0",
+    "toolsHash": "725eed83c2edd7e0",
+    "toolSchemaTokens": 68,
+    "toolCatalogFingerprint": "loop-tools-725eed83c2edd7e0",
+    "toolNames": [
+      "alpha_lookup",
+      "beta_fetch",
+      "bash",
+      "request_user_input",
+      "delegate_task"
+    ],
+    "systemPrefixStable": true,
+    "dynamicStateInStablePrefix": false
+  },
+  "modelRequestShape": {
+    "caseId": "deepseek-chat-request-shape",
+    "provider": "compat",
+    "providerId": "deepseek-default",
+    "endpointFormat": "chat_completions",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+    "expectedUrl": "https://api.deepseek.com/v1/chat/completions",
+    "stream": true,
+    "requiredHeaders": [
+      "Authorization"
+    ],
+    "requiredBodyFields": [
+      "model",
+      "stream",
+      "messages",
+      "tools",
+      "thinking",
+      "reasoning_effort"
+    ],
+    "forbiddenBodyFields": [
+      "input",
+      "system",
+      "max_output_tokens"
+    ],
+    "expectedToolShape": "openai-function",
+    "toolCatalogFingerprint": "loop-tools-725eed83c2edd7e0",
+    "stableSystemPrefix": true,
+    "externalNetworkUsed": false,
+    "apiKeyRead": false
+  },
+  "providerCacheTelemetry": {
+    "cases": [
+      {
+        "caseId": "deepseek-prompt-cache",
+        "provider": "deepseek",
+        "providerId": "deepseek-default",
+        "endpointFormat": "chat_completions",
+        "model": "deepseek-v4-pro",
+        "cacheHitTokens": 930,
+        "cacheMissTokens": 70,
+        "cacheHitRate": 0.93
+      },
+      {
+        "caseId": "openai-responses-cached-tokens",
+        "provider": "openai",
+        "providerId": "openai-compatible",
+        "endpointFormat": "responses",
+        "model": "gpt-5-mini",
+        "cacheHitTokens": 300,
+        "cacheMissTokens": 100,
+        "cacheHitRate": 0.75
+      },
+      {
+        "caseId": "anthropic-cache-fields",
+        "provider": "anthropic",
+        "providerId": "minimax-anthropic",
+        "endpointFormat": "messages",
+        "model": "MiniMax-M2.5",
+        "cacheHitTokens": 1000,
+        "cacheMissTokens": 250,
+        "cacheHitRate": 0.8
+      }
+    ],
+    "expectedProviders": [
+      "anthropic",
+      "deepseek",
+      "openai"
+    ],
+    "totalCacheHitTokens": 2230,
+    "totalCacheMissTokens": 420,
+    "cacheTelemetryLost": false,
+    "unsupportedProvidersCountedAsMisses": false
+  },
+  "approvalDenied": {
+    "approvalId": "appr_route_deny_1",
+    "toolName": "bash",
+    "decision": "deny",
+    "status": "denied",
+    "mustNotExecuteDeniedTool": true
+  },
+  "userInputGates": {
+    "submittedInputId": "input_route_submit_1",
+    "cancelledInputId": "input_route_cancel_1",
+    "pendingStatus": "pending",
+    "submittedStatus": "submitted",
+    "cancelledStatus": "cancelled",
+    "submittedAnswersPersistedInEvents": false
+  },
+  "mcpToolCatalog": {
+    "providerId": "mcp:research",
+    "toolNames": [
+      "mcp_search",
+      "mcp_describe",
+      "mcp_call",
+      "mcp_refresh_catalog"
+    ],
+    "fingerprint": "mcp-loop-catalog-v1",
+    "visibleToModel": true,
+    "mcpConnectionUsed": false,
+    "credentialRead": false
+  },
+  "loopScript": {
+    "fixtureModelOnly": true,
+    "modelChunkKinds": [
+      "assistant_reasoning_delta",
+      "assistant_text_delta",
+      "tool_call_complete",
+      "usage",
+      "completed"
+    ],
+    "toolCall": {
+      "callId": "call_loop_shell_1",
+      "toolName": "bash",
+      "executed": false
+    },
+    "toolResult": {
+      "callId": "call_loop_shell_1",
+      "status": "completed",
+      "isError": true,
+      "code": "approval_denied"
+    }
+  },
+  "eventDrafts": [
+    {
+      "kind": "turn_started",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "status": "running"
+    },
+    {
+      "kind": "item_created",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_user_loop_1",
+      "item": {
+        "id": "item_user_loop_1",
+        "turnId": "turn_go_loop_1",
+        "threadId": "thr_go_loop_minimal",
+        "role": "user",
+        "kind": "user_message",
+        "text": "Summarize the fixture and request approval before shell access.",
+        "status": "completed",
+        "createdAt": "2026-06-23T00:00:00.000Z"
+      }
+    },
+    {
+      "kind": "tool_catalog_changed",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "fingerprint": "mcp-loop-catalog-v1",
+      "toolCount": 4,
+      "changeKind": "additive",
+      "toolNames": [
+        "mcp_search",
+        "mcp_describe",
+        "mcp_call",
+        "mcp_refresh_catalog"
+      ],
+      "message": "MCP catalog visible from fixture without opening an MCP connection"
+    },
+    {
+      "kind": "pipeline_stage",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "stage": "response_received",
+      "message": "Provider draft remains private until host acceptance"
+    },
+    {
+      "kind": "tool_call_ready",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_tool_turn_go_loop_1_call_loop_shell_1",
+      "callId": "call_loop_shell_1",
+      "toolName": "bash",
+      "readyCount": 1
+    },
+    {
+      "kind": "approval_requested",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_appr_route_deny_1",
+      "approvalId": "appr_route_deny_1",
+      "toolName": "bash",
+      "status": "pending",
+      "approvalPolicy": "on-request",
+      "sandboxMode": "workspace-write",
+      "summary": "Run a guarded command"
+    },
+    {
+      "kind": "approval_resolved",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_appr_route_deny_1",
+      "approvalId": "appr_route_deny_1",
+      "toolName": "bash",
+      "status": "denied",
+      "summary": "Run a guarded command"
+    },
+    {
+      "kind": "item_completed",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_call_loop_shell_1",
+      "item": {
+        "id": "item_call_loop_shell_1",
+        "turnId": "turn_go_loop_1",
+        "threadId": "thr_go_loop_minimal",
+        "role": "tool",
+        "kind": "tool_result",
+        "callId": "call_loop_shell_1",
+        "toolName": "bash",
+        "toolKind": "tool_call",
+        "status": "completed",
+        "isError": true,
+        "output": {
+          "code": "approval_denied",
+          "executed": false
+        },
+        "createdAt": "2026-06-23T00:00:03.000Z",
+        "finishedAt": "2026-06-23T00:00:03.000Z"
+      }
+    },
+    {
+      "kind": "user_input_requested",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_input_route_submit_1",
+      "inputId": "input_route_submit_1",
+      "status": "pending",
+      "prompt": "Select review outcome",
+      "questions": [
+        {
+          "header": "Outcome",
+          "id": "outcome",
+          "question": "Which outcome should be recorded?",
+          "options": [
+            {
+              "label": "approve",
+              "description": "Continue with approval."
+            },
+            {
+              "label": "revise",
+              "description": "Return for revision."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "user_input_resolved",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_input_route_submit_1",
+      "inputId": "input_route_submit_1",
+      "status": "submitted",
+      "prompt": "Select review outcome"
+    },
+    {
+      "kind": "user_input_requested",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_input_route_cancel_1",
+      "inputId": "input_route_cancel_1",
+      "status": "pending",
+      "prompt": "Choose deployment channel",
+      "questions": [
+        {
+          "header": "Channel",
+          "id": "channel",
+          "question": "Which channel should continue?",
+          "options": [
+            {
+              "label": "stable",
+              "description": "Use the stable channel."
+            },
+            {
+              "label": "beta",
+              "description": "Use the beta channel."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "user_input_resolved",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "itemId": "item_input_route_cancel_1",
+      "inputId": "input_route_cancel_1",
+      "status": "cancelled",
+      "prompt": "Choose deployment channel"
+    },
+    {
+      "kind": "usage",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "model": "deepseek-v4-pro",
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 10,
+        "reasoningTokens": 9,
+        "totalTokens": 1010,
+        "cachedTokens": 930,
+        "cacheHitTokens": 930,
+        "cacheMissTokens": 70,
+        "cacheHitRate": 0.93,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "c1ca29dab3a1a82e",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "781e4439d0d5ff79",
+        "prefixItemsHash": "e45922fbe42606d0",
+        "toolsHash": "725eed83c2edd7e0",
+        "toolSchemaTokens": 68,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 930,
+        "cacheMissTokens": 70,
+        "provider": "deepseek",
+        "providerId": "deepseek-default",
+        "endpointFormat": "chat_completions",
+        "model": "deepseek-v4-pro"
+      }
+    },
+    {
+      "kind": "usage",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "model": "gpt-5-mini",
+      "usage": {
+        "promptTokens": 400,
+        "completionTokens": 20,
+        "reasoningTokens": 11,
+        "totalTokens": 420,
+        "cachedTokens": 300,
+        "cacheHitTokens": 300,
+        "cacheMissTokens": 100,
+        "cacheHitRate": 0.75,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "c1ca29dab3a1a82e",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "781e4439d0d5ff79",
+        "prefixItemsHash": "e45922fbe42606d0",
+        "toolsHash": "725eed83c2edd7e0",
+        "toolSchemaTokens": 68,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 300,
+        "cacheMissTokens": 100,
+        "provider": "openai",
+        "providerId": "openai-compatible",
+        "endpointFormat": "responses",
+        "model": "gpt-5-mini"
+      }
+    },
+    {
+      "kind": "usage",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "model": "MiniMax-M2.5",
+      "usage": {
+        "promptTokens": 1250,
+        "completionTokens": 10,
+        "totalTokens": 1260,
+        "cachedTokens": 1000,
+        "cacheHitTokens": 1000,
+        "cacheMissTokens": 250,
+        "cacheHitRate": 0.8,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "c1ca29dab3a1a82e",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "781e4439d0d5ff79",
+        "prefixItemsHash": "e45922fbe42606d0",
+        "toolsHash": "725eed83c2edd7e0",
+        "toolSchemaTokens": 68,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 1000,
+        "cacheMissTokens": 250,
+        "provider": "anthropic",
+        "providerId": "minimax-anthropic",
+        "endpointFormat": "messages",
+        "model": "MiniMax-M2.5"
+      }
+    },
+    {
+      "kind": "turn_completed",
+      "threadId": "thr_go_loop_minimal",
+      "turnId": "turn_go_loop_1",
+      "status": "completed"
+    }
+  ],
+  "control": {
+    "stepLimit": {
+      "maxModelSteps": 2,
+      "requestedModelSteps": 3,
+      "executedModelSteps": 2,
+      "stepLimitHit": true,
+      "errorCode": "model_step_limit_exceeded",
+      "dynamicStateInStablePrefix": false
+    },
+    "cancel": {
+      "eventDrafts": [
+        {
+          "kind": "turn_started",
+          "threadId": "thr_go_loop_cancel",
+          "turnId": "turn_go_loop_cancel_1",
+          "status": "running"
+        },
+        {
+          "kind": "tool_call_ready",
+          "threadId": "thr_go_loop_cancel",
+          "turnId": "turn_go_loop_cancel_1",
+          "itemId": "item_tool_cancel_call",
+          "callId": "call_cancel_running",
+          "toolName": "bash",
+          "readyCount": 1
+        },
+        {
+          "kind": "turn_aborted",
+          "threadId": "thr_go_loop_cancel",
+          "turnId": "turn_go_loop_cancel_1",
+          "status": "aborted",
+          "reason": "fixture cancel boundary"
+        }
+      ],
+      "status": "aborted",
+      "resultCode": "tool_call_cancelled",
+      "recordsNoToolExecution": true
+    },
+    "resume": {
+      "eventDrafts": [
+        {
+          "kind": "turn_started",
+          "threadId": "thr_go_loop_resume",
+          "turnId": "turn_go_loop_resume_1",
+          "status": "running"
+        },
+        {
+          "kind": "turn_completed",
+          "threadId": "thr_go_loop_resume",
+          "turnId": "turn_go_loop_resume_1",
+          "status": "completed"
+        }
+      ],
+      "sourceThreadId": "thr_go_loop_minimal",
+      "resumedThreadId": "thr_go_loop_resume",
+      "resumesAfterSeq": 16,
+      "recoveredStateMustMatch": true
+    }
+  },
+  "expected": {
+    "eventKinds": [
+      "turn_started",
+      "item_created",
+      "tool_catalog_changed",
+      "pipeline_stage",
+      "tool_call_ready",
+      "approval_requested",
+      "approval_resolved",
+      "item_completed",
+      "user_input_requested",
+      "user_input_resolved",
+      "user_input_requested",
+      "user_input_resolved",
+      "usage",
+      "usage",
+      "usage",
+      "turn_completed"
+    ],
+    "itemKinds": [
+      "user_message",
+      "tool_result"
+    ],
+    "highestSeq": 16,
+    "replayAfterSeq": 8,
+    "replayAfterSeqCount": 8,
+    "sseFrameCount": 16,
+    "caughtUpReplayFrameCount": 0,
+    "providers": [
+      "anthropic",
+      "deepseek",
+      "openai"
+    ],
+    "totalCacheHitTokens": 2230,
+    "totalCacheMissTokens": 420,
+    "approvalStatuses": [
+      "pending",
+      "denied"
+    ],
+    "userInputStatuses": [
+      "pending",
+      "submitted",
+      "pending",
+      "cancelled"
+    ],
+    "mcpToolNames": [
+      "mcp_call",
+      "mcp_describe",
+      "mcp_refresh_catalog",
+      "mcp_search"
+    ],
+    "latestMcpFingerprint": "mcp-loop-catalog-v1",
+    "recoveredStateMatches": true,
+    "sideEffects": {
+      "providerCallAttempts": 0,
+      "toolExecutionAttempts": 0,
+      "approvalExecutionAttempts": 0,
+      "mcpConnectionAttempts": 0,
+      "credentialReadAttempts": 0,
+      "fileMutationAttempts": 0,
+      "realWorkspaceWriteAttempts": 0
+    }
+  }
+}

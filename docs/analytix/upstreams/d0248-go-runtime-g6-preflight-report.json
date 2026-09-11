@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "d0248-go-runtime-g6-preflight",
+  "changeId": "D-0248",
+  "generatedAt": "2026-06-24T17:50:50.530Z",
+  "mode": "strict",
+  "strict": true,
+  "dryRun": false,
+  "skippedCountsAsPassed": false,
+  "fakeMatrixCountsAsCredentialedPass": false,
+  "dryRunCannotAuthorizeCutover": true,
+  "goDefaultBackendEnabled": true,
+  "rendererVisibleGoSwitcher": false,
+  "commandResults": [
+    {
+      "id": "go-runtime-go-test",
+      "label": "Go runtime tests",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "cd packages/runtime-go && /tmp/analytix-go-toolchain/go/bin/go test -count=1 ./...",
+      "durationMs": 1588,
+      "reason": ""
+    },
+    {
+      "id": "runtime-conformance",
+      "label": "Runtime Go conformance",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm --prefix packages/runtime run test -- tests/go-runtime-conformance.test.ts --no-file-parallelism --maxWorkers=1",
+      "durationMs": 2565,
+      "reason": ""
+    },
+    {
+      "id": "adapter-tests",
+      "label": "Electron runtime adapter tests",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run test -- src/main/runtime/analytix-adapter.test.ts --run",
+      "durationMs": 1245,
+      "reason": ""
+    },
+    {
+      "id": "contracts-goal-tests",
+      "label": "Runtime contracts and goal tests",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm --prefix packages/runtime run test -- tests/contracts.test.ts tests/runtime-event-reducer.test.ts tests/goal-tools.test.ts --no-file-parallelism --maxWorkers=1",
+      "durationMs": 870,
+      "reason": ""
+    },
+    {
+      "id": "preload-settings-tests",
+      "label": "Preload and settings tests",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run test -- src/preload/preload-runtime-request.test.ts src/preload/preload-sandbox.test.ts src/shared/app-settings.test.ts --run",
+      "durationMs": 549,
+      "reason": ""
+    },
+    {
+      "id": "renderer-route-surface-tests",
+      "label": "Renderer route-surface tests",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run test -- src/renderer/src/components/Workbench.route-surface.test.ts src/renderer/src/components/chat/Sidebar.test.ts src/renderer/src/components/chat/FloatingComposer.test.ts --run",
+      "durationMs": 1083,
+      "reason": ""
+    },
+    {
+      "id": "product-sovereignty-scan",
+      "label": "Product sovereignty scan",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run scan:product-sovereignty",
+      "durationMs": 2945,
+      "reason": ""
+    },
+    {
+      "id": "typecheck",
+      "label": "Typecheck",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run typecheck",
+      "durationMs": 11537,
+      "reason": ""
+    },
+    {
+      "id": "build-runtime",
+      "label": "Runtime package build",
+      "status": "passed",
+      "exitCode": 0,
+      "command": "npm run build:runtime",
+      "durationMs": 2816,
+      "reason": ""
+    },
+    {
+      "id": "packaged-qa",
+      "label": "D-0251 packaged desktop QA",
+      "status": "skipped",
+      "exitCode": 0,
+      "command": "/Users/sun/.local/node/node-v22.22.1-darwin-arm64/bin/node scripts/d0251-packaged-go-runtime-qa.mjs --json",
+      "durationMs": 26,
+      "reason": "packaged QA is not fully passed; see packaged QA evidence"
+    }
+  ],
+  "readinessGate": {
+    "status": "passed",
+    "exitCode": 0,
+    "command": "/Users/sun/.local/node/node-v22.22.1-darwin-arm64/bin/node scripts/d0247-go-runtime-readiness-report.mjs --json --gate --out-json docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json --out-md docs/analytix/upstreams/d0248-go-runtime-readiness-gate-summary.md",
+    "defaultBackendReady": true,
+    "blockerIds": [],
+    "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json"
+  },
+  "blockerIds": [],
+  "expectedBlocked": false,
+  "passed": true,
+  "acceptedAsCodePhasePass": true,
+  "localCommandFailureIds": [],
+  "localCommandSkippedIds": [
+    "packaged-qa"
+  ],
+  "notes": [
+    "This preflight treats deterministic local provider/MCP matrices as default-backend gates.",
+    "When provider credentials, MCP server env, or packaged desktop state are missing, the report records post-cutover live validation pending rather than blocking the Go default runtime.",
+    "Expected-blocked mode is retained only for legacy code-stage compatibility."
+  ]
+}

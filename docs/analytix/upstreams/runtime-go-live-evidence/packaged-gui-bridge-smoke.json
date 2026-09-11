@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-packaged-gui-smoke",
+  "generatedAt": "2026-07-03T12:44:34.288Z",
+  "sourceCommit": "e0050d6b5e7791ae3bbed261c7367fc25e6e7fdf",
+  "status": "passed",
+  "passed": true,
+  "smoke": {
+    "deterministicContractOnly": false,
+    "actualPackagedAppLaunched": true,
+    "actualPackagedAppEvidenceRequiredForFinalGate": false,
+    "actualPackagedSmokeRequested": true,
+    "actualPackagedSmokePassed": true,
+    "syntheticCredentialUsed": true,
+    "providerNetworkCalled": false,
+    "settingsProfilePatchAccepted": true,
+    "mimoProfileSettingsAccepted": true,
+    "settingsCompatPatchUsed": false,
+    "settingsPatchMode": "provider-profile",
+    "bridgePreserved": true,
+    "sseBridgePreserved": true,
+    "rendererTimelinePreserved": true,
+    "approvalAndUserInputCardsCovered": true
+  },
+  "actualPackagedSmoke": {
+    "requested": true,
+    "passed": true,
+    "status": "passed",
+    "app": {
+      "appPath": "/Users/sun/Projects/analytix/dist/mac-arm64/analytix.app",
+      "appPathHash": "e245d0e0ecc44b13d09e2b9053a801e32d091da7779725ea6b4cff674da713be",
+      "executablePathHash": "40e42b9b952f41679822ed3563888234c5e5e5e0203d2ebf4b3a63b5332d4178",
+      "runtimeServerBinaryPathHash": "62ec5e4552a2a843c72a71c85d4ab1f4ae2f54e39836cf75ee716b9ba8cde2c8",
+      "appExists": true,
+      "executableExists": true,
+      "runtimeServerBinaryExists": true,
+      "appAsarExists": true,
+      "bundledRuntimeGoSourcePresent": false,
+      "ok": true,
+      "message": ""
+    },
+    "launch": {
+      "actualPackagedAppLaunched": true,
+      "appPathHash": "e245d0e0ecc44b13d09e2b9053a801e32d091da7779725ea6b4cff674da713be",
+      "debugPortUsed": true,
+      "runtimePortUsed": true,
+      "temporaryUserData": true,
+      "syntheticCredentialUsed": true,
+      "providerNetworkCalled": false,
+      "launchError": "",
+      "stdoutTailHash": "",
+      "stderrTailHash": "33f31c949ceb17e9d44bd463587a72eb01b07f704a6b3ef0173f427a013fc107"
+    },
+    "renderer": {
+      "hrefHash": "153d4c4ffbf09bc8dc08395a3b47458fb2b47014e0b96341e2b07b84cb5fed6f",
+      "title": "Analytix",
+      "apiPresent": true,
+      "domains": [
+        "app",
+        "backgroundTasks",
+        "connectPhone",
+        "dataAnalysis",
+        "diagnostics",
+        "files",
+        "logs",
+        "runtime",
+        "schedule",
+        "settings",
+        "speech",
+        "terminal",
+        "updates",
+        "workspace",
+        "write"
+      ],
+      "legacyKun": false,
+      "legacyReasonix": false,
+      "settingsOk": true,
+      "settingsRuntimeTopLevel": true,
+      "settingsProfilePatchAccepted": true,
+      "mimoProfileSettingsOk": true,
+      "mimoProviderId": "xiaomi",
+      "mimoModel": "mimo-v2.5-pro",
+      "mimoEndpointFormat": "chat_completions",
+      "mimoProviderReady": true,
+      "settingsCompatPatchUsed": false,
+      "settingsPatchMode": "provider-profile",
+      "settingsPatchError": "",
+      "restartOk": true,
+      "restartError": "",
+      "healthStatus": 200,
+      "healthService": "analytix",
+      "runtimeInfoStatus": 200,
+      "runtimeInfoProductClean": true,
+      "runtimeInfoHasLegacyMcpLocalMarker": false,
+      "runtimeInfoHasLegacyAbsorptionMarker": false,
+      "runtimeInfoHasReasonixSurface": false
+    },
+    "redaction": {
+      "status": "passed",
+      "secretMaterialFound": false,
+      "firstFinding": ""
+    },
+    "checks": [
+      {
+        "id": "packaged-app-artifact",
+        "label": "Packaged app artifact",
+        "status": "passed",
+        "message": "packaged app, app.asar, and Go runtime binary are present without bundled Go source"
+      },
+      {
+        "id": "packaged-app-launch",
+        "label": "Packaged app launch",
+        "status": "passed",
+        "message": "packaged app launched and renderer debugger was reachable"
+      },
+      {
+        "id": "packaged-renderer-bridge",
+        "label": "Packaged renderer bridge",
+        "status": "passed",
+        "message": "`window.analytix` must be present, product title must be Analytix, and legacy aliases absent"
+      },
+      {
+        "id": "packaged-settings-bridge",
+        "label": "Packaged settings bridge",
+        "status": "passed",
+        "message": "settings bridge must return top-level runtime/provider settings"
+      },
+      {
+        "id": "packaged-provider-profile-settings",
+        "label": "Packaged provider profile settings",
+        "status": "passed",
+        "message": "settings bridge must accept provider.activeProviderId plus provider.providers[] profile patches"
+      },
+      {
+        "id": "packaged-mimo-profile-settings",
+        "label": "Packaged MiMo profile settings",
+        "status": "passed",
+        "message": "packaged settings bridge must preserve Xiaomi/MiMo providerId, model, endpointFormat, and provider profile shape without legacy runtime credentials"
+      },
+      {
+        "id": "packaged-runtime-restart",
+        "label": "Packaged runtime restart",
+        "status": "passed",
+        "message": "`window.analytix.runtime.restartRuntime()` must complete"
+      },
+      {
+        "id": "packaged-runtime-health",
+        "label": "Packaged runtime health",
+        "status": "passed",
+        "message": "renderer runtimeRequest must reach /health"
+      },
+      {
+        "id": "packaged-runtime-info",
+        "label": "Packaged runtime info",
+        "status": "passed",
+        "message": "renderer runtimeRequest must reach product-clean /v1/runtime/info"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "gui-bridge-and-timeline-smoke",
+      "status": "passed",
+      "command": "npm run test -- src/preload/preload-runtime-request.test.ts src/preload/preload-sse-bridge.test.ts src/main/runtime-sse-ipc.test.ts src/renderer/src/lib/browser-analytix-bridge.test.ts src/renderer/src/store/chat-store-runtime.test.ts src/renderer/src/components/chat/MessageTimeline.tool-summary.test.ts src/renderer/src/components/RewindPlanApplyControls.test.ts src/renderer/src/components/plugin-marketplace-runtime.test.ts src/renderer/src/components/PluginMarketplaceView.test.ts --run",
+      "durationMs": 1388,
+      "exitStatus": 0,
+      "reason": ""
+    }
+  ]
+}

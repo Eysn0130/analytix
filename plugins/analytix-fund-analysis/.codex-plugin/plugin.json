@@ -1,0 +1,41 @@
+{
+  "name": "analytix-fund-analysis",
+  "version": "0.16.16",
+  "description": "Analytix 资金证据能力由 Go 宿主按当前案件与快照授权动态开放固定账户流水分析；完整 PII 仅进入可信本机 typed sink，广泛分析与报告仍失败关闭。",
+  "author": {
+    "name": "Guoqin He",
+    "url": "https://github.com/Eysn0130"
+  },
+  "homepage": "https://analytix.top",
+  "repository": "https://analytix.top",
+  "license": "Apache-2.0",
+  "keywords": [
+    "analytix",
+    "fund-investigation",
+    "case-analysis",
+    "mcp",
+    "report"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Analytix 涉案资金研判",
+    "shortDescription": "宿主授权的固定资金流分析与本机 typed display",
+    "longDescription": "仅对同一案件、同一轮次、同一上下文版本和同一数据快照内的账户资金流进行核验。材料、授权或证据不足时，不分析或发布金额，只说明未检查范围并给出补证建议。完整身份与账户信息只在可信本机界面按用户选择显示；资金能力不可用时不影响普通工作。",
+    "developerName": "Analytix",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "websiteURL": "https://analytix.top",
+    "privacyPolicyURL": "https://analytix.top/privacy",
+    "termsOfServiceURL": "https://analytix.top/terms",
+    "defaultPrompt": [
+      "在当前案件与快照授权有效时使用宿主动态广告的 analyze_account_flows；授权或证据不完整时仅返回能力缺口、未检查范围和补证动作。"
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

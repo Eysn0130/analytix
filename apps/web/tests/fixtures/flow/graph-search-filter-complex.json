@@ -1,0 +1,109 @@
+{
+  "graph": {
+    "runtime_revision": 2,
+    "nodes": [
+      {
+        "id": "node:a",
+        "title": "Alpha",
+        "display_id": "A",
+        "ntype": "seed",
+        "projection_visible": true,
+        "nodeRenderMode": "dot"
+      },
+      {
+        "id": "node:b",
+        "title": "Beta",
+        "display_id": "B",
+        "projection_visible": true,
+        "nodeRenderMode": "dot"
+      },
+      {
+        "id": "node:c",
+        "title": "Gamma",
+        "display_id": "C",
+        "projection_visible": false,
+        "nodeRenderMode": "dot"
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "edge:ab",
+        "source": "node:a",
+        "target": "node:b",
+        "relation_type": "owns",
+        "tx_count": 2,
+        "amount_total": 2500,
+        "amount": 2500
+      },
+      {
+        "edge_id": "edge:bc",
+        "source": "node:b",
+        "target": "node:c",
+        "relation_type": "pays",
+        "tx_count": 1,
+        "amount_total": 80,
+        "amount": 80
+      }
+    ]
+  },
+  "searchContracts": [
+    {
+      "query": "Alpha",
+      "limit": 5,
+      "expectedNodeIds": ["node:a"],
+      "expectedFirstNodeId": "node:a"
+    },
+    {
+      "query": "Gamma",
+      "limit": 1,
+      "expectedNodeIds": ["node:c"],
+      "expectedFirstNodeId": "node:c"
+    }
+  ],
+  "filterContracts": [
+    {
+      "minAmount": 100,
+      "collapseChildren": false,
+      "expectedEdgeIds": ["edge:ab"],
+      "expectedNodeIds": ["node:a", "node:b"],
+      "expectedCoreIds": ["node:a"],
+      "expectedChildMap": {},
+      "expectedHiddenNodeIds": [],
+      "expectedEdgeSummaries": [
+        {
+          "amountForFilter": 2500,
+          "id": "edge:ab",
+          "relationType": "owns",
+          "source": "node:a",
+          "target": "node:b",
+          "txCount": 2
+        }
+      ]
+    },
+    {
+      "maxAmount": 100,
+      "collapseChildren": false,
+      "expectedEdgeIds": ["edge:bc"],
+      "expectedNodeIds": ["node:b", "node:c"],
+      "expectedCoreIds": ["node:b"],
+      "expectedChildMap": {},
+      "expectedHiddenNodeIds": ["node:c"],
+      "expectedEdgeSummaries": [
+        {
+          "amountForFilter": 80,
+          "id": "edge:bc",
+          "relationType": "pays",
+          "source": "node:b",
+          "target": "node:c",
+          "txCount": 1
+        }
+      ]
+    }
+  ],
+  "expectedSearchIndexSummary": {
+    "indexedRowCount": 3,
+    "maxTextCount": 4,
+    "rowCount": 3,
+    "textCount": 12
+  }
+}

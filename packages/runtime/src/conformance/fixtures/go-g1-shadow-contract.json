@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "stage": "G1",
+  "mode": "shadow-conformance-only",
+  "runtimeToken": "tok-1",
+  "startedAt": "2026-06-21T00:00:00.000Z",
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false
+  },
+  "health": {
+    "status": 200,
+    "body": {
+      "status": "ok",
+      "service": "analytix",
+      "mode": "serve"
+    }
+  },
+  "runtimeInfoUnauthorized": {
+    "status": 401,
+    "body": {
+      "code": "unauthorized",
+      "message": "Runtime authentication is required."
+    }
+  },
+  "runtimeInfo": {
+    "status": 200,
+    "schemaVersion": 2,
+    "bodyHash": "f4f68a471d8134adbef2a0ad6e709dd6128f9f57c173378656d56dfb0843bc36",
+    "forbiddenTopLevelKeys": [
+      "host",
+      "dataDir",
+      "model",
+      "approvalPolicy",
+      "sandboxMode",
+      "providers"
+    ]
+  },
+  "runtimeToolsUnauthorized": {
+    "status": 401,
+    "body": {
+      "code": "unauthorized",
+      "message": "Runtime authentication is required."
+    }
+  },
+  "runtimeTools": {
+    "status": 200,
+    "schemaVersion": 2,
+    "bodyHash": "8ba896ac97130bf27bb5be50851775a09d3b1727a9c390fa9bff5d2c98321151",
+    "forbiddenTopLevelKeys": [
+      "providers",
+      "webProviders",
+      "mcpPrompts",
+      "mcpResources"
+    ],
+    "forbiddenJSONTokens": [
+      "rootDir",
+      "lastError",
+      "lastActivations",
+      "toolNames",
+      "output"
+    ]
+  }
+}

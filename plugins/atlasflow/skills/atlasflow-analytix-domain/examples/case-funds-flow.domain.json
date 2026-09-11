@@ -1,0 +1,27 @@
+{
+  "domain": "case",
+  "graphType": "funds-flow",
+  "diagramType": "dataflow",
+  "title": "涉案资金流向图",
+  "subtitle": "主路径、中转账户与去向摘要",
+  "stages": [
+    { "label": "资金来源" },
+    { "label": "中转账户" },
+    { "label": "最终去向" }
+  ],
+  "nodes": [
+    { "id": "source_a", "kind": "person", "label": "主体A", "sublabel": "资金来源", "stage": 0, "row": 0 },
+    { "id": "account_b", "kind": "account", "label": "账户B", "sublabel": "12笔 / 320万元", "stage": 1, "row": 0 },
+    { "id": "company_c", "kind": "company", "label": "公司C", "sublabel": "疑似归集", "stage": 2, "row": 0 }
+  ],
+  "edges": [
+    { "from": "source_a", "to": "account_b", "kind": "primary-fund", "label": "转入 320万元", "classification": "交易记录支持" },
+    { "from": "account_b", "to": "company_c", "kind": "primary-fund", "label": "转出 298万元", "classification": "需核验用途" }
+  ],
+  "evidence": [
+    { "id": "ev_1", "source": "银行流水明细表" },
+    { "id": "ev_2", "source": "账户开户资料" }
+  ],
+  "privacy": { "redacted": true, "level": "strict" }
+}
+

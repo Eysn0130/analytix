@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "contract": "analytix.go-case-source-public-projection/v1",
+  "projections": {
+    "completed": {
+      "schemaVersion": 1,
+      "projectionKind": "case_source_status",
+      "disclosure": "metadata_only",
+      "messageKey": "case_source_private",
+      "status": "completed",
+      "code": "case_source_result_private",
+      "privatePayloadWithheld": true,
+      "factAnswerAllowed": false,
+      "evidenceAuthority": false
+    },
+    "failed": {
+      "schemaVersion": 1,
+      "projectionKind": "case_source_status",
+      "disclosure": "metadata_only",
+      "messageKey": "case_source_failed",
+      "status": "failed",
+      "code": "case_source_result_private",
+      "privatePayloadWithheld": true,
+      "factAnswerAllowed": false,
+      "evidenceAuthority": false
+    }
+  }
+}

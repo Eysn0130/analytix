@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "rustVersion": "1.94.1",
+  "hosts": {
+    "darwin-arm64": {
+      "hostTriple": "aarch64-apple-darwin",
+      "cargoExecutableSha256": "532141271ce821135f63822c21fcd76c7972cbf69c19bc35e6ca8b00fcd5c40e",
+      "cargoVersion": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
+      "rustcExecutableSha256": "b69cbcffa5e990057035d53ccc8163e8392ce784f6abb114c19ceb61528ba9f6",
+      "rustcVersion": "rustc 1.94.1 (e408947bf 2026-03-25)",
+      "toolchainFileCount": 218,
+      "toolchainTreeSha256": "5b0fd9f1c8f63f070b3e65c891afe4bb33ab03a5887d2213e0870c29a9e452be",
+      "developerDirectory": "/Library/Developer/CommandLineTools",
+      "sdkRoot": "/Library/Developer/CommandLineTools/SDKs/MacOSX26.2.sdk",
+      "sdkVersion": "26.2",
+      "sdkSettingsJsonSha256": "95882a9cea02396e76f3e406a5728269b2a1a11bcd241430a84c9e63d09a6cd3",
+      "sdkSettingsPlistSha256": "03cb7d21a91023f6dff9ea019a3710061e2eb570bdb260faf4daa74151abf15d",
+      "tools": {
+        "ar": "eeb07a36180749a4915663753be2efb6d21d054c277e768574884c0b519bc191",
+        "clang": "15339439a6be4a9d33d281ec040a7e0092190b1c8d7de5f94d824b50ffae0769",
+        "codesign": "214d455584d19abc0d74d02b9cbc7d3da6bdcb0596c235e6156dd9ed2f4e1ba7",
+        "ld": "d24bf72261b0a8832fa87e841b8e9a857620bb789c78cef4ad97bb2dbd6e1d29"
+      }
+    }
+  }
+}

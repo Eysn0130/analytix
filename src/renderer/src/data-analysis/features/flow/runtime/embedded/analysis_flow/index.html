@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Analytix · 可视化分析</title>
+    <!-- Reuse the same visual language as 统计分析 -->
+    <link rel="stylesheet" href="../analysis_stats/app.css" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="ghostFloat" id="ghostFloat" aria-hidden="true">
+      <div class="ghostFloatNode" id="ghostFloatNode"></div>
+    </div>
+    <div class="modalMask" id="edgeLabelModal" aria-hidden="true">
+      <div class="modalCard" id="edgeLabelCard" role="dialog" aria-modal="true" aria-labelledby="edgeLabelTitle">
+        <div class="modalTitle" id="edgeLabelTitle">编辑连线文本</div>
+        <div class="modalBody">
+          <input class="input" id="edgeLabelInput" placeholder="输入文本内容…" />
+          <div class="modalHint" id="edgeLabelHint">双击线条可再次编辑</div>
+          <div class="edgeTxnReadonly" id="edgeLabelReadonly" hidden></div>
+        </div>
+        <div class="modalActions">
+          <button class="btn ghost" id="edgeLabelCancel" type="button">取消</button>
+          <button class="btn primary" id="edgeLabelSave" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+    <div class="modalMask confirmMask" id="viewCloseModal" aria-hidden="true">
+      <div class="modalCard confirmCard" role="dialog" aria-modal="true" aria-labelledby="viewCloseTitle">
+        <div class="confirmHeader">
+          <div class="confirmIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 6L18 18"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M18 6L6 18"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <div class="confirmTitleWrap">
+            <div class="modalTitle" id="viewCloseTitle">再次确认关闭</div>
+            <div class="confirmSubtitle" id="viewCloseSubtitle">关闭画布视图</div>
+          </div>
+        </div>
+        <div class="confirmMeta">
+          <div class="confirmName" id="viewCloseName">视图</div>
+          <span class="confirmTag" id="viewCloseStatus">未存储</span>
+        </div>
+        <div class="modalBody confirmBody">
+          <div class="confirmMessage" id="viewCloseMessage">关闭后将从视图列表移除。</div>
+          <div class="confirmHint" id="viewCloseHint">建议先存储视图，避免误删。</div>
+        </div>
+        <div class="modalActions">
+          <button class="btn ghost" id="viewCloseCancel" type="button">取消</button>
+          <button class="btn danger" id="viewCloseConfirm" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+    <div class="app">
+      <!-- LEFT: Seed selector -->
+      <section class="card left" id="leftCard">
+        <div class="leftHeader">
+          <div class="titleRow">
+            <div class="title">可视化分析</div>
+            <div class="titleActions">
+              <div class="badge" id="caseBadge" title="当前案件">
+                <span class="badgeDot"></span>
+                <span class="badgeText" id="caseBadgeText">未选择案件</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="segmented" role="tablist" aria-label="对象维度">
+          <div class="segWrap">
+            <button class="segBtn active" id="tabByName" role="tab" aria-selected="true" type="button">按户名</button>
+            <button class="segBtn" id="tabByCard" role="tab" aria-selected="false" type="button">按卡号</button>
+          </div>
+        </div>
+
+        <div class="leftSearch">
+          <input class="input" id="leftSearch" placeholder="搜索：户名 / 卡号 / 证件号 / 开户行…" autocomplete="off" />
+          <button class="iconBtn" id="leftSearchClear" title="清空" type="button" aria-label="清空搜索">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M6 6L18 18" stroke="rgba(2,6,23,.55)" stroke-width="2" stroke-linecap="round" />
+              <path d="M18 6L6 18" stroke="rgba(2,6,23,.55)" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="leftTools">
+          <div class="toolBtns">
+            <button class="chipBtn" id="btnSelectAll" type="button">全选</button>
+            <button class="chipBtn ghost" id="btnClearAll" type="button">清空</button>
+          </div>
+          <div class="selCount" id="selCount">已选 0</div>
+        </div>
+
+        <div class="leftOpts">
+          <div class="optRow">
+            <div class="optLabel">方向</div>
+            <div class="segSmall" role="tablist" aria-label="资金方向">
+              <button class="segMini active" data-dir="all" type="button">全部</button>
+              <button class="segMini" data-dir="in" type="button">流入</button>
+              <button class="segMini" data-dir="out" type="button">流出</button>
+            </div>
+          </div>
+          <div class="optRow">
+            <div class="optLabel">层级</div>
+            <input class="range" id="hop" type="range" min="1" max="3" value="1" />
+            <div class="optValue" id="hopText">1</div>
+          </div>
+          <div class="optRow">
+            <div class="optLabel">最小金额</div>
+            <input class="input sm" id="minAmount" value="0" inputmode="decimal" />
+          </div>
+          <div class="optRow">
+            <div class="optLabel">最大边数</div>
+            <input class="input sm" id="maxEdges" value="800" inputmode="numeric" />
+          </div>
+        </div>
+
+        <div class="tree" id="tree" aria-label="对象列表"></div>
+
+        <div class="leftBottom">
+          <button class="btn primary full" id="btnBuild" type="button">生成图谱</button>
+          <button class="btn ghost full" id="btnClearGraph" type="button">清空图谱</button>
+        </div>
+      </section>
+
+      <button class="gapToggle" id="gapToggle" title="折叠" type="button" aria-label="折叠左侧" aria-expanded="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M15 6l-6 6 6 6" stroke="rgba(2,6,23,.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <!-- RIGHT -->
+      <section class="right">
+        <section class="card toolBarCard ribbon" id="graphToolbar" role="toolbar" aria-label="图谱工具栏">
+          <div class="ribbonGroup styleGroup" role="group" aria-labelledby="graphToolbarStyleCaption">
+            <div class="ribbonGroupBody styleBlocks">
+              <div class="ribbonSub typography textBlock ribbonSubLined">
+                <div class="ribbonSubBody typoGrid">
+                  <div class="typoRow top">
+                    <div class="comboField">
+                      <button
+                        class="comboBtn"
+                        id="btnFontFamily"
+                        type="button"
+                        aria-label="字体"
+                        aria-haspopup="dialog"
+                        aria-controls="ribbonPopover"
+                        aria-expanded="false"
+                      >
+                        <svg class="ico"><use href="#ico-font"></use></svg>
+                        <span class="comboLabel" id="fontFamilyLabel">思源黑体</span>
+                        <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                      </button>
+                    <button
+                      class="comboBtn narrow"
+                      id="btnFontSize"
+                      type="button"
+                      aria-label="字号"
+                      aria-haspopup="dialog"
+                      aria-controls="ribbonPopover"
+                      aria-expanded="false"
+                    >
+                      <span class="comboLabel" id="fontSizeLabel">13</span>
+                      <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                    </button>
+                    </div>
+                    <div class="splitBtns">
+                      <button class="ribbonMini sizeBtn" id="btnFontInc" type="button" aria-label="字号加一">
+                        <svg class="ico"><use href="#ico-text-plus"></use></svg>
+                      </button>
+                      <button class="ribbonMini sizeBtn" id="btnFontDec" type="button" aria-label="字号减一">
+                        <svg class="ico"><use href="#ico-text-minus"></use></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="typoRow bottom">
+                    <div class="toggleRow">
+                      <button class="ribbonMini toggle" id="btnBold" type="button" aria-label="加粗" aria-pressed="false">B</button>
+                      <button class="ribbonMini toggle" id="btnItalic" type="button" aria-label="斜体" aria-pressed="false">I</button>
+                      <button class="ribbonMini toggle" id="btnUnderline" type="button" aria-label="下划线" aria-pressed="false">U</button>
+                      <button class="ribbonMini toggle" id="btnShadow" type="button" aria-label="文字阴影" aria-pressed="false">S</button>
+                    </div>
+                    <div class="colorRow">
+                      <button
+                        class="ribbonColorBtn compact"
+                        id="btnTextColor"
+                        type="button"
+                        data-color-target="textColor"
+                        aria-label="文字颜色"
+                        aria-haspopup="dialog"
+                        aria-controls="ribbonPopover"
+                        aria-expanded="false"
+                      >
+                        <span class="colorSwatch" id="textColorSwatch"></span>
+                        <span class="colorLabel">字体</span>
+                        <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                      </button>
+                      <button
+                        class="ribbonColorBtn compact"
+                        id="btnOutlineColor"
+                        type="button"
+                        data-color-target="outlineColor"
+                        aria-label="轮廓颜色"
+                        aria-haspopup="dialog"
+                        aria-controls="ribbonPopover"
+                        aria-expanded="false"
+                      >
+                        <span class="colorSwatch" id="outlineColorSwatch"></span>
+                        <span class="colorLabel">轮廓</span>
+                        <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="ribbonSubCaption ribbonSubBaseline" aria-hidden="true"></div>
+              </div>
+              <div class="ribbonSubDivider">｜</div>
+
+              <div class="ribbonSub edgeBlock ribbonSubLined">
+                <div class="ribbonSubBody edgeGrid">
+                  <button
+                    class="ribbonCellBtn inline"
+                    id="btnLineStyle"
+                    type="button"
+                    aria-label="线型"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-line-style"></use></svg>
+                    <span class="btnText" id="lineStyleLabel">线型</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button
+                    class="ribbonCellBtn inline"
+                    id="btnLineWidth"
+                    type="button"
+                    aria-label="线宽"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-line-width"></use></svg>
+                    <span class="btnText" id="lineWidthLabel">线宽</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button
+                    class="ribbonCellBtn inline"
+                    id="btnLineArrow"
+                    type="button"
+                    aria-label="线条方向"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-arrow"></use></svg>
+                    <span class="btnText" id="lineArrowLabel">方向</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                </div>
+                <div class="ribbonSubCaption ribbonSubBaseline" aria-hidden="true"></div>
+              </div>
+              <div class="ribbonSubDivider">｜</div>
+
+              <div class="ribbonSub nodeBlock">
+                <div class="ribbonSubBody nodeGrid">
+                  <button
+                    class="ribbonCellBtn inline nodeCell nodeCell-shape"
+                    id="btnNodeShape"
+                    type="button"
+                    aria-label="节点形状"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-node-shape"></use></svg>
+                    <span class="btnText" id="nodeShapeLabel">形状</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button
+                    class="ribbonColorBtn compact nodeCell nodeCell-fill nodeFillBtn"
+                    id="btnNodeFill"
+                    type="button"
+                    data-color-target="nodeFill"
+                    aria-label="节点填充颜色"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <span class="colorSwatch" id="nodeFillSwatch"></span>
+                    <span class="colorLabel">填充</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button
+                    class="ribbonCellBtn inline nodeCell nodeCell-size"
+                    id="btnIconSize"
+                    type="button"
+                    aria-label="节点大小"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-icon-size"></use></svg>
+                    <span class="btnText" id="iconSizeLabel">大小</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button class="ribbonCellBtn inline nodeCell nodeCell-new" id="btnNodeNew" type="button">
+                    <svg class="ico"><use href="#ico-plus"></use></svg>
+                    <span class="btnText">新建</span>
+                  </button>
+                  <button
+                    class="ribbonCellBtn inline nodeCell nodeCell-style"
+                    id="btnIconLibrary"
+                    type="button"
+                    aria-label="节点样式库"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+                    <svg class="ico"><use href="#ico-icon-library"></use></svg>
+                    <span class="btnText">样式</span>
+                    <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                  </button>
+                  <button class="ribbonCellBtn inline nodeCell nodeCell-link" id="btnNodeLink" type="button">
+                    <svg class="ico"><use href="#ico-link"></use></svg>
+                    <span class="btnText">链接</span>
+                  </button>
+                </div>
+                <div class="ribbonSubCaption ribbonSubBaseline" aria-hidden="true"></div>
+              </div>
+            </div>
+            <div class="ribbonCaption ribbonCaptionGhost" id="graphToolbarStyleCaption">样式</div>
+          </div>
+
+          <div class="ribbonSubDivider">｜</div>
+
+          <div class="ribbonGroup layoutGroup" role="group" aria-labelledby="graphToolbarLayoutCaption">
+            <div class="ribbonGroupBody layoutGrid">
+              <button class="ribbonTile layoutBtn active" id="btnLayoutCompact" type="button" data-layout="compact">
+                <svg class="ico"><use href="#ico-layout-compact"></use></svg>
+                <span class="btnText">关联图</span>
+              </button>
+              <button class="ribbonTile layoutBtn" id="btnLayoutNetwork" type="button" data-layout="network">
+                <svg class="ico"><use href="#ico-layout-network"></use></svg>
+                <span class="btnText">网络图</span>
+              </button>
+              <button class="ribbonTile layoutBtn" id="btnLayoutHierarchy" type="button" data-layout="hierarchy">
+                <svg class="ico"><use href="#ico-layout-hierarchy"></use></svg>
+                <span class="btnText">层级图</span>
+              </button>
+              <button class="ribbonTile layoutBtn" id="btnLayoutFlow" type="button" data-layout="flow">
+                <svg class="ico"><use href="#ico-layout-flow"></use></svg>
+                <span class="btnText">流向图</span>
+              </button>
+            </div>
+            <div class="ribbonCaption ribbonCaptionBaseline" id="graphToolbarLayoutCaption">布局</div>
+          </div>
+
+          <div class="ribbonSubDivider">｜</div>
+
+	          <div class="ribbonGroup analyzeGroup" role="group" aria-labelledby="graphToolbarAnalyzeCaption">
+	            <div class="ribbonGroupBody analyzeGrid">
+	              <div class="ribbonRow analyzeTopRow">
+	                <button
+                    class="ribbonTile analysisCmdBtn drop"
+                    id="btnAnalysisFilter"
+                    type="button"
+                    aria-label="筛选"
+                    title="按金额筛选"
+                    aria-haspopup="dialog"
+                    aria-controls="ribbonPopover"
+                    aria-expanded="false"
+                  >
+	                  <svg class="ico"><use href="#ico-filter"></use></svg>
+	                  <span class="btnText">筛选</span>
+	                  <svg class="ico caret"><use href="#ico-caret"></use></svg>
+	                </button>
+	                <button class="ribbonTile analysisCmdBtn" id="btnAnalysisCollapse" type="button">
+	                  <svg class="ico"><use href="#ico-collapse"></use></svg>
+	                  <span class="btnText">收缩</span>
+	                </button>
+	                <button class="ribbonTile comboBtn" id="btnGroup1" type="button">
+	                  <span class="btnText">组合 1</span>
+	                </button>
+	                <button class="ribbonTile comboBtn" id="btnGroup2" type="button">
+	                  <span class="btnText">组合 2</span>
+	                </button>
+	                <button class="ribbonTile comboBtn" id="btnGroup3" type="button">
+	                  <span class="btnText">组合 3</span>
+	                </button>
+		                <button
+                      class="ribbonTile comboBtn drop"
+                      id="btnGroupOps"
+                      type="button"
+                      aria-label="组合运算"
+                      aria-haspopup="dialog"
+                      aria-controls="ribbonPopover"
+                      aria-expanded="false"
+                    >
+	                  <span class="btnText">更多</span>
+	                  <svg class="ico caret"><use href="#ico-caret"></use></svg>
+	                </button>
+	              </div>
+	              <div class="ribbonRow row3 analyzeBottomRow">
+	                <button class="ribbonTile analysisBtn" id="btnEncodeWidth" type="button">
+	                  <svg class="ico"><use href="#ico-encode-width"></use></svg>
+	                  <span class="btnText">金额→粗细</span>
+                </button>
+                <button class="ribbonTile analysisBtn" id="btnEncodeColor" type="button">
+                  <svg class="ico"><use href="#ico-encode-color"></use></svg>
+                  <span class="btnText">金额→颜色</span>
+                </button>
+                <button class="ribbonTile analysisBtn" id="btnNodeScale" type="button">
+                  <svg class="ico"><use href="#ico-node-scale"></use></svg>
+                  <span class="btnText">节点缩放</span>
+                </button>
+              </div>
+            </div>
+	            <div class="ribbonCaption ribbonCaptionBaseline" id="graphToolbarAnalyzeCaption">分析</div>
+          </div>
+
+          <div class="ribbonSubDivider">｜</div>
+
+          <div class="ribbonGroup opsGroup" role="group" aria-labelledby="graphToolbarOpsCaption">
+            <div class="ribbonGroupBody opsGrid">
+              <div class="ribbonRow row2">
+                <button class="ribbonTile mergeBtn" id="btnMergeNodes" type="button">
+                  <svg class="ico"><use href="#ico-group-2"></use></svg>
+                  <span class="btnText">合并</span>
+                </button>
+                <button class="ribbonTile" id="btnFit" type="button">
+                  <svg class="ico"><use href="#ico-fit"></use></svg>
+                  <span class="btnText">适配视图</span>
+                </button>
+                <button
+                  class="ribbonTile drop"
+                  id="btnExport"
+                  type="button"
+                  aria-label="导出图谱"
+                  aria-haspopup="dialog"
+                  aria-controls="ribbonPopover"
+                  aria-expanded="false"
+                >
+                  <svg class="ico"><use href="#ico-export"></use></svg>
+                  <span class="btnText">导出</span>
+                  <svg class="ico caret"><use href="#ico-caret"></use></svg>
+                </button>
+              </div>
+              <div class="ribbonRow row2">
+                <button class="ribbonTile detailBtn" id="btnEdgeDetail" type="button">
+                  <svg class="ico"><use href="#ico-detail"></use></svg>
+                  <span class="btnText">详细</span>
+                </button>
+                <button class="ribbonTile" id="btnRedo" type="button">
+                  <svg class="ico"><use href="#ico-redo"></use></svg>
+                  <span class="btnText">重做</span>
+                </button>
+                <button class="ribbonTile" id="btnUndo" type="button">
+                  <svg class="ico"><use href="#ico-undo"></use></svg>
+                  <span class="btnText">撤销</span>
+                </button>
+              </div>
+            </div>
+            <div class="ribbonCaption ribbonCaptionBaseline" id="graphToolbarOpsCaption">操作</div>
+          </div>
+        </section>
+
+        <section class="card graphCard cardSolid" id="graphCard">
+          <div class="tabsBar" id="viewsBar">
+            <div class="viewsScroll" id="viewsScroll"></div>
+            <button class="viewAdd" id="btnAddView" type="button" aria-label="新建视图">+</button>
+          </div>
+
+          <div class="graphWrap" id="graphWrap">
+            <div id="graphContainer" class="graphContainer" aria-label="资金图谱"></div>
+            <div class="graphSearchFloat" id="graphSearchFloat">
+              <input class="input" id="graphSearch" placeholder="定位：卡号 / 账号 / 户名…" autocomplete="off" />
+              <button class="iconBtn sm" id="graphSearchClear" title="清空" type="button" aria-label="清空搜索">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M6 6L18 18" stroke="rgba(2,6,23,.55)" stroke-width="2" stroke-linecap="round" />
+                  <path d="M18 6L6 18" stroke="rgba(2,6,23,.55)" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div class="graphStatsFloat" id="graphStatsFloat" aria-live="polite">
+              <div class="graphStatsItem">
+                <span class="graphStatsLabel">布局</span>
+                <span class="graphStatsValue" id="graphStatsLayout">关联图布局</span>
+              </div>
+              <div class="graphStatsItem">
+                <span class="graphStatsLabel">节点</span>
+                <span class="graphStatsValue" id="graphStatsNodes">0</span>
+              </div>
+              <div class="graphStatsItem">
+                <span class="graphStatsLabel">线条</span>
+                <span class="graphStatsValue" id="graphStatsEdges">0</span>
+              </div>
+              <div class="graphStatsItem">
+                <span class="graphStatsLabel">交易金额</span>
+                <span class="graphStatsValue" id="graphStatsAmount">￥0</span>
+              </div>
+            </div>
+            <div class="minimapFloat" id="minimapWrap" aria-label="缩略图">
+              <div class="minimapTitle">缩略图</div>
+              <div class="minimapBox" id="minimap"></div>
+            </div>
+            <div class="graphLoading" id="graphLoading" aria-hidden="true" style="display: none">
+              <div class="loadingCard">
+                <div class="loadingDot"></div>
+                <div class="loadingText" id="graphLoadingText">正在生成图谱…</div>
+              </div>
+            </div>
+
+            <div class="drawerWrap" id="drawerWrap">
+              <aside class="drawer" id="drawer" aria-hidden="true">
+                <div class="dHead">
+                  <div class="dTitle" id="drawerTitle">详情</div>
+                  <button class="dClose" id="drawerClose" type="button">关闭</button>
+                </div>
+                <div class="dBody" id="drawerBody"></div>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <div id="toastWrap" class="toastWrap"></div>
+    <div id="contextMenu" class="ctxMenu" aria-hidden="true"></div>
+    <div id="drillPopover" class="drillPopover" aria-hidden="true"></div>
+    <div id="nodeInfoPopover" class="nodeInfoPopover" aria-hidden="true"></div>
+    <div id="edgeInfoPopover" class="edgeInfoPopover" aria-hidden="true"></div>
+    <div id="ribbonPopover" class="ribbonPopover" aria-hidden="true"></div>
+
+    <svg style="display:none" aria-hidden="true">
+      <symbol id="ico-font" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 18h4l2-12h4l2 12h4" />
+          <path d="M8 12h8" />
+        </g>
+      </symbol>
+      <symbol id="ico-fontsize" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 18h6" />
+          <path d="M8 18V6l-2 6h4" />
+          <path d="M14 16h5" />
+          <path d="M16.5 16V8l-1.5 4h3" />
+        </g>
+      </symbol>
+      <symbol id="ico-text-plus" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 18l4-12 4 12" />
+          <path d="M8.5 13h3" />
+          <path d="M17 7h4" />
+          <path d="M19 5v4" />
+        </g>
+      </symbol>
+      <symbol id="ico-detail" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="4.5" width="12" height="15" rx="2.5" />
+          <path d="M6.5 8h6.5" />
+          <path d="M6.5 11.5h5" />
+          <path d="M6.5 15h4" />
+          <circle cx="17.5" cy="16.5" r="3" />
+          <path d="M19.5 18.5l2 2" />
+        </g>
+      </symbol>
+      <symbol id="ico-text-minus" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 18l4-12 4 12" />
+          <path d="M8.5 13h3" />
+          <path d="M17 7h4" />
+        </g>
+      </symbol>
+      <symbol id="ico-undo" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 7L5 11l4 4" />
+          <path d="M5 11h7a5 5 0 1 1 0 10H11" />
+        </g>
+      </symbol>
+      <symbol id="ico-redo" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 7l4 4-4 4" />
+          <path d="M19 11h-7a5 5 0 1 0 0 10H13" />
+        </g>
+      </symbol>
+      <symbol id="ico-bold" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 5h6a3 3 0 0 1 0 6H7z" />
+          <path d="M7 11h7a3 3 0 0 1 0 6H7z" />
+        </g>
+      </symbol>
+      <symbol id="ico-italic" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 5h8" />
+          <path d="M6 19h8" />
+          <path d="M14 5L10 19" />
+        </g>
+      </symbol>
+      <symbol id="ico-underline" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 5v6a5 5 0 0 0 10 0V5" />
+          <path d="M5 19h14" />
+        </g>
+      </symbol>
+      <symbol id="ico-shadow" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="9" r="4" />
+          <path d="M14 14l5 5" />
+          <path d="M5 19h10" />
+        </g>
+      </symbol>
+      <symbol id="ico-color" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 7-6 6-7-7z" />
+          <path d="M7 17h10" />
+        </g>
+      </symbol>
+      <symbol id="ico-line-style" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16" />
+          <path d="M4 12h6" />
+          <path d="M14 12h6" />
+          <path d="M4 17h2" />
+          <path d="M10 17h2" />
+          <path d="M16 17h2" />
+        </g>
+      </symbol>
+      <symbol id="ico-line-width" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16" />
+          <path d="M4 12h16" stroke-width="3" />
+          <path d="M4 17h16" stroke-width="4" />
+        </g>
+      </symbol>
+      <symbol id="ico-line-color" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16" />
+          <path d="M6 17h12" />
+          <circle cx="6" cy="17" r="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-arrow" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h12" />
+          <path d="M12 6l6 6-6 6" />
+        </g>
+      </symbol>
+      <symbol id="ico-plus" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+        </g>
+      </symbol>
+      <symbol id="ico-link" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 14l4-4" />
+          <path d="M7.5 16.5a4 4 0 0 1 0-5.7l2.1-2.1a4 4 0 0 1 5.7 0" />
+          <path d="M16.5 7.5a4 4 0 0 1 0 5.7l-2.1 2.1a4 4 0 0 1-5.7 0" />
+        </g>
+      </symbol>
+      <symbol id="ico-node-shape" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="3" />
+          <rect x="13" y="13" width="6" height="6" rx="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-node-fill" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="12" r="4" />
+          <path d="M16 8h4v8h-4z" />
+        </g>
+      </symbol>
+      <symbol id="ico-node-stroke" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="12" r="4" />
+          <circle cx="18" cy="12" r="3" />
+        </g>
+      </symbol>
+      <symbol id="ico-icon-library" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="7" height="7" rx="2" />
+          <rect x="14" y="4" width="7" height="7" rx="2" />
+          <rect x="3" y="13" width="7" height="7" rx="2" />
+          <rect x="14" y="13" width="7" height="7" rx="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-icon-size" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-layout-compact" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="5" cy="6" r="2" />
+          <circle cx="19" cy="6" r="2" />
+          <circle cx="5" cy="18" r="2" />
+          <circle cx="19" cy="18" r="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-layout-network" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="12" r="2" />
+          <circle cx="12" cy="6" r="2" />
+          <circle cx="18" cy="12" r="2" />
+          <circle cx="12" cy="18" r="2" />
+          <path d="M8 12h4l4-4" />
+          <path d="M12 8l4 4" />
+          <path d="M8 12l4 4" />
+        </g>
+      </symbol>
+      <symbol id="ico-layout-hierarchy" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="4" width="6" height="4" rx="1" />
+          <rect x="4" y="16" width="6" height="4" rx="1" />
+          <rect x="14" y="16" width="6" height="4" rx="1" />
+          <path d="M12 8v4" />
+          <path d="M7 16v-4h10v4" />
+        </g>
+      </symbol>
+      <symbol id="ico-layout-flow" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="9" width="6" height="6" rx="1" />
+          <rect x="14" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+          <path d="M10 12h4" />
+        </g>
+      </symbol>
+      <symbol id="ico-group-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7" cy="8" r="2" />
+          <circle cx="17" cy="8" r="2" />
+          <path d="M4 18c1-3 4-4 8-4s7 1 8 4" />
+        </g>
+      </symbol>
+      <symbol id="ico-group-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="9" r="3" />
+          <circle cx="16" cy="9" r="3" />
+          <path d="M4 19c1-3 4-4 8-4s7 1 8 4" />
+        </g>
+      </symbol>
+	      <symbol id="ico-group-3" viewBox="0 0 24 24">
+	        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+	          <circle cx="6" cy="8" r="2" />
+	          <circle cx="12" cy="6" r="2" />
+	          <circle cx="18" cy="8" r="2" />
+	          <path d="M4 18c1-3 3-4 8-4s7 1 8 4" />
+	        </g>
+	      </symbol>
+	      <symbol id="ico-filter" viewBox="0 0 24 24">
+	        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+	          <path d="M4 6h16" />
+	          <path d="M7 11h10" />
+	          <path d="M10 16h4" />
+	        </g>
+	      </symbol>
+	      <symbol id="ico-collapse" viewBox="0 0 24 24">
+	        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+	          <path d="M6 6l4 4" />
+	          <path d="M18 6l-4 4" />
+	          <path d="M6 18l4-4" />
+	          <path d="M18 18l-4-4" />
+	          <circle cx="12" cy="12" r="1.2" />
+	        </g>
+	      </symbol>
+	      <symbol id="ico-encode-width" viewBox="0 0 24 24">
+	        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+	          <path d="M5 6h14" />
+          <path d="M4 12h16" stroke-width="3" />
+          <path d="M3 18h18" stroke-width="4" />
+        </g>
+      </symbol>
+      <symbol id="ico-encode-color" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7" cy="12" r="3" />
+          <circle cx="17" cy="12" r="3" />
+          <path d="M10 12h4" />
+        </g>
+      </symbol>
+      <symbol id="ico-node-scale" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="3" />
+          <circle cx="16" cy="16" r="5" />
+        </g>
+      </symbol>
+      <symbol id="ico-anomaly" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4l8 16H4z" />
+          <path d="M12 9v4" />
+          <circle cx="12" cy="17" r="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-fit" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="5" width="14" height="14" rx="2" />
+          <path d="M9 9h6v6H9z" />
+        </g>
+      </symbol>
+      <symbol id="ico-relayout" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="2" />
+          <circle cx="18" cy="6" r="2" />
+          <circle cx="12" cy="18" r="2" />
+          <path d="M8 6h8" />
+          <path d="M7 8l5 8 5-8" />
+        </g>
+      </symbol>
+      <symbol id="ico-export" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v10" />
+          <path d="M8 9l4-4 4 4" />
+          <path d="M5 19h14" />
+        </g>
+      </symbol>
+      <symbol id="ico-caret" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9l6 6 6-6" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Company -->
+      <symbol id="ico-company-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="4" width="8" height="16" />
+          <rect x="12" y="8" width="8" height="12" />
+          <path d="M6 8h2M6 12h2M6 16h2" />
+        </g>
+      </symbol>
+      <symbol id="ico-company-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="14" />
+          <path d="M7 10h2M11 10h2M15 10h2" />
+        </g>
+      </symbol>
+      <symbol id="ico-company-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20V8l6-4 6 4v12" />
+          <path d="M9 20v-6h6v6" />
+        </g>
+      </symbol>
+      <symbol id="ico-company-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="5" width="6" height="14" />
+          <rect x="14" y="9" width="6" height="10" />
+          <path d="M5 9h4M5 13h4M5 17h4" />
+        </g>
+      </symbol>
+      <symbol id="ico-company-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="7" width="18" height="12" />
+          <path d="M7 7V5h10v2" />
+          <path d="M9 11h6" />
+        </g>
+      </symbol>
+      <symbol id="ico-company-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="6" width="14" height="12" rx="2" />
+          <path d="M9 6V4h6v2" />
+          <path d="M8 12h8" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Person -->
+      <symbol id="ico-person-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="3" />
+          <path d="M5 19c1.5-3 5-4 7-4s5.5 1 7 4" />
+        </g>
+      </symbol>
+      <symbol id="ico-person-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="8" r="3" />
+          <circle cx="17" cy="10" r="2" />
+          <path d="M4 19c1-3 4-4 6-4" />
+          <path d="M13 19c.6-2 2.5-3 4-3" />
+        </g>
+      </symbol>
+      <symbol id="ico-person-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="7" r="3" />
+          <path d="M6 20c1-4 5-5 6-5s5 1 6 5" />
+          <path d="M12 10v3" />
+        </g>
+      </symbol>
+      <symbol id="ico-person-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="9" r="3" />
+          <path d="M3 19c1-3 4-4 6-4" />
+          <rect x="13" y="6" width="8" height="12" rx="2" />
+          <path d="M15 10h4" />
+        </g>
+      </symbol>
+      <symbol id="ico-person-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="3" />
+          <path d="M7 20c1-3 4-4 5-4s4 1 5 4" />
+          <path d="M9 5h6" />
+        </g>
+      </symbol>
+      <symbol id="ico-person-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="7" r="3" />
+          <path d="M4 20c2-4 6-5 8-5s6 1 8 5" />
+          <path d="M12 13v2" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Account Media -->
+      <symbol id="ico-media-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="12" rx="2" />
+          <path d="M7 12h10" />
+        </g>
+      </symbol>
+      <symbol id="ico-media-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="4" width="14" height="16" rx="2" />
+          <path d="M8 8h8M8 12h8M8 16h5" />
+        </g>
+      </symbol>
+      <symbol id="ico-media-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="3" width="12" height="18" rx="2" />
+          <path d="M9 7h6" />
+          <circle cx="12" cy="17" r="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-media-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="8" width="16" height="10" rx="2" />
+          <path d="M8 8V6h8v2" />
+          <path d="M9 13h6" />
+        </g>
+      </symbol>
+      <symbol id="ico-media-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M6 9h4" />
+          <path d="M6 13h8" />
+        </g>
+      </symbol>
+      <symbol id="ico-media-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M6 6l12 12" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Network Devices -->
+      <symbol id="ico-network-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="6" width="16" height="6" rx="2" />
+          <rect x="6" y="14" width="12" height="4" rx="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-network-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="4" width="12" height="6" rx="1" />
+          <rect x="6" y="14" width="12" height="6" rx="1" />
+          <path d="M12 10v4" />
+        </g>
+      </symbol>
+      <symbol id="ico-network-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 15a8 8 0 0 1 16 0" />
+          <path d="M7 15a5 5 0 0 1 10 0" />
+          <circle cx="12" cy="16" r="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-network-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="3" />
+          <path d="M4 20c2-4 6-5 8-5s6 1 8 5" />
+          <path d="M12 11v3" />
+        </g>
+      </symbol>
+      <symbol id="ico-network-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="9" width="18" height="8" rx="2" />
+          <path d="M7 9V7h10v2" />
+          <path d="M9 13h6" />
+        </g>
+      </symbol>
+      <symbol id="ico-network-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16" />
+          <path d="M7 7v10" />
+          <path d="M17 7v10" />
+          <rect x="9" y="11" width="6" height="6" rx="1" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Address -->
+      <symbol id="ico-address-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z" />
+          <circle cx="12" cy="10" r="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-address-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11l9-7 9 7" />
+          <path d="M5 10v9h14v-9" />
+        </g>
+      </symbol>
+      <symbol id="ico-address-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 4v16M4 12h16" />
+        </g>
+      </symbol>
+      <symbol id="ico-address-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 19l12-14" />
+          <circle cx="7" cy="7" r="2" />
+          <circle cx="17" cy="17" r="2" />
+        </g>
+      </symbol>
+      <symbol id="ico-address-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h16" />
+          <path d="M6 8l6-4 6 4" />
+          <path d="M6 16l6 4 6-4" />
+        </g>
+      </symbol>
+      <symbol id="ico-address-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="6" width="16" height="12" rx="2" />
+          <path d="M6 10h12" />
+          <path d="M6 14h8" />
+        </g>
+      </symbol>
+
+      <!-- Icon Library: Risk -->
+      <symbol id="ico-risk-1" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l9 16H3z" />
+          <path d="M12 8v5" />
+          <circle cx="12" cy="17" r="1" />
+        </g>
+      </symbol>
+      <symbol id="ico-risk-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l14 14" />
+          <path d="M5 19l14-14" />
+        </g>
+      </symbol>
+      <symbol id="ico-risk-3" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4v6" />
+          <path d="M8 9l4-5 4 5" />
+          <path d="M6 20h12" />
+        </g>
+      </symbol>
+      <symbol id="ico-risk-4" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="10" width="12" height="9" rx="2" />
+          <path d="M9 10V7a3 3 0 0 1 6 0v3" />
+        </g>
+      </symbol>
+      <symbol id="ico-risk-5" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 4v6c0 4-3 7-7 8-4-1-7-4-7-8V7z" />
+          <path d="M9 12l2 2 4-4" />
+        </g>
+      </symbol>
+      <symbol id="ico-risk-6" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h16" />
+          <path d="M12 4v16" />
+          <circle cx="12" cy="12" r="9" />
+        </g>
+      </symbol>
+    </svg>
+
+    <link rel="preload" as="script" href="graph-edge-worker.runtime.js" />
+    <script src="restricted-pii-projection.js"></script>
+    <script src="browser-bridge-mapper.js"></script>
+    <script src="canvas-shell-adapter.js"></script>
+    <script src="canvas-command-adapter.js"></script>
+    <script src="flow-observability-adapter.js"></script>
+    <script src="graph-mutation-store.js"></script>
+    <script src="graph-patch-adapter.js"></script>
+    <script src="graph-clipboard-model.js"></script>
+    <script src="graph-engine-primitives.js"></script>
+    <script src="graph-renderer-bootstrap.js"></script>
+    <script src="graph-label-pipeline.js"></script>
+    <script src="graph-edge-worker-bootstrap.js"></script>
+    <script src="graph-edge-routing.js"></script>
+    <script src="graph-edge-offset-model.js"></script>
+    <script src="graph-text-atlas.js"></script>
+    <script src="graph-minimap-core.js"></script>
+    <script src="graph-data-model.js"></script>
+    <script src="graph-search-model.js"></script>
+    <script src="analysis-graph-data-model.js"></script>
+    <script src="graph-merge-model.js"></script>
+    <script src="graph-transaction-model.js"></script>
+    <script src="graph-edge-txn-query-model.js"></script>
+    <script src="graph-transaction-detail-render-model.js"></script>
+    <script src="graph-transaction-detail-row-model.js"></script>
+    <script src="graph-transaction-modal-controller.js"></script>
+    <script src="graph-edge-detail-render-model.js"></script>
+    <script src="graph-node-detail-render-model.js"></script>
+    <script src="graph-info-popover-controller.js"></script>
+    <script src="graph-drawer-controller.js"></script>
+    <script src="graph-detail-command-controller.js"></script>
+    <script src="graph-render-model.js"></script>
+    <script src="graph-projection-layout-model.js"></script>
+    <script src="graph-projection-layout-sync-model.js"></script>
+    <script src="layout-worker-contract.js"></script>
+    <script src="layout-meta-model.js"></script>
+    <script src="graph_engine.js"></script>
+    <script src="compact.js"></script>
+    <script src="network-rust-cluster-plan.js"></script>
+    <script src="network.js"></script>
+    <script src="hierarchy.js"></script>
+    <script src="flow.js"></script>
+    <script src="layout-runtime-adapter.js"></script>
+    <script src="layout-node-plan-client.js"></script>
+    <script src="layout-role-projection-client.js"></script>
+    <script src="layout-node-update-model.js"></script>
+    <script src="layout-worker-result-model.js"></script>
+    <script src="layout-graph-apply-model.js"></script>
+    <script src="layout-graph-apply-controller.js"></script>
+    <script src="layout-worker-lifecycle-controller.js"></script>
+    <script src="layout-worker-scheduler-controller.js"></script>
+    <script src="layout-prewarm-controller.js"></script>
+    <script src="layout-cluster-model.js"></script>
+    <script src="layout-plan-cache-apply-model.js"></script>
+    <script src="layout-plan-cache-model.js"></script>
+    <script src="layout-plan-cache-controller.js"></script>
+    <script src="layout-network-model.js"></script>
+    <script src="layout-network-presentation-model.js"></script>
+    <script src="minimap.js"></script>
+    <script src="graph-minimap-orchestration.js"></script>
+    <script src="overlay-adapter.js"></script>
+    <script src="flow-runtime-state.js"></script>
+    <script src="flow-layout-command-store.js"></script>
+    <script src="flow-shell-state-store.js"></script>
+    <script src="flow-session-store.js"></script>
+    <script src="flow-shell-sync-store.js"></script>
+    <script src="flow-graph-command-store.js"></script>
+    <script src="flow-selection-store.js"></script>
+    <script src="flow-view-sync-store.js"></script>
+    <script src="graph-render-plan-client.js"></script>
+    <script src="network-sector-placement-cache.js"></script>
+    <script src="network-sector-placement-client.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

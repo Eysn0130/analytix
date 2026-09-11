@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analytix Mermaid Export"
+  short_description: "从 Markdown 导出 Mermaid 图片"
+  default_prompt: "Use $analytix-mermaid-export to export Mermaid diagrams from a Markdown file as styled PNG images."

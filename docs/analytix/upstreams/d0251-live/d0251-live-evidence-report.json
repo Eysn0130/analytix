@@ -1,0 +1,569 @@
+{
+  "schemaVersion": 1,
+  "id": "d0251-live-cutover-evidence-report",
+  "changeId": "D-0251",
+  "stage": "D-0251-live-evidence",
+  "generatedAt": "2026-06-24T17:51:00.863Z",
+  "sourceCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "status": "live_blocked",
+  "passed": false,
+  "defaultBackendReady": true,
+  "goDefaultCandidateAllowed": true,
+  "goDefaultBackendEnabled": true,
+  "typeScriptFallbackRetained": false,
+  "typeScriptDefaultPathRetired": true,
+  "typeScriptRollbackOverrideRetained": true,
+  "rendererVisibleGoSwitcher": false,
+  "llmAnswerQualityEvidenceUsed": false,
+  "deterministicEvidenceOnly": true,
+  "credentialSecretsRecorded": false,
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "provider": "52500f51845c054761f5c70a21172a58284924034957b06bb7370d10fbf596c8",
+    "mcp": "076203a884ebdc573da7ac610ec946228b67b9919222fa8f03b4058ec6b7de82",
+    "packaged": "90d4d8ce154518d7241af3ddf147a347cb3d3d6a4434038e58b5ed5667d792cb",
+    "operator": "fcfff86743341d7926ebf28fb08bf4a494bd06276f8bcd536897a15d0ef67b91"
+  },
+  "evidencePaths": {
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json",
+    "operator": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/operator-gate.json"
+  },
+  "componentStatus": {
+    "provider": "live_blocked",
+    "mcp": "live_blocked",
+    "packaged": "live_blocked",
+    "operator": "live_blocked"
+  },
+  "missingExternalInputs": [
+    {
+      "id": "provider:deepseek",
+      "status": "skipped",
+      "reason": "missing env-gated credential/baseUrl/model; skipped without counting as pass",
+      "missingEnv": [
+        "ANALYTIX_D0251_DEEPSEEK_API_KEY",
+        "ANALYTIX_D0251_DEEPSEEK_BASE_URL",
+        "ANALYTIX_D0251_DEEPSEEK_MODEL"
+      ]
+    },
+    {
+      "id": "provider:openai-compatible",
+      "status": "skipped",
+      "reason": "missing env-gated credential/baseUrl/model; skipped without counting as pass",
+      "missingEnv": [
+        "ANALYTIX_D0251_OPENAI_COMPAT_API_KEY",
+        "ANALYTIX_D0251_OPENAI_COMPAT_BASE_URL",
+        "ANALYTIX_D0251_OPENAI_COMPAT_MODEL"
+      ]
+    },
+    {
+      "id": "provider:anthropic-compatible",
+      "status": "skipped",
+      "reason": "missing env-gated credential/baseUrl/model; skipped without counting as pass",
+      "missingEnv": [
+        "ANALYTIX_D0251_ANTHROPIC_COMPAT_API_KEY",
+        "ANALYTIX_D0251_ANTHROPIC_COMPAT_BASE_URL",
+        "ANALYTIX_D0251_ANTHROPIC_COMPAT_MODEL"
+      ]
+    },
+    {
+      "id": "provider:custom-endpoint",
+      "status": "skipped",
+      "reason": "missing env-gated credential/baseUrl/model; skipped without counting as pass",
+      "missingEnv": [
+        "ANALYTIX_D0251_CUSTOM_ENDPOINT_API_KEY",
+        "ANALYTIX_D0251_CUSTOM_ENDPOINT_URL",
+        "ANALYTIX_D0251_CUSTOM_ENDPOINT_MODEL"
+      ]
+    },
+    {
+      "id": "mcp:credentialed-execution",
+      "status": "live_blocked",
+      "reason": "missing ANALYTIX_D0251_MCP_COMMAND/ANALYTIX_D0243_MCP_COMMAND or MCP URL"
+    },
+    {
+      "id": "packaged:packaged-app-startup",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_PACKAGED_APP_PATH and ANALYTIX_D0251_PACKAGED_LAUNCH_COMMAND to run packaged launch QA"
+    },
+    {
+      "id": "packaged:health",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA"
+    },
+    {
+      "id": "packaged:runtime-info",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA"
+    },
+    {
+      "id": "packaged:thread-list",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA"
+    },
+    {
+      "id": "packaged:turn-create",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA"
+    },
+    {
+      "id": "packaged:sse-replay",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA"
+    },
+    {
+      "id": "packaged:retired-backend-diagnostic",
+      "status": "skipped",
+      "reason": "set ANALYTIX_D0251_ROLLBACK_PROOF_JSON after verifying ANALYTIX_RUNTIME_BACKEND=typescript returns retired_backend without starting TS runtime"
+    },
+    {
+      "id": "packaged:proof:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: status"
+    },
+    {
+      "id": "packaged:proof:passed",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: passed"
+    },
+    {
+      "id": "packaged:proof:checks:packaged-app-startup:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:packaged-app-startup:status"
+    },
+    {
+      "id": "packaged:proof:checks:health:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:health:status"
+    },
+    {
+      "id": "packaged:proof:checks:runtime-info:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:runtime-info:status"
+    },
+    {
+      "id": "packaged:proof:checks:thread-list:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:thread-list:status"
+    },
+    {
+      "id": "packaged:proof:checks:turn-create:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:turn-create:status"
+    },
+    {
+      "id": "packaged:proof:checks:sse-replay:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:sse-replay:status"
+    },
+    {
+      "id": "packaged:proof:checks:retired-backend-diagnostic:status",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: checks:retired-backend-diagnostic:status"
+    },
+    {
+      "id": "packaged:proof:startup.appPathExists",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: startup.appPathExists"
+    },
+    {
+      "id": "packaged:proof:startup.launchCommandConfigured",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: startup.launchCommandConfigured"
+    },
+    {
+      "id": "packaged:proof:startup.launchCommandReferencesAppPath",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: startup.launchCommandReferencesAppPath"
+    },
+    {
+      "id": "packaged:proof:startup.exitCode",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: startup.exitCode"
+    },
+    {
+      "id": "packaged:proof:startup.launchCommandHash",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: startup.launchCommandHash"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeUrl",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeUrl"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeTokenConfigured",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeTokenConfigured"
+    },
+    {
+      "id": "packaged:proof:runtime.healthOK",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.healthOK"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.candidateContract",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.candidateContract"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.hostLocalhost",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.hostLocalhost"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.dataDirConfigured",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.dataDirConfigured"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.dataDirHash",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.dataDirHash"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.mcpAvailable",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.mcpAvailable"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.subagentsAvailable",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.subagentsAvailable"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.reasonixUpstreamAbsorptionPresent",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.reasonixUpstreamAbsorptionPresent"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.reasonixCapabilityMatrixGreen",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.reasonixCapabilityMatrixGreen"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.kunAnalytixBaselineRetained",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.kunAnalytixBaselineRetained"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.reasonixSuperiorityCodeStageClosed",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.reasonixSuperiorityCodeStageClosed"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.defaultBackendReadinessBound",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.defaultBackendReadinessBound"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.readinessSemanticsBound",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.readinessSemanticsBound"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.rawValueRecorded:false",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.rawValueRecorded:false"
+    },
+    {
+      "id": "packaged:proof:runtime.runtimeInfo.infoShapeDigest",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.runtimeInfo.infoShapeDigest"
+    },
+    {
+      "id": "packaged:proof:runtime.threadIdHash",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.threadIdHash"
+    },
+    {
+      "id": "packaged:proof:runtime.turnIdHash",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: runtime.turnIdHash"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.activeBackendAfterRollback",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.activeBackendAfterRollback"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.candidateStopped",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.candidateStopped"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.retiredBackendRejected",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.retiredBackendRejected"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.runtimeHealthAfterRollback",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.runtimeHealthAfterRollback"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.candidateLaunchCommandHash",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.candidateLaunchCommandHash"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.preRollbackRuntimeUrl:match",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.preRollbackRuntimeUrl:match"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.postRollbackRuntimeUrl",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.postRollbackRuntimeUrl"
+    },
+    {
+      "id": "packaged:proof:rollbackProof.rollbackVerifiedAt",
+      "status": "live_blocked",
+      "reason": "missing packaged QA proof field: rollbackProof.rollbackVerifiedAt"
+    },
+    {
+      "id": "operator:gate",
+      "status": "live_blocked",
+      "reason": "provider matrix evidence is not passed"
+    },
+    {
+      "id": "operator:gate",
+      "status": "live_blocked",
+      "reason": "MCP execution evidence is not passed"
+    },
+    {
+      "id": "operator:gate",
+      "status": "live_blocked",
+      "reason": "packaged desktop QA evidence is not passed"
+    },
+    {
+      "id": "operator:gate",
+      "status": "live_blocked",
+      "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1"
+    },
+    {
+      "id": "operator:gate",
+      "status": "live_blocked",
+      "reason": "operator post-cutover live-validation approval env is not set"
+    }
+  ],
+  "nextEvidenceActions": {
+    "schemaVersion": 1,
+    "credentialSecretsRecorded": false,
+    "valuesRecorded": false,
+    "providerMatrix": {
+      "status": "live_blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json",
+      "requiredEnvGroups": [
+        {
+          "id": "deepseek",
+          "status": "skipped",
+          "endpointFamily": "openai-chat-completions",
+          "endpointFormat": "openai-chat-completions",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_D0251_DEEPSEEK_API_KEY",
+            "baseUrlEnv": "ANALYTIX_D0251_DEEPSEEK_BASE_URL",
+            "modelEnv": "ANALYTIX_D0251_DEEPSEEK_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_D0251_DEEPSEEK_API_KEY",
+              "ANALYTIX_D0243_DEEPSEEK_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_D0251_DEEPSEEK_BASE_URL",
+              "ANALYTIX_D0243_DEEPSEEK_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_D0251_DEEPSEEK_MODEL",
+              "ANALYTIX_D0243_DEEPSEEK_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_D0251_DEEPSEEK_API_KEY",
+            "ANALYTIX_D0251_DEEPSEEK_BASE_URL",
+            "ANALYTIX_D0251_DEEPSEEK_MODEL"
+          ],
+          "cacheTelemetryMode": "deepseek-provider-scoped"
+        },
+        {
+          "id": "openai-compatible",
+          "status": "skipped",
+          "endpointFamily": "openai-chat-completions",
+          "endpointFormat": "openai-chat-completions",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_D0251_OPENAI_COMPAT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_D0251_OPENAI_COMPAT_BASE_URL",
+            "modelEnv": "ANALYTIX_D0251_OPENAI_COMPAT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_D0251_OPENAI_COMPAT_API_KEY",
+              "ANALYTIX_D0243_OPENAI_COMPAT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_D0251_OPENAI_COMPAT_BASE_URL",
+              "ANALYTIX_D0243_OPENAI_COMPAT_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_D0251_OPENAI_COMPAT_MODEL",
+              "ANALYTIX_D0243_OPENAI_COMPAT_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_D0251_OPENAI_COMPAT_API_KEY",
+            "ANALYTIX_D0251_OPENAI_COMPAT_BASE_URL",
+            "ANALYTIX_D0251_OPENAI_COMPAT_MODEL"
+          ],
+          "cacheTelemetryMode": "non-deepseek-no-deepseek-fields"
+        },
+        {
+          "id": "anthropic-compatible",
+          "status": "skipped",
+          "endpointFamily": "anthropic-messages",
+          "endpointFormat": "anthropic-messages",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_D0251_ANTHROPIC_COMPAT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_D0251_ANTHROPIC_COMPAT_BASE_URL",
+            "modelEnv": "ANALYTIX_D0251_ANTHROPIC_COMPAT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_D0251_ANTHROPIC_COMPAT_API_KEY",
+              "ANALYTIX_D0243_ANTHROPIC_COMPAT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_D0251_ANTHROPIC_COMPAT_BASE_URL",
+              "ANALYTIX_D0243_ANTHROPIC_COMPAT_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_D0251_ANTHROPIC_COMPAT_MODEL",
+              "ANALYTIX_D0243_ANTHROPIC_COMPAT_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_D0251_ANTHROPIC_COMPAT_API_KEY",
+            "ANALYTIX_D0251_ANTHROPIC_COMPAT_BASE_URL",
+            "ANALYTIX_D0251_ANTHROPIC_COMPAT_MODEL"
+          ],
+          "cacheTelemetryMode": "non-deepseek-no-deepseek-fields"
+        },
+        {
+          "id": "custom-endpoint",
+          "status": "skipped",
+          "endpointFamily": "custom-full-endpoint",
+          "endpointFormat": "custom-full-endpoint",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_D0251_CUSTOM_ENDPOINT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_D0251_CUSTOM_ENDPOINT_URL",
+            "modelEnv": "ANALYTIX_D0251_CUSTOM_ENDPOINT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_D0251_CUSTOM_ENDPOINT_API_KEY",
+              "ANALYTIX_D0243_CUSTOM_ENDPOINT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_D0251_CUSTOM_ENDPOINT_URL",
+              "ANALYTIX_D0243_CUSTOM_ENDPOINT_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_D0251_CUSTOM_ENDPOINT_MODEL",
+              "ANALYTIX_D0243_CUSTOM_ENDPOINT_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_D0251_CUSTOM_ENDPOINT_API_KEY",
+            "ANALYTIX_D0251_CUSTOM_ENDPOINT_URL",
+            "ANALYTIX_D0251_CUSTOM_ENDPOINT_MODEL"
+          ],
+          "cacheTelemetryMode": "custom-request-shape-only"
+        }
+      ]
+    },
+    "mcpExecution": {
+      "status": "live_blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json",
+      "requiredEnv": {
+        "commandOrUrl": [
+          "ANALYTIX_D0251_MCP_COMMAND",
+          "ANALYTIX_D0251_MCP_URL"
+        ],
+        "toolName": "ANALYTIX_D0251_MCP_TOOL_NAME",
+        "toolArgsJson": "ANALYTIX_D0251_MCP_TOOL_ARGS_JSON",
+        "bearerTokenEnv": "ANALYTIX_D0251_MCP_BEARER_TOKEN",
+        "headersJson": "ANALYTIX_D0251_MCP_HEADERS_JSON",
+        "approvalUserInputStatus": "ANALYTIX_D0251_MCP_APPROVAL_USER_INPUT_STATUS",
+        "approvalUserInputEvidence": "ANALYTIX_D0251_MCP_APPROVAL_USER_INPUT_EVIDENCE"
+      },
+      "requiredCoverage": [
+        "connect",
+        "toolDiscoverySearch",
+        "toolCall",
+        "approvalUserInput",
+        "reconnect",
+        "credentialRedaction"
+      ],
+      "topLevelMcpIndexerExposed": false
+    },
+    "packagedDesktopQa": {
+      "status": "live_blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json",
+      "requiredEnv": {
+        "appPath": "ANALYTIX_D0251_PACKAGED_APP_PATH",
+        "launchCommand": "ANALYTIX_D0251_PACKAGED_LAUNCH_COMMAND",
+        "runtimeUrl": "ANALYTIX_D0251_RUNTIME_URL",
+        "runtimeTokenEnv": "ANALYTIX_D0251_RUNTIME_TOKEN",
+        "threadIdOrCreate": [
+          "ANALYTIX_D0251_THREAD_ID",
+          "ANALYTIX_D0251_ALLOW_THREAD_CREATE=1"
+        ],
+        "rollbackProofJson": "ANALYTIX_D0251_ROLLBACK_PROOF_JSON"
+      },
+      "requiredCheckIds": [
+        "packaged-app-startup",
+        "health",
+        "runtime-info",
+        "thread-list",
+        "turn-create",
+        "sse-replay",
+        "go-runtime-default-gate",
+        "retired-backend-diagnostic"
+      ]
+    },
+    "operatorGate": {
+      "status": "live_blocked",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/operator-gate.json",
+      "requiredEnv": {
+        "g6Ready": "ANALYTIX_GO_RUNTIME_G6_READY=1",
+        "approval": "ANALYTIX_D0251_OPERATOR_APPROVES_GO_DEFAULT=1"
+      },
+      "evidenceReviewedIds": [
+        "provider-matrix-credentialed",
+        "mcp-matrix-credentialed",
+        "packaged-qa"
+      ]
+    },
+    "commands": [
+      "npm run runtime:go:d0251-live-evidence -- --json",
+      "npm run runtime:go:preflight -- --json --gate",
+      "ANALYTIX_GO_RUNTIME_G6_READY=1 ANALYTIX_D0252_OPERATOR_APPROVES_GO_DEFAULT_CANDIDATE=1 npm run runtime:go:d0252-candidate-report -- --gate --json"
+    ]
+  },
+  "strictGateEnvWhenPassed": {},
+  "outputPaths": {
+    "json": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/d0251-live-evidence-report.json",
+    "markdown": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/d0251-live-evidence-summary.md",
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/packaged-go-runtime-qa.json",
+    "operator": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0251-live/operator-gate.json"
+  },
+  "notes": [
+    "D-0251 collects auditable JSON evidence only; it does not evaluate LLM answer quality.",
+    "Missing provider credentials, MCP execution configuration, packaged runtime state, or operator approval keeps live validation pending.",
+    "Go runtime is the default core after deterministic local gates; TypeScript executable fallback is retired.",
+    "typeScriptFallbackRetained:false means the TypeScript runtime is not retained as the default-path fallback; ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic and must not start TS runtime."
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "serve": {
+    "host": "127.0.0.1",
+    "port": 8899,
+    "dataDir": "./.analytix-data",
+    "baseUrl": "https://api.deepseek.com/beta",
+    "endpointFormat": "chat_completions",
+    "model": "deepseek-v4-pro",
+    "approvalPolicy": "on-request",
+    "sandboxMode": "workspace-write",
+    "insecure": false
+  },
+  "modelProviders": {
+    "defaultProviderId": "deepseek",
+    "providers": [
+      {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "baseUrl": "https://api.deepseek.com/beta",
+        "endpointFormat": "chat_completions",
+        "models": ["deepseek-v4-pro"],
+        "modelProfiles": {
+          "deepseek-v4-pro": {
+            "contextWindowTokens": 1000000,
+            "inputModalities": ["text"],
+            "outputModalities": ["text"],
+            "supportsToolCalling": true,
+            "messageParts": ["text"]
+          }
+        }
+      }
+    ]
+  },
+  "runtime": {
+    "streamIdleTimeoutMs": 45000,
+    "stepLimits": {
+      "defaultMaxModelSteps": 64,
+      "plannerMaxModelSteps": 24,
+      "headlessMaxModelSteps": 32
+    }
+  },
+  "capabilities": {
+    "mcp": {
+      "enabled": false,
+      "servers": {},
+      "search": {
+        "enabled": false,
+        "mode": "auto",
+        "autoThresholdToolCount": 24,
+        "topKDefault": 5,
+        "topKMax": 10,
+        "minScore": 0.15
+      }
+    },
+    "web": {
+      "enabled": false,
+      "fetchEnabled": false,
+      "searchEnabled": false,
+      "allowDomains": [],
+      "denyDomains": ["localhost", "127.0.0.1"],
+      "maxFetchBytes": 1000000
+    },
+    "skills": {
+      "enabled": false,
+      "roots": ["~/.agents/skills", "./.agents/skills"],
+      "legacySkillMd": true
+    },
+    "subagents": {
+      "enabled": true,
+      "maxParallel": 2,
+      "maxChildRuns": 4,
+      "defaultToolPolicy": "readOnly",
+      "profiles": {}
+    },
+    "visionBridge": {
+      "enabled": false,
+      "mode": "auto",
+      "endpointFormat": "chat_completions",
+      "maxImageDimension": 1280,
+      "maxImageBytes": 1500000,
+      "maxScreenshotsPerTurn": 4,
+      "observationCacheTtlMs": 120000,
+      "injectPolicy": "observation_text",
+      "fallbackWhenPrimaryImageUnsupported": true,
+      "semanticProbeStatus": "unknown"
+    }
+  }
+}

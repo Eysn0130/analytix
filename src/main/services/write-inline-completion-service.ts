@@ -1,0 +1,847 @@
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  resolveWriteInlineCompletionModel,
+  type ModelEndpointFormat,
+  type AppSettingsV1
+} from '../../shared/app-settings'
+import type {
+  WriteInlineCompletionAction,
+  WriteInlineCompletionMode,
+  WriteInlineCompletionDebugEntry,
+  WriteInlineCompletionRequest,
+  WriteInlineCompletionResult
+} from '../../shared/write-inline-completion'
+import type { WriteInlineEditRecentEdit } from '../../shared/write-inline-edit'
+import { sanitizePublicAssistantText } from '../../shared/public-runtime-content'
+import {
+  retrieveWriteInlineCompletionContext,
+  type WriteRetrievalContext,
+  type WriteRetrievalSnippet
+} from './write-retrieval-service'
+
+const INLINE_COMPLETION_TIMEOUT_MS = 30_000
+const INLINE_COMPLETION_POLL_MS = 100
+const MAX_INLINE_COMPLETION_DEBUG_ENTRIES = 120
+const INPUT_BOUNDARY_MARKERS = ['PREFIX', 'SUFFIX', 'EDIT_SCOPE'] as const
+const OUTPUT_ACTION_MARKERS = ['SHORT', 'LONG', 'EDIT'] as const
+// Every protocol marker name, longest first so the alternation prefers EDIT_SCOPE
+// over EDIT. Used to terminate a marked body that lost its closing >>> and to
+// scrub malformed marker soup that must never reach the ghost text.
+const PROTOCOL_MARKER_NAMES = [...INPUT_BOUNDARY_MARKERS, ...OUTPUT_ACTION_MARKERS]
+  .slice()
+  .sort((a, b) => b.length - a.length)
+  .join('|')
+const PROTOCOL_MARKER_OPENER = new RegExp(`<<<[ \\t]*(?:${PROTOCOL_MARKER_NAMES})\\b`, 'i')
+// The placeholder lines from buildResponseProtocolPromptBlock(). A weak model
+// sometimes parrots them verbatim; such an echo is never a real suggestion.
+const PROTOCOL_PLACEHOLDER_BODIES = new Set([
+  'short text to insert at the cursor',
+  'longer continuation to insert at the cursor',
+  'replacement text for the editable local scope'
+])
+
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }>
+    }
+    text?: string
+  }>
+}
+
+type ResponsesApiResponse = {
+  output_text?: string
+  output?: Array<Record<string, unknown>>
+}
+
+type AnthropicMessageResponse = {
+  content?: Array<Record<string, unknown>>
+}
+
+type ChatCompletionMessage = {
+  role: 'system' | 'user'
+  content: string
+}
+
+type WriteInlineProviderResponseFormat = ModelEndpointFormat | 'fim_completions'
+
+const inlineCompletionDebugEntries: WriteInlineCompletionDebugEntry[] = []
+
+type PendingInlineCompletionDebugEntry = Omit<
+  WriteInlineCompletionDebugEntry,
+  'request' | 'suffix' | 'response' | 'completion' | 'errorCode'
+> & {
+  prompt: string
+  suffix: string
+  rawResponse: string
+  completion: string
+  errorCode?: string
+}
+
+function debugFingerprint(text = ''): { sha256: string; bytes: number } {
+  const value = String(text || '')
+  return {
+    sha256: createHash('sha256').update(value).digest('hex'),
+    bytes: Buffer.byteLength(value)
+  }
+}
+
+function appendInlineCompletionDebugEntry(entry: PendingInlineCompletionDebugEntry): void {
+  inlineCompletionDebugEntries.push({
+    id: entry.id,
+    createdAt: entry.createdAt,
+    durationMs: entry.durationMs,
+    ok: entry.ok,
+    model: entry.model,
+    mode: entry.mode,
+    request: debugFingerprint(entry.prompt),
+    suffix: debugFingerprint(entry.suffix),
+    response: debugFingerprint(entry.rawResponse),
+    completion: debugFingerprint(entry.completion),
+    ...(entry.actionKind ? { actionKind: entry.actionKind } : {}),
+    ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
+    referenceCount: entry.referenceCount,
+    ...(entry.recentEditCount !== undefined ? { recentEditCount: entry.recentEditCount } : {}),
+    promptChars: entry.promptChars,
+    suffixChars: entry.suffixChars,
+    responseChars: entry.responseChars
+  })
+  if (inlineCompletionDebugEntries.length > MAX_INLINE_COMPLETION_DEBUG_ENTRIES) {
+    inlineCompletionDebugEntries.splice(0, inlineCompletionDebugEntries.length - MAX_INLINE_COMPLETION_DEBUG_ENTRIES)
+  }
+}
+
+export function listWriteInlineCompletionDebugEntries(): WriteInlineCompletionDebugEntry[] {
+  return [...inlineCompletionDebugEntries].reverse()
+}
+
+export function clearWriteInlineCompletionDebugEntries(): void {
+  inlineCompletionDebugEntries.length = 0
+}
+
+function appendInlineCompletionPreflightFailure(
+  startedAt: number,
+  settings: AppSettingsV1,
+  request: WriteInlineCompletionRequest,
+  message: string
+): void {
+  const model = resolveModel(request, settings)
+  const mode = resolveMode(request)
+  const prompt = buildWriteInlineCompletionPrompt(request, null)
+  appendInlineCompletionDebugEntry({
+    id: randomUUID(),
+    createdAt: new Date(startedAt).toISOString(),
+    durationMs: Date.now() - startedAt,
+    ok: false,
+    model,
+    mode,
+    prompt,
+    suffix: request.suffix,
+    rawResponse: '',
+    completion: '',
+    actionKind: undefined,
+    errorCode: 'preflight_failed',
+    referenceCount: 0,
+    recentEditCount: request.recentEdits?.length ?? 0,
+    promptChars: prompt.length,
+    suffixChars: request.suffix.length,
+    responseChars: 0
+  })
+}
+
+function resolveModel(request: WriteInlineCompletionRequest, settings: AppSettingsV1): string {
+  return resolveWriteInlineCompletionModel(settings, request.model)
+}
+
+function resolveMode(request: WriteInlineCompletionRequest): WriteInlineCompletionMode {
+  if (request.mode === 'edit') return 'edit'
+  return request.mode === 'long' ? 'long' : 'short'
+}
+
+function flattenMessageContent(
+  content: string | Array<{ type?: string; text?: string }> | undefined
+): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => (part?.type === 'text' || part?.text ? part?.text ?? '' : ''))
+    .join('')
+}
+
+function cleanCompletionText(raw: string): string {
+  const normalized = raw.replace(/\r\n?/g, '\n').replaceAll(String.fromCharCode(0), '')
+  const trimmed = normalized.trim()
+  if (!trimmed) return ''
+
+  const fenced = trimmed.match(/^```(?:\w+)?\n([\s\S]*?)\n```$/)
+  if (fenced) return fenced[1]
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1)
+  }
+  return normalized
+}
+
+function trimMarkerPadding(text = ''): string {
+  return String(text || '').replace(/\n$/, '')
+}
+
+function markerBlock(marker: string, text = ''): string {
+  return `<<<${marker}\n${sanitizePromptLine(text)}\n>>>`
+}
+
+function sanitizePromptLine(text = ''): string {
+  return String(text || '').replace(/\r\n?/g, '\n').split('-->').join('--\\>')
+}
+
+function compactText(text = ''): string {
+  return String(text || '').replace(/\s+/g, ' ').trim()
+}
+
+function clipPromptText(text = '', maxChars = 0): string {
+  const source = sanitizePromptLine(text)
+  if (!maxChars || source.length <= maxChars) return source
+  const head = Math.max(1, Math.floor(maxChars * 0.58))
+  const tail = Math.max(1, maxChars - head - 13)
+  return `${source.slice(0, head)}\n... omitted ...\n${source.slice(source.length - tail)}`
+}
+
+function formatRecentEditAge(ageMs: number): string {
+  const seconds = Math.max(0, Math.round(ageMs / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.round(minutes / 60)}h ago`
+}
+
+function buildRecentEditsPromptBlock(edits: WriteInlineEditRecentEdit[] | undefined): string[] {
+  const recentEdits = (edits ?? [])
+    .filter((edit) => edit.deletedText || edit.insertedText || edit.instruction)
+    .slice(-8)
+  if (recentEdits.length === 0) return []
+
+  const lines = [
+    '',
+    'Recent local edits in this file. Treat these as intent signals. If they clearly imply that the user is continuing a local rewrite, you may choose EDIT. If they only show ordinary typing, choose COMPLETION or return an empty completion.'
+  ]
+
+  recentEdits.forEach((edit, index) => {
+    lines.push('')
+    lines.push(`[${index + 1}] ${formatRecentEditAge(edit.ageMs)}; source=${edit.source}; range=${edit.from}-${edit.to}${edit.scopeKind ? `; scope=${edit.scopeKind}` : ''}`)
+    if (edit.instruction) lines.push(`Instruction: ${clipPromptText(edit.instruction, 420)}`)
+    if (edit.deletedText) lines.push(`Deleted: ${clipPromptText(edit.deletedText, 520)}`)
+    if (edit.insertedText) lines.push(`Inserted: ${clipPromptText(edit.insertedText, 520)}`)
+    const around = compactText(`${edit.beforeContext} [[edit]] ${edit.afterContext}`)
+    if (around) lines.push(`Around: ${clipPromptText(around, 520)}`)
+  })
+
+  return lines
+}
+
+function buildEditCandidatePromptBlock(request: WriteInlineCompletionRequest): string[] {
+  const candidate = request.editCandidate
+  if (!candidate) return []
+  const scopeLines = candidate.startLine === candidate.endLine
+    ? `line ${candidate.startLine}`
+    : `lines ${candidate.startLine}-${candidate.endLine}`
+  return [
+    '',
+    'Editable local scope if EDIT is the best action.',
+    'Choose EDIT when the user instruction or recent user changes make a replacement more useful than cursor completion.',
+    `Edit candidate: ${candidate.kind}; ${scopeLines}; offsets ${candidate.from}-${candidate.to}.`,
+    'Original editable scope boundary:',
+    markerBlock('EDIT_SCOPE', candidate.original)
+  ]
+}
+
+function buildEditActionGuidanceBlock(request: WriteInlineCompletionRequest): string[] {
+  if (!request.editCandidate) return []
+  return [
+    '',
+    'Edit action guidance:',
+    'An editable scope is available in <<<EDIT_SCOPE ... >>>. Return <<<EDIT ... >>> only when replacing that exact scope is the best local action.',
+    'If the user is simply continuing at the cursor, return <<<SHORT ... >>> or <<<LONG ... >>> instead.'
+  ]
+}
+
+function buildResponseProtocolPromptBlock(): string[] {
+  return [
+    'Return exactly one TextIDE-style action block and nothing else:',
+    '<<<SHORT',
+    'short text to insert at the cursor',
+    '>>>',
+    '<<<LONG',
+    'longer continuation to insert at the cursor',
+    '>>>',
+    '<<<EDIT',
+    'replacement text for the editable local scope',
+    '>>>'
+  ]
+}
+
+function buildMarkedContextBlocks(request: WriteInlineCompletionRequest): string[] {
+  return [
+    '',
+    'Boundary-marked cursor context:',
+    markerBlock('PREFIX', request.prefix),
+    markerBlock('SUFFIX', request.suffix)
+  ]
+}
+
+function buildRetrievalPromptBlock(
+  retrieval: WriteRetrievalContext,
+  mode: WriteInlineCompletionMode
+): string[] {
+  const lines = [
+    '',
+    'Reference snippets from the same writing workspace.',
+    'Use these snippets only for local terminology, factual continuity, and style. Do not mention them in the returned action.',
+    `Completion mode: ${mode}.`,
+    `Retrieval: ${retrieval.source}; indexed ${retrieval.indexedFiles} files / ${retrieval.indexedChunks} chunks.`,
+    `Query keywords: ${retrieval.keywords.join(', ')}`
+  ]
+
+  const formatSnippetLocation = (snippet: WriteRetrievalSnippet): string => {
+    if (snippet.location.kind === 'pdf') {
+      return snippet.location.pageStart === snippet.location.pageEnd
+        ? `${snippet.path}#page=${snippet.location.pageStart}`
+        : `${snippet.path}#page=${snippet.location.pageStart}-${snippet.location.pageEnd}`
+    }
+    return snippet.location.lineStart === snippet.location.lineEnd
+      ? `${snippet.path}:${snippet.location.lineStart}`
+      : `${snippet.path}:${snippet.location.lineStart}-${snippet.location.lineEnd}`
+  }
+
+  retrieval.snippets.forEach((snippet, index) => {
+    const location = formatSnippetLocation(snippet)
+    lines.push('')
+    lines.push(`[${index + 1}] ${location}`)
+    if (snippet.title) lines.push(`Title: ${sanitizePromptLine(snippet.title)}`)
+    lines.push(`Matched: ${snippet.keywords.join(', ')}`)
+    lines.push(sanitizePromptLine(snippet.text))
+  })
+
+  return lines
+}
+
+export function buildWriteInlineCompletionPrompt(
+  request: WriteInlineCompletionRequest,
+  retrieval: WriteRetrievalContext | null = null
+): string {
+  const mode = resolveMode(request)
+  const lines = [
+    '<!-- Analytix inline completion.',
+    'Complete the text at the cursor.',
+    'The boundary blocks below identify local context, but the response must be plain insertable text only.',
+    'Return only the text to insert at the cursor.',
+    'Do not wrap the answer in quotes, Markdown fences, XML, JSON, or action markers.',
+    'Do not echo <<<PREFIX ... >>>, <<<SUFFIX ... >>>, or these instructions.',
+    mode === 'long'
+      ? 'The user has paused for inspiration. Suggest one compact, grounded continuation only when it clearly fits.'
+      : 'Prefer a short, precise continuation that looks like the next few keystrokes.',
+    'Return an empty response only when there is no sensible local continuation.',
+    `Trigger hint: ${mode}.`,
+    `Cursor: line ${request.cursor.line}, column ${request.cursor.column}.`,
+    `Language: ${sanitizePromptLine(request.context.language)}.`,
+    `Policy: ${sanitizePromptLine(request.policy.name)}.`,
+    sanitizePromptLine(request.policy.instruction),
+    '',
+    'Cursor context:',
+    `Current line prefix: ${sanitizePromptLine(request.context.currentLinePrefix)}`,
+    `Current line suffix: ${sanitizePromptLine(request.context.currentLineSuffix)}`,
+    `Previous non-empty line: ${sanitizePromptLine(request.context.previousNonEmptyLine)}`,
+    `Next line: ${sanitizePromptLine(request.context.nextLine)}`,
+    `Signals: ${JSON.stringify(request.context.signals)}`,
+    ...buildRecentEditsPromptBlock(request.recentEdits),
+    ...(retrieval?.snippets.length ? buildRetrievalPromptBlock(retrieval, mode) : []),
+    ...buildMarkedContextBlocks(request),
+    'For the FIM engine, the raw prefix also follows this instruction block.',
+    '-->',
+    ''
+  ]
+  return `${lines.join('\n')}${request.prefix}`
+}
+
+function buildChatPromptSection(marker: string, text = ''): string {
+  return markerBlock(marker, text)
+}
+
+export function buildWriteInlineCompletionChatMessages(
+  request: WriteInlineCompletionRequest,
+  retrieval: WriteRetrievalContext | null = null
+): ChatCompletionMessage[] {
+  const mode = resolveMode(request)
+  const userLines = [
+    `Trigger hint: ${mode}. The model must decide whether the returned type is short, long, or edit.`,
+    `Cursor: line ${request.cursor.line}, column ${request.cursor.column}.`,
+    `Language: ${sanitizePromptLine(request.context.language)}.`,
+    `Policy: ${sanitizePromptLine(request.policy.name)}.`,
+    sanitizePromptLine(request.policy.instruction),
+    '',
+    ...buildResponseProtocolPromptBlock(),
+    '',
+    'Choose SHORT for normal next-keystroke writing, sentence continuation, or list continuation.',
+    'Choose LONG when the local context clearly needs a fuller next thought or paragraph.',
+    'Choose EDIT when the user instruction or recent local edits imply an existing nearby scope should be rewritten.',
+    'If neither action is useful, return an empty <<<SHORT ... >>> block.',
+    'Do not echo <<<PREFIX ... >>>, <<<SUFFIX ... >>>, or <<<EDIT_SCOPE ... >>> in the response.',
+    '',
+    'Cursor context:',
+    `Current line prefix: ${sanitizePromptLine(request.context.currentLinePrefix)}`,
+    `Current line suffix: ${sanitizePromptLine(request.context.currentLineSuffix)}`,
+    `Previous non-empty line: ${sanitizePromptLine(request.context.previousNonEmptyLine)}`,
+    `Next line: ${sanitizePromptLine(request.context.nextLine)}`,
+    `Signals: ${JSON.stringify(request.context.signals)}`,
+    ...buildEditActionGuidanceBlock(request),
+    ...buildRecentEditsPromptBlock(request.recentEdits),
+    ...buildEditCandidatePromptBlock(request),
+    ...(retrieval?.snippets.length ? buildRetrievalPromptBlock(retrieval, mode) : []),
+    '',
+    buildChatPromptSection('PREFIX', request.prefix),
+    buildChatPromptSection('SUFFIX', request.suffix)
+  ]
+
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are Analytix inline writing. You perform local writing completion and in-place text edits.',
+        'For edit tasks, reason from <<<PREFIX ... >>>, <<<EDIT_SCOPE ... >>>, and <<<SUFFIX ... >>>, then return only the replacement inside <<<EDIT ... >>>.',
+        'Do not include explanations, markdown fences outside the marked action, before/after labels, or unchanged surrounding text outside the chosen action.'
+      ].join('\n')
+    },
+    {
+      role: 'user',
+      content: userLines.join('\n')
+    }
+  ]
+}
+
+function debugPromptFromMessages(messages: ChatCompletionMessage[]): string {
+  return messages
+    .map((message) => `## ${message.role}\n${message.content}`)
+    .join('\n\n')
+}
+
+function providerTextFromResponse(
+  responseText: string,
+  format: WriteInlineProviderResponseFormat = 'chat_completions'
+): string {
+  let parsed: ChatCompletionResponse | ResponsesApiResponse | AnthropicMessageResponse
+  try {
+    parsed = JSON.parse(responseText) as ChatCompletionResponse | ResponsesApiResponse | AnthropicMessageResponse
+  } catch {
+    throw new Error('Inline completion provider returned non-JSON data.')
+  }
+  if (format === 'responses') {
+    return textFromResponsesPayload(parsed as ResponsesApiResponse)
+  }
+  if (format === 'messages') {
+    return textFromAnthropicPayload(parsed as AnthropicMessageResponse)
+  }
+  const chatPayload = parsed as ChatCompletionResponse
+  const firstChoice = chatPayload.choices?.[0]
+  if (typeof firstChoice?.text === 'string') return firstChoice.text
+  const first = firstChoice?.message?.content
+  return flattenMessageContent(first)
+}
+
+function textFromResponsesPayload(payload: ResponsesApiResponse): string {
+  if (typeof payload.output_text === 'string') return payload.output_text
+  const parts: string[] = []
+  for (const item of payload.output ?? []) {
+    const content = item.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      const record = block as Record<string, unknown>
+      const text = record.text
+      if (typeof text === 'string') parts.push(text)
+    }
+  }
+  return parts.join('')
+}
+
+function textFromAnthropicPayload(payload: AnthropicMessageResponse): string {
+  const parts: string[] = []
+  for (const block of payload.content ?? []) {
+    if (block.type === 'text' && typeof block.text === 'string') {
+      parts.push(block.text)
+    }
+  }
+  return parts.join('')
+}
+
+export type WriteInlineActionEditTarget = {
+  from: number
+  to: number
+  original: string
+  scopeKind?: 'selection' | 'paragraph'
+}
+
+function completionAction(
+  text: string,
+  kind: Extract<WriteInlineCompletionMode, 'short' | 'long'> = 'short'
+): WriteInlineCompletionAction {
+  return { kind, text: cleanCompletionText(text) }
+}
+
+function editAction(
+  replacement: string,
+  target: WriteInlineActionEditTarget | undefined
+): WriteInlineCompletionAction {
+  const cleaned = cleanCompletionText(replacement)
+  if (!target) return completionAction(cleaned)
+  return {
+    kind: 'edit',
+    replacement: cleaned,
+    from: target.from,
+    to: target.to,
+    original: target.original,
+    scopeKind: target.scopeKind
+  }
+}
+
+function actionFromJsonValue(
+  value: unknown,
+  options: { editTarget?: WriteInlineActionEditTarget }
+): WriteInlineCompletionAction | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const rawKind = String(record.kind ?? record.action ?? record.type ?? '').trim().toLowerCase()
+  const text = String(record.text ?? record.completion ?? record.insert ?? record.replacement ?? record.edit ?? '')
+  if (rawKind === 'short' || rawKind === 'completion' || rawKind === 'insert') return completionAction(text, 'short')
+  if (rawKind === 'long') return completionAction(text, 'long')
+  if (rawKind === 'edit' || rawKind === 'replacement' || rawKind === 'replace') {
+    return editAction(text, options.editTarget)
+  }
+  return null
+}
+
+function containsInputBoundaryEcho(text: string): boolean {
+  return INPUT_BOUNDARY_MARKERS.some((marker) => new RegExp(`<<<\\s*${marker}\\b`, 'i').test(text)) ||
+    text.includes('Return only the text to insert at the cursor.')
+}
+
+/**
+ * Strip protocol marker tokens that leaked into a malformed response so they can
+ * never surface as ghost text. Guarded on an actual marker opener being present,
+ * so ordinary prose that merely contains ">>>" (a REPL transcript, a merge
+ * conflict marker) is returned untouched.
+ */
+function stripActionMarkerArtifacts(text: string): string {
+  if (!PROTOCOL_MARKER_OPENER.test(text)) return text
+  return text
+    .replace(new RegExp(`<<<[ \\t]*(?:${PROTOCOL_MARKER_NAMES})\\b[ \\t]*`, 'gi'), '')
+    .replace(/>>>/g, '')
+    // Drop any line that is a bare echo of the protocol placeholder text, so a
+    // full-template parrot collapses to empty rather than leaking the sample lines.
+    .split('\n')
+    .filter((line) => !PROTOCOL_PLACEHOLDER_BODIES.has(line.trim().toLowerCase()))
+    .join('\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function parseMarkedActionBlock(
+  text: string,
+  options: { editTarget?: WriteInlineActionEditTarget }
+): WriteInlineCompletionAction | null {
+  // A body ends at the first closing >>> or the next protocol opener, whichever
+  // comes first, so a block that dropped its >>> never swallows later markers.
+  const bodyTerminator = new RegExp(`>>>|<<<[ \\t]*(?:${PROTOCOL_MARKER_NAMES})\\b`, 'i')
+  for (const marker of OUTPUT_ACTION_MARKERS) {
+    // Tolerant opener: trailing spaces/tabs and an optional single newline after
+    // the keyword, so same-line bodies (<<<SHORT text >>>) parse too.
+    const opener = new RegExp(`<<<[ \\t]*${marker}\\b[ \\t]*\\n?`, 'i').exec(text)
+    if (!opener) continue
+    const rest = text.slice(opener.index + opener[0].length)
+    const end = rest.search(bodyTerminator)
+    // Drop horizontal whitespace abutting the close marker, then a single
+    // trailing newline; leading whitespace is kept so a continuation like
+    // " next words" stays intact.
+    const body = trimMarkerPadding((end >= 0 ? rest.slice(0, end) : rest).replace(/[ \t]+$/, ''))
+    // Skip empty blocks (a contentless SHORT must not shadow a filled LONG, and
+    // a pure marker skeleton must fall through to the scrubbing fallback below)
+    // and skip a verbatim echo of the protocol's own placeholder text.
+    const condensed = body.trim().toLowerCase()
+    if (!condensed || PROTOCOL_PLACEHOLDER_BODIES.has(condensed)) continue
+    if (marker === 'SHORT') return completionAction(body, 'short')
+    if (marker === 'LONG') return completionAction(body, 'long')
+    return editAction(body, options.editTarget)
+  }
+  return null
+}
+
+export function parseWriteInlineAction(
+  raw: string,
+  options: {
+    fallbackKind?: WriteInlineCompletionAction['kind']
+    editTarget?: WriteInlineActionEditTarget
+  } = {}
+): WriteInlineCompletionAction {
+  const fallbackKind = options.fallbackKind ?? 'short'
+  const normalized = raw.replace(/\r\n?/g, '\n').replaceAll(String.fromCharCode(0), '')
+  const trimmed = normalized.trim()
+  if (!trimmed) {
+    return fallbackKind === 'edit'
+      ? editAction('', options.editTarget)
+      : completionAction('', fallbackKind === 'long' ? 'long' : 'short')
+  }
+
+  if (containsInputBoundaryEcho(trimmed)) {
+    return fallbackKind === 'edit'
+      ? editAction('', options.editTarget)
+      : completionAction('', fallbackKind === 'long' ? 'long' : 'short')
+  }
+
+  const marked = parseMarkedActionBlock(trimmed, { editTarget: options.editTarget })
+  if (marked) return marked
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    const action = actionFromJsonValue(parsed, { editTarget: options.editTarget })
+    if (action) return action
+  } catch {
+    /* XML/plain-text fallbacks below. */
+  }
+
+  const short = trimmed.match(/^<short(?:\s[^>]*)?>([\s\S]*?)<\/short>$/i) ??
+    trimmed.match(/<short(?:\s[^>]*)?>([\s\S]*?)<\/short>/i)
+  if (short) return completionAction(short[1], 'short')
+
+  const long = trimmed.match(/^<long(?:\s[^>]*)?>([\s\S]*?)<\/long>$/i) ??
+    trimmed.match(/<long(?:\s[^>]*)?>([\s\S]*?)<\/long>/i)
+  if (long) return completionAction(long[1], 'long')
+
+  const completion = trimmed.match(/^<completion(?:\s[^>]*)?>([\s\S]*?)<\/completion>$/i) ??
+    trimmed.match(/<completion(?:\s[^>]*)?>([\s\S]*?)<\/completion>/i)
+  if (completion) return completionAction(completion[1], fallbackKind === 'long' ? 'long' : 'short')
+
+  const edit = trimmed.match(/^<edit(?:\s[^>]*)?>([\s\S]*?)<\/edit>$/i) ??
+    trimmed.match(/<edit(?:\s[^>]*)?>([\s\S]*?)<\/edit>/i)
+  if (edit) return editAction(edit[1], options.editTarget)
+
+  const labeledCompletion = trimmed.match(/^(?:completion|insert)[:：]\s*([\s\S]*)$/i)
+  if (labeledCompletion) return completionAction(labeledCompletion[1], fallbackKind === 'long' ? 'long' : 'short')
+  const labeledShort = trimmed.match(/^(?:short)[:：]\s*([\s\S]*)$/i)
+  if (labeledShort) return completionAction(labeledShort[1], 'short')
+  const labeledLong = trimmed.match(/^(?:long)[:：]\s*([\s\S]*)$/i)
+  if (labeledLong) return completionAction(labeledLong[1], 'long')
+  const labeledEdit = trimmed.match(/^(?:edit|replacement|replace|new text|edited text|替换文本|修改后|修改|替换)[:：]\s*([\s\S]*)$/i)
+  if (labeledEdit) return editAction(labeledEdit[1], options.editTarget)
+
+  // Last resort: treat the response as plain insertable text, but scrub any
+  // leaked protocol markers first so a malformed skeleton (">>> <<<LONG >>>
+  // <<<EDIT") degrades to an empty completion instead of polluting the ghost text.
+  const scrubbed = stripActionMarkerArtifacts(normalized)
+  return fallbackKind === 'edit'
+    ? editAction(scrubbed, options.editTarget)
+    : completionAction(scrubbed, fallbackKind === 'long' ? 'long' : 'short')
+}
+
+export function extractWriteInlineAction(
+  responseText: string,
+  options: {
+    fallbackKind?: WriteInlineCompletionAction['kind']
+    editTarget?: WriteInlineActionEditTarget
+    responseFormat?: WriteInlineProviderResponseFormat
+  } = {}
+): WriteInlineCompletionAction {
+  return parseWriteInlineAction(providerTextFromResponse(responseText, options.responseFormat), options)
+}
+
+export type WriteInlineRuntimeRequest = (
+  path: string,
+  method?: string,
+  body?: string
+) => Promise<{ ok: boolean; status: number; body: string }>
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function parseRuntimeObject(body: string): Record<string, unknown> | null {
+  try {
+    return objectValue(JSON.parse(body))
+  } catch {
+    return null
+  }
+}
+
+function runtimeTurnId(body: string): string {
+  const parsed = parseRuntimeObject(body)
+  const turn = objectValue(parsed?.turn)
+  return String(turn?.id ?? parsed?.turnId ?? '').trim()
+}
+
+function runtimeAssistantText(body: string, turnId: string): { text: string; status: string } {
+  const parsed = parseRuntimeObject(body)
+  const turns = Array.isArray(parsed?.turns) ? parsed.turns : []
+  const target = turns
+    .map(objectValue)
+    .find((turn) => String(turn?.id ?? '').trim() === turnId) ?? null
+  const status = String(target?.status ?? '').trim()
+  const topLevelItems = Array.isArray(parsed?.items) ? parsed.items : []
+  const turnItems = Array.isArray(target?.items) ? target.items : []
+  const items = [...topLevelItems, ...turnItems].map(objectValue)
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (!item) continue
+    const kind = String(item.kind ?? '')
+    if (kind !== 'assistant_text' && kind !== 'agent_message') continue
+    const text = sanitizePublicAssistantText(String(item.text ?? item.detail ?? item.summary ?? ''))
+    if (text) return { text, status }
+  }
+  return { text: '', status }
+}
+
+async function requestRuntimeInlineCompletion(
+  request: WriteInlineCompletionRequest,
+  model: string,
+  prompt: string,
+  runtimeRequest: WriteInlineRuntimeRequest
+): Promise<string> {
+  const create = await runtimeRequest('/v1/threads', 'POST', JSON.stringify({
+    workspace: request.workspaceRoot?.trim() || '',
+    model,
+    mode: 'agent',
+    approvalPolicy: 'never',
+    sandboxMode: 'read-only',
+    title: '[Write inline completion]'
+  }))
+  const thread = parseRuntimeObject(create.body)
+  const threadId = String(thread?.id ?? '').trim()
+  if (!create.ok || !threadId) throw new Error('runtime_thread_unavailable')
+
+  try {
+    const start = await runtimeRequest(
+      `/v1/threads/${encodeURIComponent(threadId)}/turns`,
+      'POST',
+      JSON.stringify({
+        prompt,
+        model,
+        mode: 'agent',
+        approvalPolicy: 'never',
+        sandboxMode: 'read-only',
+        disableUserInput: true,
+        maxModelSteps: 1
+      })
+    )
+    const turnId = runtimeTurnId(start.body)
+    if (!start.ok || !turnId) throw new Error('runtime_turn_unavailable')
+
+    const deadline = Date.now() + INLINE_COMPLETION_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      const detail = await runtimeRequest(`/v1/threads/${encodeURIComponent(threadId)}`, 'GET')
+      if (!detail.ok) throw new Error('runtime_result_unavailable')
+      const outcome = runtimeAssistantText(detail.body, turnId)
+      if (outcome.status === 'completed') return outcome.text
+      if (outcome.status === 'failed' || outcome.status === 'aborted') {
+        throw new Error('runtime_turn_failed')
+      }
+      await new Promise((resolve) => setTimeout(resolve, INLINE_COMPLETION_POLL_MS))
+    }
+    throw new Error('runtime_turn_timeout')
+  } finally {
+    await runtimeRequest(`/v1/threads/${encodeURIComponent(threadId)}`, 'DELETE').catch(() => undefined)
+  }
+}
+
+export async function requestWriteInlineCompletion(
+  settings: AppSettingsV1,
+  request: WriteInlineCompletionRequest,
+  runtimeRequest?: WriteInlineRuntimeRequest
+): Promise<WriteInlineCompletionResult> {
+  const startedAt = Date.now()
+  if (settings.write.inlineCompletion.enabled === false) {
+    appendInlineCompletionPreflightFailure(startedAt, settings, request, 'Inline completion is disabled.')
+    return { ok: false, message: 'Inline completion is disabled.' }
+  }
+
+  if (!runtimeRequest) {
+    appendInlineCompletionPreflightFailure(startedAt, settings, request, 'Inline completion runtime is unavailable.')
+    return { ok: false, message: 'Inline completion runtime is unavailable.' }
+  }
+
+  const model = resolveModel(request, settings)
+  const mode = resolveMode(request)
+  const actionMayEdit = Boolean(request.editCandidate && request.recentEdits?.length)
+  const retrieval = settings.write.inlineCompletion.retrievalEnabled === false
+    ? null
+    : await retrieveWriteInlineCompletionContext(request, {
+        maxSnippets: mode === 'long' || mode === 'edit' || actionMayEdit ? 5 : 3
+      }).catch(() => null)
+  const messages = buildWriteInlineCompletionChatMessages(request, retrieval)
+  const prompt = debugPromptFromMessages(messages)
+  const debugBase = {
+    id: randomUUID(),
+    createdAt: new Date(startedAt).toISOString(),
+    model,
+    mode,
+    prompt,
+    suffix: request.suffix,
+    referenceCount: retrieval?.snippets.length ?? 0,
+    recentEditCount: request.recentEdits?.length ?? 0,
+    promptChars: prompt.length,
+    suffixChars: request.suffix.length
+  }
+
+  try {
+    const text = await requestRuntimeInlineCompletion(request, model, prompt, runtimeRequest)
+
+    const extractedAction = parseWriteInlineAction(text, {
+      fallbackKind: mode,
+      editTarget: request.editCandidate
+        ? {
+            from: request.editCandidate.from,
+            to: request.editCandidate.to,
+            original: request.editCandidate.original,
+            scopeKind: request.editCandidate.kind
+          }
+        : undefined
+    })
+    const action: WriteInlineCompletionAction = extractedAction.kind === 'edit'
+      ? { ...extractedAction, replacement: sanitizePublicAssistantText(extractedAction.replacement) }
+      : { ...extractedAction, text: sanitizePublicAssistantText(extractedAction.text) }
+    const completion = action.kind === 'edit' ? action.replacement : action.text
+    const finalMode = action.kind
+    appendInlineCompletionDebugEntry({
+      ...debugBase,
+      mode: finalMode,
+      durationMs: Date.now() - startedAt,
+      ok: true,
+      rawResponse: text,
+      completion,
+      actionKind: finalMode,
+      responseChars: text.length
+    })
+
+    return {
+      ok: true,
+      completion,
+      action,
+      model,
+      mode: finalMode
+    }
+  } catch {
+    appendInlineCompletionDebugEntry({
+      ...debugBase,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      rawResponse: '',
+      completion: '',
+      responseChars: 0,
+      errorCode: 'request_failed'
+    })
+    return {
+      ok: false,
+      message: 'Inline completion request failed.'
+    }
+  }
+}

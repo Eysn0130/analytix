@@ -1,0 +1,80 @@
+{
+  "layoutProjectionContract": {
+    "snapshotId": "snap-layout",
+    "mode": "runtime",
+    "viewport": {
+      "center": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 100,
+        "height": 100
+      },
+      "zoom": 1
+    },
+    "nodePositions": [
+      {
+        "id": "node:b",
+        "x": 20,
+        "y": 5,
+        "nodeRenderMode": "dot",
+        "projection_visible": true
+      },
+      {
+        "id": "node:a",
+        "x": 10,
+        "y": 15,
+        "nodeRenderMode": "dot",
+        "projection_visible": true
+      },
+      {
+        "id": "node:c",
+        "x": 30,
+        "y": 25,
+        "nodeRenderMode": "dot",
+        "projection_visible": false
+      }
+    ],
+    "expectedNodeOrder": ["node:a", "node:b", "node:c"],
+    "expectedSyncRows": [
+      {
+        "cluster_node": false,
+        "id": "node:a",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": true,
+        "x": 10,
+        "y": 15
+      },
+      {
+        "cluster_node": false,
+        "id": "node:b",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": true,
+        "x": 20,
+        "y": 5
+      },
+      {
+        "cluster_node": false,
+        "id": "node:c",
+        "node_render_mode": "dot",
+        "projection_cluster_id": "",
+        "projection_collapsed": true,
+        "projection_visible": false,
+        "x": 30,
+        "y": 25
+      }
+    ],
+    "expectedBounds": {
+      "maxX": 30,
+      "maxY": 25,
+      "minX": 10,
+      "minY": 5
+    },
+    "expectedSignature": "snap-layout::n:3::z:1::c:0,0::s:100x100::b:10,30,5,25::m:node:a:10:15:dot|node:b:20:5:dot|node:c:30:25:dot"
+  }
+}

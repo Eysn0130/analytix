@@ -1,0 +1,23 @@
+{
+  "domain": "official-doc",
+  "graphType": "official-document-circulation",
+  "diagramType": "workflow",
+  "title": "收文办理流程图",
+  "subtitle": "签收、登记、拟办、批办、承办、归档",
+  "nodes": [
+    { "id": "receive", "kind": "process", "label": "签收", "sublabel": "来文接收" },
+    { "id": "register", "kind": "process", "label": "登记", "sublabel": "编号与要素" },
+    { "id": "propose", "kind": "process", "label": "拟办", "sublabel": "提出处理意见" },
+    { "id": "approve", "kind": "security", "label": "批办", "sublabel": "负责人批示" },
+    { "id": "handle", "kind": "process", "label": "承办", "sublabel": "部门办理" },
+    { "id": "archive", "kind": "database", "label": "归档", "sublabel": "材料留存" }
+  ],
+  "edges": [
+    { "from": "receive", "to": "register" },
+    { "from": "register", "to": "propose" },
+    { "from": "propose", "to": "approve", "kind": "security", "label": "审核意见" },
+    { "from": "approve", "to": "handle" },
+    { "from": "handle", "to": "archive" }
+  ]
+}
+

@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "id": "task-job-orchestration-fixture-v1",
+  "toolContracts": {
+    "task": {
+      "name": "task",
+      "promptField": "prompt",
+      "backgroundField": "run_in_background",
+      "continueField": "continue_from",
+      "forkField": "fork_from",
+      "internalRuntimeOnly": true,
+      "requiresPermissionGate": true,
+      "mayAppendParentGoalEvidence": true
+    },
+    "parallelTasks": {
+      "name": "parallel_tasks",
+      "tasksField": "tasks",
+      "dependencyField": "depends_on",
+      "internalRuntimeOnly": true,
+      "requiresDependencyValidation": true,
+      "requiresPlannerReadOnlyToolset": true
+    }
+  },
+  "routeContract": {
+    "wait": "/v1/runtime/task-jobs/wait",
+    "output": "/v1/runtime/task-jobs/output",
+    "kill": "/v1/runtime/task-jobs/kill",
+    "forbiddenTopLevelRoutes": [
+      "/v1/workflow",
+      "/v1/create-loop",
+      "/v1/autoresearch"
+    ],
+    "authMatrix": {
+      "protectedRoutes": [
+        "wait",
+        "output",
+        "kill"
+      ],
+      "unauthorizedStatus": 401
+    }
+  },
+  "routeExecutable": {
+    "unauthorizedStatus": 401,
+    "output": {
+      "status": 200,
+      "jobStatus": "running",
+      "output": "route partial\n",
+      "nextOffset": 14,
+      "replayOffset": 0
+    },
+    "wait": {
+      "status": 200,
+      "jobStatus": "completed",
+      "result": "route complete"
+    },
+    "kill": {
+      "status": 200,
+      "jobStatus": "killed",
+      "error": "route killed"
+    },
+    "missingOutput": {
+      "status": 404
+    },
+    "rehydrated": {
+      "outputStatus": 200,
+      "waitStatus": 200,
+      "killStatus": 200,
+      "completedStatus": "completed",
+      "completedNextOffset": 29,
+      "killedStatus": "killed"
+    }
+  },
+  "foreground": {
+    "kind": "task",
+    "status": "completed",
+    "result": "foreground complete"
+  },
+  "background": {
+    "kind": "task",
+    "statusAcrossTurn": "running",
+    "output": "partial output\n",
+    "finalStatus": "completed",
+    "finalResult": "background complete"
+  },
+  "waitOutputKill": {
+    "killedStatus": "killed",
+    "killedError": "cancelled by parent"
+  },
+  "parallel": {
+    "dependencyField": "depends_on",
+    "validOrder": [
+      "a",
+      "b",
+      "c"
+    ],
+    "singleTaskError": "parallel task plan requires at least two tasks",
+    "duplicateIdError": "duplicate parallel task id",
+    "selfDependencyError": "self-referencing parallel task dependency",
+    "cycleError": "parallel task dependency cycle",
+    "unknownDependencyError": "unknown parallel task dependency"
+  },
+  "plannerExecutor": {
+    "plannerKind": "planner",
+    "plannerPolicy": "readOnly",
+    "executorPolicy": "inherit",
+    "failureStatus": "failed",
+    "cancelledStatus": "cancelled",
+    "skippedReason": "dependency failed: b",
+    "cancelReason": "planner executor cancelled",
+    "outputOffsetJobCount": 2,
+    "requiresFailurePropagation": true,
+    "requiresCancellationPropagation": true,
+    "requiresTranscriptPropagation": true,
+    "transcriptPropagationMode": "fork",
+    "transcriptPropagationJobCount": 2
+  },
+  "durableRunner": {
+    "restartDrill": {
+      "runningJobId": "task_rehydrate_running",
+      "queuedJobId": "task_rehydrate_queued",
+      "rehydratedCount": 2,
+      "outputBeforeRestart": "before restart\n",
+      "outputAfterRestart": "after restart\n",
+      "waitStatus": "completed",
+      "killStatus": "killed",
+      "killError": "rehydrated kill"
+    },
+    "staleReconcile": {
+      "runningJobId": "task_orphan_running",
+      "queuedJobId": "task_orphan_queued",
+      "reason": "runtime restart reconciliation",
+      "expectedStatus": "interrupted",
+      "reconciledCount": 2
+    }
+  },
+  "approvalDenyNoExecute": {
+    "deniedToolNames": [
+      "task",
+      "parallel_tasks"
+    ],
+    "approvalIds": [
+      "appr_call_task_denied",
+      "appr_call_parallel_denied"
+    ],
+    "createsDurableJobs": false,
+    "createsChildRuns": false
+  },
+  "nestedEvent": {
+    "parentCallId": "call_parent",
+    "childRunId": "child_nested",
+    "nestedSseMetadataFields": [
+      "parentCallId",
+      "childRunId",
+      "evidenceLedgered",
+      "evidenceLedgerError"
+    ]
+  },
+  "parentGoalEvidence": {
+    "requiresActiveGoal": true,
+    "evidenceLedgeredEventKey": "evidenceLedgered",
+    "evidenceLedgerErrorEventKey": "evidenceLedgerError"
+  },
+  "permissions": {
+    "inheritedPolicy": "inherit",
+    "plannerReadOnlyToolset": [
+      "read",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "plannerForbiddenToolset": [
+      "task",
+      "parallel_tasks"
+    ]
+  },
+  "transcript": {
+    "sourceId": "sa_source",
+    "continueTargetId": "sa_source",
+    "forkTargetId": "sa_fork",
+    "incompatibleError": "subagent transcript identity is incompatible",
+    "sameIdentityRequired": true,
+    "continuePreservesTarget": true,
+    "forkCreatesDistinctTarget": true
+  }
+}

@@ -1,0 +1,565 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-live-evidence-report",
+  "stage": "runtime-go-live-evidence",
+  "generatedAt": "2026-07-03T12:44:29.110Z",
+  "sourceCommit": "e0050d6b5e7791ae3bbed261c7367fc25e6e7fdf",
+  "status": "passed",
+  "passed": true,
+  "defaultBackendReady": true,
+  "goDefaultRuntimeAllowed": true,
+  "goDefaultBackendEnabled": true,
+  "typeScriptFallbackRetained": false,
+  "typeScriptDefaultPathRetired": true,
+  "typeScriptOverrideRetired": true,
+  "rendererVisibleGoSwitcher": false,
+  "llmAnswerQualityEvidenceUsed": false,
+  "liveOrActualEvidenceUsed": true,
+  "deterministicEvidenceOnly": false,
+  "credentialSecretsRecorded": false,
+  "dryRun": false,
+  "noWrite": false,
+  "persistentEvidenceWritten": true,
+  "timeoutMs": 20000,
+  "packagedTimeoutMs": 600000,
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "provider": "a06013ea661bdde05d0c97dc8ff8260017bd212a11b2d4ae0f3b7f76b111df46",
+    "mcp": "d1b37c64c58d6571a6dd8cc31ce5d32fff93aa1a78de1a61bc3b740adf4971d7",
+    "packaged": "008b11566dacf34c7e6a4a1a875a351a552baf27be0927ee27550ec054611153",
+    "packagedGui": "ed2c97fe357b3172fecaed7752c722d09be979d784fbd5b5739695ab4c0717a5",
+    "packagedSoak": "938c0d491adb4b6c4c83cff3a415378dd816aa557a3b85544b178c1b3c0c9c74",
+    "operator": "52c87e87f431cbf75334fc281fc172b3200681e1fcb1f099c625e23b834ad70c"
+  },
+  "evidencePaths": {
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "packagedGui": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json",
+    "packagedSoak": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json",
+    "operator": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/operator-gate.json"
+  },
+  "componentStatus": {
+    "provider": "passed",
+    "mcp": "passed",
+    "packaged": "passed",
+    "packagedGui": "passed",
+    "packagedSoak": "passed",
+    "operator": "passed"
+  },
+  "missingExternalInputs": [],
+  "missingExternalInputIds": [],
+  "finalGateBlocked": false,
+  "finalGateBlockers": [],
+  "nextEvidenceActions": {
+    "schemaVersion": 1,
+    "credentialSecretsRecorded": false,
+    "valuesRecorded": false,
+    "providerMatrix": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+      "settingsProfile": {
+        "status": "loaded",
+        "source": "default-app-settings",
+        "settingsPathConfigured": true,
+        "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805",
+        "activeProviderId": "",
+        "selectedProviderId": "deepseek",
+        "providerCount": 2
+      },
+      "settingsProfileCoverage": {
+        "status": "loaded",
+        "source": "default-app-settings",
+        "providerCount": 2,
+        "matchedProviderIds": [
+          "deepseek",
+          "openai-compatible"
+        ],
+        "usableProviderIds": [
+          "deepseek",
+          "openai-compatible"
+        ],
+        "usableNonDeepSeekProviderIds": [
+          "openai-compatible"
+        ],
+        "deepseekSettingsProfileUsable": true,
+        "nonDeepSeekSettingsProfileUsable": true,
+        "satisfiesFinalProviderCoverageFromSettings": true,
+        "credentialValuesRecorded": false
+      },
+      "completionOptions": {
+        "credentialValuesRecorded": false,
+        "settingsProfilePath": "provider.providers[]",
+        "currentSettingsProviderCount": 2,
+        "usableNonDeepSeekProviderIds": [
+          "openai-compatible"
+        ],
+        "recognizedPresetProviderIds": [
+          "aliyun",
+          "aliyun-token-plan",
+          "kimi-code",
+          "litellm",
+          "minimax",
+          "minimax-token-plan",
+          "moonshot-cn",
+          "moonshot-global",
+          "opencode-go",
+          "tencentcloud",
+          "tencentcloud-token-plan",
+          "volcengine-coding-plan",
+          "xiaomi",
+          "xiaomi-token-plan",
+          "zai-coding-plan",
+          "zhipu-coding-plan"
+        ],
+        "requiredNonDeepSeekSettingsFields": [
+          "id or name identifying a non-DeepSeek provider",
+          "apiKey",
+          "endpointFormat or recognized preset/model profile default",
+          "baseUrl or recognized preset default",
+          "models[] or runtime.model or recognized preset default"
+        ],
+        "acceptedNonDeepSeekProfileSignals": [
+          "openai-compatible: endpointFormat chat_completions or OpenAI-compatible id/name",
+          "anthropic-compatible: endpointFormat messages or Anthropic/Claude id/name",
+          "custom-endpoint: endpointFormat custom_endpoint or full endpoint URL"
+        ],
+        "envCompletionGroups": [
+          {
+            "id": "openai-compatible",
+            "requiredEnv": [
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_API_KEY",
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_BASE_URL",
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_MODEL"
+            ],
+            "acceptedAliases": {
+              "apiKeyEnv": [
+                "ANALYTIX_RUNTIME_OPENAI_COMPAT_API_KEY",
+                "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_API_KEY"
+              ],
+              "baseUrlEnv": [
+                "ANALYTIX_RUNTIME_OPENAI_COMPAT_BASE_URL",
+                "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_BASE_URL"
+              ],
+              "modelEnv": [
+                "ANALYTIX_RUNTIME_OPENAI_COMPAT_MODEL",
+                "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_MODEL"
+              ]
+            }
+          },
+          {
+            "id": "anthropic-compatible",
+            "requiredEnv": [
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL"
+            ],
+            "acceptedAliases": {
+              "apiKeyEnv": [
+                "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+                "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_API_KEY"
+              ],
+              "baseUrlEnv": [
+                "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+                "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_BASE_URL"
+              ],
+              "modelEnv": [
+                "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL",
+                "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_MODEL"
+              ]
+            }
+          },
+          {
+            "id": "custom-endpoint",
+            "requiredEnv": [
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL"
+            ],
+            "acceptedAliases": {
+              "apiKeyEnv": [
+                "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+                "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_API_KEY"
+              ],
+              "baseUrlEnv": [
+                "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+                "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_URL"
+              ],
+              "modelEnv": [
+                "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL",
+                "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_MODEL"
+              ]
+            }
+          }
+        ]
+      },
+      "requiredCredentialedProviderCoverage": [
+        "deepseek",
+        "at-least-one-non-deepseek-provider"
+      ],
+      "credentialedDeepSeekPassed": true,
+      "credentialedNonDeepSeekProviderIds": [
+        "openai-compatible"
+      ],
+      "requiredEnvGroups": [
+        {
+          "id": "deepseek",
+          "status": "passed",
+          "endpointFamily": "openai-chat-completions",
+          "endpointFormat": "openai-chat-completions",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_RUNTIME_DEEPSEEK_API_KEY",
+            "baseUrlEnv": "ANALYTIX_RUNTIME_DEEPSEEK_BASE_URL",
+            "modelEnv": "ANALYTIX_RUNTIME_DEEPSEEK_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_RUNTIME_DEEPSEEK_API_KEY",
+              "ANALYTIX_RUNTIME_GO_DEEPSEEK_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_RUNTIME_DEEPSEEK_BASE_URL",
+              "ANALYTIX_RUNTIME_GO_DEEPSEEK_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_RUNTIME_DEEPSEEK_MODEL",
+              "ANALYTIX_RUNTIME_GO_DEEPSEEK_MODEL"
+            ]
+          },
+          "missingEnv": [],
+          "missingSettingsProfileFields": [],
+          "providerSource": "settings-profile",
+          "settingsProfileMatched": true,
+          "settingsProfileUsable": true,
+          "providerHasApiKey": true,
+          "providerModelConfigured": true,
+          "cacheTelemetryMode": "deepseek-provider-scoped"
+        },
+        {
+          "id": "openai-compatible",
+          "status": "passed",
+          "endpointFamily": "openai-chat-completions",
+          "endpointFormat": "openai-chat-completions",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_RUNTIME_OPENAI_COMPAT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_RUNTIME_OPENAI_COMPAT_BASE_URL",
+            "modelEnv": "ANALYTIX_RUNTIME_OPENAI_COMPAT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_API_KEY",
+              "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_BASE_URL",
+              "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_RUNTIME_OPENAI_COMPAT_MODEL",
+              "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_MODEL"
+            ]
+          },
+          "missingEnv": [],
+          "missingSettingsProfileFields": [],
+          "providerSource": "settings-profile",
+          "settingsProfileMatched": true,
+          "settingsProfileUsable": true,
+          "providerHasApiKey": true,
+          "providerModelConfigured": true,
+          "cacheTelemetryMode": "non-deepseek-no-deepseek-fields"
+        },
+        {
+          "id": "anthropic-compatible",
+          "status": "skipped",
+          "endpointFamily": "anthropic-messages",
+          "endpointFormat": "anthropic-messages",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+            "modelEnv": "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+              "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+              "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_BASE_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL",
+              "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+            "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+            "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL"
+          ],
+          "missingSettingsProfileFields": [
+            "provider.providers[].matchingProfile"
+          ],
+          "providerSource": "missing",
+          "settingsProfileMatched": false,
+          "settingsProfileUsable": false,
+          "providerHasApiKey": false,
+          "providerModelConfigured": false,
+          "cacheTelemetryMode": "non-deepseek-no-deepseek-fields"
+        },
+        {
+          "id": "custom-endpoint",
+          "status": "skipped",
+          "endpointFamily": "custom-full-endpoint",
+          "endpointFormat": "custom-full-endpoint",
+          "env": {
+            "apiKeyEnv": "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+            "baseUrlEnv": "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+            "modelEnv": "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL"
+          },
+          "acceptedAliases": {
+            "apiKeyEnv": [
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+              "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_API_KEY"
+            ],
+            "baseUrlEnv": [
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+              "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_URL"
+            ],
+            "modelEnv": [
+              "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL",
+              "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_MODEL"
+            ]
+          },
+          "missingEnv": [
+            "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+            "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+            "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL"
+          ],
+          "missingSettingsProfileFields": [
+            "provider.providers[].matchingProfile"
+          ],
+          "providerSource": "missing",
+          "settingsProfileMatched": false,
+          "settingsProfileUsable": false,
+          "providerHasApiKey": false,
+          "providerModelConfigured": false,
+          "cacheTelemetryMode": "custom-request-shape-only"
+        }
+      ]
+    },
+    "mcpExecution": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+      "requiredEnv": {
+        "commandOrUrl": [
+          "ANALYTIX_RUNTIME_MCP_COMMAND",
+          "ANALYTIX_RUNTIME_MCP_URL"
+        ],
+        "toolName": "ANALYTIX_RUNTIME_MCP_TOOL_NAME",
+        "toolArgsJson": "ANALYTIX_RUNTIME_MCP_TOOL_ARGS_JSON",
+        "bearerTokenEnv": "ANALYTIX_RUNTIME_GO_MCP_BEARER_TOKEN",
+        "headersJson": "ANALYTIX_RUNTIME_GO_MCP_HEADERS_JSON",
+        "approvalUserInputStatus": "ANALYTIX_RUNTIME_GO_MCP_APPROVAL_USER_INPUT_STATUS",
+        "approvalUserInputEvidence": "ANALYTIX_RUNTIME_GO_MCP_APPROVAL_USER_INPUT_EVIDENCE"
+      },
+      "requiredCoverage": [
+        "connect",
+        "toolDiscoverySearch",
+        "toolCall",
+        "approvalUserInput",
+        "reconnect",
+        "credentialRedaction"
+      ],
+      "topLevelMcpIndexerExposed": false
+    },
+    "packagedDesktopQa": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+      "requiredEnv": {
+        "appPath": "ANALYTIX_RUNTIME_GO_PACKAGED_APP_PATH",
+        "launchCommand": "ANALYTIX_RUNTIME_GO_PACKAGED_LAUNCH_COMMAND",
+        "runtimeUrl": "ANALYTIX_RUNTIME_GO_RUNTIME_URL",
+        "runtimeTokenEnv": "ANALYTIX_RUNTIME_GO_RUNTIME_TOKEN",
+        "threadIdOrCreate": [
+          "ANALYTIX_RUNTIME_GO_THREAD_ID",
+          "ANALYTIX_RUNTIME_GO_ALLOW_THREAD_CREATE=1"
+        ],
+        "rollbackEvidenceJson": "ANALYTIX_RUNTIME_GO_ROLLBACK_EVIDENCE_JSON",
+        "rollbackEvidenceCommand": "ANALYTIX_RUNTIME_GO_ROLLBACK_EVIDENCE_COMMAND",
+        "rollbackRuntimePid": "ANALYTIX_RUNTIME_GO_RUNTIME_PID"
+      },
+      "requiredCheckIds": [
+        "packaged-app-startup",
+        "health",
+        "runtime-info",
+        "thread-list",
+        "turn-create",
+        "sse-replay",
+        "go-runtime-default-gate",
+        "typescript-retired-backend"
+      ]
+    },
+    "packagedGuiBridgeSmoke": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json",
+      "requiredEnv": {
+        "appPath": [
+          "ANALYTIX_RUNTIME_GO_GUI_PACKAGED_APP_PATH",
+          "ANALYTIX_RUNTIME_GO_PACKAGED_APP_PATH",
+          "ANALYTIX_PACKAGED_APP_PATH"
+        ],
+        "apiKey": "ANALYTIX_RUNTIME_GO_GUI_API_KEY",
+        "timeoutMs": "ANALYTIX_RUNTIME_GO_GUI_TIMEOUT_MS"
+      },
+      "requiredCheckIds": [
+        "packaged-app-artifact",
+        "packaged-app-launch",
+        "packaged-renderer-bridge",
+        "packaged-settings-bridge",
+        "packaged-provider-profile-settings",
+        "packaged-mimo-profile-settings",
+        "packaged-runtime-restart",
+        "packaged-runtime-health",
+        "packaged-runtime-info"
+      ]
+    },
+    "packagedSessionSoak": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json",
+      "finalGateActualEvidenceRequired": false,
+      "finalGateMissingRequiredEvidence": [],
+      "requiredEnv": {
+        "appPath": [
+          "ANALYTIX_RUNTIME_GO_PACKAGED_SOAK_APP_PATH",
+          "ANALYTIX_RUNTIME_GO_PACKAGED_APP_PATH",
+          "ANALYTIX_PACKAGED_APP_PATH"
+        ],
+        "timeoutMs": "ANALYTIX_RUNTIME_GO_PACKAGED_SOAK_TIMEOUT_MS",
+        "actual": "ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK=1"
+      },
+      "requiredCheckIds": [
+        "go-session-durable-contract",
+        "typescript-retired-backend-session-contract",
+        "packaged-app-artifact",
+        "packaged-app-launch",
+        "packaged-renderer-bridge",
+        "packaged-settings-bridge",
+        "packaged-provider-profile-settings",
+        "packaged-runtime-restart",
+        "packaged-session-thread-create",
+        "packaged-session-turn-create",
+        "packaged-session-sse-replay",
+        "packaged-session-tool-timeline",
+        "packaged-session-mimo-plan",
+        "packaged-session-attachment-fallback",
+        "packaged-session-approval-user-input",
+        "packaged-session-fork",
+        "packaged-session-resume",
+        "packaged-session-thread-list",
+        "packaged-session-provider-redaction"
+      ]
+    },
+    "operatorGate": {
+      "status": "passed",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/operator-gate.json",
+      "dependencySummary": {
+        "schemaVersion": 1,
+        "envGate": {
+          "runtimeReady": true,
+          "operatorApprovesDefault": true
+        },
+        "evidence": {
+          "providerPassed": true,
+          "mcpPassed": true,
+          "packagedPassed": true,
+          "packagedGuiRequired": true,
+          "packagedGuiPassed": true,
+          "packagedSoakRequired": true,
+          "packagedSoakPassed": true,
+          "packagedSoakActualFinalEvidencePresent": true,
+          "credentialedEvidenceReviewed": true
+        },
+        "commitBinding": {
+          "required": true,
+          "formatValid": true,
+          "exists": true,
+          "relevantEvidenceClean": true,
+          "bound": true
+        },
+        "blockers": []
+      },
+      "requiredEnv": {
+        "g6Ready": "ANALYTIX_RUNTIME_READY=1",
+        "approval": "ANALYTIX_RUNTIME_GO_OPERATOR_APPROVES_DEFAULT=1"
+      },
+      "evidenceReviewedIds": [
+        "provider-matrix-credentialed",
+        "mcp-matrix-credentialed",
+        "packaged-qa",
+        "packaged-gui-bridge-smoke",
+        "packaged-session-soak"
+      ]
+    },
+    "commands": [
+      "npm run runtime:go:approval-user-input-evidence -- --json",
+      "npm run runtime:go:live-evidence -- --json",
+      "npm run runtime:go:local-validation -- --json",
+      "npm run runtime:go:packaged-soak -- --json --actual",
+      "npm run runtime:go:packaged-gui-smoke -- --json",
+      "npm run runtime:go:live-validation -- --json --live-deepseek-cache-from-settings --live-non-deepseek-provider-from-settings --no-gate",
+      "npm run runtime:go:preflight",
+      "ANALYTIX_RUNTIME_READY=1 ANALYTIX_RUNTIME_GO_OPERATOR_APPROVES_DEFAULT=1 npm run runtime:go:default-readiness-report -- --gate --json"
+    ]
+  },
+  "coveredFinalCoverageEnv": {
+    "ANALYTIX_RUNTIME_DURABLE_RESTART_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_DURABLE_RESTART_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "ANALYTIX_RUNTIME_MCP_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_MCP_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "ANALYTIX_RUNTIME_PACKAGED_QA_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PACKAGED_QA_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "ANALYTIX_RUNTIME_READY": "1",
+    "ANALYTIX_RUNTIME_READY_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/operator-gate.json"
+  },
+  "strictGateEnvWhenPassed": {
+    "ANALYTIX_RUNTIME_DURABLE_RESTART_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_DURABLE_RESTART_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "ANALYTIX_RUNTIME_MCP_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_MCP_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "ANALYTIX_RUNTIME_PACKAGED_QA_STATUS": "passed",
+    "ANALYTIX_RUNTIME_PACKAGED_QA_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "ANALYTIX_RUNTIME_GO_PROVIDER_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_PROVIDER_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "ANALYTIX_RUNTIME_GO_MCP_MATRIX_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_MCP_MATRIX_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_QA_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_QA_STATUS_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_GUI_SMOKE_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_GUI_SMOKE_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_SESSION_SOAK_STATUS": "passed",
+    "ANALYTIX_RUNTIME_GO_PACKAGED_SESSION_SOAK_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json",
+    "ANALYTIX_RUNTIME_READY": "1",
+    "ANALYTIX_RUNTIME_READY_EVIDENCE": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/operator-gate.json"
+  },
+  "outputPaths": {
+    "json": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/live-evidence-report.json",
+    "markdown": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/live-evidence-summary.md",
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "packagedGui": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json",
+    "packagedSoak": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json",
+    "operator": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/operator-gate.json"
+  },
+  "notes": [
+    "Runtime Go live evidence collects auditable JSON evidence only; it does not evaluate LLM answer quality.",
+    "All live validation inputs are covered; the strict gate env block contains only current Analytix runtime variables.",
+    "Go runtime is the only production agent runtime after deterministic local gates; TypeScript backend override is retired.",
+    "typeScriptDefaultPathRetired:true and typeScriptOverrideRetired:true mean ANALYTIX_RUNTIME_BACKEND=typescript must return a retired_backend diagnostic without starting TypeScript."
+  ]
+}

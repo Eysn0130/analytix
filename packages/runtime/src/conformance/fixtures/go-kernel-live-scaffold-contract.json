@@ -1,0 +1,253 @@
+{
+  "id": "go-kernel-live-scaffold-d0239",
+  "runtimeToken": "tok-1",
+  "sourceContractIds": [
+    "go-durable-sidecar-contract",
+    "go-minimal-agent-loop-contract",
+    "go-g3-provider-streaming-usage-cache-contract",
+    "go-g4-tools-approval-user-input-mcp-contract",
+    "approval-user-input-route-contract",
+    "mcp-tool-lifecycle-contract",
+    "go-g5-full-loop-contract"
+  ],
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false,
+    "electronMainConnected": false,
+    "testConformanceOnly": true,
+    "internalGateOnly": true,
+    "fixtureBackedKernelOnly": true,
+    "topLevelHiddenEntryExposed": false
+  },
+  "components": [
+    {
+      "id": "loop-controller",
+      "source": "Reasonix internal/agent controller discipline",
+      "class": "contract-reimplement",
+      "route": "/v1/conformance/loop/run",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    },
+    {
+      "id": "event-sink",
+      "source": "Reasonix event sink and session recovery discipline",
+      "class": "contract-reimplement",
+      "route": "/v1/conformance/durable/events/replay",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    },
+    {
+      "id": "cache-accounting",
+      "source": "Reasonix provider/cache accounting and schema stability",
+      "class": "code-port-and-adapt",
+      "route": "/v1/conformance/g3/provider/cache-accounting",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    },
+    {
+      "id": "approval-user-input-gate",
+      "source": "Reasonix permission and ask gate lifecycle",
+      "class": "contract-reimplement",
+      "route": "/v1/conformance/g4/manager/approval/replay",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    },
+    {
+      "id": "mcp-catalog-recovery",
+      "source": "Reasonix MCP lazy catalog and recovery discipline",
+      "class": "code-port-and-adapt",
+      "route": "/v1/conformance/g4/manager/mcp/search",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    },
+    {
+      "id": "job-subagent-orchestration",
+      "source": "Reasonix internal/jobs and internal/agent/subagent_store lineage",
+      "class": "contract-reimplement",
+      "route": "/v1/conformance/kernel/job-orchestration",
+      "expectedLive": true,
+      "sideEffectsAllowed": false
+    }
+  ],
+  "reasonixAbsorption": [
+    {
+      "capability": "session-scoped Job Manager",
+      "reasonixSource": "internal/jobs",
+      "class": "contract-reimplement",
+      "analytixLanding": "Go kernel scaffold job orchestration fixture under analytix conformance routes"
+    },
+    {
+      "capability": "subagent continue/fork lineage guard",
+      "reasonixSource": "internal/agent/subagent_store_test.go",
+      "class": "contract-reimplement",
+      "analytixLanding": "parent-goal-bound child metadata and lineage contract, no public subagent route"
+    },
+    {
+      "capability": "MCP lazy catalog recovery",
+      "reasonixSource": "internal/plugin/lazy.go and internal/plugin/canonicalize.go",
+      "class": "code-port-and-adapt",
+      "analytixLanding": "G4 MCP catalog/search/reconnect fixture and kernel component map"
+    },
+    {
+      "capability": "loop controller and durable event sink",
+      "reasonixSource": "internal/agent and internal/event",
+      "class": "contract-reimplement",
+      "analytixLanding": "D-0236 durable store plus D-0237 minimal loop under analytix conformance routes"
+    },
+    {
+      "capability": "provider-aware cache accounting",
+      "reasonixSource": "internal/provider and cache diagnostics discipline",
+      "class": "code-port-and-adapt",
+      "analytixLanding": "G3 provider/cache replay and kernel cache-accounting component"
+    },
+    {
+      "capability": "Reasonix SessionAPI and config root",
+      "reasonixSource": "internal/control and internal/serve public protocol",
+      "class": "reject",
+      "analytixLanding": "not exposed; analytix HTTP/SSE contract remains authoritative"
+    },
+    {
+      "capability": "live production Go job/subagent execution",
+      "reasonixSource": "internal/jobs runtime execution",
+      "class": "defer",
+      "analytixLanding": "future G5/G6 after packaged QA and permission gates"
+    }
+  ],
+  "jobOrchestration": {
+    "fixtureOnly": true,
+    "parentGoalRequired": true,
+    "topLevelRoutesExposed": false,
+    "publicSubagentProtocolAllowed": false,
+    "jobManagerLive": false,
+    "backgroundExecutionAllowed": false,
+    "lineageContract": {
+      "continueRequiresSameParent": true,
+      "forkRejectsSiblingSession": true,
+      "failedTranscriptRejectedForReuse": true,
+      "staleRunningMarkedInterrupted": true
+    },
+    "expectedStatuses": [
+      "queued",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "interrupted"
+    ],
+    "expectedTools": [
+      "delegate_task",
+      "parallel_tasks",
+      "wait",
+      "kill"
+    ]
+  },
+  "retirementCleanup": {
+    "g6Ready": false,
+    "noImmediateProductionDelete": true,
+    "currentRetainedPaths": [
+      {
+        "id": "typescript-runtime-default",
+        "path": "packages/runtime",
+        "reason": "production default backend remains TypeScript until G6 readiness gate passes"
+      },
+      {
+        "id": "main-analytix-process",
+        "path": "src/main/analytix-process.ts",
+        "reason": "production process supervisor for current default runtime"
+      },
+      {
+        "id": "main-runtime-adapter",
+        "path": "src/main/runtime/analytix-adapter.ts",
+        "reason": "single backend-neutral adapter owns transition gate and rollback"
+      }
+    ],
+    "deleteAfterG6": [
+      {
+        "id": "internal-conformance-env-gate",
+        "path": "src/main/runtime/analytix-adapter.ts",
+        "reason": "transition-only Go conformance backend selector"
+      },
+      {
+        "id": "fixture-conformance-routes",
+        "path": "/v1/conformance/*",
+        "reason": "replace with production Go route parity tests after G6"
+      },
+      {
+        "id": "kernel-scaffold-contract",
+        "path": "packages/runtime/src/conformance/fixtures/go-kernel-live-scaffold-contract.json",
+        "reason": "superseded by production Go kernel manager evidence"
+      },
+      {
+        "id": "minimal-loop-contract",
+        "path": "packages/runtime/src/conformance/fixtures/go-minimal-agent-loop-contract.json",
+        "reason": "superseded by live Go loop parity evidence"
+      },
+      {
+        "id": "shadow-only-g5-replay",
+        "path": "packages/runtime-go/shadow_g5.go",
+        "reason": "superseded by live production Go G5/G6 conformance"
+      }
+    ],
+    "forbiddenRedundancy": [
+      {
+        "id": "deprecated-bridge-alias",
+        "token": "legacy renderer alias",
+        "present": false
+      },
+      {
+        "id": "duplicate-settings-schema",
+        "token": "legacy agent settings root",
+        "present": false
+      },
+      {
+        "id": "renderer-visible-go-route",
+        "token": "/v1/runtime/go",
+        "present": false
+      },
+      {
+        "id": "ui-runtime-switcher",
+        "token": "Go backend settings switcher",
+        "present": false
+      },
+      {
+        "id": "reasonix-public-protocol",
+        "token": "SessionAPI",
+        "present": false
+      }
+    ],
+    "g6Blockers": [
+      "production Go loop/provider/MCP/job managers",
+      "packaged desktop route QA",
+      "crash recovery and rollback drills",
+      "credentialed provider and MCP matrix",
+      "TS runtime retirement migration plan"
+    ]
+  },
+  "expected": {
+    "componentCount": 6,
+    "liveComponentCount": 6,
+    "replaceOrPortCount": 2,
+    "contractReimplementCount": 3,
+    "deferCount": 1,
+    "rejectCount": 1,
+    "forbiddenSurfaceCount": 0,
+    "currentRetainedCount": 3,
+    "deleteAfterG6Count": 5,
+    "forbiddenRedundancyCount": 5,
+    "presentForbiddenRedundancyCount": 0,
+    "g6BlockerCount": 5,
+    "sideEffects": {
+      "providerCallAttempts": 0,
+      "approvalExecutionAttempts": 0,
+      "toolExecutionAttempts": 0,
+      "mcpConnectionAttempts": 0,
+      "mcpCredentialAttempts": 0,
+      "credentialReadAttempts": 0,
+      "fileMutationAttempts": 0,
+      "realWorkspaceWriteAttempts": 0
+    }
+  }
+}

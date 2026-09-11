@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-mcp-execution",
+  "generatedAt": "2026-06-28T12:29:39.852Z",
+  "status": "passed",
+  "passed": true,
+  "credentialedExecution": true,
+  "topLevelMcpIndexerExposed": false,
+  "reasonixPublicProtocolUsed": false,
+  "requiredCoverage": [
+    "connect",
+    "toolDiscoverySearch",
+    "toolCall",
+    "approvalUserInput",
+    "reconnect",
+    "credentialRedaction"
+  ],
+  "connect": true,
+  "toolDiscoverySearch": true,
+  "toolCall": true,
+  "approvalUserInput": true,
+  "reconnect": true,
+  "redaction": true,
+  "credentialedProbes": [
+    {
+      "id": "credentialed-mcp",
+      "family": "mcp",
+      "endpointFormat": "http",
+      "status": "passed",
+      "skipped": false,
+      "credentialed": true,
+      "credentialedExecution": true,
+      "connect": true,
+      "toolDiscoverySearch": true,
+      "toolCall": true,
+      "approvalUserInput": true,
+      "reconnect": true,
+      "credentialRedaction": true,
+      "commandConfigured": false,
+      "commandHash": "",
+      "urlConfigured": true,
+      "url": "http://127.0.0.1:18765/",
+      "urlHash": "23c915b55eea78eae26cec77221b09ed0639dc5aec6a6871c9a2ff2923f7018a",
+      "bearerAuthConfigured": false,
+      "requestShape": {
+        "protocol": "mcp-jsonrpc-over-http",
+        "transport": "streamable-http",
+        "methods": [
+          "initialize",
+          "notifications/initialized",
+          "tools/list",
+          "tools/call"
+        ],
+        "headerNameClasses": [
+          "accept",
+          "content-type"
+        ],
+        "customHeadersConfigured": false,
+        "credentialHeaderConfigured": false,
+        "credentialValueRecorded": false,
+        "toolArgsValueRecorded": false
+      },
+      "toolNameConfigured": true,
+      "approvalUserInputEvidence": {
+        "status": "passed",
+        "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-approval-user-input-evidence.json",
+        "evidenceSha256": "5116ec18c17902c034723510fdf1fe37a7b3e8816e78a25f815b0bc881ba9f67",
+        "evidenceDigestAlgorithm": "sha256:file-bytes-v1",
+        "rawValueRecorded": false,
+        "credentialSecretsRecorded": false,
+        "requiredFields": [
+          "schemaVersion",
+          "id",
+          "status",
+          "passed",
+          "approvalUserInput",
+          "rawValueRecorded",
+          "credentialSecretsRecorded"
+        ],
+        "missingEvidenceFields": [],
+        "message": "approval/user-input evidence passed"
+      },
+      "toolCount": 1,
+      "calledToolNameHash": "0dfca5acbf311c2e9c056b1729d5d11e2a401ff205d9c253bca23510091ae664",
+      "toolCatalogDigest": "3dda48f7f0d3f84b1701fb877cd617a84f747e62dcaed020b566d2c7065f6460",
+      "toolResultContentTypes": [
+        "text"
+      ],
+      "reconnectToolNameHash": "0dfca5acbf311c2e9c056b1729d5d11e2a401ff205d9c253bca23510091ae664",
+      "reconnectToolCatalogDigest": "3dda48f7f0d3f84b1701fb877cd617a84f747e62dcaed020b566d2c7065f6460",
+      "reconnectToolCount": 1,
+      "transport": "http-json-rpc",
+      "message": "credentialed MCP HTTP connect/list/call/reconnect probe completed"
+    }
+  ],
+  "notes": [
+    "Runtime Go MCP evidence requires explicit tool name configuration before executing a live tool call.",
+    "Approval/user-input coverage must be supplied by a separate auditable JSON evidence file when it cannot be exercised by the stdio MCP probe.",
+    "No MCP-indexer top-level UI or upstream public protocol surface is added."
+  ]
+}

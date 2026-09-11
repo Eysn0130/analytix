@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "protocol": "analytix-darwin-authority-launch-gate-v1",
+  "sourcePath": "scripts/native/darwin-authority-launch-gate.c",
+  "sourceSha256": "b8a173e45927a4d801ce551e9800ac40c23ab79dae2683dd3521de7eb282544c",
+  "sourceSize": 62949,
+  "hosts": {
+    "darwin-arm64": {
+      "arch": "arm64",
+      "developerDirectory": "/Library/Developer/CommandLineTools",
+      "clangPath": "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "clangSha256": "15339439a6be4a9d33d281ec040a7e0092190b1c8d7de5f94d824b50ffae0769",
+      "ldPath": "/Library/Developer/CommandLineTools/usr/bin/ld",
+      "ldSha256": "d24bf72261b0a8832fa87e841b8e9a857620bb789c78cef4ad97bb2dbd6e1d29",
+      "sdkRoot": "/Library/Developer/CommandLineTools/SDKs/MacOSX26.2.sdk",
+      "sdkVersion": "26.2",
+      "sdkSettingsJsonSha256": "95882a9cea02396e76f3e406a5728269b2a1a11bcd241430a84c9e63d09a6cd3",
+      "sdkSettingsPlistSha256": "03cb7d21a91023f6dff9ea019a3710061e2eb570bdb260faf4daa74151abf15d",
+      "libSystemTbdSha256": "607d9993892c95703a0909ff06f5843058ff1ec30b08337f42ab056d9bf325ea",
+      "minimumMacosVersion": "11.0"
+    },
+    "darwin-x64": {
+      "arch": "x86_64",
+      "developerDirectory": "/Library/Developer/CommandLineTools",
+      "clangPath": "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "clangSha256": "15339439a6be4a9d33d281ec040a7e0092190b1c8d7de5f94d824b50ffae0769",
+      "ldPath": "/Library/Developer/CommandLineTools/usr/bin/ld",
+      "ldSha256": "d24bf72261b0a8832fa87e841b8e9a857620bb789c78cef4ad97bb2dbd6e1d29",
+      "sdkRoot": "/Library/Developer/CommandLineTools/SDKs/MacOSX26.2.sdk",
+      "sdkVersion": "26.2",
+      "sdkSettingsJsonSha256": "95882a9cea02396e76f3e406a5728269b2a1a11bcd241430a84c9e63d09a6cd3",
+      "sdkSettingsPlistSha256": "03cb7d21a91023f6dff9ea019a3710061e2eb570bdb260faf4daa74151abf15d",
+      "libSystemTbdSha256": "607d9993892c95703a0909ff06f5843058ff1ec30b08337f42ab056d9bf325ea",
+      "minimumMacosVersion": "11.0"
+    }
+  }
+}

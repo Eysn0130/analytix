@@ -1,0 +1,115 @@
+{
+  "contract": "CashClassificationVectorsV1",
+  "version": 1,
+  "vectors": [
+    {
+      "id": "explicit_true_without_cue",
+      "explicit": true,
+      "wire_token": "1",
+      "fields": {},
+      "expected": "cash"
+    },
+    {
+      "id": "explicit_false_is_observed_zero",
+      "explicit": false,
+      "wire_token": "0",
+      "fields": {},
+      "expected": "non_cash"
+    },
+    {
+      "id": "missing_with_positive_cue",
+      "explicit": null,
+      "wire_token": null,
+      "fields": {
+        "summary": "cash deposit"
+      },
+      "expected": "unknown"
+    },
+    {
+      "id": "missing_with_negative_cue",
+      "explicit": null,
+      "wire_token": null,
+      "fields": {
+        "txn_type": "no cash transfer"
+      },
+      "expected": "unknown"
+    },
+    {
+      "id": "invalid_with_positive_cue",
+      "explicit": "invalid",
+      "wire_token": "invalid",
+      "fields": {
+        "remark": "cash withdrawal"
+      },
+      "expected": "unknown"
+    },
+    {
+      "id": "explicit_true_negative_cue_conflict",
+      "explicit": true,
+      "wire_token": "true",
+      "fields": {
+        "remark": "noncash transfer"
+      },
+      "expected": "conflict"
+    },
+    {
+      "id": "explicit_false_positive_cue_conflict",
+      "explicit": false,
+      "wire_token": "false",
+      "fields": {
+        "voucher_type": "cash voucher"
+      },
+      "expected": "conflict"
+    },
+    {
+      "id": "explicit_true_positive_cue",
+      "explicit": true,
+      "wire_token": "cash",
+      "fields": {
+        "summary": "\u73b0\u91d1\u5b58\u5165"
+      },
+      "expected": "cash"
+    },
+    {
+      "id": "explicit_false_negative_cue",
+      "explicit": false,
+      "wire_token": "noncash",
+      "fields": {
+        "txn_type": "\u975e\u73b0\u91d1\u8f6c\u8d26"
+      },
+      "expected": "non_cash"
+    },
+    {
+      "id": "explicit_true_both_cues_conflict",
+      "explicit": true,
+      "wire_token": "yes",
+      "fields": {
+        "summary": "no cash",
+        "remark": "cash deposit"
+      },
+      "expected": "conflict"
+    },
+    {
+      "id": "explicit_false_both_cues_conflict",
+      "explicit": false,
+      "wire_token": "no",
+      "fields": {
+        "summary": "\u4e0d\u542b\u73b0\u91d1",
+        "voucher_type": "\u73b0\u91d1\u652f\u53d6"
+      },
+      "expected": "conflict"
+    },
+    {
+      "id": "missing_without_cue",
+      "explicit": null,
+      "wire_token": null,
+      "fields": {},
+      "expected": "unknown"
+    }
+  ],
+  "empty_dataset_expected_counts": {
+    "requested_rows": 0,
+    "cash_covered_rows": 0,
+    "cash_conflict_rows": 0
+  }
+}

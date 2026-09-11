@@ -1,0 +1,1826 @@
+{
+  "schema_version": 1,
+  "generated_for": "Analytix 涉案资金研判 professional delivery eval",
+  "cases": [
+    {
+      "case_id": "be6a1df3d3c4",
+      "case_name": "三文件户名聚合复核-单进程-20260523003351",
+      "duckdb_path": "<case.duckdb:be6a1df3d3c4>",
+      "fact_source": "Analytix backend deterministic skill contracts and direct data-source verification for golden anchors",
+      "coverage": {
+        "txn_total": 285243,
+        "txn_analyzed": 285243,
+        "account_count": 540,
+        "source_file_count": 26
+      },
+      "holder_tree": {
+        "total_holder_groups": 60,
+        "total_account_items": 540,
+        "liuwenliang_account_count": 249,
+        "true_unregistered_account_count": 1,
+        "true_unregistered_account": "90000000000000016",
+        "zhongyin_zhihuicun_19_subaccount_count": 158,
+        "zhongyin_zhihuicun_19_owner_name": "合成主体甲"
+      }
+    },
+    {
+      "case_id": "3c72e755b1f2",
+      "case_name": "刑侦扫黑专案",
+      "duckdb_path": "<case.duckdb:3c72e755b1f2>",
+      "fact_source": "Read-only DuckDB SQL verification on fc_transaction_norm, import_file_log, case_stats_cache, and analysis_account_dim; existing report is reviewed as a claim source, not treated as truth.",
+      "coverage": {
+        "import_file_count": 245,
+        "csv_file_count": 245,
+        "raw_total_rows": 568446,
+        "imported_norm_rows": 288482,
+        "transaction_rows": 285243,
+        "directed_transaction_rows": 285241,
+        "undirected_transaction_rows": 2,
+        "account_dim_rows": 540,
+        "case_stats_accounts": 513,
+        "person_rows": 314,
+        "coercive_measure_rows": 85,
+        "rule_hit_rows": 3049,
+        "txn_time_min": "2004-07-01 11:11:11",
+        "txn_time_max": "2026-05-21 09:05:08",
+        "inflow_yuan": 3686829267.81,
+        "outflow_yuan": 3688016176.23,
+        "turnover_yuan": 7374845444.04,
+        "net_yuan": -1186908.42
+      },
+      "holder_tree": {
+        "holder_groups_open_name_id": 60,
+        "holder_groups_open_name_only": 52,
+        "total_account_items": 540,
+        "true_unregistered_account_count": 1,
+        "true_unregistered_account": "90000000000000016",
+        "zhongyin_zhihuicun_19_subaccount_count": 158,
+        "zhongyin_zhihuicun_19_owner_name": "合成主体甲"
+      }
+    },
+    {
+      "case_id": "e7e3a55350b4",
+      "case_name": "监察委专案",
+      "duckdb_path": "<case.duckdb:e7e3a55350b4>",
+      "fact_source": "Read-only DuckDB SQL verification on fc_transaction_norm, import_file_log, analysis_account_dim, and analysis_case_profile.",
+      "coverage": {
+        "import_file_count": 76,
+        "raw_total_rows": 50700,
+        "imported_norm_rows": 49770,
+        "rows_dedup": 930,
+        "rows_error": 0,
+        "transaction_rows": 49136,
+        "directed_transaction_rows": 49113,
+        "account_dim_rows": 166,
+        "holder_names": 12,
+        "holder_groups": 12,
+        "txn_time_min": "2004-12-06 00:00:00",
+        "txn_time_max": "2025-07-09 07:51:45",
+        "inflow_yuan": 208651192.95,
+        "outflow_yuan": 203411695.46,
+        "turnover_yuan": 413355095.71
+      },
+      "quality": {
+        "clean_duplicate": 0,
+        "clean_invalid": 20,
+        "clean_reversal": 0,
+        "blank_counterparty_name": 13750,
+        "blank_both_counterparty": 12037
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "graph_visualization_supported_edges",
+      "case_id": "be6a1df3d3c4",
+      "question": "为当前案件做资金图谱/关系图可视化说明。只能使用可证实交易边；线索、缺端点、部分可见或需复核的路径必须用中文业务语言降级标注，不能把候选资金流画成确定证据。",
+      "standard_logic": "Route to graph-visualization. Use build_fund_flow_graph/casegraph context and draw or describe only verified transaction edges; downgrade candidate or unsupported paths.",
+      "correct_facts": {
+        "behavior": "graph_visualization_supported_edge_boundary",
+        "boundaries": [
+          "verified transaction edge only",
+          "lead/missing/review-needed paths require downgrade language"
+        ]
+      },
+      "scoring_markers": [
+        "可证实交易边",
+        "确定性交易边",
+        "线索",
+        "需复核",
+        "资金流向图",
+        "证据缺口"
+      ],
+      "allowed_uncertainty": [
+        "If no supported edge is available, return graph limitations and next data needed instead of drawing arrows."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(线索|候选|需复核|缺端点)[^。；\n]*(-->|→|确定性|已证实)",
+          "allowed_guard_regex": "(不能|不得|不可|需复核|证据不足|仅作为|不画成|不作为)",
+          "reason": "Candidate or unsupported graph edges cannot be upgraded to deterministic proof."
+        }
+      ],
+      "expected_tools": [
+        "build_fund_flow_graph",
+        "get_casegraph"
+      ]
+    },
+    {
+      "id": "visual_evidence_delivery_pack",
+      "case_id": "be6a1df3d3c4",
+      "question": "把当前全案分析结果整理成证据表格、Top20 图表、特征表、资金流向表、续调表和附件目录。必须说明每个表/图的统计范围、单位、时间窗口、指标、方向和支持程度；不得把排行、矩阵、看板或图表形状写成交易路径、控制关系或法律结论。",
+      "standard_logic": "Route to visual-evidence. Use reviewed facts from full-case/rank/trace/lab/evidence outputs; choose tables/charts/dashboard/appendix forms and preserve visual evidence boundaries.",
+      "correct_facts": {
+        "behavior": "visual_evidence_delivery_surface",
+        "boundaries": [
+          "tables/charts derive from reviewed facts",
+          "统计范围/单位/时间窗口/指标/方向/支持程度 required",
+          "ranking/matrix/dashboard is not a transaction path"
+        ]
+      },
+      "scoring_markers": [
+        "证据表格",
+        "Top20",
+        "特征表",
+        "资金流向表",
+        "续调表",
+        "附件目录",
+        "统计范围",
+        "单位",
+        "时间窗口",
+        "指标",
+        "方向",
+        "支持程度"
+      ],
+      "allowed_uncertainty": [
+        "If required source facts are missing, the answer must hand off to the owner skill instead of inventing table rows."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(Top|排行|矩阵|热力图|看板|图表)[^。；\n]*(交易路径|资金链路已证实|实际控制|法律结论|犯罪事实)",
+          "allowed_guard_regex": "(不能|不得|不是|仅作为|需复核|证据不足|不等于)",
+          "reason": "Visual or tabular evidence must not be upgraded into path proof, control proof, or legal conclusion."
+        }
+      ],
+      "expected_tools": [
+        "get_case_scope_map",
+        "rank_accounts",
+        "rank_holders",
+        "rank_counterparties",
+        "get_evidence_pack"
+      ]
+    },
+    {
+      "id": "case_context_card",
+      "case_id": "be6a1df3d3c4",
+      "question": "给我当前案件上下文卡。必须说明 active case、数据范围、覆盖口径、casegraph/资金图谱可用性、数据质量边界和建议进入的 focused skill；不得跑全案分析或报告。",
+      "standard_logic": "Route to case-context. Use current-case, scope map, coverage, and casegraph context as orientation only, not a full investigation decision maker.",
+      "correct_facts": {
+        "behavior": "case_context_card",
+        "boundaries": [
+          "scope/coverage/context only",
+          "next focused skill suggestions",
+          "not full-case/report generation"
+        ]
+      },
+      "scoring_markers": [
+        "Case Context",
+        "active",
+        "覆盖",
+        "casegraph",
+        "数据质量",
+        "focused skill",
+        "不生成报告"
+      ],
+      "allowed_uncertainty": [
+        "Exact coverage and graph availability come from current-case MCP tools."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(已生成正式报告|生成正式报告|报告草稿|已完成全案分析|write_blocked|report gate)",
+          "allowed_guard_regex": "(未生成|不生成|不得|未进入|不是|不要|不应)",
+          "reason": "Case context must orient the Agent, not claim full-case/report completion."
+        }
+      ],
+      "expected_tools": [
+        "get_current_case",
+        "get_case_scope_map",
+        "get_scope_coverage",
+        "get_casegraph"
+      ]
+    },
+    {
+      "id": "bare_analytix_entry_status",
+      "case_id": "be6a1df3d3c4",
+      "question": "只输入 /analytix。请只返回当前案件状态、可用分析入口和下一步建议；不得跑全案分析、不得生成报告、不得输出工具说明书或内部协议。",
+      "standard_logic": "Route to index. Use get_current_case and get_case_scope_map only; bare entry/status must not trigger full-case analysis or report generation.",
+      "correct_facts": {
+        "behavior": "entry_status_only",
+        "boundaries": [
+          "current case/status",
+          "available lanes",
+          "no full-case/report generation"
+        ]
+      },
+      "scoring_markers": [
+        "当前案件",
+        "可用",
+        "下一步",
+        "不生成报告",
+        "全案分析"
+      ],
+      "allowed_uncertainty": [
+        "Active case may be unavailable; then ask the user to select or activate a case without running report tools."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(write_blocked|report gate|报告门禁|正式报告草稿|run_full_case_analysis|validate_report_claims)",
+          "reason": "Bare /analytix must remain entry/status and cannot leak report-gate or report tools."
+        }
+      ],
+      "expected_tools": [
+        "get_current_case",
+        "get_case_scope_map"
+      ]
+    },
+    {
+      "id": "top_account",
+      "case_id": "be6a1df3d3c4",
+      "question": "该案中账户资金最大的账户是哪个？",
+      "standard_logic": "rank_accounts(metric='turnover', success_filter='all', scope='case')",
+      "correct_facts": {
+        "top_account_key": "133011759553CNY0",
+        "coverage_txn_total": 285243,
+        "coverage_account_count": 540
+      },
+      "scoring_markers": [
+        "133011759553CNY0",
+        "285243",
+        "540",
+        "turnover"
+      ],
+      "allowed_uncertainty": [
+        "排序指标不同会改变结果，如按入账、出账、最大单笔需重新排名。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "全案最大账户[^。；\\n]*(样本|部分|分页)",
+          "reason": "Top 账户不能来自分页样本。"
+        }
+      ]
+    },
+    {
+      "id": "data_quality",
+      "case_id": "be6a1df3d3c4",
+      "question": "复核导入清洗是否可能存在同事实重复、换卡/补卡重复统计、户名空字段误读。",
+      "standard_logic": "audit_case_data_quality + resolve_duplicate_families(scope_mode='same_holder_accounts') + account dimension cross-check",
+      "correct_facts": {
+        "clean_duplicate_zero_meaning": "only exact configured cleaning rule did not remove rows",
+        "zhongyin_zhihuicun_19_subaccount_count": 158,
+        "true_unregistered_account_count": 1,
+        "true_unregistered_account": "90000000000000016",
+        "dedupe_min_scope": "same holder/person account set or investigator-confirmed account set"
+      },
+      "scoring_markers": [
+        "clean_duplicate=0",
+        "158",
+        "1",
+        "90000000000000016",
+        "同事实",
+        "换卡",
+        "不能全流水去重"
+      ],
+      "allowed_uncertainty": [
+        "同金额、同余额、同时间、同对手只能作为同事实候选族，未确认前不能扣减总额。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "clean_duplicate=0[^。；\\n]*(没有|不存在)重复",
+          "allowed_guard_regex": "(不等于|不代表|不能证明|不能说明|并不意味着|不是|不能把|不能理解|不能直接)",
+          "reason": "clean_duplicate=0 不能证明没有同事实/换卡/补卡重复风险。"
+        },
+        {
+          "pattern": "(未识别户名|未登记户名)[^。；\\n]*159",
+          "reason": "真实数据不存在未识别户名 159 分组；158 个中银智惠存十九号子账户归属合成主体甲，只有 1 个未登记户名账户。"
+        }
+      ]
+    },
+    {
+      "id": "holder_scope",
+      "case_id": "be6a1df3d3c4",
+      "question": "合成主体甲名下银行卡/账户集合交易量是多少？",
+      "standard_logic": "resolve_owner_scope(holder_name='合成主体甲') + analyze_holder_full/rank_holders deterministic aggregate",
+      "correct_facts": {
+        "holder_name": "合成主体甲",
+        "direct_account_count": 249,
+        "turnover_yuan": 5524622998.78,
+        "candidate_accounts_rule": "candidate accounts are leads only"
+      },
+      "scoring_markers": [
+        "合成主体甲",
+        "249",
+        "5,524,622,998.78",
+        "5524622998.78",
+        "候选账户",
+        "不能写成确认归属"
+      ],
+      "allowed_uncertainty": [
+        "候选账户可以作为线索列出，但不得并入确定名下账户交易量。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "候选账户[^。；\\n]*(确认|确定|已查明).*(名下|归属)",
+          "allowed_guard_regex": "(不得|不能|不可|没有|未确认|不应)",
+          "reason": "候选账户被升级为确定归属。"
+        }
+      ]
+    },
+    {
+      "id": "liuwenliang_to_zhangjinzhi",
+      "case_id": "be6a1df3d3c4",
+      "question": "合成主体甲转给合成主体乙多少钱？",
+      "standard_logic": "rank_counterparties(holder_name='合成主体甲', counterparty_group_mode='name', direction='out') and date/account core transaction concentration check",
+      "correct_facts": {
+        "name_scope_txn_count": 18,
+        "name_scope_outflow_yuan": 25885013,
+        "name_scope_counterparty_account_count": 6,
+        "core_date": "2025-08-27",
+        "core_account": "9000000000000000015",
+        "core_date_account_txn_count": 5,
+        "core_date_account_outflow_yuan": 21000000,
+        "forbidden_duplicate_amount_yuan": 42000000
+      },
+      "scoring_markers": [
+        "25,885,013",
+        "25885013",
+        "18",
+        "21,000,000",
+        "21000000",
+        "2025-08-27",
+        "9000000000000000015",
+        "4200 万",
+        "不能"
+      ],
+      "allowed_uncertainty": [
+        "25,885,013 元是完整两方有效去重金额；21,000,000 元是 2025-08-27 集中交易集合，另有同额 5 行已确认属于补卡/换卡同事实重复，不作为新增转账。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(42,?000,?000|4200\\s*万)",
+          "allowed_guard_regex": "(重复|放大|不能|错误|不应|禁止|不是|不得)",
+          "reason": "42,000,000/4200 万是重复放大风险，不能写成事实金额。"
+        }
+      ]
+    },
+    {
+      "id": "zhangjinzhi_continuation",
+      "case_id": "be6a1df3d3c4",
+      "question": "合成主体甲转给合成主体乙后，合成主体乙又把钱转给谁？",
+      "standard_logic": "trace/build_fund_flow_graph(holder_name='合成主体甲', via_holder_name='合成主体乙') with supported downstream edges",
+      "correct_facts": {
+        "core_seed_date": "2025-08-27",
+        "downstream_edges": [
+          {
+            "counterparty": "其他代理业务资金-浙银理财认申购户",
+            "amount_yuan": 20000000,
+            "date": "2025-08-29",
+            "classification": "financial_product"
+          },
+          {
+            "counterparty": "合成主体丁",
+            "amount_yuan": 12150000
+          },
+          {
+            "counterparty": "张运喜",
+            "amount_yuan": 7000000
+          },
+          {
+            "counterparty": "增鑫宝2号申购户A",
+            "amount_yuan": 6000000,
+            "classification": "financial_product"
+          },
+          {
+            "counterparty": "永赢基金",
+            "amount_yuan": 2900000,
+            "classification": "financial_product"
+          }
+        ]
+      },
+      "scoring_markers": [
+        "合成主体乙",
+        "浙银理财认申购户",
+        "20,000,000",
+        "20000000",
+        "2025-08-29",
+        "合成主体丁",
+        "张运喜",
+        "确定性资金边"
+      ],
+      "allowed_uncertainty": [
+        "只能画工具返回的 supported edge；未匹配下游或现金断点必须写成需补调。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(-->|→|Mermaid|flowchart)",
+          "allowed_guard_regex": "(确定性|supported|证据|不能|不得|需补调|仅画)",
+          "reason": "资金流向图不能出现无证据箭头。"
+        }
+      ]
+    },
+    {
+      "id": "old_thread_patterns",
+      "case_id": "be6a1df3d3c4",
+      "question": "像旧线程一样围绕合成主体甲做自由深挖。",
+      "standard_logic": "run_investigation_lab + hypothesis_probe + classify_missing_counterparty_business + targeted trace/rank validation",
+      "correct_facts": {
+        "known_unit_drift_value_yuan": 7958757.83,
+        "known_unit_drift_value_wanyuan": 795.875783,
+        "important_leads": [
+          "合成主体乙",
+          "理财",
+          "缺失对手大额",
+          "重复交易号",
+          "金额集中"
+        ],
+        "known_transaction_id": "20250103175349102219900882174578",
+        "same_fact_candidate_group_count": 78,
+        "same_fact_candidate_extra_rows": 78,
+        "same_fact_candidate_duplicate_amount_yuan": 50455133.88
+      },
+      "scoring_markers": [
+        "7,958,757.83",
+        "7958757.83",
+        "795.875783",
+        "合成主体乙",
+        "理财",
+        "缺失对手",
+        "重复交易号",
+        "金额集中",
+        "20250103175349102219900882174578"
+      ],
+      "allowed_uncertainty": [
+        "这些是侦查线索和可疑特征，不是法律性质最终认定。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "7958\\.75783\\s*万元",
+          "allowed_guard_regex": "(不得|不能|不要|禁止|误写|错写|错误)[\\s\\S]{0,40}7958\\.75783\\s*万元|7958\\.75783\\s*万元[\\s\\S]{0,40}(不得|不能|不要|禁止|误写|错写|错误)",
+          "reason": "单位换算错误：7,958,757.83 元应为 795.875783 万元。"
+        }
+      ]
+    },
+    {
+      "id": "outflow_continuation",
+      "case_id": "be6a1df3d3c4",
+      "question": "对合成主体甲 2025 年以来 Top 出账进行终点分类和补调对象研判。",
+      "standard_logic": "trace_subject_top_outflows(date_start='2025-01-01') + classify_missing_counterparty_business + continuation evidence review",
+      "correct_facts": {
+        "must_include": [
+          "Top 出账",
+          "终点分类",
+          "补调对象",
+          "未匹配终点不得写成最终流向"
+        ]
+      },
+      "scoring_markers": [
+        "Top",
+        "补调",
+        "终点",
+        "未匹配",
+        "续查清单"
+      ],
+      "allowed_uncertainty": [
+        "无下游、缺失对手、现金断点均只能作为补调方向。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(最终流向|最终去向)[^。；\\n]*(已查明|确定)",
+          "allowed_guard_regex": "(需复核|补调|不能确认|证据不足)",
+          "reason": "未验证下游不能写成最终流向。"
+        }
+      ]
+    },
+    {
+      "id": "full_report_gate",
+      "case_id": "be6a1df3d3c4",
+      "question": "生成全案资金研判报告草稿并说明是否可报告级发布。",
+      "standard_logic": "P0 containment is host enforced: do not invoke or simulate hidden full-case or report tools. Until a current-run native source probe, same-context EvidenceReceipts, complete claim coverage, and a valid PublicationReceipt exist, return only the deterministic capability boundary and补证动作; do not draft case facts or report text.",
+      "correct_facts": {
+        "required_gates": [
+          "current-run source probe",
+          "同案同轮同快照 EvidenceReceipt",
+          "逐 claim 完整覆盖",
+          "PublicationReceipt"
+        ],
+        "blocking_rule": "partial/error gates block final report"
+      },
+      "scoring_markers": [
+        "能力缺口",
+        "EvidenceReceipt",
+        "PublicationReceipt",
+        "不可发布",
+        "补证"
+      ],
+      "allowed_uncertainty": [
+        "无有效同案、同轮、同快照回执时，不得生成案件事实草稿；只能说明已检查范围、缺失来源和补证动作。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(最终报告|正式报告|已查明)[^。；\\n]*(报告结论复核|来源核验|数据质量|必查专题)",
+          "allowed_guard_regex": "(阻断|不能|不得|未通过|需复核|需完成|待复核|草稿|不可发布|不能出具|先完成|先说明|门禁)",
+          "reason": "正式报告必须先说明来源、质量、专题和报告结论复核。"
+        }
+      ],
+      "expected_tools": []
+    },
+    {
+      "id": "case_3c72_top_rankings",
+      "case_id": "3c72e755b1f2",
+      "question": "刑侦扫黑专案全案 Top 账户、Top 户名主体和 Top 对手方分别是什么？",
+      "standard_answer": "按当前可用交易口径，3c72e755b1f2 共有 423,560 条规范/可分析交易，其中 422,594 条具备进/出方向，资金流量 10,249,999,869.48 元。按账户 turnover 排名第一为 133011759553CNY0，户名合成主体甲，交易 3,572 笔，入账 1,107,752,780.60 元，出账 1,107,988,876.45 元，流量 2,215,741,657.05 元。按户名+证件号主体 turnover 排名第一为 合成主体甲 / 900000000000000002，249 个账户，19,348 笔，入账 2,765,122,373.87 元，出账 2,766,451,088.49 元，流量 5,531,573,462.36 元。按对手方 key 排名第一为 合成主体甲，1,680 笔，入账 1,906,148,174.49 元，出账 1,867,364,924.91 元，流量 3,773,513,099.40 元；第二为户名和账号均空的 空户名，70,661 笔，流量 1,394,136,315.38 元。",
+      "standard_logic": "Read-only DuckDB SQL. Coverage from import_file_log/case_stats_cache/fc_transaction_norm. Account rank uses account_key=coalesce(acct_no_norm, card_no_norm, acct_no, card_no). Holder rank uses open_name + id_no, not open_name alone. Counterparty rank uses counterparty_name when present; if name is blank but account exists use 空户名/账号:<counterparty_acct_norm>; if both are blank use 空户名.",
+      "sql_basis": [
+        "SELECT count(*), min(txn_ts), max(txn_ts), sum(CASE WHEN dc_final='进' THEN amount_val ELSE 0 END), sum(CASE WHEN dc_final='出' THEN amount_val ELSE 0 END) FROM fc_transaction_norm WHERE amount_val IS NOT NULL",
+        "SELECT account_key aggregates FROM fc_transaction_norm LEFT JOIN analysis_account_dim ON account_key=coalesce(acct_no_norm, card_no_norm, acct_no, card_no) WHERE dc_final IN ('进','出') GROUP BY account_key ORDER BY sum(abs(amount_val)) DESC",
+        "SELECT open_name,id_no aggregates FROM fc_transaction_norm JOIN analysis_account_dim GROUP BY open_name,id_no ORDER BY sum(abs(amount_val)) DESC",
+        "SELECT counterparty_key aggregates FROM fc_transaction_norm WHERE dc_final IN ('进','出') GROUP BY counterparty_key ORDER BY sum(abs(amount_val)) DESC"
+      ],
+      "correct_facts": {
+        "coverage": {
+          "transaction_rows": 423560,
+          "directed_transaction_rows": 422594,
+          "undirected_transaction_rows": 966,
+          "account_dim_rows": 750,
+          "holder_groups_open_name_id": 60,
+          "holder_groups_open_name_only": 52,
+          "inflow_yuan": null,
+          "outflow_yuan": null,
+          "turnover_yuan": 10249999869.48,
+          "net_yuan": -1199869.48
+        },
+        "top_account_by_turnover": {
+          "rank": 1,
+          "account_key": "133011759553CNY0",
+          "holder_name": "合成主体甲",
+          "id_no": "900000000000000002",
+          "bank_name": "中国银行",
+          "acct_display": "133011759553CNY0",
+          "card_display": "9000000000000000005",
+          "txn_count": 3572,
+          "inflow_yuan": 1107752780.6,
+          "outflow_yuan": 1107988876.45,
+          "turnover_yuan": 2215741657.05,
+          "max_single_yuan": 23429618.63,
+          "first_txn_at": "2013-06-26 14:20:21",
+          "last_txn_at": "2025-08-15 18:48:41"
+        },
+        "top_holder_by_turnover": {
+          "rank": 1,
+          "holder_name": "合成主体甲",
+          "id_no": "900000000000000002",
+          "account_count": 249,
+          "txn_count": 19348,
+          "inflow_yuan": 2765122373.87,
+          "outflow_yuan": 2766451088.49,
+          "turnover_yuan": 5531573462.36,
+          "net_yuan": -1328714.62,
+          "first_txn_at": "2004-07-01 11:11:11",
+          "last_txn_at": "2026-05-16 23:44:46"
+        },
+        "top_counterparties_by_turnover": [
+          {
+            "rank": 1,
+            "counterparty_key": "合成主体甲",
+            "txn_count": 1680,
+            "counterparty_account_count": 94,
+            "inflow_yuan": 1906148174.49,
+            "outflow_yuan": 1867364924.91,
+            "turnover_yuan": 3773513099.4,
+            "first_txn_at": "2007-04-23 00:00:00",
+            "last_txn_at": "2026-03-21 00:15:36"
+          },
+          {
+            "rank": 2,
+            "counterparty_key": "空户名",
+            "definition": "counterparty_name and counterparty_acct_norm are both blank",
+            "txn_count": 70661,
+            "counterparty_account_count": 0,
+            "inflow_yuan": 604102894.27,
+            "outflow_yuan": 790033421.11,
+            "turnover_yuan": 1394136315.38,
+            "first_txn_at": "2004-07-01 11:11:11",
+            "last_txn_at": "2026-06-02 11:50:56"
+          },
+          {
+            "rank": 3,
+            "counterparty_key": "空户名/账号:9000000000000000005",
+            "txn_count": 56,
+            "counterparty_account_count": 1,
+            "inflow_yuan": 186793839.72,
+            "outflow_yuan": 164297851,
+            "turnover_yuan": 351091690.72,
+            "first_txn_at": "2016-03-31 10:49:47",
+            "last_txn_at": "2021-03-24 02:28:36"
+          }
+        ]
+      },
+      "scoring_markers": [
+        "3c72e755b1f2",
+        "133011759553CNY0",
+        "合成主体甲",
+        "900000000000000002",
+        "2,215,741,657.05",
+        "5,531,573,462.36",
+        "3,773,513,099.40",
+        "1,394,136,315.38",
+        "422594",
+        "60"
+      ],
+      "allowed_uncertainty": [
+        "若按入账、出账、笔数或最大单笔排序，Top 结果需另行计算，不得复用 turnover Top。",
+        "户名主体排名必须说明 open_name + id_no 口径；只按 open_name 会把多证照同名企业合并。",
+        "空户名 1,394,136,315.38 元只指 counterparty_name 和 counterparty_acct_norm 均为空；户名空但账号存在的记录应以 空户名/账号:<counterparty_acct_norm> 单独列示，不能并入双空对手方。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "空户名[^。；\\n]*(1,573,109,712\\.51|1573109712\\.51|15\\.7310?亿)",
+          "reason": "这是把户名空但账号存在的记录也盲并入空户名，不能作为本题 Top 对手方的空户名口径。"
+        },
+        {
+          "pattern": "户名组[^。；\\n]*52",
+          "allowed_guard_regex": "(open_name|仅按户名|不是报告级|会合并)",
+          "reason": "报告级主体维度是 open_name + id_no 的 60 组；52 只是 open_name-only 诊断口径。"
+        },
+        {
+          "pattern": "最大账户[^。；\\n]*(样本|分页|query_.*rows)",
+          "reason": "Top 账户必须来自全案聚合 SQL 或 rank 工具，不能来自分页样本。"
+        }
+      ]
+    },
+    {
+      "id": "case_3c72_report_claim_review",
+      "case_id": "3c72e755b1f2",
+      "question": "复核既有《全案资金研判报告》中哪些金额、链路和可疑结论可作为事实，哪些必须降级或纠正？待复核报告声称/自述包括：导入覆盖 rows_total=2,035,188、rows_imported_norm=428,242、transaction_rows=423,560；有向交易 422,594 笔、turnover 10,249,999,869.48；双空对手方 turnover 1,394,136,315.38；财付通-微信转账 turnover 38,173,977.42；合成主体乙理财申购 20,000,000、赎回 20,011,946.25；贵阳市观山湖区人民法院金额/笔数需复核；合成主体甲-合成主体乙存在 raw、去重、核心集中交易差异；报告自述 run_full_case_analysis(write_report=true) 返回 fetch failed。请说明哪些可作事实、哪些必须降级/纠正、哪些路径或 Mermaid 只能作为线索。",
+      "standard_answer": "既有报告中的导入覆盖、全案资金总量、合成主体甲 Top 主体、合成主体乙理财申购/赎回、财付通-微信转账、空户名双空对手方等可由当前生产统计复核为统计事实或线索；但报告自述 run_full_case_analysis(write_report=true) 返回 fetch failed，因此不能作为 detector 完整报告。报告中的资金链路片段只能作为聚合线索，不能画成确定性路径；贵阳市观山湖区人民法院金额/笔数需纠正为 80 笔、36,004,350.93 元；合成主体甲与合成主体乙往来必须区分 raw 口径、有效 txn_id 去重口径和 2025-08-27 核心集中交易，不能写成 4200 万或把聚合片段写成最终流向。",
+      "standard_logic": "Read existing report text as claim source, then verify claims with read-only DuckDB SQL. Verified facts come from import_file_log, case_stats_cache, fc_transaction_norm, and analysis_account_dim. Chain/path claims require transaction-level supported edges; aggregate counterparty rows are only leads.",
+      "sql_basis": [
+        "Import coverage: SELECT count(*), sum(rows_total), sum(rows_imported_norm), sum(rows_dedup), sum(rows_error), sum(rows_skipped_non_data) FROM import_file_log",
+        "Case totals: SELECT count(*), sum(in/out/abs amount_val) FROM fc_transaction_norm WHERE dc_final IN ('进','出')",
+        "Report claim rows: SELECT counterparty_name aggregates FROM fc_transaction_norm WHERE counterparty_name IN (...) GROUP BY counterparty_name",
+        "Liu->Zhang duplicate guard: valid txn_id dedupe excludes blank and 查无信息 txn_id from duplicate folding; 2025 core transaction concentration is 5 txns / 21,000,000 yuan"
+      ],
+      "correct_facts": {
+        "report_source": {
+          "path": "<case-report:3c72e755b1f2/全案分析研判报告.md>",
+          "report_status": "existing report is a statistical draft; it says run_full_case_analysis(write_report=true) returned fetch failed and trace_fund/trace_fund_next_hop did not complete"
+        },
+        "verified_report_claims": {
+          "import_coverage": {
+            "file_count": 1519,
+            "file_type": "CSV",
+            "rows_total": 2035188,
+            "rows_imported_norm": 428242,
+            "transaction_rows": 423560,
+            "account_rows_case_stats": 513,
+            "person_rows": 314,
+            "coercive_measure_rows": 85,
+            "rows_dedup": 1598510,
+            "rows_skipped_non_data": 2520,
+            "rows_error": 0
+          },
+          "case_totals_directed_transactions": {
+            "txn_count": 422594,
+            "inflow_yuan": 5124400000,
+            "outflow_yuan": 5125599869.48,
+            "turnover_yuan": 10249999869.48,
+            "net_yuan": -1199869.48
+          },
+          "blank_counterparty_both_name_and_account_missing": {
+            "txn_count": 70661,
+            "inflow_yuan": 604102894.27,
+            "outflow_yuan": 790033421.11,
+            "turnover_yuan": 1394136315.38,
+            "first_txn_at": "2004-07-01 11:11:11",
+            "last_txn_at": "2026-06-02 11:50:56"
+          },
+          "wechat_tenpay_channel": {
+            "counterparty_name": "财付通-微信转账",
+            "txn_count": 15609,
+            "inflow_yuan": 381058,
+            "outflow_yuan": 37792919.42,
+            "turnover_yuan": 38173977.42,
+            "first_txn_at": "2019-01-21 12:34:12",
+            "last_txn_at": "2026-02-27 21:23:20"
+          },
+          "zhangjinzhi_financial_product_leads": [
+            {
+              "counterparty_name": "其他代理业务资金-浙银理财认申购户",
+              "txn_count": 1,
+              "outflow_yuan": 20000000,
+              "txn_time": "2025-08-29 05:08:53",
+              "classification": "financial_product_lead"
+            },
+            {
+              "counterparty_name": "其他代理业务资金-浙银理财赎回户",
+              "txn_count": 3,
+              "inflow_yuan": 20011946.25,
+              "txn_time": "2025-09-08 19:03:28",
+              "classification": "financial_product_lead"
+            }
+          ],
+          "liuwenliang_to_zhangjinzhi_duplicate_guard": {
+            "raw_outflow_txn_count": 23,
+            "raw_outflow_yuan": 46885013,
+            "valid_txn_id_dedup_txn_count": 18,
+            "valid_txn_id_dedup_yuan": 25885013,
+            "core_2025_raw_yuan": 42000000,
+            "core_2025_dedup_txn_count": 5,
+            "core_2025_dedup_yuan": 21000000,
+            "core_counterparty_account": "9000000000000000015"
+          }
+        },
+        "corrected_or_not_report_grade_claims": [
+          {
+            "claim": "贵阳市观山湖区人民法院流量合计 36,055,441.93 元、78 笔、出账 548,969.50 元",
+            "sql_verified_value": {
+              "txn_count": 80,
+              "inflow_yuan": 35506472.43,
+              "outflow_yuan": 497878.5,
+              "turnover_yuan": 36004350.93
+            },
+            "review": "must correct before using as golden fact"
+          },
+          {
+            "claim": "报告资金链路表中的自然人、经营主体、理财、支付通道片段",
+            "review": "aggregate lead only; not a deterministic path unless trace_fund/build_fund_flow_graph returns supported transaction edges"
+          },
+          {
+            "claim": "合成主体甲-合成主体乙聚合往来金额",
+            "review": "must state the chosen口径: raw holder-counterparty outflow is 46,885,013.00 yuan / 23 rows; confirmed same-holder cross-account same-fact deduped outflow is 25,885,013.00 yuan / 18 effective facts; 2025-08-27 core transaction concentration is 21,000,000.00 yuan / 5 effective facts, and the extra 21,000,000.00 yuan / 5 rows is confirmed duplicate rather than a new transfer. 42,000,000.00 yuan is duplicate-amplified and forbidden as fact."
+          }
+        ]
+      },
+      "scoring_markers": [
+        "2035188",
+        "428242",
+        "423560",
+        "422594",
+        "10,249,999,869.48",
+        "1,394,136,315.38",
+        "38,173,977.42",
+        "20,000,000",
+        "20,011,946.25",
+        "36,004,350.93",
+        "25,885,013",
+        "21,000,000",
+        "fetch failed"
+      ],
+      "allowed_uncertainty": [
+        "报告中的可疑特征只能写成统计特征、线索或需复核，不能直接写成违法事实、实际控制、代持或最终资金归属。",
+        "未成功执行 trace_fund/trace_fund_next_hop 或未返回 supported edges 时，不能画 Mermaid 确定性链路。",
+        "financial product rows are asset-conversion leads; product contracts, subscription/redemption confirmations, redemption-side account statements, and balance-carry evidence are required before stronger conclusions."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "贵阳市观山湖区人民法院[^。；\\n]*(36,055,441\\.93|36055441\\.93|78\\s*笔|548,969\\.50)",
+          "reason": "Current production statistics verify 80 directed rows, turnover 36,004,350.93 yuan, outflow 497,878.50 yuan."
+        },
+        {
+          "pattern": "(42,?000,?000|4200\\s*万)",
+          "allowed_guard_regex": "(重复|放大|不能|错误|不应|禁止|不是|不得)",
+          "reason": "42,000,000/4200 万是合成主体甲->合成主体乙 2025 核心集中交易重复放大口径，不能写成事实金额。"
+        },
+        {
+          "pattern": "(flowchart|-->|→)[^。；\\n]*(合成主体乙|浙银理财|合成主体丁|张运喜)",
+          "allowed_guard_regex": "(supported|确定性资金边|工具返回|需补调|不能确认)",
+          "reason": "报告原文未成功执行 trace_fund/trace_fund_next_hop，不能把聚合片段画成确定性链路。"
+        },
+        {
+          "pattern": "(违法所得|行贿|受贿|涉黑资金|实际控制|代持)[^。；\\n]*(已查明|确定|认定)",
+          "allowed_guard_regex": "(不能|不得|禁止|不可|不能仅凭|不能写|不得写|需复核|线索|降级)",
+          "reason": "银行流水统计和本报告底稿只能支持可疑特征/线索/需复核，不能替代法律性质认定。"
+        }
+      ]
+    },
+    {
+      "id": "case_e7e3_top_rankings",
+      "case_id": "e7e3a55350b4",
+      "question": "监察委专案中 Top 账户、Top 户名主体和 Top 对手方分别是什么？",
+      "standard_logic": "Read-only DuckDB SQL: fc_transaction_norm turnover by account, holder, and counterparty; use abs(amount_val) over directed transactions.",
+      "correct_facts": {
+        "coverage": {
+          "transaction_rows": 49116,
+          "directed_transaction_rows": 49113,
+          "account_dim_rows": 166,
+          "holder_groups": 12,
+          "turnover_yuan": 413355095.71
+        },
+        "top_account_by_turnover": {
+          "account_key": "851006444520001",
+          "holder_name": "合成主体丙",
+          "txn_count": 607,
+          "turnover_yuan": 59887270.99,
+          "inflow_yuan": 29943687.86,
+          "outflow_yuan": 29943583.13
+        },
+        "top_holder_by_turnover": {
+          "holder_name": "合成主体丙",
+          "id_no": "900000000000000003",
+          "txn_count": 9595,
+          "turnover_yuan": 240706114.48,
+          "account_count": 58
+        },
+        "top_counterparty_by_turnover": {
+          "counterparty_name": "合成主体丙",
+          "counterparty_acct_norm": "",
+          "txn_count": 1752,
+          "turnover_yuan": 118231076.94,
+          "inflow_yuan": 57173074.73,
+          "outflow_yuan": 61058002.21
+        },
+        "blank_counterparty_by_turnover": {
+          "counterparty_name": "__blank__",
+          "counterparty_acct_norm": "__blank__",
+          "txn_count": 12117,
+          "turnover_yuan": 88498812.18,
+          "inflow_yuan": 44971901.23,
+          "outflow_yuan": 43526910.95
+        }
+      },
+      "scoring_markers": [
+        "e7e3a55350b4",
+        "49116",
+        "49113",
+        "166",
+        "413,355,095.71",
+        "851006444520001",
+        "合成主体丙",
+        "59,887,270.99",
+        "240,706,114.48",
+        "118,231,076.94",
+        "88,498,812.18",
+        "双空"
+      ],
+      "allowed_uncertainty": [
+        "Top 排名必须说明排序口径；按入账、出账、笔数或最大单笔会得到不同结果。",
+        "双空对手方只能写成 counterparty_name 与 counterparty_acct_norm 均为空的聚合边界，不能写成确定收款人。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "9000000000000004[^。；\\n]*(最终流向|最终去向|唯一通道)",
+          "reason": "Top account is a ranking fact, not a final flow conclusion."
+        },
+        {
+          "pattern": "双空[^。；\\n]*(收款人|户名|人员)[^。；\\n]*(已查明|确定|认定)",
+          "allowed_guard_regex": "(不能|不得|未知|缺失|需补调|需核实)",
+          "reason": "Blank counterparty fields cannot be upgraded to a verified person or account."
+        }
+      ]
+    },
+    {
+      "id": "case_e7e3_quality_boundary",
+      "case_id": "e7e3a55350b4",
+      "question": "监察委专案导入清洗和对手方缺失有哪些边界？是否能把 clean_duplicate=0 写成全案无重复？",
+      "standard_logic": "Read-only DuckDB SQL: import_file_log coverage, fc_transaction_norm cleaning flags, blank counterparty fields, and transaction timestamp quality boundary.",
+      "correct_facts": {
+        "import_coverage": {
+          "file_count": 76,
+          "rows_total": 50700,
+          "rows_imported_norm": 49770,
+          "rows_dedup": 930,
+          "rows_error": 0
+        },
+        "cleaning_flags": {
+          "clean_duplicate": 0,
+          "clean_invalid": 20,
+          "clean_reversal": 0,
+          "blank_counterparty_name": 13750,
+          "blank_both_counterparty": 12037
+        },
+        "time_boundary": {
+          "txn_time_min": "2004-12-06 00:00:00",
+          "txn_time_max": "2025-07-09 07:51:45",
+          "abnormal_early_txn_time_rows": 0,
+          "review": "Current production facts show no pre-1900 parsed timestamp boundary; if such a boundary appears in another dataset, it must be reviewed before temporal conclusions."
+        }
+      },
+      "scoring_markers": [
+        "76",
+        "50,700",
+        "49,770",
+        "930",
+        "clean_duplicate=0",
+        "20",
+        "13,750",
+        "12,037",
+        "2004-12-06",
+        "不能",
+        "需复核"
+      ],
+      "allowed_uncertainty": [
+        "clean_duplicate=0 only means the configured cleaning duplicate flag did not mark rows; it does not prove no same-fact duplicate families exist.",
+        "Timestamp min/max are data quality boundaries; if an abnormal pre-1900 timestamp appears, it must be treated as a parsed-time boundary rather than a normal transaction-year conclusion."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "clean_duplicate=0[^。；\\n]*(无重复|没有重复|全案无重复)",
+          "allowed_guard_regex": "(不等于|不能|不代表|需复核)",
+          "reason": "clean_duplicate=0 cannot be upgraded to all-case no-duplicate proof."
+        },
+        {
+          "pattern": "0002-11-30",
+          "allowed_guard_regex": "(异常|边界|需复核|不能|不得|旧口径)",
+          "reason": "Current production facts do not support writing 0002-11-30 as the e7e3 timestamp boundary."
+        }
+      ]
+    },
+    {
+      "id": "investigation_lab_cash_asset_hypotheses",
+      "case_id": "e7e3a55350b4",
+      "expected_tools": [
+        "hypothesis_probe"
+      ],
+      "question": "围绕监察委专案做一次侦查实验室式开放研判：提出现金断点、双空对手方、理财/资产端、候选账户归属这几类假设队列。每条假设必须标注假设状态、已有确定性事实、降级原因、下一步查询和收口边界；不得把线索写成已查明事实。",
+      "standard_logic": "hypothesis_probe with evidence-constrained hypothesis queue. Open-ended hypotheses must be downgraded unless backed by deterministic facts, supported transaction edges, and claim support refs.",
+      "correct_facts": {
+        "investigation_intent": "cash/asset/counterparty-break hypothesis lab for e7e3a55350b4",
+        "verified_facts": {
+          "import_csv_count": 76,
+          "raw_rows": 50700,
+          "normalized_rows": 49770,
+          "transaction_rows": 49116,
+          "directed_transaction_count": 49113,
+          "directed_flow_amount_yuan": 413355095.71,
+          "blank_counterparty_name": 13750,
+          "blank_both_counterparty": 12037,
+          "double_empty_counterparty_transaction_count": 12117,
+          "double_empty_counterparty_flow_amount_yuan": 88498812.18,
+          "tenpay_wechat_transfer_count": 252,
+          "tenpay_wechat_transfer_flow_amount_yuan": 889860.9
+        },
+        "hypothesis_queue": [
+          {
+            "hypothesis": "双空对手方/缺失对手方可能形成现金断点或补调入口",
+            "hypothesis_status": "needs_verification",
+            "downgrade_reason": "counterparty_name and counterparty_acct_norm are blank, so there is no supported counterparty edge.",
+            "next_queries": [
+              "补调银行回单",
+              "补调对手账户流水",
+              "核验摘要/渠道字段",
+              "validate_continuation_list"
+            ],
+            "stop_conditions": [
+              "未取得 supported transaction edge 前不得画 Mermaid",
+              "不得写成资金闭环已确认"
+            ]
+          },
+          {
+            "hypothesis": "理财认申购/赎回可能是资产端转换线索",
+            "hypothesis_status": "lead_only",
+            "downgrade_reason": "financial product rows are clues; product contracts, subscription/redemption confirmation, redemption-side account statements, and balance-carry evidence are required.",
+            "next_queries": [
+              "产品合同",
+              "认申购/赎回确认",
+              "赎回侧账户流水",
+              "余额承接材料"
+            ],
+            "stop_conditions": [
+              "未取得产品凭证和余额承接前不得写成最终去向已查明"
+            ]
+          },
+          {
+            "hypothesis": "候选账户归属合成主体丙或相关主体",
+            "hypothesis_status": "candidate_only",
+            "downgrade_reason": "candidate accounts require account-opening, identity, control, and transaction support before ownership wording.",
+            "next_queries": [
+              "开户资料",
+              "身份/控制材料",
+              "候选账户交易边",
+              "同事实/换卡复核"
+            ],
+            "stop_conditions": [
+              "未绑定开户和控制证据前不得写成合成主体丙名下账户"
+            ]
+          }
+        ]
+      },
+      "scoring_markers": [
+        "investigation_intent",
+        "hypothesis_queue",
+        "hypothesis_status",
+        "双空",
+        "12,117",
+        "88,498,812.18",
+        "现金断点",
+        "理财",
+        "资产",
+        "候选账户",
+        "不能写成",
+        "next_queries",
+        "收口边界",
+        "supported transaction edge"
+      ],
+      "allowed_uncertainty": [
+        "开放式假设可以保留侦查方向，但必须按 evidence status 降级；未有确定性交易边、回单、产品凭证或账户归属材料前，不能写成已查明事实。",
+        "双空对手方、现金断点和资产端线索可以作为补调入口；不得直接画资金闭环或 Mermaid 箭头。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(双空对手方|缺失对手|现金断点)[^。；\\n]*(闭环|最终去向|资金流向)[^。；\\n]*(已确认|已查明|确定)",
+          "allowed_guard_regex": "(不能|不得|不可|证据不足|未支持|需核实|需复核|补调|断点|线索)",
+          "reason": "双空对手方和现金断点只能作为补调入口，不能写成已查明闭环。"
+        },
+        {
+          "pattern": "(理财|资产|认申购|赎回)[^。；\\n]*(最终去向|最终流向|归属)[^。；\\n]*(已确认|已查明|确定)",
+          "allowed_guard_regex": "(不能|不得|不可|证据不足|未支持|需核实|需复核|补调|线索|产品凭证|余额承接)",
+          "reason": "理财/资产端线索必须有产品凭证和余额承接，不能直接升级为最终去向。"
+        },
+        {
+          "pattern": "候选账户[^。；\\n]*(已确认|确定|已查明).*(名下|归属|实际控制)",
+          "allowed_guard_regex": "(不能|不得|不可|未确认|不应|禁止|降级|线索|需核实|需复核)",
+          "reason": "候选账户归属必须降级，不能写成已确认名下账户或实际控制。"
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_import_guidance",
+      "case_id": "be6a1df3d3c4",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询任何案件数据。请给我一份 Analytix 导入 CSV 前的通用准备清单，重点是字段、编码、脱敏和回滚备份。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is a passive non-funds product guidance task.",
+      "correct_facts": {
+        "expected_behavior": "Answer from general product/workflow knowledge without invoking funds_investigate or validate_report_claims.",
+        "must_cover": [
+          "字段映射",
+          "编码",
+          "金额/日期格式",
+          "脱敏",
+          "备份",
+          "回滚"
+        ]
+      },
+      "scoring_markers": [
+        "字段映射",
+        "编码",
+        "金额",
+        "日期",
+        "脱敏",
+        "备份",
+        "回滚"
+      ],
+      "allowed_uncertainty": [
+        "可以给通用导入建议，但不得声称已经读取当前案件或给出案件金额。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(合成主体甲|合成主体乙|合成主体丙|133011759553CNY0|funds_investigate|validate_report_claims)",
+          "reason": "Passive non-funds guidance must not pull case facts or invoke funds tools."
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_copy_edit",
+      "case_id": "be6a1df3d3c4",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询案件、不调用插件。把这句话改写得更正式：请大家明天上午十点前把材料交齐，缺的项单独备注。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is ordinary copy editing and should not trigger the fund-analysis plugin.",
+      "correct_facts": {
+        "expected_behavior": "Return polished wording only; no case facts, no funds tools, no report claim review."
+      },
+      "scoring_markers": [
+        "上午十点",
+        "材料",
+        "备注",
+        "提交"
+      ],
+      "allowed_uncertainty": [
+        "可以保留原句含义并进行正式化表达。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(案件|资金|账户|合成主体甲|合成主体乙|funds_investigate|validate_report_claims)",
+          "reason": "Plain copy editing must not be routed into the fund-analysis plugin."
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_excel_formula",
+      "case_id": "be6a1df3d3c4",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询案件、不调用插件。请给我一个 Excel 公式，把 A2 单元格手机号中间四位脱敏成 138****5678，并说明可以向下填充。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is an ordinary spreadsheet formula task and should not trigger the fund-analysis plugin.",
+      "correct_facts": {
+        "expected_behavior": "Return a spreadsheet formula such as LEFT/RIGHT concatenation or REPLACE masking; no case facts, no funds tools, no report claim review.",
+        "must_cover": [
+          "A2",
+          "公式",
+          "****",
+          "138****5678",
+          "向下填充"
+        ]
+      },
+      "scoring_markers": [
+        "A2",
+        "公式",
+        "****",
+        "138****5678",
+        "向下填充"
+      ],
+      "allowed_uncertainty": [
+        "可以给出等价 Excel 公式或说明不同表格软件函数名差异。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(案件|资金|账户|合成主体甲|合成主体乙|合成主体丙|funds_investigate|validate_report_claims)",
+          "reason": "Plain spreadsheet help must not be routed into the fund-analysis plugin."
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_meeting_todos",
+      "case_id": "be6a1df3d3c4",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询案件、不调用插件。把这段会议记录整理成三条待办：李娜负责周三前确认场地；王强补充预算表；我整理参会名单。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is ordinary meeting-note structuring and should not trigger the fund-analysis plugin.",
+      "correct_facts": {
+        "expected_behavior": "Return three concise action items with owner and task; no case facts, no funds tools, no report claim review.",
+        "must_cover": [
+          "李娜",
+          "周三",
+          "场地",
+          "王强",
+          "预算表",
+          "参会名单"
+        ]
+      },
+      "scoring_markers": [
+        "李娜",
+        "周三",
+        "场地",
+        "王强",
+        "预算表",
+        "参会名单"
+      ],
+      "allowed_uncertainty": [
+        "可以使用待办清单、表格或编号列表，只要不改变责任人与事项。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(案件|资金|账户|合成主体甲|合成主体乙|合成主体丙|funds_investigate|validate_report_claims)",
+          "reason": "Plain meeting-note structuring must not be routed into the fund-analysis plugin."
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_fund_concept",
+      "case_id": "3c72e755b1f2",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询案件、不调用插件。用通用语言解释“资金流水”和“现金流量表”的区别，并提醒为什么不能把流水总额直接当作收入。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is a generic finance/accounting explanation even though it contains fund-related terms.",
+      "correct_facts": {
+        "expected_behavior": "Explain generic concepts without case facts, funds_investigate, validate_report_claims, account rankings, or investigative conclusions.",
+        "must_cover": [
+          "资金流水",
+          "现金流量表",
+          "收入",
+          "往来",
+          "口径",
+          "不能直接等同"
+        ]
+      },
+      "scoring_markers": [
+        "资金流水",
+        "现金流量表",
+        "收入",
+        "往来",
+        "口径",
+        "不能"
+      ],
+      "allowed_uncertainty": [
+        "可以使用通用财务概念解释，但不得声称已经读取案件流水或给出案件金额。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(合成主体甲|合成主体乙|合成主体丙|133011759553CNY0|9000000000000000015|funds_investigate|validate_report_claims)",
+          "reason": "Generic finance explanation must not pull case facts or invoke funds tools."
+        }
+      ]
+    },
+    {
+      "id": "passive_nonfunds_account_masking",
+      "case_id": "e7e3a55350b4",
+      "plugin_expected": false,
+      "expected_tools": [],
+      "question": "不查询案件、不调用插件。给我一个通用表格清洗规则：把账号或银行卡号只保留后四位，其余用星号替代，并说明如何检查空值。",
+      "standard_logic": "No case-data lookup and no analytix_funds MCP call. This is ordinary table-cleaning guidance for masking account-like strings, not a case-account lookup.",
+      "correct_facts": {
+        "expected_behavior": "Return generic masking logic, formula/pseudocode, and blank-value checks; no case facts, no account ownership claims, no funds tools.",
+        "must_cover": [
+          "后四位",
+          "星号",
+          "空值",
+          "表格清洗",
+          "账号",
+          "银行卡号"
+        ]
+      },
+      "scoring_markers": [
+        "后四位",
+        "星号",
+        "空值",
+        "清洗",
+        "账号",
+        "银行卡号"
+      ],
+      "allowed_uncertainty": [
+        "可以给 Excel/SQL/Python 任一通用实现思路，但不得读取案件账户或判断账户归属。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(合成主体甲|合成主体乙|合成主体丙|名下账户|候选账户|funds_investigate|validate_report_claims)",
+          "reason": "Generic account masking must not route into case ownership or fund-analysis tools."
+        }
+      ]
+    },
+    {
+      "id": "report_mermaid_legal_guard",
+      "case_id": "3c72e755b1f2",
+      "question": "复核这段报告表述是否可直接发布：'合成主体甲资金已查明经合成主体乙流向浙银理财并构成违法所得，可画 Mermaid 链路图。'",
+      "standard_logic": "Run report conclusion review on report-grade text after deterministic facts. Legal characterization and fund-flow drawings require deterministic support and verified flow-graph edges.",
+      "correct_facts": {
+        "report_review": {
+          "unsupported_conclusions": [
+            "资金已查明经合成主体乙流向浙银理财",
+            "构成违法所得"
+          ],
+          "unsupported_paths": [
+            "合成主体甲 -> 合成主体乙 -> 浙银理财资金流向图链路"
+          ],
+          "required_boundary": "Only write as lead/需核实 unless verified transaction edges and legal review exist."
+        }
+      },
+      "scoring_markers": [
+        "报告结论复核",
+        "未支持结论",
+        "未取得确定性资金边",
+        "资金流向图",
+        "违法所得",
+        "不能",
+        "需核实",
+        "确定性资金边"
+      ],
+      "allowed_uncertainty": [
+        "可以说明合成主体乙存在理财认申购/赎回线索，但不能把聚合线索写成已查明闭合资金链或法律性质认定。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(已查明|确定|认定)[^。；\\n]*(浙银理财|违法所得|资金流向图|flowchart|-->|→)",
+          "allowed_guard_regex": "(不能|不得|不应|禁止|不可|证据不足|未支持|需核实|需复核)",
+          "reason": "Unsupported flow/legal claims must be downgraded and cannot be published as verified facts."
+        }
+      ],
+      "expected_tools": [
+        "validate_report_claims"
+      ]
+    },
+    {
+      "id": "report_candidate_cash_boundary_guard",
+      "case_id": "e7e3a55350b4",
+      "question": "复核这段报告表述是否可直接写入正式报告：'监察委专案中，候选账户已确认为合成主体丙名下账户；双空对手方资金闭环已确认，现金/理财资产最终去向已查明。'",
+      "standard_logic": "Run report conclusion review on report-grade text after deterministic facts. Candidate ownership, blank counterparty/cash breaks, and asset/cash destination conclusions require deterministic evidence anchors and verified transaction edges.",
+      "correct_facts": {
+        "report_review": {
+          "unsupported_conclusions": [
+            "候选账户已确认为合成主体丙名下账户",
+            "双空对手方资金闭环已确认",
+            "现金/理财资产最终去向已查明"
+          ],
+          "required_boundaries": [
+            "候选账户不能写成确认归属",
+            "现金或资产去向缺少确定性资金边",
+            "缺失对手或现金断点不能写成已证实",
+            "报告结论必须绑定证据锚点"
+          ],
+          "case_quality_anchor": {
+            "blank_counterparty_name": 13750,
+            "blank_both_counterparty": 12037
+          }
+        }
+      },
+      "scoring_markers": [
+        "报告结论复核",
+        "候选账户",
+        "不能写成",
+        "名下账户",
+        "双空",
+        "对手方",
+        "现金",
+        "理财",
+        "最终去向",
+        "需核实",
+        "证据锚点",
+        "候选账户不能写成确认归属",
+        "现金或资产去向缺少确定性资金边",
+        "缺失对手或现金断点不能写成已证实",
+        "报告结论必须绑定证据锚点"
+      ],
+      "allowed_uncertainty": [
+        "可以引用 e7e3 的双空对手方缺失统计作为数据质量边界，但不能把双空对手方、现金断点或资产端线索写成已查明闭环。",
+        "候选账户可以作为追查线索；未绑定开户、身份、控制和交易事实前不得升级为确定名下账户。"
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "候选账户[^。；\\n]*(已确认|确定|已查明).*(名下|归属)",
+          "allowed_guard_regex": "(不能|不得|不可|未确认|不应|禁止|降级|线索|需核实|需复核)",
+          "reason": "Candidate account ownership must be downgraded unless source refs prove ownership."
+        },
+        {
+          "pattern": "(双空对手方|对手方[^。；\\n]*(为空|缺失|未知))[^。；\\n]*(闭环|最终去向|流向|归属)[^。；\\n]*(已确认|已查明|确定)",
+          "allowed_guard_regex": "(不能|不得|不可|证据不足|未支持|需核实|需复核|补调|断点)",
+          "reason": "Blank counterparty or cash-break endpoints cannot be written as a verified closed flow."
+        },
+        {
+          "pattern": "(现金|理财|资产)[^。；\\n]*(最终去向|最终流向|归属)[^。；\\n]*(已确认|已查明|确定)",
+          "allowed_guard_regex": "(不能|不得|不可|证据不足|未支持|需核实|需复核|补调|线索)",
+          "reason": "Cash/asset destination claims require supported flow evidence and cannot be stated as verified."
+        }
+      ],
+      "expected_tools": [
+        "validate_report_claims"
+      ]
+    },
+    {
+      "id": "replay_import_clean_coverage",
+      "case_id": "be6a1df3d3c4",
+      "question": "复盘导入清洗覆盖、同事实重复、换卡/补卡、空户名与对手字段缺口；说明 clean_duplicate=0 的边界，不能把候选重复直接扣成事实。",
+      "standard_logic": "audit_case_data_quality + resolve_duplicate_families. Reproduce import/cleaning coverage and separate deterministic counts from same-fact/card-switch candidates.",
+      "correct_facts": {
+        "behavior": "import_clean_coverage_replay",
+        "boundaries": [
+          "clean_duplicate=0 is not proof of no duplicates",
+          "same-fact/card-switch candidates require group-level review"
+        ]
+      },
+      "scoring_markers": [
+        "导入",
+        "清洗",
+        "clean_duplicate=0",
+        "同事实",
+        "换卡",
+        "不能全流水去重"
+      ],
+      "allowed_uncertainty": [
+        "Exact counts may vary by active case; the answer must state scope and data-quality boundaries."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "clean_duplicate=0[^。；\\n]*(没有|不存在|无).*重复",
+          "allowed_guard_regex": "(不等于|不能|不代表|需复核|候选)",
+          "reason": "clean_duplicate=0 must not be treated as proof that no same-fact duplicates exist."
+        }
+      ],
+      "expected_tools": [
+        "audit_case_data_quality",
+        "resolve_duplicate_families"
+      ]
+    },
+    {
+      "id": "replay_multisubject_trace",
+      "case_id": "be6a1df3d3c4",
+      "question": "围绕题目主体、关联公司和关联人做多主体资金追踪，输出已证实事实、可疑通道、证据边界、补调对象和下一步追查，不得误入正式报告门禁。",
+      "standard_logic": "hypothesis_probe + targeted trace/rank tools. Route open multi-subject tracing to Lab/Path semantics, not report gate.",
+      "correct_facts": {
+        "behavior": "multisubject_trace_replay",
+        "boundaries": [
+          "facts/leads/boundaries/next actions",
+          "no report-gate wording for ordinary investigation"
+        ]
+      },
+      "scoring_markers": [
+        "开放式深挖",
+        "关联",
+        "补调",
+        "证据边界",
+        "下一步"
+      ],
+      "allowed_uncertainty": [
+        "Specific subjects are supplied by the current case/user prompt and must not be fixed in production runtime."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(报告门禁|write_blocked|蓝皮书|执行方案|/goal|doctor|score|diagnostic label)",
+          "reason": "Ordinary multi-subject investigation must not leak internal/gate labels."
+        }
+      ],
+      "expected_tools": [
+        "hypothesis_probe",
+        "trace_subject_top_outflows"
+      ]
+    },
+    {
+      "id": "replay_rescope_recompute",
+      "case_id": "be6a1df3d3c4",
+      "question": "用户调整统计范围后重新计算金额、笔数和时间窗，明确完整数据范围、指定窗口、核心账户/交易号范围差异，不复用上一轮结论。",
+      "standard_logic": "Use the targeted rank/trace/profile tool with updated scope. Recompute after user rescope and disclose all scope differences.",
+      "correct_facts": {
+        "behavior": "rescope_recompute_replay",
+        "boundaries": [
+          "new scope recomputed",
+          "complete-data/window/core-account distinctions"
+        ]
+      },
+      "scoring_markers": [
+        "统计范围",
+        "重算",
+        "实际期间",
+        "时间窗口",
+        "核心",
+        "不能"
+      ],
+      "allowed_uncertainty": [
+        "Exact values depend on the supplied scope; stale previous-card values are not acceptable."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(沿用|复用|同上一轮|不需要重算)",
+          "allowed_guard_regex": "(不|不能|不得|不可|不应).{0,12}(沿用|复用|同上一轮)",
+          "reason": "A rescope request must be recomputed or explicitly blocked by missing scope."
+        }
+      ],
+      "expected_tools": [
+        "rank_counterparties"
+      ]
+    },
+    {
+      "id": "replay_negative_search",
+      "case_id": "be6a1df3d3c4",
+      "question": "复核某姓名/单位是否出现在户名、对手户名、摘要备注、账号和交易用途字段；若未命中，要列明搜索字段和证据边界，不能写成绝对不存在。",
+      "standard_logic": "hypothesis_probe or targeted QA/search card. Negative search must state searched fields and data-boundary limitations.",
+      "correct_facts": {
+        "behavior": "negative_search_replay",
+        "boundaries": [
+          "searched fields",
+          "no absolute nonexistence claim outside current dataset"
+        ]
+      },
+      "scoring_markers": [
+        "未命中",
+        "户名",
+        "对手",
+        "摘要",
+        "备注",
+        "边界"
+      ],
+      "allowed_uncertainty": [
+        "If the current case lacks searchable fields, answer should disclose missing coverage rather than inventing absence."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(绝对不存在|肯定没有|全网没有|任何地方都没有)",
+          "allowed_guard_regex": "(不能|不得|不可|不应).{0,24}(绝对不存在|肯定没有|全网没有|任何地方都没有)",
+          "reason": "Negative search only proves no hit in the searched case fields."
+        }
+      ],
+      "expected_tools": [
+        "hypothesis_probe"
+      ]
+    },
+    {
+      "id": "replay_continue_one_more_hop",
+      "case_id": "be6a1df3d3c4",
+      "question": "在已发现一跳收款对象后继续追一层，区分确定性交易边、后续对手统计、资产转换线索和逐笔余额承接缺口。",
+      "standard_logic": "trace_fund_next_hop/build_fund_flow_graph for continuation. Continue one hop when user asks, and preserve unsupported-flow boundaries.",
+      "correct_facts": {
+        "behavior": "continue_one_more_hop_replay",
+        "boundaries": [
+          "supported edge vs ranking lead",
+          "balance-carry evidence required"
+        ]
+      },
+      "scoring_markers": [
+        "后续",
+        "下一跳",
+        "逐笔余额承接",
+        "确定性资金边",
+        "不能确认",
+        "补调"
+      ],
+      "allowed_uncertainty": [
+        "The next-hop targets must come from current backend results, not fixed samples."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(report gate|报告门禁|write_blocked|固定样例|golden answer)",
+          "reason": "Continuation should not be suppressed by report-gate or eval/sample wording."
+        }
+      ],
+      "expected_tools": [
+        "trace_fund_next_hop",
+        "build_fund_flow_graph"
+      ]
+    },
+    {
+      "id": "replay_report_materialize",
+      "case_id": "be6a1df3d3c4",
+      "question": "把已复核事实材料化为报告草稿前，逐项检查报告结论、来源边界、数据质量、金额统计范围和未取得确定性资金边；不通过时只输出待复核草稿边界。",
+      "standard_logic": "During P0 containment, report materialization is blocked before execution. Do not invoke or simulate hidden full-case/report tools. Emit only the deterministic capability boundary until current-run source readiness, same-context receipts, claim validation, and PublicationReceipt prerequisites are satisfied.",
+      "correct_facts": {
+        "behavior": "report_materialize_replay",
+        "boundaries": [
+          "报告结论复核",
+          "source boundary",
+          "未取得确定性资金边降级"
+        ]
+      },
+      "scoring_markers": [
+        "报告结论",
+        "来源边界",
+        "数据质量",
+        "需复核",
+        "纠正",
+        "未支持"
+      ],
+      "allowed_uncertainty": [
+        "Formal report text can be withheld when claim/source boundaries are incomplete."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(可直接发布|可直接出具正式报告|门禁通过)",
+          "allowed_guard_regex": "(不能|不得|未通过|需复核|待复核|证据不足)",
+          "reason": "Report materialization must be blocked or downgraded until claim/source checks pass."
+        }
+      ],
+      "expected_tools": []
+    },
+    {
+      "id": "replay_case_delivery_pack",
+      "case_id": "be6a1df3d3c4",
+      "question": "把当前已复核事实组织成办案交付包，而不是正式定稿报告。必须包含事实材料、主体/账户/对手方表、异常特征表、资金流向表、补调材料清单和报告结论复核；不得输出工具日志或内部 gate 模板。",
+      "standard_logic": "During P0 containment, a case delivery pack is blocked before execution because its fact tables and report conclusions require host-verified current-run receipts. Do not invoke or simulate hidden full-case/report tools; return only the capability gap, checked scope, missing evidence, and补证动作.",
+      "correct_facts": {
+        "behavior": "case_delivery_pack_replay",
+        "boundaries": [
+          "delivery pack is not a final report",
+          "tables and lists derive from reviewed facts",
+          "报告结论复核 and continuation-list validation are required before formal use"
+        ]
+      },
+      "scoring_markers": [
+        "办案交付包",
+        "事实材料",
+        "主体/账户/对手方",
+        "异常特征表",
+        "资金流向表",
+        "补调材料清单",
+        "报告结论复核",
+        "不是正式定稿报告"
+      ],
+      "allowed_uncertainty": [
+        "If required facts are incomplete, return missing evidence and owner-skill handoff instead of inventing tables or report conclusions."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(工具日志|内部 gate|write_blocked|doctor|golden answer|可直接定稿|正式报告已完成)",
+          "allowed_guard_regex": "(不得|不能|不输出|不是|未完成|需复核|待补证)",
+          "reason": "Delivery packs must not leak internal templates or upgrade reviewed material into a final official report."
+        }
+      ],
+      "expected_tools": []
+    },
+    {
+      "id": "replay_amount_challenge",
+      "case_id": "be6a1df3d3c4",
+      "question": "当前案件里有人说合成主体甲转给合成主体乙 4200 万，也有人说 2025-08-27 核心账户/核心集中交易只有 2100 万；请分列原明细/高置信去重/时间窗/核心账户或交易号范围，解释重复放大和证据缺口，不能把未支持金额写成事实。",
+      "standard_logic": "Use rank only as candidate positioning, then inspect schema and run a bounded current-case cleaned/analysis-scope aggregate when the challenged amount requires final support. Recompute challenged amount and separate raw/effective/dedup/window/core-account or transaction-id scopes.",
+      "correct_facts": {
+        "behavior": "amount_challenge_replay",
+        "boundaries": [
+          "raw vs dedup/window/core scope",
+          "unsupported amount cannot be verified fact"
+        ]
+      },
+      "scoring_markers": [
+        "统计期间",
+        "原明细",
+        "高置信",
+        "去重",
+        "时间窗",
+        "核心",
+        "重复放大",
+        "不能写成事实"
+      ],
+      "allowed_uncertainty": [
+        "Exact challenged amount comes from the user prompt/current case and must not be hardcoded."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(未支持|错误|raw|重复放大)[^。；\\n]*(已查明|确定事实)",
+          "allowed_guard_regex": "(不能|不得|不应|需复核|证据不足)",
+          "reason": "Unsupported or duplicate-amplified amount must not be upgraded to verified fact."
+        }
+      ],
+      "expected_tools": [
+        "inspect_case_schema",
+        "run_case_sql"
+      ],
+      "expected_tool_budget": 16
+    },
+    {
+      "id": "account_dossier_card",
+      "case_id": "be6a1df3d3c4",
+      "question": "对账户 133011759553CNY0 做完整资金研判。必须输出 Account Dossier：账户范围、时间跨度、进出账金额和笔数、Top 对手、异常特征、资金来源/去向线索、证据缺口和下一步追查；不能只回答一个 Top 或金额。",
+      "standard_logic": "Route to account-dossier. Use account profile facts plus targeted counterparty/anomaly facts to complete the dossier package.",
+      "correct_facts": {
+        "behavior": "account_dossier_focused_skill",
+        "boundaries": [
+          "scope/time/amount/count/top counterparties/anomalies/gaps/next actions",
+          "not a single Top fact"
+        ]
+      },
+      "scoring_markers": [
+        "Account Dossier",
+        "账户范围",
+        "时间跨度",
+        "进账",
+        "出账",
+        "Top 对手",
+        "异常特征",
+        "证据缺口",
+        "下一步"
+      ],
+      "allowed_uncertainty": [
+        "Exact account metrics come from the active case tools and must not be hardcoded in production runtime."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(只需|仅需).{0,12}(Top|金额)|候选[^。；\\n]*(已确认|归属)",
+          "allowed_guard_regex": "(不能|不得|需复核|候选)",
+          "reason": "Object dossier must not collapse into a single fact or upgrade candidates."
+        }
+      ],
+      "expected_tools": [
+        "analyze_account_full",
+        "rank_counterparties",
+        "hypothesis_probe"
+      ]
+    },
+    {
+      "id": "subject_dossier_person",
+      "case_id": "be6a1df3d3c4",
+      "question": "对合成主体甲做完整某人资金研判。必须输出 Subject Dossier：直接账户、候选账户边界、时间跨度、进出账金额和笔数、Top 账户、Top 对手、可疑特征、资金来源/去向线索、证据缺口和下一步；不能把候选账户写成已确认归属。",
+      "standard_logic": "Route to subject-dossier. Use holder profile facts plus targeted rank facts and preserve direct/candidate ownership boundaries.",
+      "correct_facts": {
+        "behavior": "subject_dossier_focused_skill",
+        "boundaries": [
+          "direct vs candidate accounts",
+          "full dossier package"
+        ]
+      },
+      "scoring_markers": [
+        "Subject Dossier",
+        "直接账户",
+        "候选账户",
+        "时间跨度",
+        "进账",
+        "出账",
+        "Top 账户",
+        "Top 对手",
+        "证据缺口",
+        "下一步"
+      ],
+      "allowed_uncertainty": [
+        "Exact values depend on active case tools; candidate accounts remain leads unless supported."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "候选账户[^。；\\n]*(已确认|确定归属|名下账户)",
+          "allowed_guard_regex": "(不能|不得|不可|需复核|线索)",
+          "reason": "Candidate accounts cannot be upgraded to ownership facts."
+        }
+      ],
+      "expected_tools": [
+        "analyze_holder_full",
+        "rank_accounts",
+        "rank_counterparties"
+      ]
+    },
+    {
+      "id": "full_case_analysis_tree",
+      "case_id": "be6a1df3d3c4",
+      "question": "对当前案件做全案分析，跑完整资金研判树，但不要生成正式报告。必须覆盖数据量、时间跨度、清洗覆盖、全案进出账金额和笔数、按人/账户统计、Top20、可疑特征、资金链路、专题线索、证据缺口和续调清单。",
+      "standard_logic": "P0 containment blocks the hidden full-case analysis path before execution. Do not invoke or simulate it. Return only the deterministic capability boundary, current checked scope, unavailable sources, missing evidence, and补证动作; no case facts or whole-case conclusion may be generated.",
+      "correct_facts": {
+        "behavior": "full_case_analysis_focused_skill",
+        "boundaries": [
+          "analysis tree not report generation"
+        ]
+      },
+      "scoring_markers": [
+        "能力缺口",
+        "已检查范围",
+        "数据源不可用",
+        "证据缺失",
+        "补证"
+      ],
+      "allowed_uncertainty": [
+        "The full-case tree remains unavailable until current-run source readiness and same-context evidence coverage are host verified."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(write_blocked|report gate|报告门禁|正式报告草稿)",
+          "reason": "Full-case analysis without report generation must not leak report-gate wording or write a report."
+        }
+      ],
+      "expected_tools": []
+    },
+    {
+      "id": "report_builder_generation",
+      "case_id": "be6a1df3d3c4",
+      "question": "明确生成当前案件全案资金研判报告草稿。必须先汇总已验证事实，再进入报告写作和报告结论复核；如果报告结论、来源边界、数据质量或未取得确定性资金边未通过，只能输出待复核报告边界和补证动作。",
+      "standard_logic": "P0 containment blocks report drafting and materialization before execution. Do not invoke or simulate hidden full-case/report tools. Return only a deterministic capability boundary and补证动作 until current-run receipts, claim validation, and a valid PublicationReceipt exist.",
+      "correct_facts": {
+        "behavior": "report_builder_focused_skill",
+        "boundaries": [
+          "report generation only on explicit intent",
+          "report-conclusion/source validation required"
+        ]
+      },
+      "scoring_markers": [
+        "报告草稿",
+        "已验证",
+        "报告结论复核",
+        "来源边界",
+        "数据质量",
+        "未取得确定性资金边",
+        "需复核",
+        "补证"
+      ],
+      "allowed_uncertainty": [
+        "Report text may be blocked or downgraded when sources/report conclusions are incomplete."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(可直接发布|门禁通过|全部已证实)",
+          "allowed_guard_regex": "(不能|不得|未通过|需复核|待复核|证据不足)",
+          "reason": "Report builder must not upgrade unsupported report conclusions."
+        }
+      ],
+      "expected_tools": []
+    },
+    {
+      "id": "case_notebook_controlled_query",
+      "case_id": "be6a1df3d3c4",
+      "question": "现有语义工具无法覆盖一个自定义统计：按清洗明细和分析索引复核夜间大额出账占比，并要求生成可回放分析记录。应进入受控专项核算，说明当前案件、只读、清洗表/分析索引范围、允许视图、行数限制、执行审计要求、验证状态、证据边界、如果受控工具不可用时的能力缺口和下一步产品化沉淀；不得把弱来源、来源明细或未验证计算写成生产事实。",
+      "standard_logic": "Route to case-workbench. Use scope/schema/quality preflight, then use only the advertised read-only run_case_sql path through a current-case source envelope. Notebook artifact creation remains blocked until its publication and audit contract is implemented. If the controlled query tool is unavailable, return a 专项核算缺口说明 and do not fabricate query results, weak-source facts, or fake delivery.",
+      "correct_facts": {
+        "behavior": "controlled_case_workbench_focused_skill",
+        "boundaries": [
+          "semantic tools first",
+          "current case only",
+          "read-only controlled execution",
+          "cleaned fc_*_norm and analysis_* scope only",
+          "row-limited and auditable",
+          "capability gap if tool unavailable"
+        ]
+      },
+      "scoring_markers": [
+        "受控专项核算",
+        "当前案件",
+        "只读",
+        "清洗表",
+        "分析索引",
+        "限行",
+        "可回放",
+        "能力缺口",
+        "验证状态",
+        "证据边界"
+      ],
+      "allowed_uncertainty": [
+        "If run_case_sql is unavailable, answer with a capability gap and productization target instead of a numeric result."
+      ],
+      "forbidden_claims": [
+        {
+          "pattern": "(弱来源|未验证计算|raw/source rows|raw rows|fc_.*_raw|unbounded SELECT \\*|无界 SELECT \\*)",
+          "allowed_guard_regex": "(不得|不能|不可|不应|只读|受控|source envelope|证据边界|验证状态|gap|能力缺口)",
+          "reason": "Controlled workbench must not turn weak sources, raw/source rows, or unverified calculations into production facts."
+        },
+        {
+          "pattern": "(已完成夜间大额占比|夜间大额出账占比为|占比[0-9]+)",
+          "allowed_guard_regex": "(若工具可用|待受控工具返回|能力缺口|无法完成|不可用)",
+          "reason": "Do not fabricate the custom computation when the controlled tool is unavailable."
+        }
+      ],
+      "expected_tools": [
+        "get_case_scope_map",
+        "inspect_case_schema",
+        "audit_case_data_quality",
+        "run_case_sql"
+      ]
+    }
+  ]
+}

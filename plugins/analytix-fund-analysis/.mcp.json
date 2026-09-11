@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "analytix_funds": {
+      "disabled": true,
+      "command": "node",
+      "cwd": ".",
+      "args": [
+        "./mcp/server.mjs"
+      ],
+      "env_vars": [
+        "ANALYTIX_API_BASE_URL",
+        "ANALYTIX_API_TOKEN",
+        "ANALYTIX_CASE_PROJECT_CONFIG",
+        "ANALYTIX_CASE_PROJECT_ROOT",
+        "ANALYTIX_WORKSPACE_ROOT",
+        "ANALYTIX_DATA_ANALYSIS_DIR",
+        "ANALYTIX_DATA_ANALYSIS_HOME",
+        "ANALYTIX_DATA_ANALYSIS_CASES_ROOT",
+        "ANALYTIX_FUNDS_DISABLE_LOCAL_DUCKDB_WORKBENCH",
+        "ANALYTIX_FUNDS_ARTIFACT_DIR",
+        "ANALYTIX_FUNDS_DISCOVERY_MODE",
+        "ANALYTIX_FUNDS_EXPOSE_ALL_TOOLS",
+        "ANALYTIX_FUNDS_ALLOW_DEBUG_PAYLOAD"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 120,
+      "default_tools_approval_mode": "prompt",
+      "tools": {
+        "export_cleaned_case_data": {
+          "approval_mode": "prompt"
+        },
+        "run_full_case_analysis": {
+          "approval_mode": "prompt"
+        }
+      }
+    }
+  }
+}

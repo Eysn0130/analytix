@@ -1,0 +1,6 @@
+interface:
+  display_name: "研判完整性复核"
+  short_description: "复核研判完整性、统计范围、核验意见和遗漏方向"
+  default_prompt: "请复核资金研判是否遗漏方向、统计范围错误、证据不足或过度下结论。"
+policy:
+  allow_implicit_invocation: true

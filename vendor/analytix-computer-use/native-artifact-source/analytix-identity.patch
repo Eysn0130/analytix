@@ -1,0 +1,15 @@
+--- a/scripts/build-open-computer-use-app.sh
++++ b/scripts/build-open-computer-use-app.sh
+@@ -299 +299 @@
+-release_app_bundle_name="Open Computer Use.app"
++release_app_bundle_name="Analytix Computer Use.app"
+@@ -302,2 +302,2 @@
+-bundle_icon_name="OpenComputerUse.icns"
+-icon_master_png="${repo_root}/assets/app-icons/open-computer-use-1024.png"
++bundle_icon_name="AnalytixComputerUse.icns"
++icon_master_png="${repo_root}/assets/app-icons/analytix-computer-use-1024.png"
+@@ -307,2 +307,2 @@
+-bundle_display_name="Open Computer Use"
+-bundle_identifier="com.qwenlm.opencomputeruse"
++bundle_display_name="Analytix Computer Use"
++bundle_identifier="com.analytix.computer-use"

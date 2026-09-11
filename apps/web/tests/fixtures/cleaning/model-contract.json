@@ -1,0 +1,267 @@
+{
+  "version": 1,
+  "cleaningRealtime": {
+    "activeCaseId": "case-1",
+    "otherCaseId": "case-2",
+    "progressEvent": {
+      "event": "cleaning.job.progress",
+      "job_id": "clean-job-1",
+      "sequence": 10,
+      "type": "info",
+      "payload": {
+        "message": "cleaning step 1",
+        "progress": 40,
+        "step": 1
+      }
+    },
+    "expectedProgressProjection": {
+      "eventName": "cleaning.job.progress",
+      "jobId": "clean-job-1",
+      "liveEvent": {
+        "sequence": 10,
+        "level": "info",
+        "message": "cleaning step 1",
+        "progress": 40,
+        "step": 1
+      },
+      "shouldRefreshJobs": false,
+      "shouldRefreshContext": false
+    },
+    "completedEvent": {
+      "event": "cleaning.job.completed",
+      "job_id": "clean-job-1",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "payload": {
+        "progress": 100,
+        "counters": {
+          "cleaned_rows": 5
+        }
+      }
+    },
+    "expectedCompletedProjection": {
+      "completedCleanedRows": 5,
+      "shouldRefreshJobs": true,
+      "shouldRefreshContext": true
+    },
+    "previousJobs": [
+      {
+        "job_id": "clean-job-1",
+        "status": "running",
+        "progress": 40,
+        "cleaned_rows": 1,
+        "updated_at": "2025-12-31T23:59:00Z"
+      },
+      {
+        "job_id": "clean-job-2",
+        "status": "queued",
+        "progress": 0,
+        "cleaned_rows": 0,
+        "updated_at": "2025-12-31T23:58:00Z"
+      }
+    ],
+    "expectedCompletedJobs": [
+      {
+        "job_id": "clean-job-1",
+        "status": "succeeded",
+        "progress": 100,
+        "cleaned_rows": 5,
+        "updated_at": "2026-01-01T00:00:00Z"
+      },
+      {
+        "job_id": "clean-job-2",
+        "status": "queued",
+        "progress": 0,
+        "cleaned_rows": 0,
+        "updated_at": "2025-12-31T23:58:00Z"
+      }
+    ],
+    "canceledEvent": {
+      "event": "cleaning.job.failed",
+      "job_id": "clean-job-1",
+      "timestamp": "2026-01-01T00:00:10Z",
+      "payload": {
+        "code": "JOB_CANCELED"
+      }
+    },
+    "expectedCanceledJobs": [
+      {
+        "job_id": "clean-job-1",
+        "status": "canceled",
+        "progress": 40,
+        "cleaned_rows": 1,
+        "updated_at": "2026-01-01T00:00:10Z"
+      },
+      {
+        "job_id": "clean-job-2",
+        "status": "queued",
+        "progress": 0,
+        "cleaned_rows": 0,
+        "updated_at": "2025-12-31T23:58:00Z"
+      }
+    ]
+  },
+  "exportRealtime": {
+    "activeCaseId": "case-1",
+    "otherCaseId": "case-2",
+    "initialState": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "idle",
+      "progress": 0,
+      "outputPath": "",
+      "error": "previous warning",
+      "message": ""
+    },
+    "progressEvent": {
+      "event": "export.job.progress",
+      "job_id": "export-job-1",
+      "payload": {
+        "message": "exporting",
+        "progress": 35
+      }
+    },
+    "expectedProgressProjection": {
+      "eventName": "export.job.progress",
+      "jobId": "export-job-1",
+      "payloadMessage": "exporting",
+      "payloadCode": "",
+      "payloadOutputPath": "",
+      "progress": 35
+    },
+    "expectedProgressState": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "running",
+      "progress": 35,
+      "outputPath": "",
+      "error": "previous warning",
+      "message": "exporting"
+    },
+    "completedEvent": {
+      "event": "export.job.completed",
+      "job_id": "export-job-1",
+      "payload": {
+        "message": "export complete",
+        "output_path": "/tmp/export.csv"
+      }
+    },
+    "expectedCompletedState": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "done",
+      "progress": 100,
+      "outputPath": "/tmp/export.csv",
+      "error": "previous warning",
+      "message": "export complete"
+    },
+    "expectedCompletedTerminalAction": {
+      "type": "notify",
+      "status": "done",
+      "outputPath": "/tmp/export.csv",
+      "errorText": ""
+    },
+    "failedEvent": {
+      "event": "export.job.failed",
+      "job_id": "export-job-1",
+      "payload": {
+        "code": "WRITE_FAILED",
+        "message": "write failed"
+      }
+    },
+    "expectedFailedState": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "failed",
+      "progress": 0,
+      "outputPath": "",
+      "error": "write failed",
+      "message": "write failed"
+    },
+    "expectedFailedTerminalAction": {
+      "type": "notify",
+      "status": "failed",
+      "outputPath": "",
+      "errorText": "write failed"
+    },
+    "stateWithPreviousError": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "running",
+      "progress": 50,
+      "outputPath": "",
+      "error": "previous error",
+      "message": "running"
+    },
+    "canceledEvent": {
+      "event": "export.job.failed",
+      "job_id": "export-job-1",
+      "payload": {
+        "code": "JOB_CANCELED",
+        "message": "ignored"
+      }
+    },
+    "expectedCanceledState": {
+      "jobId": "export-job-1",
+      "kind": "csv",
+      "status": "canceled",
+      "progress": 50,
+      "outputPath": "",
+      "error": "previous error",
+      "message": "导出已取消"
+    },
+    "expectedCanceledTerminalAction": {
+      "type": "notify",
+      "status": "canceled",
+      "outputPath": "",
+      "errorText": ""
+    },
+    "completedWithoutPathEvent": {
+      "event": "export.job.completed",
+      "job_id": "export-job-1",
+      "payload": {
+        "message": "done"
+      }
+    },
+    "failedWithoutMessageEvent": {
+      "event": "export.job.failed",
+      "job_id": "export-job-1",
+      "payload": {
+        "code": "WRITE_FAILED"
+      }
+    },
+    "expectedSyncTerminalAction": {
+      "type": "sync"
+    }
+  },
+  "stepImpact": {
+    "summaries": [
+      {
+        "step": 1,
+        "description": "amount balance",
+        "affected_rows": 3
+      },
+      {
+        "step": 8,
+        "description": "account info",
+        "affected_rows": 2
+      }
+    ],
+    "expectedPositiveSteps": [
+      {
+        "step": 1,
+        "description": "amount balance",
+        "affectedRows": 3
+      },
+      {
+        "step": 8,
+        "description": "account info",
+        "affectedRows": 2
+      }
+    ],
+    "expectedImpact": {
+      "txnStepAffected": 3,
+      "accountStepAffected": 2,
+      "stepHits": 2
+    }
+  }
+}

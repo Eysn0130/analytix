@@ -1,0 +1,2212 @@
+.analytix-animated-login,
+.analytix-animated-login *,
+.analytix-animated-login *::before,
+.analytix-animated-login *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html:has(.analytix-animated-login),
+body:has(.analytix-animated-login),
+#root:has(.analytix-animated-login) {
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body:has(.analytix-animated-login) {
+  background: #1a1a2e;
+  zoom: 1;
+}
+
+body:has(.analytix-animated-login)::before,
+body:has(.analytix-animated-login)::after {
+  display: none;
+}
+
+.analytix-animated-login {
+  --login-form-width: 400px;
+  --login-form-min-height: 400px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: clamp(36px, 7vh, 76px) 84px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #1a1a2e;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  max-height: 100vh;
+  overscroll-behavior: none;
+  pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.analytix-animated-login .login-window-drag-region {
+  position: absolute;
+  inset: 0 0 auto 68px;
+  z-index: 1;
+  height: max(64px, var(--desktop-titlebar-height, 0px));
+  background: #1a1a2e;
+  pointer-events: auto;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.analytix-animated-login [data-copy-allowed="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.analytix-animated-login.is-stage-prepared,
+.analytix-animated-login.is-stage-entering,
+.analytix-animated-login.is-stage-entered {
+  background: #1a1a2e;
+}
+
+.analytix-animated-login a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.analytix-animated-login .text-pair {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.08;
+}
+
+.analytix-animated-login .text-primary {
+  color: inherit;
+}
+
+.analytix-animated-login .text-secondary {
+  color: rgba(72, 72, 84, 0.62);
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.analytix-animated-login .login-page {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: min(100%, 1080px);
+  height: min(600px, calc(100vh - clamp(150px, 18vh, 220px)));
+  min-height: min(520px, calc(100vh - clamp(150px, 18vh, 220px)));
+  max-height: calc(100vh - clamp(150px, 18vh, 220px));
+  border: 1px solid transparent;
+  border-radius: 32px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 28px 80px rgba(8, 8, 18, 0.3),
+    0 6px 18px rgba(8, 8, 18, 0.16);
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.analytix-animated-login.is-stage-entering .login-page {
+  animation: analytixLoginShellEnter 760ms cubic-bezier(0.2, 0.88, 0.22, 1) 120ms both;
+}
+
+.analytix-animated-login.is-stage-entering .left-panel {
+  animation: analytixLoginPanelReveal 640ms cubic-bezier(0.2, 0.88, 0.22, 1) 180ms both;
+}
+
+.analytix-animated-login.is-stage-entering .right-panel {
+  animation: analytixLoginPanelReveal 680ms cubic-bezier(0.2, 0.88, 0.22, 1) 220ms both;
+}
+
+.analytix-animated-login.is-stage-entering .left-panel .logo {
+  animation: analytixLoginContentReveal 420ms cubic-bezier(0.24, 0.9, 0.24, 1) 320ms both;
+}
+
+.analytix-animated-login.is-stage-entering .characters-wrapper {
+  animation: analytixLoginContentReveal 760ms cubic-bezier(0.22, 0.88, 0.24, 1) 460ms both;
+}
+
+.analytix-animated-login.is-stage-entering .footer-links {
+  animation: analytixLoginContentReveal 520ms cubic-bezier(0.24, 0.88, 0.24, 1) 660ms both;
+}
+
+.analytix-animated-login.is-stage-entering .sparkle-icon {
+  animation: analytixLoginContentReveal 320ms cubic-bezier(0.24, 0.9, 0.24, 1) 340ms both;
+}
+
+.analytix-animated-login.is-stage-entering .form-header {
+  animation: analytixLoginContentReveal 460ms cubic-bezier(0.24, 0.9, 0.24, 1) 430ms both;
+}
+
+.analytix-animated-login.is-stage-entering .startup-bypass-chip {
+  animation: analytixLoginContentReveal 360ms cubic-bezier(0.24, 0.9, 0.24, 1) 500ms both;
+}
+
+.analytix-animated-login.is-stage-entering .startup-bypass-status-list {
+  animation: analytixLoginContentReveal 460ms cubic-bezier(0.24, 0.9, 0.24, 1) 640ms both;
+}
+
+.analytix-animated-login.is-stage-entering .startup-bypass-note {
+  animation: analytixLoginContentReveal 380ms cubic-bezier(0.24, 0.9, 0.24, 1) 820ms both;
+}
+
+.analytix-animated-login.is-stage-entering .startup-bypass-action {
+  animation: analytixLoginContentReveal 380ms cubic-bezier(0.24, 0.9, 0.24, 1) 900ms both;
+}
+
+.analytix-animated-login.is-stage-entering #login-form > .form-group:nth-of-type(1) {
+  animation: analytixLoginContentReveal 460ms cubic-bezier(0.24, 0.9, 0.24, 1) 560ms both;
+}
+
+.analytix-animated-login.is-stage-entering #login-form > .form-group:nth-of-type(2) {
+  animation: analytixLoginContentReveal 460ms cubic-bezier(0.24, 0.9, 0.24, 1) 700ms both;
+}
+
+.analytix-animated-login.is-stage-entering .form-options {
+  animation: analytixLoginContentReveal 420ms cubic-bezier(0.24, 0.9, 0.24, 1) 830ms both;
+}
+
+.analytix-animated-login.is-stage-entering .btn-login {
+  animation: analytixLoginContentReveal 440ms cubic-bezier(0.24, 0.9, 0.24, 1) 960ms both;
+}
+
+.analytix-animated-login.is-stage-entering .signup-link {
+  animation: analytixLoginContentReveal 380ms cubic-bezier(0.24, 0.9, 0.24, 1) 1080ms both;
+}
+
+.analytix-animated-login.is-stage-entering .license-import-panel > * {
+  animation: analytixLoginContentReveal 420ms cubic-bezier(0.24, 0.9, 0.24, 1) 560ms both;
+}
+
+.analytix-animated-login.is-stage-prepared .login-page {
+  opacity: 0;
+  transform: none;
+}
+
+.analytix-animated-login.is-stage-prepared .left-panel,
+.analytix-animated-login.is-stage-prepared .right-panel,
+.analytix-animated-login.is-stage-prepared .left-panel .logo,
+.analytix-animated-login.is-stage-prepared .characters-wrapper,
+.analytix-animated-login.is-stage-prepared .footer-links,
+.analytix-animated-login.is-stage-prepared .sparkle-icon,
+.analytix-animated-login.is-stage-prepared .form-header,
+.analytix-animated-login.is-stage-prepared .startup-bypass-chip,
+.analytix-animated-login.is-stage-prepared .startup-bypass-status-list,
+.analytix-animated-login.is-stage-prepared .startup-bypass-note,
+.analytix-animated-login.is-stage-prepared .startup-bypass-action,
+.analytix-animated-login.is-stage-prepared .license-import-panel > *,
+.analytix-animated-login.is-stage-prepared #login-form > .form-group,
+.analytix-animated-login.is-stage-prepared .form-options,
+.analytix-animated-login.is-stage-prepared .btn-login,
+.analytix-animated-login.is-stage-prepared .signup-link {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+
+.analytix-animated-login .left-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #d4d0dc 0%, #c8c4d0 50%, #bbb7c5 100%);
+  padding: 24px 48px 22px;
+  overflow: hidden;
+}
+
+.analytix-animated-login .left-panel .logo {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.analytix-animated-login .logo-mark-shell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.analytix-animated-login .logo-mark-shell svg {
+  width: 100%;
+  height: auto;
+}
+
+.analytix-animated-login .logo-mark-shell img,
+.analytix-animated-login .login-brand-symbol {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  object-fit: contain;
+}
+
+.analytix-animated-login .login-brand-wordmark {
+  display: block;
+  width: 104px;
+  height: auto;
+  object-fit: contain;
+}
+
+.analytix-animated-login .characters-wrapper {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 332px;
+  will-change: transform, opacity;
+  transform: translateZ(0);
+}
+
+.analytix-animated-login .left-panel .footer-links {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  gap: 28px;
+  font-size: 13px;
+  color: rgba(80, 70, 90, 0.7);
+}
+
+.analytix-animated-login .left-panel .footer-links a,
+.analytix-animated-login .left-panel .footer-links button {
+  color: inherit;
+  transition: color 0.2s;
+}
+
+.analytix-animated-login .footer-link-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analytix-animated-login .left-panel .footer-links .text-pair {
+  gap: 3px;
+}
+
+.analytix-animated-login .left-panel .footer-links .text-primary {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .left-panel .footer-links .text-secondary {
+  color: rgba(80, 70, 90, 0.52);
+  font-size: 9px;
+}
+
+.analytix-animated-login .left-panel .footer-links a:hover {
+  color: #333;
+}
+
+.analytix-animated-login .left-panel .footer-links button:hover {
+  color: #333;
+}
+
+.analytix-animated-login .left-panel::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  right: 15%;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: rgba(180, 170, 200, 0.25);
+  filter: blur(80px);
+}
+
+.analytix-animated-login .left-panel::before {
+  content: "";
+  position: absolute;
+  bottom: 15%;
+  left: 10%;
+  width: 350px;
+  height: 350px;
+  border-radius: 50%;
+  background: rgba(200, 195, 210, 0.2);
+  filter: blur(100px);
+}
+
+.analytix-animated-login .right-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  padding: 24px 40px;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.analytix-animated-login.is-panel-login .right-panel {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.analytix-animated-login.is-panel-register .right-panel,
+.analytix-animated-login.is-panel-forgot-password .right-panel {
+  align-items: center;
+}
+
+.analytix-animated-login.is-panel-register .right-panel {
+  padding-block: 4px;
+}
+
+.analytix-animated-login.is-panel-forgot-password .right-panel {
+  padding-block: 8px;
+}
+
+.analytix-animated-login .form-container {
+  width: 100%;
+  max-width: var(--login-form-width);
+  min-height: var(--login-form-min-height);
+  will-change: transform, opacity;
+  transform: translateZ(0);
+}
+
+.analytix-animated-login.is-panel-register .form-container,
+.analytix-animated-login.is-panel-forgot-password .form-container {
+  min-height: auto;
+  padding-block: 6px 16px;
+}
+
+.analytix-animated-login.is-panel-register .form-container {
+  margin-block: auto;
+  padding-block: 0;
+}
+
+.analytix-animated-login.is-panel-forgot-password .form-container {
+  padding-block: 0;
+}
+
+.analytix-animated-login .sparkle-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.analytix-animated-login.is-panel-forgot-password .sparkle-icon {
+  margin-bottom: 12px;
+}
+
+.analytix-animated-login .sparkle-icon svg {
+  width: 44px;
+  height: 29px;
+}
+
+.analytix-animated-login .form-header {
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.analytix-animated-login .compact-form-header {
+  margin-bottom: 14px;
+}
+
+.analytix-animated-login.is-panel-register .compact-form-header {
+  margin-bottom: 4px;
+}
+
+.analytix-animated-login.is-panel-register .login-heading {
+  margin-bottom: 4px;
+  font-size: 22px;
+}
+
+.analytix-animated-login.is-panel-forgot-password .login-heading {
+  margin-bottom: 6px;
+  font-size: 24px;
+}
+
+.analytix-animated-login.is-panel-register .header-description-copy .text-primary,
+.analytix-animated-login.is-panel-forgot-password .header-description-copy .text-primary {
+  font-size: 12px;
+}
+
+.analytix-animated-login.is-panel-register .header-description-copy .text-secondary,
+.analytix-animated-login.is-panel-forgot-password .header-description-copy .text-secondary {
+  font-size: 8px;
+}
+
+.analytix-animated-login.is-mode-bypass .form-container {
+  max-width: 420px;
+}
+
+.analytix-animated-login .startup-bypass-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.analytix-animated-login .startup-bypass-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 0 14px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.92) 0%, rgba(224, 231, 255, 0.86) 100%);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.analytix-animated-login .startup-bypass-header {
+  margin-bottom: 0;
+}
+
+.analytix-animated-login .startup-bypass-summary {
+  color: #5b6270;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+.analytix-animated-login .startup-bypass-status-list {
+  display: grid;
+  gap: 12px;
+}
+
+.analytix-animated-login .startup-bypass-status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 15px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.94) 100%);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
+}
+
+.analytix-animated-login .startup-bypass-status__dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 6px rgba(148, 163, 184, 0.12);
+}
+
+.analytix-animated-login .startup-bypass-status.is-active .startup-bypass-status__dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.14);
+}
+
+.analytix-animated-login .startup-bypass-status.is-ready .startup-bypass-status__dot {
+  background: #0f766e;
+  box-shadow: 0 0 0 6px rgba(15, 118, 110, 0.14);
+}
+
+.analytix-animated-login .startup-bypass-status.is-warning .startup-bypass-status__dot {
+  background: #c2410c;
+  box-shadow: 0 0 0 6px rgba(194, 65, 12, 0.14);
+}
+
+.analytix-animated-login .startup-bypass-status__body {
+  display: grid;
+  gap: 4px;
+}
+
+.analytix-animated-login .startup-bypass-status__label {
+  color: #101828;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.analytix-animated-login .startup-bypass-status__detail {
+  color: #667085;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.analytix-animated-login .startup-bypass-note {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.05) 0%, rgba(30, 41, 59, 0.08) 100%);
+  color: #495367;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+.analytix-animated-login .startup-bypass-action {
+  display: grid;
+  gap: 8px;
+}
+
+.analytix-animated-login .startup-bypass-action button {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(17, 24, 39, 0.14);
+  border-radius: 14px;
+  background: #111827;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.analytix-animated-login .startup-bypass-action button:hover {
+  background: #0f766e;
+  border-color: rgba(15, 118, 110, 0.36);
+  transform: translateY(-1px);
+}
+
+.analytix-animated-login .startup-bypass-action button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
+
+.analytix-animated-login .startup-bypass-action span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.analytix-animated-login .startup-bypass-action.is-ready span {
+  color: #0f766e;
+}
+
+.analytix-animated-login .startup-bypass-action.is-warning span {
+  color: #c2410c;
+}
+
+.analytix-animated-login .login-heading {
+  margin: 0 0 8px;
+  color: #121926;
+  font-size: clamp(22px, 2.4vw, 27px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+
+.analytix-animated-login .header-description-copy .text-primary {
+  color: #62606d;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .header-description-copy .text-secondary {
+  color: rgba(98, 96, 109, 0.58);
+  font-size: 10px;
+}
+
+.analytix-animated-login .form-group {
+  margin-bottom: 10px;
+}
+
+.analytix-animated-login.is-panel-register .form-group,
+.analytix-animated-login.is-panel-forgot-password .form-group {
+  margin-bottom: 10px;
+}
+
+.analytix-animated-login.is-panel-register .form-group {
+  margin-bottom: 2px;
+}
+
+.analytix-animated-login.is-panel-register .form-group label,
+.analytix-animated-login.is-panel-forgot-password .form-group label {
+  margin-bottom: 4px;
+}
+
+.analytix-animated-login.is-panel-register .form-group label {
+  margin-bottom: 0;
+}
+
+.analytix-animated-login .form-group label {
+  display: block;
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.analytix-animated-login .field-label-copy .text-primary {
+  color: #333;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .field-label-copy .text-secondary {
+  color: rgba(78, 78, 90, 0.52);
+  font-size: 9px;
+}
+
+.analytix-animated-login.is-panel-register .field-label-copy {
+  gap: 1px;
+}
+
+.analytix-animated-login.is-panel-register .field-label-copy .text-primary,
+.analytix-animated-login.is-panel-forgot-password .field-label-copy .text-primary {
+  font-size: 11px;
+}
+
+.analytix-animated-login.is-panel-register .field-label-copy .text-primary {
+  font-size: 10px;
+}
+
+.analytix-animated-login.is-panel-register .field-label-copy .text-secondary,
+.analytix-animated-login.is-panel-forgot-password .field-label-copy .text-secondary {
+  font-size: 7px;
+  letter-spacing: 0.07em;
+}
+
+.analytix-animated-login .form-group .input-wrapper {
+  position: relative;
+}
+
+.analytix-animated-login .form-group input {
+  width: 100%;
+  height: 38px;
+  padding: 0 40px 0 0;
+  border: none;
+  border-bottom: 1.5px solid #e0e0e0;
+  outline: none;
+  background: transparent;
+  color: #1a1a2e;
+  font: inherit;
+  font-size: 15px;
+  transition: border-color 0.3s;
+}
+
+.analytix-animated-login .form-group input:focus {
+  border-bottom-color: #5b21b6;
+}
+
+.analytix-animated-login .form-group input::placeholder {
+  color: #ccc;
+}
+
+.analytix-animated-login .form-group input[type="password"]:not(:placeholder-shown) {
+  letter-spacing: 2px;
+}
+
+.analytix-animated-login .form-group input:disabled {
+  color: #8b8794;
+  cursor: wait;
+}
+
+.analytix-animated-login.is-panel-register .form-group input,
+.analytix-animated-login.is-panel-forgot-password .form-group input {
+  height: 36px;
+  font-size: 14px;
+}
+
+.analytix-animated-login.is-panel-register .form-group input {
+  height: 27px;
+  font-size: 13px;
+}
+
+.analytix-animated-login .verification-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.analytix-animated-login .verification-code-input input {
+  padding-right: 0;
+  letter-spacing: 0.28em;
+}
+
+.analytix-animated-login .send-code-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 124px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid #d7deed;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+  color: #2643a5;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    color 0.2s,
+    transform 0.2s;
+}
+
+.analytix-animated-login .send-code-button .text-pair {
+  align-items: center;
+  gap: 2px;
+}
+
+.analytix-animated-login .send-code-button .text-primary {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .send-code-button .text-secondary {
+  color: rgba(38, 67, 165, 0.6);
+  font-size: 8px;
+}
+
+.analytix-animated-login.is-panel-register .send-code-button {
+  min-width: 112px;
+  height: 27px;
+  padding: 0 10px;
+  border-radius: 11px;
+}
+
+.analytix-animated-login.is-panel-register .send-code-button .text-primary {
+  font-size: 11px;
+}
+
+.analytix-animated-login.is-panel-register .send-code-button .text-secondary {
+  font-size: 7px;
+}
+
+.analytix-animated-login .send-code-button:hover {
+  border-color: #b9c8eb;
+  background: linear-gradient(180deg, #ffffff 0%, #e9f1ff 100%);
+  transform: translateY(-1px);
+}
+
+.analytix-animated-login .send-code-button:disabled {
+  color: #8c95a8;
+  border-color: #e5eaf3;
+  background: #f7f9fc;
+  cursor: wait;
+  transform: none;
+}
+
+.analytix-animated-login .send-code-button:disabled .text-secondary {
+  color: rgba(140, 149, 168, 0.7);
+}
+
+.analytix-animated-login .toggle-password {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  padding: 6px;
+  border: none;
+  background: none;
+  color: #666;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: color 0.2s;
+}
+
+.analytix-animated-login .toggle-password:hover {
+  color: #333;
+}
+
+.analytix-animated-login .toggle-password:disabled {
+  color: #b9b5c1;
+  cursor: not-allowed;
+}
+
+.analytix-animated-login .toggle-password:focus-visible,
+.analytix-animated-login .forgot-link:focus-visible,
+.analytix-animated-login .signup-link a:focus-visible,
+.analytix-animated-login .send-code-button:focus-visible,
+.analytix-animated-login .auth-switch-link:focus-visible,
+.analytix-animated-login .challenge-refresh-button:focus-visible,
+.analytix-animated-login .challenge-verify-button:focus-visible,
+.analytix-animated-login .auth-challenge-tile:focus-visible,
+.analytix-animated-login .license-import-link:focus-visible,
+.analytix-animated-login .license-import-back:focus-visible,
+.analytix-animated-login .startup-bypass-action button:focus-visible,
+.analytix-animated-login .left-panel .footer-links a:focus-visible,
+.analytix-animated-login .left-panel .footer-links button:focus-visible,
+.analytix-animated-login .login-legal-panel__close:focus-visible {
+  outline: 2px solid #5b21b6;
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.analytix-animated-login .form-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+.analytix-animated-login .remember-me {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.analytix-animated-login .remember-me .text-primary {
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .remember-me .text-secondary {
+  color: rgba(85, 85, 96, 0.58);
+  font-size: 9px;
+}
+
+.analytix-animated-login .remember-me input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #5b21b6;
+  cursor: pointer;
+}
+
+.analytix-animated-login .forgot-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #5b21b6;
+  font: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.analytix-animated-login .forgot-link .text-pair {
+  align-items: flex-end;
+}
+
+.analytix-animated-login .forgot-link .text-primary {
+  color: #5b21b6;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .forgot-link .text-secondary {
+  color: rgba(91, 33, 182, 0.54);
+  font-size: 9px;
+}
+
+.analytix-animated-login .forgot-link:hover {
+  opacity: 0.8;
+}
+
+.analytix-animated-login .btn-login {
+  position: relative;
+  width: 100%;
+  height: 48px;
+  overflow: hidden;
+  font: inherit;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.analytix-animated-login .btn-login {
+  margin-bottom: 0;
+  border: 1.5px solid #1a1a2e;
+  border-radius: 25px;
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.analytix-animated-login .btn-login .btn-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+}
+
+.analytix-animated-login .button-copy {
+  align-items: center;
+  gap: 1px;
+}
+
+.analytix-animated-login .button-copy .text-primary {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .button-copy .text-secondary {
+  color: currentColor;
+  font-size: 8px;
+  opacity: 0.72;
+}
+
+.analytix-animated-login .btn-login .btn-hover-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 25px;
+  background: #5b21b6;
+  color: #fff;
+  opacity: 0;
+  transition: all 0.3s;
+}
+
+.analytix-animated-login .btn-login:hover .btn-text {
+  transform: translateX(40px);
+  opacity: 0;
+}
+
+.analytix-animated-login .btn-login:hover .btn-hover-content {
+  opacity: 1;
+}
+
+.analytix-animated-login .btn-login:disabled {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.analytix-animated-login .btn-login:disabled .btn-hover-content {
+  opacity: 0 !important;
+}
+
+.analytix-animated-login .btn-login:disabled:hover .btn-text {
+  transform: none;
+  opacity: 1;
+}
+
+.analytix-animated-login .signup-link {
+  width: 100%;
+  margin-top: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+  color: #888;
+  text-align: right;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.analytix-animated-login .signup-link > .text-pair {
+  align-items: flex-end;
+}
+
+.analytix-animated-login .signup-link > .text-pair .text-primary {
+  color: #807d89;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .signup-link > .text-pair .text-secondary {
+  color: rgba(128, 125, 137, 0.58);
+  font-size: 9px;
+}
+
+.analytix-animated-login .signup-link a {
+  color: #1a1a2e;
+}
+
+.analytix-animated-login .signup-link a .text-pair {
+  align-items: flex-end;
+}
+
+.analytix-animated-login .signup-link a .text-primary {
+  color: #1a1a2e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .signup-link a .text-secondary {
+  color: rgba(26, 26, 46, 0.56);
+  font-size: 9px;
+}
+
+.analytix-animated-login .signup-link a:hover {
+  text-decoration: underline;
+}
+
+.analytix-animated-login .login-secondary-actions {
+  width: 100%;
+  margin-top: 20px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.analytix-animated-login .auth-switch-link,
+.analytix-animated-login .license-import-link,
+.analytix-animated-login .license-import-back {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  line-height: 1.08;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.analytix-animated-login .auth-switch-link {
+  color: #1a1a2e;
+}
+
+.analytix-animated-login .license-import-link,
+.analytix-animated-login .license-import-back {
+  color: #5b21b6;
+}
+
+.analytix-animated-login .login-secondary-actions .text-pair,
+.analytix-animated-login .auth-switch-link .text-pair,
+.analytix-animated-login .license-import-link .text-pair,
+.analytix-animated-login .license-import-back .text-pair {
+  gap: 3px;
+}
+
+.analytix-animated-login .login-secondary-actions .auth-switch-link .text-pair {
+  align-items: flex-start;
+}
+
+.analytix-animated-login .login-secondary-actions .license-import-link .text-pair {
+  align-items: flex-end;
+}
+
+.analytix-animated-login .auth-switch-link .text-primary,
+.analytix-animated-login .license-import-link .text-primary,
+.analytix-animated-login .license-import-back .text-primary {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .auth-switch-link .text-secondary,
+.analytix-animated-login .license-import-link .text-secondary,
+.analytix-animated-login .license-import-back .text-secondary {
+  font-size: 9px;
+}
+
+.analytix-animated-login .auth-switch-link .text-primary {
+  color: #1a1a2e;
+}
+
+.analytix-animated-login .auth-switch-link .text-secondary {
+  color: rgba(26, 26, 46, 0.56);
+}
+
+.analytix-animated-login .license-import-link .text-primary,
+.analytix-animated-login .license-import-back .text-primary {
+  color: #5b21b6;
+}
+
+.analytix-animated-login .license-import-link .text-secondary,
+.analytix-animated-login .license-import-back .text-secondary {
+  color: rgba(91, 33, 182, 0.54);
+}
+
+.analytix-animated-login .auth-switch-link:hover {
+  text-decoration: underline;
+}
+
+.analytix-animated-login .auth-switch-link:hover,
+.analytix-animated-login .license-import-link:hover,
+.analytix-animated-login .license-import-back:hover {
+  opacity: 0.72;
+}
+
+.analytix-animated-login .auth-inline-panel {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: var(--login-form-width);
+  max-height: 100%;
+}
+
+.analytix-animated-login.is-panel-register .auth-inline-panel {
+  gap: 2px;
+}
+
+.analytix-animated-login .auth-inline-form {
+  display: grid;
+}
+
+.analytix-animated-login .register-agreement {
+  margin: 0 0 2px;
+  align-items: flex-start;
+}
+
+.analytix-animated-login.is-panel-register .register-agreement {
+  gap: 6px;
+}
+
+.analytix-animated-login.is-panel-register .register-agreement input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+.analytix-animated-login.is-panel-register .register-agreement .text-primary {
+  font-size: 11px;
+}
+
+.analytix-animated-login.is-panel-register .register-agreement .text-secondary {
+  font-size: 7px;
+}
+
+.analytix-animated-login .auth-inline-message {
+  display: none;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(146, 160, 188, 0.18);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.analytix-animated-login .auth-inline-message.is-visible {
+  display: block;
+}
+
+.analytix-animated-login .auth-inline-message .text-primary {
+  color: #4c5872;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .auth-inline-message .text-secondary {
+  color: rgba(76, 88, 114, 0.54);
+  font-size: 8px;
+}
+
+.analytix-animated-login .auth-inline-message.is-success {
+  border-color: rgba(23, 133, 108, 0.2);
+  background: rgba(24, 145, 117, 0.08);
+}
+
+.analytix-animated-login .auth-inline-message.is-success .text-primary {
+  color: #166857;
+}
+
+.analytix-animated-login .auth-inline-message.is-success .text-secondary {
+  color: rgba(22, 104, 87, 0.58);
+}
+
+.analytix-animated-login .auth-inline-message.is-error {
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.analytix-animated-login .auth-inline-message.is-error .text-primary {
+  color: #be2d2d;
+}
+
+.analytix-animated-login .auth-inline-message.is-error .text-secondary {
+  color: rgba(190, 45, 45, 0.58);
+}
+
+.analytix-animated-login .auth-inline-primary {
+  margin-top: 0;
+}
+
+.analytix-animated-login.is-panel-register .btn-login {
+  height: 40px;
+}
+
+.analytix-animated-login.is-panel-register .signup-link {
+  margin-top: 0;
+}
+
+.analytix-animated-login .license-import-panel {
+  position: relative;
+  display: grid;
+  gap: 22px;
+  width: 100%;
+  max-width: var(--login-form-width);
+}
+
+.analytix-animated-login .license-import-back {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  justify-self: start;
+}
+
+.analytix-animated-login .license-import-header {
+  margin-bottom: 0;
+}
+
+.analytix-animated-login .license-import-header p {
+  color: #5b6270;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+.analytix-animated-login .license-machine-field {
+  margin-bottom: 0;
+}
+
+.analytix-animated-login .license-machine-field input {
+  padding-right: 0;
+  color: #1f2937;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.analytix-animated-login .license-import-message {
+  min-height: 54px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(91, 33, 182, 0.06);
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.analytix-animated-login .license-import-message.is-ready {
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+}
+
+.analytix-animated-login .license-import-message.is-warning {
+  background: rgba(194, 65, 12, 0.08);
+  color: #c2410c;
+}
+
+.analytix-animated-login .license-import-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.analytix-animated-login .license-import-button {
+  margin-top: 0;
+}
+
+.analytix-animated-login .auth-challenge-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 148px 36px 0 0;
+}
+
+.analytix-animated-login .auth-challenge-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(17, 20, 36, 0.1) 0%, rgba(17, 20, 36, 0.24) 38%, rgba(17, 20, 36, 0.44) 100%);
+  backdrop-filter: blur(8px);
+}
+
+.analytix-animated-login .auth-challenge-modal {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 408px);
+  margin: 0;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(185, 199, 224, 0.42);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 248, 253, 0.98) 100%);
+  box-shadow:
+    0 24px 48px rgba(17, 24, 39, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.analytix-animated-login .auth-challenge-modal.is-success-mode {
+  align-content: center;
+}
+
+.analytix-animated-login .auth-challenge-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analytix-animated-login .auth-challenge-kicker .text-primary {
+  color: #50617e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .auth-challenge-kicker .text-secondary {
+  color: rgba(80, 97, 126, 0.54);
+  font-size: 8px;
+}
+
+.analytix-animated-login .auth-challenge-modal-title {
+  margin: 8px 0 0;
+  color: #142036;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+}
+
+.analytix-animated-login .auth-challenge-modal-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.analytix-animated-login .auth-challenge-copy .text-primary {
+  color: #202a3f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .auth-challenge-copy .text-secondary {
+  color: rgba(83, 99, 133, 0.58);
+  font-size: 8px;
+}
+
+.analytix-animated-login .challenge-refresh-button,
+.analytix-animated-login .challenge-verify-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 12px;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.analytix-animated-login .challenge-refresh-button {
+  min-width: 88px;
+  border: 1px solid rgba(153, 171, 206, 0.34);
+  background: rgba(255, 255, 255, 0.84);
+  color: #53627f;
+}
+
+.analytix-animated-login .challenge-refresh-button .text-pair,
+.analytix-animated-login .challenge-verify-button .text-pair {
+  align-items: center;
+  gap: 2px;
+}
+
+.analytix-animated-login .challenge-refresh-button .text-primary,
+.analytix-animated-login .challenge-verify-button .text-primary {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .challenge-refresh-button .text-secondary,
+.analytix-animated-login .challenge-verify-button .text-secondary {
+  font-size: 7px;
+}
+
+.analytix-animated-login .challenge-refresh-button .text-secondary {
+  color: rgba(83, 98, 127, 0.56);
+}
+
+.analytix-animated-login .challenge-refresh-button:hover,
+.analytix-animated-login .challenge-verify-button:hover {
+  transform: translateY(-1px);
+}
+
+.analytix-animated-login .challenge-refresh-button:hover {
+  border-color: rgba(114, 137, 188, 0.4);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.analytix-animated-login .challenge-refresh-button:disabled,
+.analytix-animated-login .challenge-verify-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
+
+.analytix-animated-login .auth-challenge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.analytix-animated-login .auth-challenge-tile,
+.analytix-animated-login .auth-challenge-skeleton {
+  position: relative;
+  min-height: 78px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.analytix-animated-login .auth-challenge-tile {
+  border: 1px solid rgba(175, 188, 214, 0.32);
+  background: linear-gradient(180deg, #fdfefe 0%, #f5f8fd 100%);
+  box-shadow: 0 6px 14px rgba(23, 35, 70, 0.06);
+}
+
+.analytix-animated-login .auth-challenge-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.analytix-animated-login .auth-challenge-tile-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(53, 66, 92, 0.78);
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: 0 3px 8px rgba(18, 29, 57, 0.12);
+}
+
+.analytix-animated-login .auth-challenge-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.analytix-animated-login .auth-challenge-tile:hover::after {
+  border-color: rgba(84, 104, 167, 0.26);
+}
+
+.analytix-animated-login .auth-challenge-tile.is-selected::after {
+  border-color: #3157d6;
+  box-shadow: inset 0 0 0 1px rgba(49, 87, 214, 0.18);
+  background: linear-gradient(180deg, rgba(49, 87, 214, 0.04) 0%, rgba(49, 87, 214, 0.12) 100%);
+}
+
+.analytix-animated-login .auth-challenge-tile.is-selected .auth-challenge-tile-badge {
+  background: #3157d6;
+  color: #fff;
+}
+
+.analytix-animated-login .auth-challenge-skeleton {
+  background:
+    linear-gradient(110deg, rgba(240, 243, 250, 0.9) 30%, rgba(255, 255, 255, 0.98) 48%, rgba(240, 243, 250, 0.9) 66%),
+    linear-gradient(180deg, #f3f6fb 0%, #eef2f7 100%);
+  background-size: 220% 100%, 100% 100%;
+  animation: analytixChallengeSkeleton 1.1s ease-in-out infinite;
+}
+
+.analytix-animated-login .auth-challenge-footer {
+  display: grid;
+  gap: 8px;
+}
+
+.analytix-animated-login .challenge-verify-button {
+  width: 100%;
+  border: 1px solid rgba(34, 49, 89, 0.12);
+  background: linear-gradient(180deg, #233459 0%, #1a2743 100%);
+  color: #fff;
+  box-shadow: 0 12px 20px rgba(26, 39, 67, 0.14);
+}
+
+.analytix-animated-login .challenge-verify-button .text-secondary {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.analytix-animated-login .challenge-verify-button.is-verified {
+  background: linear-gradient(180deg, #1b7b66 0%, #136551 100%);
+  border-color: rgba(19, 101, 81, 0.2);
+}
+
+.analytix-animated-login .auth-challenge-note {
+  display: none;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(146, 160, 188, 0.18);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.analytix-animated-login .auth-challenge-note.is-visible {
+  display: block;
+}
+
+.analytix-animated-login .auth-challenge-note .text-primary {
+  color: #4c5872;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .auth-challenge-note .text-secondary {
+  color: rgba(76, 88, 114, 0.54);
+  font-size: 7px;
+}
+
+.analytix-animated-login .auth-challenge-note.is-success {
+  border-color: rgba(23, 133, 108, 0.2);
+  background: rgba(24, 145, 117, 0.08);
+}
+
+.analytix-animated-login .auth-challenge-note.is-success .text-primary {
+  color: #166857;
+}
+
+.analytix-animated-login .auth-challenge-note.is-success .text-secondary {
+  color: rgba(22, 104, 87, 0.58);
+}
+
+.analytix-animated-login .auth-challenge-note.is-error {
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.analytix-animated-login .auth-challenge-note.is-error .text-primary {
+  color: #be2d2d;
+}
+
+.analytix-animated-login .auth-challenge-note.is-error .text-secondary {
+  color: rgba(190, 45, 45, 0.58);
+}
+
+.analytix-animated-login .auth-challenge-success-panel {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 12px 8px 2px;
+}
+
+.analytix-animated-login .auth-challenge-success-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(24, 145, 117, 0.14) 0%, rgba(24, 145, 117, 0.06) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.analytix-animated-login .auth-challenge-success-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.analytix-animated-login .auth-challenge-success-icon circle,
+.analytix-animated-login .auth-challenge-success-icon path {
+  stroke: #17856c;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.analytix-animated-login .auth-challenge-success-text {
+  color: #45625c;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.analytix-animated-login .login-legal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(18, 25, 38, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  cursor: pointer;
+}
+
+.analytix-animated-login .login-legal-panel {
+  width: min(460px, 100vw);
+  height: 100vh;
+  padding: 28px 28px 32px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: -24px 0 60px rgba(16, 18, 32, 0.18);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  cursor: default;
+}
+
+.analytix-animated-login .login-legal-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.analytix-animated-login .login-legal-panel__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.analytix-animated-login .login-legal-panel__eyebrow svg {
+  width: 38px;
+  height: 24px;
+}
+
+.analytix-animated-login .login-legal-panel__eyebrow .text-primary {
+  color: #171d2c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .login-legal-panel__eyebrow .text-secondary {
+  color: rgba(63, 71, 87, 0.56);
+  font-size: 9px;
+}
+
+.analytix-animated-login .login-legal-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  border: 1px solid rgba(23, 29, 44, 0.1);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(240, 243, 248, 0.94) 100%);
+  color: #171d2c;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    0 8px 18px rgba(17, 24, 39, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.analytix-animated-login .login-legal-panel__close:hover {
+  border-color: rgba(91, 33, 182, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 242, 250, 0.98) 100%);
+  color: #5b21b6;
+  transform: translateY(-1px);
+}
+
+.analytix-animated-login .login-legal-panel__intro {
+  margin-top: 30px;
+}
+
+.analytix-animated-login .login-legal-panel__intro h2 {
+  margin: 0;
+  color: #121926;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+.analytix-animated-login .login-legal-panel__intro p {
+  margin-top: 12px;
+  color: #5e6572;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.analytix-animated-login .login-legal-panel__official-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  margin-top: 18px;
+  padding: 0 14px;
+  border: 1px solid rgba(91, 33, 182, 0.16);
+  border-radius: 12px;
+  background: rgba(91, 33, 182, 0.07);
+  color: #5b21b6;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.analytix-animated-login .login-legal-panel__official-link .text-pair {
+  align-items: center;
+}
+
+.analytix-animated-login .login-legal-panel__official-link .text-primary {
+  color: #5b21b6;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .login-legal-panel__official-link .text-secondary {
+  color: rgba(91, 33, 182, 0.56);
+  font-size: 8px;
+}
+
+.analytix-animated-login .login-legal-panel__official-link:hover {
+  border-color: rgba(91, 33, 182, 0.26);
+  background: rgba(91, 33, 182, 0.1);
+  transform: translateY(-1px);
+}
+
+.analytix-animated-login .login-legal-panel__body {
+  display: grid;
+  gap: 20px;
+  margin-top: 26px;
+}
+
+.analytix-animated-login .login-legal-section {
+  padding-top: 18px;
+  border-top: 1px solid rgba(20, 26, 38, 0.08);
+}
+
+.analytix-animated-login .login-legal-section h3 {
+  margin: 0 0 10px;
+  color: #171d2c;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.analytix-animated-login .login-legal-section p {
+  margin: 0;
+  color: #5f6673;
+  font-size: 14px;
+  line-height: 1.62;
+}
+
+.analytix-animated-login .login-legal-section p + p {
+  margin-top: 10px;
+}
+
+.analytix-animated-login .characters-scene {
+  position: relative;
+  width: 480px;
+  height: 360px;
+}
+
+.analytix-animated-login .character {
+  position: absolute;
+  bottom: 0;
+  transform-origin: bottom center;
+  transition:
+    transform 0.7s ease-in-out,
+    height 0.7s ease-in-out;
+}
+
+.analytix-animated-login .char-purple {
+  left: 60px;
+  width: 170px;
+  height: 370px;
+  border-radius: 10px 10px 0 0;
+  background: #6c3ff5;
+  z-index: 1;
+}
+
+.analytix-animated-login .char-black {
+  left: 220px;
+  width: 115px;
+  height: 290px;
+  border-radius: 8px 8px 0 0;
+  background: #2d2d2d;
+  z-index: 2;
+}
+
+.analytix-animated-login .char-orange {
+  left: 0;
+  width: 230px;
+  height: 190px;
+  border-radius: 115px 115px 0 0;
+  background: #ff9b6b;
+  z-index: 3;
+}
+
+.analytix-animated-login .char-yellow {
+  left: 290px;
+  width: 135px;
+  height: 215px;
+  border-radius: 68px 68px 0 0;
+  background: #e8d754;
+  z-index: 4;
+}
+
+.analytix-animated-login .eyes {
+  position: absolute;
+  display: flex;
+  transition:
+    left 0.7s ease-in-out,
+    top 0.7s ease-in-out,
+    transform 0.7s ease-in-out;
+}
+
+.analytix-animated-login .eyeball {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #fff;
+  transition: height 0.15s ease;
+}
+
+.analytix-animated-login .pupil,
+.analytix-animated-login .bare-pupil {
+  border-radius: 50%;
+  background: #2d2d2d;
+}
+
+.analytix-animated-login .pupil {
+  transition: transform 0.1s ease-out;
+}
+
+.analytix-animated-login .bare-pupil {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.7s ease-in-out;
+}
+
+.analytix-animated-login .yellow-mouth {
+  position: absolute;
+  width: 50px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2d2d2d;
+  transition:
+    left 0.7s ease-in-out,
+    top 0.7s ease-in-out,
+    transform 0.7s ease-in-out;
+}
+
+@keyframes analytixLoginShakeHead {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  10% {
+    translate: -9px 0;
+  }
+
+  20% {
+    translate: 7px 0;
+  }
+
+  30% {
+    translate: -6px 0;
+  }
+
+  40% {
+    translate: 5px 0;
+  }
+
+  50% {
+    translate: -4px 0;
+  }
+
+  60% {
+    translate: 3px 0;
+  }
+
+  70% {
+    translate: -2px 0;
+  }
+
+  80% {
+    translate: 1px 0;
+  }
+
+  90% {
+    translate: -0.5px 0;
+  }
+}
+
+@keyframes analytixLoginShellEnter {
+  0% {
+    opacity: 0;
+    box-shadow:
+      0 18px 44px rgba(8, 8, 18, 0.06),
+      0 8px 18px rgba(8, 8, 18, 0.03);
+  }
+
+  68% {
+    opacity: 1;
+    box-shadow:
+      0 28px 72px rgba(8, 8, 18, 0.24),
+      0 10px 22px rgba(8, 8, 18, 0.12);
+  }
+
+  100% {
+    opacity: 1;
+    box-shadow:
+      0 28px 80px rgba(8, 8, 18, 0.3),
+      0 6px 18px rgba(8, 8, 18, 0.16);
+  }
+}
+
+@keyframes analytixLoginPanelReveal {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes analytixLoginContentReveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translate3d(0, 1px, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes analytixChallengeSkeleton {
+  0% {
+    background-position: 100% 0, 0 0;
+  }
+
+  100% {
+    background-position: -120% 0, 0 0;
+  }
+}
+
+.analytix-animated-login .eyes.shake-head,
+.analytix-animated-login .yellow-mouth.shake-head,
+.analytix-animated-login .orange-mouth.shake-head {
+  animation: analytixLoginShakeHead 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.analytix-animated-login .orange-mouth {
+  position: absolute;
+  width: 28px;
+  height: 14px;
+  border: 3px solid #2d2d2d;
+  border-top: none;
+  border-radius: 0 0 14px 14px;
+  opacity: 0;
+  transition:
+    opacity 0.7s ease-in-out,
+    left 0.7s ease-in-out,
+    top 0.7s ease-in-out,
+    transform 0.7s ease-in-out;
+}
+
+.analytix-animated-login .orange-mouth.visible {
+  opacity: 1;
+}
+
+.analytix-animated-login .error-msg {
+  display: none;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 10px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+  font-size: 13px;
+}
+
+.analytix-animated-login .error-msg .feedback-primary {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analytix-animated-login .error-msg .feedback-secondary {
+  display: block;
+  margin-top: 4px;
+  color: rgba(220, 38, 38, 0.72);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.analytix-animated-login .error-msg.visible {
+  display: block;
+}
+
+.analytix-animated-login .error-msg.info {
+  border-color: rgba(91, 33, 182, 0.2);
+  background: rgba(91, 33, 182, 0.08);
+  color: #4c1d95;
+}
+
+.analytix-animated-login .error-msg.info .feedback-secondary {
+  color: rgba(76, 29, 149, 0.68);
+}
+
+.analytix-animated-login .form-group input.error {
+  border-bottom-color: #dc2626;
+}
+
+.analytix-animated-login .form-group label.error-label {
+  color: #dc2626;
+}
+
+.analytix-animated-login .form-group label.error-label .text-primary {
+  color: #dc2626;
+}
+
+.analytix-animated-login .form-group label.error-label .text-secondary {
+  color: rgba(220, 38, 38, 0.66);
+}
+
+@media (max-width: 900px) {
+  .analytix-animated-login {
+    padding: 28px;
+  }
+
+  .analytix-animated-login .login-page {
+    grid-template-columns: 1fr;
+    width: min(100%, 720px);
+    height: auto;
+    min-height: calc(100vh - 56px);
+    max-height: calc(100vh - 56px);
+    border-radius: 24px;
+  }
+
+  .analytix-animated-login .left-panel {
+    display: none;
+  }
+
+  .analytix-animated-login .form-container {
+    min-height: auto;
+  }
+
+  .analytix-animated-login .signup-link {
+    flex-wrap: wrap;
+  }
+
+  .analytix-animated-login .auth-challenge-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .analytix-animated-login .auth-challenge-modal {
+    width: calc(100% - 32px);
+  }
+
+  .analytix-animated-login .startup-bypass-status {
+    padding: 13px 14px;
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .analytix-animated-login .right-panel {
+    padding: 28px 24px;
+  }
+
+  .analytix-animated-login .form-options {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .analytix-animated-login .login-secondary-actions {
+    gap: 14px;
+  }
+
+  .analytix-animated-login .verification-code-row {
+    grid-template-columns: 1fr;
+  }
+
+  .analytix-animated-login .send-code-button,
+  .analytix-animated-login .challenge-refresh-button {
+    width: 100%;
+  }
+
+  .analytix-animated-login .auth-challenge-modal {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .analytix-animated-login .auth-challenge-modal-head {
+    flex-direction: column;
+  }
+
+  .analytix-animated-login .auth-challenge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analytix-animated-login.is-stage-entering .login-page,
+  .analytix-animated-login.is-stage-entering .left-panel,
+  .analytix-animated-login.is-stage-entering .right-panel,
+  .analytix-animated-login.is-stage-entering .left-panel .logo,
+  .analytix-animated-login.is-stage-entering .characters-wrapper,
+  .analytix-animated-login.is-stage-entering .sparkle-icon,
+  .analytix-animated-login.is-stage-entering .form-header,
+  .analytix-animated-login.is-stage-entering .startup-bypass-chip,
+  .analytix-animated-login.is-stage-entering .startup-bypass-status-list,
+  .analytix-animated-login.is-stage-entering .startup-bypass-note,
+  .analytix-animated-login.is-stage-entering .startup-bypass-action,
+  .analytix-animated-login.is-stage-entering .license-import-panel > *,
+  .analytix-animated-login.is-stage-entering #login-form > .form-group,
+  .analytix-animated-login.is-stage-entering .form-options,
+  .analytix-animated-login.is-stage-entering .btn-login,
+  .analytix-animated-login.is-stage-entering .signup-link,
+  .analytix-animated-login.is-stage-prepared .login-page,
+  .analytix-animated-login.is-stage-prepared .left-panel,
+  .analytix-animated-login.is-stage-prepared .right-panel,
+  .analytix-animated-login.is-stage-prepared .left-panel .logo,
+  .analytix-animated-login.is-stage-prepared .characters-wrapper,
+  .analytix-animated-login.is-stage-prepared .sparkle-icon,
+  .analytix-animated-login.is-stage-prepared .form-header,
+  .analytix-animated-login.is-stage-prepared .startup-bypass-chip,
+  .analytix-animated-login.is-stage-prepared .startup-bypass-status-list,
+  .analytix-animated-login.is-stage-prepared .startup-bypass-note,
+  .analytix-animated-login.is-stage-prepared .license-import-panel > *,
+  .analytix-animated-login.is-stage-prepared #login-form > .form-group,
+  .analytix-animated-login.is-stage-prepared .form-options,
+  .analytix-animated-login.is-stage-prepared .btn-login,
+  .analytix-animated-login.is-stage-prepared .signup-link,
+  .analytix-animated-login.is-stage-entering .footer-links {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "stage": "D-0236",
+  "mode": "go-temp-durable-event-session-store",
+  "runtimeToken": "tok-1",
+  "threadId": "thr_durable_events",
+  "concurrentThreadId": "thr_durable_concurrent",
+  "malformedLine": "{not-json",
+  "eventDrafts": [
+    {
+      "kind": "usage",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_ds_cache",
+      "model": "deepseek-chat",
+      "usage": {
+        "promptTokens": 100,
+        "completionTokens": 20,
+        "reasoningTokens": 4,
+        "totalTokens": 120,
+        "cachedTokens": 64,
+        "cacheHitTokens": 64,
+        "cacheMissTokens": 36,
+        "cacheHitRate": 0.64,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "pref-ds",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "sys-stable",
+        "prefixItemsHash": "items-stable",
+        "toolsHash": "tools-stable",
+        "toolSchemaTokens": 42,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 64,
+        "cacheMissTokens": 36,
+        "provider": "deepseek",
+        "providerId": "deepseek",
+        "endpointFormat": "chat_completions",
+        "model": "deepseek-chat"
+      }
+    },
+    {
+      "kind": "usage",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_openai_cache",
+      "model": "gpt-5.1",
+      "usage": {
+        "promptTokens": 100,
+        "completionTokens": 30,
+        "totalTokens": 130,
+        "cachedTokens": 20,
+        "cacheHitTokens": 20,
+        "cacheMissTokens": 80,
+        "cacheHitRate": 0.2,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "pref-openai",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "sys-stable",
+        "prefixItemsHash": "items-stable",
+        "toolsHash": "tools-stable",
+        "toolSchemaTokens": 42,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 20,
+        "cacheMissTokens": 80,
+        "provider": "openai",
+        "providerId": "openai",
+        "endpointFormat": "responses",
+        "model": "gpt-5.1"
+      }
+    },
+    {
+      "kind": "usage",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_anthropic_cache",
+      "model": "claude-sonnet-4.5",
+      "usage": {
+        "promptTokens": 30,
+        "completionTokens": 15,
+        "totalTokens": 45,
+        "cachedTokens": 12,
+        "cacheHitTokens": 12,
+        "cacheMissTokens": 18,
+        "cacheHitRate": 0.4,
+        "turns": 1,
+        "tokenEconomySavingsTokens": 0
+      },
+      "cacheDiagnostics": {
+        "prefixHash": "pref-anthropic",
+        "prefixChanged": false,
+        "prefixChangeReasons": [],
+        "toolSourceChanged": false,
+        "toolSourceChangeReasons": [],
+        "systemHash": "sys-stable",
+        "prefixItemsHash": "items-stable",
+        "toolsHash": "tools-stable",
+        "toolSchemaTokens": 42,
+        "cacheTelemetrySupported": true,
+        "cacheHitTokens": 12,
+        "cacheMissTokens": 18,
+        "provider": "anthropic",
+        "providerId": "anthropic",
+        "endpointFormat": "messages",
+        "model": "claude-sonnet-4.5"
+      }
+    },
+    {
+      "kind": "approval_requested",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_gate",
+      "approvalId": "appr_durable_1",
+      "toolName": "bash",
+      "status": "pending",
+      "approvalPolicy": "on-request",
+      "sandboxMode": "workspace-write",
+      "summary": "blocked shell command"
+    },
+    {
+      "kind": "approval_resolved",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_gate",
+      "approvalId": "appr_durable_1",
+      "toolName": "bash",
+      "status": "denied",
+      "summary": "blocked shell command"
+    },
+    {
+      "kind": "user_input_requested",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_input",
+      "itemId": "item_input_1",
+      "inputId": "input_durable_1",
+      "status": "pending",
+      "prompt": "Choose mode",
+      "questions": [
+        {
+          "header": "Mode",
+          "id": "mode",
+          "question": "Which mode?",
+          "options": [
+            {
+              "label": "Fast",
+              "description": "Prefer speed."
+            },
+            {
+              "label": "Careful",
+              "description": "Prefer scrutiny."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "user_input_resolved",
+      "threadId": "thr_durable_events",
+      "turnId": "turn_input",
+      "itemId": "item_input_1",
+      "inputId": "input_durable_1",
+      "status": "submitted",
+      "prompt": "Choose mode"
+    },
+    {
+      "kind": "tool_catalog_changed",
+      "threadId": "thr_durable_events",
+      "fingerprint": "mcp-durable-v1",
+      "toolCount": 2,
+      "changeKind": "additive",
+      "toolNames": [
+        "mcp.search",
+        "mcp.refresh"
+      ],
+      "message": "MCP catalog replayed from durable events"
+    }
+  ],
+  "concurrentEventCount": 12,
+  "expected": {
+    "eventKinds": [
+      "usage",
+      "usage",
+      "usage",
+      "approval_requested",
+      "approval_resolved",
+      "user_input_requested",
+      "user_input_resolved",
+      "tool_catalog_changed"
+    ],
+    "highestSeq": 8,
+    "replayAfterSeq": 2,
+    "replayAfterSeqCount": 6,
+    "caughtUpReplayFrameCount": 0,
+    "diagnosticCount": 1,
+    "providers": [
+      "anthropic",
+      "deepseek",
+      "openai"
+    ],
+    "totalCacheHitTokens": 96,
+    "totalCacheMissTokens": 134,
+    "approvalStatuses": [
+      "pending",
+      "denied"
+    ],
+    "userInputStatuses": [
+      "pending",
+      "submitted"
+    ],
+    "mcpToolNames": [
+      "mcp.refresh",
+      "mcp.search"
+    ],
+    "latestMcpFingerprint": "mcp-durable-v1",
+    "archiveThreadId": "thr_g2_beta",
+    "forkThreadId": "thr_durable_fork_1",
+    "resumeThreadId": "thr_durable_resume_1"
+  }
+}

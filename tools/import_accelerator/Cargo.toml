@@ -1,0 +1,18 @@
+[package]
+name = "analytix-import-accelerator"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "analytix-import-accelerator"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+calamine = { version = "0.26", features = ["dates"] }
+csv = "1.4"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
+md-5 = "0.10"
+serde_json = "1"
+sha2 = "0.10"

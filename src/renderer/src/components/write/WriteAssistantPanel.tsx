@@ -1,0 +1,324 @@
+import type { ReactElement } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import {
+  FolderOpen,
+  FileText,
+  ListTodo,
+  MessageSquareQuote,
+  Plus,
+  Sparkles,
+  X
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import type { AttachmentReference, RuntimeConnectionStatus, ChatBlock } from '../../agent/types'
+import type { QueuedUserMessage } from '../../store/chat-store-types'
+import type { ModelProviderModelGroup } from '@shared/analytix-api'
+import {
+  useWriteWorkspaceStore,
+  writeRelativeToWorkspace
+} from '../../write/write-workspace-store'
+import { MessageTimeline } from '../chat/MessageTimeline'
+import { FloatingComposer } from '../chat/FloatingComposer'
+import type { ComposerReasoningEffort } from '../chat/FloatingComposerModelPicker'
+import { PanelCollapseButton } from '../workbench/PanelCollapseButton'
+
+type Props = {
+  input: string
+  setInput: (value: string) => void
+  mode: 'plan' | 'agent'
+  setMode: (value: 'plan' | 'agent') => void
+  busy: boolean
+  runtimeConnection: RuntimeConnectionStatus
+  activeThreadId: string | null
+  blocks: ChatBlock[]
+  hasLiveStream: boolean
+  composerModel: string
+  composerProviderId?: string
+  composerPickList: string[]
+  composerModelGroups?: ModelProviderModelGroup[]
+  composerReasoningEffort: ComposerReasoningEffort
+  setComposerModel: (modelId: string, providerId?: string) => void
+  setComposerReasoningEffort: (effort: ComposerReasoningEffort) => void
+  queuedMessages: QueuedUserMessage[]
+  removeQueuedMessage: (id: string) => void
+  attachments?: AttachmentReference[]
+  attachmentUploadEnabled?: boolean
+  attachmentUploadBusy?: boolean
+  attachmentUploadError?: string | null
+  onPickAttachments?: (files: File[]) => void
+  onPasteClipboardImage?: (options?: { silentNoImage?: boolean }) => void | Promise<void>
+  onRemoveAttachment?: (id: string) => void
+  onSend: () => void
+  onInterrupt: (options?: { discard?: boolean }) => void
+  onRetryConnection: () => void
+  onOpenSettings: () => void
+  onConfigureProviders?: () => void
+  onNewConversation: () => void
+  onPickWorkspace: () => void
+  onCollapse: () => void
+  className?: string
+}
+
+export function WriteAssistantPanel({
+  input,
+  setInput,
+  mode,
+  setMode,
+  busy,
+  runtimeConnection,
+  activeThreadId,
+  blocks,
+  hasLiveStream,
+  composerModel,
+  composerProviderId,
+  composerPickList,
+  composerModelGroups = [],
+  composerReasoningEffort,
+  setComposerModel,
+  setComposerReasoningEffort,
+  queuedMessages,
+  removeQueuedMessage,
+  attachments = [],
+  attachmentUploadEnabled = false,
+  attachmentUploadBusy = false,
+  attachmentUploadError = null,
+  onPickAttachments,
+  onPasteClipboardImage,
+  onRemoveAttachment,
+  onSend,
+  onInterrupt,
+  onRetryConnection,
+  onOpenSettings,
+  onConfigureProviders,
+  onNewConversation,
+  onPickWorkspace,
+  onCollapse,
+  className = ''
+}: Props): ReactElement {
+  const { t } = useTranslation('common')
+  // Field-level subscription: keeps the assistant panel from re-rendering on
+  // fileContent updates emitted for every keystroke in the editor.
+  const {
+    workspaceRoot,
+    activeFilePath,
+    selection,
+    quotedSelections,
+    quoteCurrentSelection,
+    removeQuotedSelection
+  } = useWriteWorkspaceStore(
+    useShallow((s) => ({
+      workspaceRoot: s.workspaceRoot,
+      activeFilePath: s.activeFilePath,
+      selection: s.selection,
+      quotedSelections: s.quotedSelections,
+      quoteCurrentSelection: s.quoteCurrentSelection,
+      removeQuotedSelection: s.removeQuotedSelection
+    }))
+  )
+  const activeFileLabel = activeFilePath
+    ? writeRelativeToWorkspace(workspaceRoot, activeFilePath)
+    : t('writeNoFileOpen')
+  const canCreateConversation = runtimeConnection === 'ready' && !busy
+  const hasTimeline = blocks.length > 0 || busy || hasLiveStream
+  const selectionIsPdf = selection.sourceKind === 'pdf'
+
+  const setAssistantPrompt = (prompt: string): void => {
+    setInput(input.trim() ? `${input.trim()}\n\n${prompt}` : prompt)
+  }
+
+  const quoteSelectionForAssistant = (): void => {
+    if (!workspaceRoot.trim()) return
+    quoteCurrentSelection(workspaceRoot)
+    if (!input.trim()) {
+      setInput(t(selectionIsPdf ? 'writeAssistantExplainPdfSelectionPrompt' : 'writeAssistantPolishSelectionPrompt'))
+    }
+  }
+
+  return (
+    <aside
+      className={`write-assistant-panel ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-white backdrop-blur-xl dark:bg-ds-canvas ${className}`}
+    >
+      <div className="shrink-0 border-b border-ds-border-muted bg-white/92 dark:bg-ds-card">
+        <div className="ds-right-panel-topbar">
+          <PanelCollapseButton
+            onClick={onCollapse}
+            ariaLabel={t('rightPanelCollapse')}
+            title={t('rightPanelCollapse')}
+          />
+          <div className="ds-right-panel-title-group">
+            <Sparkles className="ds-right-panel-title-icon" strokeWidth={1.8} />
+            <span className="ds-right-panel-title">
+              {t('writeAssistant')}
+            </span>
+            <span className="ds-right-panel-subtitle" title={activeFileLabel}>
+              {activeFileLabel}
+            </span>
+          </div>
+          <div className="ds-right-panel-actions">
+            <button
+              type="button"
+              onClick={onPickWorkspace}
+              className="ds-sidebar-toggle-button ds-right-panel-icon-button"
+              aria-label={t('writeAssistantChangeWorkspace')}
+              title={t('writeAssistantChangeWorkspace')}
+            >
+              <FolderOpen className="h-4 w-4" strokeWidth={1.85} />
+            </button>
+            <button
+              type="button"
+              onClick={onNewConversation}
+              disabled={!canCreateConversation}
+              className="ds-sidebar-toggle-button ds-right-panel-icon-button disabled:cursor-not-allowed disabled:opacity-45"
+              aria-label={t('writeAssistantNewConversation')}
+              title={t('writeAssistantNewConversation')}
+            >
+              <Plus className="h-4 w-4" strokeWidth={2.1} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-ds-main/45 dark:bg-transparent">
+        {hasTimeline ? (
+          <MessageTimeline
+            blocks={blocks}
+            live=""
+            activeThreadId={activeThreadId}
+            runtimeConnection={runtimeConnection}
+            onRetryConnection={onRetryConnection}
+            onOpenSettings={onOpenSettings}
+            onSelectSuggestion={(text) => setInput(text)}
+            compactCards
+          />
+        ) : (
+          <div className="flex min-h-full flex-col justify-end px-5 py-5">
+            <div className="mb-auto rounded-[24px] border border-ds-border bg-ds-card/95 p-4 shadow-sm">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+                <Sparkles className="h-5 w-5" strokeWidth={1.9} />
+              </div>
+              <h3 className="mt-4 text-[18px] font-semibold tracking-[-0.035em] text-ds-ink">
+                {t('writeAssistantEmptyTitle')}
+              </h3>
+              <p className="mt-2 text-[13px] leading-6 text-ds-muted">
+                {t('writeAssistantEmptySub')}
+              </p>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              <button
+                type="button"
+                onClick={() => setAssistantPrompt(t('writeAssistantSummarizePrompt', { file: activeFileLabel }))}
+                className="flex items-center gap-3 rounded-2xl border border-ds-border bg-ds-card px-3 py-3 text-left transition hover:border-accent/25 hover:bg-ds-hover"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
+                  <FileText className="h-4 w-4" strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-semibold text-ds-ink">{t('writeAssistantSummarize')}</span>
+                  <span className="mt-0.5 block truncate text-[12px] text-ds-faint">{t('writeAssistantSummarizeSub')}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssistantPrompt(t('writeAssistantOutlinePrompt', { file: activeFileLabel }))}
+                className="flex items-center gap-3 rounded-2xl border border-ds-border bg-ds-card px-3 py-3 text-left transition hover:border-accent/25 hover:bg-ds-hover"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+                  <ListTodo className="h-4 w-4" strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-semibold text-ds-ink">{t('writeAssistantOutline')}</span>
+                  <span className="mt-0.5 block truncate text-[12px] text-ds-faint">{t('writeAssistantOutlineSub')}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selection.charCount > 0) {
+                    quoteSelectionForAssistant()
+                  } else {
+                    setAssistantPrompt(t('writeAssistantPolishSelectionPrompt'))
+                  }
+                }}
+                className="flex items-center gap-3 rounded-2xl border border-ds-border bg-ds-card px-3 py-3 text-left transition hover:border-accent/25 hover:bg-ds-hover"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-300">
+                  <MessageSquareQuote className="h-4 w-4" strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-semibold text-ds-ink">
+                    {t(selectionIsPdf ? 'writeAssistantExplainPdfSelection' : 'writeAssistantPolishSelection')}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[12px] text-ds-faint">
+                    {t(selectionIsPdf ? 'writeAssistantExplainPdfSelectionSub' : 'writeAssistantPolishSelectionSub')}
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-ds-border-muted bg-white/92 px-4 pb-4 pt-3 dark:bg-ds-card">
+        {quotedSelections.length > 0 ? (
+          <div className="mb-3 flex flex-col gap-1.5">
+            {quotedSelections.map((quote) => (
+              <div
+                key={quote.id}
+                className="flex min-w-0 items-center gap-2 rounded-xl border border-accent/20 bg-accent/10 px-3 py-2 text-[12px] text-ds-muted"
+              >
+                <MessageSquareQuote className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.9} />
+                <span className="min-w-0 flex-1 truncate">
+                  {quote.sourceTitle}
+                  {quote.sourceKind === 'pdf' && quote.pageStart != null && quote.pageEnd != null
+                    ? ` · p.${quote.pageStart === quote.pageEnd ? quote.pageStart : `${quote.pageStart}-${quote.pageEnd}`}`
+                    : quote.lineStart != null && quote.lineEnd != null ? ` · ${quote.lineStart}-${quote.lineEnd}` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeQuotedSelection(quote.id)}
+                  className="rounded-md p-1 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+                  title={t('writeRemoveQuote')}
+                  aria-label={t('writeRemoveQuote')}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <FloatingComposer
+          variant="compact"
+          workspaceRootOverride={workspaceRoot}
+          input={input}
+          setInput={setInput}
+          mode={mode}
+          setMode={setMode}
+          busy={busy}
+          runtimeReady={runtimeConnection === 'ready'}
+          hasActiveThread={Boolean(activeThreadId)}
+          composerModel={composerModel}
+          composerProviderId={composerProviderId}
+          composerPickList={composerPickList}
+          composerModelGroups={composerModelGroups}
+          composerReasoningEffort={composerReasoningEffort}
+          onComposerModelChange={setComposerModel}
+          onComposerReasoningEffortChange={setComposerReasoningEffort}
+          modelPickerMode="combobox"
+          queuedMessages={queuedMessages}
+          onRemoveQueuedMessage={removeQueuedMessage}
+          attachments={attachments}
+          attachmentUploadEnabled={attachmentUploadEnabled}
+          attachmentUploadBusy={attachmentUploadBusy}
+          attachmentUploadError={attachmentUploadError}
+          onPickAttachments={onPickAttachments}
+          onPasteClipboardImage={onPasteClipboardImage}
+          onRemoveAttachment={onRemoveAttachment}
+          onSend={onSend}
+          onInterrupt={onInterrupt}
+          onConfigureProviders={onConfigureProviders}
+        />
+      </div>
+    </aside>
+  )
+}

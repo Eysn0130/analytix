@@ -1,0 +1,6 @@
+interface:
+  display_name: "证据图表附件"
+  short_description: "生成证据表、图表、附件和可视化材料"
+  default_prompt: "请生成当前案件证据表、图表或附件，并使用经侦业务标题和图例。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,247 @@
+body.analytix-installer-surface {
+  overflow: hidden;
+  background: #ffffff;
+  zoom: 1;
+}
+
+body.analytix-installer-surface #root {
+  min-height: 100vh;
+}
+
+.win-package-installer {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+  justify-content: stretch;
+  background:
+    linear-gradient(135deg, rgba(246, 248, 252, 0.96), rgba(235, 241, 249, 0.92)),
+    #f6f8fc;
+  color: #18233a;
+  padding: 0;
+}
+
+.win-package-installer__panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: none;
+  overflow: auto;
+  padding: 56px clamp(48px, 6vw, 96px);
+}
+
+.win-package-installer__brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.win-package-installer__logo .ax-loading-logo__overlay {
+  animation-play-state: running;
+}
+
+.win-package-installer__eyebrow {
+  display: block;
+  color: #526482;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.win-package-installer h1 {
+  margin: 5px 0 0;
+  color: #17233b;
+  font-size: 30px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.16;
+}
+
+.win-package-installer__status {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 34px;
+  border: 1px solid rgba(143, 159, 187, 0.22);
+  border-radius: 8px;
+  background: #f7f9fd;
+  padding: 18px 20px;
+}
+
+.win-package-installer__status-title,
+.win-package-installer__status-detail {
+  display: block;
+}
+
+.win-package-installer__status-title {
+  color: #18233a;
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+.win-package-installer__status-detail {
+  margin-top: 5px;
+  color: #61708d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.win-package-installer__version {
+  flex: 0 0 auto;
+  border: 1px solid rgba(70, 89, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(70, 89, 255, 0.08);
+  color: #364cff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 7px 10px;
+}
+
+.win-package-installer__progress {
+  height: 9px;
+  margin-top: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(72, 90, 124, 0.12);
+}
+
+.win-package-installer__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3e63ff, #22b8a6);
+  transition: width 220ms ease;
+}
+
+.win-package-installer__path {
+  display: block;
+  margin-top: 24px;
+}
+
+.win-package-installer__path > span {
+  display: block;
+  margin-bottom: 9px;
+  color: #526482;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.win-package-installer__path > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  gap: 10px;
+}
+
+.win-package-installer__path input {
+  min-width: 0;
+  height: 42px;
+  border: 1px solid rgba(143, 159, 187, 0.28);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #18233a;
+  font-size: 14px;
+  outline: none;
+  padding: 0 12px;
+}
+
+.win-package-installer__path input:focus {
+  border-color: rgba(70, 89, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(70, 89, 255, 0.12);
+}
+
+.win-package-installer__error {
+  margin: 16px 0 0;
+  border: 1px solid rgba(205, 55, 55, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 242, 242, 0.94);
+  color: #9d2929;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.win-package-installer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 34px;
+}
+
+.win-package-installer button {
+  height: 40px;
+  min-width: 82px;
+  border: 1px solid rgba(143, 159, 187, 0.28);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #253149;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 16px;
+}
+
+.win-package-installer button:hover:not(:disabled) {
+  background: #f3f6fb;
+}
+
+.win-package-installer button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.win-package-installer__primary {
+  border-color: #3e63ff !important;
+  background: #3e63ff !important;
+  color: #ffffff !important;
+}
+
+.win-package-installer__primary:hover:not(:disabled) {
+  background: #334fe0 !important;
+}
+
+.win-package-installer__danger {
+  border-color: rgba(196, 43, 28, 0.32) !important;
+  color: #b3261e !important;
+}
+
+@media (max-width: 680px) {
+  .win-package-installer {
+    min-height: 100vh;
+  }
+
+  .win-package-installer__panel {
+    padding: 28px 22px;
+  }
+
+  .win-package-installer__status,
+  .win-package-installer__brand {
+    flex-direction: column;
+  }
+
+  .win-package-installer__path > div {
+    grid-template-columns: 1fr;
+  }
+
+  .win-package-installer__actions {
+    justify-content: stretch;
+  }
+
+  .win-package-installer__actions button {
+    flex: 1 1 130px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .win-package-installer__logo .ax-loading-logo__overlay {
+    animation: ax-loading-logo-shimmer 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+  }
+}

@@ -1,0 +1,8 @@
+interface:
+  display_name: "资金事实快查"
+  short_description: "当前案件轻量事实快查、主体关联、Top 排行和低风险单点事实"
+  default_prompt: "请直接核验当前案件事实，按严格命中、模糊命中、排除对象、不能确认输出。"
+policy:
+  allow_implicit_invocation: true
+  desktop_fact_progress: "姓名/主体是否有关联等低风险快查应直接核验当前案件事实；不得展示 quick-fact、SKILL.md、MCP、Shell、命令行或本地路径。"
+  pair_amount_boundary: "A 转 B 多少钱、金额争议、重复/换卡/同事实风险必须交给特定双方资金往来核验，不由资金事实快查成稿。"

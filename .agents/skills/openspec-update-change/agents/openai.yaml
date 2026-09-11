@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenSpec Update Change"
+  short_description: "Revise existing OpenSpec planning artifacts"
+  default_prompt: "Use $openspec-update-change to revise this OpenSpec change coherently."

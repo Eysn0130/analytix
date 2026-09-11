@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://analytix.top/schemas/analytix-fund-analysis/capability-registry.schema.json",
+  "title": "Analytix Fund Analysis Capability Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plugin",
+    "focused_skills",
+    "task_taxonomy",
+    "tool_discovery_contract",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "capability-registry-v1"
+    },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "distribution": { "type": "string" },
+        "runtime_boundary": { "type": "string" }
+      }
+    },
+    "tool_discovery_contract": {
+      "$ref": "#/$defs/toolDiscoveryContract"
+    },
+    "focused_skills": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/focusedSkill" },
+      "minItems": 1
+    },
+    "task_taxonomy": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/taskTaxonomy" },
+      "minItems": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "$defs": {
+    "focusedSkill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "use_when",
+        "not_for",
+        "commands",
+        "completion_standard"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "use_when": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "not_for": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "completion_standard": { "type": "string" }
+      }
+    },
+    "taskTaxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "use_when",
+        "focused_skills",
+        "commands",
+        "completion_standard"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "use_when": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "focused_skills": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "completion_standard": { "type": "string" }
+      }
+    },
+    "toolDiscoveryContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priority_tools",
+        "default_visible_tools",
+        "frontdoor_report_only_tools",
+        "full_discovery_env_vars",
+        "max_default_visible_tools"
+      ],
+      "properties": {
+        "priority_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "default_visible_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "frontdoor_report_only_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "full_discovery_env_vars": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "max_default_visible_tools": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "evalCoverageContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_tasks",
+        "min_passive_nonfunds_tasks",
+        "min_passive_near_miss_tasks",
+        "passive_near_miss_terms",
+        "min_cases",
+        "min_tasks_per_required_case",
+        "min_report_claim_review_tasks",
+        "min_report_claim_review_cases",
+        "required_case_ids",
+        "required_task_ids",
+        "passive_nonfunds_task_ids",
+        "functional_closure_contract",
+        "required_dimensions"
+      ],
+      "properties": {
+        "min_tasks": { "type": "integer", "minimum": 1 },
+        "min_passive_nonfunds_tasks": { "type": "integer", "minimum": 0 },
+        "min_passive_near_miss_tasks": { "type": "integer", "minimum": 0 },
+        "passive_near_miss_terms": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "min_cases": { "type": "integer", "minimum": 1 },
+        "min_tasks_per_required_case": { "type": "integer", "minimum": 1 },
+        "min_report_claim_review_tasks": { "type": "integer", "minimum": 0 },
+        "min_report_claim_review_cases": { "type": "integer", "minimum": 0 },
+        "required_case_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "required_task_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "passive_nonfunds_task_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "functional_closure_contract": {
+          "$ref": "#/$defs/functionalClosureContract"
+        },
+        "required_dimensions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evalCoverageDimension" },
+          "minItems": 1
+        }
+      }
+    },
+    "functionalClosureContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_ids",
+        "required_modes",
+        "optional_modes",
+        "required_product_surfaces",
+        "allow_release_without_functional_closure",
+        "auto_fail_markers"
+      ],
+      "properties": {
+        "task_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "required_modes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "optional_modes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "required_product_surfaces": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/functionalClosureSurface" },
+          "minItems": 1
+        },
+        "allow_release_without_functional_closure": { "type": "boolean" },
+        "auto_fail_markers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+    "functionalClosureSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "task_ids"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "task_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+    "evalCoverageDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "task_ids"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "task_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "lane",
+        "intent",
+        "primary_tools",
+        "answer_card_contract",
+        "evidence_contract",
+        "doctor_checks"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "lane": { "type": "string" },
+        "intent": { "type": "string" },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "primary_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "conditional_tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "required_gates": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stop_conditions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "answer_card_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "must_write_facts",
+            "must_state_boundaries",
+            "forbidden_as_facts",
+            "next_queries",
+            "stop_conditions"
+          ],
+          "properties": {
+            "must_write_facts": { "type": "array", "items": { "type": "string" } },
+            "must_state_boundaries": { "type": "array", "items": { "type": "string" } },
+            "forbidden_as_facts": { "type": "array", "items": { "type": "string" } },
+            "next_queries": { "type": "array", "items": { "type": "string" } },
+            "stop_conditions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "evidence_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ledger_required",
+            "supported_edge_required_for_mermaid",
+            "user_visible_opaque_refs_allowed"
+          ],
+          "properties": {
+            "ledger_required": { "type": "boolean" },
+            "supported_edge_required_for_mermaid": { "type": "boolean" },
+            "user_visible_opaque_refs_allowed": { "type": "boolean" },
+            "artifact_policy": { "type": "string" },
+            "claim_review_risk_markers": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "tool_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ordinary_max_tool_calls": { "type": "integer", "minimum": 0 },
+            "report_max_tool_calls": { "type": "integer", "minimum": 0 },
+            "max_command_audit_tool_calls": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "doctor_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "score_dimensions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

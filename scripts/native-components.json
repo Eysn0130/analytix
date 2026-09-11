@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 4,
+  "receiptSchemaVersion": 6,
+  "components": [
+    {
+      "id": "import-accelerator",
+      "sourceRoot": "tools/import_accelerator",
+      "cargoManifest": "tools/import_accelerator/Cargo.toml",
+      "binaryName": "analytix-import-accelerator",
+      "role": "immutable-data-import",
+      "agentCore": false,
+      "consumers": [
+        "backend/app/core/import_accelerator.py",
+        "backend/app/core/native_component_paths.py",
+        "packages/runtime-go/internal/adapters/outbound/nativecomponentregistry/load_darwin.go"
+      ],
+      "packagePath": "runtime/analytix-import-accelerator",
+      "supportedTargets": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-x64"
+      ],
+      "executionProbe": {
+        "schemaVersion": 1,
+        "authorityProtocol": "analytix-native-build-probe-v1",
+        "componentProtocol": "analytix-native-v1",
+        "policySha256": "0cc3872164fdadfb687a8642846913bf0f2394cd21c26799a5d483dee1ea8d2a",
+        "authorityTargets": [
+          "darwin-arm64",
+          "darwin-x64"
+        ]
+      },
+      "authorization": "existing-data-plane-boundary@33d6de1d3c40691b73033f698af8bb518b15300d"
+    },
+    {
+      "id": "cleaning-ops",
+      "sourceRoot": "tools/cleaning_ops",
+      "cargoManifest": "tools/cleaning_ops/Cargo.toml",
+      "binaryName": "analytix-cleaning-ops",
+      "role": "case-data-cleaning",
+      "agentCore": false,
+      "consumers": [
+        "backend/app/repositories/cleaning_native_runtime.py",
+        "backend/app/core/native_component_paths.py",
+        "packages/runtime-go/internal/adapters/outbound/nativecomponentregistry/load_darwin.go"
+      ],
+      "packagePath": "runtime/analytix-cleaning-ops",
+      "supportedTargets": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-x64"
+      ],
+      "executionProbe": {
+        "schemaVersion": 1,
+        "authorityProtocol": "analytix-native-build-probe-v1",
+        "componentProtocol": "analytix-native-v1",
+        "policySha256": "59c4287d312b4972eb6890883865e3c37d226650caf78f65168363413ac85e35",
+        "authorityTargets": [
+          "darwin-arm64",
+          "darwin-x64"
+        ]
+      },
+      "authorization": "existing-data-plane-boundary@33d6de1d3c40691b73033f698af8bb518b15300d"
+    },
+    {
+      "id": "analysis-compute",
+      "sourceRoot": "tools/analysis_compute",
+      "cargoManifest": "tools/analysis_compute/Cargo.toml",
+      "binaryName": "analytix-analysis-compute",
+      "role": "bounded-analysis-compute",
+      "agentCore": false,
+      "consumers": [
+        "backend/app/core/analysis_compute_runner.py",
+        "backend/app/core/native_component_paths.py",
+        "packages/runtime-go/internal/adapters/outbound/nativecomponentregistry/load_darwin.go"
+      ],
+      "packagePath": "runtime/analytix-analysis-compute",
+      "supportedTargets": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-x64"
+      ],
+      "executionProbe": {
+        "schemaVersion": 1,
+        "authorityProtocol": "analytix-native-build-probe-v1",
+        "componentProtocol": "analytix-native-v1",
+        "policySha256": "fd2227234c61de1505e50aa33e1e24c2f58c2545fe4d07e41b8064709c18f4d8",
+        "authorityTargets": [
+          "darwin-arm64",
+          "darwin-x64"
+        ]
+      },
+      "authorization": "existing-data-plane-boundary@33d6de1d3c40691b73033f698af8bb518b15300d"
+    },
+    {
+      "id": "data-engine",
+      "sourceRoot": "tools/data_engine",
+      "cargoManifest": "tools/data_engine/Cargo.toml",
+      "binaryName": "analytix-data-engine",
+      "role": "single-owner-case-database",
+      "agentCore": false,
+      "consumers": [
+        "backend/app/core/data_engine_client.py",
+        "backend/app/core/db_engine.py",
+        "backend/app/core/native_component_paths.py",
+        "packages/runtime-go/internal/adapters/outbound/nativecomponentregistry/load_darwin.go",
+        "packages/runtime-go/internal/adapters/outbound/nativecomponentrunner/runner_darwin.go"
+      ],
+      "packagePath": "runtime/analytix-data-engine",
+      "supportedTargets": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-x64"
+      ],
+      "executionProbe": {
+        "schemaVersion": 1,
+        "authorityProtocol": "analytix-native-build-probe-v1",
+        "componentProtocol": "analytix-native-v1",
+        "policySha256": "97ce13396fb6f5ba7e9d851ab4abc2f23ac8abdd13acaa3e983a326d6bf4a1e0",
+        "authorityTargets": [
+          "darwin-arm64",
+          "darwin-x64"
+        ]
+      },
+      "authorization": "existing-data-plane-boundary@af0ea1967c76c7b771aaff1c0d5606ca4d5b832c"
+    }
+  ]
+}

@@ -1,0 +1,1013 @@
+.data-analysis-surface {
+  --workbench-ui-radius: 7px;
+  --workbench-ui-radius-inner: 6px;
+  --workbench-ui-card-radius: 14px;
+  --workbench-ui-control-height: 30px;
+  --workbench-ui-control-height-sm: 28px;
+  --workbench-ui-button-pad-x: 10px;
+  --workbench-ui-text: var(--sidebar-nav-active-text);
+  --workbench-ui-text-muted: var(--color-text-muted);
+  --workbench-ui-text-soft: var(--sidebar-segment-inactive);
+  --workbench-ui-surface: color-mix(in oklab, var(--sidebar-surface) 96%, var(--color-bg-elevated));
+  --workbench-ui-surface-muted: color-mix(in oklab, var(--sidebar-subtle) 88%, var(--sidebar-hover));
+  --workbench-ui-surface-strong: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated) 8%);
+  --workbench-ui-border: color-mix(in oklab, var(--sidebar-control-border) 84%, var(--color-border) 16%);
+  --workbench-ui-border-strong: color-mix(in oklab, var(--sidebar-segment-active-end) 64%, var(--sidebar-control-border));
+  --workbench-ui-accent-start: var(--sidebar-segment-active-start);
+  --workbench-ui-accent-end: var(--sidebar-segment-active-end);
+  --workbench-ui-accent-shadow: var(--sidebar-segment-active-shadow);
+  --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-elevated));
+  --workbench-ui-on-accent: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-text) 12%);
+  --workbench-ui-focus-ring: color-mix(in oklab, var(--color-accent) 22%, transparent);
+  --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 6%, var(--sidebar-surface));
+  --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 26%, var(--workbench-ui-border));
+  --workbench-ui-danger-text: color-mix(in oklab, var(--color-danger) 72%, var(--color-text));
+  --workbench-ui-table-head-bg: color-mix(in oklab, var(--sidebar-surface) 98%, var(--color-bg-elevated));
+  --workbench-ui-table-font-size: 11.5px;
+  --workbench-ui-table-row-font-size: 11px;
+  --workbench-ui-toolbar-radius: 6px;
+  --workbench-ui-toolbar-control-height: 32px;
+  --workbench-ui-toolbar-pad-x: 22px;
+  --workbench-ui-toolbar-font-size: 10px;
+  --workbench-ui-toolbar-font-weight: 600;
+  --workbench-ui-toolbar-text: color-mix(in oklab, var(--sidebar-nav-active-text) 82%, var(--color-text) 18%);
+  --workbench-ui-toolbar-surface: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated) 8%);
+  --workbench-ui-toolbar-surface-hover: color-mix(in oklab, var(--sidebar-hover) 78%, var(--color-bg-elevated) 22%);
+  --workbench-ui-toolbar-border: color-mix(in oklab, var(--sidebar-control-border) 86%, var(--color-border) 14%);
+  --workbench-ui-toolbar-border-strong: color-mix(in oklab, var(--color-accent) 18%, var(--workbench-ui-toolbar-border));
+  --workbench-ui-toolbar-accent-start: var(--sidebar-segment-active-start);
+  --workbench-ui-toolbar-accent-end: var(--sidebar-segment-active-end);
+  --workbench-ui-toolbar-danger-surface: color-mix(in oklab, var(--color-danger) 8%, var(--workbench-ui-toolbar-surface));
+  --workbench-ui-toolbar-danger-border: color-mix(in oklab, var(--color-danger) 28%, var(--workbench-ui-toolbar-border));
+  --workbench-ui-toolbar-danger-text: color-mix(in oklab, var(--color-danger) 76%, var(--workbench-ui-toolbar-text));
+  --workbench-ui-panel-border: color-mix(in oklab, var(--sidebar-control-border) 84%, var(--color-border) 16%);
+  --workbench-ui-panel-border-hover: color-mix(in oklab, var(--color-accent) 14%, var(--workbench-ui-panel-border));
+  --workbench-ui-panel-shadow: 0 10px 24px rgba(23, 45, 88, 0.035);
+  --workbench-ui-panel-shadow-hover:
+    0 26px 58px rgba(27, 50, 95, 0.12),
+    0 10px 22px rgba(78, 102, 156, 0.08);
+}
+
+.data-analysis-surface[data-theme="dark"] {
+  --workbench-ui-text: var(--color-text);
+  --workbench-ui-text-muted: color-mix(in oklab, var(--color-text-muted) 86%, var(--color-text) 14%);
+  --workbench-ui-text-soft: color-mix(in oklab, var(--color-text-muted) 74%, var(--color-text) 26%);
+  --workbench-ui-surface: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-bg));
+  --workbench-ui-surface-muted: color-mix(in oklab, var(--color-bg-subtle) 76%, var(--color-bg-elevated));
+  --workbench-ui-surface-strong: color-mix(in oklab, var(--color-bg-elevated) 94%, var(--color-bg-subtle));
+  --workbench-ui-border: color-mix(in oklab, var(--color-border) 78%, transparent);
+  --workbench-ui-border-strong: color-mix(in oklab, var(--color-accent) 30%, var(--color-border));
+  --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 16%, var(--color-bg-elevated));
+  --workbench-ui-on-accent: color-mix(in oklab, var(--color-text) 92%, var(--color-bg) 8%);
+  --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 14%, var(--color-bg-elevated));
+  --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 38%, var(--workbench-ui-border));
+  --workbench-ui-danger-text: color-mix(in oklab, var(--color-danger) 78%, var(--color-text));
+  --workbench-ui-table-head-bg: color-mix(in oklab, var(--color-bg-subtle) 82%, var(--color-bg-elevated));
+  --workbench-ui-toolbar-text: color-mix(in oklab, var(--color-text) 88%, var(--color-text-muted) 12%);
+  --workbench-ui-toolbar-surface: color-mix(in oklab, var(--color-bg-elevated) 86%, var(--color-bg-subtle));
+  --workbench-ui-toolbar-surface-hover: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-subtle));
+  --workbench-ui-toolbar-border: color-mix(in oklab, var(--color-border) 78%, transparent);
+  --workbench-ui-toolbar-border-strong: color-mix(in oklab, var(--color-accent) 30%, var(--workbench-ui-toolbar-border));
+  --workbench-ui-toolbar-danger-surface: color-mix(in oklab, var(--color-danger) 16%, var(--workbench-ui-toolbar-surface));
+  --workbench-ui-toolbar-danger-border: color-mix(in oklab, var(--color-danger) 40%, var(--workbench-ui-toolbar-border));
+  --workbench-ui-toolbar-danger-text: color-mix(in oklab, var(--color-danger) 80%, var(--workbench-ui-toolbar-text));
+  --workbench-ui-panel-border: color-mix(in oklab, var(--color-border) 76%, transparent);
+  --workbench-ui-panel-border-hover: color-mix(in oklab, var(--color-accent) 34%, var(--color-border));
+  --workbench-ui-panel-shadow: 0 16px 34px rgba(4, 8, 18, 0.34);
+  --workbench-ui-panel-shadow-hover:
+    0 28px 58px rgba(3, 8, 18, 0.52),
+    0 12px 24px color-mix(in oklab, var(--color-accent) 18%, transparent);
+}
+
+.workbench-ui-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--workbench-ui-control-height);
+  min-width: 40px;
+  padding: 0 var(--workbench-ui-button-pad-x);
+  border: 1px solid var(--workbench-ui-border);
+  border-radius: var(--workbench-ui-radius);
+  background: var(--workbench-ui-surface);
+  box-shadow: none;
+  color: var(--workbench-ui-text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.workbench-ui-btn:focus-visible {
+  outline: 2px solid var(--workbench-ui-focus-ring);
+  outline-offset: 2px;
+}
+
+.workbench-ui-btn:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+}
+
+.workbench-ui-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.workbench-ui-btn--sm {
+  min-height: var(--workbench-ui-control-height-sm);
+  border-radius: 11px;
+}
+
+.workbench-ui-btn--with-badge {
+  padding-right: 14px;
+}
+
+.workbench-ui-btn--block {
+  width: 100%;
+  min-width: 0;
+}
+
+.workbench-ui-btn--ghost {
+  background: var(--workbench-ui-surface-muted);
+}
+
+.workbench-ui-btn--accent {
+  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 84%, #1f3bb8);
+  background: linear-gradient(136deg, var(--workbench-ui-accent-start) 0%, var(--workbench-ui-accent-end) 100%);
+  color: var(--workbench-ui-on-accent);
+  box-shadow: var(--workbench-ui-accent-shadow);
+}
+
+.workbench-ui-btn--accent:hover:not(:disabled),
+.workbench-ui-btn--accent:focus-visible:not(:disabled),
+.workbench-ui-btn--accent:active:not(:disabled) {
+  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 88%, #1639ba);
+  background: linear-gradient(
+    136deg,
+    color-mix(in oklab, var(--workbench-ui-accent-start) 90%, #6180ff) 0%,
+    color-mix(in oklab, var(--workbench-ui-accent-end) 94%, #214cdc) 100%
+  );
+  color: var(--workbench-ui-on-accent);
+  box-shadow: 0 16px 32px rgba(44, 94, 219, 0.22);
+}
+
+.workbench-ui-btn--accent:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.workbench-ui-btn--danger {
+  border-color: var(--workbench-ui-danger-border);
+  background: var(--workbench-ui-danger-surface);
+  color: var(--workbench-ui-danger-text);
+}
+
+.workbench-ui-btn--danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-danger) 10%, var(--sidebar-hover));
+  color: color-mix(in oklab, var(--color-danger) 78%, var(--color-text));
+}
+
+.workbench-ui-toolbar-btn {
+  min-width: 0;
+  min-height: var(--workbench-ui-toolbar-control-height);
+  padding: 0 var(--workbench-ui-toolbar-pad-x);
+  border: 1px solid var(--workbench-ui-toolbar-border);
+  border-radius: var(--workbench-ui-toolbar-radius);
+  background: var(--workbench-ui-toolbar-surface);
+  box-shadow: none;
+  color: var(--workbench-ui-toolbar-text);
+  font-size: var(--workbench-ui-toolbar-font-size);
+  font-weight: var(--workbench-ui-toolbar-font-weight);
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--sm {
+  min-height: var(--workbench-ui-toolbar-control-height);
+  border-radius: var(--workbench-ui-toolbar-radius);
+}
+
+.workbench-ui-toolbar-btn:hover:not(:disabled),
+.workbench-ui-toolbar-btn:focus-visible:not(:disabled) {
+  border-color: var(--workbench-ui-toolbar-border-strong);
+  background: var(--workbench-ui-toolbar-surface-hover);
+  box-shadow: none;
+  color: var(--workbench-ui-toolbar-text);
+  transform: none;
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--ghost {
+  background: var(--workbench-ui-toolbar-surface);
+  color: var(--workbench-ui-toolbar-text);
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent {
+  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 84%, #1f3bb8);
+  background: linear-gradient(
+    136deg,
+    var(--workbench-ui-toolbar-accent-start) 0%,
+    var(--workbench-ui-toolbar-accent-end) 100%
+  );
+  box-shadow: none;
+  color: var(--workbench-ui-on-accent);
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:hover:not(:disabled),
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:focus-visible:not(:disabled),
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) {
+  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, #1639ba);
+  background: linear-gradient(
+    136deg,
+    color-mix(in oklab, var(--workbench-ui-toolbar-accent-start) 90%, #6180ff) 0%,
+    color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 94%, #214cdc) 100%
+  );
+  box-shadow: none;
+  color: var(--workbench-ui-on-accent);
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) {
+  transform: none;
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--danger {
+  border-color: var(--workbench-ui-toolbar-danger-border);
+  background: var(--workbench-ui-toolbar-danger-surface);
+  color: var(--workbench-ui-toolbar-danger-text);
+}
+
+.workbench-ui-toolbar-btn.workbench-ui-btn--danger:hover:not(:disabled),
+.workbench-ui-toolbar-btn.workbench-ui-btn--danger:focus-visible:not(:disabled) {
+  background: color-mix(in oklab, var(--color-danger) 10%, var(--workbench-ui-toolbar-surface-hover));
+  color: color-mix(in oklab, var(--color-danger) 78%, var(--workbench-ui-toolbar-danger-text));
+}
+
+.workbench-ui-toolbar-btn.is-active {
+  border-color: var(--workbench-ui-toolbar-border-strong);
+  background: var(--workbench-ui-toolbar-surface-hover);
+  color: var(--workbench-ui-toolbar-accent-end);
+}
+
+.workbench-ui-btn--loading {
+  cursor: progress;
+}
+
+.workbench-ui-btn__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workbench-ui-btn__spinner {
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.workbench-ui-btn__spinner > span {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 1.8px solid currentColor;
+  border-right-color: transparent;
+  animation: workbench-ui-btn-spin 720ms linear infinite;
+}
+
+.workbench-ui-btn__badge {
+  position: absolute;
+  top: -1px;
+  right: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--sidebar-badge-accent);
+  color: var(--color-accent-strong);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--program-shell-bg);
+}
+
+@keyframes workbench-ui-btn-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.workbench-ui-segmented {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-items: stretch;
+  min-width: 0;
+  min-height: var(--workbench-ui-control-height);
+  border: none;
+  border-radius: var(--workbench-ui-radius);
+  background: color-mix(in oklab, var(--sidebar-segment-surface) 95%, var(--color-bg-elevated));
+  box-shadow:
+    inset 0 0 0 1px var(--workbench-ui-border),
+    0 1px 0 rgba(180, 191, 214, 0.16);
+  overflow: hidden;
+}
+
+.workbench-ui-segmented__indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% / var(--workbench-ui-segment-count, 1));
+  border: 1px solid color-mix(in oklab, var(--workbench-ui-accent-end) 84%, #1f3bb8);
+  border-radius: var(--workbench-ui-radius);
+  background: linear-gradient(136deg, var(--workbench-ui-accent-start) 0%, var(--workbench-ui-accent-end) 100%);
+  box-shadow: var(--workbench-ui-accent-shadow);
+  opacity: var(--workbench-ui-indicator-opacity, 1);
+  transform: translateX(calc(var(--workbench-ui-active-index, 0) * 100%));
+  transform-origin: center center;
+  will-change: transform;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.workbench-ui-segmented__option {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--workbench-ui-text-soft);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0 var(--workbench-ui-button-pad-x);
+  cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+.workbench-ui-segmented__option:hover:not(.workbench-ui-segmented__option--active):not(:disabled) {
+  background: color-mix(in oklab, var(--color-accent) 6%, transparent);
+  color: var(--color-text);
+}
+
+.workbench-ui-segmented__option:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--workbench-ui-focus-ring);
+}
+
+.workbench-ui-segmented__option--active {
+  color: var(--workbench-ui-on-accent);
+}
+
+.workbench-ui-segmented__option:first-of-type {
+  border-top-left-radius: var(--workbench-ui-radius);
+  border-bottom-left-radius: var(--workbench-ui-radius);
+}
+
+.workbench-ui-segmented__option:last-of-type {
+  border-top-right-radius: var(--workbench-ui-radius);
+  border-bottom-right-radius: var(--workbench-ui-radius);
+}
+
+.workbench-ui-segmented__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workbench-ui-mode-card {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 64px;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid color-mix(in oklab, var(--workbench-ui-border) 72%, #edf2fa);
+  border-radius: var(--workbench-ui-card-radius);
+  background: var(--workbench-ui-surface-strong);
+  box-shadow: 0 1px 0 rgba(180, 191, 214, 0.14);
+  color: var(--workbench-ui-text-muted);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--motion-fast) ease,
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.workbench-ui-mode-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--color-accent) 16%, var(--workbench-ui-border));
+  background: var(--color-bg-elevated);
+}
+
+.workbench-ui-mode-card:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-accent) 34%, #c5d5ff);
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--color-accent) 18%, transparent),
+    0 10px 24px rgba(68, 92, 233, 0.08);
+}
+
+.workbench-ui-mode-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workbench-ui-mode-card--active {
+  border-color: color-mix(in oklab, var(--color-accent) 22%, #cdd9f8);
+  background: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-elevated));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 14%, transparent),
+    0 10px 24px rgba(68, 92, 233, 0.08);
+  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+}
+
+.workbench-ui-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--workbench-ui-metric-columns, 4), minmax(0, 1fr));
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.workbench-ui-metric-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 6px;
+  min-height: 106px;
+  padding: 8px 28px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.workbench-ui-metric-card + .workbench-ui-metric-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--workbench-ui-panel-border);
+}
+
+.workbench-ui-metric-card--interactive {
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.workbench-ui-metric-card--interactive:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--workbench-ui-accent-start) 8%, var(--workbench-ui-surface-muted)) 0%,
+    var(--workbench-ui-surface) 100%
+  );
+  transform: translateY(-1px);
+}
+
+.workbench-ui-metric-card--interactive:focus-visible {
+  outline: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--workbench-ui-accent-start) 10%, var(--workbench-ui-surface-muted)) 0%,
+    var(--workbench-ui-surface) 100%
+  );
+}
+
+.workbench-ui-metric-card--active {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--workbench-ui-accent-start) 12%, var(--workbench-ui-surface-muted)) 0%,
+    var(--workbench-ui-surface) 100%
+  );
+}
+
+.workbench-ui-metric-card__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--workbench-ui-text-muted);
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.workbench-ui-metric-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--workbench-ui-text-soft);
+}
+
+.workbench-ui-metric-card__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.workbench-ui-metric-card__label-group {
+  display: inline-grid;
+  gap: 2px;
+}
+
+.workbench-ui-metric-card__label {
+  white-space: nowrap;
+}
+
+.workbench-ui-metric-card__secondary {
+  color: var(--workbench-ui-text-soft);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workbench-ui-metric-card__value {
+  color: var(--workbench-ui-text);
+  font-size: clamp(34px, 2.35vw, 40px);
+  line-height: 0.9;
+  font-weight: 780;
+  letter-spacing: -0.06em;
+}
+
+.workbench-ui-metric-card__description {
+  margin: 0;
+  color: var(--workbench-ui-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workbench-ui-metric-card__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: color-mix(in oklab, var(--workbench-ui-text-muted) 86%, var(--workbench-ui-text-soft) 14%);
+}
+
+.workbench-ui-metric-card__meta-accent {
+  color: color-mix(in oklab, var(--workbench-ui-text-muted) 54%, var(--workbench-ui-text) 46%);
+  font-weight: 700;
+}
+
+.workbench-ui-metric-card__meta-tail {
+  color: color-mix(in oklab, var(--workbench-ui-text-muted) 86%, var(--workbench-ui-text-soft) 14%);
+}
+
+.workbench-ui-metric-card__meta.is-positive .workbench-ui-metric-card__meta-accent {
+  color: #30a46c;
+}
+
+.workbench-ui-metric-card__meta.is-negative .workbench-ui-metric-card__meta-accent {
+  color: #d05a5a;
+}
+
+.workbench-ui-metric-card__meta.is-neutral .workbench-ui-metric-card__meta-accent {
+  color: color-mix(in oklab, var(--workbench-ui-text-muted) 62%, var(--workbench-ui-text) 38%);
+}
+
+.workbench-ui-table-shell {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.workbench-ui-table-card {
+  align-self: stretch;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border: 1px solid var(--workbench-ui-panel-border);
+  border-radius: 14px;
+  background: var(--workbench-ui-surface);
+  box-shadow: var(--workbench-ui-panel-shadow);
+  overflow: hidden;
+  transition:
+    border-color 160ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
+}
+
+.workbench-ui-table-card:hover,
+.workbench-ui-table-card:focus-within {
+  border-color: var(--workbench-ui-panel-border-hover);
+  box-shadow: var(--workbench-ui-panel-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.workbench-ui-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}
+
+.workbench-ui-table-card__header {
+  gap: 14px 16px;
+  padding: 10px 18px;
+}
+
+.workbench-ui-table-card__copy {
+  min-width: 0;
+}
+
+.workbench-ui-table-card__title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--workbench-ui-text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.workbench-ui-table-card__title-row strong {
+  color: var(--workbench-ui-text);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.workbench-ui-table-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #6d84e3;
+}
+
+.workbench-ui-table-card__icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.workbench-ui-table-card__tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  --workbench-ui-radius: 6px;
+  --workbench-ui-control-height: 32px;
+  --workbench-ui-control-height-sm: 32px;
+  --workbench-ui-button-pad-x: 22px;
+  --workbench-ui-text-muted: var(--workbench-ui-toolbar-text);
+  --workbench-ui-surface: var(--workbench-ui-toolbar-surface);
+  --workbench-ui-surface-muted: var(--workbench-ui-toolbar-surface);
+  --workbench-ui-border: var(--workbench-ui-panel-border);
+  --workbench-ui-border-strong: var(--workbench-ui-panel-border-hover);
+  --workbench-ui-accent-start: var(--workbench-ui-toolbar-accent-start);
+  --workbench-ui-accent-end: var(--workbench-ui-toolbar-accent-end);
+  --workbench-ui-accent-shadow: none;
+}
+
+.workbench-ui-table-card__search {
+  width: clamp(260px, 18vw, 320px);
+  min-width: 0;
+}
+
+.workbench-ui-table-card__note {
+  color: var(--workbench-ui-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.workbench-ui-table-body {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.workbench-ui-table-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workbench-ui-table-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.workbench-ui-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--workbench-ui-control-height);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--workbench-ui-border);
+  border-radius: var(--workbench-ui-radius);
+  background: var(--workbench-ui-surface);
+  color: var(--workbench-ui-text-muted);
+  box-shadow: 0 1px 0 rgba(180, 191, 214, 0.16);
+}
+
+.workbench-ui-search-field:focus-within {
+  border-color: var(--workbench-ui-border-strong);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--workbench-ui-accent-end) 18%, transparent),
+    0 12px 24px rgba(49, 78, 207, 0.12);
+  color: var(--color-text);
+}
+
+.workbench-ui-search-field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 0;
+}
+
+.workbench-ui-search-field__input::placeholder {
+  color: color-mix(in oklab, var(--workbench-ui-text-muted) 78%, transparent);
+}
+
+.workbench-ui-search-field__clear {
+  flex: 0 0 auto;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--workbench-ui-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.workbench-ui-toolbar-search-field {
+  position: relative;
+  padding-left: 36px;
+}
+
+.workbench-ui-toolbar-search-field::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M9 3.5a5.5 5.5 0 1 0 3.39 9.83l3.14 3.14a.75.75 0 1 0 1.06-1.06l-3.14-3.14A5.5 5.5 0 0 0 9 3.5Zm0 1.5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z' fill='%237a8699'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 18px 18px;
+}
+
+.workbench-ui-toolbar-search-field__input {
+  font-size: 10px;
+}
+
+.workbench-ui-toolbar-search-field__clear {
+  border-radius: 6px;
+}
+
+.workbench-ui-search-field__clear:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+}
+
+.workbench-ui-search-field__clear:disabled {
+  opacity: 0;
+  cursor: default;
+  pointer-events: none;
+}
+
+.workbench-ui-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  color: var(--workbench-ui-text-muted);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.workbench-ui-table-footer > div {
+  white-space: nowrap;
+}
+
+.workbench-ui-table-footer__mono {
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+
+.workbench-ui-table-shell .gridHeader {
+  background: var(--workbench-ui-table-head-bg);
+}
+
+.workbench-ui-table-shell .hCell,
+.workbench-ui-table-shell .hSort,
+.workbench-ui-table-shell .workbench-ui-table-footer {
+  font-size: var(--workbench-ui-table-font-size);
+}
+
+.workbench-ui-table-shell .cell,
+.workbench-ui-table-shell .tag {
+  font-size: var(--workbench-ui-table-row-font-size);
+}
+
+.workbench-ui-table-shell .hCell {
+  padding: 6px 8px;
+}
+
+.workbench-ui-table-shell .row {
+  height: 32px;
+}
+
+.workbench-ui-table-shell .cell {
+  padding: 0 7px;
+  line-height: 1.1;
+}
+
+.workbench-ui-table-shell .tag {
+  gap: 4px;
+  padding: 3px 6px;
+}
+
+.workbench-ui-ledger-table-wrap {
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  border-radius: 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.workbench-ui-ledger-table {
+  min-width: 1040px;
+  border-collapse: collapse;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.workbench-ui-ledger-table thead,
+.workbench-ui-ledger-table tbody,
+.workbench-ui-ledger-table tr {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.workbench-ui-ledger-table th,
+.workbench-ui-ledger-table td {
+  border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+
+.workbench-ui-ledger-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 12px 10px 11px;
+  border-top: none;
+  background: var(--workbench-ui-toolbar-accent-end);
+  border-bottom-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, #1639ba);
+  color: #ffffff;
+  font-size: 10.8px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  text-align: center;
+  box-shadow: none;
+}
+
+.workbench-ui-ledger-table th:first-child,
+.workbench-ui-ledger-table td:first-child {
+  padding-left: 16px;
+}
+
+.workbench-ui-ledger-table th:last-child,
+.workbench-ui-ledger-table td:last-child {
+  padding-right: 16px;
+}
+
+.workbench-ui-ledger-table td {
+  padding: 10px 10px;
+  background: var(--workbench-ui-surface);
+  font-size: 11.5px;
+}
+
+.workbench-ui-ledger-table tbody tr:hover td {
+  background: var(--workbench-ui-surface-muted);
+}
+
+.workbench-ui-ledger-table tbody tr.is-selected td {
+  background: var(--workbench-ui-accent-soft);
+}
+
+@media (max-width: 1280px) {
+  .workbench-ui-metric-strip {
+    grid-template-columns: repeat(var(--workbench-ui-metric-columns-tablet, 2), minmax(0, 1fr));
+  }
+
+  .workbench-ui-metric-card + .workbench-ui-metric-card::before {
+    top: 18px;
+    bottom: 18px;
+  }
+}
+
+@media (max-width: 760px) {
+  .workbench-ui-metric-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-ui-metric-card {
+    min-height: 0;
+    padding: 20px;
+  }
+
+  .workbench-ui-metric-card + .workbench-ui-metric-card::before {
+    display: none;
+  }
+
+  .workbench-ui-metric-card__value {
+    font-size: 42px;
+  }
+
+  .workbench-ui-table-card__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workbench-ui-table-card__tools {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workbench-ui-table-card__search {
+    width: 100%;
+  }
+}

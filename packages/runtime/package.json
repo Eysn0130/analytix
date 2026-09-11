@@ -1,0 +1,60 @@
+{
+  "name": "analytix-runtime",
+  "version": "0.1.0",
+  "description": "analytix runtime contracts, config, hooks, telemetry, and Go runtime launcher",
+  "author": "Guoqin He (GitHub: Eysn0130)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/analytix-config.d.ts",
+      "import": "./dist/config/analytix-config.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry/index.d.ts",
+      "import": "./dist/telemetry/index.js"
+    }
+  },
+  "bin": {
+    "analytix": "./dist/cli/serve-entry.js"
+  },
+  "scripts": {
+    "clean": "node ./scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --maxWorkers=1 --fileParallelism=false",
+    "test:watch": "vitest",
+    "transcript:diff": "node ./scripts/transcript-diff.mjs",
+    "serve": "node ./dist/cli/serve-entry.js",
+    "dev": "tsc -p tsconfig.build.json --watch"
+  },
+  "dependencies": {
+    "@computer-use/nut-js": "^4.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "analytix-computer-use": "file:../../vendor/analytix-computer-use",
+    "better-sqlite3": "^12.10.0",
+    "diff": "^8.0.4",
+    "jimp": "^1.6.1",
+    "proxy-agent": "^6.5.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.7"
+  }
+}

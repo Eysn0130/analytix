@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "brand": "analytix",
+  "primarySourceDirectory": "/Users/sun/Downloads/analytix-logo",
+  "notes": [
+    "Main brand assets are copied from the approved analytix-logo source folder.",
+    "App icon PNGs are generated from the approved analytix-exact-app-icon exports with the connected light outer canvas made transparent and the visible icon body scaled to the normal dock/taskbar/launcher footprint.",
+    "CodexDesktop-Rebuild was inspected only for icon sizing, tray template strategy, empty-state hierarchy, shadow, border, and motion references. No Codex logo assets are shipped from this manifest.",
+    "Legacy mascot/cameo art remains in src/asset/img with cameo/mascot names and is not the product identity source."
+  ],
+  "assets": [
+    {
+      "source": "analytix-logo-system-readme.md",
+      "target": "src/asset/brand/analytix-logo-system-readme.md",
+      "usage": "Source readme copied for local provenance."
+    },
+    {
+      "source": "analytix-capital-wordmark-logo-x.png",
+      "target": "src/asset/brand/analytix-logo.png",
+      "usage": "Opaque wordmark reference; not used for app identity strings."
+    },
+    {
+      "source": "analytix-capital-wordmark-logo-x-transparent.png",
+      "target": "src/asset/brand/analytix-logo-transparent.png",
+      "usage": "Transparent wordmark reference for future visual work."
+    },
+    {
+      "source": "analytix-exact-symbol-color.png",
+      "target": "src/asset/brand/analytix-symbol-color.png",
+      "usage": "Light-surface brand symbol and empty-state mark."
+    },
+    {
+      "source": "analytix-exact-symbol-reversed.png",
+      "target": "src/asset/brand/analytix-symbol-reversed.png",
+      "usage": "Dark-surface brand symbol."
+    },
+    {
+      "source": "src/asset/brand/analytix-symbol-reversed.png",
+      "target": "src/asset/brand/analytix-symbol-loader-mask.png",
+      "usage": "Generated alpha mask for the Codex-style startup and route loading shimmer."
+    },
+    {
+      "source": "analytix-exact-symbol-mono-black.png",
+      "target": "src/asset/brand/analytix-symbol-mono-black.png",
+      "usage": "Reserved monochrome symbol for icon-only surfaces; runtime tray/menu bar identity uses the app icon source."
+    },
+    {
+      "source": "analytix-exact-symbol-mono-white.png",
+      "target": "src/asset/brand/analytix-symbol-mono-white.png",
+      "usage": "Reserved monochrome mark for dark icon-only surfaces."
+    },
+    {
+      "source": "analytix-exact-app-icon-16.png",
+      "target": "src/asset/brand/analytix-app-icon-16.png",
+      "usage": "Transparent app icon export for small-size Windows icon validation."
+    },
+    {
+      "source": "analytix-exact-app-icon-32.png",
+      "target": "src/asset/brand/analytix-app-icon-32.png",
+      "usage": "Transparent app icon export for small-size Windows icon validation."
+    },
+    {
+      "source": "analytix-exact-app-icon-64.png",
+      "target": "src/asset/brand/analytix-app-icon-64.png",
+      "usage": "Transparent app icon export for mid-size icon outputs."
+    },
+    {
+      "source": "analytix-exact-app-icon-128.png",
+      "target": "src/asset/brand/analytix-app-icon-128.png",
+      "usage": "Transparent app icon export for mid-size icon outputs."
+    },
+    {
+      "source": "analytix-exact-app-icon-256.png",
+      "target": "src/asset/brand/analytix-app-icon-256.png",
+      "usage": "Transparent app icon export for Windows ICO source size."
+    },
+    {
+      "source": "analytix-exact-app-icon-512.png",
+      "target": "src/asset/brand/analytix-app-icon-512.png",
+      "usage": "Transparent renderer titlebar icon, Linux icon, and runtime fallback tray icon."
+    },
+    {
+      "source": "analytix-exact-app-icon-1024.png",
+      "target": "src/asset/brand/analytix-app-icon-1024.png",
+      "usage": "Transparent macOS app icon source and build/icon.icns generation."
+    },
+    {
+      "source": "src/asset/brand/analytix-app-icon-1024.png",
+      "target": "build/icon.icns",
+      "usage": "Generated macOS .icns for app/dock/installer."
+    },
+    {
+      "source": "src/asset/brand/analytix-app-icon-1024.png",
+      "target": "build/icon.ico",
+      "usage": "Generated multi-size Windows .ico for installer, shortcuts, and taskbar."
+    },
+    {
+      "source": "src/asset/brand/analytix-app-icon-512.png",
+      "target": "src/asset/brand/analytix-splash.png",
+      "usage": "Generated lowercase analytix splash baseline."
+    }
+  ]
+}

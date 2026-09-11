@@ -1,0 +1,6 @@
+interface:
+  display_name: "异常资金线索研判"
+  short_description: "形成异常资金线索、假设队列、核验方向和核验意见"
+  default_prompt: "请围绕当前案件异常资金线索形成核验方向和补证建议。"
+policy:
+  allow_implicit_invocation: true

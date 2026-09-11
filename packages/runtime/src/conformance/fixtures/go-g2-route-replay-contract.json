@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "stage": "G2",
+  "mode": "shadow-route-replay-only",
+  "runtimeToken": "tok-1",
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false
+  },
+  "routes": [
+    {
+      "id": "thread-list-default",
+      "setup": "thread-list",
+      "method": "GET",
+      "path": "/v1/threads",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "response": {
+        "status": 200,
+        "body": {
+          "threads": [
+            {
+              "id": "thr_g2_beta",
+              "title": "Beta Archive",
+              "workspace": "/tmp/beta",
+              "model": "deepseek-chat",
+              "mode": "agent",
+              "status": "idle",
+              "executionPolicyVersion": 2,
+              "approvalPolicy": "on-request",
+              "sandboxMode": "workspace-write",
+              "relation": "primary",
+              "createdAt": "2026-06-21T00:00:00.000Z",
+              "updatedAt": "2026-06-21T00:02:00.000Z",
+              "messageCount": 0,
+              "turnCount": 0
+            },
+            {
+              "id": "thr_g2_alpha",
+              "title": "Alpha Project",
+              "workspace": "/tmp/alpha",
+              "model": "deepseek-chat",
+              "mode": "agent",
+              "status": "idle",
+              "executionPolicyVersion": 2,
+              "approvalPolicy": "on-request",
+              "sandboxMode": "workspace-write",
+              "relation": "primary",
+              "createdAt": "2026-06-21T00:00:00.000Z",
+              "updatedAt": "2026-06-21T00:01:00.000Z",
+              "messageCount": 0,
+              "turnCount": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "thread-archive-patch",
+      "setup": "thread-archive",
+      "method": "PATCH",
+      "path": "/v1/threads/thr_g2_beta",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "body": {
+        "status": "archived"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "thr_g2_beta",
+          "title": "Beta Archive",
+          "workspace": "/tmp/beta",
+          "model": "deepseek-chat",
+          "mode": "agent",
+          "status": "archived",
+          "executionPolicyVersion": 2,
+          "approvalPolicy": "on-request",
+          "sandboxMode": "workspace-write",
+          "relation": "primary",
+          "createdAt": "2026-06-21T00:00:00.000Z",
+          "updatedAt": "2026-06-21T00:10:00.000Z",
+          "turns": []
+        }
+      }
+    },
+    {
+      "id": "thread-list-archived-only",
+      "setup": "thread-search-archive",
+      "method": "GET",
+      "path": "/v1/threads?archived_only=true",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "response": {
+        "status": 200,
+        "body": {
+          "threads": [
+            {
+              "id": "thr_g2_beta",
+              "title": "Beta Archive",
+              "workspace": "/tmp/beta",
+              "model": "deepseek-chat",
+              "mode": "agent",
+              "status": "archived",
+              "executionPolicyVersion": 2,
+              "approvalPolicy": "on-request",
+              "sandboxMode": "workspace-write",
+              "relation": "primary",
+              "createdAt": "2026-06-21T00:00:00.000Z",
+              "updatedAt": "2026-06-21T00:10:00.000Z",
+              "messageCount": 0,
+              "turnCount": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "thread-search-archived",
+      "setup": "thread-search-archive",
+      "method": "GET",
+      "path": "/v1/threads?include_archived=true&search=archive",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "response": {
+        "status": 200,
+        "body": {
+          "threads": [
+            {
+              "id": "thr_g2_beta",
+              "title": "Beta Archive",
+              "workspace": "/tmp/beta",
+              "model": "deepseek-chat",
+              "mode": "agent",
+              "status": "archived",
+              "executionPolicyVersion": 2,
+              "approvalPolicy": "on-request",
+              "sandboxMode": "workspace-write",
+              "relation": "primary",
+              "createdAt": "2026-06-21T00:00:00.000Z",
+              "updatedAt": "2026-06-21T00:10:00.000Z",
+              "messageCount": 0,
+              "turnCount": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "thread-read-detail",
+      "setup": "thread-read",
+      "method": "GET",
+      "path": "/v1/threads/thr_g2_read",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "thr_g2_read",
+          "title": "Read Thread",
+          "workspace": "/tmp/read",
+          "model": "deepseek-chat",
+          "mode": "agent",
+          "status": "idle",
+          "executionPolicyVersion": 2,
+          "approvalPolicy": "on-request",
+          "sandboxMode": "workspace-write",
+          "relation": "primary",
+          "createdAt": "2026-06-21T00:00:00.000Z",
+          "updatedAt": "2026-06-21T00:02:00.000Z",
+          "turns": [
+            {
+              "id": "turn_g2_read",
+              "threadId": "thr_g2_read",
+              "status": "completed",
+              "prompt": "Read me",
+              "steering": [],
+              "createdAt": "2026-06-21T00:01:00.000Z",
+              "startedAt": "2026-06-21T00:01:00.000Z",
+              "finishedAt": "2026-06-21T00:02:00.000Z",
+              "items": [
+                {
+                  "id": "item_g2_read_user",
+                  "turnId": "turn_g2_read",
+                  "threadId": "thr_g2_read",
+                  "role": "user",
+                  "status": "completed",
+                  "createdAt": "2026-06-21T00:01:00.000Z",
+                  "finishedAt": "2026-06-21T00:01:00.000Z",
+                  "kind": "user_message",
+                  "text": "Read me"
+                },
+                {
+                  "id": "item_g2_read_assistant",
+                  "turnId": "turn_g2_read",
+                  "threadId": "thr_g2_read",
+                  "role": "assistant",
+                  "status": "completed",
+                  "createdAt": "2026-06-21T00:02:00.000Z",
+                  "finishedAt": "2026-06-21T00:02:00.000Z",
+                  "kind": "assistant_text",
+                  "text": "Read response"
+                }
+              ],
+              "attachmentIds": [],
+              "activeSkillIds": [],
+              "injectedMemoryIds": []
+            }
+          ],
+          "latestSeq": 2
+        }
+      }
+    },
+    {
+      "id": "thread-update-title-workspace",
+      "setup": "thread-read",
+      "method": "PATCH",
+      "path": "/v1/threads/thr_g2_read",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "body": {
+        "title": "Read Thread Updated",
+        "workspace": "/tmp/read-updated"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "thr_g2_read",
+          "title": "Read Thread Updated",
+          "workspace": "/tmp/read-updated",
+          "model": "deepseek-chat",
+          "mode": "agent",
+          "status": "idle",
+          "executionPolicyVersion": 2,
+          "approvalPolicy": "on-request",
+          "sandboxMode": "workspace-write",
+          "relation": "primary",
+          "createdAt": "2026-06-21T00:00:00.000Z",
+          "updatedAt": "2026-06-21T00:10:00.000Z",
+          "turns": [
+            {
+              "id": "turn_g2_read",
+              "threadId": "thr_g2_read",
+              "status": "completed",
+              "prompt": "Read me",
+              "steering": [],
+              "createdAt": "2026-06-21T00:01:00.000Z",
+              "startedAt": "2026-06-21T00:01:00.000Z",
+              "finishedAt": "2026-06-21T00:02:00.000Z",
+              "items": [
+                {
+                  "id": "item_g2_read_user",
+                  "turnId": "turn_g2_read",
+                  "threadId": "thr_g2_read",
+                  "role": "user",
+                  "status": "completed",
+                  "createdAt": "2026-06-21T00:01:00.000Z",
+                  "finishedAt": "2026-06-21T00:01:00.000Z",
+                  "kind": "user_message",
+                  "text": "Read me"
+                },
+                {
+                  "id": "item_g2_read_assistant",
+                  "turnId": "turn_g2_read",
+                  "threadId": "thr_g2_read",
+                  "role": "assistant",
+                  "status": "completed",
+                  "createdAt": "2026-06-21T00:02:00.000Z",
+                  "finishedAt": "2026-06-21T00:02:00.000Z",
+                  "kind": "assistant_text",
+                  "text": "Read response"
+                }
+              ],
+              "attachmentIds": [],
+              "activeSkillIds": [],
+              "injectedMemoryIds": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "thread-fork-side",
+      "setup": "thread-fork",
+      "method": "POST",
+      "path": "/v1/threads/thr_g2_parent/fork",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "body": {
+        "relation": "side",
+        "title": "Side Thread"
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": "thr_1",
+          "title": "Side Thread",
+          "workspace": "/tmp/parent",
+          "model": "deepseek-chat",
+          "mode": "agent",
+          "status": "idle",
+          "executionPolicyVersion": 2,
+          "approvalPolicy": "on-request",
+          "sandboxMode": "workspace-write",
+          "relation": "side",
+          "parentThreadId": "thr_g2_parent",
+          "forkedFromThreadId": "thr_g2_parent",
+          "forkedFromTitle": "Parent Thread",
+          "forkedAt": "2026-06-21T00:10:00.000Z",
+          "forkedFromMessageCount": 1,
+          "forkedFromTurnCount": 1,
+          "createdAt": "2026-06-21T00:10:00.000Z",
+          "updatedAt": "2026-06-21T00:10:00.000Z",
+          "turns": [
+            {
+              "id": "turn_g2_parent",
+              "threadId": "thr_1",
+              "status": "completed",
+              "prompt": "Fork me",
+              "steering": [],
+              "createdAt": "2026-06-21T00:01:00.000Z",
+              "startedAt": "2026-06-21T00:01:00.000Z",
+              "finishedAt": "2026-06-21T00:02:00.000Z",
+              "items": [
+                {
+                  "id": "item_g2_parent_user",
+                  "turnId": "turn_g2_parent",
+                  "threadId": "thr_1",
+                  "role": "user",
+                  "status": "completed",
+                  "createdAt": "2026-06-21T00:01:00.000Z",
+                  "finishedAt": "2026-06-21T00:01:00.000Z",
+                  "kind": "user_message",
+                  "text": "Fork me"
+                }
+              ],
+              "attachmentIds": [],
+              "activeSkillIds": [],
+              "injectedMemoryIds": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "session-resume-thread",
+      "setup": "session-resume",
+      "method": "POST",
+      "path": "/v1/sessions/thr_g2_source/resume-thread",
+      "auth": "runtime-token",
+      "responseKind": "json",
+      "body": {
+        "workspace": "/tmp/resumed",
+        "model": "deepseek-v4-pro",
+        "mode": "agent"
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "thread_id": "thr_1",
+          "session_id": "thr_g2_source",
+          "message_count": 1,
+          "summary": "Source Thread resumed"
+        }
+      }
+    },
+    {
+      "id": "events-since-seq",
+      "setup": "events",
+      "method": "GET",
+      "path": "/v1/threads/thr_g2_events/events?since_seq=1",
+      "auth": "runtime-token",
+      "responseKind": "sse",
+      "response": {
+        "status": 200
+      },
+      "sseFrames": [
+        "id: 2\nevent: turn_started\ndata: {\"kind\":\"turn_started\",\"seq\":2,\"timestamp\":\"2026-06-21T00:04:01.000Z\",\"threadId\":\"thr_g2_events\",\"turnId\":\"turn_g2_events\"}",
+        "id: 3\nevent: item_created\ndata: {\"kind\":\"item_created\",\"seq\":3,\"timestamp\":\"2026-06-21T00:04:02.000Z\",\"threadId\":\"thr_g2_events\",\"turnId\":\"turn_g2_events\",\"itemId\":\"item_g2_events_user\",\"item\":{\"id\":\"item_g2_events_user\",\"turnId\":\"turn_g2_events\",\"threadId\":\"thr_g2_events\",\"role\":\"user\",\"status\":\"completed\",\"createdAt\":\"2026-06-21T00:04:00.000Z\",\"finishedAt\":\"2026-06-21T00:04:00.000Z\",\"kind\":\"user_message\",\"text\":\"Replay this\"}}"
+      ]
+    },
+    {
+      "id": "events-caught-up-since-seq",
+      "setup": "events",
+      "method": "GET",
+      "path": "/v1/threads/thr_g2_events/events?since_seq=3",
+      "auth": "runtime-token",
+      "responseKind": "sse",
+      "response": {
+        "status": 200
+      },
+      "sseFrames": []
+    },
+    {
+      "id": "events-unauthorized-since-seq",
+      "setup": "events",
+      "method": "GET",
+      "path": "/v1/threads/thr_g2_events/events?since_seq=0",
+      "auth": "none",
+      "responseKind": "json",
+      "response": {
+        "status": 401,
+        "body": {
+          "code": "unauthorized",
+          "message": "Runtime authentication is required."
+        }
+      }
+    }
+  ]
+}

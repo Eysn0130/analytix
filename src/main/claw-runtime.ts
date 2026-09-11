@@ -1,0 +1,2770 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { randomUUID } from 'node:crypto'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { basename, isAbsolute, relative, resolve } from 'node:path'
+import { URL } from 'node:url'
+import {
+  createLarkChannel,
+  Domain,
+  LoggerLevel,
+  type LarkChannel,
+  type NormalizedMessage,
+  type SendInput,
+  type SendOptions,
+  type SendResult
+} from '@larksuiteoapi/node-sdk'
+import type {
+  AppSettingsV1,
+  ClawGeneratedFileV1,
+  ClawImChannelV1,
+  ClawImConversationV1,
+  ClawImProvider,
+  ClawImRemoteSessionV1,
+  ClawRunResult,
+  ClawRuntimeStatus,
+  ModelProviderProfileV1
+} from '../shared/app-settings'
+import {
+  DEFAULT_CLAW_MODEL,
+  DEFAULT_MODEL_PROVIDER_ID,
+  applyAnalytixRuntimePatch,
+  buildClawRuntimePrompt,
+  getAnalytixRuntimeSettings,
+  getModelProviderSettings,
+  isComposerChatModelId,
+  listNonTextModelIds,
+  modelProfileSupportsTextChat,
+  modelProviderModelProfile,
+  normalizeModelProviderId,
+  parseClawUserPromptForDisplay
+} from '../shared/app-settings'
+import { parseClawCommand } from '../shared/claw-commands'
+import { sanitizePublicAssistantText } from '../shared/public-runtime-content'
+import { projectOrdinaryPublicText } from '../shared/ordinary-log-pii-projection'
+import {
+  asString,
+  buildFeishuPrompt,
+  clawConversationKey,
+  extractIncomingChannelId,
+  extractIncomingProvider,
+  extractIncomingPrompt,
+  extractIncomingRemoteSession,
+  extractSenderLabel,
+  feishuSenderLabel,
+  finalAssistantReplyText,
+  formatFeishuMirrorText,
+  imCompletionReplyForPush,
+  isRunningStatus,
+  IM_COMPLETED_NO_TEXT_REPLY,
+  IM_PROCESSING_ACK,
+  latestGeneratedFiles,
+  nestedRecord,
+  normalizeTaskModel,
+  parseJsonObject,
+  readRequestBody,
+  replyTextForGeneratedFiles,
+  runtimeErrorMessage,
+  sanitizePathSegment,
+  shouldDirectSendExistingGeneratedFilesForPrompt,
+  shouldSendGeneratedFilesForPrompt,
+  sleep,
+  webhookUrl,
+  writeJson,
+  type ClawRuntimeDeps,
+  type RunPromptOptions,
+  type ThreadDetailJson,
+  type ThreadRecordJson,
+  type SseSubscriber,
+  subscribeRuntimeThreadEvents
+} from './claw-runtime-helpers'
+import {
+  captureCurrentFinalPublicationAuthorityPin,
+  getRuntimeBaseUrlForSettings,
+  isCurrentFinalPublicationAuthorityPin,
+  runtimeAuthHeaders
+} from './runtime/analytix-adapter'
+import { FEISHU_PUBLIC_PROJECTION_BOUNDARY, FeishuStreamer } from './feishu-streamer'
+import type { TelegramInboundPayload } from './telegram-runtime'
+import type { AccountCredentialScopeV1 } from '../../packages/runtime/src/contracts/provider-registry.js'
+
+const MAX_IM_FILE_UPLOAD_BYTES = 50 * 1024 * 1024
+const CLAW_IM_APPROVAL_POLICY = 'never'
+const CLAW_IM_SANDBOX_MODE = 'workspace-write'
+const CLAW_TELEGRAM_INBOUND_IMAGE_HEADING = '[Telegram inbound message]'
+
+type FeishuClawChannel = ClawImChannelV1 & {
+  platformAccount: Extract<NonNullable<ClawImChannelV1['platformAccount']>, { kind: 'feishu' }>
+}
+
+type FeishuCredentialAuthority = {
+  scope: AccountCredentialScopeV1
+  generation: string
+  incarnation: string
+}
+
+type IncomingRemoteSession = Pick<
+  ClawImRemoteSessionV1,
+  'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'
+>
+
+function hasFeishuPlatformAccount(channel: ClawImChannelV1): channel is FeishuClawChannel {
+  const account = channel.platformAccount
+  return account?.kind === 'feishu' &&
+    typeof account.appId === 'string' &&
+    account.appId.trim() !== ''
+}
+
+function isMissingThreadResult(result: { ok: boolean; status: number; body: string }): boolean {
+  if (result.ok) return false
+  const message = runtimeErrorMessage(result, '').toLowerCase()
+  return result.status === 404 && message.includes('thread') && message.includes('not found')
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function fallbackWeixinRemoteSession(
+  payload: Record<string, unknown>,
+  senderLabel: string
+): IncomingRemoteSession | null {
+  const message = nestedRecord(payload.message)
+  const data = nestedRecord(payload.data)
+  const chatId = asString(
+    payload.chatId ||
+    payload.chat_id ||
+    payload.open_chat_id ||
+    payload.from ||
+    payload.conversationId ||
+    payload.conversation_id ||
+    message.chatId ||
+    message.chat_id ||
+    message.from ||
+    message.sender ||
+    data.chatId ||
+    data.chat_id ||
+    data.from ||
+    data.sender ||
+    senderLabel
+  )
+  if (!chatId || chatId === 'webhook' || chatId === 'WeChat') return null
+  const messageId = asString(
+    payload.messageId ||
+    payload.message_id ||
+    message.messageId ||
+    message.message_id ||
+    data.messageId ||
+    data.message_id
+  ) || `wx_${randomUUID()}`
+  const threadId = asString(
+    payload.threadId ||
+    payload.thread_id ||
+    message.threadId ||
+    message.thread_id ||
+    data.threadId ||
+    data.thread_id
+  )
+  const senderId = asString(
+    payload.senderId ||
+    payload.sender_id ||
+    message.senderId ||
+    message.sender_id ||
+    message.sender ||
+    data.senderId ||
+    data.sender_id ||
+    data.sender
+  ) || chatId
+  const senderName = asString(
+    payload.senderName ||
+    payload.sender_name ||
+    message.senderName ||
+    message.sender_name ||
+    message.sender ||
+    data.senderName ||
+    data.sender_name ||
+    data.sender
+  ) || chatId
+  return { chatId, messageId, threadId, senderId, senderName }
+}
+
+function isChineseLocale(settings: AppSettingsV1): boolean {
+  return settings.locale.toLowerCase().startsWith('zh')
+}
+
+function currentImModel(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+  return channel?.model?.trim() || settings.claw.im.model.trim() || DEFAULT_CLAW_MODEL
+}
+
+function currentImProviderId(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+  return channel?.providerId?.trim() ||
+    settings.claw.im.providerId?.trim() ||
+    getAnalytixRuntimeSettings(settings).providerId.trim() ||
+    DEFAULT_MODEL_PROVIDER_ID
+}
+
+function providerLabel(provider: ModelProviderProfileV1): string {
+  const name = provider.name.trim()
+  return name && name !== provider.id ? `${name} (${provider.id})` : provider.id
+}
+
+function providerTextModels(settings: AppSettingsV1, provider: ModelProviderProfileV1): string[] {
+  const nonTextModelIds = listNonTextModelIds(settings)
+  const models: string[] = []
+  for (const model of provider.models) {
+    const trimmed = model.trim()
+    if (!trimmed) continue
+    if (!isComposerChatModelId(trimmed, nonTextModelIds)) continue
+    if (!modelProfileSupportsTextChat(modelProviderModelProfile(provider, trimmed))) continue
+    models.push(trimmed)
+  }
+  return models
+}
+
+function findImProvider(settings: AppSettingsV1, value: string): ModelProviderProfileV1 | undefined {
+  const query = value.trim()
+  if (!query) return undefined
+  const normalizedId = normalizeModelProviderId(query)
+  const providers = getModelProviderSettings(settings).providers
+  return providers.find((provider) => provider.id === normalizedId) ??
+    providers.find((provider) => provider.id.toLowerCase() === query.toLowerCase()) ??
+    providers.find((provider) => provider.name.trim().toLowerCase() === query.toLowerCase())
+}
+
+function currentImProvider(settings: AppSettingsV1, channel?: ClawImChannelV1): ModelProviderProfileV1 {
+  const providers = getModelProviderSettings(settings).providers
+  const providerId = currentImProviderId(settings, channel)
+  return providers.find((provider) => provider.id === providerId) ??
+    providers.find((provider) => provider.id === DEFAULT_MODEL_PROVIDER_ID) ??
+    providers[0]
+}
+
+function resolveImModelAlias(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === '自动') return 'auto'
+  if (normalized === 'pro') return 'deepseek-v4-pro'
+  if (normalized === 'flash') return 'deepseek-v4-flash'
+  return value.trim()
+}
+
+function findProviderModel(models: readonly string[], value: string): string | undefined {
+  const requested = resolveImModelAlias(value)
+  if (!requested) return undefined
+  if (requested.toLowerCase() === 'auto') return 'auto'
+  return models.find((model) => model === requested) ??
+    models.find((model) => model.toLowerCase() === requested.toLowerCase())
+}
+
+function effectiveImRuntimeModel(settings: AppSettingsV1, requestedModel: string): string {
+  const trimmed = requestedModel.trim()
+  if (trimmed && trimmed.toLowerCase() !== DEFAULT_CLAW_MODEL) return trimmed
+  return getAnalytixRuntimeSettings(settings).model.trim() || trimmed || DEFAULT_CLAW_MODEL
+}
+
+function imCommandHelpText(settings: AppSettingsV1): string {
+  if (isChineseLocale(settings)) {
+    return [
+      '连接手机命令：',
+      '- `/help`：查看命令帮助',
+      '- `/new`：当前 IM 连接开启新话题',
+      '- `/provider`：查看已加载的模型供应商',
+      '- `/provider <id>`：切换当前 IM 连接供应商',
+      '- `/model`：查看当前供应商可用模型',
+      '- `/model <id>`：切换当前 IM 连接模型',
+      '也支持 `-new`、`-help`、`-provider minimax`、`-model MiniMax-M3` 这种写法。'
+    ].join('\n')
+  }
+  return [
+    'Connect Phone commands:',
+    '- `/help`: show command help',
+    '- `/new`: start a new topic for this IM connection',
+    '- `/provider`: list loaded model providers',
+    '- `/provider <id>`: switch the provider for this IM connection',
+    '- `/model`: list models for the current provider',
+    '- `/model <id>`: switch the model for this IM connection',
+    '`-new`, `-help`, `-provider minimax`, and `-model MiniMax-M3` are supported too.'
+  ].join('\n')
+}
+
+function imProviderListText(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+  const providers = getModelProviderSettings(settings).providers
+  const currentProviderId = currentImProviderId(settings, channel)
+  const rows = providers.map((provider) => {
+    const marker = provider.id === currentProviderId ? '*' : '-'
+    const modelCount = providerTextModels(settings, provider).length
+    const credentialStatus = isChineseLocale(settings) ? '凭据由 Registry 管理' : 'credential managed by Registry'
+    return `${marker} \`${provider.id}\` ${providerLabel(provider)} · ${modelCount} models · ${credentialStatus}`
+  })
+  if (isChineseLocale(settings)) {
+    return [
+      `当前供应商：\`${currentProviderId}\`。`,
+      '已加载供应商：',
+      ...rows,
+      '切换供应商：`/provider <id>`。切换后可用 `/model` 查看该供应商模型。'
+    ].join('\n')
+  }
+  return [
+    `Current provider: \`${currentProviderId}\`.`,
+    'Loaded providers:',
+    ...rows,
+    'Switch provider with `/provider <id>`. Use `/model` after switching to list its models.'
+  ].join('\n')
+}
+
+function imProviderCommandHint(settings: AppSettingsV1, value: string): string {
+  return isChineseLocale(settings)
+    ? `没有找到供应商 \`${value}\`。发送 \`/provider\` 查看已加载供应商。`
+    : `Provider \`${value}\` was not found. Send \`/provider\` to list loaded providers.`
+}
+
+function imProviderChangedText(
+  settings: AppSettingsV1,
+  provider: ModelProviderProfileV1,
+  model: string
+): string {
+  return isChineseLocale(settings)
+    ? `当前 IM 供应商已切换到 \`${provider.id}\`，模型为 \`${model}\`。发送 \`/model\` 可查看这个供应商的可用模型。`
+    : `IM provider switched to \`${provider.id}\`; model is \`${model}\`. Send \`/model\` to list models for this provider.`
+}
+
+function imModelListText(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+  const provider = currentImProvider(settings, channel)
+  const models = providerTextModels(settings, provider)
+  const currentModel = currentImModel(settings, channel)
+  const rows = models.map((model) => `${model === currentModel ? '*' : '-'} \`${model}\``)
+  if (isChineseLocale(settings)) {
+    return [
+      `当前供应商：\`${provider.id}\` ${providerLabel(provider)}`,
+      `当前模型：\`${currentModel}\`。`,
+      ...(rows.length > 0
+        ? ['可用模型：', ...rows, '切换模型：`/model <id>`。']
+        : ['这个供应商还没有可用的文本模型，请先在设置里为它配置模型。'])
+    ].join('\n')
+  }
+  return [
+    `Current provider: \`${provider.id}\` ${providerLabel(provider)}`,
+    `Current model: \`${currentModel}\`.`,
+    ...(rows.length > 0
+      ? ['Available models:', ...rows, 'Switch model with `/model <id>`.']
+      : ['This provider has no usable text models yet. Add models for it in Settings first.'])
+  ].join('\n')
+}
+
+function imModelCommandHint(settings: AppSettingsV1, provider: ModelProviderProfileV1, value: string): string {
+  const models = providerTextModels(settings, provider)
+  const ids = models.map((model) => `\`${model}\``).join(', ')
+  return isChineseLocale(settings)
+    ? `供应商 \`${provider.id}\` 下没有找到模型 \`${value}\`。${ids ? `可用模型：${ids}。` : '这个供应商还没有可用的文本模型。'}`
+    : `Model \`${value}\` was not found for provider \`${provider.id}\`. ${ids ? `Available models: ${ids}.` : 'This provider has no usable text models yet.'}`
+}
+
+function imModelChangedText(settings: AppSettingsV1, model: string): string {
+  return isChineseLocale(settings)
+    ? `连接手机模型已切换到 \`${model}\`。`
+    : `Connect Phone model switched to \`${model}\`.`
+}
+
+function imNewTopicText(settings: AppSettingsV1): string {
+  return isChineseLocale(settings)
+    ? '新话题已开启。下一条消息会创建新的本地会话。'
+    : 'Started a new topic. The next message will create a fresh local conversation.'
+}
+
+/**
+ * One-time intro sent to an IM conversation when the channel is first
+ * connected: who the assistant is, what it can do, and the IM commands.
+ */
+export function imWelcomeText(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+  const profile = channel?.agentProfile
+  const name = profile?.name.trim() || channel?.label.trim() || 'Analytix'
+  const description = profile?.description.trim() ?? ''
+  if (isChineseLocale(settings)) {
+    return [
+      `你好，我是 ${name}，通过 Analytix 连接到这个对话的 AI 助手。`,
+      ...(description ? [description] : []),
+      '你可以直接发消息让我帮忙：回答问题、查资料、读写已连接电脑工作区里的文件、生成文档等，完成后我会在这里回复你。',
+      imCommandHelpText(settings),
+      '直接发一条消息就可以开始。'
+    ].join('\n\n')
+  }
+  return [
+    `Hi, I am ${name}, an AI assistant connected to this chat through Analytix.`,
+    ...(description ? [description] : []),
+    'Send me a message and I will handle it on the connected computer: answering questions, research, reading and writing workspace files, generating documents — I reply here once done.',
+    imCommandHelpText(settings),
+    'Send any message to get started.'
+  ].join('\n\n')
+}
+
+/**
+ * How long the background push keeps polling a turn that outran the IM
+ * response window before giving up (30 min). Generous enough for long
+ * agentic runs, bounded so a stuck turn never leaks a forever-poll.
+ */
+const RESULT_PUSH_MAX_WAIT_MS = 30 * 60 * 1_000
+
+export class ClawRuntime {
+  private readonly deps: ClawRuntimeDeps
+  private server: Server | null = null
+  private serverKey = ''
+  private feishuChannels = new Map<string, LarkChannel>()
+  private feishuChannelKeys = new Map<string, string>()
+  private feishuChannelAuthorities = new Map<string, FeishuCredentialAuthority>()
+  private feishuSyncVersion = 0
+  /** Channels with an in-flight first-message welcome delivery. */
+  private readonly welcomeInFlight = new Set<string>()
+  /** WeChat channels already greeted (or attempted) at connect time this run. */
+  private readonly weixinConnectWelcomeAttempted = new Set<string>()
+  /** `${threadId}:${turnId}` of turns with an in-flight delayed-result push. */
+  private readonly pendingResultPushes = new Set<string>()
+
+  constructor(deps: ClawRuntimeDeps) {
+    this.deps = deps
+  }
+
+  sync(settings: AppSettingsV1): void {
+    this.syncWebhook(settings)
+    void this.syncFeishuChannels(settings)
+    void this.syncWeixinConnectWelcomes(settings)
+    this.syncTelegramChannels(settings)
+  }
+
+  private syncTelegramChannels(settings: AppSettingsV1): void {
+    this.deps.telegramRuntime?.sync(settings)
+  }
+
+  /**
+   * Greets the WeChat owner right after a channel is first connected.
+   * The QR login records the owner's user id, so the intro can be
+   * pushed before any inbound message. Failures fall back to the
+   * first-inbound-message welcome.
+   */
+  private async syncWeixinConnectWelcomes(settings: AppSettingsV1): Promise<void> {
+    if (!settings.claw.enabled || !settings.claw.im.enabled) return
+    if (!this.deps.sendWeixinBridgeMessage || !this.deps.resolveWeixinAccountUserId) return
+    for (const channel of settings.claw.channels) {
+      if (!channel.enabled || channel.provider !== 'weixin' || channel.welcomeSentAt) continue
+      const account = channel.platformAccount
+      if (account?.kind !== 'weixin' || !account.accountId.trim()) continue
+      if (this.weixinConnectWelcomeAttempted.has(channel.id) || this.welcomeInFlight.has(channel.id)) continue
+      this.weixinConnectWelcomeAttempted.add(channel.id)
+      this.welcomeInFlight.add(channel.id)
+      try {
+        const owner = (await this.deps.resolveWeixinAccountUserId(account.accountId)).trim()
+        if (!owner) continue
+        const result = await this.deps.sendWeixinBridgeMessage({
+          accountId: account.accountId,
+          to: owner,
+          text: imWelcomeText(settings, channel)
+        })
+        if (result.ok) {
+          await this.markChannelWelcomeSent(channel.id)
+        } else {
+          this.deps.logError('claw-weixin', 'Failed to greet the WeChat owner after connect; the welcome will be sent on the first inbound message instead.', {
+            channelId: channel.id,
+            message: result.message
+          })
+        }
+      } catch (error) {
+        this.deps.logError('claw-weixin', 'Failed to greet the WeChat owner after connect', {
+          channelId: channel.id,
+          message: errorMessage(error)
+        })
+      } finally {
+        this.welcomeInFlight.delete(channel.id)
+      }
+    }
+  }
+
+  private async markChannelWelcomeSent(channelId: string): Promise<void> {
+    const settings = await this.deps.store.load()
+    const now = new Date().toISOString()
+    await this.deps.store.patch({
+      claw: {
+        channels: settings.claw.channels.map((item) =>
+          item.id === channelId ? { ...item, welcomeSentAt: now, updatedAt: now } : item
+        )
+      }
+    })
+  }
+
+  /** Welcome text still owed to this channel, or '' when already delivered. */
+  private pendingWelcomeText(settings: AppSettingsV1, channel: ClawImChannelV1 | undefined): string {
+    if (!channel || channel.welcomeSentAt || this.welcomeInFlight.has(channel.id)) return ''
+    return imWelcomeText(settings, channel)
+  }
+
+  /**
+   * Sends the welcome as its own WeChat bubble so it arrives ahead of
+   * the (slow) model reply. Returns false when the channel cannot push
+   * (non-WeChat provider, missing bridge, unknown recipient) so the
+   * caller falls back to prepending the text to the HTTP reply.
+   */
+  private async pushWeixinWelcome(
+    channel: ClawImChannelV1,
+    remoteSession: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'> | undefined,
+    text: string
+  ): Promise<boolean> {
+    if (channel.provider !== 'weixin' || !this.deps.sendWeixinBridgeMessage) return false
+    const account = channel.platformAccount
+    if (account?.kind !== 'weixin' || !account.accountId.trim()) return false
+    const to = remoteSession?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+    if (!to) return false
+    const result = await this.deps.sendWeixinBridgeMessage({
+      accountId: account.accountId,
+      to,
+      text
+    })
+    if (!result.ok) {
+      this.deps.logError('claw-weixin', 'Failed to push the WeChat welcome message; prepending it to the reply instead.', {
+        channelId: channel.id,
+        message: result.message
+      })
+    }
+    return result.ok
+  }
+
+  stop(): void {
+    this.closeWebhook()
+    void this.closeAllFeishuChannels()
+    this.deps.telegramRuntime?.stop()
+  }
+
+  async status(): Promise<ClawRuntimeStatus> {
+    const settings = await this.deps.store.load()
+    return {
+      imServerRunning: this.server !== null && settings.claw.enabled && settings.claw.im.enabled,
+      imUrl: webhookUrl(settings),
+      runningTaskIds: []
+    }
+  }
+
+  async runTask(_taskId: string): Promise<ClawRunResult> {
+    return { ok: false, message: 'Connect Phone scheduled tasks have moved to Schedule.' }
+  }
+
+  private async runPrompt(settings: AppSettingsV1, options: RunPromptOptions): Promise<ClawRunResult> {
+    const workspace = options.workspaceRoot.trim() || settings.workspaceRoot
+    const existingThreadId = options.threadId?.trim()
+    const requestedModel = normalizeTaskModel(options.model) ?? (settings.runtime.model.trim() || DEFAULT_CLAW_MODEL)
+    const model = effectiveImRuntimeModel(settings, requestedModel)
+    const providerId = options.providerId?.trim() || currentImProviderId(settings, options.channel)
+    const runtimeSettings = applyAnalytixRuntimePatch(settings, { providerId, model })
+    const createThread = async (): Promise<ThreadRecordJson | null> => {
+      const body: Record<string, unknown> = { workspace, model, mode: options.mode }
+      if (options.source === 'im') {
+        body.approvalPolicy = CLAW_IM_APPROVAL_POLICY
+        body.sandboxMode = CLAW_IM_SANDBOX_MODE
+      }
+      const create = await this.deps.runtimeRequest(runtimeSettings, '/v1/threads', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      })
+      if (!create.ok) return null
+      return JSON.parse(create.body) as ThreadRecordJson
+    }
+    const patchThreadTitle = (thread: ThreadRecordJson): void => {
+      if (!options.title.trim()) return
+      void this.deps.runtimeRequest(runtimeSettings, `/v1/threads/${encodeURIComponent(thread.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: options.title.trim() })
+      })
+    }
+    let thread: ThreadRecordJson | null = existingThreadId ? { id: existingThreadId } : await createThread()
+    if (!thread) return { ok: false, message: 'Failed to create thread.' }
+    if (!existingThreadId) patchThreadTitle(thread)
+
+    const runtimePrompt = buildClawRuntimePrompt(runtimeSettings, options.prompt, { channel: options.channel })
+    const displayText = options.displayText?.trim() || parseClawUserPromptForDisplay(options.prompt).text
+    const attachmentIds = await this.uploadImAttachments(runtimeSettings, options.attachmentLocalFilePaths ?? [], {
+      threadId: thread.id,
+      workspace,
+      source: options.source,
+      channelId: options.channel?.id
+    })
+    const turnBody: Record<string, unknown> = {
+      prompt: runtimePrompt,
+      mode: options.mode
+    }
+    if (displayText && displayText !== runtimePrompt) turnBody.displayText = displayText
+    if (model) turnBody.model = model
+    if (attachmentIds.length > 0) turnBody.attachmentIds = attachmentIds
+    // IM senders can only reply in their chat app; they cannot answer
+    // GUI prompts, so the runtime must not expose user-input tools.
+    if (options.source === 'im') {
+      turnBody.disableUserInput = true
+      turnBody.approvalPolicy = CLAW_IM_APPROVAL_POLICY
+      turnBody.sandboxMode = CLAW_IM_SANDBOX_MODE
+    }
+    let turn = await this.startRuntimeTurn(runtimeSettings, thread.id, turnBody)
+    if (!turn.ok && existingThreadId && isMissingThreadResult(turn)) {
+      this.deps.logError('claw-runtime', 'Configured IM thread was missing; creating a replacement thread.', {
+        threadId: existingThreadId,
+        channelId: options.channel?.id,
+        source: options.source
+      })
+      thread = await createThread()
+      if (!thread) return { ok: false, message: 'Failed to create thread.' }
+      patchThreadTitle(thread)
+      turn = await this.startRuntimeTurn(runtimeSettings, thread.id, turnBody)
+    }
+    if (!turn.ok) return { ok: false, message: 'Failed to start turn.' }
+
+    const parsedTurn = parseJsonObject(turn.body)
+    const turnId = asString(parsedTurn?.turnId) || asString(nestedRecord(parsedTurn?.turn).id)
+    if (!turnId) {
+      return { ok: false, message: 'Failed to start turn: missing turn id.' }
+    }
+    if (turnId && options.onTurnStarted) {
+      await options.onTurnStarted({ threadId: thread.id, turnId })
+    }
+    if (!options.waitForResult) {
+      return { ok: true, threadId: thread.id, turnId, message: 'Started' }
+    }
+
+    const outcome = await this.waitForAssistantResult(
+      runtimeSettings,
+      thread.id,
+      turnId,
+      options.responseTimeoutMs,
+      workspace
+    )
+    if (outcome.status === 'failed' || outcome.status === 'aborted') {
+      return { ok: false, message: outcome.error || `Agent turn ${outcome.status}.` }
+    }
+    if (outcome.status === 'timeout') {
+      // The turn outran the response window but keeps running in the
+      // runtime. Ack now; the caller pushes the real result back when
+      // the turn finishes (see `scheduleImResultPush`). Returning the
+      // last-seen text here is what used to leak an intermediate plan.
+      return {
+        ok: true,
+        threadId: thread.id,
+        turnId,
+        text: '',
+        message: IM_PROCESSING_ACK,
+        files: [],
+        completed: false
+      }
+    }
+    return {
+      ok: true,
+      threadId: thread.id,
+      turnId,
+      text: outcome.text,
+      message: outcome.text || IM_COMPLETED_NO_TEXT_REPLY,
+      files: outcome.files,
+      completed: true
+    }
+  }
+
+  private startRuntimeTurn(
+    settings: AppSettingsV1,
+    threadId: string,
+    turnBody: Record<string, unknown>
+  ): Promise<{ ok: boolean; status: number; body: string }> {
+    return this.deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}/turns`,
+      { method: 'POST', body: JSON.stringify(turnBody) }
+    )
+  }
+
+  private async uploadImAttachments(
+    settings: AppSettingsV1,
+    localFilePaths: readonly string[],
+    context: { threadId: string; workspace: string; source: 'task' | 'im'; channelId?: string }
+  ): Promise<string[]> {
+    const ids: string[] = []
+    for (const localFilePath of localFilePaths) {
+      const filePath = localFilePath.trim()
+      if (!filePath) continue
+      try {
+        const data = await readFile(filePath)
+        const upload = await this.deps.runtimeRequest(settings, '/v1/attachments', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: basename(filePath) || 'telegram-image',
+            dataBase64: data.toString('base64'),
+            localFilePath: filePath,
+            threadId: context.threadId,
+            workspace: context.workspace
+          })
+        })
+        if (!upload.ok) {
+          this.deps.logError('claw-im', 'Failed to upload an IM attachment to the Analytix runtime.', {
+            ...context,
+            filePath,
+            message: runtimeErrorMessage(upload, 'attachment upload failed')
+          })
+          continue
+        }
+        const parsed = parseJsonObject(upload.body)
+        const attachmentId = asString(nestedRecord(parsed?.attachment).id)
+        if (!attachmentId) {
+          this.deps.logError('claw-im', 'Analytix runtime attachment upload returned no attachment id.', {
+            ...context,
+            filePath
+          })
+          continue
+        }
+        ids.push(attachmentId)
+      } catch (error) {
+        this.deps.logError('claw-im', 'Failed to read an IM attachment before starting the turn.', {
+          ...context,
+          filePath,
+          message: errorMessage(error)
+        })
+      }
+    }
+    return ids
+  }
+
+  private async subscribeSse(
+    settings: AppSettingsV1,
+    threadId: string,
+    streamer: FeishuStreamer,
+    signal: AbortSignal
+  ): Promise<{ close: () => void }> {
+    const baseUrl = getRuntimeBaseUrlForSettings(settings)
+    if (!baseUrl) throw new Error('runtime_base_url_unavailable')
+    const headers: Record<string, string> = { Accept: 'text/event-stream' }
+    const auth = runtimeAuthHeaders(settings).get('Authorization')
+    if (auth) headers.Authorization = auth
+    return subscribeRuntimeThreadEvents({
+      baseUrl,
+      threadId,
+      headers,
+      signal,
+      onEvent: (event) => streamer.onSseEvent(event as Record<string, unknown>),
+      logError: (category, message, detail) => this.deps.logError(category, message, detail)
+    })
+  }
+
+  private subscribeSseForStreamer(
+    settings: AppSettingsV1,
+    threadId: string,
+    streamer: FeishuStreamer
+  ): SseSubscriber {
+    return (signal) => {
+      const setup = this.subscribeSse(settings, threadId, streamer, signal)
+      let close = (): void => undefined
+      void setup.then(
+        (handle) => {
+          close = handle.close
+        },
+        (error) => {
+          this.deps.logError('claw-feishu-stream', 'SSE subscription setup failed', {
+            message: errorMessage(error),
+            threadId
+          })
+        }
+      )
+      return { close: () => close() }
+    }
+  }
+
+  private async runStreamingReply(input: {
+    bridge: LarkChannel
+    chatId: string
+    threadId: string
+    turnId: string
+    replyOptions: { replyTo?: string; replyInThread?: boolean }
+    responseTimeoutMs: number
+    context: Record<string, unknown>
+  }): Promise<{ ok: boolean; messageId: string; finalText: string; fellBack: boolean; message: string }> {
+    const timeoutAbort = new AbortController()
+    const timeout = setTimeout(() => timeoutAbort.abort(), input.responseTimeoutMs)
+    let streamer: FeishuStreamer | null = null
+    try {
+      const settings = await this.deps.store.load()
+      const runtimeBaseUrl = getRuntimeBaseUrlForSettings(settings)
+      const authorityPin = captureCurrentFinalPublicationAuthorityPin()
+      let authorityOriginMatches = false
+      try {
+        authorityOriginMatches = Boolean(
+          runtimeBaseUrl && authorityPin &&
+          new URL(runtimeBaseUrl).origin === new URL(authorityPin.runtimeUrl).origin
+        )
+      } catch {
+        authorityOriginMatches = false
+      }
+      let detail: ThreadDetailJson | null = null
+      try {
+        const detailRes = await this.deps.runtimeRequest(
+          settings,
+          `/v1/threads/${encodeURIComponent(input.threadId)}`,
+          { method: 'GET' }
+        )
+        if (detailRes.ok) detail = JSON.parse(detailRes.body) as ThreadDetailJson
+      } catch {
+        detail = null
+      }
+      if (!detail || !authorityPin || !authorityOriginMatches ||
+          !isCurrentFinalPublicationAuthorityPin(authorityPin) ||
+          detail.historyAuthority === 'case_boundary_only_v1') {
+        const boundary = await this.sendFeishuEffectOnce(
+          input.bridge,
+          input.chatId,
+          { markdown: FEISHU_PUBLIC_PROJECTION_BOUNDARY },
+          input.replyOptions,
+          input.context
+        )
+        return {
+          ok: true,
+          messageId: boundary.messageId,
+          finalText: FEISHU_PUBLIC_PROJECTION_BOUNDARY,
+          fellBack: true,
+          message: 'case_projection_boundary'
+        }
+      }
+      streamer = new FeishuStreamer({
+        bridge: input.bridge,
+        chatId: input.chatId,
+        turnId: input.turnId,
+        threadId: input.threadId,
+        replyOptions: input.replyOptions,
+        finalPublicationAuthorityPin: authorityPin,
+        isFinalPublicationAuthorityPinCurrent: isCurrentFinalPublicationAuthorityPin,
+        isBridgeCredentialAuthorityCurrent: async () => {
+          const channelId = typeof input.context.channelId === 'string' ? input.context.channelId : ''
+          return !this.deps.resolveAccountCredential || Boolean(
+            channelId && (await this.currentFeishuBridge(channelId)) === input.bridge
+          )
+        },
+        logger: (category, message, detail) => this.deps.logError(category, message, detail)
+      })
+      timeoutAbort.signal.addEventListener('abort', () => streamer?.abort(), { once: true })
+      const result = await streamer.start({
+        subscribe: this.subscribeSseForStreamer(settings, input.threadId, streamer)
+      })
+      return {
+        ok: result.ok,
+        messageId: result.messageId,
+        finalText: result.finalText,
+        fellBack: result.fellBack,
+        message: result.ok ? 'streamed' : 'stream_failed'
+      }
+    } catch (error) {
+      this.deps.logError('claw-feishu-stream', 'Streaming reply failed; publishing only the fixed boundary.', {
+        message: errorMessage(error),
+        ...input.context
+      })
+      try {
+        const fallback = await this.sendFeishuEffectOnce(
+          input.bridge,
+          input.chatId,
+          { markdown: FEISHU_PUBLIC_PROJECTION_BOUNDARY },
+          input.replyOptions,
+          input.context
+        )
+        return {
+          ok: true,
+          messageId: fallback.messageId,
+          finalText: FEISHU_PUBLIC_PROJECTION_BOUNDARY,
+          fellBack: true,
+          message: 'boundary_fallback'
+        }
+      } catch {
+        return {
+          ok: false,
+          messageId: '',
+          finalText: FEISHU_PUBLIC_PROJECTION_BOUNDARY,
+          fellBack: true,
+          message: 'Sorry, something went wrong while handling your message.'
+        }
+      }
+    } finally {
+      clearTimeout(timeout)
+      streamer?.dispose()
+    }
+  }
+
+  /**
+   * Polls a turn to completion. Resolves with the turn's *concluding*
+   * text (never an intermediate plan — see {@link finalAssistantReplyText})
+   * and any generated files. Non-throwing on a failed/aborted/timed-out
+   * turn so both the synchronous reply and the asynchronous push can
+   * decide what to send; still throws when the thread read itself fails.
+   */
+  private async waitForAssistantResult(
+    settings: AppSettingsV1,
+    threadId: string,
+    turnId: string,
+    timeoutMs: number,
+    workspaceRoot?: string
+  ): Promise<{
+    status: 'completed' | 'failed' | 'aborted' | 'timeout'
+    text: string
+    files: ClawGeneratedFileV1[]
+    error?: string
+  }> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await sleep(1_500)
+      const detailRes = await this.deps.runtimeRequest(
+        settings,
+        `/v1/threads/${encodeURIComponent(threadId)}`,
+        { method: 'GET' }
+      )
+      if (!detailRes.ok) {
+        throw new Error(runtimeErrorMessage(detailRes, 'Failed to read thread result.'))
+      }
+      const detail = JSON.parse(detailRes.body) as ThreadDetailJson
+      if (detail.historyAuthority === 'case_boundary_only_v1') {
+        return {
+          status: 'completed',
+          text: FEISHU_PUBLIC_PROJECTION_BOUNDARY,
+          files: []
+        }
+      }
+      const targetTurn = Array.isArray(detail.turns)
+        ? detail.turns.find((turn) => turn.id === turnId)
+        : undefined
+      if (!targetTurn) continue
+      if (isRunningStatus(targetTurn.status)) continue
+      if (targetTurn.status === 'failed' || targetTurn.status === 'aborted') {
+        return {
+          status: targetTurn.status,
+          text: '',
+          files: [],
+          error: sanitizePublicAssistantText(targetTurn.error ?? '').trim() || `Agent turn ${targetTurn.status}.`
+        }
+      }
+      if (targetTurn.status === 'completed') {
+        return {
+          status: 'completed',
+          text: finalAssistantReplyText(detail, { turnId }),
+          files: latestGeneratedFiles(detail, { turnId, workspaceRoot })
+        }
+      }
+    }
+    return { status: 'timeout', text: '', files: [] }
+  }
+
+  /**
+   * Fire-and-forget delivery of a turn's result that outran the IM
+   * response window. Keeps polling in the background and pushes the
+   * concluding text (or a completion note) back over the bridge when the
+   * turn finishes. No-op for providers/recipients we cannot push to, and
+   * deduped per turn so a retried inbound never double-pushes.
+   */
+  private scheduleImResultPush(
+    settings: AppSettingsV1,
+    input: {
+      channel?: ClawImChannelV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+      threadId: string
+      turnId?: string
+      workspaceRoot: string
+    }
+  ): void {
+    const { channel, turnId } = input
+    if (!channel || !turnId) return
+    const canPush =
+      (channel.provider === 'weixin' && Boolean(this.deps.sendWeixinBridgeMessage)) ||
+      (channel.provider === 'feishu' && this.feishuChannels.has(channel.id)) ||
+      (channel.provider === 'telegram' && Boolean(this.deps.telegramRuntime?.has(channel.id)))
+    if (!canPush) return
+    const key = `${input.threadId}:${turnId}`
+    if (this.pendingResultPushes.has(key)) return
+    this.pendingResultPushes.add(key)
+    void (async () => {
+      try {
+        const outcome = await this.waitForAssistantResult(
+          settings,
+          input.threadId,
+          turnId,
+          RESULT_PUSH_MAX_WAIT_MS,
+          input.workspaceRoot
+        )
+        if (outcome.status === 'timeout') {
+          this.deps.logError(
+            'claw-im',
+            'Gave up pushing a delayed agent result: turn still running after the maximum wait.',
+            { threadId: input.threadId, turnId }
+          )
+          return
+        }
+        const body =
+          outcome.status === 'completed'
+            ? outcome.text.trim() || imCompletionReplyForPush(outcome.files)
+            : `❌ 任务未完成：${outcome.error || outcome.status}`
+        await this.pushImMessage(channel, input.remoteSession, body)
+      } catch (error) {
+        this.deps.logError('claw-im', 'Failed to push a delayed agent result.', {
+          message: errorMessage(error),
+          threadId: input.threadId,
+          turnId
+        })
+      } finally {
+        this.pendingResultPushes.delete(key)
+      }
+    })()
+  }
+
+  /** Pushes a standalone bridge message to the sender of an inbound IM. */
+  private async pushImMessage(
+    channel: ClawImChannelV1,
+    remoteSession: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'> | undefined,
+    text: string
+  ): Promise<void> {
+    if (channel.provider === 'weixin') {
+      const account = channel.platformAccount
+      if (account?.kind !== 'weixin' || !account.accountId.trim() || !this.deps.sendWeixinBridgeMessage) return
+      const to = remoteSession?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+      if (!to) return
+      const result = await this.deps.sendWeixinBridgeMessage({ accountId: account.accountId, to, text })
+      if (!result.ok) {
+        this.deps.logError('claw-weixin', 'Failed to push delayed result over the WeChat bridge.', {
+          channelId: channel.id,
+          message: result.message
+        })
+      }
+      return
+    }
+    if (channel.provider === 'feishu') {
+      const bridge = await this.currentFeishuBridge(channel.id)
+      const to = remoteSession?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+      if (!bridge || !to) return
+      await this.sendFeishuMessage(
+        bridge,
+        to,
+        { markdown: text },
+        {},
+        { purpose: 'agent-reply-delayed', channelId: channel.id, chatId: to }
+      )
+      return
+    }
+    if (channel.provider === 'telegram') {
+      const to = remoteSession?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+      if (!to || !this.deps.telegramRuntime) return
+      const result = await this.deps.telegramRuntime.sendMessage(channel.id, to, text)
+      if (!result.ok) {
+        this.deps.logError('claw-telegram', 'Failed to push delayed result over Telegram.', {
+          channelId: channel.id,
+          chatId: to,
+          message: result.message
+        })
+      }
+    }
+  }
+
+  private resolveChannelWorkspaceRoot(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
+    return channel?.workspaceRoot.trim() || settings.claw.im.workspaceRoot.trim() || settings.workspaceRoot
+  }
+
+  private legacyEmptyBaseConversationWorkspaceRoot(
+    session: Pick<ClawImRemoteSessionV1, 'chatId' | 'threadId'>
+  ): string {
+    const key = sanitizePathSegment(session.threadId.trim() || session.chatId.trim(), 'conversation')
+    return `/conversations/${key}`
+  }
+
+  private resolveConversationWorkspaceRoot(
+    settings: AppSettingsV1,
+    channel: ClawImChannelV1,
+    session: Pick<ClawImRemoteSessionV1, 'chatId' | 'threadId'>
+  ): string {
+    const base = this.resolveChannelWorkspaceRoot(settings, channel).trim()
+    const key = sanitizePathSegment(session.threadId.trim() || session.chatId.trim(), 'conversation')
+    return base ? `${base.replace(/\/+$/, '')}/conversations/${key}` : ''
+  }
+
+  private resolveIncomingWorkspaceRoot(
+    settings: AppSettingsV1,
+    channel: ClawImChannelV1 | undefined,
+    conversation: ClawImConversationV1 | undefined,
+    remoteSession: Pick<ClawImRemoteSessionV1, 'chatId' | 'threadId'> | undefined
+  ): string {
+    const storedConversationRoot = conversation?.workspaceRoot.trim() ?? ''
+    if (storedConversationRoot && remoteSession) {
+      const legacyEmptyBaseRoot = this.legacyEmptyBaseConversationWorkspaceRoot(remoteSession)
+      if (storedConversationRoot !== legacyEmptyBaseRoot) return storedConversationRoot
+    } else if (storedConversationRoot) {
+      return storedConversationRoot
+    }
+    const conversationRoot = channel && remoteSession
+      ? this.resolveConversationWorkspaceRoot(settings, channel, remoteSession)
+      : ''
+    return conversationRoot || this.resolveChannelWorkspaceRoot(settings, channel)
+  }
+
+  private findChannelConversation(
+    channel: ClawImChannelV1,
+    session: Pick<ClawImRemoteSessionV1, 'chatId' | 'threadId'>
+  ): ClawImConversationV1 | undefined {
+    const targetKey = clawConversationKey(session.chatId, session.threadId)
+    return channel.conversations.find((conversation) =>
+      clawConversationKey(conversation.chatId, conversation.remoteThreadId) === targetKey
+    )
+  }
+
+  private async resetIncomingImThread(
+    input: {
+      channel?: ClawImChannelV1
+      conversation?: ClawImConversationV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+    }
+  ): Promise<void> {
+    if (!input.channel) return
+    const currentSettings = await this.deps.store.load()
+    const currentChannel = currentSettings.claw.channels.find((item) => item.id === input.channel?.id)
+    if (!currentChannel) return
+    const session = input.remoteSession
+    const currentConversation = session
+      ? this.findChannelConversation(currentChannel, session)
+      : input.conversation
+        ? currentChannel.conversations.find((item) => item.id === input.conversation?.id)
+        : undefined
+    const now = new Date().toISOString()
+    await this.deps.store.patch({
+      claw: {
+        channels: currentSettings.claw.channels.map((item) => {
+          if (item.id !== currentChannel.id) return item
+          return {
+            ...item,
+            threadId: '',
+            conversations: currentConversation
+              ? item.conversations.map((conversation) =>
+                  conversation.id === currentConversation.id
+                    ? {
+                        ...conversation,
+                        latestMessageId: session?.messageId || conversation.latestMessageId,
+                        senderId: session?.senderId || conversation.senderId,
+                        senderName: session?.senderName || conversation.senderName,
+                        localThreadId: '',
+                        updatedAt: now
+                      }
+                    : conversation
+                )
+              : item.conversations,
+            updatedAt: now
+          }
+        })
+      }
+    })
+  }
+
+  private async setIncomingImModel(channel: ClawImChannelV1 | undefined, model: string): Promise<void> {
+    if (!channel) {
+      await this.deps.store.patch({ claw: { im: { model } } })
+      return
+    }
+    const currentSettings = await this.deps.store.load()
+    const now = new Date().toISOString()
+    await this.deps.store.patch({
+      claw: {
+        channels: currentSettings.claw.channels.map((item) =>
+          item.id === channel.id
+            ? {
+                ...item,
+                model,
+                updatedAt: now
+              }
+            : item
+        )
+      }
+    })
+  }
+
+  private async setIncomingImProvider(
+    channel: ClawImChannelV1 | undefined,
+    providerId: string,
+    model: string
+  ): Promise<void> {
+    if (!channel) {
+      await this.deps.store.patch({ claw: { im: { providerId, model } } })
+      return
+    }
+    const currentSettings = await this.deps.store.load()
+    const now = new Date().toISOString()
+    await this.deps.store.patch({
+      claw: {
+        channels: currentSettings.claw.channels.map((item) =>
+          item.id === channel.id
+            ? {
+                ...item,
+                providerId,
+                model,
+                updatedAt: now
+              }
+            : item
+        )
+      }
+    })
+  }
+
+  private async handleIncomingImCommand(
+    settings: AppSettingsV1,
+    input: {
+      text: string
+      channel?: ClawImChannelV1
+      conversation?: ClawImConversationV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+    }
+  ): Promise<string | null> {
+    const command = parseClawCommand(input.text)
+    if (!command) return null
+    if (command.kind === 'help') return imCommandHelpText(settings)
+    if (command.kind === 'showProvider') return imProviderListText(settings, input.channel)
+    if (command.kind === 'provider') {
+      const provider = findImProvider(settings, command.providerId)
+      if (!provider) return imProviderCommandHint(settings, command.providerId)
+      const models = providerTextModels(settings, provider)
+      const currentModel = currentImModel(settings, input.channel)
+      const currentProviderModel = currentModel === DEFAULT_CLAW_MODEL
+        ? undefined
+        : findProviderModel(models, currentModel)
+      const nextModel = currentProviderModel ?? models[0] ?? DEFAULT_CLAW_MODEL
+      await this.setIncomingImProvider(input.channel, provider.id, nextModel)
+      return imProviderChangedText(settings, provider, nextModel)
+    }
+    if (command.kind === 'showModel') return imModelListText(settings, input.channel)
+    if (command.kind === 'model') {
+      const provider = currentImProvider(settings, input.channel)
+      const model = findProviderModel(providerTextModels(settings, provider), command.model)
+      if (!model) return imModelCommandHint(settings, provider, command.model)
+      await this.setIncomingImModel(input.channel, model)
+      return imModelChangedText(settings, model)
+    }
+    if (command.kind === 'clear') {
+      await this.resetIncomingImThread({
+        channel: input.channel,
+        conversation: input.conversation,
+        remoteSession: input.remoteSession
+      })
+      return imNewTopicText(settings)
+    }
+    return null
+  }
+
+  private async processIncomingImPrompt(
+    settings: AppSettingsV1,
+    input: {
+      prompt: string
+      displayText?: string
+      sender: string
+      provider: ClawImProvider
+      channel?: ClawImChannelV1
+      conversation?: ClawImConversationV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+      waitForResult?: boolean
+      attachmentLocalFilePaths?: string[]
+    }
+  ): Promise<ClawRunResult> {
+    const { channel, conversation, prompt, provider, remoteSession, sender } = input
+    const initialThreadId =
+      conversation?.localThreadId.trim() ||
+      channel?.threadId.trim() ||
+      ''
+    const result = await this.runPrompt(settings, {
+      prompt,
+      displayText: input.displayText,
+      title: channel ? `[Connect Phone:${channel.label}] ${sender}` : `[Connect Phone:${provider}] ${sender}`,
+      workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession),
+      model: channel?.model ?? settings.claw.im.model,
+      providerId: channel?.providerId ?? settings.claw.im.providerId,
+      mode: settings.claw.im.mode,
+      waitForResult: input.waitForResult !== false,
+      responseTimeoutMs: settings.claw.im.responseTimeoutMs,
+      source: 'im',
+      threadId: initialThreadId || undefined,
+      attachmentLocalFilePaths: input.attachmentLocalFilePaths,
+      channel,
+      onTurnStarted: async ({ threadId }) => {
+        if (!channel) return
+        const now = new Date().toISOString()
+        // Patch from a fresh settings snapshot: the request-scoped
+        // `settings` may be stale by now (e.g. the welcome marker was
+        // persisted while this turn was starting).
+        const latestSettings = await this.deps.store.load()
+        if (remoteSession) {
+          const existingConversation = conversation ?? this.findChannelConversation(channel, remoteSession)
+          const nextConversation: ClawImConversationV1 = existingConversation
+            ? {
+                ...existingConversation,
+                latestMessageId: remoteSession.messageId,
+                senderId: remoteSession.senderId,
+                senderName: remoteSession.senderName,
+                localThreadId: threadId,
+                workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, existingConversation, remoteSession),
+                updatedAt: now
+              }
+            : {
+                id: randomUUID(),
+                chatId: remoteSession.chatId,
+                remoteThreadId: remoteSession.threadId,
+                latestMessageId: remoteSession.messageId,
+                senderId: remoteSession.senderId,
+                senderName: remoteSession.senderName,
+                localThreadId: threadId,
+                workspaceRoot: this.resolveConversationWorkspaceRoot(settings, channel, remoteSession),
+                createdAt: now,
+                updatedAt: now
+              }
+          await this.deps.store.patch({
+            claw: {
+              channels: latestSettings.claw.channels.map((item) =>
+                item.id === channel.id
+                  ? {
+                      ...item,
+                      threadId,
+                      conversations: existingConversation
+                        ? item.conversations.map((entry) => entry.id === existingConversation.id ? nextConversation : entry)
+                        : [...item.conversations, nextConversation],
+                      updatedAt: now
+                    }
+                  : item
+              )
+            }
+          })
+        } else if (!initialThreadId) {
+          await this.deps.store.patch({
+            claw: {
+              channels: latestSettings.claw.channels.map((item) =>
+                item.id === channel.id
+                  ? {
+                      ...item,
+                      threadId,
+                      updatedAt: now
+                    }
+                  : item
+              )
+            }
+          })
+        }
+        this.deps.notifyChannelActivity?.({ channelId: channel.id, threadId })
+      }
+    })
+    return result
+  }
+
+  private resolveFeishuChannels(settings: AppSettingsV1): FeishuClawChannel[] {
+    if (!settings.claw.enabled) return []
+    return settings.claw.channels.filter(
+      (channel): channel is FeishuClawChannel =>
+        channel.enabled &&
+        channel.provider === 'feishu' &&
+        hasFeishuPlatformAccount(channel)
+    )
+  }
+
+  private buildFeishuRemoteSession(message: NormalizedMessage): ClawImRemoteSessionV1 {
+    return {
+      chatId: message.chatId.trim(),
+      messageId: message.messageId.trim(),
+      threadId: message.threadId?.trim() || '',
+      senderId: message.senderId.trim(),
+      senderName: feishuSenderLabel(message),
+      updatedAt: new Date().toISOString()
+    }
+  }
+
+  private async rememberFeishuRemoteSession(
+    settings: AppSettingsV1,
+    channel: ClawImChannelV1,
+    message:
+      | NormalizedMessage
+      | Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+  ): Promise<void> {
+    const nextRemoteSession =
+      'chatType' in message
+        ? this.buildFeishuRemoteSession(message)
+        : {
+            ...message,
+            updatedAt: new Date().toISOString()
+          }
+    const current = channel.remoteSession
+    if (
+      current?.chatId === nextRemoteSession.chatId &&
+      current?.messageId === nextRemoteSession.messageId &&
+      current?.threadId === nextRemoteSession.threadId &&
+      current?.senderId === nextRemoteSession.senderId &&
+      current?.senderName === nextRemoteSession.senderName
+    ) {
+      return
+    }
+    await this.deps.store.patch({
+      claw: {
+        channels: settings.claw.channels.map((item) =>
+          item.id === channel.id
+            ? {
+                ...item,
+                remoteSession: nextRemoteSession,
+                updatedAt: nextRemoteSession.updatedAt
+              }
+            : item
+        )
+      }
+    })
+  }
+
+  private async sendFeishuMessage(
+    bridge: LarkChannel,
+    to: string,
+    input: SendInput,
+    options: SendOptions,
+    context: Record<string, unknown>
+  ): Promise<SendResult> {
+    const channelId = typeof context.channelId === 'string' ? context.channelId : ''
+    const requireCurrentSession = async (): Promise<void> => {
+      // Synthetic bridges used by focused unit tests have no credential
+      // resolver. Production-created bridges always carry the Main resolver
+      // and an exact authority fence.
+      if (!this.deps.resolveAccountCredential) return
+      if (!channelId || (await this.currentFeishuBridge(channelId)) !== bridge) {
+        throw new Error('Feishu account credential is unavailable.')
+      }
+    }
+    try {
+      await requireCurrentSession()
+      const result = await bridge.send(to, input, options)
+      await requireCurrentSession()
+      return result
+    } catch (error) {
+      if (!options.replyTo) {
+        this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark message', {
+          ...context,
+          to
+        })
+        throw error
+      }
+
+      this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark reply; falling back to plain chat message.', {
+        ...context,
+        replyTo: options.replyTo,
+        replyInThread: options.replyInThread,
+        to
+      })
+      try {
+        await requireCurrentSession()
+        const result = await bridge.send(to, input, {
+          ...options,
+          replyTo: undefined,
+          replyInThread: undefined
+        })
+        await requireCurrentSession()
+        return result
+      } catch (fallbackError) {
+        this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark fallback message', {
+          ...context,
+          to
+        })
+        throw fallbackError
+      }
+    }
+  }
+
+  private async sendFeishuEffectOnce(
+    bridge: LarkChannel,
+    to: string,
+    input: SendInput,
+    options: SendOptions,
+    context: Record<string, unknown>
+  ): Promise<SendResult> {
+    if (this.deps.resolveAccountCredential) {
+      const channelId = typeof context.channelId === 'string' ? context.channelId : ''
+      if (!channelId || (await this.currentFeishuBridge(channelId)) !== bridge) {
+        throw new Error('Feishu account credential is unavailable.')
+      }
+      const result = await bridge.send(to, input, options)
+      if ((await this.currentFeishuBridge(channelId)) !== bridge) {
+        throw new Error('Feishu account credential changed.')
+      }
+      return result
+    }
+    return bridge.send(to, input, options)
+  }
+
+  private async resolveImGeneratedFiles(
+    files: readonly ClawGeneratedFileV1[],
+    workspaceRoot: string,
+    context: Record<string, unknown>
+  ): Promise<ClawGeneratedFileV1[]> {
+    const root = workspaceRoot.trim()
+    if (!root || files.length === 0) return []
+    let realRoot = ''
+    try {
+      realRoot = await realpath(resolve(root))
+    } catch (error) {
+      this.deps.logError('claw-im', 'Failed to resolve IM file workspace root', {
+        ...context,
+        workspaceRoot: root,
+        message: errorMessage(error)
+      })
+      return []
+    }
+
+    const resolvedFiles: ClawGeneratedFileV1[] = []
+    const seen = new Set<string>()
+    for (const file of files) {
+      try {
+        const realFile = await realpath(resolve(file.path))
+        const relativePath = relative(realRoot, realFile)
+        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+          this.deps.logError('claw-im', 'Skipping generated file outside the IM workspace', {
+            ...context,
+            filePath: file.path,
+            workspaceRoot: root
+          })
+          continue
+        }
+        if (seen.has(realFile)) continue
+        const fileStat = await stat(realFile)
+        if (!fileStat.isFile()) continue
+        if (fileStat.size > MAX_IM_FILE_UPLOAD_BYTES) {
+          this.deps.logError('claw-im', 'Skipping generated file because it is too large for IM upload', {
+            ...context,
+            filePath: realFile,
+            bytes: fileStat.size,
+            maxBytes: MAX_IM_FILE_UPLOAD_BYTES
+          })
+          continue
+        }
+        seen.add(realFile)
+        resolvedFiles.push({
+          ...file,
+          path: realFile,
+          fileName: file.fileName || realFile.split(/[\\/]/).pop() || 'attachment'
+        })
+      } catch (error) {
+        this.deps.logError('claw-im', 'Skipping generated file that cannot be read for IM upload', {
+          ...context,
+          filePath: file.path,
+          message: errorMessage(error)
+        })
+      }
+    }
+    return resolvedFiles
+  }
+
+  private async sendFeishuGeneratedFiles(
+    bridge: LarkChannel,
+    to: string,
+    files: readonly ClawGeneratedFileV1[],
+    options: SendOptions,
+    context: Record<string, unknown>
+  ): Promise<{ sent: ClawGeneratedFileV1[]; failed: Array<{ file: ClawGeneratedFileV1; message: string }> }> {
+    const sent: ClawGeneratedFileV1[] = []
+    const failed: Array<{ file: ClawGeneratedFileV1; message: string }> = []
+    for (const file of files) {
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          to,
+          { file: { source: file.path, fileName: file.fileName } },
+          options,
+          {
+            ...context,
+            purpose: 'agent-file',
+            filePath: file.path,
+            fileName: file.fileName
+          }
+        )
+        sent.push(file)
+      } catch {
+        failed.push({ file, message: 'Feishu / Lark file delivery failed.' })
+        this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark file attachment', {
+          ...context,
+          filePath: file.path,
+          fileName: file.fileName
+        })
+      }
+    }
+    return { sent, failed }
+  }
+
+  private async recentGeneratedFilesForThread(
+    settings: AppSettingsV1,
+    threadId: string,
+    workspaceRoot: string,
+    context: Record<string, unknown>
+  ): Promise<ClawGeneratedFileV1[]> {
+    const targetThreadId = threadId.trim()
+    if (!targetThreadId) return []
+    try {
+      const detailRes = await this.deps.runtimeRequest(
+        settings,
+        `/v1/threads/${encodeURIComponent(targetThreadId)}`,
+        { method: 'GET' }
+      )
+      if (!detailRes.ok) {
+        this.deps.logError('claw-feishu', 'Failed to read recent generated files from Analytix thread', {
+          ...context,
+          threadId: targetThreadId,
+          message: runtimeErrorMessage(detailRes, 'Failed to read thread result.')
+        })
+        return []
+      }
+      return latestGeneratedFiles(JSON.parse(detailRes.body) as ThreadDetailJson, {
+        workspaceRoot,
+        maxFiles: 3
+      })
+    } catch (error) {
+      this.deps.logError('claw-feishu', 'Failed to inspect Analytix thread for recent generated files', {
+        ...context,
+        threadId: targetThreadId,
+        message: errorMessage(error)
+      })
+      return []
+    }
+  }
+
+  private findImChannelForThread(
+    settings: AppSettingsV1,
+    threadId: string
+  ): { channel: ClawImChannelV1; conversation?: ClawImConversationV1 } | null {
+    const targetThreadId = threadId.trim()
+    if (!targetThreadId) return null
+    for (const channel of settings.claw.channels) {
+      if (!channel.enabled) continue
+      const conversation =
+        [...channel.conversations]
+          .filter((item) => item.localThreadId.trim() === targetThreadId)
+          .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
+      if (conversation) return { channel, conversation }
+      if (channel.threadId.trim() === targetThreadId) return { channel }
+    }
+    return null
+  }
+
+  private async mirrorThreadMessageToWeixin(
+    channel: ClawImChannelV1,
+    conversation: ClawImConversationV1 | undefined,
+    threadId: string,
+    text: string,
+    direction: 'user' | 'assistant'
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const account = channel.platformAccount
+    if (account?.kind !== 'weixin' || !account.accountId.trim()) {
+      return { ok: false, message: 'No target WeChat account is available yet.' }
+    }
+    const to = conversation?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+    if (!to) return { ok: false, message: 'No target WeChat conversation is available yet.' }
+    if (!this.deps.sendWeixinBridgeMessage) {
+      return { ok: false, message: 'Built-in WeChat bridge is not initialized.' }
+    }
+    const result = await this.deps.sendWeixinBridgeMessage({
+      accountId: account.accountId,
+      to,
+      text
+    })
+    if (result.ok) return { ok: true }
+    this.deps.logError('claw-weixin', 'Failed to mirror Connect Phone message to WeChat', {
+      message: result.message,
+      threadId,
+      direction,
+      channelId: channel.id,
+      to
+    })
+    return result
+  }
+
+  private async mirrorThreadMessageToTelegram(
+    channel: ClawImChannelV1,
+    conversation: ClawImConversationV1 | undefined,
+    threadId: string,
+    text: string,
+    direction: 'user' | 'assistant'
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (!this.deps.telegramRuntime) return { ok: false, message: 'Telegram bridge is not initialized.' }
+    const to = conversation?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+    if (!to) return { ok: false, message: 'No target Telegram chat is available yet.' }
+    const message = direction === 'user'
+      ? `From Analytix:\n\n${text}`
+      : text
+    const result = await this.deps.telegramRuntime.sendMessage(channel.id, to, message)
+    if (result.ok) return { ok: true }
+    this.deps.logError('claw-telegram', 'Failed to mirror Connect Phone message to Telegram', {
+      message: result.message,
+      threadId,
+      direction,
+      channelId: channel.id,
+      chatId: to
+    })
+    return result
+  }
+
+  async mirrorThreadMessageToIm(
+    threadId: string,
+    text: string,
+    direction: 'user' | 'assistant'
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const trimmed = text.trim()
+    if (!trimmed) return { ok: false, message: 'Message is empty.' }
+    const publicText = projectOrdinaryPublicText(trimmed)
+    if (!publicText.trim()) return { ok: false, message: 'Message is empty.' }
+    const settings = await this.deps.store.load()
+    try {
+      const detailRes = await this.deps.runtimeRequest(
+        settings,
+        `/v1/threads/${encodeURIComponent(threadId.trim())}`,
+        { method: 'GET' }
+      )
+      if (!detailRes.ok) {
+        return { ok: false, message: 'Thread publication authority is unavailable.' }
+      }
+      const detail = JSON.parse(detailRes.body) as ThreadDetailJson
+      if (detail.historyAuthority === 'case_boundary_only_v1') {
+        return { ok: false, message: 'Case projections cannot use the ordinary Connect Phone mirror.' }
+      }
+    } catch {
+      return { ok: false, message: 'Thread publication authority is unavailable.' }
+    }
+    const target = this.findImChannelForThread(settings, threadId)
+    if (!target) return { ok: false, message: 'Channel not found.' }
+    if (target.channel.provider === 'weixin') {
+      return this.mirrorThreadMessageToWeixin(
+        target.channel,
+        target.conversation,
+        threadId,
+        publicText,
+        direction
+      )
+    }
+    if (target.channel.provider === 'telegram') {
+      return this.mirrorThreadMessageToTelegram(
+        target.channel,
+        target.conversation,
+        threadId,
+        publicText,
+        direction
+      )
+    }
+    if (target.channel.provider !== 'feishu') return { ok: false, message: 'Unsupported IM provider.' }
+    const channel = target.channel
+    const conversation =
+      target.conversation ??
+      [...channel.conversations]
+        .filter((item) => item.localThreadId.trim() === threadId.trim())
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
+    if (!conversation?.chatId.trim()) {
+      return { ok: false, message: 'No target Feishu / Lark conversation is available yet.' }
+    }
+    const bridge = await this.currentFeishuBridge(channel.id)
+    if (!bridge) {
+      return { ok: false, message: 'Feishu / Lark bridge is not connected.' }
+    }
+    try {
+      await this.sendFeishuMessage(
+        bridge,
+        conversation.chatId,
+        formatFeishuMirrorText(publicText, direction),
+        {},
+        {
+          purpose: 'mirror',
+          threadId,
+          direction,
+          channelId: channel.id,
+          chatId: conversation.chatId
+        }
+      )
+      return { ok: true }
+    } catch {
+      this.deps.logError('claw-feishu', 'Failed to mirror Connect Phone message to Feishu / Lark', {
+        threadId,
+        direction
+      })
+      return { ok: false, message: 'Feishu / Lark message delivery failed.' }
+    }
+  }
+
+  async mirrorThreadMessageToFeishu(
+    threadId: string,
+    text: string,
+    direction: 'user' | 'assistant'
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    return this.mirrorThreadMessageToIm(threadId, text, direction)
+  }
+
+  async handleTelegramUpdate(payload: TelegramInboundPayload): Promise<void> {
+    const settings = await this.deps.store.load()
+    const channel = settings.claw.channels.find((item) => item.id === payload.channelId && item.enabled)
+    if (!channel || channel.provider !== 'telegram') return
+    if (!this.deps.telegramRuntime?.has(channel.id)) return
+
+    const remoteSession: IncomingRemoteSession = {
+      chatId: payload.chatId,
+      messageId: payload.messageId,
+      threadId: '',
+      senderId: payload.senderId,
+      senderName: payload.senderName
+    }
+    const conversation = this.findChannelConversation(channel, {
+      chatId: remoteSession.chatId,
+      threadId: remoteSession.threadId
+    })
+    const workspaceRoot = this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession)
+    const text = payload.text.trim()
+    const localFilePath = payload.localFilePath?.trim() || ''
+
+    const welcomeText = this.pendingWelcomeText(settings, channel)
+    if (welcomeText) {
+      this.welcomeInFlight.add(channel.id)
+      try {
+        await this.pushTelegramWelcome(channel, remoteSession, welcomeText)
+        await this.markChannelWelcomeSent(channel.id)
+      } catch (error) {
+        this.deps.logError('claw-telegram', 'Failed to send the Telegram welcome message; it will be retried on the next inbound message.', {
+          channelId: channel.id,
+          chatId: remoteSession.chatId,
+          message: errorMessage(error)
+        })
+      } finally {
+        this.welcomeInFlight.delete(channel.id)
+      }
+    }
+
+    const commandReply = await this.handleIncomingImCommand(settings, {
+      text,
+      channel,
+      conversation,
+      remoteSession
+    })
+    if (commandReply !== null) {
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, commandReply)
+      return
+    }
+
+    const taskCreation = await this.deps.createScheduledTaskFromText?.(text, {
+      workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
+      clawChannelId: channel.id,
+      providerId: channel.providerId?.trim() || settings.claw.im.providerId?.trim() || null,
+      modelHint: channel.model,
+      mode: settings.claw.im.mode
+    }) ?? { kind: 'noop' as const }
+    if (taskCreation.kind === 'created') {
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, taskCreation.confirmationText)
+      return
+    }
+    if (taskCreation.kind === 'error') {
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, `Failed to create the scheduled task: ${taskCreation.message}`)
+      return
+    }
+
+    const promptText = localFilePath && !text
+      ? `${CLAW_TELEGRAM_INBOUND_IMAGE_HEADING}\nSender: ${payload.senderName}\n\n[image attachment]`
+      : localFilePath
+        ? `${CLAW_TELEGRAM_INBOUND_IMAGE_HEADING}\nSender: ${payload.senderName}\n\n${text}`
+        : text
+    if (!promptText.trim()) {
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, 'Only text and image messages are supported right now.')
+      return
+    }
+
+    const result = await this.processIncomingImPrompt(settings, {
+      prompt: promptText,
+      displayText: text || '[image]',
+      sender: payload.senderName,
+      provider: 'telegram',
+      channel,
+      conversation,
+      remoteSession,
+      attachmentLocalFilePaths: localFilePath ? [localFilePath] : []
+    })
+    if (!result.ok) {
+      this.deps.logError('claw-telegram', 'Telegram inbound prompt failed.', {
+        channelId: channel.id,
+        chatId: remoteSession.chatId,
+        message: result.message
+      })
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, `Failed to process the message: ${result.message}`)
+      return
+    }
+    if (result.completed === false) {
+      this.scheduleImResultPush(settings, {
+        channel,
+        remoteSession,
+        threadId: result.threadId,
+        turnId: result.turnId,
+        workspaceRoot
+      })
+      await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, IM_PROCESSING_ACK)
+      return
+    }
+    const reply = result.text?.trim() || result.message?.trim() || IM_COMPLETED_NO_TEXT_REPLY
+    await this.deps.telegramRuntime.sendMessage(channel.id, remoteSession.chatId, reply)
+  }
+
+  private async pushTelegramWelcome(
+    channel: ClawImChannelV1,
+    remoteSession: IncomingRemoteSession | undefined,
+    text: string
+  ): Promise<boolean> {
+    if (channel.provider !== 'telegram' || !this.deps.telegramRuntime) return false
+    const to = remoteSession?.chatId.trim() || channel.remoteSession?.chatId.trim() || ''
+    if (!to) return false
+    const result = await this.deps.telegramRuntime.sendMessage(channel.id, to, text)
+    if (!result.ok) {
+      this.deps.logError('claw-telegram', 'Failed to push the Telegram welcome message.', {
+        channelId: channel.id,
+        chatId: to,
+        message: result.message
+      })
+    }
+    return result.ok
+  }
+
+  private async handleFeishuMessage(channelId: string, message: NormalizedMessage): Promise<void> {
+    const bridge = await this.currentFeishuBridge(channelId)
+    const settings = await this.deps.store.load()
+    const channel = settings.claw.channels.find((item) => item.id === channelId && item.enabled)
+    if (!bridge || !channel) return
+    if (bridge.botIdentity?.openId && message.senderId === bridge.botIdentity.openId) return
+    if (message.chatType === 'group' && !message.mentionedBot && !message.mentionAll) return
+    await this.rememberFeishuRemoteSession(settings, channel, message)
+    const remoteSession = this.buildFeishuRemoteSession(message)
+    const conversation = this.findChannelConversation(channel, {
+      chatId: remoteSession.chatId,
+      threadId: remoteSession.threadId
+    })
+    const workspaceRoot = this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession)
+    const replyOptions = { replyTo: message.messageId, replyInThread: Boolean(message.threadId) }
+
+    // Feishu has no recipient until someone messages the bot, so the
+    // one-time channel intro goes out before handling the first message.
+    const welcomeText = this.pendingWelcomeText(settings, channel)
+    if (welcomeText) {
+      this.welcomeInFlight.add(channel.id)
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: welcomeText },
+          {},
+          {
+            purpose: 'welcome',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId
+          }
+        )
+        await this.markChannelWelcomeSent(channel.id)
+      } catch (error) {
+        this.deps.logError('claw-feishu', 'Failed to send the Feishu welcome message; it will be retried on the next inbound message.', {
+          message: errorMessage(error),
+          channelId,
+          chatId: message.chatId
+        })
+      } finally {
+        this.welcomeInFlight.delete(channel.id)
+      }
+    }
+
+    const commandReply = await this.handleIncomingImCommand(settings, {
+      text: message.content,
+      channel,
+      conversation,
+      remoteSession
+    })
+    if (commandReply !== null) {
+      await this.sendFeishuMessage(
+        bridge,
+        message.chatId,
+        { markdown: commandReply },
+        replyOptions,
+        {
+          purpose: 'im-command',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId
+        }
+      )
+      return
+    }
+
+    const sender = feishuSenderLabel(message)
+    const taskCreation = await this.deps.createScheduledTaskFromText?.(message.content, {
+      workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
+      clawChannelId: channel.id,
+      providerId: channel.providerId?.trim() || settings.claw.im.providerId?.trim() || null,
+      modelHint: channel.model,
+      mode: settings.claw.im.mode
+    }) ?? { kind: 'noop' as const }
+    if (taskCreation.kind === 'created') {
+      await this.sendFeishuMessage(
+        bridge,
+        message.chatId,
+        { markdown: taskCreation.confirmationText },
+        { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+        {
+          purpose: 'schedule-created',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId
+        }
+      )
+      return
+    }
+    if (taskCreation.kind === 'error') {
+      await this.sendFeishuMessage(
+        bridge,
+        message.chatId,
+        { markdown: `Failed to create the scheduled task: ${taskCreation.message}` },
+        { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+        {
+          purpose: 'schedule-error',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId
+        }
+      )
+      return
+    }
+    if (!message.content.trim() && message.rawContentType !== 'text') {
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: 'Only text messages are supported right now.' },
+          { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+          {
+            purpose: 'unsupported-message',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId
+          }
+        )
+      } catch (error) {
+        this.deps.logError('claw-feishu', 'Failed to send unsupported-message reply', {
+          message: errorMessage(error),
+          chatId: message.chatId
+        })
+      }
+      return
+    }
+
+    if (shouldDirectSendExistingGeneratedFilesForPrompt(message.content)) {
+      const existingThreadId = conversation?.localThreadId.trim() || channel.threadId.trim()
+      const existingFiles = await this.resolveImGeneratedFiles(
+        await this.recentGeneratedFilesForThread(settings, existingThreadId, workspaceRoot, {
+          purpose: 'direct-existing-file-lookup',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId,
+          threadId: existingThreadId
+        }),
+        workspaceRoot,
+        {
+          purpose: 'direct-existing-file-resolve',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId,
+          threadId: existingThreadId
+        }
+      )
+      if (existingFiles.length > 0) {
+        try {
+          await this.sendFeishuMessage(
+            bridge,
+            message.chatId,
+            { markdown: replyTextForGeneratedFiles('', existingFiles) },
+            replyOptions,
+            {
+              purpose: 'direct-existing-file-reply',
+              channelId,
+              chatId: message.chatId,
+              inboundMessageId: message.messageId,
+              threadId: existingThreadId
+            }
+          )
+        } catch (error) {
+          this.deps.logError('claw-feishu', 'Failed to send direct file confirmation reply', {
+            message: errorMessage(error),
+            chatId: message.chatId,
+            threadId: existingThreadId
+          })
+        }
+        const delivery = await this.sendFeishuGeneratedFiles(
+          bridge,
+          message.chatId,
+          existingFiles,
+          replyOptions,
+          {
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId,
+            threadId: existingThreadId
+          }
+        )
+        if (delivery.sent.length > 0) return
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: `我找到了文件 ${existingFiles.map((file) => file.fileName).join(', ')}，但飞书附件上传失败。` },
+          replyOptions,
+          {
+            purpose: 'direct-existing-file-failed',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId,
+            threadId: existingThreadId
+          }
+        ).catch((error) => {
+          this.deps.logError('claw-feishu', 'Failed to send direct file failure reply', {
+            message: errorMessage(error),
+            chatId: message.chatId,
+            threadId: existingThreadId
+          })
+        })
+        return
+      }
+    }
+
+    // Add a "in progress" emoji reaction on the user's inbound message
+    // immediately so they see feedback before the agent run completes
+    // (which can take seconds). The reaction is targeted at the user's
+    // message id (not a new bot message) and is left in place after the
+    // agent finishes as a "handled" marker.
+    //
+    // Emoji type selection: Feishu / Lark's `im.v1.messageReaction.create`
+    // endpoint accepts a closed set of `emoji_type` strings; the SDK does
+    // NOT validate them locally — invalid values are rejected by the API
+    // with `code 231001 "reaction type is invalid"`. Empirically verified:
+    //   - `'WORK'`  → REJECTED (production logs, code 231001) — never use
+    //   - `'OnIt'`  → CONFIRMED VALID — renders as 🫡 (salute face,
+    //                 internet-canonical "got it, doing it" signal;
+    //                 best match for the user-requested "在做了")
+    //   - `'SMILE'` → CONFIRMED VALID — fallback, renders as 🙂
+    //
+    // Failure is logged but NOT re-thrown — we never want a reaction
+    // failure to drop the user's message or abort the agent run.
+    try {
+      if ((await this.currentFeishuBridge(channelId)) !== bridge) return
+      await bridge.addReaction(message.messageId, 'OnIt')
+      if ((await this.currentFeishuBridge(channelId)) !== bridge) return
+    } catch (error) {
+      this.deps.logError('claw-feishu', 'Failed to add Feishu / Lark pending reaction; continuing with the agent run.', {
+        message: errorMessage(error),
+        chatId: message.chatId,
+        messageId: message.messageId
+      })
+    }
+
+    let result: ClawRunResult
+    let streamedToFeishu = false
+    try {
+      if (channel.feishuStream === true) {
+        const started = await this.processIncomingImPrompt(settings, {
+          prompt: buildFeishuPrompt(message),
+          sender,
+          provider: 'feishu',
+          channel,
+          conversation,
+          remoteSession,
+          waitForResult: false
+        })
+        if (!started.ok || !started.threadId || !started.turnId) {
+          result = { ok: false, message: started.message || 'Failed to start Feishu streaming turn.' }
+        } else {
+          const streamResult = await this.runStreamingReply({
+            bridge,
+            chatId: message.chatId,
+            threadId: started.threadId,
+            turnId: started.turnId,
+            replyOptions: { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+            responseTimeoutMs: 60_000,
+            context: {
+              purpose: 'feishu-stream',
+              channelId,
+              chatId: message.chatId,
+              inboundMessageId: message.messageId,
+              threadId: started.threadId,
+              turnId: started.turnId
+            }
+          })
+          if (streamResult.ok) {
+            const streamedText = streamResult.finalText.trim() || 'Completed.'
+            streamedToFeishu = true
+            result = {
+              ok: true,
+              threadId: started.threadId,
+              turnId: started.turnId,
+              text: streamedText,
+              message: streamResult.fellBack ? 'streamed (fell back to one-shot send)' : 'streamed'
+            }
+          } else {
+            result = {
+              ok: false,
+              message: streamResult.message.trim() || 'Sorry, something went wrong while handling your message.'
+            }
+          }
+        }
+      } else {
+        result = await this.processIncomingImPrompt(settings, {
+          prompt: buildFeishuPrompt(message),
+          sender,
+          provider: 'feishu',
+          channel,
+          conversation,
+          remoteSession
+        })
+      }
+    } catch (error) {
+      this.deps.logError('claw-feishu', 'Failed to handle Feishu inbound message', {
+        message: errorMessage(error),
+        chatId: message.chatId,
+        senderId: message.senderId
+      })
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: 'Sorry, I could not process your message right now.' },
+          { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+          {
+            purpose: 'processing-error',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId
+          }
+        )
+      } catch {
+        /* ignore secondary reply failures */
+      }
+      return
+    }
+
+    if (result.ok && result.completed === false) {
+      // The turn outran the response window; the reply below is the ack
+      // (carried on `result.message`). Deliver the real result when the
+      // turn finishes.
+      this.scheduleImResultPush(settings, {
+        channel,
+        remoteSession,
+        threadId: result.threadId,
+        turnId: result.turnId,
+        workspaceRoot
+      })
+    }
+    const generatedFiles = result.ok ? result.files ?? [] : []
+    const filesToSend = result.ok && (generatedFiles.length > 0 || shouldSendGeneratedFilesForPrompt(message.content))
+      ? await this.resolveImGeneratedFiles(generatedFiles, workspaceRoot, {
+          purpose: 'agent-file-resolve',
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId,
+          threadId: result.threadId,
+          turnId: result.turnId
+        })
+      : []
+    const replyText = result.ok
+      ? replyTextForGeneratedFiles(result.text?.trim() || result.message?.trim() || 'Completed.', filesToSend)
+      : (result.message.trim() || 'Sorry, something went wrong while handling your message.')
+    const resultThreadId = result.ok ? result.threadId : undefined
+    const resultTurnId = result.ok ? result.turnId : undefined
+    if (!streamedToFeishu) {
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: replyText },
+          replyOptions,
+          {
+            purpose: 'agent-reply',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId,
+            runtimeOk: result.ok,
+            threadId: resultThreadId,
+            turnId: resultTurnId
+          }
+        )
+      } catch (error) {
+        this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark agent reply', {
+          message: errorMessage(error),
+          chatId: message.chatId,
+          senderId: message.senderId,
+          threadId: resultThreadId,
+          turnId: resultTurnId
+        })
+      }
+    }
+    if (filesToSend.length > 0) {
+      const delivery = await this.sendFeishuGeneratedFiles(
+        bridge,
+        message.chatId,
+        filesToSend,
+        replyOptions,
+        {
+          channelId,
+          chatId: message.chatId,
+          inboundMessageId: message.messageId,
+          threadId: resultThreadId,
+          turnId: resultTurnId
+        }
+      )
+      if (delivery.sent.length === 0 && delivery.failed.length > 0) {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: `我找到了文件 ${filesToSend.map((file) => file.fileName).join(', ')}，但飞书附件上传失败。` },
+          replyOptions,
+          {
+            purpose: 'agent-file-failed',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId,
+            threadId: resultThreadId,
+            turnId: resultTurnId
+          }
+        ).catch((error) => {
+          this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark file failure reply', {
+            message: errorMessage(error),
+            chatId: message.chatId,
+            senderId: message.senderId,
+            threadId: resultThreadId,
+            turnId: resultTurnId
+          })
+        })
+      }
+    }
+  }
+
+  private async syncFeishuChannels(settings: AppSettingsV1): Promise<void> {
+    const version = ++this.feishuSyncVersion
+    const targets = this.resolveFeishuChannels(settings)
+    const targetMap = new Map(targets.map((channel) => [channel.id, channel]))
+
+    await Promise.all(
+      [...this.feishuChannels.keys()]
+        .filter((channelId) => !targetMap.has(channelId))
+        .map((channelId) => this.closeFeishuChannel(channelId))
+    )
+    if (version !== this.feishuSyncVersion) return
+
+    for (const target of targets) {
+      const account = target.platformAccount
+      const appId = account.appId.trim()
+      const domain = account.domain.trim().toLowerCase() === 'lark' ? 'lark' : 'feishu'
+      const scope = {
+        owner: 'transport' as const,
+        provider: 'feishu',
+        accountId: account.accountId,
+        channelId: target.id,
+        purpose: 'transport-feishu-app-secret' as const
+      }
+      const resolution = await this.deps.resolveAccountCredential?.(scope)
+      if (!resolution?.ok || resolution.credential.kind !== 'feishu') {
+        await this.closeFeishuChannel(target.id)
+        this.deps.logError('claw-feishu', 'Feishu account credential is unavailable.', {
+          channelId: target.id
+        })
+        continue
+      }
+      let appSecret = resolution.credential.appSecret
+      const allowedFileDirs = [
+        this.resolveChannelWorkspaceRoot(settings, target),
+        settings.claw.im.workspaceRoot,
+        settings.workspaceRoot
+      ]
+        .map((entry) => entry.trim())
+        .filter((entry, index, entries) => entry && entries.indexOf(entry) === index)
+      const nextKey = `${target.id}|${appId}|${domain}|${resolution.state.providerGeneration}|${resolution.state.providerIncarnation}|${allowedFileDirs.join('|')}`
+      const currentKey = this.feishuChannelKeys.get(target.id)
+      if (this.feishuChannels.has(target.id) && currentKey === nextKey) continue
+      if (this.feishuChannels.has(target.id)) {
+        await this.closeFeishuChannel(target.id)
+        if (version !== this.feishuSyncVersion) return
+      }
+
+      try {
+        let bridge: LarkChannel
+        try {
+          bridge = createLarkChannel({
+            appId,
+            appSecret,
+            domain: domain === 'lark' ? Domain.Lark : Domain.Feishu,
+            loggerLevel: LoggerLevel.warn,
+            source: 'analytix',
+            transport: 'websocket',
+            policy: {
+              dmMode: 'open',
+              requireMention: true,
+              respondToMentionAll: true
+            },
+            ...(allowedFileDirs.length > 0
+              ? { outbound: { allowedFileDirs } }
+              : {})
+          })
+        } finally {
+          // The SDK necessarily retains its own active-session credential.
+          // Clear Main's resolver draft and local binding immediately after
+          // constructing that explicitly fenced session.
+          resolution.credential.appSecret = ''
+          appSecret = ''
+        }
+        let sessionActive = true
+        bridge.on('message', async (message) => {
+          if (!sessionActive || (await this.currentFeishuBridge(target.id)) !== bridge) return
+          await this.handleFeishuMessage(target.id, message)
+        })
+        bridge.on('error', (error) => {
+          this.deps.logError('claw-feishu', 'Feishu channel error', {
+            code: error.code,
+            channelId: target.id
+          })
+        })
+        bridge.on('reject', () => {
+          this.deps.logError('claw-feishu', 'Feishu message rejected by channel policy', {
+            channelId: target.id
+          })
+        })
+        bridge.on('reconnecting', () => {
+          sessionActive = false
+          if (this.feishuChannels.get(target.id) === bridge) {
+            void this.closeFeishuChannel(target.id)
+          } else {
+            void bridge.disconnect().catch(() => undefined)
+          }
+          this.deps.logError('claw-feishu', 'Feishu channel reconnecting', {
+            channelId: target.id
+          })
+        })
+        bridge.on('reconnected', () => {
+          sessionActive = false
+          if (this.feishuChannels.get(target.id) === bridge) {
+            void this.closeFeishuChannel(target.id)
+          } else {
+            void bridge.disconnect().catch(() => undefined)
+          }
+          this.deps.logError('claw-feishu', 'Feishu channel reconnected', {
+            channelId: target.id
+          })
+        })
+        // The Feishu / Lark App admin subscribes to `im.message.message_read_v1`
+        // in the developer console. The high-level `bridge.on(...)` API has no
+        // entry for read receipts in its `EventMap`, and the SDK's internal
+        // `EventDispatcher` does not pre-register a handler either — so the
+        // dispatcher emits a `no im.message.message_read_v1 handle` warn on
+        // every receipt. Register a no-op here to silence the warn until we
+        // have product behavior for read receipts.
+        //
+        // TODO: replace this no-op with a real handler once we decide what to
+        //       do with read receipts (e.g. track in chat store, update agent
+        //       state, drive read-driven follow-ups).
+        const dispatcher = (bridge as unknown as {
+          dispatcher?: {
+            register(handles: Record<string, (raw: unknown) => Promise<void> | void>): void
+          }
+        }).dispatcher
+        dispatcher?.register({
+          'im.message.message_read_v1': () => {
+            // intentionally empty — see TODO above
+          }
+        })
+        await bridge.connect()
+        if (!this.disableFeishuAutomaticReconnect(bridge)) {
+          sessionActive = false
+          await bridge.disconnect().catch(() => undefined)
+          this.deps.logError('claw-feishu', 'Feishu automatic reconnect could not be disabled.', {
+            channelId: target.id
+          })
+          continue
+        }
+        if (!sessionActive || version !== this.feishuSyncVersion) {
+          await bridge.disconnect().catch(() => undefined)
+          return
+        }
+        const current = await this.deps.resolveAccountCredential?.(scope)
+        if (
+          !current?.ok ||
+          current.credential.kind !== 'feishu' ||
+          current.state.providerGeneration !== resolution.state.providerGeneration ||
+          current.state.providerIncarnation !== resolution.state.providerIncarnation
+        ) {
+          await bridge.disconnect().catch(() => undefined)
+          continue
+        }
+        this.feishuChannels.set(target.id, bridge)
+        this.feishuChannelKeys.set(target.id, nextKey)
+        this.feishuChannelAuthorities.set(target.id, {
+          scope,
+          generation: resolution.state.providerGeneration,
+          incarnation: resolution.state.providerIncarnation
+        })
+      } catch {
+        this.deps.logError('claw-feishu', 'Failed to start Feishu channel bridge', {
+          channelId: target.id
+        })
+      }
+    }
+  }
+
+  private async closeFeishuChannel(channelId: string): Promise<void> {
+    const bridge = this.feishuChannels.get(channelId)
+    this.feishuChannels.delete(channelId)
+    this.feishuChannelKeys.delete(channelId)
+    this.feishuChannelAuthorities.delete(channelId)
+    if (!bridge) return
+    await bridge.disconnect().catch(() => {
+      this.deps.logError('claw-feishu', 'Failed to stop Feishu channel bridge', {
+        channelId
+      })
+    })
+  }
+
+  private disableFeishuAutomaticReconnect(bridge: LarkChannel): boolean {
+    const rawClient = (bridge as unknown as {
+      rawWsClient?: {
+        wsConfig?: {
+          updateWs?: (input: { autoReconnect: boolean }) => void
+          getWS?: (key: 'autoReconnect') => unknown
+        }
+      }
+    }).rawWsClient
+    const config = rawClient?.wsConfig
+    if (typeof config?.updateWs !== 'function' || typeof config.getWS !== 'function') return false
+    try {
+      config.updateWs({ autoReconnect: false })
+      return config.getWS('autoReconnect') === false
+    } catch {
+      return false
+    }
+  }
+
+  async invalidateFeishuAccountCredential(scope: AccountCredentialScopeV1): Promise<void> {
+    if (scope.owner !== 'transport' || scope.provider !== 'feishu' || !scope.channelId) return
+    const authority = this.feishuChannelAuthorities.get(scope.channelId)
+    if (!authority || authority.scope.owner !== scope.owner || authority.scope.provider !== scope.provider ||
+      authority.scope.accountId !== scope.accountId || authority.scope.channelId !== scope.channelId ||
+      authority.scope.purpose !== scope.purpose) return
+    await this.closeFeishuChannel(scope.channelId)
+  }
+
+  private async currentFeishuBridge(channelId: string): Promise<LarkChannel | null> {
+    const bridge = this.feishuChannels.get(channelId)
+    if (!bridge) return null
+    // Tests may install a synthetic bridge directly. Production bridges are
+    // inserted only by syncFeishuChannels, together with an authority fence.
+    if (!this.deps.resolveAccountCredential) return bridge
+    const authority = this.feishuChannelAuthorities.get(channelId)
+    if (!authority) {
+      await this.closeFeishuChannel(channelId)
+      return null
+    }
+    const current = await this.deps.resolveAccountCredential(authority.scope).catch(() => null)
+    if (
+      !current?.ok ||
+      current.credential.kind !== 'feishu' ||
+      current.state.providerGeneration !== authority.generation ||
+      current.state.providerIncarnation !== authority.incarnation
+    ) {
+      await this.closeFeishuChannel(channelId)
+      return null
+    }
+    return bridge
+  }
+
+  private async closeAllFeishuChannels(): Promise<void> {
+    const ids = [...this.feishuChannels.keys()]
+    await Promise.all(ids.map((channelId) => this.closeFeishuChannel(channelId)))
+  }
+
+  private syncWebhook(settings: AppSettingsV1): void {
+    const im = settings.claw.im
+    const key = `${im.port}|${im.path}`
+    if (this.server && this.serverKey === key) return
+    this.closeWebhook()
+
+    const server = createServer((req, res) => {
+      void this.handleWebhook(req, res)
+    })
+    server.on('error', (error) => {
+      this.deps.logError('claw-webhook', 'Connect Phone webhook server failed', {
+        message: error instanceof Error ? error.message : String(error)
+      })
+      if (this.server === server) {
+        this.closeWebhook()
+      }
+    })
+    server.listen(im.port, '127.0.0.1')
+    this.server = server
+    this.serverKey = key
+  }
+
+  private closeWebhook(): void {
+    if (!this.server) return
+    const server = this.server
+    this.server = null
+    this.serverKey = ''
+    server.close()
+  }
+
+  private async handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      const settings = await this.deps.store.load()
+      const im = settings.claw.im
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      if (url.pathname === '/claw/internal/gui-plan/create' && req.method === 'POST') {
+        // The legacy `gui_plan_create` MCP bridge is no longer the
+        // active plan path. GUI plan creation now flows through the
+        // native Analytix `create_plan` tool. Reject legacy calls
+        // loudly so older clients see a clear migration error.
+        writeJson(res, 410, {
+          ok: false,
+          code: 'gui_plan_create_retired',
+          message:
+            'The /claw/internal/gui-plan/create endpoint is no longer active. Use the Analytix create_plan tool.'
+        })
+        return
+      }
+      if (req.method !== 'POST' || url.pathname !== im.path) {
+        writeJson(res, 404, { ok: false, message: 'Not found.' })
+        return
+      }
+      if (!settings.claw.enabled || !im.enabled) {
+        writeJson(res, 503, { ok: false, message: 'Connect Phone webhook is disabled.' })
+        return
+      }
+      if (im.secret) {
+        const auth = req.headers.authorization ?? ''
+        // 新名字 x-analytix-secret 优先;旧名字 x-analytix-secret 已配置
+        // 在外部系统里,属于对外契约,必须长期兼容。
+        const rawHeaderSecret = req.headers['x-analytix-secret'] ?? req.headers['x-analytix-secret']
+        const headerSecret = Array.isArray(rawHeaderSecret) ? rawHeaderSecret[0] : rawHeaderSecret
+        if (auth !== `Bearer ${im.secret}` && headerSecret !== im.secret) {
+          writeJson(res, 401, { ok: false, message: 'Unauthorized.' })
+          return
+        }
+      }
+
+      const body = await readRequestBody(req)
+      const payload = parseJsonObject(body)
+      if (!payload) {
+        writeJson(res, 400, { ok: false, message: 'Expected a JSON object.' })
+        return
+      }
+      const prompt = extractIncomingPrompt(payload)
+      if (!prompt) {
+        writeJson(res, 400, { ok: false, message: 'No message text found.' })
+        return
+      }
+      const sender = extractSenderLabel(payload)
+      const provider = extractIncomingProvider(payload, im.provider)
+      const incomingChannelId = extractIncomingChannelId(payload)
+      const channel = incomingChannelId
+        ? settings.claw.channels.find(
+            (item) => item.enabled && item.id === incomingChannelId
+          ) ?? settings.claw.channels.find(
+            (item) => item.enabled && item.provider === provider
+          )
+        : settings.claw.channels.find(
+            (item) => item.enabled && item.provider === provider
+          )
+      const remoteSession = extractIncomingRemoteSession(payload) ??
+        (provider === 'weixin' ? fallbackWeixinRemoteSession(payload, sender) : null)
+      if (provider === 'feishu' && channel) {
+        if (remoteSession) {
+          await this.rememberFeishuRemoteSession(settings, channel, remoteSession)
+        }
+      }
+      const conversation =
+        channel && remoteSession
+          ? this.findChannelConversation(channel, {
+              chatId: remoteSession.chatId,
+              threadId: remoteSession.threadId
+            })
+          : undefined
+      // First inbound message on a freshly connected channel: push the
+      // intro over the WeChat bridge when possible (it lands before the
+      // model reply), otherwise prepend it to this response.
+      let welcomePrefix = ''
+      const welcomeText = this.pendingWelcomeText(settings, channel)
+      if (welcomeText && channel) {
+        this.welcomeInFlight.add(channel.id)
+        try {
+          const pushed = await this.pushWeixinWelcome(channel, remoteSession ?? undefined, welcomeText)
+          if (!pushed) welcomePrefix = `${welcomeText}\n\n---\n\n`
+          await this.markChannelWelcomeSent(channel.id)
+        } finally {
+          this.welcomeInFlight.delete(channel.id)
+        }
+      }
+      const commandReply = await this.handleIncomingImCommand(settings, {
+        text: prompt,
+        channel,
+        conversation,
+        remoteSession: remoteSession ?? undefined
+      })
+      if (commandReply !== null) {
+        writeJson(res, 200, { ok: true, reply: `${welcomePrefix}${commandReply}` })
+        return
+      }
+      const taskCreation = await this.deps.createScheduledTaskFromText?.(prompt, {
+        workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
+        clawChannelId: channel?.id ?? null,
+        providerId: channel?.providerId?.trim() || im.providerId?.trim() || null,
+        modelHint: channel?.model ?? im.model,
+        mode: im.mode
+      }) ?? { kind: 'noop' as const }
+      if (taskCreation.kind === 'created') {
+        writeJson(res, 200, { ok: true, createdTaskId: taskCreation.taskId, reply: `${welcomePrefix}${taskCreation.confirmationText}` })
+        return
+      }
+      if (taskCreation.kind === 'error') {
+        writeJson(res, 500, { ok: false, message: taskCreation.message })
+        return
+      }
+      const result = await this.processIncomingImPrompt(settings, {
+        prompt,
+        sender,
+        provider,
+        channel,
+        conversation,
+        remoteSession: remoteSession ?? undefined
+      })
+      if (!result.ok) {
+        writeJson(res, 500, result)
+        return
+      }
+      if (result.completed === false) {
+        // The turn outran the response window. Ack now and push the real
+        // result back when it finishes, instead of replying with whatever
+        // intermediate text happened to exist at the timeout.
+        this.scheduleImResultPush(settings, {
+          channel,
+          remoteSession: remoteSession ?? undefined,
+          threadId: result.threadId,
+          turnId: result.turnId,
+          workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession ?? undefined)
+        })
+        writeJson(res, 200, {
+          ok: true,
+          threadId: result.threadId,
+          turnId: result.turnId,
+          reply: `${welcomePrefix}${IM_PROCESSING_ACK}`
+        })
+        return
+      }
+      // Current-turn deliverable media files ride along in the response so
+      // push-capable bridges (WeChat) can upload them after the text reply.
+      // The prompt heuristic remains as a fallback for explicit file-send
+      // requests when the current run returns an empty list.
+      const generatedFiles = result.files ?? []
+      const files = generatedFiles.length > 0 || shouldSendGeneratedFilesForPrompt(prompt)
+        ? await this.resolveImGeneratedFiles(
+            generatedFiles,
+            this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession ?? undefined),
+            {
+              purpose: 'im-webhook-file-resolve',
+              provider,
+              channelId: channel?.id,
+              threadId: result.threadId,
+              turnId: result.turnId
+            }
+          )
+        : []
+      const replyBody = result.text?.trim() || result.message?.trim() || IM_COMPLETED_NO_TEXT_REPLY
+      writeJson(res, 200, { ...result, files, reply: `${welcomePrefix}${replyBody}` })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.deps.logError('claw-webhook', 'Connect Phone webhook request failed', { message })
+      writeJson(res, 500, { ok: false, message: 'Internal server error.' })
+    }
+  }
+}
+
+export function createClawRuntime(deps: ClawRuntimeDeps): ClawRuntime {
+  return new ClawRuntime(deps)
+}

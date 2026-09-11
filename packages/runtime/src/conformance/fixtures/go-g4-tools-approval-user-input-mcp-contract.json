@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "id": "go-g4-tools-approval-user-input-mcp-contract-v1",
+  "stage": "G4",
+  "mode": "shadow-conformance-only",
+  "sourceContractIds": [
+    "mcp-tool-lifecycle-fixture-v1",
+    "approval-user-input-route-api-gates-v1",
+    "task-job-orchestration-fixture-v1"
+  ],
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false
+  },
+  "toolCatalog": {
+    "advertisedToolNames": [
+      "alpha_lookup",
+      "beta_fetch",
+      "bash",
+      "request_user_input",
+      "delegate_task"
+    ],
+    "canonicalOrderStable": true,
+    "forbiddenTopLevelRoutes": [
+      "/v1/workflow",
+      "/v1/create-loop",
+      "/v1/autoresearch"
+    ]
+  },
+  "approval": {
+    "id": "appr_route_deny_1",
+    "toolName": "bash",
+    "decision": "deny",
+    "expectedStatus": "denied",
+    "secondDecisionStatus": 409,
+    "pendingBefore": 1,
+    "pendingAfter": 0,
+    "mustNotExecuteDeniedTool": true
+  },
+  "userInput": {
+    "id": "input_route_cancel_1",
+    "resolution": "cancelled",
+    "expectedStatus": "cancelled",
+    "secondResolveStatus": 404,
+    "pendingBefore": 1,
+    "pendingAfter": 0,
+    "remoteDisableUserInputPreserved": true,
+    "structuredChoiceValidation": {
+      "maxQuestions": 3,
+      "minOptionsWhenProvided": 2,
+      "maxOptionsWhenProvided": 3,
+      "dedupeLabelsCaseInsensitive": true,
+      "invalidResultCode": "invalid_user_input_request",
+      "opensGateOnInvalid": false,
+      "invalidCases": [
+        "too_many_questions",
+        "single_option",
+        "too_many_options",
+        "duplicate_labels_case_insensitive"
+      ]
+    },
+    "submittedRoute": {
+      "status": "submitted",
+      "answersEchoed": true,
+      "resolvedEventIncludesAnswers": false
+    }
+  },
+  "mcp": {
+    "providerId": "mcp:research",
+    "connectToolNames": [
+      "alpha_lookup"
+    ],
+    "reloadToolNames": [
+      "alpha_lookup",
+      "beta_fetch"
+    ],
+    "disconnectReason": "disabled by connect_tool_source policy",
+    "cancel": {
+      "errorSubstring": "tool call aborted before start",
+      "executed": false
+    },
+    "diagnosticsRedaction": {
+      "secret": "Bearer lifecycle-secret",
+      "replacement": "<redacted>"
+    },
+    "approvalAnnotations": {
+      "normalizedToolName": "mcp_research_delete_index",
+      "decision": "deny",
+      "executed": false
+    },
+    "searchMetaTools": {
+      "toolNames": [
+        "mcp_search",
+        "mcp_describe",
+        "mcp_call",
+        "mcp_refresh_catalog"
+      ],
+      "trustedToolId": "github/search_issues",
+      "untrustedSearchedTools": 0,
+      "unknownToolError": "unknown MCP tool: github/search_issues",
+      "callPolicy": "on-request",
+      "deniedCallExecuted": false
+    },
+    "knownOverrideDiagnostic": {
+      "knownOverride": "codegraph",
+      "effectiveCwd": "/tmp/analytix-mcp-lifecycle",
+      "lowPriority": true,
+      "backgroundStart": true
+    }
+  },
+  "plannerExecutor": {
+    "plannerReadOnlyToolset": [
+      "read",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "backgroundJobRoutesInternalOnly": true,
+    "topLevelWorkflowRoutesExposed": false
+  },
+  "remoteEntryBoundary": {
+    "expectedPortKeys": [
+      "approvals",
+      "lifecycle",
+      "turns"
+    ],
+    "forbiddenPortKeys": [
+      "goal",
+      "checkpointRewindService",
+      "memoryStore",
+      "sessionStore",
+      "threadService",
+      "threadStore",
+      "toolHost"
+    ]
+  },
+  "expectedOutput": {
+    "stage": "G4",
+    "mode": "shadow-conformance-only",
+    "sourceContractIds": [
+      "mcp-tool-lifecycle-fixture-v1",
+      "approval-user-input-route-api-gates-v1",
+      "task-job-orchestration-fixture-v1"
+    ],
+    "toolNames": [
+      "alpha_lookup",
+      "beta_fetch",
+      "bash",
+      "request_user_input",
+      "delegate_task"
+    ],
+    "approvalDeniedNoExecute": true,
+    "userInputCancelled": true,
+    "userInputValidationCode": "invalid_user_input_request",
+    "userInputValidationCases": [
+      "too_many_questions",
+      "single_option",
+      "too_many_options",
+      "duplicate_labels_case_insensitive"
+    ],
+    "userInputInvalidOpensGate": false,
+    "userInputSubmittedAnswersEchoed": true,
+    "userInputResolvedEventOmitsAnswers": true,
+    "mcpApprovalAnnotatedNoExecute": true,
+    "mcpSearchMetaToolsAdvertised": true,
+    "mcpSearchUntrustedWorkspaceHidden": true,
+    "mcpSearchCallDeniedNoExecute": true,
+    "mcpKnownOverride": "codegraph",
+    "plannerReadOnlyToolset": [
+      "read",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "productBoundary": {
+      "rendererPreloadMainBridgeUnchanged": true,
+      "analytixServeContractUnchanged": true,
+      "reasonixPublicProtocolAllowed": false,
+      "defaultGoBackendAllowed": false,
+      "rendererVisibleGoRoutesAllowed": false
+    }
+  }
+}

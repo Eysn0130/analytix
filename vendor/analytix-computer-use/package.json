@@ -1,0 +1,52 @@
+{
+  "name": "analytix-computer-use",
+  "version": "0.2.3",
+  "description": "Cross-platform Analytix Computer Use MCP server launcher. After install, configure analytix-computer-use mcp.",
+  "author": "Guoqin He (GitHub: Eysn0130)",
+  "license": "MIT",
+  "homepage": "https://analytix.top",
+  "repository": {
+    "type": "git",
+    "url": "https://analytix.top"
+  },
+  "bugs": {
+    "url": "https://analytix.top"
+  },
+  "keywords": [
+    "analytix",
+    "computer-use",
+    "mcp",
+    "macos",
+    "linux",
+    "windows",
+    "automation"
+  ],
+  "preferGlobal": true,
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "analytix-computer-use": "bin/analytix-computer-use",
+    "analytix-computer-use-mcp": "bin/analytix-computer-use-mcp",
+    "open-computer-use": "bin/open-computer-use",
+    "open-computer-use-mcp": "bin/open-computer-use-mcp"
+  },
+  "scripts": {
+    "postinstall": "node ./scripts/postinstall.mjs"
+  },
+  "files": [
+    ".agents/plugins/marketplace.json",
+    "bin/",
+    "dist/Analytix Computer Use.app/",
+    "dist/linux/",
+    "dist/windows/",
+    "plugins/",
+    "scripts/install-claude-mcp.sh",
+    "scripts/install-gemini-mcp.sh",
+    "scripts/install-config-helper.mjs",
+    "scripts/install-opencode-mcp.sh",
+    "scripts/postinstall.mjs",
+    "README.md",
+    "LICENSE"
+  ]
+}

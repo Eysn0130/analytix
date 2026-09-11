@@ -1,0 +1,22 @@
+mod account_dim;
+mod args;
+mod dataset_snapshot_manifest_v2;
+mod detail_tables;
+mod funds_producer_content_manifest_v1;
+mod identity;
+mod keyword_index;
+mod materialize;
+mod meta_swap;
+mod profile;
+mod verify;
+
+pub(crate) use args::parse_args;
+pub(crate) use args::MaterializeArgs;
+pub(crate) use funds_producer_content_manifest_v1::require_base_table;
+pub(crate) use identity::build_materialization_identity;
+pub(crate) use materialize::{materialize_txn_daily, MaterializeResult};
+pub(crate) use meta_swap::materialization_result_signature;
+pub(crate) use verify::parse_verify_args;
+pub(crate) use verify::verify_txn_daily;
+pub(crate) use verify::verify_txn_daily_snapshot_binding;
+pub(crate) use verify::VerifyTxnDailyResult;

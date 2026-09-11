@@ -1,0 +1,885 @@
+{
+  "schemaVersion": 1,
+  "id": "go-g3-provider-streaming-usage-cache-contract-v1",
+  "stage": "G3",
+  "mode": "shadow-conformance-only",
+  "sourceContractIds": [
+    "provider-cache-prefix-matrix-v1"
+  ],
+  "productBoundary": {
+    "rendererPreloadMainBridgeUnchanged": true,
+    "analytixServeContractUnchanged": true,
+    "reasonixPublicProtocolAllowed": false,
+    "defaultGoBackendAllowed": false,
+    "rendererVisibleGoRoutesAllowed": false
+  },
+  "providerUsageMatrix": [
+    {
+      "id": "unsupported-openai-compatible",
+      "endpointFormat": "chat_completions",
+      "baseUrl": "https://openai-compatible.example/v1",
+      "model": "gpt-5-mini",
+      "expectedUsage": {
+        "promptTokens": 100,
+        "completionTokens": 10,
+        "totalTokens": 110,
+        "cacheHitRate": null,
+        "absent": [
+          "cacheHitTokens",
+          "cacheMissTokens"
+        ]
+      },
+      "responseBody": {
+        "id": "openai_no_cache",
+        "model": "gpt-5-mini",
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "ok"
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 100,
+          "completion_tokens": 10,
+          "total_tokens": 110
+        }
+      }
+    },
+    {
+      "id": "deepseek-prompt-cache",
+      "endpointFormat": "chat_completions",
+      "baseUrl": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "expectedUsage": {
+        "promptTokens": 1000,
+        "completionTokens": 10,
+        "reasoningTokens": 9,
+        "totalTokens": 1010,
+        "cacheHitTokens": 930,
+        "cacheMissTokens": 70,
+        "cacheHitRate": 0.93
+      },
+      "responseBody": {
+        "id": "deepseek_cache",
+        "model": "deepseek-v4-pro",
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "ok"
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 1000,
+          "completion_tokens": 10,
+          "total_tokens": 1010,
+          "prompt_cache_hit_tokens": 930,
+          "prompt_cache_miss_tokens": 70,
+          "completion_tokens_details": {
+            "reasoning_tokens": 9
+          }
+        }
+      }
+    },
+    {
+      "id": "deepseek-native-cache-precedence",
+      "endpointFormat": "chat_completions",
+      "baseUrl": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "expectedUsage": {
+        "promptTokens": 1000,
+        "completionTokens": 10,
+        "totalTokens": 1010,
+        "cacheHitTokens": 700,
+        "cacheMissTokens": 300,
+        "cacheHitRate": 0.7
+      },
+      "responseBody": {
+        "id": "deepseek_native_cache",
+        "model": "deepseek-v4-pro",
+        "choices": [
+          {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "ok"
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 1000,
+          "completion_tokens": 10,
+          "total_tokens": 1010,
+          "prompt_cache_hit_tokens": 700,
+          "prompt_cache_miss_tokens": 300,
+          "prompt_tokens_details": {
+            "cached_tokens": 999
+          }
+        }
+      }
+    },
+    {
+      "id": "openai-responses-cached-tokens",
+      "endpointFormat": "responses",
+      "baseUrl": "https://openai-compatible.example/v1",
+      "model": "gpt-5-mini",
+      "expectedUsage": {
+        "promptTokens": 400,
+        "completionTokens": 20,
+        "reasoningTokens": 11,
+        "totalTokens": 420,
+        "cacheHitTokens": 300,
+        "cacheMissTokens": 100,
+        "cacheHitRate": 0.75
+      },
+      "responseBody": {
+        "id": "responses_cache",
+        "status": "completed",
+        "output_text": "ok",
+        "usage": {
+          "input_tokens": 400,
+          "output_tokens": 20,
+          "total_tokens": 420,
+          "input_tokens_details": {
+            "cached_tokens": 300
+          },
+          "output_tokens_details": {
+            "reasoning_tokens": 11
+          }
+        }
+      }
+    },
+    {
+      "id": "anthropic-cache-fields",
+      "endpointFormat": "messages",
+      "baseUrl": "https://api.minimaxi.com/anthropic",
+      "model": "MiniMax-M2.5",
+      "expectedUsage": {
+        "promptTokens": 1250,
+        "completionTokens": 10,
+        "totalTokens": 1260,
+        "cacheHitTokens": 1000,
+        "cacheMissTokens": 250,
+        "cacheHitRate": 0.8
+      },
+      "responseBody": {
+        "id": "anthropic_cache",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 50,
+          "output_tokens": 10,
+          "cache_read_input_tokens": 1000,
+          "cache_creation_input_tokens": 200
+        }
+      }
+    }
+  ],
+  "requestShapeCaseIds": [
+    "deepseek-chat-request-shape",
+    "openai-compatible-chat-request-shape",
+    "responses-request-shape",
+    "anthropic-messages-request-shape",
+    "custom-responses-full-endpoint-request-shape",
+    "custom-messages-full-endpoint-request-shape",
+    "custom-chat-full-endpoint-request-shape"
+  ],
+  "requestShapeMatrix": [
+    {
+      "id": "deepseek-chat-request-shape",
+      "endpointFormat": "chat_completions",
+      "baseUrl": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "reasoningEffort": "max",
+      "expectedUrl": "https://api.deepseek.com/v1/chat/completions",
+      "requiredHeaders": [
+        "Authorization"
+      ],
+      "forbiddenHeaders": [
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "messages",
+        "tools",
+        "thinking",
+        "reasoning_effort"
+      ],
+      "forbiddenBodyFields": [
+        "input",
+        "system",
+        "max_output_tokens"
+      ],
+      "expectedToolShape": "openai-function"
+    },
+    {
+      "id": "openai-compatible-chat-request-shape",
+      "endpointFormat": "chat_completions",
+      "baseUrl": "https://openai-compatible.example/v1",
+      "model": "gpt-5-mini",
+      "reasoningEffort": "high",
+      "expectedUrl": "https://openai-compatible.example/v1/chat/completions",
+      "requiredHeaders": [
+        "Authorization"
+      ],
+      "forbiddenHeaders": [
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "messages",
+        "tools",
+        "reasoning_effort"
+      ],
+      "forbiddenBodyFields": [
+        "input",
+        "system",
+        "max_output_tokens",
+        "thinking"
+      ],
+      "expectedToolShape": "openai-function"
+    },
+    {
+      "id": "responses-request-shape",
+      "endpointFormat": "responses",
+      "baseUrl": "https://openai-compatible.example/v1",
+      "model": "gpt-5-mini",
+      "expectedUrl": "https://openai-compatible.example/v1/responses",
+      "requiredHeaders": [
+        "Authorization"
+      ],
+      "forbiddenHeaders": [
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "input",
+        "tools",
+        "max_output_tokens"
+      ],
+      "forbiddenBodyFields": [
+        "messages",
+        "system",
+        "thinking"
+      ],
+      "expectedToolShape": "responses-function"
+    },
+    {
+      "id": "anthropic-messages-request-shape",
+      "endpointFormat": "messages",
+      "baseUrl": "https://api.minimaxi.com/anthropic",
+      "model": "MiniMax-M2.5",
+      "expectedUrl": "https://api.minimaxi.com/anthropic/v1/messages",
+      "requiredHeaders": [
+        "Authorization",
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "forbiddenHeaders": [],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "system",
+        "messages",
+        "tools",
+        "max_tokens"
+      ],
+      "forbiddenBodyFields": [
+        "input",
+        "max_output_tokens",
+        "thinking"
+      ],
+      "expectedToolShape": "anthropic-input-schema"
+    },
+    {
+      "id": "custom-responses-full-endpoint-request-shape",
+      "endpointFormat": "custom_endpoint",
+      "baseUrl": "https://gateway.example/custom-path/responses",
+      "model": "custom-responses-model",
+      "expectedUrl": "https://gateway.example/custom-path/responses",
+      "requiredHeaders": [
+        "Authorization"
+      ],
+      "forbiddenHeaders": [
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "input",
+        "tools",
+        "max_output_tokens"
+      ],
+      "forbiddenBodyFields": [
+        "messages",
+        "system",
+        "thinking"
+      ],
+      "expectedToolShape": "responses-function"
+    },
+    {
+      "id": "custom-messages-full-endpoint-request-shape",
+      "endpointFormat": "custom_endpoint",
+      "baseUrl": "https://gateway.example/custom-path/messages",
+      "model": "custom-messages-model",
+      "expectedUrl": "https://gateway.example/custom-path/messages",
+      "requiredHeaders": [
+        "Authorization",
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "forbiddenHeaders": [],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "system",
+        "messages",
+        "tools",
+        "max_tokens"
+      ],
+      "forbiddenBodyFields": [
+        "input",
+        "max_output_tokens",
+        "thinking"
+      ],
+      "expectedToolShape": "anthropic-input-schema"
+    },
+    {
+      "id": "custom-chat-full-endpoint-request-shape",
+      "endpointFormat": "custom_endpoint",
+      "baseUrl": "https://gateway.example/custom-path/chat/completions",
+      "model": "custom-chat-model",
+      "reasoningEffort": "high",
+      "expectedUrl": "https://gateway.example/custom-path/chat/completions",
+      "requiredHeaders": [
+        "Authorization"
+      ],
+      "forbiddenHeaders": [
+        "x-api-key",
+        "anthropic-version"
+      ],
+      "requiredBodyFields": [
+        "model",
+        "stream",
+        "messages",
+        "tools",
+        "reasoning_effort"
+      ],
+      "forbiddenBodyFields": [
+        "input",
+        "system",
+        "max_output_tokens",
+        "thinking"
+      ],
+      "expectedToolShape": "openai-function"
+    }
+  ],
+  "streaming": {
+    "threadId": "thr_go_g3_stream",
+    "sinceSeq": 2,
+    "sseFrames": [
+      "id: 3\nevent: item_delta\ndata: {\"seq\":3,\"kind\":\"item_delta\",\"threadId\":\"thr_go_g3_stream\",\"turnId\":\"turn_go_g3_stream\",\"delta\":\"hello\"}",
+      "id: 4\nevent: usage\ndata: {\"seq\":4,\"kind\":\"usage\",\"threadId\":\"thr_go_g3_stream\",\"turnId\":\"turn_go_g3_stream\",\"usage\":{\"promptTokens\":1000,\"completionTokens\":10,\"reasoningTokens\":9,\"totalTokens\":1010,\"cacheHitTokens\":930,\"cacheMissTokens\":70,\"cacheHitRate\":0.93}}",
+      "id: 5\nevent: turn_completed\ndata: {\"seq\":5,\"kind\":\"turn_completed\",\"threadId\":\"thr_go_g3_stream\",\"turnId\":\"turn_go_g3_stream\",\"status\":\"completed\"}"
+    ],
+    "expectedKindsInOrder": [
+      "item_delta",
+      "usage",
+      "turn_completed"
+    ],
+    "expectedUsageCaseId": "deepseek-prompt-cache"
+  },
+  "cacheDiagnostics": {
+    "prefixHash": "c1ca29dab3a1a82e",
+    "systemHash": "781e4439d0d5ff79",
+    "prefixItemsHash": "e45922fbe42606d0",
+    "toolsHash": "725eed83c2edd7e0",
+    "toolSchemaTokens": 68,
+    "provider": "compat",
+    "providerId": "deepseek-default",
+    "endpointFormat": "chat_completions",
+    "model": "deepseek-v4-pro",
+    "sanitizedRequestUrl": "https://api.deepseek.com/chat/completions",
+    "forbiddenDiagnosticsSubstrings": [
+      "Stable cache contract system.",
+      "Search files without exposing file content.",
+      "same cache-visible prefix text",
+      "api-key",
+      "Authorization"
+    ]
+  },
+  "cacheDriftAttribution": {
+    "previousShape": {
+      "prefixHash": "8a06d723ca843343",
+      "systemHash": "781e4439d0d5ff79",
+      "prefixItemsHash": "4f53cda18c2baa0c",
+      "toolsHash": "725eed83c2edd7e0",
+      "toolSchemaTokens": 68,
+      "provider": "compat",
+      "providerId": "deepseek-default",
+      "endpointFormat": "chat_completions",
+      "model": "deepseek-v4-pro"
+    },
+    "currentShape": {
+      "prefixHash": "be1411d62f5932b4",
+      "systemHash": "781e4439d0d5ff79",
+      "prefixItemsHash": "4f53cda18c2baa0c",
+      "toolsHash": "fe22167c9a379bfe",
+      "toolSchemaTokens": 47,
+      "provider": "compat",
+      "providerId": "openai-compatible",
+      "endpointFormat": "responses",
+      "model": "gpt-5-mini"
+    },
+    "usage": {
+      "promptTokens": 120,
+      "completionTokens": 12,
+      "totalTokens": 132,
+      "cacheHitRate": null
+    },
+    "expectedReasons": [
+      "tools",
+      "provider",
+      "model"
+    ],
+    "expectedTelemetrySupported": false
+  },
+  "cacheAccounting": {
+    "rawPayloadParsedCaseIds": [
+      "unsupported-openai-compatible",
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence",
+      "openai-responses-cached-tokens",
+      "anthropic-cache-fields"
+    ],
+    "rawTelemetrySupportedCaseIds": [
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence",
+      "openai-responses-cached-tokens",
+      "anthropic-cache-fields"
+    ],
+    "rawMatchesExpectedUsageCaseIds": [
+      "unsupported-openai-compatible",
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence",
+      "openai-responses-cached-tokens",
+      "anthropic-cache-fields"
+    ],
+    "telemetrySupportedCaseIds": [
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence",
+      "openai-responses-cached-tokens",
+      "anthropic-cache-fields"
+    ],
+    "unsupportedUnknownCaseIds": [
+      "unsupported-openai-compatible"
+    ],
+    "deepseekCaseIds": [
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence"
+    ],
+    "openaiCacheCaseIds": [
+      "openai-responses-cached-tokens"
+    ],
+    "anthropicCacheCaseIds": [
+      "anthropic-cache-fields"
+    ],
+    "totalCacheHitTokens": 2930,
+    "totalCacheMissTokens": 720,
+    "aggregateCacheHitRate": 0.8027397260273973,
+    "unsupportedProvidersCountedAsMisses": false
+  },
+  "expectedOutput": {
+    "stage": "G3",
+    "mode": "shadow-conformance-only",
+    "sourceContractIds": [
+      "provider-cache-prefix-matrix-v1"
+    ],
+    "providerUsageCaseIds": [
+      "unsupported-openai-compatible",
+      "deepseek-prompt-cache",
+      "deepseek-native-cache-precedence",
+      "openai-responses-cached-tokens",
+      "anthropic-cache-fields"
+    ],
+    "requestShapeCaseIds": [
+      "deepseek-chat-request-shape",
+      "openai-compatible-chat-request-shape",
+      "responses-request-shape",
+      "anthropic-messages-request-shape",
+      "custom-responses-full-endpoint-request-shape",
+      "custom-messages-full-endpoint-request-shape",
+      "custom-chat-full-endpoint-request-shape"
+    ],
+    "requestShapeSummary": {
+      "caseCount": 7,
+      "exactUrlCount": 7,
+      "derivedUrlMatchCaseIds": [
+        "deepseek-chat-request-shape",
+        "openai-compatible-chat-request-shape",
+        "responses-request-shape",
+        "anthropic-messages-request-shape",
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "headerShapeMatchCaseIds": [
+        "deepseek-chat-request-shape",
+        "openai-compatible-chat-request-shape",
+        "responses-request-shape",
+        "anthropic-messages-request-shape",
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "bodyShapeMatchCaseIds": [
+        "deepseek-chat-request-shape",
+        "openai-compatible-chat-request-shape",
+        "responses-request-shape",
+        "anthropic-messages-request-shape",
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "toolShapeMatchCaseIds": [
+        "deepseek-chat-request-shape",
+        "openai-compatible-chat-request-shape",
+        "responses-request-shape",
+        "anthropic-messages-request-shape",
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "matrix": [
+        {
+          "id": "deepseek-chat-request-shape",
+          "endpointFormat": "chat_completions",
+          "baseUrl": "https://api.deepseek.com",
+          "model": "deepseek-v4-pro",
+          "reasoningEffort": "max",
+          "expectedUrl": "https://api.deepseek.com/v1/chat/completions",
+          "requiredHeaders": [
+            "Authorization"
+          ],
+          "forbiddenHeaders": [
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "messages",
+            "tools",
+            "thinking",
+            "reasoning_effort"
+          ],
+          "forbiddenBodyFields": [
+            "input",
+            "system",
+            "max_output_tokens"
+          ],
+          "expectedToolShape": "openai-function"
+        },
+        {
+          "id": "openai-compatible-chat-request-shape",
+          "endpointFormat": "chat_completions",
+          "baseUrl": "https://openai-compatible.example/v1",
+          "model": "gpt-5-mini",
+          "reasoningEffort": "high",
+          "expectedUrl": "https://openai-compatible.example/v1/chat/completions",
+          "requiredHeaders": [
+            "Authorization"
+          ],
+          "forbiddenHeaders": [
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "messages",
+            "tools",
+            "reasoning_effort"
+          ],
+          "forbiddenBodyFields": [
+            "input",
+            "system",
+            "max_output_tokens",
+            "thinking"
+          ],
+          "expectedToolShape": "openai-function"
+        },
+        {
+          "id": "responses-request-shape",
+          "endpointFormat": "responses",
+          "baseUrl": "https://openai-compatible.example/v1",
+          "model": "gpt-5-mini",
+          "expectedUrl": "https://openai-compatible.example/v1/responses",
+          "requiredHeaders": [
+            "Authorization"
+          ],
+          "forbiddenHeaders": [
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "input",
+            "tools",
+            "max_output_tokens"
+          ],
+          "forbiddenBodyFields": [
+            "messages",
+            "system",
+            "thinking"
+          ],
+          "expectedToolShape": "responses-function"
+        },
+        {
+          "id": "anthropic-messages-request-shape",
+          "endpointFormat": "messages",
+          "baseUrl": "https://api.minimaxi.com/anthropic",
+          "model": "MiniMax-M2.5",
+          "expectedUrl": "https://api.minimaxi.com/anthropic/v1/messages",
+          "requiredHeaders": [
+            "Authorization",
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "forbiddenHeaders": [],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "system",
+            "messages",
+            "tools",
+            "max_tokens"
+          ],
+          "forbiddenBodyFields": [
+            "input",
+            "max_output_tokens",
+            "thinking"
+          ],
+          "expectedToolShape": "anthropic-input-schema"
+        },
+        {
+          "id": "custom-responses-full-endpoint-request-shape",
+          "endpointFormat": "custom_endpoint",
+          "baseUrl": "https://gateway.example/custom-path/responses",
+          "model": "custom-responses-model",
+          "expectedUrl": "https://gateway.example/custom-path/responses",
+          "requiredHeaders": [
+            "Authorization"
+          ],
+          "forbiddenHeaders": [
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "input",
+            "tools",
+            "max_output_tokens"
+          ],
+          "forbiddenBodyFields": [
+            "messages",
+            "system",
+            "thinking"
+          ],
+          "expectedToolShape": "responses-function"
+        },
+        {
+          "id": "custom-messages-full-endpoint-request-shape",
+          "endpointFormat": "custom_endpoint",
+          "baseUrl": "https://gateway.example/custom-path/messages",
+          "model": "custom-messages-model",
+          "expectedUrl": "https://gateway.example/custom-path/messages",
+          "requiredHeaders": [
+            "Authorization",
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "forbiddenHeaders": [],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "system",
+            "messages",
+            "tools",
+            "max_tokens"
+          ],
+          "forbiddenBodyFields": [
+            "input",
+            "max_output_tokens",
+            "thinking"
+          ],
+          "expectedToolShape": "anthropic-input-schema"
+        },
+        {
+          "id": "custom-chat-full-endpoint-request-shape",
+          "endpointFormat": "custom_endpoint",
+          "baseUrl": "https://gateway.example/custom-path/chat/completions",
+          "model": "custom-chat-model",
+          "reasoningEffort": "high",
+          "expectedUrl": "https://gateway.example/custom-path/chat/completions",
+          "requiredHeaders": [
+            "Authorization"
+          ],
+          "forbiddenHeaders": [
+            "x-api-key",
+            "anthropic-version"
+          ],
+          "requiredBodyFields": [
+            "model",
+            "stream",
+            "messages",
+            "tools",
+            "reasoning_effort"
+          ],
+          "forbiddenBodyFields": [
+            "input",
+            "system",
+            "max_output_tokens",
+            "thinking"
+          ],
+          "expectedToolShape": "openai-function"
+        }
+      ],
+      "endpointFormats": [
+        "chat_completions",
+        "responses",
+        "messages",
+        "custom_endpoint"
+      ],
+      "fullEndpointCaseIds": [
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "toolShapes": [
+        "openai-function",
+        "responses-function",
+        "anthropic-input-schema"
+      ],
+      "customFullEndpointExactUrlCaseIds": [
+        "custom-responses-full-endpoint-request-shape",
+        "custom-messages-full-endpoint-request-shape",
+        "custom-chat-full-endpoint-request-shape"
+      ],
+      "customFullEndpointAppendedPathCount": 0,
+      "requiredBodyFieldFamilies": {
+        "messagesFieldCaseCount": 5,
+        "inputFieldCaseCount": 2,
+        "systemFieldCaseCount": 2,
+        "thinkingFieldCaseCount": 1,
+        "maxOutputTokensCaseCount": 2,
+        "maxTokensCaseCount": 2
+      },
+      "forbiddenBodyFieldFamilies": {
+        "thinkingForbiddenCaseCount": 6,
+        "systemForbiddenCaseCount": 5,
+        "inputForbiddenCaseCount": 5,
+        "maxOutputTokensForbiddenCaseCount": 5
+      }
+    },
+    "streamingKinds": [
+      "item_delta",
+      "usage",
+      "turn_completed"
+    ],
+    "cacheTelemetrySupported": true,
+    "cacheDriftAttribution": {
+      "previousPrefixHash": "8a06d723ca843343",
+      "currentPrefixHash": "be1411d62f5932b4",
+      "systemHashStable": true,
+      "prefixItemsHashStable": true,
+      "toolsHashChanged": true,
+      "providerChanged": true,
+      "modelChanged": true,
+      "endpointFormatChanged": true,
+      "expectedReasons": [
+        "tools",
+        "provider",
+        "model"
+      ],
+      "telemetrySupported": false,
+      "cacheHitRateKnown": false
+    },
+    "cacheAccounting": {
+      "rawPayloadParsedCaseIds": [
+        "unsupported-openai-compatible",
+        "deepseek-prompt-cache",
+        "deepseek-native-cache-precedence",
+        "openai-responses-cached-tokens",
+        "anthropic-cache-fields"
+      ],
+      "rawTelemetrySupportedCaseIds": [
+        "deepseek-prompt-cache",
+        "deepseek-native-cache-precedence",
+        "openai-responses-cached-tokens",
+        "anthropic-cache-fields"
+      ],
+      "rawMatchesExpectedUsageCaseIds": [
+        "unsupported-openai-compatible",
+        "deepseek-prompt-cache",
+        "deepseek-native-cache-precedence",
+        "openai-responses-cached-tokens",
+        "anthropic-cache-fields"
+      ],
+      "telemetrySupportedCaseIds": [
+        "deepseek-prompt-cache",
+        "deepseek-native-cache-precedence",
+        "openai-responses-cached-tokens",
+        "anthropic-cache-fields"
+      ],
+      "unsupportedUnknownCaseIds": [
+        "unsupported-openai-compatible"
+      ],
+      "deepseekCaseIds": [
+        "deepseek-prompt-cache",
+        "deepseek-native-cache-precedence"
+      ],
+      "openaiCacheCaseIds": [
+        "openai-responses-cached-tokens"
+      ],
+      "anthropicCacheCaseIds": [
+        "anthropic-cache-fields"
+      ],
+      "totalCacheHitTokens": 2930,
+      "totalCacheMissTokens": 720,
+      "aggregateCacheHitRate": 0.8027397260273973,
+      "unsupportedProvidersCountedAsMisses": false
+    },
+    "productBoundary": {
+      "rendererPreloadMainBridgeUnchanged": true,
+      "analytixServeContractUnchanged": true,
+      "reasonixPublicProtocolAllowed": false,
+      "defaultGoBackendAllowed": false,
+      "rendererVisibleGoRoutesAllowed": false
+    }
+  }
+}

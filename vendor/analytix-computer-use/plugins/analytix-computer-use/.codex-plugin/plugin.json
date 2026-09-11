@@ -1,0 +1,40 @@
+{
+  "name": "analytix-computer-use",
+  "version": "0.2.3",
+  "description": "Analytix 品牌化 Computer Use MCP server，通过 accessibility / UI Automation 在 macOS、Windows 和 Linux 上控制桌面应用。",
+  "author": {
+    "name": "Guoqin He",
+    "url": "https://github.com/Eysn0130"
+  },
+  "homepage": "https://analytix.top",
+  "repository": "https://analytix.top",
+  "license": "MIT",
+  "keywords": [
+    "analytix",
+    "computer-use",
+    "mcp",
+    "desktop-automation",
+    "accessibility"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Analytix Computer Use",
+    "shortDescription": "使用 Analytix Computer Use MCP 后端读取和操作桌面应用。",
+    "longDescription": "Analytix Computer Use 是 analytix 使用的本地 Computer Use MCP 后端。它会读取应用状态、截图、accessibility tree 与语义 element_index，并通过平台 accessibility / UI Automation 执行点击、文本输入、按键、滚动、拖拽、set_value、select_text 和 secondary action。macOS 上会以 Analytix Computer Use 应用身份请求辅助功能和屏幕录制权限。",
+    "developerName": "Analytix",
+    "category": "效率工具",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://analytix.top",
+    "privacyPolicyURL": "https://analytix.top/privacy",
+    "termsOfServiceURL": "https://analytix.top/terms",
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": "使用 Analytix Computer Use 检查当前桌面应用，获取 accessibility tree 和截图，确认目标元素后再执行请求的 GUI 操作。"
+  },
+  "mcpServers": "./.mcp.json"
+}

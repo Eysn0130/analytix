@@ -1,0 +1,485 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-provider-matrix",
+  "generatedAt": "2026-07-03T12:44:29.110Z",
+  "status": "passed",
+  "passed": true,
+  "credentialedMatrixEnvGated": true,
+  "credentialedMatrixSettingsProfileGated": true,
+  "readsRealApiKeysByDefault": true,
+  "settingsProfileCredentialsRead": true,
+  "credentialValuesRecorded": false,
+  "credentialSecretsRecorded": false,
+  "settingsProfile": {
+    "status": "loaded",
+    "source": "default-app-settings",
+    "settingsPathConfigured": true,
+    "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805",
+    "activeProviderId": "",
+    "selectedProviderId": "deepseek",
+    "providerCount": 2
+  },
+  "settingsProfileCoverage": {
+    "status": "loaded",
+    "source": "default-app-settings",
+    "providerCount": 2,
+    "matchedProviderIds": [
+      "deepseek",
+      "openai-compatible"
+    ],
+    "usableProviderIds": [
+      "deepseek",
+      "openai-compatible"
+    ],
+    "usableNonDeepSeekProviderIds": [
+      "openai-compatible"
+    ],
+    "deepseekSettingsProfileUsable": true,
+    "nonDeepSeekSettingsProfileUsable": true,
+    "satisfiesFinalProviderCoverageFromSettings": true,
+    "credentialValuesRecorded": false
+  },
+  "requiredProviderIds": [
+    "deepseek",
+    "openai-compatible",
+    "anthropic-compatible",
+    "custom-endpoint"
+  ],
+  "requiredCredentialedProviderCoverage": [
+    "deepseek",
+    "at-least-one-non-deepseek-provider"
+  ],
+  "optionalCredentialedProviderIds": [
+    "openai-compatible",
+    "anthropic-compatible",
+    "custom-endpoint"
+  ],
+  "credentialedDeepSeekPassed": true,
+  "credentialedNonDeepSeekProviderIds": [
+    "openai-compatible"
+  ],
+  "credentialedProviderCoverage": {
+    "passed": true,
+    "deepseekPassed": true,
+    "nonDeepSeekProviderPassed": true,
+    "nonDeepSeekPassedIds": [
+      "openai-compatible"
+    ],
+    "passedIds": [
+      "deepseek",
+      "openai-compatible"
+    ],
+    "missing": []
+  },
+  "credentialedProbes": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "family": "openai-chat-completions",
+      "endpointFamily": "openai-chat-completions",
+      "endpointFormat": "openai-chat-completions",
+      "credentialed": true,
+      "requestUrl": "https://api.deepseek.com/v1/chat/completions",
+      "requestUrlHash": "45cf67066d4f1cabb601c45bf99ddbd513037f5c4e608d3ac3689937804db451",
+      "requestShape": {
+        "method": "POST",
+        "urlPolicy": "append-chat-completions",
+        "requestUrl": "https://api.deepseek.com/v1/chat/completions",
+        "endpointFamily": "openai-chat-completions",
+        "endpointFormat": "openai-chat-completions",
+        "customEndpointInferredFormat": "",
+        "bodyFields": [
+          "max_tokens",
+          "messages",
+          "model",
+          "stream",
+          "stream_options"
+        ],
+        "messageCount": 1,
+        "inputConfigured": false,
+        "streamRequested": true,
+        "maxTokensField": "max_tokens",
+        "headerNames": [
+          "content-type",
+          "redacted-bearer-auth-header"
+        ],
+        "credentialConfigured": true,
+        "credentialValueRecorded": false,
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "requestShapeValidation": {
+        "status": "passed",
+        "missing": []
+      },
+      "missingEnv": [],
+      "redaction": {
+        "status": "passed",
+        "credentialEnvNames": [
+          "ANALYTIX_RUNTIME_DEEPSEEK_API_KEY",
+          "ANALYTIX_RUNTIME_GO_DEEPSEEK_API_KEY"
+        ],
+        "credentialValueRecorded": false
+      },
+      "provider": {
+        "activeProviderId": "",
+        "providerId": "deepseek",
+        "model": "deepseek-v4-pro",
+        "endpointFormat": "chat-completions",
+        "hasApiKey": true,
+        "providerIsDeepSeek": true,
+        "source": "settings-profile",
+        "settingsProfileMatched": true,
+        "settingsProfileUsable": true,
+        "settingsProfileId": "deepseek",
+        "settingsProfilePresetFallbackUsed": false,
+        "settingsProfilePresetModelFallbackUsed": false,
+        "settingsProviderCount": 2,
+        "settingsPathConfigured": true,
+        "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805"
+      },
+      "status": "passed",
+      "skipped": false,
+      "message": "credentialed provider probe passed",
+      "streamParsing": {
+        "status": "passed",
+        "mode": "sse",
+        "frameCount": 19,
+        "jsonFrameCount": 18,
+        "parseErrorCount": 0
+      },
+      "usageParsing": {
+        "status": "passed",
+        "tokenFields": [
+          "completion_tokens",
+          "completion_tokens_details",
+          "prompt_cache_hit_tokens",
+          "prompt_cache_miss_tokens",
+          "prompt_tokens",
+          "prompt_tokens_details",
+          "total_tokens"
+        ],
+        "usageObjectPresent": true
+      },
+      "cacheTelemetry": {
+        "status": "passed",
+        "providerScoped": true,
+        "cacheFieldNames": [
+          "prompt_cache_hit_tokens",
+          "prompt_cache_miss_tokens"
+        ],
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "errorHandling": {
+        "status": "passed",
+        "httpStatus": 400,
+        "errorProbePassed": true,
+        "requestShape": {
+          "method": "POST",
+          "sameRequestUrl": true,
+          "intentionallyInvalidBody": true,
+          "credentialValueRecorded": false,
+          "requestBodyRecorded": false
+        },
+        "responseSummary": "{\"error\":{\"message\":\"Failed to deserialize the JSON body into the target type: missing field `model` at line 1 column 153\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}}",
+        "rawResponseRecorded": false,
+        "credentialValueRecorded": false
+      }
+    },
+    {
+      "id": "openai-compatible",
+      "label": "OpenAI-compatible",
+      "family": "openai-chat-completions",
+      "endpointFamily": "openai-chat-completions",
+      "endpointFormat": "openai-chat-completions",
+      "credentialed": true,
+      "requestUrl": "https://api.xiaomimimo.com/v1/chat/completions",
+      "requestUrlHash": "f44c9c79be0a3c2b86d7aaa0f3d09f008e616d0df79db2445bcae877e1c4f133",
+      "requestShape": {
+        "method": "POST",
+        "urlPolicy": "append-chat-completions",
+        "requestUrl": "https://api.xiaomimimo.com/v1/chat/completions",
+        "endpointFamily": "openai-chat-completions",
+        "endpointFormat": "openai-chat-completions",
+        "customEndpointInferredFormat": "",
+        "bodyFields": [
+          "max_tokens",
+          "messages",
+          "model",
+          "stream",
+          "stream_options"
+        ],
+        "messageCount": 1,
+        "inputConfigured": false,
+        "streamRequested": true,
+        "maxTokensField": "max_tokens",
+        "headerNames": [
+          "content-type",
+          "redacted-bearer-auth-header"
+        ],
+        "credentialConfigured": true,
+        "credentialValueRecorded": false,
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "requestShapeValidation": {
+        "status": "passed",
+        "missing": []
+      },
+      "missingEnv": [],
+      "redaction": {
+        "status": "passed",
+        "credentialEnvNames": [
+          "ANALYTIX_RUNTIME_OPENAI_COMPAT_API_KEY",
+          "ANALYTIX_RUNTIME_GO_OPENAI_COMPAT_API_KEY"
+        ],
+        "credentialValueRecorded": false
+      },
+      "provider": {
+        "activeProviderId": "",
+        "providerId": "xiaomi",
+        "model": "mimo-v2.5",
+        "endpointFormat": "chat-completions",
+        "hasApiKey": true,
+        "providerIsDeepSeek": false,
+        "source": "settings-profile",
+        "settingsProfileMatched": true,
+        "settingsProfileUsable": true,
+        "settingsProfileId": "xiaomi",
+        "settingsProfilePresetFallbackUsed": false,
+        "settingsProfilePresetModelFallbackUsed": false,
+        "settingsProviderCount": 2,
+        "settingsPathConfigured": true,
+        "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805"
+      },
+      "status": "passed",
+      "skipped": false,
+      "message": "credentialed provider probe passed",
+      "streamParsing": {
+        "status": "passed",
+        "mode": "sse",
+        "frameCount": 9,
+        "jsonFrameCount": 8,
+        "parseErrorCount": 0
+      },
+      "usageParsing": {
+        "status": "passed",
+        "tokenFields": [
+          "completion_tokens",
+          "completion_tokens_details",
+          "prompt_tokens",
+          "prompt_tokens_details",
+          "total_tokens"
+        ],
+        "usageObjectPresent": true
+      },
+      "cacheTelemetry": {
+        "status": "passed",
+        "providerScoped": false,
+        "cacheFieldNames": [],
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "errorHandling": {
+        "status": "passed",
+        "httpStatus": 400,
+        "errorProbePassed": true,
+        "requestShape": {
+          "method": "POST",
+          "sameRequestUrl": true,
+          "intentionallyInvalidBody": true,
+          "credentialValueRecorded": false,
+          "requestBodyRecorded": false
+        },
+        "responseSummary": "{ \"error\": { \"code\": \"400\", \"message\": \"Param Incorrect\", \"param\": \"Not supported model unknown-model\" } }",
+        "rawResponseRecorded": false,
+        "credentialValueRecorded": false
+      }
+    },
+    {
+      "id": "anthropic-compatible",
+      "label": "Anthropic-compatible",
+      "family": "anthropic-messages",
+      "endpointFamily": "anthropic-messages",
+      "endpointFormat": "anthropic-messages",
+      "credentialed": true,
+      "requestUrl": "",
+      "requestUrlHash": "",
+      "requestShape": {
+        "method": "POST",
+        "urlPolicy": "append-anthropic-messages",
+        "requestUrl": "",
+        "endpointFamily": "anthropic-messages",
+        "endpointFormat": "anthropic-messages",
+        "customEndpointInferredFormat": "",
+        "bodyFields": [],
+        "messageCount": 0,
+        "inputConfigured": false,
+        "streamRequested": false,
+        "maxTokensField": "",
+        "headerNames": [
+          "content-type",
+          "anthropic-version",
+          "redacted-api-key-header"
+        ],
+        "credentialConfigured": false,
+        "credentialValueRecorded": false,
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "requestShapeValidation": {
+        "status": "failed",
+        "missing": [
+          "credentialConfigured",
+          "streamRequested",
+          "messageOrInput",
+          "maxTokensField"
+        ]
+      },
+      "missingEnv": [
+        "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+        "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_BASE_URL",
+        "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_MODEL"
+      ],
+      "redaction": {
+        "status": "passed",
+        "credentialEnvNames": [
+          "ANALYTIX_RUNTIME_ANTHROPIC_COMPAT_API_KEY",
+          "ANALYTIX_RUNTIME_GO_ANTHROPIC_COMPAT_API_KEY"
+        ],
+        "credentialValueRecorded": false
+      },
+      "provider": {
+        "activeProviderId": "",
+        "providerId": "anthropic-compatible",
+        "model": "",
+        "endpointFormat": "anthropic-messages",
+        "hasApiKey": false,
+        "providerIsDeepSeek": false,
+        "source": "missing",
+        "settingsProfileMatched": false,
+        "settingsProfileUsable": false,
+        "settingsProfileId": "",
+        "settingsProfilePresetFallbackUsed": false,
+        "settingsProfilePresetModelFallbackUsed": false,
+        "settingsProviderCount": 2,
+        "settingsPathConfigured": true,
+        "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805"
+      },
+      "status": "skipped",
+      "skipped": true,
+      "missingSettingsProfileFields": [
+        "provider.providers[].matchingProfile"
+      ],
+      "message": "missing credential/baseUrl/model from env or settings provider profile; skipped without counting as pass",
+      "streamParsing": {
+        "status": "skipped"
+      },
+      "usageParsing": {
+        "status": "skipped"
+      },
+      "cacheTelemetry": {
+        "status": "skipped",
+        "providerScoped": false
+      },
+      "errorHandling": {
+        "status": "skipped",
+        "errorProbePassed": false
+      }
+    },
+    {
+      "id": "custom-endpoint",
+      "label": "Custom full endpoint",
+      "family": "custom-full-endpoint",
+      "endpointFamily": "custom-full-endpoint",
+      "endpointFormat": "custom-full-endpoint",
+      "credentialed": true,
+      "requestUrl": "",
+      "requestUrlHash": "",
+      "requestShape": {
+        "method": "POST",
+        "urlPolicy": "custom-full-endpoint-no-append",
+        "requestUrl": "",
+        "endpointFamily": "custom-full-endpoint",
+        "endpointFormat": "custom-full-endpoint",
+        "customEndpointInferredFormat": "chat_completions",
+        "bodyFields": [],
+        "messageCount": 0,
+        "inputConfigured": false,
+        "streamRequested": false,
+        "maxTokensField": "",
+        "headerNames": [
+          "content-type",
+          "redacted-bearer-auth-header"
+        ],
+        "credentialConfigured": false,
+        "credentialValueRecorded": false,
+        "deepSeekSpecificRequestFieldsPresent": false
+      },
+      "requestShapeValidation": {
+        "status": "failed",
+        "missing": [
+          "credentialConfigured",
+          "streamRequested",
+          "messageOrInput",
+          "maxTokensField"
+        ]
+      },
+      "missingEnv": [
+        "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+        "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_URL",
+        "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_MODEL"
+      ],
+      "redaction": {
+        "status": "passed",
+        "credentialEnvNames": [
+          "ANALYTIX_RUNTIME_CUSTOM_ENDPOINT_API_KEY",
+          "ANALYTIX_RUNTIME_GO_CUSTOM_ENDPOINT_API_KEY"
+        ],
+        "credentialValueRecorded": false
+      },
+      "provider": {
+        "activeProviderId": "",
+        "providerId": "custom-endpoint",
+        "model": "",
+        "endpointFormat": "custom-full-endpoint",
+        "hasApiKey": false,
+        "providerIsDeepSeek": false,
+        "source": "missing",
+        "settingsProfileMatched": false,
+        "settingsProfileUsable": false,
+        "settingsProfileId": "",
+        "settingsProfilePresetFallbackUsed": false,
+        "settingsProfilePresetModelFallbackUsed": false,
+        "settingsProviderCount": 2,
+        "settingsPathConfigured": true,
+        "settingsPathHash": "448e33a6a7097fc2417ca22f0b8ba0b4e3c38357e7d8872f8eeb161536905805"
+      },
+      "status": "skipped",
+      "skipped": true,
+      "missingSettingsProfileFields": [
+        "provider.providers[].matchingProfile"
+      ],
+      "message": "missing credential/baseUrl/model from env or settings provider profile; skipped without counting as pass",
+      "streamParsing": {
+        "status": "skipped"
+      },
+      "usageParsing": {
+        "status": "skipped"
+      },
+      "cacheTelemetry": {
+        "status": "skipped",
+        "providerScoped": false
+      },
+      "errorHandling": {
+        "status": "skipped",
+        "errorProbePassed": false
+      }
+    }
+  ],
+  "redaction": {
+    "status": "passed",
+    "secretMaterialFound": false
+  },
+  "notes": [
+    "Provider probes record endpoint family, request shape, stream parsing, usage parsing, cache telemetry, error handling, and redaction.",
+    "Custom endpoint mode uses the configured full endpoint path without appending another provider path.",
+    "DeepSeek cache telemetry is provider-scoped and does not alter OpenAI-compatible, Anthropic-compatible, or custom endpoint request bodies."
+  ]
+}

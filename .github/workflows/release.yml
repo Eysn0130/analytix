@@ -1,0 +1,122 @@
+name: analytix release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: analytix app version to release
+        required: true
+        type: string
+      channel:
+        description: analytix release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+
+env:
+  ANALYTIX_APP_VERSION: ${{ inputs.version }}
+  ANALYTIX_UPDATE_CHANNEL: ${{ inputs.channel }}
+
+jobs:
+  verify-release-identity:
+    name: verify analytix release identity
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/runtime-go/go.mod
+          cache-dependency-path: packages/runtime-go/go.sum
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install fixed release validation tools
+        run: |
+          cargo install ripgrep --version 14.1.1 --locked
+          python -m pip install "pytest>=8.3,<9"
+          rg --version
+
+      - name: Verify native publication retirement boundary
+        run: |
+          npm run scan:product-sovereignty
+          npm run test -- src/main/packaging-config.test.ts src/main/data-analysis/native-runtime-paths.test.ts --run
+          python -m pytest backend/tests/test_native_component_paths.py -q
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build runtime
+        run: npm run build:runtime
+
+      - name: Run Go runtime release gate
+        run: npm run runtime:go:release-gate
+
+  verify-windows-data-engine-owner:
+    name: verify Windows data engine owner gate
+    runs-on: windows-latest
+    needs: verify-release-identity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/runtime-go/go.mod
+          cache-dependency-path: packages/runtime-go/go.sum
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install fixed release validation tools
+        run: |
+          cargo --version
+          cargo install ripgrep --version 14.1.1 --locked
+          python -m pip install "pytest>=8.3,<9"
+          rg --version
+
+      - name: Verify native publication retirement boundary
+        run: |
+          npm run scan:product-sovereignty
+          npm run test -- src/main/packaging-config.test.ts src/main/data-analysis/native-runtime-paths.test.ts --run
+          python -m pytest backend/tests/test_native_component_paths.py -q
+
+      - name: Validate data engine gate scripts
+        run: |
+          node --check scripts/verify-data-engine-single-owner.cjs
+          node --check scripts/audit-windows-package.cjs
+
+      - name: Run Windows owner mutex test
+        run: cargo test --manifest-path tools/data_engine/Cargo.toml windows_named_mutex_conflict_returns_owner_conflict
+
+      - name: Build native data tools
+        run: npm run build:data-native

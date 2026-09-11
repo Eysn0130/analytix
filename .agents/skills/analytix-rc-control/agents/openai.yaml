@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analytix RC Control"
+  short_description: "Coordinate delivery, Slice review and economical monitoring"
+  default_prompt: "Use $analytix-rc-control to advance the next dependency-valid Analytix delivery milestone with the lightest safe execution shape and evidence-based acceptance."

@@ -1,0 +1,44 @@
+{
+  "id": "starlight",
+  "name": "Analytix Cameo",
+  "version": "1.0.0",
+  "author": "Analytix Contributors",
+  "description": "官方示例插件:analytix cameo 形象包,含主题色与进行中文案。",
+  "figures": {
+    "swim": "img/bird.png",
+    "surf": "img/surf.png",
+    "greet": "img/greet.png",
+    "sleep": "img/sleep.png",
+    "sit": "img/sit.png",
+    "toggleIcon": "img/greet.png"
+  },
+  "labels": {
+    "zh": {
+      "working": "巡航中…",
+      "workingSprint": "流星冲刺中…",
+      "workingDive": "潜入星海中…",
+      "workingSurf": "星浪滑行中…"
+    },
+    "en": {
+      "working": "Stargazing…",
+      "workingSprint": "Meteor dash…",
+      "workingDive": "Deep diving…",
+      "workingSurf": "Riding stardust…"
+    }
+  },
+  "tokens": {
+    "light": {
+      "--ds-accent": "#7a5fd0",
+      "--ds-accent-soft": "rgba(122, 95, 208, 0.15)",
+      "--ds-selection": "rgba(122, 95, 208, 0.2)"
+    },
+    "dark": {
+      "--ds-accent": "#a78ff0",
+      "--ds-accent-soft": "rgba(167, 143, 240, 0.2)",
+      "--ds-selection": "rgba(167, 143, 240, 0.26)"
+    }
+  },
+  "features": {
+    "cameos": true
+  }
+}

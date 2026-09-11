@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "id": "d0250b-go-runtime-cutover-report",
+  "changeId": "D-0250B",
+  "stage": "D-0250B-intake",
+  "generatedAt": "2026-06-24T17:50:54.121Z",
+  "status": "intake-closed",
+  "d0250bIntakeClosed": true,
+  "localCodeStageReady": true,
+  "localCodeStageCheckIds": [
+    "go-server-conformance",
+    "durable-restart-proof",
+    "provider-matrix-local",
+    "mcp-matrix-local",
+    "product-sovereignty",
+    "typecheck",
+    "build-runtime"
+  ],
+  "liveCutoverStage": "D-0250C-live",
+  "liveCutoverStatus": "post-cutover-live-validation-pending",
+  "strictG6Passed": false,
+  "goDefaultCandidate": true,
+  "defaultBackendReady": true,
+  "goDefaultBackendEnabled": true,
+  "typeScriptFallbackRetained": false,
+  "typeScriptDefaultPathRetired": true,
+  "typeScriptRollbackOverrideRetained": true,
+  "rendererVisibleGoSwitcher": false,
+  "windowAnalytixChanged": false,
+  "settingsSchemaChanged": false,
+  "productIdentityChanged": false,
+  "reasonixEngineRuntimeOnly": true,
+  "evidenceIntake": [
+    {
+      "id": "provider-matrix-credentialed",
+      "label": "Credentialed provider matrix",
+      "status": "skipped",
+      "evidencePath": "",
+      "requiredCoverage": [
+        "deepseek",
+        "openai-compatible",
+        "anthropic-compatible",
+        "custom-endpoint"
+      ],
+      "passed": false,
+      "reason": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation"
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "label": "Credentialed MCP execution matrix",
+      "status": "skipped",
+      "evidencePath": "",
+      "requiredCoverage": [
+        "connect",
+        "tool-discovery-search",
+        "tool-call",
+        "approval-user-input",
+        "reconnect",
+        "redaction"
+      ],
+      "passed": false,
+      "reason": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation"
+    },
+    {
+      "id": "packaged-qa",
+      "label": "Packaged desktop QA",
+      "status": "skipped",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-packaged-go-runtime-qa-report.json",
+      "requiredCoverage": [
+        "packaged-app-startup",
+        "health",
+        "thread-list",
+        "turn-create",
+        "sse-replay",
+        "go-runtime-default-gate",
+        "retired-backend-diagnostic"
+      ],
+      "passed": false,
+      "reason": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation"
+    },
+    {
+      "id": "explicit-env-gate",
+      "label": "D-0250B operator gate",
+      "status": "missing",
+      "evidencePath": "",
+      "requiredCoverage": [
+        "ANALYTIX_GO_RUNTIME_G6_READY=1",
+        "d0250b-go-runtime-operator-gate JSON",
+        "credentialedEvidenceReviewed",
+        "goDefaultCandidateApproved"
+      ],
+      "passed": false,
+      "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation"
+    }
+  ],
+  "missingEvidence": [
+    {
+      "id": "provider-matrix-credentialed",
+      "status": "skipped",
+      "evidencePath": "",
+      "reason": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation"
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "status": "skipped",
+      "evidencePath": "",
+      "reason": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation"
+    },
+    {
+      "id": "packaged-qa",
+      "status": "skipped",
+      "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-packaged-go-runtime-qa-report.json",
+      "reason": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation"
+    },
+    {
+      "id": "explicit-env-gate",
+      "status": "missing",
+      "evidencePath": "",
+      "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation"
+    }
+  ],
+  "readinessGate": {
+    "command": "read /Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json",
+    "exitCode": 0,
+    "evidencePath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0248-go-runtime-readiness-gate-report.json",
+    "blockerIds": [],
+    "failureReasons": [
+      {
+        "id": "provider-matrix-credentialed",
+        "status": "skipped",
+        "reason": "ANALYTIX_D0243_PROVIDER_MATRIX_STATUS is skipped; credentialed provider evidence remains post-cutover live validation"
+      },
+      {
+        "id": "mcp-matrix-credentialed",
+        "status": "skipped",
+        "reason": "ANALYTIX_D0243_MCP_MATRIX_STATUS is skipped; credentialed MCP evidence remains post-cutover live validation"
+      },
+      {
+        "id": "packaged-qa",
+        "status": "skipped",
+        "reason": "ANALYTIX_D0243_PACKAGED_QA_STATUS is skipped; packaged desktop QA remains post-cutover live validation"
+      },
+      {
+        "id": "explicit-env-gate",
+        "status": "missing",
+        "reason": "ANALYTIX_GO_RUNTIME_G6_READY is not set to 1; operator evidence remains post-cutover live validation"
+      }
+    ]
+  },
+  "rollback": {
+    "defaultPath": "Go runtime is selected when ANALYTIX_RUNTIME_BACKEND is unset or set to analytix/go/go-runtime-default.",
+    "candidatePath": "Operational rollback means restoring a previous release. ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic and must return an error instead of starting TS runtime.",
+    "retainedFallback": "src/main/runtime/analytix-adapter.ts keeps TypeScript only as a retired-backend diagnostic rejection path; it must not launch TS runtime."
+  },
+  "nextExitPlan": {
+    "d0250c": "Collect real credentialed provider, MCP execution, packaged QA, and operator JSON as post-cutover live validation.",
+    "d0250d": "Continue replacement and rollback validation while Go remains the default runtime core."
+  },
+  "notes": [
+    "This report closes the D-0250B intake code-stage when local deterministic gates pass and missing evidence is limited to D-0250C-live inputs.",
+    "D-0250C-live evidence remains post-cutover validation when credentialed provider/MCP, packaged QA, or operator gate JSON evidence is absent.",
+    "No fake live evidence is written; missing live inputs are recorded as post-cutover validation pending.",
+    "typeScriptFallbackRetained:false means the TypeScript runtime is retired from the default dual-track path; ANALYTIX_RUNTIME_BACKEND=typescript is a retired-backend diagnostic and must not start TS runtime."
+  ]
+}

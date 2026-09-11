@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "contract": "ProductionMcpEntryClosureV1",
+  "entry": "mcp/server.mjs",
+  "files": [
+    "mcp/server.mjs",
+    "mcp/jsonrpc-stdio-runtime.mjs",
+    "mcp/mcp-request-handler-runtime.mjs",
+    "mcp/runtime-normalizers.mjs",
+    "mcp/pre-execution-tool-policy.mjs",
+    "mcp/source-unavailable-boundary.mjs",
+    "mcp/tool-schema-validation.mjs"
+  ]
+}

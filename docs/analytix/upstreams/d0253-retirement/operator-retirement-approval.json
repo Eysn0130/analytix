@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "d0253-fallback-retirement-operator-approval",
+  "changeId": "D-0253",
+  "generatedAt": "2026-06-24T17:51:10.360Z",
+  "evidenceTargetCommit": "69607b035a1000a24173abfbff2ad5b5c5e10846",
+  "status": "blocked",
+  "passed": false,
+  "approvalGate": "ANALYTIX_D0253_RETIRE_FALLBACK_APPROVED=1",
+  "explicitEnvGate": false,
+  "fallbackRetirementApproved": false,
+  "candidateSoakReviewed": false,
+  "replacementTestsReviewed": false,
+  "rollbackStrategyReviewed": false,
+  "filesDeleted": false,
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "d0252Candidate": "a8a19dfcca96baa1625b917c2bc9a2cb4cc915925591f431bb0aacd570aa44d3",
+    "candidateSoak": "4b657587eacebee78e8f04c5b7806828768635ecde82174a96772ce1be1e1977",
+    "replacementTests": "46c2525c42b27ea2d837b2bd890ecab3f589e4c7be6fda3de7e8c7392724f761",
+    "rollbackStrategy": "858a3af03f0d94792133e65c4f36354361d0d132b82f870b7a43d4249e107c4e"
+  },
+  "reportPaths": {
+    "d0252Candidate": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0252-candidate/d0252-go-default-candidate-report.json",
+    "candidateSoak": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/candidate-soak.json",
+    "replacementTests": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/replacement-tests.json",
+    "rollbackStrategy": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/rollback-strategy.json"
+  },
+  "evidenceReviewed": [
+    {
+      "id": "d0252-candidate-ready",
+      "status": "blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0252-candidate/d0252-go-default-candidate-report.json"
+    },
+    {
+      "id": "candidate-soak",
+      "status": "blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/candidate-soak.json"
+    },
+    {
+      "id": "replacement-tests",
+      "status": "blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/replacement-tests.json"
+    },
+    {
+      "id": "rollback-strategy",
+      "status": "blocked",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/d0253-retirement/rollback-strategy.json"
+    }
+  ],
+  "blockerIds": [
+    "candidate-soak-reviewed",
+    "replacement-tests-reviewed",
+    "rollback-strategy-reviewed",
+    "operator-retirement-approval"
+  ]
+}

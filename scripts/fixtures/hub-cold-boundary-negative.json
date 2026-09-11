@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "unclassified-analytix-hub-network-module",
+      "kind": "discovery-inventory",
+      "filePath": "src/main/services/remote-marketplace-fixture.ts",
+      "source": "export async function loadMarketplace() { return fetch('https://analytix.top/api/agent/plugins/marketplace') }",
+      "expectedError": "hub_cold_inventory_unclassified:src/main/services/remote-marketplace-fixture.ts"
+    },
+    {
+      "name": "ordinary-static-marketplace-edge",
+      "kind": "reachability",
+      "roots": [
+        "src/main/index.ts"
+      ],
+      "modules": {
+        "src/main/index.ts": {
+          "staticImports": [
+            "src/main/services/hub-agent-marketplace-service.ts"
+          ],
+          "dynamicImports": []
+        },
+        "src/main/services/hub-agent-marketplace-service.ts": {
+          "staticImports": [],
+          "dynamicImports": []
+        }
+      },
+      "forbidden": [
+        "src/main/services/hub-agent-marketplace-service.ts"
+      ],
+      "expectedError": "hub_cold_fixture_static_reachability:src/main/services/hub-agent-marketplace-service.ts"
+    }
+  ]
+}

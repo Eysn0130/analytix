@@ -1,0 +1,64 @@
+interface:
+  display_name: "Analytix 涉案资金研判"
+  short_description: "当前案件资金快查、专项资金核算、资金穿透、证据图表附件和报告复核"
+  default_prompt: "按当前案件事实直接给出经侦研判结论、核验意见和补证建议；若必须先发进度，只能写“正在核验当前案件事实。”。"
+policy:
+  allow_implicit_invocation: true
+  first_visible_message_contract: "强制：所有当前案件资金任务首条可见 assistant 消息只能为空或完全等于“正在核验当前案件事实。”。特别禁止以“我先”“我会”“我将”“先”“按...口径”开头，禁止公告技能、工具、流程、文件读取、SQL、Shell、本地路径或数据表。"
+  user_visible_language_contract: "普通办案用户只看公安经侦业务语言。不得在正文、进度说明、图表、报告或附件标题中出现 SKILL.md、MCP、Shell、tool、skill、专项资金核算、case_id、Mermaid、supported、needs_review、candidate、blocked、claim、debug、JSON、本地路径或命令行。已确认的同事实重复记录只能写为已确认重复、已剔除、不作为新增转账；不要写成待核类事项。用户用旧词反问时，不要照抄或反向复述用户旧词，也不要使用“不是+用户旧词”的对比句；直接写“该差异原因为已确认重复记录，已剔除，不作为新增转账”。"
+  pair_amount_confirmed_duplicate_wording_contract: "Pair Amount 确认重复记录场景的最终答案必须零出现“待复核”三个字；即使用户问“是不是待复核”，也不得引用、否定、加引号或解释该旧词。直接写：该差异原因为已确认重复记录，已剔除，不作为新增转账。发送前自查，若答案含“待复核”，必须重写后再发送。"
+  desktop_owner_first: "普通当前案件资金问题先识别 focused owner；自然语言事实核验总入口只作 shortcut/navigator/support，不替代特定双方资金往来核验、画像、追踪、证据图表、报告或研判材料交付复核成稿。A 转给 B 多少钱/双方资金往来金额争议必须由 pair-amount owner 首答收敛：取得金额、笔数、期间和候选交易后立即成稿；rank_counterparties 最多一次候选支持，不得反复排行，不得调用 validate_report_claims、资金流向图谱、画像或全案分析来回答普通双方资金往来金额；承接/分流事实最多做一次同一主体/账户/日期范围的下游支持核验，不得同参重复调用。自定义统计范围、只统计、重算、复核后有效追问即使直接复用前文事实，也必须单列“核验意见”，并在该段写“已有流水支持”和“暂不能认定”；不能只用表格列名“使用边界”代替。资金流向图/资金穿透图首答最多使用一次特定双方资金往来核验固定起点、一次主体出账去向或资金流向图核验固定下游；不得为每个下游对手方逐个重复特定双方资金往来核验，不得用 SQL/表结构/本地检索补图，事实不足即标注需复核/需补证。普通双方资金往来金额自然问句不是模板核验题，必须围绕双方转账详细情况展开：完整金额/笔数/期间、付款/收款账户数和账号、主要集中转账、集中交易以外逐笔往来、重复差异、逐笔明细、已在案承接/分流和外部补证边界都要讲清楚；完整明细聚合是未限定问句的控制事实，排行交叉校验、主要集中转账或旧报告金额不能静默改写完整明细总额、笔数和首末时间；如果明细聚合多出早期、小额、终端、批处理、还款或汇款等行，必须解释这些行对关系持续性、账户变化、用途/控制线索和重复差异的意义。确认重复记录只能写为已剔除且不作为新增转账；用户用旧词质疑时，不要复述该旧词，不要使用“不是+用户旧词”的对比句，改写为“差异原因为已确认重复记录”。不能只给基础汇总或把当前案内已有后续出账写成待调取。本插件是通用 skill 公告规则的显式例外；即便运行环境要求工具前发 commentary，也只能省略或逐字写“正在核验当前案件事实。”，不能说明将使用哪个 skill、流程或工具。首条可见 assistant 消息不得是计划、承诺、技能公告或流程说明；默认不要发进度，直接核验事实。即使选择 focused skill，也不得写“我将使用”“我会使用”、`pair-amount-investigation`、“特定双方资金往来核验技能”“特定双方资金往来核验流程”“先定位当前案件数据”“统计口径”。若必须发进度，只能逐字写“正在核验当前案件事实。”。不得写“我先”“我会”“我将”“先”“按...口径”“按“特定双方资金往来核验”的经侦口径”“读取案件数据口径”“可用交易明细”“技能说明”“流程”“commentary”或 `item-`，不得先列资源、读技能文件、cat、grep、find、ls、Shell、本地路径或工作区文件搜索。若事实核验能力未就绪，只说明当前证据不足或来源未就绪，并给出补证建议。"
+  preserve_delivery_skeletons: "报告、全案研判或复核材料返回可见结构时，保留经侦材料标题；标题后第一项必须是研判结论或初步研判结论，再保留核验状态、来源边界、数据质量边界、资金流核验意见和补证动作，不改写成通用摘要。"
+routing:
+  entry_status:
+    use_when: "The user invokes bare /analytix or asks what Analytix fund-analysis workflows are available."
+    route_to: "index"
+    boundary: "Return current-case-project status and next focused workflow suggestions only."
+  object_dossier:
+    use_when: "The user asks for complete fund analysis of a card, account, person, holder, company, or subject."
+    route_to:
+      - "account-dossier"
+      - "subject-dossier"
+    boundary: "Do not collapse dossiers into a Top ranking or report gate."
+  full_case:
+    use_when: "The user asks for full-case analysis, complete investigation, or to run the analysis tree."
+    route_to: "full-case-analysis"
+    boundary: "Do not generate a formal report unless the user explicitly asks for report writing."
+  report_delivery:
+    use_when: "The user explicitly asks to generate, update, draft, or QA a formal report or report claim."
+    route_to:
+      - "report-builder"
+      - "claim-review"
+    boundary: "Report writing and claim review are explicit-intent workflows, not the default /analytix path. Preserve conclusion-first report headings: title, then 研判结论/初步研判结论 before 基本情况 or tables; then preserve 来源边界, 数据质量, 未获支持的研判结论, 降级/线索, 禁用表述, and 复核动作 when the skill contract returns them."
+  evidence-request:
+    use_when: "The user asks for supplementary evidence, subpoena priorities, continuation lists, evidence packs, or follow-up verification requests."
+    route_to: "evidence-request"
+    boundary: "Build an actionable request list; do not treat requested records as already proven facts."
+  analysis-critique:
+    use_when: "The user asks whether an Analytix answer, plan, dossier, lab pass, full-case result, or next step is complete, mechanical, missing lanes, or routed to the wrong skill."
+    route_to: "analysis-critique"
+    boundary: "Critique route and evidence coverage; do not generate new case facts."
+  graph_visualization:
+    use_when: "The user asks for casegraph, fund-flow graph, Mermaid, relation graph, or graph QA."
+    route_to: "graph-visualization"
+    boundary: "Only supported transaction edges may be drawn as facts; candidate or missing edges must be labeled."
+  visual_evidence:
+    use_when: "The user asks for evidence tables, charts, dashboards, appendix workbooks, Top20 tables, feature tables, flow tables, or visual/table QA."
+    route_to: "visual-evidence"
+    boundary: "Build reader-facing tables or visuals from reviewed facts; rankings, matrices, and dashboards are not transaction paths or legal conclusions."
+  pair_amount_investigation:
+    use_when: "The user asks A transferred how much to B, challenges a two-party amount basis, or raises duplicate/card-replacement/same-fact amount risk."
+    route_to: "pair-amount-investigation"
+    boundary: "本能力负责最终成稿。排行、自然语言入口事实卡、重复记录复核和专项资金核算结果只作支撑证据。"
+  case_workbench:
+    use_when: "The user explicitly asks for SQL, notebook, custom statistical scope, reproducible computation, or a semantic-tool gap that needs a controlled current-case-project analysis path."
+    route_to: "case-workbench"
+    boundary: "Use the current-case source envelope for custom analysis; keep execution read-only, cleaned/analysis scoped, row-limited, purpose-tagged, validated, and evidence-boundary aware. Do not turn weak sources, source detail rows, unverified calculations, or missing delivery into production facts."
+  delivery_qc:
+    use_when: "A substantive case answer, graph, table, report section, or attachment package needs final professional-delivery review."
+    route_to: "delivery-qc"
+    boundary: "Check conclusion, evidence, abnormality, case significance, limits, next evidence, and engineering-word leakage; do not generate new facts."
+  passive_nonintervention:
+    use_when: "The request is not about current-case-project funds, accounts, flows, counterparties, graphs, reports, or claims."
+    route_to: "none"
+    boundary: "Do not invoke Analytix tools for passive non-fund tasks."

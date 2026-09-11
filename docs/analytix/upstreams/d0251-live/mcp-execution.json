@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "d0251-mcp-execution",
+  "changeId": "D-0251",
+  "generatedAt": "2026-06-24T17:51:00.863Z",
+  "status": "live_blocked",
+  "passed": false,
+  "credentialedExecution": false,
+  "topLevelMcpIndexerExposed": false,
+  "reasonixPublicProtocolUsed": false,
+  "requiredCoverage": [
+    "connect",
+    "toolDiscoverySearch",
+    "toolCall",
+    "approvalUserInput",
+    "reconnect",
+    "credentialRedaction"
+  ],
+  "connect": false,
+  "toolDiscoverySearch": false,
+  "toolCall": false,
+  "approvalUserInput": false,
+  "reconnect": false,
+  "redaction": true,
+  "credentialedProbes": [
+    {
+      "id": "credentialed-mcp",
+      "family": "mcp",
+      "endpointFormat": "stdio-or-http",
+      "status": "skipped",
+      "skipped": true,
+      "credentialed": true,
+      "credentialedExecution": false,
+      "connect": false,
+      "toolDiscoverySearch": false,
+      "toolCall": false,
+      "approvalUserInput": false,
+      "reconnect": false,
+      "credentialRedaction": true,
+      "commandConfigured": false,
+      "commandHash": "",
+      "urlConfigured": false,
+      "url": "",
+      "urlHash": "",
+      "bearerAuthConfigured": false,
+      "requestShape": {
+        "protocol": "mcp-jsonrpc",
+        "methods": [
+          "initialize",
+          "notifications/initialized",
+          "tools/list",
+          "tools/call"
+        ],
+        "credentialValueRecorded": false,
+        "toolArgsValueRecorded": false
+      },
+      "toolNameConfigured": false,
+      "approvalUserInputProof": {
+        "evidencePath": "",
+        "evidenceSha256": "",
+        "evidenceDigestAlgorithm": "sha256:file-bytes-v1",
+        "rawValueRecorded": false,
+        "credentialSecretsRecorded": false,
+        "requiredFields": [
+          "schemaVersion",
+          "id",
+          "status",
+          "passed",
+          "approvalUserInput",
+          "rawValueRecorded",
+          "credentialSecretsRecorded"
+        ],
+        "status": "skipped",
+        "message": "approval/user-input evidence path is not passed"
+      },
+      "message": "missing ANALYTIX_D0251_MCP_COMMAND/ANALYTIX_D0243_MCP_COMMAND or MCP URL"
+    }
+  ],
+  "notes": [
+    "D-0251 MCP evidence requires explicit tool name configuration before executing a live tool call.",
+    "Approval/user-input coverage must be supplied by a separate auditable JSON proof when it cannot be exercised by the stdio MCP probe.",
+    "No MCP-indexer top-level UI or upstream public protocol surface is added."
+  ]
+}

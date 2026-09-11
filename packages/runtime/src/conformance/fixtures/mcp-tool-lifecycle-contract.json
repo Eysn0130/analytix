@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "id": "mcp-tool-lifecycle-fixture-v1",
+  "providerId": "mcp:research",
+  "connect": {
+    "toolNames": [
+      "alpha_lookup"
+    ],
+    "diagnostic": {
+      "available": true,
+      "toolCount": 1
+    }
+  },
+  "disconnect": {
+    "reason": "disabled by connect_tool_source policy",
+    "toolNames": [],
+    "diagnostic": {
+      "available": false,
+      "toolCount": 1
+    }
+  },
+  "reload": {
+    "toolNames": [
+      "alpha_lookup",
+      "beta_fetch"
+    ],
+    "schemaOrderStable": true
+  },
+  "cancel": {
+    "errorSubstring": "tool call aborted before start",
+    "executed": false
+  },
+  "error": {
+    "code": "tool_execution_failed",
+    "approved": true
+  },
+  "callReconnect": {
+    "serverId": "github",
+    "toolName": "read",
+    "normalizedToolName": "mcp_github_read",
+    "transportError": "stale connection",
+    "protocolError": "MCP error -32603: Validation Error: Validation Failed",
+    "retryOnTransportError": true,
+    "retryOnProtocolError": false,
+    "maxAttempts": 2,
+    "staleConnection": {
+      "factoryAttempts": 2,
+      "closeCount": 1,
+      "resultInstance": 2,
+      "isError": false
+    },
+    "protocolFailure": {
+      "factoryAttempts": 1,
+      "closeCount": 0,
+      "code": "tool_execution_failed",
+      "isError": true
+    }
+  },
+  "approvalAnnotations": {
+    "serverId": "research",
+    "toolName": "delete_index",
+    "normalizedToolName": "mcp_research_delete_index",
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true
+    },
+    "approvalId": "appr_call_mcp_delete",
+    "decision": "deny",
+    "resultKind": "approval",
+    "executed": false
+  },
+  "searchMetaTools": {
+    "toolNames": [
+      "mcp_search",
+      "mcp_describe",
+      "mcp_call",
+      "mcp_refresh_catalog"
+    ],
+    "trustedWorkspace": "/tmp/project",
+    "untrustedWorkspace": "/tmp/untrusted",
+    "trustedToolId": "github/search_issues",
+    "query": "查 github issue",
+    "untrustedSearchedTools": 0,
+    "unknownToolError": "unknown MCP tool: github/search_issues",
+    "callPolicy": "on-request",
+    "deniedCallExecuted": false,
+    "refreshDrift": {
+      "serverId": "github",
+      "initialToolNames": [
+        "search_issues"
+      ],
+      "expandedToolNames": [
+        "search_issues",
+        "create_issue"
+      ],
+      "expectedTotalIndexed": 2,
+      "expectedCatalogDrift": true
+    }
+  },
+  "diagnosticsRedaction": {
+    "secret": "Bearer lifecycle-secret",
+    "replacement": "<redacted>"
+  },
+  "knownOverride": {
+    "serverId": "codegraph",
+    "explicitCwd": "/tmp/analytix-explicit-codegraph",
+    "workspaceRoot": "/tmp/analytix-mcp-lifecycle",
+    "daemonIdleTimeoutMs": "5000",
+    "diagnostic": {
+      "knownOverride": "codegraph",
+      "effectiveCwd": "/tmp/analytix-mcp-lifecycle",
+      "lowPriority": true,
+      "backgroundStart": true
+    }
+  },
+  "knownOverrideVariants": [
+    {
+      "serverId": "codegraph",
+      "workspaceRoot": "/tmp/analytix-mcp-lifecycle",
+      "daemonIdleTimeoutMs": "5000",
+      "diagnostic": {
+        "knownOverride": "codegraph",
+        "effectiveCwd": "/tmp/analytix-mcp-lifecycle",
+        "lowPriority": true,
+        "backgroundStart": true
+      }
+    },
+    {
+      "serverId": "codebase-memory",
+      "explicitCwd": "/tmp/analytix-explicit-memory",
+      "workspaceRoot": "/tmp/analytix-mcp-lifecycle",
+      "diagnostic": {
+        "knownOverride": "codebase-memory",
+        "effectiveCwd": "/tmp/analytix-explicit-memory",
+        "lowPriority": true,
+        "backgroundStart": true
+      }
+    }
+  ],
+  "backgroundReconnect": {
+    "failedServerIds": [
+      "github",
+      "linear"
+    ],
+    "suspendedProviderId": "mcp:linear",
+    "suspendedReason": "disabled during startup retry",
+    "expectedConnectedServerIds": [
+      "github"
+    ],
+    "expectedErrorServerIds": [
+      "linear"
+    ],
+    "attemptsPerFailedServer": 2,
+    "requiresRuntimeRestart": false
+  },
+  "liveLocalIndexer": {
+    "serverId": "codegraph",
+    "cwd": "/tmp/analytix-mcp-lifecycle",
+    "lowPriority": true,
+    "backgroundStart": true,
+    "failedServerIds": [
+      "codegraph",
+      "codebase-memory"
+    ],
+    "attemptsPerFailedServer": 2,
+    "initialFiles": [
+      {
+        "path": "src/a.ts",
+        "digest": "sha256-a"
+      },
+      {
+        "path": "src/b.ts",
+        "digest": "sha256-b"
+      }
+    ],
+    "lateTombstonePath": "src/b.ts",
+    "resumeFiles": [
+      {
+        "path": "src/c.ts",
+        "digest": "sha256-c"
+      }
+    ],
+    "secretDiagnostic": "Bearer lifecycle-secret",
+    "expectedOutput": {
+      "serverId": "codegraph",
+      "cwd": "/tmp/analytix-mcp-lifecycle",
+      "lowPriority": true,
+      "backgroundStart": true,
+      "retryAttempts": {
+        "codegraph": 2,
+        "codebase-memory": 2
+      },
+      "activePaths": [
+        "src/a.ts",
+        "src/c.ts"
+      ],
+      "tombstoneCount": 1,
+      "restartedFromSnapshot": true,
+      "secretSafeDiagnostic": "Authorization=<redacted>"
+    },
+    "executionError": {
+      "toolName": "mcp_codegraph_index_fail_diagnostic",
+      "isError": true,
+      "secretSafeError": "Authorization=<redacted> contract indexer diagnostic",
+      "leaksSecret": false
+    }
+  }
+}

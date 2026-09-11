@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "officialTeamIdentifier": null,
+  "nativeEntitlementsPath": "build/entitlements.mac.native-helper.plist",
+  "nativeEntitlementsSha256": "11967a4990edd569f10d01076a3ef52f8c593765ce6389dfa215c109efec2644",
+  "strictNativeRelativePaths": [
+    "Contents/Resources/runtime-go/bin/runtime-server",
+    "Contents/Resources/runtime/analytix-import-accelerator",
+    "Contents/Resources/runtime/analytix-cleaning-ops",
+    "Contents/Resources/runtime/analytix-analysis-compute",
+    "Contents/Resources/runtime/analytix-data-engine"
+  ]
+}

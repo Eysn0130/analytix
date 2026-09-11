@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "d0243-packaged-go-runtime-qa",
+  "changeId": "D-0251",
+  "stage": "D-0251-packaged-desktop-qa",
+  "generatedAt": "2026-06-24T17:50:50.488Z",
+  "goDefaultBackendEnabled": true,
+  "rendererVisibleGoSwitcher": false,
+  "typeScriptFallbackRetained": false,
+  "reasonixPublicProtocolUsed": false,
+  "topLevelMcpIndexerExposed": false,
+  "credentialSecretsRecorded": false,
+  "redaction": {
+    "status": "passed",
+    "secretMaterialFound": false
+  },
+  "requiredCheckIds": [
+    "packaged-app-startup",
+    "health",
+    "runtime-info",
+    "thread-list",
+    "turn-create",
+    "sse-replay",
+    "go-runtime-default-gate",
+    "retired-backend-diagnostic"
+  ],
+  "checks": [
+    {
+      "id": "packaged-app-startup",
+      "label": "Packaged app startup",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_PACKAGED_APP_PATH and ANALYTIX_D0251_PACKAGED_LAUNCH_COMMAND to run packaged launch QA",
+      "evidence": ""
+    },
+    {
+      "id": "health",
+      "label": "Runtime health",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA",
+      "evidence": ""
+    },
+    {
+      "id": "runtime-info",
+      "label": "Runtime info",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA",
+      "evidence": ""
+    },
+    {
+      "id": "thread-list",
+      "label": "Thread list",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA",
+      "evidence": ""
+    },
+    {
+      "id": "turn-create",
+      "label": "Turn create",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA",
+      "evidence": ""
+    },
+    {
+      "id": "sse-replay",
+      "label": "SSE replay",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_RUNTIME_URL to run live packaged runtime QA",
+      "evidence": ""
+    },
+    {
+      "id": "go-runtime-default-gate",
+      "label": "Go runtime default gate",
+      "status": "passed",
+      "message": "Go runtime default is selected",
+      "evidence": ""
+    },
+    {
+      "id": "retired-backend-diagnostic",
+      "label": "TypeScript retired-backend diagnostic",
+      "status": "skipped",
+      "message": "set ANALYTIX_D0251_ROLLBACK_PROOF_JSON after verifying ANALYTIX_RUNTIME_BACKEND=typescript returns retired_backend without starting TS runtime",
+      "evidence": ""
+    }
+  ],
+  "startup": {
+    "appPathConfigured": false,
+    "appPathExists": false,
+    "launchCommandConfigured": false,
+    "launchCommandReferencesAppPath": false
+  },
+  "runtime": {
+    "runtimeUrl": "",
+    "runtimeTokenConfigured": false,
+    "threadIdHash": "",
+    "turnIdHash": ""
+  },
+  "candidateGate": {
+    "runtimeBackend": "go-runtime-default",
+    "candidateEnvSet": false,
+    "goDefaultBackendEnabled": true
+  },
+  "rollbackProof": {},
+  "passed": false,
+  "status": "live_blocked"
+}

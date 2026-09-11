@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-08-23",
+  "analytixCommit": "196c6dd3f6d74c660224b88117963ba52508389f",
+  "analytixPreRewriteCommit": "8ddfdfd1fda2a744eaca1ad6a99fe5a48354a448",
+  "analytixHistoryRewriteMap": "docs/analytix/history-rewrite-provenance-2026-07-10.json",
+  "authorization": {
+    "reference": "goal-thread-user-declaration-2026-07-13",
+    "status": "declared-unverified",
+    "scope": "The user declared code-level reuse authorization for every registered upstream; original license classes, blob evidence, file-level provenance, notices, and excluded gitlinks remain independently recorded and enforced."
+  },
+  "sources": [
+    {
+      "id": "codexdesktop-rebuild",
+      "directory": "CodexDesktop-Rebuild",
+      "branch": "master",
+      "commit": "5b83c2a2a8503aaaf0f346010df179e038f59bbc",
+      "remote": "https://github.com/Haleclipse/CodexDesktop-Rebuild.git",
+      "ledger": "docs/analytix/upstreams/codexdesktop-rebuild-sync.md",
+      "license": {
+        "path": null,
+        "blob": null,
+        "name": "no project license found at reviewed commit",
+        "class": "reference-only-unlicensed",
+        "reusePolicy": "clean-room behavior study only unless written authorization is recorded"
+      }
+    },
+    {
+      "id": "deepseek-reasonix",
+      "directory": "DeepSeek-Reasonix",
+      "branch": "main-v2",
+      "commit": "9eb9511f8b2049a47ee2fef7597256151ac824cb",
+      "remote": "https://github.com/esengine/DeepSeek-Reasonix.git",
+      "ledger": "docs/analytix/upstreams/reasonix-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "bc45a281d8050c59c9b833ea2d0b1fb6e02602c0",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance and MIT notice required"
+      }
+    },
+    {
+      "id": "kun",
+      "directory": "Kun",
+      "branch": "master",
+      "commit": "f65ac05c0f62d060b7a0cf208ee2941b6ecf41f7",
+      "remote": "https://github.com/KunAgent/Kun.git",
+      "ledger": "docs/analytix/upstreams/kun-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "def8c00355e33337e1177ffe749c85d776e1c254",
+        "name": "PolyForm Noncommercial 1.0.0",
+        "class": "restricted-source-license",
+        "reusePolicy": "noncommercial terms and required notice apply; commercial use requires written authorization"
+      }
+    },
+    {
+      "id": "claude-code",
+      "directory": "claude-code",
+      "branch": "main",
+      "commit": "015170d3fd84fb57ef4685a64b673fadd0690dc1",
+      "remote": "https://github.com/anthropics/claude-code.git",
+      "ledger": "docs/analytix/upstreams/claude-code-sync.md",
+      "license": {
+        "path": "LICENSE.md",
+        "blob": "645a5d67c6d1e16437bec850dad5bd3b6c81f77c",
+        "name": "all rights reserved; commercial terms",
+        "class": "reference-only-proprietary",
+        "reusePolicy": "clean-room behavior study only unless written authorization is recorded"
+      }
+    },
+    {
+      "id": "claw-code",
+      "directory": "claw-code",
+      "branch": "main",
+      "commit": "4ea31c1bc91c4e9bcbd67d51c550c01e127e6d0d",
+      "remote": "https://github.com/ultraworkers/claw-code.git",
+      "ledger": "docs/analytix/upstreams/claw-code-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "28e6960dd9a2be209c308b49bc9a8973dbf4d60d",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance and MIT notice required"
+      }
+    },
+    {
+      "id": "gajae-code",
+      "directory": "gajae-code",
+      "branch": "main",
+      "commit": "ee15071cb52316708a1a2235958ee7bfdd7738ec",
+      "remote": "https://github.com/Yeachan-Heo/gajae-code.git",
+      "ledger": "docs/analytix/upstreams/gajae-code-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "16eb3fc020a9dbefb165d2fb1d4597d2203c44bd",
+        "name": "MIT at reviewed root; inherited copyright chain unresolved",
+        "class": "blocked-provenance",
+        "reusePolicy": "reference only until pi-mono and oh-my-pi lineage notices are resolved per file"
+      }
+    },
+    {
+      "id": "hermes-agent",
+      "directory": "hermes-agent",
+      "branch": "main",
+      "commit": "d7b36070ef807841699ad32c5b6af547fee3ff64",
+      "remote": "https://github.com/NousResearch/hermes-agent.git",
+      "ledger": "docs/analytix/upstreams/hermes-agent-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "75410e73319c72cd3e991a501c5455eb78f38375",
+        "name": "MIT root with file-level exceptions",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level review required; bundled all-rights-reserved and Apache materials are not covered by the root alone"
+      }
+    },
+    {
+      "id": "lazycodex",
+      "directory": "lazycodex",
+      "branch": "main",
+      "commit": "2a03f45f1bbc1d5d0cbf6c1293888e9df3ccbebf",
+      "remote": "https://github.com/code-yeongyu/lazycodex.git",
+      "ledger": "docs/analytix/upstreams/lazycodex-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "09aac3c3b7f6e26e8520b362eb048d4d8f9165c3",
+        "name": "MIT root with gitlink and file-level exceptions",
+        "class": "permissive-with-notice",
+        "reusePolicy": "committed files require file-level review; uninitialized gitlink content is not admitted"
+      }
+    },
+    {
+      "id": "opencode",
+      "directory": "opencode",
+      "branch": "dev",
+      "commit": "849c2598abc7d2b40261e74b5826bc74ffc78308",
+      "remote": "https://github.com/anomalyco/opencode",
+      "ledger": "docs/analytix/upstreams/opencode-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "6439474beed8e0271df9862eff97ffd70ec2464c",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance and MIT notice required"
+      }
+    },
+    {
+      "id": "postgres-mcp",
+      "directory": "postgres-mcp",
+      "branch": "main",
+      "commit": "07eb329c8c48e49640e0d1b5b35465d4d024c3ee",
+      "remote": "https://github.com/crystaldba/postgres-mcp.git",
+      "ledger": "docs/analytix/upstreams/postgres-mcp-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "49eef5868972bb002014f178b491752cfd50409f",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance and MIT notice required"
+      }
+    },
+    {
+      "id": "instructor",
+      "directory": "instructor",
+      "branch": "main",
+      "commit": "47fdb2ca07119d389a3c0e8bc28b9930b814f294",
+      "remote": "https://github.com/567-labs/instructor.git",
+      "ledger": "docs/analytix/upstreams/instructor-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "f3325f8da4271c8e711369623d138881737177cf",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance and MIT notice required"
+      }
+    },
+    {
+      "id": "openclaw",
+      "directory": "openclaw",
+      "branch": "main",
+      "commit": "50a2481652b6a62d573ece3cead60400dc77020d",
+      "remote": "https://github.com/openclaw/openclaw.git",
+      "ledger": "docs/analytix/upstreams/openclaw-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "f7b526698bb7ed2d26d96c49f2f32234c88f69bc",
+        "name": "MIT at annotated tag v2026.5.18",
+        "class": "permissive-with-notice",
+        "reusePolicy": "file-level provenance, exact nested MIT license, and packaged third-party notice required"
+      }
+    }
+  ]
+}

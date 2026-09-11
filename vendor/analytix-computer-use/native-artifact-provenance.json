@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "analytix-native-artifact-provenance-v1",
+  "artifact": {
+    "path": "dist/Analytix Computer Use.app",
+    "platform": "darwin",
+    "arch": "arm64",
+    "configuration": "release",
+    "logicalSizeBytes": 3746676,
+    "publishable": false,
+    "releaseEligibility": "development_native_non_publishable",
+    "releaseBlockers": [
+      "adhoc_signature",
+      "not_notarized"
+    ],
+    "signature": {
+      "kind": "adhoc",
+      "codesignDeepStrictVerified": true,
+      "cdhashSha256": "0f4c19073c35d7fb669e9a265a0df86cc1f211af12b0df5f5f46415d34cf33bf"
+    },
+    "files": [
+      {
+        "path": "dist/Analytix Computer Use.app/Contents/MacOS/OpenComputerUse",
+        "sha256": "afc1d155d45645ef65535a2997d06cf0eb23c82cc1d1097b5a8aa32a21bd4e52"
+      },
+      {
+        "path": "dist/Analytix Computer Use.app/Contents/Info.plist",
+        "sha256": "078eb65196a8c3ff14fcf60377e70204130e1b8dc2b9beb4837a391e337424ef"
+      },
+      {
+        "path": "dist/Analytix Computer Use.app/Contents/Resources/AnalytixComputerUse.icns",
+        "sha256": "957f0e0e91e2f292118004e3fa3cb56a2e9ec23102a85d03ec62ce292d9029f7"
+      },
+      {
+        "path": "dist/Analytix Computer Use.app/Contents/Resources/official-software-cursor-window-252.png",
+        "sha256": "a85784a3f438da110c42b509b0b27b90d47b85812274a9d329f3f27b9bd8965f"
+      },
+      {
+        "path": "dist/Analytix Computer Use.app/Contents/_CodeSignature/CodeResources",
+        "sha256": "3b461b4f3b3dce57ee58c1c3565fcdcb2e59040a96c83db443951f8b205150db"
+      }
+    ]
+  },
+  "source": {
+    "repository": "https://github.com/QwenLM/open-computer-use.git",
+    "commit": "f238d1bc85b53bd785d2618d4fbb5d2402207c7a",
+    "tree": "370028a70b8c9cfb9be8d4f712097fd7a728e469",
+    "archiveSha256": "eab8745c33f10bf624981a406ea14a2bf3f8d0de4cd4502ffc0398330509df12",
+    "license": {
+      "spdx": "MIT",
+      "path": "LICENSE",
+      "sha256": "0fdb775e00e6fdde23984b4f1184cd13c34135caac1e714ad489141c239704bc"
+    }
+  },
+  "adaptation": {
+    "scope": "bundle_packaging_identity_only",
+    "patchPath": "native-artifact-source/analytix-identity.patch",
+    "patchSha256": "9320bf0038afac03abeb0e976a6a68d24c28f470b1ef5dc65d4fc350775ba4e7",
+    "bundleName": "Analytix Computer Use.app",
+    "displayName": "Analytix Computer Use",
+    "bundleIdentifier": "com.analytix.computer-use",
+    "executableName": "OpenComputerUse",
+    "absorbedDirtySourceChanges": false
+  },
+  "inputs": {
+    "analytixIcon": {
+      "path": "plugins/analytix-computer-use/assets/icon.png",
+      "gitBlob": "4a4181bd82d2a7a2c87e81101513e935882b431e",
+      "sha256": "d8af0b2632ccde09ff49bb7898bb383712d5c954496e3427cd951603e3eaf303",
+      "transform": "sips -z 1024 1024",
+      "derivedPngSha256": "9f3d1d927eac6db4689d9ef1bf55fdf7fce1fa48ab94b925959cadd21f989d23"
+    },
+    "cursorImage": {
+      "sourcePath": "docs/references/codex-computer-use-reverse-engineering/assets/extracted-2026-04-19/official-software-cursor-window-252.png",
+      "sha256": "a85784a3f438da110c42b509b0b27b90d47b85812274a9d329f3f27b9bd8965f"
+    }
+  },
+  "toolchain": {
+    "swift": "Apple Swift 6.2.4 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)",
+    "target": "arm64-apple-macosx26.0",
+    "hostKernel": "Darwin 25.5.0 arm64"
+  },
+  "build": {
+    "canonicalSourceRoot": "$ANALYTIX_DEV_CACHE_ROOT/build-inputs/computer-use-f238d1bc85b5-370028a70b8c",
+    "commands": [
+      "git archive --format=tar f238d1bc85b53bd785d2618d4fbb5d2402207c7a",
+      "git apply --unidiff-zero native-artifact-source/analytix-identity.patch",
+      "sips -z 1024 1024 plugins/analytix-computer-use/assets/icon.png --out assets/app-icons/analytix-computer-use-1024.png",
+      "OPEN_COMPUTER_USE_CODESIGN_MODE=adhoc ./scripts/build-open-computer-use-app.sh --configuration release --arch arm64"
+    ],
+    "requiresAnalytixCacheHelper": true,
+    "notarizationAttempted": false
+  },
+  "verification": {
+    "machOArchitectures": [
+      "arm64"
+    ],
+    "plistIdentityVerified": true,
+    "cliVersion": "0.2.3",
+    "mcpProtocolVersion": "2025-03-26",
+    "mcpServerName": "open-computer-use",
+    "mcpServerVersion": "0.1.51",
+    "mcpToolCount": 9,
+    "mcpToolNames": [
+      "click",
+      "drag",
+      "get_app_state",
+      "list_apps",
+      "perform_secondary_action",
+      "press_key",
+      "scroll",
+      "set_value",
+      "type_text"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "补充取证清单"
+  short_description: "形成补充核验、调证对象、调证材料和优先级清单"
+  default_prompt: "请针对当前资金研判缺口形成补充取证清单和调证优先级。"
+policy:
+  allow_implicit_invocation: true

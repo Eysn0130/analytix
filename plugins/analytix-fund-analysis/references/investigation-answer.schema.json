@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://analytix.local/schemas/investigation-answer.schema.json",
+  "title": "FinalInvestigationAnswer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "investigation_objective",
+    "conclusion",
+    "verified_facts",
+    "risk_patterns",
+    "evidence_boundaries",
+    "next_proof_actions"
+  ],
+  "properties": {
+    "investigation_objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "scope", "source_boundary"],
+      "properties": {
+        "purpose": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 },
+        "time_range": { "type": "string" },
+        "source_boundary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "conclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "evidence_maturity"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "evidence_maturity": {
+          "type": "string",
+          "enum": ["已核验事实", "统计特征", "可疑特征", "线索", "需复核", "不可判断"]
+        },
+        "cannot_conclude": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "verified_facts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact", "evidence_receipt_ids"],
+        "properties": {
+          "fact_id": { "type": "string" },
+          "fact": { "type": "string", "minLength": 1 },
+          "fact_type": { "type": "string" },
+          "amount_yuan": { "type": "number" },
+          "txn_count": { "type": "integer" },
+          "period": { "type": "string" },
+          "parties": { "type": "array", "items": { "type": "string" } },
+          "support_status": { "type": "string" },
+          "evidence_receipt_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+          "evidence_refs": {
+            "oneOf": [
+              { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "query_ids": { "type": "array", "items": { "type": "string" } },
+                  "evidence_ids": { "type": "array", "items": { "type": "string" } },
+                  "evidence_receipt_ids": { "type": "array", "items": { "type": "string" } },
+                  "source_hash": { "type": "string" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "fund_flow_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path_summary": { "type": "string" },
+          "path_nodes": { "type": "array", "items": { "type": "string" } },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["from", "to", "evidence_receipt_ids"],
+              "properties": {
+                "edge_id": { "type": "string" },
+                "from": { "type": "string", "minLength": 1 },
+                "to": { "type": "string", "minLength": 1 },
+                "amount_yuan": { "type": "number" },
+                "txn_count": { "type": "integer" },
+                "support_status": { "type": "string" },
+                "edge_status": { "type": "string" },
+                "evidence_receipt_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+                "evidence_refs": { "type": "object", "additionalProperties": false, "properties": { "evidence_ids": { "type": "array", "items": { "type": "string" } }, "evidence_receipt_ids": { "type": "array", "items": { "type": "string" } }, "source_hash": { "type": "string" } } }
+              }
+            }
+          },
+          "evidence_receipt_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "evidence_refs": {
+            "oneOf": [
+              { "type": "array", "items": { "type": "string" } },
+              { "type": "object", "additionalProperties": false, "properties": { "evidence_ids": { "type": "array", "items": { "type": "string" } }, "evidence_receipt_ids": { "type": "array", "items": { "type": "string" } }, "source_hash": { "type": "string" } } }
+            ]
+          }
+        }
+      }
+    },
+    "risk_patterns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern", "basis"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1 },
+          "basis": { "type": "string", "minLength": 1 },
+          "related_fact_ids": { "type": "array", "items": { "type": "string" } },
+          "evidence_receipt_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "evidence_refs": {
+            "oneOf": [
+              { "type": "array", "items": { "type": "string" } },
+              { "type": "object", "additionalProperties": false, "properties": { "evidence_ids": { "type": "array", "items": { "type": "string" } }, "evidence_receipt_ids": { "type": "array", "items": { "type": "string" } }, "source_hash": { "type": "string" } } }
+            ]
+          }
+        }
+      }
+    },
+    "evidence_boundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["boundary"],
+            "properties": {
+              "boundary": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string" },
+              "next_proof_action": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "next_proof_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "proof_value"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "target": { "type": "string" },
+          "material": { "type": "string" },
+          "time_scope": { "type": "string" },
+          "field_scope": { "type": "string" },
+          "linked_gap": { "type": "string" },
+          "priority": { "type": "string" },
+          "proof_value": { "type": "string", "minLength": 1 },
+          "evidence_boundary": { "type": "string" },
+          "forbidden_upgrade": { "type": "string" },
+          "owner": { "type": "string" }
+        }
+      }
+    },
+    "visible_final_answer": { "type": "string" },
+    "final_answer_text": { "type": "string" }
+  }
+}

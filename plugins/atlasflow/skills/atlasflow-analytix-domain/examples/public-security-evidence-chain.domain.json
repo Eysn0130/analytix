@@ -1,0 +1,25 @@
+{
+  "domain": "public-security",
+  "graphType": "evidence-chain",
+  "diagramType": "workflow",
+  "title": "证据链完整性图",
+  "subtitle": "来源、固定、解析、事实支撑与补证",
+  "nodes": [
+    { "id": "source", "kind": "evidence", "label": "证据来源", "sublabel": "调取/提交" },
+    { "id": "fix", "kind": "security", "label": "固定封存", "sublabel": "完整性校验" },
+    { "id": "parse", "kind": "process", "label": "解析整理", "sublabel": "结构化提取" },
+    { "id": "fact", "kind": "process", "label": "支撑事实", "sublabel": "与待证事实关联" },
+    { "id": "gap", "kind": "security", "label": "补证建议", "sublabel": "待核验环节" }
+  ],
+  "edges": [
+    { "from": "source", "to": "fix", "kind": "evidence", "label": "来源登记" },
+    { "from": "fix", "to": "parse" },
+    { "from": "parse", "to": "fact", "kind": "primary" },
+    { "from": "fact", "to": "gap", "kind": "security", "label": "缺口复核" }
+  ],
+  "evidence": [
+    { "id": "ev_1", "source": "电子数据提取笔录" },
+    { "id": "ev_2", "source": "银行流水附件" }
+  ]
+}
+

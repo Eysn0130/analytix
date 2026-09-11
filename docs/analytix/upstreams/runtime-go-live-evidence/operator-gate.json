@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-operator-gate",
+  "generatedAt": "2026-07-03T12:44:29.110Z",
+  "status": "passed",
+  "passed": true,
+  "operatorGate": "ANALYTIX_RUNTIME_READY=1",
+  "explicitEnvGate": true,
+  "credentialedEvidenceReviewed": true,
+  "defaultRuntimeApproved": true,
+  "goDefaultApproved": true,
+  "commitHash": "e0050d6b5e7791ae3bbed261c7367fc25e6e7fdf",
+  "evidenceTargetCommit": "e0050d6b5e7791ae3bbed261c7367fc25e6e7fdf",
+  "evidenceDigestAlgorithm": "sha256:canonical-json-v1",
+  "evidenceDigests": {
+    "provider": "a06013ea661bdde05d0c97dc8ff8260017bd212a11b2d4ae0f3b7f76b111df46",
+    "mcp": "d1b37c64c58d6571a6dd8cc31ce5d32fff93aa1a78de1a61bc3b740adf4971d7",
+    "packaged": "008b11566dacf34c7e6a4a1a875a351a552baf27be0927ee27550ec054611153",
+    "packagedGui": "ed2c97fe357b3172fecaed7752c722d09be979d784fbd5b5739695ab4c0717a5",
+    "packagedSoak": "938c0d491adb4b6c4c83cff3a415378dd816aa557a3b85544b178c1b3c0c9c74"
+  },
+  "reportPaths": {
+    "provider": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json",
+    "mcp": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json",
+    "packaged": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json",
+    "packagedGui": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json",
+    "packagedSoak": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json"
+  },
+  "evidenceReviewed": [
+    {
+      "id": "provider-matrix-credentialed",
+      "status": "passed",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/provider-matrix.json"
+    },
+    {
+      "id": "mcp-matrix-credentialed",
+      "status": "passed",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-execution.json"
+    },
+    {
+      "id": "packaged-qa",
+      "status": "passed",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-go-runtime-qa.json"
+    },
+    {
+      "id": "packaged-gui-bridge-smoke",
+      "status": "passed",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-gui-bridge-smoke.json"
+    },
+    {
+      "id": "packaged-session-soak",
+      "status": "passed",
+      "path": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json"
+    }
+  ],
+  "typeScriptFallbackRetained": false,
+  "goDefaultBackendEnabled": true,
+  "rendererVisibleGoSwitcher": false,
+  "reasonixEngineRuntimeOnly": true,
+  "dependencySummary": {
+    "schemaVersion": 1,
+    "envGate": {
+      "runtimeReady": true,
+      "operatorApprovesDefault": true
+    },
+    "evidence": {
+      "providerPassed": true,
+      "mcpPassed": true,
+      "packagedPassed": true,
+      "packagedGuiRequired": true,
+      "packagedGuiPassed": true,
+      "packagedSoakRequired": true,
+      "packagedSoakPassed": true,
+      "packagedSoakActualFinalEvidencePresent": true,
+      "credentialedEvidenceReviewed": true
+    },
+    "commitBinding": {
+      "required": true,
+      "formatValid": true,
+      "exists": true,
+      "relevantEvidenceClean": true,
+      "bound": true
+    },
+    "blockers": []
+  },
+  "failureReasons": []
+}

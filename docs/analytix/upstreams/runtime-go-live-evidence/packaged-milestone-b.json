@@ -1,0 +1,466 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-packaged-milestone-b",
+  "stage": "packaged-real-duckdb-funds-analysis-milestone-b",
+  "generatedAt": "2026-08-18T07:12:38.807Z",
+  "sourceCommit": "",
+  "harnessCommit": "3386296498975b00dd6dc01806f3e68bd953543b",
+  "harness": {
+    "scriptSha256": "8b6d256618c957a842b1760a4d62053d8d2cb20635ad08260b567657bf44515e",
+    "contractManifestSha256": "ff9456f74d1a4e8bb05978e2adc3bfb12ffd9ef6402028d817c6290934527b0a",
+    "entries": [
+      {
+        "name": "runtime-go-packaged-milestone-b.mjs",
+        "regular": true,
+        "byteLength": 298608,
+        "sha256": "8b6d256618c957a842b1760a4d62053d8d2cb20635ad08260b567657bf44515e"
+      },
+      {
+        "name": "runtime-go-validation-command.mjs",
+        "regular": true,
+        "byteLength": 4009,
+        "sha256": "06ed2afbe68378b25d6a758707c987ee4ed905d7c69591635a0ed45d6de32dd6"
+      },
+      {
+        "name": "after-pack.cjs",
+        "regular": true,
+        "byteLength": 158524,
+        "sha256": "adf758be5b4070d0e92bb80f3d9457a6da42d6f1c7c908c6877c68266e17e983"
+      },
+      {
+        "name": "package.json",
+        "regular": true,
+        "byteLength": 10843,
+        "sha256": "fca31a5b3889a172d86a21d8554d6f141507329abeab163f20bbbe760cf4b86c"
+      }
+    ]
+  },
+  "status": "FAIL",
+  "passed": false,
+  "timeoutMs": 1200000,
+  "app": {
+    "targetKey": "darwin-arm64",
+    "appPathHash": "e245d0e0ecc44b13d09e2b9053a801e32d091da7779725ea6b4cff674da713be"
+  },
+  "acceptanceClass": "formal-packaged-typed-local-display-external-owner-isolated-real-case",
+  "mockUsed": false,
+  "fixtureUsed": false,
+  "syntheticProviderUsed": false,
+  "directRuntimeTurnDriverUsed": false,
+  "directSnapshotIPCUsed": false,
+  "arbitrarySQLUsed": null,
+  "rendererDatabasePathReceived": null,
+  "completePIIRecorded": null,
+  "postRCChecks": [
+    {
+      "id": "authorized-joint-case-linkage",
+      "status": "UNVERIFIED",
+      "message": "explicit joint-case product behavior is deferred outside the current macOS A0/B1 train"
+    }
+  ],
+  "externalCase": {
+    "configured": false,
+    "ownerIsolated": false,
+    "contractSha256": "",
+    "provenanceSha256": "",
+    "snapshotCount": 0,
+    "preserved": false,
+    "workspacePathHash": "",
+    "ownerRootPathHash": ""
+  },
+  "managedProductData": {
+    "configured": false,
+    "contract": "analytix.runtime-main-owned-authority/v1",
+    "ownerRootPathHash": "",
+    "bootstrapPathHash": "",
+    "bootstrapSha256": "",
+    "installationAuthorityKeySha256": "",
+    "volumeIdentityDigest": "",
+    "authorityRootCount": 0,
+    "bootstrapInstalled": false,
+    "installationAuthoritySeeded": false
+  },
+  "providerAudit": {
+    "configured": false,
+    "challengePublished": false,
+    "challengeDigest": "",
+    "receiptVerified": false,
+    "receiptSha256": "",
+    "minimumObservedProviderRequestCount": 0,
+    "exactObservedProviderRequestCount": 0,
+    "providerRequestCount": 0,
+    "scannedRequestBodyCount": 0,
+    "completeIdentifierFindingCount": null,
+    "forbiddenHostMaterialFindingCount": null,
+    "providerSafeSemanticBlockCount": 0,
+    "providerSafeSemanticValidationCount": 0,
+    "keyId": ""
+  },
+  "typedLocalDisplay": {
+    "required": true,
+    "status": "UNVERIFIED",
+    "contract": "analytix.typed-local-display.v1",
+    "fullModeExactValue": false,
+    "maskedModeLocalOnly": false,
+    "acceptedSlotBindingVerified": false,
+    "ordinaryRendererCompletePIIAbsent": false,
+    "forbiddenGenericProviderChannelsZero": false,
+    "invalidatedAfterAuthorityChange": false,
+    "reason": "typed_local_display_public_seam_not_exercised",
+    "blocksMilestoneB": true
+  },
+  "directSourcePreview": {
+    "required": true,
+    "status": "UNVERIFIED",
+    "contract": "analytix.direct-source-preview.v1",
+    "fullModeExactValue": false,
+    "maskedModeLocalOnly": false,
+    "providerRequestAbsent": false,
+    "claimReceiptFinalGateAbsent": false,
+    "invalidatedAfterAuthorityChange": false,
+    "reason": "direct_source_preview_public_seam_not_exercised",
+    "blocksMilestoneB": true
+  },
+  "provider": {
+    "configured": false,
+    "normalHubLoginObserved": false,
+    "family": "",
+    "modelHash": "",
+    "baseUrlOriginHash": "",
+    "credentialFilesOwnerPrivate": false
+  },
+  "isolation": {
+    "trustedCacheTmpdir": false,
+    "cacheTmpdirPathHash": "",
+    "isolatedHomeUsed": false,
+    "isolatedUserDataUsed": false,
+    "sandboxRemoved": false,
+    "productRunRemoved": false,
+    "productDataOutsideCache": false,
+    "productOwnerStable": false,
+    "productVolumeRevalidated": false,
+    "userDataRuntimeSeparated": false,
+    "externalCaseOutsideSandbox": false,
+    "ordinaryCodeWorkspaceCleaned": false,
+    "caseBindingRestored": false,
+    "protectedSourceAliasCleaned": false
+  },
+  "publicSeams": {
+    "firstLaunch": null,
+    "snapshotOne": null,
+    "snapshotTwo": null,
+    "relaunch": null,
+    "exactPackagedRuntimeExecutable": false
+  },
+  "workflow": {
+    "threadIdHash": "",
+    "sameThread": false,
+    "ordinaryTurnCount": 0,
+    "ordinaryExecutions": [],
+    "fundsTurnCount": 0,
+    "blockedCaseTurnCount": 0,
+    "snapshotOne": null,
+    "snapshotTwo": null,
+    "snapshotEvolution": null,
+    "historicalComparison": null,
+    "typedLocalDisplay": null,
+    "directSourcePreview": null,
+    "typedLocalDisplayRevocation": null,
+    "compactionCount": 0,
+    "preRelaunchProjectionDigest": "",
+    "recoveredProjectionDigest": "",
+    "exactRecovery": false,
+    "recoveredCase": null,
+    "stableEntityDisplayAcrossSnapshotAndRestart": false,
+    "publicPIIScan": null,
+    "completedRunnableFlow": false
+  },
+  "exit": {
+    "firstNormal": false,
+    "finalNormal": false,
+    "residualProcessCount": null
+  },
+  "artifact": {
+    "ok": false,
+    "blocked": true,
+    "blocker": "expected_packaged_source_commit_missing_or_invalid",
+    "targetKey": "darwin-arm64",
+    "appPathHash": "e245d0e0ecc44b13d09e2b9053a801e32d091da7779725ea6b4cff674da713be",
+    "sourceCommit": "",
+    "authoritySha256": "cc6ab555c607cd42c33510292d1eed3d7226a0b4c2257b25be72212486c47cb0",
+    "authorityDigest": "",
+    "executableSha256": "6fb88cb2c3052910369e66508a4f79e741b9705ba3e18c908a666853a260533d",
+    "runtimeServerSha256": "61cb8dbfe8274924f63e345b5824be4eb690467870a223cfeedbdb18c8e01141",
+    "appAsarSha256": "63a3d1e0b21c86f0906f35e3a0ddd965ee1b2bf384dfdfcc790135d70d037667",
+    "worktreeSnapshotDigest": "",
+    "codeSignatureVerified": false,
+    "fundsPluginArtifactBound": false
+  },
+  "artifactFinal": null,
+  "checks": [
+    {
+      "id": "trusted-cache-tmpdir",
+      "status": "FAIL",
+      "message": "analytix_cache_tmpdir_unavailable_unwritable_or_outside_trusted_mount"
+    },
+    {
+      "id": "managed-product-data-authority",
+      "status": "BLOCKED",
+      "message": "trusted_cache_required_before_managed_product_data_validation"
+    },
+    {
+      "id": "formal-packaged-artifact",
+      "status": "BLOCKED",
+      "message": "expected_packaged_source_commit_missing_or_invalid"
+    },
+    {
+      "id": "external-owner-isolated-case",
+      "status": "BLOCKED",
+      "message": "external_case_workspace_contract_and_provenance_required"
+    },
+    {
+      "id": "canonical-csv-contract-and-provenance",
+      "status": "BLOCKED",
+      "message": "external_case_workspace_contract_and_provenance_required"
+    },
+    {
+      "id": "provider-request-audit-authority",
+      "status": "BLOCKED",
+      "message": "provider_audit_owner_root_receipt_challenge_keypair_socket_trust_pin_and_scanner_build_required"
+    },
+    {
+      "id": "configured-network-provider",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "typed-local-display",
+      "status": "UNVERIFIED",
+      "message": "typed_local_display_public_seam_not_exercised"
+    },
+    {
+      "id": "direct-source-preview",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "packaged-first-launch",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "ordinary-before-case",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "case-authority-unavailable-fails-closed",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "ordinary-after-case-block",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "native-snapshot-one-staging",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "funds-catalog-after-snapshot-one",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "real-account-flow-one",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "host-funds-invocation-and-final-binding",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "evidence-claim-final-gate-one",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "default-redacted-ui-one",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "ordinary-between-funds",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "native-snapshot-two-staging",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "snapshot-evolution-and-history",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "real-account-flow-two",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "ordinary-after-typed-local-display",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "same-thread-additive-sequence",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "mixed-code-todo-subagent-funds",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "authority-loss-mixed-turn-and-reacquisition",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "protected-source-general-tool-bypass-denied",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "case-switch-epoch-and-default-entity-isolation",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "fork-subagent-case-isolation",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "public-pii-scan-zero",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "provider-payload-pii-scan-zero",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "provider-semantic-context-contract",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "typed-local-display-revocation",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "typed-local-display-rehydration",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "nonzero-compaction",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "normal-first-quit",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "fresh-packaged-relaunch",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "exact-thread-recovery",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "recovered-case-query",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "normal-final-quit",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "zero-residual-processes",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    },
+    {
+      "id": "sandbox-cleanup-and-case-preservation",
+      "status": "UNVERIFIED",
+      "message": "check was not executed"
+    }
+  ],
+  "failureCheckIds": [
+    "trusted-cache-tmpdir"
+  ],
+  "blockedCheckIds": [
+    "managed-product-data-authority",
+    "formal-packaged-artifact",
+    "external-owner-isolated-case",
+    "canonical-csv-contract-and-provenance",
+    "provider-request-audit-authority"
+  ],
+  "unverifiedCheckIds": [
+    "configured-network-provider",
+    "typed-local-display",
+    "direct-source-preview",
+    "packaged-first-launch",
+    "ordinary-before-case",
+    "case-authority-unavailable-fails-closed",
+    "ordinary-after-case-block",
+    "native-snapshot-one-staging",
+    "funds-catalog-after-snapshot-one",
+    "real-account-flow-one",
+    "host-funds-invocation-and-final-binding",
+    "evidence-claim-final-gate-one",
+    "default-redacted-ui-one",
+    "ordinary-between-funds",
+    "native-snapshot-two-staging",
+    "snapshot-evolution-and-history",
+    "real-account-flow-two",
+    "ordinary-after-typed-local-display",
+    "same-thread-additive-sequence",
+    "mixed-code-todo-subagent-funds",
+    "authority-loss-mixed-turn-and-reacquisition",
+    "protected-source-general-tool-bypass-denied",
+    "case-switch-epoch-and-default-entity-isolation",
+    "fork-subagent-case-isolation",
+    "public-pii-scan-zero",
+    "provider-payload-pii-scan-zero",
+    "provider-semantic-context-contract",
+    "typed-local-display-revocation",
+    "typed-local-display-rehydration",
+    "nonzero-compaction",
+    "normal-first-quit",
+    "fresh-packaged-relaunch",
+    "exact-thread-recovery",
+    "recovered-case-query",
+    "normal-final-quit",
+    "zero-residual-processes",
+    "sandbox-cleanup-and-case-preservation"
+  ]
+}

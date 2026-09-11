@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "contract": "analytix.ordinary-pii-conformance/v1",
+  "syntheticOnly": true,
+  "untrustedTextCases": [
+    {
+      "id": "short-account-8-zh",
+      "input": "账号：00123456",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "short-account-format-label-fullwidth-digits",
+      "input": "账\u200b号：００１２３４５６７",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567"
+    },
+    {
+      "id": "short-account-11-en",
+      "input": "account number: 00123456789",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456789"
+    },
+    {
+      "id": "account-fullwidth-hyphen",
+      "input": "卡号：0012－3456－7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "account-slash-separator",
+      "input": "账户：0012/3456/7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "account-underscore-separator",
+      "input": "帐号：0012_3456_7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "account-dot-separator",
+      "input": "账号：0012.3456.7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "account-narrow-no-break-space",
+      "input": "账号：0012\u202f3456\u202f7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "account-format-between-digits",
+      "input": "账号：0012\u200b3456\u20607890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "untrusted-mask-looking-short-account",
+      "input": "账号：1234*5678",
+      "expected": "mask",
+      "sensitiveCanonical": "12345678"
+    },
+    {
+      "id": "bare-long-account",
+      "input": "001234567890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "unbounded-long-identifier",
+      "input": "12345678901234567890123456789012345678901234567890123456789012345",
+      "expected": "mask",
+      "sensitiveCanonical": "12345678901234567890123456789012345678901234567890123456789012345"
+    },
+    {
+      "id": "unlabeled-short-number",
+      "input": "普通编号 12345678",
+      "expected": "preserve"
+    },
+    {
+      "id": "amount-short-number",
+      "input": "金额 12345678 元",
+      "expected": "preserve"
+    },
+    {
+      "id": "record-count",
+      "input": "记录数 2645472",
+      "expected": "preserve"
+    },
+    {
+      "id": "calendar-date",
+      "input": "日期 20260720",
+      "expected": "preserve"
+    }
+  ],
+  "typedFieldCases": [
+    {
+      "id": "account-no-alias",
+      "fieldName": "account_no",
+      "value": "00123456",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "card-no-alias",
+      "fieldName": "card_no",
+      "value": "001234567",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567"
+    },
+    {
+      "id": "chinese-card-alias",
+      "fieldName": "卡号",
+      "value": "0012345678",
+      "expected": "mask",
+      "sensitiveCanonical": "0012345678"
+    },
+    {
+      "id": "chinese-account-alias",
+      "fieldName": "账户",
+      "value": "00123456789",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456789"
+    },
+    {
+      "id": "traditional-account-alias",
+      "fieldName": "帐号",
+      "value": "001234567890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "trusted-amount-field",
+      "fieldName": "amount",
+      "value": "12345678",
+      "expected": "preserve"
+    },
+    {
+      "id": "trusted-date-field",
+      "fieldName": "txn_time",
+      "value": "2026-07-20 12:34:56",
+      "expected": "preserve"
+    }
+  ],
+  "controlledSourceCases": [
+    {
+      "id": "leading-zero-source-string",
+      "sourceExactValue": "00123456",
+      "sourceRepresentation": "string",
+      "expectedDecision": "byte_exact_copy_only",
+      "ordinaryProjectionAllowed": false
+    },
+    {
+      "id": "format-character-source-string",
+      "sourceExactValue": "0012\u200b3456",
+      "sourceRepresentation": "string",
+      "expectedDecision": "byte_exact_copy_only",
+      "ordinaryProjectionAllowed": false
+    },
+    {
+      "id": "numeric-coercion-rejected",
+      "sourceExactValue": "12345678",
+      "sourceRepresentation": "number",
+      "expectedDecision": "reject_non_string_source",
+      "ordinaryProjectionAllowed": false
+    },
+    {
+      "id": "scientific-notation-rejected",
+      "sourceExactValue": "1.2345678e+19",
+      "sourceRepresentation": "scientific_number",
+      "expectedDecision": "reject_non_exact_source",
+      "ordinaryProjectionAllowed": false
+    }
+  ]
+}

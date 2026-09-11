@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "pythonRuntime": {
+    "version": "3.11.15+20260623",
+    "series": "3.11",
+    "target": "x86_64-pc-windows-msvc",
+    "assetName": "cpython-3.11.15+20260623-x86_64-pc-windows-msvc-install_only.tar.gz",
+    "archiveSha256": "7e0a8abfee952efc63dff290022a73f0185b586f522678ae7a757a56f23c289b",
+    "sourceTreeSha256": "0a34d108b4ab72741891f9715ba8e8b6c174961e9c7737a32e0ad84d06f166b4",
+    "runtimeContentSha256": "54e4b998e5acf6f09f6493bf779d8790d09a47314b2a482a50214ed28b8b2838",
+    "runtimeFileCount": 1908
+  },
+  "sitePackages": {
+    "platform": "win_amd64",
+    "requirementsLockSha256": "19d79e68c1d1036cbb9a7cc773e30ab1d583780e6395618289ed1a3c9ca07f99",
+    "wheelCount": 45,
+    "wheelSetSha256": "8ee7ecbe31b2bb63c1f4cc731fb810306624dd845a7c0469831b5227e4569df8",
+    "contentSha256": "070a3102a35f78688940caddf1dd85859606cbf6a495432a937d3f2e2112a957",
+    "fileCount": 3017
+  }
+}

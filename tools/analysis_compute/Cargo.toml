@@ -1,0 +1,29 @@
+[package]
+name = "analytix-analysis-compute"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "analytix-analysis-compute"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["bundled-duckdb"]
+bundled-duckdb = ["duckdb/bundled", "duckdb/json"]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = "0.4"
+csv = "1"
+duckdb = { version = "=1.10504.0", default-features = false }
+icu_collator = "2.2.0"
+icu_locale_core = "2.2.0"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"

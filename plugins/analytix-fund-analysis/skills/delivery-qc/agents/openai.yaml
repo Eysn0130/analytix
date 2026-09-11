@@ -1,0 +1,8 @@
+interface:
+  display_name: "研判材料交付复核"
+  short_description: "检查资金研判输出是否具备结论、依据、异常、意义、边界和补证动作"
+  default_prompt: "请检查该研判输出是否达到公安经侦材料口吻，并指出缺失的核验意见或补证动作。"
+policy:
+  allow_implicit_invocation: false
+  user_visible_language_contract: "普通办案用户不应看到 delivery-qc、workflow、support layer、case_id、JSON、debug、tool 或 skill 等工程词。"
+  gate_boundary: "本能力只做研判材料交付复核，不新增案件事实。"

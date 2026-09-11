@@ -1,0 +1,639 @@
+.txnDetailDialogWrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.txnDetailDialogWrap.open {
+  display: flex;
+}
+
+.txnDetailDialogBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.txnDetailDialogWrap.stable .txnDetailDialogBackdrop,
+.txnDetailDialogWrap.sorting .txnDetailDialogBackdrop {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.txnDetailDialogModal {
+  position: relative;
+  width: min(var(--txnModalMaxW, 1680px), calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  height: min(720px, calc(100vh - 40px));
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--workbench-ui-border, rgba(148, 163, 184, 0.28)) 82%, rgba(15, 23, 42, 0.08));
+  background:
+    radial-gradient(1200px 460px at 12% -18%, rgba(31, 111, 235, 0.08), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 255, 0.94));
+  box-shadow: 0 24px 72px rgba(2, 6, 23, 0.24);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.txnDetailDialogWrap.sorting .txnDetailDialogModal {
+  box-shadow: 0 8px 26px rgba(2, 6, 23, 0.18);
+}
+
+.txnModalShell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+.txnModalToolbar {
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.txnModalToolbarMain {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.txnModalToolbarTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: rgba(2, 6, 23, 0.9);
+}
+
+.txnModalToolbarMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.56);
+}
+
+.txnModalToolbarActions {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.txnModalBody {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.txnTableViewport {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+.txnTableWrap {
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: auto;
+  scrollbar-color: rgba(15, 23, 42, 0.26) rgba(255, 255, 255, 0.38);
+  border: none;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.72);
+  overscroll-behavior: contain;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.txnTableWrap::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.txnTableWrap::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  min-width: 42px;
+  border: 3px solid rgba(255, 255, 255, 0.68);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.txnTableWrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 111, 235, 0.28);
+}
+
+.txnTableWrap::-webkit-scrollbar-track,
+.txnTableWrap::-webkit-scrollbar-corner {
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.persistentHorizontalScrollbar {
+  position: relative;
+  flex: 0 0 12px;
+  width: 100%;
+  height: 12px;
+  min-height: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  touch-action: none;
+}
+
+.persistentHorizontalScrollbar.is-scrollable {
+  cursor: pointer;
+}
+
+.persistentHorizontalScrollbar:focus,
+.persistentHorizontalScrollbar:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.persistentHorizontalScrollbar__thumb {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: 6px;
+  min-width: 42px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.24);
+  cursor: ew-resize;
+}
+
+.persistentHorizontalScrollbar.is-scrollable:hover .persistentHorizontalScrollbar__thumb,
+.persistentHorizontalScrollbar__thumb:hover {
+  background: rgba(31, 111, 235, 0.28);
+}
+
+.persistentHorizontalScrollbar.is-static .persistentHorizontalScrollbar__thumb {
+  cursor: default;
+}
+
+.txnTableWrap.is-sorting {
+  scroll-behavior: auto;
+}
+
+.txnTableWrap.is-sorting .txnTable {
+  opacity: 1;
+  transition: none;
+}
+
+.txnDetailDialogWrap.stable .txnTableWrap,
+.txnDetailDialogWrap.sorting .txnTableWrap,
+.txnDetailDialogWrap.stable .txnTable,
+.txnDetailDialogWrap.sorting .txnTable {
+  background: #ffffff;
+}
+
+.txnInner {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+.txnTable {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.82);
+}
+
+.txnTable th,
+.txnTable td {
+  padding: 9px 10px;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.txnTable td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.txnTable th:last-child,
+.txnTable td:last-child {
+  border-right: none;
+}
+
+.txnTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-right: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  color: rgba(2, 6, 23, 0.72);
+  font-weight: 900;
+  user-select: none;
+}
+
+.txnTable th > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.txnThLabel {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.txnThText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.txnSortIcon {
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.45;
+  transform: translateY(-0.5px);
+}
+
+.txnSortIcon.active {
+  opacity: 0.95;
+  color: rgba(31, 111, 235, 0.95);
+}
+
+.txnTable th.sortable {
+  cursor: pointer;
+}
+
+.txnTable th.sorted {
+  color: rgba(31, 111, 235, 0.95);
+}
+
+.txnTable th:hover {
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.txnTable tr.txnRow.even td {
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.txnTable tr:hover td {
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.txnTable tr.highlight td {
+  background: rgba(31, 111, 235, 0.1);
+}
+
+.txnSkCell {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(2, 6, 23, 0.06),
+    rgba(2, 6, 23, 0.12),
+    rgba(2, 6, 23, 0.06)
+  );
+  background-size: 200% 100%;
+  animation: txnSk 1.15s ease-in-out infinite;
+}
+
+@keyframes txnSk {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.resizer {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.txnSpacer td {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.txnTable tr.txnSpacer:hover td {
+  background: transparent !important;
+}
+
+.txnMono {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+}
+
+.txnToneIn {
+  color: rgba(16, 185, 129, 0.95);
+}
+
+.txnToneOut {
+  color: rgba(239, 68, 68, 0.95);
+}
+
+.txnToneGood {
+  color: #2f7b58;
+  font-weight: 700;
+}
+
+.txnToneDanger {
+  color: #9d4646;
+  font-weight: 700;
+}
+
+.txnDir {
+  font-weight: 900;
+}
+
+.txnDir.in {
+  color: rgba(16, 185, 129, 0.95);
+}
+
+.txnDir.out {
+  color: rgba(239, 68, 68, 0.95);
+}
+
+.txnAmt {
+  text-align: right;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+  font-weight: 900;
+}
+
+.txnEmpty {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: rgba(2, 6, 23, 0.55);
+}
+
+.txnTable th .resizer {
+  right: 0;
+}
+
+.txnModalFooter {
+  align-items: center;
+}
+
+.txnModalThemeStats {
+  --stats-tree-secondary-title-size: 11.5px;
+  --stats-table-font-size: var(--stats-tree-secondary-title-size);
+  --stats-table-row-font-size: 11px;
+  --stats-toolbar-button-pad-x: 10px;
+  --left-control-radius: 7px;
+  --left-control-border: color-mix(in oklab, var(--sidebar-control-border, #d5deef) 84%, #d5deef);
+  --workbench-ui-accent-start: color-mix(in oklab, var(--sidebar-segment-active-start, #3d67f3) 88%, #3d67f3);
+  --workbench-ui-accent-end: color-mix(in oklab, var(--sidebar-segment-active-end, #1f51da) 88%, #1f51da);
+  --stats-table-head-bg: var(--workbench-ui-accent-end, #1f51da);
+  --stats-table-head-border: color-mix(in oklab, var(--workbench-ui-accent-end, #1f51da) 88%, #1639ba);
+  --stats-table-head-text: #ffffff;
+  --stats-table-head-divider: color-mix(in oklab, #ffffff 18%, var(--stats-table-head-border));
+  --stats-table-head-hover: color-mix(in oklab, var(--stats-table-head-bg) 92%, #6f98ff);
+}
+
+.txnModalThemeStats .chipBtn.navStyle {
+  position: relative;
+  min-width: 40px;
+  min-height: 30px;
+  padding: 0 var(--stats-toolbar-button-pad-x);
+  border-radius: var(--left-control-radius);
+  border: 1px solid var(--left-control-border);
+  background: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated));
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.txnModalThemeStats .chipBtn.navStyle:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--color-text);
+  transform: none;
+}
+
+.txnModalThemeStats .chipBtn.navStyle.ghost,
+.txnModalThemeStats .chipBtn.navStyle.workbench-ui-btn--ghost {
+  background: color-mix(in oklab, var(--sidebar-surface) 88%, var(--sidebar-subtle));
+}
+
+.txnModalThemeStats .txnModalToolbarActions > .chipBtn.navStyle {
+  min-height: 30px;
+  padding-left: var(--stats-toolbar-button-pad-x);
+  padding-right: var(--stats-toolbar-button-pad-x);
+  white-space: nowrap;
+}
+
+.txnModalThemeStats .tableToolbar,
+.txnModalThemeStats .tableFooter,
+.txnModalThemeStats .txnTable th,
+.txnModalThemeStats .txnSortIcon {
+  font-size: var(--stats-table-font-size);
+}
+
+.txnModalThemeStats .txnTable,
+.txnModalThemeStats .txnTable td,
+.txnModalThemeStats .txnDir {
+  font-size: var(--stats-table-row-font-size);
+}
+
+.txnModalThemeStats .txnTable th,
+.txnModalThemeStats .txnTable td {
+  padding: 0 7px;
+  height: 32px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.txnModalThemeStats .txnTable td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.txnModalThemeStats .txnTable th > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.txnModalThemeStats .txnThLabel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.txnModalThemeStats .txnThText {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.txnModalThemeStats .txnSortIcon {
+  opacity: 0.72;
+  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+}
+
+.txnModalThemeStats .txnSortIcon.active {
+  opacity: 1;
+  color: #ffffff;
+}
+
+.txnModalThemeStats .txnTable th.sorted {
+  background: var(--stats-table-head-hover);
+  color: #ffffff;
+}
+
+.txnModalThemeStats .tableToolbar {
+  padding: 6px 12px;
+  gap: 12px;
+}
+
+.txnModalThemeStats .tableFooter {
+  padding: 5px 12px;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.txnModalThemeStats .txnModalToolbarTitle {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--sidebar-nav-active-text);
+}
+
+.txnModalThemeStats .txnModalToolbarMeta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.txnModalThemeStats .txnTableWrap {
+  overscroll-behavior: contain;
+}
+
+.txnModalThemeStats .txnTable th {
+  background: var(--stats-table-head-bg);
+  border-bottom-color: var(--stats-table-head-border);
+  border-right-color: var(--stats-table-head-divider);
+  font-weight: 900;
+  color: var(--stats-table-head-text);
+  padding: 6px 8px;
+  padding-right: 20px;
+  user-select: none;
+  white-space: normal;
+  height: auto;
+  min-height: 32px;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.txnModalThemeStats .txnTable td {
+  line-height: 1.1;
+}
+
+.txnModalThemeStats .txnTable th:hover {
+  background: var(--stats-table-head-hover);
+}
+
+.txnModalThemeStats .txnTable tr.txnRow.even td {
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.txnModalThemeStats .txnDir {
+  display: inline;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+}
+
+.txnModalThemeStats .txnModalFooterSummary,
+.txnModalThemeStats .footMono {
+  font-size: inherit;
+}
+
+.txnModalFooterSummary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 4px;
+  flex-wrap: wrap;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.txnModalFooterSummary > span {
+  white-space: nowrap;
+}
+
+.txnModalFooterSummaryLabel {
+  color: rgba(2, 6, 23, 0.72);
+  font-weight: 600;
+}
+
+@media (max-width: 1060px) {
+  .txnDetailDialogWrap,
+  .txnModalWrap {
+    padding: 10px;
+  }
+
+  .txnDetailDialogModal,
+  .txnModal {
+    width: calc(100% - 4px);
+    height: calc(100% - 4px);
+    max-height: calc(100% - 4px);
+  }
+
+  .txnModalToolbar,
+  .txnModalFooter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .txnModalToolbarActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

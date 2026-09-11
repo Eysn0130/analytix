@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-go-mcp-approval-user-input-evidence",
+  "generatedAt": "2026-07-01T06:52:48.118Z",
+  "sourceCommit": "80e068ffd7d07112b8fcce2262cccb5d0fba3675",
+  "status": "passed",
+  "passed": true,
+  "approvalUserInput": true,
+  "approval": true,
+  "userInput": true,
+  "rawValueRecorded": false,
+  "credentialSecretsRecorded": false,
+  "redaction": {
+    "status": "passed",
+    "secretMaterialFound": false
+  },
+  "checks": [
+    {
+      "id": "go-approval-user-input-contract",
+      "status": "passed",
+      "command": "go test . -run TestRuntimeServer(ApprovalDenyAndAllowControlToolExecution|BashApprovalDenyAndAllowControlExecution|UserInputOnlyAppearsWhenModelCallsTool|DisableUserInputRemovesInteractiveToolSchemas|NormalTurnsDoNotCreateSyntheticApprovalOrUserInputGates)$",
+      "durationMs": 607,
+      "exitStatus": 0,
+      "reason": ""
+    }
+  ],
+  "outputPath": "/Users/sun/Projects/analytix/docs/analytix/upstreams/runtime-go-live-evidence/mcp-approval-user-input-evidence.json"
+}

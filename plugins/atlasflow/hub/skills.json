@@ -1,0 +1,46 @@
+{
+  "platform": "mac-arm64",
+  "generatedAt": "2026-07-05T00:00:00.000Z",
+  "skills": [
+    {
+      "id": "atlasflow:atlasflow",
+      "skillName": "atlasflow",
+      "displayName": "AtlasFlow",
+      "shortDescription": "Core diagram generation: architecture, workflow, sequence, dataflow, lifecycle.",
+      "category": "Diagramming",
+      "sourceKind": "plugin",
+      "scope": "plugin",
+      "pluginName": "atlasflow",
+      "version": "2.10.0-analytix.1",
+      "upstreamMarketplaceName": "analytix-hub",
+      "skillPath": "skills/atlasflow/SKILL.md",
+      "interface": {
+        "displayName": "AtlasFlow",
+        "shortDescription": "Professional diagram generation core Skill."
+      },
+      "skill": {
+        "description": "Create professional architecture, workflow, sequence, dataflow, and lifecycle diagrams."
+      }
+    },
+    {
+      "id": "atlasflow:atlasflow-analytix-domain",
+      "skillName": "atlasflow-analytix-domain",
+      "displayName": "AtlasFlow analytix domain",
+      "shortDescription": "Public-security, official-document, case-project, and general business graph routing.",
+      "category": "Case Analysis",
+      "sourceKind": "plugin",
+      "scope": "plugin",
+      "pluginName": "atlasflow",
+      "version": "2.10.0-analytix.1",
+      "upstreamMarketplaceName": "analytix-hub",
+      "skillPath": "skills/atlasflow-analytix-domain/SKILL.md",
+      "interface": {
+        "displayName": "AtlasFlow analytix domain",
+        "shortDescription": "Maps public-security, official-document, case, and general tasks to AtlasFlow diagrams."
+      },
+      "skill": {
+        "description": "Route public-security, official-document, case-project, and general business diagram requests into AtlasFlow JSON IR."
+      }
+    }
+  ]
+}

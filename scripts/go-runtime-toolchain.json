@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "hosts": {
+    "darwin-arm64": {
+      "goVersion": "go1.26.4",
+      "goExecutableSha256": "e61851b2c0cde9b9ac4ae044fcce6ba9d55cb15f98ded3964793acaa8632242f",
+      "tools": {
+        "asm": "73ba98c43140ed233a551a6e851eb9dce5c98d4a227fb3133f0e79f942308ff4",
+        "compile": "b22f296c393f7b43c0705ac7748cdd02c0d34dce26a9e46ea9e86dd561a83ead",
+        "link": "3ad229dd65af0f8ed67283ef960fcbc259fe89a00c51731bde83f61caec29f8d"
+      }
+    }
+  }
+}
