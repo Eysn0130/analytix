@@ -301,6 +301,29 @@ The Git round-trip regression installs the real pre-push hook in both synthetic
 clones, including its argv/stdin handling and rejection before remote mutation;
 an always-successful hook stub is not evidence of the protected push path.
 
+### PR-mode transition (2026-09-12)
+
+[PR #22](https://github.com/Eysn0130/analytix/pull/22) carries the PR-only hook,
+fail-closed aggregate gate and platform-fixture corrections. The public main
+remains `58b365b3bc878e987e215d1fb1862ef111a1a37e` until a verified merge.
+Local baseline/type/build checks, 18 Git/gate tests and all 15 updater tests
+passed. Keychain file-identity and recovery-journal replacement fixtures now
+retain the old inode instead of assuming unlink/recreate changes identity.
+The case-sensitivity fixture uses distinct alphabetic names and asserts both
+filesystem behaviors instead of treating a numeric temporary name as an alias.
+These targeted Go checks passed locally in ordinary and `analytix_prod` modes;
+the changed Linux branches still require Linux CI. No production permission,
+storage or privacy validator was relaxed.
+
+The local full persistence package attempt exceeded a three-minute package
+deadline while progressing through startup crash-cut tests: **timeout, not
+PASS**. The single previously failing statistics CLI case passed on macOS;
+this does not resolve the Linux CI DuckDB internal error. The main CI also
+reported application and both full Go-suite failures. Keep this PR draft until
+the current candidate's required CI and applicable acceptance actually pass.
+Neither these focused results nor the source baseline imply full regression,
+native packaging or formal release readiness.
+
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
 canary and retains its non-disclosure assertion. That does **not** prove the
