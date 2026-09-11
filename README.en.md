@@ -22,7 +22,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; third-party terms also apply"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white" alt="Electron 34">
+  <img src="https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white" alt="Electron 41">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
 </p>
 
@@ -143,6 +143,9 @@ resources and host prerequisites prepared, use `npm run doctor -- --native`
 and `npm run dev` for the full development chain. See the
 [development baseline](docs/analytix/development-baseline.md) for asset supply,
 platform limits, CI and packaging. `dev:fast` is not full initialization.
+`dev` / `dev:fast` retain their existing behavior and are not automatically
+isolated from real user data. The explicit `dev:isolated` entrypoint additionally
+requires a provisioned task Keychain; prepared directories are not launch readiness.
 
 On the configured Owner macOS host only, source
 `./scripts/use-analytix-cache.sh` before install/test/build commands. Other

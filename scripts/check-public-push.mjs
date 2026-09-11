@@ -82,9 +82,30 @@ export function checkPublicPush(input, { cwd = process.cwd(), policy = publicSou
   return { updates, checkedObjects: candidates.size }
 }
 
+// CI has no pre-push hook invocation. Inspect its real candidate, not just the
+// hook's unit tests; include the tip even when the baseline itself is the tip.
+export function checkPublicCandidate({ cwd = process.cwd(), revision = 'HEAD', policy = publicSourcePolicy } = {}) {
+  const tip = gitRead(cwd, ['rev-parse', '--verify', `${revision}^{commit}`]).trim()
+  const result = checkPublicPush(`refs/heads/main ${tip} refs/heads/main ${zero}\n`, { cwd, policy })
+  let files = 0
+  for (const entry of gitRead(cwd, ['ls-tree', '-r', '-l', '-z', tip]).split('\0').filter(Boolean)) {
+    const match = entry.match(/^\d{6} (\w+) [a-f0-9]{40}\s+(\d+|-)\t([\s\S]+)$/)
+    if (!match || match[1] !== 'blob') throw new Error('Public candidate contains an uninspectable source entry.')
+    const [, , size, name] = match
+    if (isPrivateSourcePath(name, policy)) throw new Error(`Public candidate contains excluded local file ${JSON.stringify(name)}.`)
+    if (Number(size) > policy.maxBlobBytes) throw new Error(`Public candidate exceeds the blob size limit: ${JSON.stringify(name)}.`)
+    files++
+  }
+  return { ...result, files }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    checkPublicPush(readFileSync(0, 'utf8'))
+    if (process.argv.slice(2).join(' ') === '--candidate') {
+      const result = checkPublicCandidate()
+      console.log(`PASS public ancestry, excluded paths and blob limits: ${result.files} current files; ${result.checkedObjects} post-baseline objects. Not a content secret scan.`)
+    } else if (process.argv.length === 2) checkPublicPush(readFileSync(0, 'utf8'))
+    else throw new Error('Push refused: unsupported inspection arguments.')
   } catch (error) {
     console.error(error instanceof Error && error.message.startsWith('Push refused:')
       ? error.message : 'Push refused: public history inspection failed. Fetch full history and check the local Git configuration.')

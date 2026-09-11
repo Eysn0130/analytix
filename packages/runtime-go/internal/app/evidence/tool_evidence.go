@@ -610,7 +610,10 @@ func normalizeAccountFlowEvidence(
 	if err != nil {
 		return VerifiedEvidenceMaterial{}, err
 	}
-	filtersHash := domainsecurity.CanonicalJSONHash([]byte(`{"schemaVersion":1,"purpose":"analytix.account-flow-filters/v1","subjectRef":"` + subjectRef + `","startInclusive":"` + semantic.StartInclusive + `","endInclusive":"` + semantic.EndInclusive + `"}`))
+	filtersHash, err := accountFlowFiltersHashV1(subjectRef, semantic.StartInclusive, semantic.EndInclusive)
+	if err != nil {
+		return VerifiedEvidenceMaterial{}, err
+	}
 	queryScope, err := domainevidence.NewAccountFlowQueryScopeRefV1(input.Context.ContextDigest, semantic.QueryHash)
 	if err != nil {
 		return VerifiedEvidenceMaterial{}, errors.New("account-flow query scope binding is invalid")
@@ -635,6 +638,20 @@ func normalizeAccountFlowEvidence(
 			},
 		}, PIIClassification: domainevidence.PIINone,
 	}, nil
+}
+
+func accountFlowFiltersHashV1(subject, start, end string) (string, error) {
+	body, err := json.Marshal(struct {
+		SchemaVersion  int    `json:"schemaVersion"`
+		Purpose        string `json:"purpose"`
+		SubjectRef     string `json:"subjectRef"`
+		StartInclusive string `json:"startInclusive"`
+		EndInclusive   string `json:"endInclusive"`
+	}{1, "analytix.account-flow-filters/v1", subject, start, end})
+	if err != nil {
+		return "", err
+	}
+	return domainsecurity.CanonicalJSONHash(body), nil
 }
 
 func canonicalAccountFlowEvidenceTime(value string) (string, error) {

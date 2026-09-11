@@ -23,7 +23,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/first--party%20license-Apache%202.0-blue" alt="First-party license: Apache 2.0; third-party terms also apply"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white" alt="Electron 34">
+  <img src="https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white" alt="Electron 41">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
 </p>
 
@@ -143,6 +143,8 @@ npm run verify:baseline
 `npm run doctor -- --native`、`npm run dev` 启动完整开发链路。公开 clone 的
 资源准备、平台限制、CI 和封包状态见
 [开发基线](docs/analytix/development-baseline.md)；不把 `dev:fast` 当作完整初始化。
+`dev` / `dev:fast` 保留既有行为，不承诺自动隔离真实资料。新的显式
+`dev:isolated` 入口还要求已配置的专属 Keychain；目录准备不等于启动就绪。
 
 ### macOS 本机开发缓存
 

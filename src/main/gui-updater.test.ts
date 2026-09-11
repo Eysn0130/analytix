@@ -108,6 +108,9 @@ describe('checkGuiUpdate feed URL', () => {
 
   it('projects manual metadata fetch failures without copying network exceptions', async () => {
     delete process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES
+    // Exercise the network-error projection, not an absent-feed early return.
+    // A clean CI checkout has no Owner update configuration.
+    process.env.ANALYTIX_RELEASE_BASE_URL = 'https://updates.example.invalid/analytix'
     const sentinel = 'https://updates.example.test/private/customer-pii-13900000036?token=secret'
     const fetchMock = vi.fn().mockRejectedValueOnce(new Error(sentinel))
     vi.stubGlobal('fetch', fetchMock)

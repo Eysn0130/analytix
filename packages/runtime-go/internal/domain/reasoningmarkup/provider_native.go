@@ -3,6 +3,7 @@ package reasoningmarkup
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -310,9 +311,14 @@ func decodeProviderIdentifierUnicodeEscapes(value string) string {
 	var out strings.Builder
 	for cursor := 0; cursor < len(value); {
 		if cursor+6 <= len(value) && value[cursor] == '\\' && value[cursor+1] == 'u' {
-			var decoded string
-			if json.Unmarshal([]byte(`"`+value[cursor:cursor+6]+`"`), &decoded) == nil {
-				out.WriteString(decoded)
+			hex := value[cursor+2 : cursor+6]
+			if strings.IndexFunc(hex, func(r rune) bool {
+				return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F')
+			}) == -1 {
+				decoded, _ := strconv.ParseUint(hex, 16, 16)
+				// WriteRune preserves JSON's replacement-rune behavior for lone
+				// UTF-16 surrogates, without constructing JSON from provider text.
+				out.WriteRune(rune(decoded))
 				cursor += 6
 				continue
 			}

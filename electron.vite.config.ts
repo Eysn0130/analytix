@@ -14,6 +14,11 @@ process.env.VITE_ANALYTIX_RUNTIME_PORT ??= browserRuntimePort
 process.env.VITE_ANALYTIX_BROWSER_WORKSPACE_ROOT ??=
   process.env.ANALYTIX_BROWSER_WORKSPACE_ROOT ?? process.cwd()
 const SETTINGS_FILE_NAME = 'analytix-settings.json'
+// Ordinary isolated development must not auto-load an Owner's repository .env
+// into a browser bundle. Legacy explicit test-account runs keep their routing.
+const developmentEnvDir = process.env.ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE === 'isolated-local-v1'
+  ? process.env.ANALYTIX_USER_DATA_DIR
+  : undefined
 const FLOW_RUNTIME_ASSET_ROOT = resolve('src/renderer/src/data-analysis/features/flow/runtime/embedded')
 const FLOW_RUNTIME_ROUTE_PREFIX = '/flow-runtime/'
 
@@ -288,6 +293,7 @@ async function writeFetchResponse(res: NodeJS.WritableStream & {
 
 export default defineConfig({
   main: {
+    envDir: developmentEnvDir,
     plugins: [externalizeDepsPlugin(), hubColdBuildGraphPlugin('main')],
     build: {
       rollupOptions: {
@@ -299,6 +305,7 @@ export default defineConfig({
     }
   },
   preload: {
+    envDir: developmentEnvDir,
     // Sandboxed preloads can only require Electron and a small Node subset.
     // Bundle the runtime validators instead of leaving an unavailable
     // `require("zod")` in the generated preload.
@@ -313,6 +320,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    envDir: developmentEnvDir,
     optimizeDeps: {
       force: true
     },

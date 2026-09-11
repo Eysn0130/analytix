@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkPublicPush, isPrivateSourcePath } from './check-public-push.mjs'
+import { checkPublicCandidate, checkPublicPush, isPrivateSourcePath } from './check-public-push.mjs'
 import { setupGitSync } from './setup-git-sync.mjs'
 
 const zero = '0'.repeat(40)
@@ -36,6 +36,26 @@ test('normal public descendants and new feature branches are accepted', t => {
   const tip = f.commit('source.txt')
   assert.deepEqual(checkPublicPush(update(tip, f.publicRoot), f), { updates: 1, checkedObjects: 1 })
   assert.equal(checkPublicPush(update(tip, zero, 'refs/heads/codex/feature'), f).updates, 1)
+})
+
+test('CI inspects actual candidate tree and post-baseline history without changing Git', t => {
+  const f = fixture(t)
+  const tip = f.commit('source.txt')
+  const before = run(f.cwd, 'status', '--porcelain')
+  assert.equal(checkPublicCandidate(f).files, 2)
+  assert.equal(run(f.cwd, 'rev-parse', 'HEAD'), tip)
+  assert.equal(run(f.cwd, 'status', '--porcelain'), before)
+  f.commit('local-only.bin')
+  run(f.cwd, 'rm', 'local-only.bin')
+  run(f.cwd, '-c', 'commit.gpgsign=false', 'commit', '-m', 'Remove synthetic excluded file')
+  assert.throws(() => checkPublicCandidate(f), /excluded local file/)
+})
+
+test('CI rejects forbidden files even when present in the configured root commit', t => {
+  const f = fixture(t)
+  const root = f.commit('local-only.bin')
+  assert.throws(() => checkPublicCandidate({ ...f, policy: { ...f.policy, publicRoot: root } }), /not solely descended/)
+  assert.throws(() => checkPublicCandidate({ ...f, policy: { ...f.policy, excludedPaths: ['README.md'] } }), /excluded local file/)
 })
 
 test('private orphan history and a merge of private history are both rejected', t => {

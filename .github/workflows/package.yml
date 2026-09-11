@@ -14,6 +14,9 @@ jobs:
   preflight:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Require main and an explicitly qualified dedicated packaging runner
         env:
@@ -24,6 +27,17 @@ jobs:
           test "$PACKAGE_RUNNER_READY" = true || {
             echo 'NOT_CONFIGURED: dedicated macOS ARM64 packaging runner, pinned toolchains and verified runtime assets are required.'
             echo 'Do not register a personal workstation or bypass native build authority to satisfy this check.'
+            exit 1
+          }
+      - name: Require successful development CI for this exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          conclusion=$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$CANDIDATE_SHA&event=push&branch=main&per_page=1" --jq '.workflow_runs[0].conclusion // "not_executed"')
+          test "$conclusion" = success || {
+            echo "Candidate CI is $conclusion; no installer will be produced for an unverified commit."
             exit 1
           }
 

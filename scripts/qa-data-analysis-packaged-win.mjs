@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { qaLoopbackURL } from './lib/qa-loopback-url.mjs'
 
 const appPath = process.env.ANALYTIX_APP_EXE || 'C:\\Program Files\\Analytix\\analytix\\analytix.exe'
 const sampleDir = process.argv[2] || process.env.ANALYTIX_QA_SAMPLE_DIR || 'C:\\Users\\Public\\AnalytixTestDataLarge'
@@ -79,8 +80,9 @@ async function requestJson(apiBase, method, route, body, steps, label) {
   const started = process.hrtime.bigint()
   let response
   try {
-    response = await fetch(`${apiBase}${route}`, {
+    response = await fetch(qaLoopbackURL(apiBase, route), {
       method,
+      redirect: 'error',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json'

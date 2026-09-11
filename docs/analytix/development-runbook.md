@@ -213,7 +213,9 @@ backup, rollback, failure-recovery, and verification plans.
 
 ## Setup And Execution
 
-Install dependencies only when they are absent or the lockfile changed:
+After pulling, use `npm run doctor` to check root/runtime installation inputs.
+Install dependencies when absent, unstamped, or changed (including linked
+package manifests and Node ABI):
 
 ```bash
 npm ci
@@ -227,6 +229,13 @@ npm run dev
 
 `npm run dev` is an execution path, not a validation verdict. Define the
 observable behavior being checked and capture failures separately.
+Ordinary `dev` / `dev:fast` retain their existing behavior; do not run them
+against real user state as automated acceptance. The explicit `dev:isolated`
+candidate prepares checkout-specific state and checks native inputs, but also
+requires a provisioned task Keychain. Its provisioning/restart lifecycle is
+not yet a general development bootstrap and has not replaced the default entry.
+See [development baseline](development-baseline.md) for the full development
+loop, platform limits and remaining CI/package work.
 
 ## Validation Matrix
 

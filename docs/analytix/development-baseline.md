@@ -26,10 +26,13 @@ never reset or auto-stash them as routine setup. See [Git workflow](git-workflow
 `git pull` updates tracked source; it does **not** install dependencies, refresh
 generated outputs, start services or migrate user data. After dependency changes
 run `bootstrap`; after code changes rebuild the affected outputs. Root and
-runtime lockfiles are separate. Runtime install fingerprints include both
-manifests, its lockfile, platform and Node ABI, so an existing `node_modules`
-directory no longer conceals a changed dependency graph. Failed installation
-does not receive a success stamp.
+runtime lockfiles are separate. Root and runtime install fingerprints include
+the manifest, lockfile, linked-package manifests, platform and Node ABI. The
+root fingerprint also binds the installation scripts, and the root doctor
+checks installed direct dependency versions against the lock.
+An existing `node_modules` directory is not sufficient evidence. Failed or
+incomplete postinstall does not receive a new success stamp. These fingerprints
+check installation inputs, not every transitive package byte or native ABI.
 
 Use Node **22.22.1**, npm **10.9.4** and Go **1.26.4** for the tested baseline.
 `.nvmrc`, `.node-version`, `packageManager` and CI agree. Go's `go 1.22` directive
@@ -37,6 +40,22 @@ is the language minimum, not a claim that every packaging toolchain is admitted.
 Native builds additionally use the pinned Rust **1.94.1**, SDK/tool identities,
 verified build storage and native execution authority. Do not weaken those
 checks to accommodate a new machine.
+
+Backend development uses Python **3.11** (`backend/.python-version`) and uv
+**0.11.5** in CI. `backend/uv.lock` pins the application and development
+dependency resolution; it does not qualify native build resources or every
+build-system tool. With that uv version installed, run:
+
+```sh
+uv sync --project backend --locked --extra dev --python 3.11
+uv run --project backend --no-sync python -m pytest backend/tests -q
+```
+
+`--locked` rejects a stale lock instead of silently resolving newer packages.
+Use a dedicated `UV_PROJECT_ENVIRONMENT` for isolated validation; ordinary
+`uv sync` manages `backend/.venv` and can remove undeclared packages. Review
+intentional dependency updates together with the lockfile and backend tests.
+See the [uv locking and syncing contract](https://docs.astral.sh/uv/concepts/projects/sync/).
 
 After a source change:
 
@@ -61,11 +80,13 @@ archive ancestry, force push, or push all local branches/tags.
 | Command | What it actually establishes |
 | --- | --- |
 | `npm run doctor` | Source tools and dependency inputs are available/current. No compiler or app launch. |
-| `npm run doctor -- --native` | Also checks configured host, pinned versions and runtime asset hashes. Native binary/SDK authority is still checked during build. |
+| `npm run doctor -- --native` | Also checks Electron SQLite/terminal module loading, configured host, pinned versions and runtime asset hashes. Native binary/SDK authority is still checked during build. |
 | `npm run verify:baseline` | Doctor, sync/setup regression tests, TypeScript typecheck, Electron + TS launcher build, and built-output layout smoke. |
 | `npm test` | Application/renderer/host/TS-runtime Vitest suite. Not every Go/Rust/Python/script test. |
-| `npm run dev` | Existing native development build, TS launcher build, then Electron dev app. No native capability is removed. |
-| `npm run dev:fast` | Fast iteration only after required native/build inputs are ready. Not a bootstrap or acceptance replacement. |
+| `npm run dev` | Existing native development build, TS launcher build, then Electron. Default behavior is preserved; this command is not automatically isolated from real user state. |
+| `npm run dev:fast` | Reuses already built native/runtime inputs. Not a bootstrap, isolation or acceptance replacement. |
+| `npm run dev:isolated` | Explicit candidate: checkout-specific private profile, no ambient credentials, native doctor and existing build chain. Refuses launch without an explicit task Keychain; not yet a general first-run bootstrap. |
+| `npm run test:plugin-contracts` | Deterministic Funds production-entry closure and report-scenario contracts; no live model request. Not full plugin acceptance. |
 | `npm run assets:verify` | Pinned resource presence, size and hash checks for the current target. |
 
 The current native builder admits macOS targets on its configured macOS build
@@ -75,9 +96,33 @@ development or packaging on Linux/Windows. Windows official packaging still
 requires Windows x64, its signing identity and an implemented/admitted native
 build route; those requirements cannot be supplied by changing a workflow label.
 
-Use isolated synthetic profiles for development/QA. A real Provider is only
-needed for explicitly authorized live model work. Do not point automated tests
-or candidate packages at existing Owner application or case data.
+The explicit `dev:isolated` candidate retains its own named profile under the configured
+cache's private `tmp` tree, keyed by checkout path. It does not reuse installed
+Analytix data, import the caller's Provider/Hub credentials, enable Hub bootstrap,
+inherit a prebuilt runtime override, or read the repository's `.env` through
+Vite. Its child-only home/config paths share the existing desktop isolation
+boundary; the invoking shell and normal application profile are unchanged.
+Protocol/login-item registrations and update traffic remain suppressed by that
+boundary. This is **state isolation, not an OS sandbox**; manually selected
+files and explicitly enabled tools still require their normal permissions.
+
+After explicit task-Keychain provisioning and lifecycle qualification, the
+candidate accepts `--fast`, `--profile <name>` and `--fresh`. Do not advertise
+those flags as an already qualified first-run/restart workflow: new directories
+alone cannot satisfy the runtime's Keychain binding. The launcher checks this
+before building or starting Electron, never creates a fake database and never
+falls back to the default/login Keychain. Automatic protected provisioning,
+unlock, identity continuity and whole-launcher restart remain an open work
+package. The default `dev` commands were deliberately **not switched** to this
+incomplete candidate.
+
+The launcher rejects symlinked, shared or non-canonical profile directories
+instead of silently repairing them. Profiles are not automatically deleted:
+archive/clean exact task-owned paths only after confirming they are no longer
+in use. The existing `dev:test-account` remains an **explicit legacy Hub QA**
+entrypoint; it is not ordinary Provider onboarding. No credentials are copied
+into a fresh profile. A real Provider is only needed for explicitly authorized
+live model work. Do not point automated tests or candidates at Owner case data.
 
 ## Runtime resources and the 57 excluded files
 
@@ -122,10 +167,21 @@ history; fix misleading current entrypoints rather than rewriting old evidence.
 ## CI and package candidates
 
 `.github/workflows/ci.yml` runs on main/codex pushes, PRs and manual dispatch:
-source baseline, application tests, bounded-concurrency full Go suites
-(default and `analytix_prod`) and Python backend tests. Failures remain failures;
+source baseline, actual candidate history/path/blob policy, two deterministic
+Funds contracts, application tests, bounded-concurrency full Go suites
+(default and `analytix_prod`), locked Python backend tests and four Rust component unit
+suites. Private-authority test jobs use `umask 077`, as the local cache helper
+does; this does not relax permission validators. Source-set tests explicitly
+model Darwin, Linux and Windows instead of assuming the CI host is Darwin.
+Failures remain failures;
 no `continue-on-error` converts them to green. Actions use commit pins, read-only
-tokens and no Provider secrets. Dependabot covers Actions, npm and Go.
+tokens and no Provider secrets. Dependabot covers Actions, root/runtime/Atlasflow
+npm, Go, four Rust crates, backend uv and the Windows Python lock. Backend uv
+and pip are [distinct Dependabot ecosystems](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories).
+Minor and
+patch development-tool updates can be grouped; major framework updates remain
+separate reviewable PRs. No automatic merge is enabled. Existing large upgrade
+PRs are not safe to merge merely because the new grouping is narrower.
 
 The public main ruleset rejects force updates and deletion, while retaining
 ordinary fast-forward `commit` / `push`. CI reports are visible, not an enforced
@@ -147,6 +203,8 @@ toolchains, admitted storage and an explicit `ANALYTIX_RUNTIME_ASSET_ARCHIVE`.
 Never register a personal/production workstation just to make this green.
 PR code never runs on this packaging runner. Checkout and package output must
 be fresh. A readiness variable alone does not constitute qualification.
+Preflight also requires successful Development CI from a main push at the exact
+candidate SHA. An older green run or a different commit cannot admit a package.
 
 The previous `release.yml` remains a manual **legacy formal verification**
 workflow, accurately named; it is not an installer factory. Its historical
@@ -194,3 +252,48 @@ Remaining work has distinct owners and acceptance criteria:
 - Full installer/GUI/upgrade acceptance remains unexecuted. The package
   workflow's missing-runner preflight was exercised and correctly rejected
   packaging as `NOT_CONFIGURED`; it did not produce or publish an installer.
+
+## Stable development route
+
+Preserve the existing product and the one Go Core. The current stabilization
+changes are an explicit isolation candidate, dependency freshness, executable CI policy,
+bounded JSON/Unicode handling and QA network containment—not a product rewrite,
+license reclassification or replacement of healthy implementation.
+
+Proceed in dependency order; keep an unmet item visible rather than calling
+the whole product stable because `verify:baseline` passes:
+
+| Work package | Completion evidence |
+| --- | --- |
+| Development loop | Fresh locked install → doctor → isolated dev profile → edit/rebuild → focused regression → reviewed commit/push; restart preserves only that dev profile. |
+| CI portability | Separate real product failures from platform/toolchain/private-storage fixture assumptions. Make fixtures explicit; keep original negative security assertions and execute all suites. No skip/continue-on-error or fake receipt as package evidence. |
+| Security maintenance | Verify each alert's reachable behavior; apply minimal compatible patches. Do not merge the mixed major Electron/TypeScript/Vite/Tailwind PR as one batch. Content digests are not password hashes. |
+| Reproducible inputs | Keep npm/Cargo/Go/Python locks current through reviewed updates; retain hashes and approved supply for excluded resources. Independent native builder profiles need their own storage/toolchain qualification; an environment variable must not impersonate the Owner volume. |
+| Core business regression | Isolated onboarding → synthetic Provider/stream/tool approval → deny/cancel/timeout → persistence/restart; plugin install must not self-authorize. Reuse existing public-contract tests before adding another harness. |
+| Funds regression | Synthetic import → snapshot → calculation → model-safe projection → protected local display/export. Match source rows, amounts and evidence references; no real case fixtures or model credentials. |
+| Candidate delivery | Qualified disposable macOS ARM64 builder + approved resources + exact-SHA CI → DMG inspection → isolated install/start/restart/upgrade. This remains distinct from a Release, feed promotion and notarization. |
+
+The previous `52b5874` CI finished with successful source/backend jobs and
+failed application/default-Go/production-Go jobs. Its application result was
+6,094 passed / 53 failed / 15 pre-existing skips. The present changes fix
+specific causes (including an unconfigured update-feed fixture, host-dependent
+Go source-set assertions and CI private-directory creation); they do not erase
+that baseline failure or prove all remaining tests have passed.
+
+The 2026-09-12 stabilization candidate based on `52b5874` was verified locally
+on macOS ARM64: 40 baseline tests, native doctor, TypeScript checks, source
+build/layout smoke, two deterministic Funds contracts, Darwin/Linux/Windows Go
+source-selection tests, and the complete affected Go evidence/reasoning packages
+in ordinary and production modes passed. Targeted updater, isolation and
+non-disclosure fixture tests passed; these are not a full application-suite
+result. A fresh isolated Python 3.11 environment installed from `backend/uv.lock`
+passed all **1,617 backend tests** (two dependency deprecation warnings).
+Workflow lint passed. Installer and live Provider checks were not executed.
+
+One public historical secret-scanning alert identifies a key-shaped negative
+test fixture. The current fixture now constructs an explicitly synthetic
+canary and retains its non-disclosure assertion. That does **not** prove the
+previous literal was never issued, remove its public historical blob or justify
+dismissing the alert. Resolve original credential provenance/rotation separately
+without printing or exercising the value. No real Provider check is part of
+these deterministic development tests.

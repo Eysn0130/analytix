@@ -7,6 +7,7 @@ import { verifyAssets } from './runtime-assets.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const { installationInput } = createRequire(import.meta.url)('./ensure-runtime-install.cjs')
+const { appInstallCurrent } = createRequire(import.meta.url)('./app-install-state.cjs')
 
 function version(value) {
   const parts = /(?:^|\s|go|v)(\d+)\.(\d+)(?:\.(\d+))?/.exec(value || '')
@@ -36,6 +37,7 @@ export function dependencyChecks(root) {
   const checks = ['typescript', 'electron-vite', 'electron'].map(name => ({
     name: `App dependency: ${name}`, passed: existsSync(join(root, 'node_modules', name, 'package.json'))
   }))
+  checks.push({ name: 'App dependencies match current manifests, lockfile and Node ABI', passed: appInstallCurrent(root) })
   let current = false
   try {
     const runtime = join(root, 'packages/runtime')
@@ -47,6 +49,21 @@ export function dependencyChecks(root) {
   } catch {}
   checks.push({ name: 'Runtime dependencies match current manifests and lockfile', passed: current })
   return checks
+}
+
+export function nativeDependencyCheck(root, run = spawnSync) {
+  try {
+    const electron = createRequire(join(root, 'package.json'))('electron')
+    const result = run(electron, ['-e',
+      "const db = require('better-sqlite3')(':memory:'); db.prepare('select 1').get(); db.close(); require('node-pty');"
+    ], {
+      cwd: root, timeout: 15000, stdio: 'ignore',
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' }
+    })
+    return { name: 'Electron ABI: in-memory SQLite and terminal module load', passed: !result.error && !result.signal && result.status === 0 }
+  } catch {
+    return { name: 'Electron ABI: in-memory SQLite and terminal module load', passed: false }
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -63,6 +80,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const rust = /channel\s*=\s*"([^"]+)"/.exec(readFileSync(join(repo, 'rust-toolchain.toml'), 'utf8'))?.[1]
       const installedRust = command('rustup', ['toolchain', 'list'])
       checks.push(
+        nativeDependencyCheck(repo),
         { name: 'Native build authority supports this host', passed: process.platform === 'darwin' && Boolean(goPin) },
         { name: 'Pinned native Go version installed (binary authority checked at build)', passed: Boolean(goPin) && command('go', ['version']).split(' ')[2] === goPin.goVersion },
         { name: 'Pinned Rust toolchain installed', passed: Boolean(rust) && installedRust.split('\n').some(line => line.startsWith(`${rust}-`)) },

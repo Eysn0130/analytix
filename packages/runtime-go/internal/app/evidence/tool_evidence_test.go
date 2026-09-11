@@ -27,6 +27,24 @@ import (
 
 const accountFlowEvidenceSourceFileIDV1 = "0123456789abcdefabcd"
 
+func TestAccountFlowFiltersHashPreservesExistingDigestAndEscapesFields(t *testing.T) {
+	const priorCanonicalInput = `{"schemaVersion":1,"purpose":"analytix.account-flow-filters/v1","subjectRef":"cer1_synthetic","startInclusive":"2026-01-01T00:00:00Z","endInclusive":"2026-02-01T00:00:00Z"}`
+	actual, err := accountFlowFiltersHashV1("cer1_synthetic", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z")
+	if err != nil || actual != domainsecurity.CanonicalJSONHash([]byte(priorCanonicalInput)) {
+		t.Fatalf("valid filter digest drifted: %v", err)
+	}
+	for _, subject := range []string{`quote"subject`, `back\slash`, "newline\nsubject", `x","schemaVersion":9,"injected":"y`} {
+		body, err := json.Marshal(map[string]any{"schemaVersion": 1, "purpose": "analytix.account-flow-filters/v1", "subjectRef": subject, "startInclusive": "start", "endInclusive": "end"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := accountFlowFiltersHashV1(subject, "start", "end")
+		if err != nil || actual != domainsecurity.CanonicalJSONHash(body) {
+			t.Fatal("filter fields must remain data, never JSON syntax")
+		}
+	}
+}
+
 func TestOriginalOutcomeAcceptsAccountFlowPartial(t *testing.T) {
 	_, _, input := toolEvidenceServiceFixture(t, "2")
 	input.Call.Name = "mcp__analytix_funds__analyze_account_flows"

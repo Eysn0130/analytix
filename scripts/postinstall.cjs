@@ -1,4 +1,8 @@
 const { spawnSync } = require('node:child_process')
+const { resolve } = require('node:path')
+const { beginAppInstall, recordAppInstall } = require('./app-install-state.cjs')
+const appRoot = resolve(__dirname, '..')
+const appInput = beginAppInstall(appRoot)
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
@@ -80,3 +84,5 @@ try {
 } catch (error) {
   console.warn('[postinstall] skipped node-pty electron prebuild:', error.message)
 }
+
+recordAppInstall(appRoot, appInput)

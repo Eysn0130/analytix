@@ -3279,7 +3279,7 @@ process.exit(1)
             ],
             missingSettingsProfileFields: [
               'provider.providers[].matchingProfile',
-              'sk-shouldNeverReachCutoverSummary123456'
+              'sk-' + 'syntheticScanNotIssued'.padEnd(36, '0')
             ]
           },
           {
@@ -3303,8 +3303,8 @@ process.exit(1)
               status: 'loaded',
               source: 'default-app-settings',
               providerCount: 1,
-              matchedProviderIds: ['deepseek', 'sk-profileNameShouldNotReachSummary123456'],
-              usableProviderIds: ['deepseek', 'sk-usableProfileShouldNotReachSummary123456'],
+              matchedProviderIds: ['deepseek', 'sk-' + 'syntheticMatchedNotIssued'.padEnd(38, '0')],
+              usableProviderIds: ['deepseek', 'sk-' + 'syntheticCanaryNotIssued'.padEnd(40, '0')],
               usableNonDeepSeekProviderIds: [],
               deepseekSettingsProfileUsable: true,
               nonDeepSeekSettingsProfileUsable: false,
@@ -3445,9 +3445,9 @@ process.exit(1)
           })
         ])
       }))
-      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-shouldNeverReachCutoverSummary123456')
-      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-profileNameShouldNotReachSummary123456')
-      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-usableProfileShouldNotReachSummary123456')
+      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-' + 'syntheticScanNotIssued'.padEnd(36, '0'))
+      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-' + 'syntheticMatchedNotIssued'.padEnd(38, '0'))
+      expect(JSON.stringify(report.finalCoverageLiveEvidence)).not.toContain('sk-' + 'syntheticCanaryNotIssued'.padEnd(40, '0'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
