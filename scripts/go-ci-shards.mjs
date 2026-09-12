@@ -3,7 +3,17 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const runtimePackage = 'analytix.local/runtime-go/internal/runtimeapp'
-export const runtimeShardCount = 4
+// At four partitions, CI exhausted the 20-minute package deadline after
+// only 36/91 and 44/92 top-level tests. Smaller partitions retain that deadline
+// and every discovered test; verbose execution exposes individual durations.
+export const runtimeShardCount = 16
+
+export function runtimeShardIndex(value) {
+  if (!/^(0|[1-9][0-9]*)$/.test(value || '') || Number(value) >= runtimeShardCount) {
+    throw new Error(`Expected runtime shard 0..${runtimeShardCount - 1}.`)
+  }
+  return Number(value)
+}
 
 export function otherGoPackages(output) {
   const packages = output.trim().split(/\s+/)
@@ -59,14 +69,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const packages = otherGoPackages(inventory(['list', '-tags', tags, './...']))
       console.log(`Go package partition: ${packages.length} packages; runtimeapp belongs to all ${runtimeShardCount} required shards.`)
       args.push(...packages)
-    } else if (mode === 'runtime' && /^[0-3]$/.test(shardValue || '')) {
+    } else if (mode === 'runtime') {
+      const index = runtimeShardIndex(shardValue)
       const shards = runtimeTestShards(inventory(['test', '-count=1', '-tags', tags, '-list', '^(Test|Example|Fuzz)', runtimePackage]))
-      const index = Number(shardValue)
       const names = shards[index]
       console.log(JSON.stringify({ package: runtimePackage, tags, shard: index, total: shards.flat().length, selected: names }))
       const pattern = `^(${names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`
-      args.push('-run', pattern, runtimePackage)
-    } else throw new Error('Expected packages or runtime <0..3>.')
+      args.push('-v', '-run', pattern, runtimePackage)
+    } else throw new Error(`Expected packages or runtime <0..${runtimeShardCount - 1}>.`)
     process.exitCode = goExitStatus(spawnSync('go', args, { stdio: 'inherit' }))
   } catch (error) {
     console.error(error.message)

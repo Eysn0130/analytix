@@ -3,18 +3,19 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { assertDevelopmentCISuccess, requiredDevelopmentJobs } from './development-ci-gate.mjs'
 import { goTestSelection } from './go-test-selection.mjs'
-import { runtimePackage, runtimeTestShards, otherGoPackages, goExitStatus } from './go-ci-shards.mjs'
+import { runtimePackage, runtimeShardCount, runtimeShardIndex, runtimeTestShards, otherGoPackages, goExitStatus } from './go-ci-shards.mjs'
 
 test('Go partitions cover every discovered package and runtime test exactly once', () => {
   const packages = ['analytix.local/runtime-go', runtimePackage, `${runtimePackage}/fixture`]
   assert.deepEqual([...otherGoPackages(packages.join('\n')), runtimePackage].sort(), packages.sort())
-  const names = ['TestAlpha', 'TestBeta', 'TestGamma', 'TestDelta', 'TestRestart', 'ExampleRead', 'FuzzDecode']
+  const names = [...Array.from({ length: runtimeShardCount * 2 + 1 }, (_, i) => `TestFixture${i}`), 'ExampleRead', 'FuzzDecode']
   const listing = values => `${values.join('\n')}\nok\t${runtimePackage}\t0.001s\n`
   const shards = runtimeTestShards(listing(names))
-  assert.equal(shards.length, 4)
+  assert.equal(shards.length, runtimeShardCount)
+  assert.equal(Math.max(...shards.map(shard => shard.length)) - Math.min(...shards.map(shard => shard.length)), 1)
   assert.deepEqual(shards.flat().sort(), [...names].sort())
   assert.deepEqual(runtimeTestShards(listing([...names].reverse())), shards)
-  for (const bad of ['', listing(names.slice(0, 3)), listing([...names, names[0]]), listing(names) + 'unknown inventory\n', names.join('\n')]) {
+  for (const bad of ['', listing(names.slice(0, runtimeShardCount - 1)), listing([...names, names[0]]), listing(names) + 'unknown inventory\n', names.join('\n')]) {
     assert.throws(() => runtimeTestShards(bad), /inventory/)
   }
   for (const bad of ['', packages.filter(name => name !== runtimePackage).join('\n'), [...packages, runtimePackage].join('\n')]) {
@@ -24,6 +25,10 @@ test('Go partitions cover every discovered package and runtime test exactly once
   assert.equal(goExitStatus({ status: 2 }), 2)
   assert.equal(goExitStatus({ status: null, signal: 'SIGKILL' }), 1)
   assert.equal(goExitStatus({ status: 0, error: new Error('spawn failed') }), 1)
+  for (let index = 0; index < runtimeShardCount; index++) assert.equal(runtimeShardIndex(String(index)), index)
+  for (const bad of [undefined, '', '-1', '01', '1.5', 'NaN', String(runtimeShardCount), '999999999999999999999999']) {
+    assert.throws(() => runtimeShardIndex(bad), /Expected runtime shard/)
+  }
 })
 
 const success = () => Object.fromEntries(requiredDevelopmentJobs.map(name => [name, { result: 'success' }]))
@@ -72,7 +77,8 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.match(restart, /node \.\.\/\.\.\/scripts\/go-test-selection\.mjs/)
   assert.match(workflow, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs packages/)
   assert.match(workflow, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs runtime "\$TEST_SHARD"/)
-  assert.match(workflow, /shard: \[0, 1, 2, 3\]/)
+  const matrixShards = workflow.match(/shard: \[([^\]]+)\]/)?.[1].split(',').map(value => Number(value.trim()))
+  assert.deepEqual(matrixShards, Array.from({ length: runtimeShardCount }, (_, index) => index))
 })
 
 test('all complete CI job families are required for the merge gate', () => {
