@@ -110,7 +110,7 @@ func (s *DurableEventSessionStore) RewindThreadIfBaseline(threadID, turnID, expe
 	if s.caseThreads != nil && s.caseThreads.IsCaseThread(threadID) {
 		return nil, threadapp.ErrCaseRewindSignedArchive
 	}
-	if err := s.settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock(threadID); err != nil {
+	if err := s.settleGeneralTerminalPublicationsBeforeHistoryRewriteNoLock(threadID); err != nil {
 		return nil, err
 	}
 	thread, err := s.readThreadNoLock(threadID)
@@ -138,7 +138,7 @@ func (s *DurableEventSessionStore) CommitRewindMutation(request threadapp.Rewind
 	defer s.mu.Unlock()
 	caseBound := s.caseThreads != nil && s.caseThreads.IsCaseThread(request.ThreadID)
 	if !caseBound {
-		if err := s.settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock(request.ThreadID); err != nil {
+		if err := s.settleGeneralTerminalPublicationsBeforeHistoryRewriteNoLock(request.ThreadID); err != nil {
 			return threadapp.RewindMutationCommitResult{}, err
 		}
 	}
@@ -175,7 +175,7 @@ func (s *DurableEventSessionStore) CommitCompaction(request threadapp.Compaction
 		if err != nil {
 			return threadapp.CompactionCommitResult{}, errors.Join(threadapp.ErrCaseCompactionRequiresTrustedArchive, err)
 		}
-		if err := s.settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock(request.ThreadID); err != nil {
+		if err := s.settleGeneralTerminalPublicationsBeforeHistoryRewriteNoLock(request.ThreadID); err != nil {
 			return threadapp.CompactionCommitResult{}, err
 		}
 		if hook := s.caseCompactionCommitHook; hook != nil {
@@ -214,7 +214,7 @@ func (s *DurableEventSessionStore) CommitCompaction(request threadapp.Compaction
 		}
 		return result, commitErr
 	}
-	if err := s.settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock(request.ThreadID); err != nil {
+	if err := s.settleGeneralTerminalPublicationsBeforeHistoryRewriteNoLock(request.ThreadID); err != nil {
 		return threadapp.CompactionCommitResult{}, err
 	}
 	return threadapp.CommitCompactionWithReadWrite(request, s.readThreadNoLock, s.writeThreadMutationNoLock)

@@ -357,7 +357,7 @@ func TestCompactionSettlesRealGeneralTerminalCrashGapBeforeHistoryMutation(t *te
 }
 
 func TestCompactionDoesNotCrossActiveUsageIndexRebuild(t *testing.T) {
-	handler, threadID, _ := newUnboundCompactionFixture(t)
+	handler, threadID, current := newUnboundCompactionFixture(t)
 	thread := rawGeneralTerminalThreadForTest(t, handler.store, threadID)
 	prepared, err := threadapp.PrepareCompaction(
 		thread,
@@ -376,6 +376,10 @@ func TestCompactionDoesNotCrossActiveUsageIndexRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rewind, err := threadapp.PrepareRewindMutation(thread, threadID, "turn_compaction_4", current, time.Date(2026, 7, 15, 2, 45, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
 	rebuildEntered := make(chan struct{})
 	rebuildRelease := make(chan struct{})
 	rebuildDone := make(chan error, 1)
@@ -387,13 +391,22 @@ func TestCompactionDoesNotCrossActiveUsageIndexRebuild(t *testing.T) {
 	go func() { rebuildDone <- handler.store.EnsureUsageIndex() }()
 	<-rebuildEntered
 	committed, err := handler.store.CommitCompaction(prepared.CommitRequest())
+	rewindResult, rewindErr := handler.store.CommitRewindMutation(threadapp.RewindMutationCommitRequest{
+		ThreadID: threadID, RewindTurnID: rewind.RewindTurnID, Stamp: rewind.Stamp,
+		ExpectedBaselineDigest: rewind.BaselineDigest, ExpectedContextDigest: current.ContextDigest, CurrentContext: current,
+	})
+	legacyResult, legacyErr := handler.store.RewindThreadIfBaseline(threadID, "turn_compaction_4", beforeDigest)
 	close(rebuildRelease)
 	if rebuildErr := <-rebuildDone; rebuildErr != nil {
 		t.Fatalf("usage index rebuild failed after barrier test: %v", rebuildErr)
 	}
 	handler.store.beforeUsageIndexThreadHook = nil
-	if err == nil || committed.Committed {
+	if !errors.Is(err, errUsageIndexRebuildHistoryMutation) || committed.Committed {
 		t.Fatalf("compaction crossed an active usage index rebuild: result=%#v err=%v", committed, err)
+	}
+	if !errors.Is(rewindErr, errUsageIndexRebuildHistoryMutation) || rewindResult.Committed ||
+		!errors.Is(legacyErr, errUsageIndexRebuildHistoryMutation) || legacyResult != nil {
+		t.Fatal("a rewind entry point crossed the active usage index rebuild")
 	}
 	after := rawGeneralTerminalThreadForTest(t, handler.store, threadID)
 	afterDigest, err := threadapp.MutationBaselineDigest(after)
@@ -406,6 +419,9 @@ func TestCompactionDoesNotCrossActiveUsageIndexRebuild(t *testing.T) {
 	}
 	if afterDigest != beforeDigest || string(afterEvents) != string(beforeEvents) {
 		t.Fatal("rejected history barrier mutated the canonical thread or event log")
+	}
+	if retry, err := handler.store.CommitCompaction(prepared.CommitRequest()); err != nil || !retry.Committed {
+		t.Fatalf("unchanged compaction could not retry after the rebuild drained: committed=%t err=%v", retry.Committed, err)
 	}
 }
 
