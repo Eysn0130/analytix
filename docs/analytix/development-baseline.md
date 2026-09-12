@@ -641,3 +641,16 @@ negative tests. The old server line/file cap already failed at public baseline
 adapter-construction ownership, including alias/indirect/new/literal and duplicate
 construction negatives. Other server layering guards remain. This is a local
 architecture PASS only; current-head remote Development acceptance is pending.
+
+Case turn snapshot admission now checks the composition-owned Registry's local
+availability before contacting shared witness authority. The confirmed-import
+owner retains its underlying snapshot capability and remains the only activator.
+Restart fixtures explicitly seed synthetic protected Provider Registry authority
+for ordinary loopback turns. Six focused zero-generation/partial/non-JSON/corrupt/
+bound-sibling witnessed cases passed locally (151.68 s), retaining zero-witness
+and preservation assertions. Fresh import activation passed (6.76 s); real CAS
+readback-fault and exact-operation suites passed (13.57 s / 41.47 s). Combined
+focused run passed (214.246 s), no skips. An earlier entire witnessed group ran
+into its unchanged local 10-minute budget after reaching the last subcase;
+that run is partial, not full PASS. Sampling and sequential progress indicate
+cumulative filesystem cost; no timeout or CI partition was increased.

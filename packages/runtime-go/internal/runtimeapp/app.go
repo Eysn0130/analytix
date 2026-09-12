@@ -1030,7 +1030,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var datasetSnapshotAuthorityV2 datasetsnapshotport.AuthorityV2
 	var datasetSnapshotCurrentAuthorityV2 datasetsnapshotport.CurrentAuthorityV2
 	if sharedEvidenceDatasetSnapshotV2.snapshot != nil {
-		datasetSnapshotAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
+		datasetSnapshotAuthorityV2 = runtimeCaseDatasetSnapshotAuthorityV2{
+			snapshot: sharedEvidenceDatasetSnapshotV2.snapshot, registry: sharedEvidenceDatasetSnapshotV2.registryOwner,
+		}
 		datasetSnapshotCurrentAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
 	}
 	identityAuthority, err := newRuntimeHostIdentityAuthority(finalAuthority)
