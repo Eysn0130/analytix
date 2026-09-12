@@ -141,7 +141,9 @@ func TestCompositeLeaseMatchesFilesystemCaseSensitivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	aliasRoots, err := ResolveRootSet(filepath.Join(aliasBase, "casedata"), filepath.Join(base, "DurableB"))
+	// Both cold roots must belong to the second ancestor. Sharing base for
+	// DurableB would correctly conflict with the first lease's directory lock.
+	aliasRoots, err := ResolveRootSet(filepath.Join(aliasBase, "casedata"), filepath.Join(aliasBase, "DurableB"))
 	if err != nil {
 		t.Fatal(err)
 	}

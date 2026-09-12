@@ -4,7 +4,7 @@ import { assertDevelopmentCISuccess, requiredDevelopmentJobs } from './developme
 
 const success = () => Object.fromEntries(requiredDevelopmentJobs.map(name => [name, { result: 'success' }]))
 
-test('all five complete CI job families are required for the merge gate', () => {
+test('all complete CI job families are required for the merge gate', () => {
   assert.equal(assertDevelopmentCISuccess(success()), true)
   for (const name of requiredDevelopmentJobs) {
     for (const result of ['failure', 'cancelled', 'skipped', 'pending', undefined]) {

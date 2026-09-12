@@ -172,11 +172,18 @@ history; fix misleading current entrypoints rather than rewriting old evidence.
 
 `.github/workflows/ci.yml` runs on main pushes, PRs and manual dispatch:
 source baseline, actual candidate history/path/blob policy, two deterministic
-Funds contracts, application tests, bounded-concurrency full Go suites
+Funds contracts, application tests, native filesystem contracts on Linux and
+macOS ARM64, bounded-concurrency full Go suites
 (default and `analytix_prod`), locked Python backend tests and four Rust component unit
 suites. Private-authority test jobs use `umask 077`, as the local cache helper
 does; this does not relax permission validators. Source-set tests explicitly
 model Darwin, Linux and Windows instead of assuming the CI host is Darwin.
+The complete secure-generation, final-authority, raw-artifact and persistence
+packages run on both native hosts before the dependent full Go suites. A failed
+filesystem prerequisite blocks those suites and still fails the aggregate; it
+never substitutes a focused pass for the full suites. Native metadata failures
+report inode flags and xattr counts, not file contents or credentials. These
+synthetic filesystem tests are not Keychain, installer or live-provider acceptance.
 Failures remain failures;
 no `continue-on-error` converts them to green. Actions use commit pins, read-only
 tokens and no Provider secrets. Dependabot covers Actions, root/runtime/Atlasflow
