@@ -829,3 +829,16 @@ endpoint authority; the positive HTTP/route/absence test passed (47.68 s), and t
 unselected-Provider zero-call negative passed (49.35 s). Earlier combined runs
 failed on stale route-field assertions and fixture cardinality; they are not
 full package PASS. Complete new-head remote root coverage is still required.
+
+Desktop retirement now recognizes exact-witnessed legacy TypeScript parents
+whose original product storage contains only metadata/messages sidecars. The
+ordinary primary inventory remains strict. Only the desktop retirement path
+carries that bounded audit input into the semantic stage, where the normal
+recovery/upsert path materializes a canonical primary before strict inventory
+and signed publication. Invalid or missing lineage is checked before initial
+authority directory creation and repeated during semantic admission. A new
+negative initially exposed two housekeeping directories created before rejection;
+the earlier witness fixes that mutation instead of weakening whole-tree equality.
+The final complete desktop-migration selection, strict/wrong-family/unwitnessed
+inventory checks and both invalid-lineage no-mutation branches passed locally.
+Current-head remote runtime acceptance remains required.

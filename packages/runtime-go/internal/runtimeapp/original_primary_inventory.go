@@ -82,6 +82,35 @@ func (inventory *runtimeOriginalPrimaryInventoryV1) ReadCommittedEventLogSHA256V
 }
 
 func readRuntimeOriginalPrimaryInventoryV1(ctx context.Context, roots persistencefs.RootSet, snapshot persistencefs.RawSnapshot) (*runtimeOriginalPrimaryInventoryV1, []map[string]any, error) {
+	return readRuntimeOriginalPrimaryInventoryWithRetiredAuditV1(ctx, roots, snapshot, nil)
+}
+
+// readRuntimeOriginalPrimaryInventoryForRetiredAuditV1 keeps the strict
+// original-primary denominator intact while allowing the desktop migration to
+// carry a witnessed metadata-only parent through its retired audit phase. A
+// parent is eligible only when its ID came from the exact, source-hash-bound
+// legacy lineage witness; the stage callback subsequently materializes its
+// canonical primary before the ordinary startup path is run.
+func readRuntimeOriginalPrimaryInventoryForRetiredAuditV1(
+	ctx context.Context,
+	roots persistencefs.RootSet,
+	snapshot persistencefs.RawSnapshot,
+	retiredParentIDs map[string]struct{},
+) (*runtimeOriginalPrimaryInventoryV1, []map[string]any, error) {
+	for id := range retiredParentIDs {
+		if !domainthread.IsCanonicalRecordID(id) {
+			return nil, nil, pendingworkapp.ErrChildProducerInventoryIncomplete
+		}
+	}
+	return readRuntimeOriginalPrimaryInventoryWithRetiredAuditV1(ctx, roots, snapshot, retiredParentIDs)
+}
+
+func readRuntimeOriginalPrimaryInventoryWithRetiredAuditV1(
+	ctx context.Context,
+	roots persistencefs.RootSet,
+	snapshot persistencefs.RawSnapshot,
+	retiredParentIDs map[string]struct{},
+) (*runtimeOriginalPrimaryInventoryV1, []map[string]any, error) {
 	inventory := &runtimeOriginalPrimaryInventoryV1{entries: map[string]runtimeOriginalPrimaryEntryV1{}, roots: roots}
 	files := make(map[string]persistencefs.EntryRecord, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
@@ -109,7 +138,15 @@ func readRuntimeOriginalPrimaryInventoryV1(ctx context.Context, roots persistenc
 				return nil, nil, pendingworkapp.ErrChildProducerInventoryIncomplete
 			}
 			primary, exists := files[entry.Path+"/thread.json"]
-			if !exists || primary.Type != "file" {
+			if !exists {
+				if family.label == "durable/threads/" {
+					if _, retired := retiredParentIDs[id]; retired {
+						continue
+					}
+				}
+				return nil, nil, pendingworkapp.ErrChildProducerInventoryIncomplete
+			}
+			if primary.Type != "file" {
 				return nil, nil, pendingworkapp.ErrChildProducerInventoryIncomplete
 			}
 			if reader == nil {
