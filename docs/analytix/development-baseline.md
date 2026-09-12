@@ -668,3 +668,17 @@ durable restart and all original raw/private non-disclosure checks. Primary
 reader missing/rebind/cancellation coverage passed (1.73 s); combined local
 server selection passed (87.203 s). Full current-head remote server/package
 acceptance remains required.
+
+Thread listing now excludes only explicitly qualified restart-held scopes before
+public snapshot/cursor reads; independent read failures still propagate. The
+complete local thread application package passed (2.212 s), and the full varied
+inventory ordinary HTTP/witness-outage test passed across two restarts (319.88 s).
+Signed report-attempt fixtures without original primary/enrollment now assert
+their actual earlier authority rejection instead of expecting a later recovery
+gate. Reserved and corrected aborted cases passed (24.86 s / 26.97 s); all three
+Core-linkage negatives passed (66.53 s), and the genuinely enrolled reserved
+history retention test passed (0.48 s). The combined initial selection failed on
+the old aborted assertion; its corrected focused rerun passed. These are local
+focused results, not full runtime acceptance. Remote run 34693285203 independently
+reported a plan-turn 500 in the Ubuntu native PII held-state lane; investigation
+continues before merge admission.

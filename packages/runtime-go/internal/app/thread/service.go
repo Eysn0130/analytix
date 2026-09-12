@@ -130,6 +130,12 @@ func (s *Service) List(input ListInput) ([]map[string]any, error) {
 	threads := make([]map[string]any, 0, len(indexed))
 	for _, candidate := range indexed {
 		threadID := strings.TrimSpace(contracts.StringField(candidate, "id"))
+		// A qualified restart hold has no public snapshot/cursor authority.
+		// Omit only that explicit scope before reads; failures for independent
+		// threads still propagate instead of turning corrupt state into success.
+		if s.caseThreads != nil && s.caseThreads.RestartPreservesThreadV1(threadID) {
+			continue
+		}
 		projected, _, err := s.readPublicThreadSnapshotV1(threadID)
 		if err != nil || projected == nil || contracts.StringField(projected, "id") != threadID {
 			if err != nil {
