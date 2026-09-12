@@ -39,9 +39,22 @@ const milestoneScriptPath = join(
 const requireFromTest = createRequire(import.meta.url)
 const fixtureCacheRoot = realpathSync(tmpdir())
 const fixtureModuleRoot = mkdtempSync(join(fixtureCacheRoot, 'milestone-a-module-fixture-'))
+const fixtureCacheHelper = join(fixtureModuleRoot, 'synthetic-cache-preflight.zsh')
 const fixtureModules = new Map<boolean, Promise<Record<string, any>>>()
 
-beforeAll(() => { vi.stubEnv('TMPDIR', fixtureCacheRoot) })
+beforeAll(() => {
+  vi.stubEnv('TMPDIR', fixtureCacheRoot)
+  // Parser/parent-process fixtures are not Owner-volume qualification. Exercise
+  // a real sourced preflight against the parent's disposable storage instead.
+  // The production helper and its physical-volume requirements stay unchanged.
+  writeFileSync(fixtureCacheHelper, [
+    '# Synthetic test-only storage preflight; not formal cache acceptance.',
+    '[[ -d "$HOME" && -w "$HOME" && -d "$TMPDIR" && -w "$TMPDIR" ]] || return 1',
+    '[[ -d "$NPM_CONFIG_CACHE" && -w "$NPM_CONFIG_CACHE" ]] || return 1',
+    '[[ "$TMPDIR" == "${HOME:h}/tmp" && "$NPM_CONFIG_CACHE" == "${HOME:h}/npm-cache" ]] || return 1',
+    ''
+  ].join('\n'), { mode: 0o600 })
+})
 afterAll(() => {
   vi.unstubAllEnvs()
   rmSync(fixtureModuleRoot, { recursive: true, force: true })
@@ -534,12 +547,15 @@ function fixtureMilestoneModule(exposeInternals: boolean): Promise<Record<string
   )).href
   const originalSource = readFileSync(milestoneScriptPath, 'utf8')
   // Existing source-level test instrumentation supplies only the synthetic
-  // cache mount and source-relative module bindings. Do not change production
+  // cache mount, child preflight and source-relative module bindings. Do not change production
   // cache policy, parser validation, freshness checks or acceptance classes.
   const cacheDeclaration = "const CACHE_MOUNT = '/Volumes/AnalytixCache'"
   if (!originalSource.includes(cacheDeclaration)) throw new Error('milestone_a_cache_fixture_binding_missing')
+  const helperPathExpression = 'repositorySourcePath(\n    CACHE_HELPER_SOURCE_RELATIVE_PATH\n  )'
+  if (originalSource.split(helperPathExpression).length !== 2) throw new Error('milestone_a_helper_fixture_binding_missing')
   let instrumentedSource = originalSource
     .replace(cacheDeclaration, `const CACHE_MOUNT = ${JSON.stringify(fixtureCacheRoot)}`)
+    .replace(helperPathExpression, JSON.stringify(fixtureCacheHelper))
     .replaceAll('import.meta.url', JSON.stringify(originalModuleUrl))
     .replace("'./lib/local-provider-acceptance.mjs'", JSON.stringify(pathToFileURL(join(
       process.cwd(), 'scripts/lib/local-provider-acceptance.mjs'
@@ -11418,6 +11434,22 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       .not.toBe(acceptance.observedSourceDigest)
   }, 30_000)
 
+  it('binds synthetic parent storage preflight to the same isolated home', { tags: ['macos-integration'] }, () => {
+    const root = taskOwnedSandbox()
+    const home = join(root, 'home')
+    const temporary = join(root, 'tmp')
+    const npmCache = join(root, 'npm-cache')
+    for (const directory of [home, temporary, npmCache]) mkdirSync(directory, { mode: 0o700 })
+    const env = { HOME: home, TMPDIR: temporary, NPM_CONFIG_CACHE: npmCache }
+    const invoke = (environment: NodeJS.ProcessEnv) => spawnSync('/bin/zsh', ['-c', 'source "$1"', 'fixture', fixtureCacheHelper], {
+      env: environment, encoding: 'utf8', timeout: 5_000
+    })
+    expect(invoke(env).status).toBe(0)
+    expect(invoke({ ...env, TMPDIR: root }).status).toBe(1)
+    expect(invoke({ ...env, NPM_CONFIG_CACHE: root }).status).toBe(1)
+    expect(invoke({ ...env, HOME: join(root, 'missing') }).status).toBe(1)
+  })
+
   it('accepts a legal equivalent hash and keeps the parent-owned test bound', { tags: ['macos-integration'], timeout: 30_000 }, async () => {
     const {
       loadMilestoneAExternalRepositoryAcceptance,
@@ -12700,7 +12732,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       planArtifactExcludeSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       planArtifactExcludeBeforeSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       testCommand:
-        `source '${join(process.cwd(), 'scripts', 'use-analytix-cache.sh')}' && 'node' '--test' 'test/math.test.mjs'`
+        `source '${fixtureCacheHelper}' && 'node' '--test' 'test/math.test.mjs'`
     }))
     expect(verifyMilestoneAExternalRepositoryAcceptance(authority, 'baseline')).toEqual(
       expect.objectContaining({
