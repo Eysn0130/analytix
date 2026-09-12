@@ -390,6 +390,41 @@ undersized budget merely from the suite timeout.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 
+The subsequent CI at `322b722ee` executed both Linux held-state subcases:
+evidence-registry passed in 219.78 s and pii-authorization in 384.30 s, including
+the exact JSON-event gate. These prove isolated execution, not the full-suite
+deadline or a product latency target. CPU profiles show substantial filesystem,
+hashing and allocation work; they do not establish a deadlock. macOS failed
+before the same behavior at package inspection. The diagnostic executable now
+uses the physical `RUNNER_TEMP` path, preserving strict executable-path checks.
+Native sandbox tests retain the original raw-path assertion and add the same
+read/write/link/child-process/ordinary-work assertions with canonical roots to
+separate host alias behavior; macOS CI must establish the result.
+
+That Application run reported 6,161 passes and four failures. Two actual
+`/bin/zsh` parent-owned test contracts now join the required macOS integration
+lane with unchanged deadlines. Missing cache configuration in the Milestone B
+dry run is explicitly BLOCKED, still non-passing and nonzero when gated;
+an invalid configured relative path remains FAIL. The oversized-source test
+uses exact `Buffer.equals` instead of object-property traversal, retaining
+byte/length equality and all no-side-effect checks. The focused 13-case check
+passed; parallel local testing also exposed six settings timeouts, while its
+isolated full 69-case run passed. Do not hide that resource/isolation evidence
+behind a timeout increase.
+
+Attachment creation-residue recovery fixtures now freeze the same original
+inventory as production startup before entering recovery. The original failure
+was reproduced; all six owner/leaf/shard preservation and independent-write
+subcases then executed and passed. Production recovery validation is unchanged.
+Registry architecture guards now distinguish the sole settlement producer from
+its exact input/error-preserving shared-owner forwarding method, enforce the
+current-owner lock lifetime, and bind import activation and finalization to that
+same owner. Mutation checks reject changed arguments, owner selection, errors
+and lock release. These focused guard passes do not waive the other architecture
+failures; the local activation integration remains unverified because its
+non-removable-APFS prerequisite causes a skip, which the exact-event checker
+correctly rejects.
+
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
 canary and retains its non-disclosure assertion. That does **not** prove the
