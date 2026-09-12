@@ -2636,15 +2636,15 @@ func replayG5PackageRuntimeIdentity(input G5PackageRuntimeIdentityCase) G5Packag
 		input.RuntimeCLI.AfterPackRequiredPath == input.RuntimeCLI.BundledEntryCandidate
 	return G5PackageRuntimeIdentityOutput{
 		RootPackageNameAnalytix:           input.ReleaseIdentity.RootPackageName == "analytix",
-		RootProductNameAnalytix:           input.ReleaseIdentity.RootProductName == "analytix",
+		RootProductNameAnalytix:           input.ReleaseIdentity.RootProductName == "Analytix",
 		RuntimePackageNameAnalytixRuntime: input.ReleaseIdentity.RuntimePackageName == "analytix-runtime",
 		RuntimeBinAnalytixServeEntry:      runtimeBinAnalytixServeEntry,
 		RuntimeServeScriptUsesServeEntry:  input.ReleaseIdentity.RuntimeServeScript == "node ./dist/cli/serve-entry.js",
 		BuilderAppIDAnalytix:              input.ReleaseIdentity.AppID == "com.analytix.desktop",
-		BuilderProductNameAnalytix:        input.ReleaseIdentity.BuilderProductName == "analytix",
+		BuilderProductNameAnalytix:        input.ReleaseIdentity.BuilderProductName == "Analytix",
 		BuilderArtifactNameAnalytix:       input.ReleaseIdentity.ArtifactNamePrefix == "analytix-",
 		NSISNamesAnalytix:                 nsisNamesAnalytix,
-		AppProductNameAnalytix:            input.ReleaseIdentity.AppProductName == "analytix",
+		AppProductNameAnalytix:            input.ReleaseIdentity.AppProductName == "Analytix",
 		WindowsAppUserModelIDAnalytix:     input.ReleaseIdentity.WindowsAppUserModelID == "com.analytix.desktop",
 		ResolveBundledServeEntry:          resolveBundledServeEntry,
 		ServeUsageAnalytixServe:           serveUsageAnalytixServe,
@@ -3119,7 +3119,7 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
 	rendererSettingsReadFacadeCoversSpeechToText :=
 		input.RendererSettingsReadFacadeMatrix.Facade == "rendererRuntimeClient.getSettings" &&
-			stringInSlice("useSpeechToTextSettings", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
+			stringInSlice("useSpeechToTextEnabled", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
 			input.RendererSettingsReadFacadeMatrix.SpeechToTextSourceUsesSettingsClient &&
 			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
 	rendererSettingsReadFacadeCoversUsageModelLabel :=

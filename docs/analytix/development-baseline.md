@@ -749,3 +749,13 @@ non-macOS build and awaits Linux CI. Filestore mutation/UTF16 checks passed
 (0.690 s). The macOS HTTP staged checkpoint contract passed (50.57 s), with target
 and Git index byte equality. No unrestricted Git fallback or safety waiver was
 introduced; Linux protected repository probes remain explicitly fail-closed.
+
+G5 Go conformance now uses the actual product display name Analytix and the
+current useSpeechToTextEnabled reader already enforced by the TypeScript source
+scanner. Runtime/package machine identity remains analytix. The facade, source
+implementation and evidence requirements are retained; four new negative
+mutations reject direct facade, missing source, retired reader and absent
+source evidence. Full G5 control executable comparison and those negatives
+passed locally (0.662 s). The preceding root selection exposed the stale reader
+name after its other four current Registry/Git contracts passed; that combined
+selection was FAIL, not full application or Go acceptance.
