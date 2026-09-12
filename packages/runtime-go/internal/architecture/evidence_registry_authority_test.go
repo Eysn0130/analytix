@@ -2,7 +2,6 @@ package architecture_test
 
 import (
 	"go/ast"
-	"go/token"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -209,92 +208,16 @@ func TestRuntimeCompositionUsesOneWitnessedRegistryForHostFactFinalization(t *te
 
 func TestRuntimeSharedEvidenceRegistryOpensOnlyAfterNonEmptySemanticActivation(t *testing.T) {
 	root := runtimeGoRoot(t)
-	path := filepath.Join(root, "internal", "runtimeapp", "shared_evidence_dataset_snapshot_v2.go")
-	parsed := parseGoFile(t, path, 0)
-	var target *ast.FuncDecl
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.Name == "newRuntimeSharedEvidenceDatasetSnapshotV2" {
-			target = function
-			break
-		}
-	}
-	if target == nil || target.Body == nil {
-		t.Fatal("runtime shared evidence composition function is unavailable")
-	}
-
-	guardIndex := -1
-	for index, statement := range target.Body.List {
-		conditional, ok := statement.(*ast.IfStmt)
-		if !ok {
-			continue
-		}
-		binary, binaryOK := conditional.Cond.(*ast.BinaryExpr)
-		if !binaryOK || binary.Op != token.LOR {
-			continue
-		}
-		negated, negatedOK := binary.Y.(*ast.UnaryExpr)
-		call, callOK := func() (*ast.CallExpr, bool) {
-			if !negatedOK || negated.Op != token.NOT {
-				return nil, false
+	file := parseGoFile(t, filepath.Join(root, "internal", "runtimeapp", "shared_evidence_dataset_snapshot_v2.go"), 0)
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "newRuntimeSharedEvidenceDatasetSnapshotV2" {
+			if issue := sharedRegistryActivationIssue(function); issue != "" {
+				t.Fatal(issue)
 			}
-			value, ok := negated.X.(*ast.CallExpr)
-			return value, ok
-		}()
-		if !callOK {
-			continue
-		}
-		selector, selectorOK := call.Fun.(*ast.SelectorExpr)
-		receiver, receiverOK := func() (*ast.Ident, bool) {
-			if !selectorOK {
-				return nil, false
-			}
-			value, ok := selector.X.(*ast.Ident)
-			return value, ok
-		}()
-		if !receiverOK || receiver.Name != "preparedRegistry" ||
-			selector.Sel.Name != "WitnessedV2ActivationAllowed" {
-			continue
-		}
-		_, returns := func() (*ast.ReturnStmt, bool) {
-			if len(conditional.Body.List) != 1 {
-				return nil, false
-			}
-			value, ok := conditional.Body.List[0].(*ast.ReturnStmt)
-			return value, ok
-		}()
-		if !returns || guardIndex != -1 {
-			t.Fatal("runtime shared registry activation guard is not one exact early return")
-		}
-		guardIndex = index
-	}
-	if guardIndex < 0 {
-		t.Fatal("runtime shared registry has no non-empty semantic activation guard")
-	}
-
-	constructors := []struct {
-		packageName string
-		function    string
-	}{
-		{packageName: "evidenceregistrystore", function: "NewAuthorityIndexStoreV2"},
-		{packageName: "evidenceregistrystore", function: "NewAuthorityCapsuleStoreV2"},
-		{packageName: "evidenceregistryapp", function: "New"},
-	}
-	for _, constructor := range constructors {
-		before := 0
-		after := 0
-		for index, statement := range target.Body.List {
-			count := runtimeEvidenceRegistryCallCount(statement, constructor.packageName, constructor.function)
-			if index <= guardIndex {
-				before += count
-			} else {
-				after += count
-			}
-		}
-		if before != 0 || after != 1 {
-			t.Fatalf("%s.%s crosses registry activation guard: before=%d after=%d", constructor.packageName, constructor.function, before, after)
+			return
 		}
 	}
+	t.Fatal("runtime shared evidence composition function is unavailable")
 }
 
 func runtimeEvidenceRegistryCallCount(node ast.Node, packageName string, functionName string) int {

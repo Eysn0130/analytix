@@ -94,14 +94,18 @@ jobs:
         working-directory: packages/runtime-go
         run: |
           umask 077
-          export GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
           go test -count=1 -p 1 -parallel 2 -timeout 5m \
             ./internal/adapters/outbound/processsandbox \
             ./internal/adapters/outbound/process
       - name: Execute all macOS integration contracts with synthetic providers
         run: |
           umask 077
-          export GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
           npm test -- --tags-filter=macos-integration
 
   filesystem-contracts:
@@ -173,6 +177,7 @@ jobs:
           profile_root="$(cd "$RUNNER_TEMP" && pwd -P)"
           # go test executes its build target, not the copy requested by -o.
           export GOTMPDIR="$profile_root"
+          export TMPDIR="$profile_root"
           # Keep the existing full-suite deadline, not a new performance SLA.
           go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
             -run "^TestRuntimeTestExecutableIsUnpackagedAndCanonical$|^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
