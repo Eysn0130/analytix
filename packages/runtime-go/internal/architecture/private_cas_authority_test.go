@@ -60,14 +60,8 @@ func TestPrivateCASHasNoAuthorityFreeProductionOpenPath(t *testing.T) {
 		}
 		parsed := parseGoFile(t, file, 0)
 		relative := rel(t, root, file)
-		if relative != "internal/adapters/outbound/finalauthority/private_cas.go" {
-			body, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(body), "openSecurePrivateCAS(") || strings.Contains(string(body), "SecurePrivateCAS{") {
-				t.Fatalf("%s bypasses the sole private CAS constructor", relative)
-			}
+		if relative != "internal/adapters/outbound/finalauthority/private_cas.go" && hasPrivateCASConstruction(parsed) {
+			t.Fatalf("%s bypasses the sole private CAS constructor", relative)
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			function, ok := node.(*ast.FuncDecl)
@@ -101,6 +95,79 @@ func TestPrivateCASHasNoAuthorityFreeProductionOpenPath(t *testing.T) {
 			}
 			return true
 		})
+	}
+}
+
+// A container of existing CAS handles does not construct CAS authority. Inspect
+// the literal's own type, rather than matching the element type's spelling.
+func hasPrivateCASConstruction(node ast.Node) bool {
+	found := false
+	ast.Inspect(node, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.CallExpr:
+			found = found || privateCASCallName(typed) == "openSecurePrivateCAS"
+		case *ast.CompositeLit:
+			found = found || privateCASLiteralConstructsAuthority(typed, typed.Type)
+		}
+		return !found
+	})
+	return found
+}
+
+func privateCASLiteralConstructsAuthority(literal *ast.CompositeLit, kind ast.Expr) bool {
+	if literal.Type != nil {
+		kind = literal.Type
+	}
+	if pointer, ok := kind.(*ast.StarExpr); ok {
+		kind = pointer.X
+	}
+	var element ast.Expr
+	switch typed := kind.(type) {
+	case *ast.Ident:
+		return typed.Name == "SecurePrivateCAS"
+	case *ast.SelectorExpr:
+		return typed.Sel.Name == "SecurePrivateCAS"
+	case *ast.ArrayType:
+		element = typed.Elt
+	case *ast.MapType:
+		element = typed.Value
+	}
+	if element == nil {
+		return false
+	}
+	for _, value := range literal.Elts {
+		if keyed, ok := value.(*ast.KeyValueExpr); ok {
+			value = keyed.Value
+		}
+		if nested, ok := value.(*ast.CompositeLit); ok && privateCASLiteralConstructsAuthority(nested, element) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPrivateCASConstructionGuardDistinguishesHandlesFromAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		source    string
+		violation bool
+	}{
+		{"[]*owner.SecurePrivateCAS{first, second}", false},
+		{"map[string]*owner.SecurePrivateCAS{\"first\": first}", false},
+		{"owner.SecurePrivateCAS{}", true},
+		{"&SecurePrivateCAS{}", true},
+		{"[]*owner.SecurePrivateCAS{{}}", true},
+		{"map[string]*owner.SecurePrivateCAS{\"first\": {}}", true},
+		{"[][]owner.SecurePrivateCAS{{{}}}", true},
+		{"openSecurePrivateCAS(root)", true},
+		{"owner.openSecurePrivateCAS(root)", true},
+	} {
+		expression, err := parser.ParseExpr(tc.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := hasPrivateCASConstruction(expression); got != tc.violation {
+			t.Errorf("%s: violation=%v, want %v", tc.source, got, tc.violation)
+		}
 	}
 }
 

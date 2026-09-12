@@ -548,3 +548,20 @@ previous literal was never issued, remove its public historical blob or justify
 dismissing the alert. Resolve original credential provenance/rotation separately
 without printing or exercising the value. No real Provider check is part of
 these deterministic development tests.
+
+PR #22 final-closure work began from `82e055026` with a clean canonical
+worktree and matching remote PR HEAD; main was `58b365b3b`. Development run
+`34690548012` passed Source baseline, Application, macOS process integration,
+Filesystem and Backend lanes, but still had Go/Runtime failures. Those partial
+results do not admit a merge.
+
+The private-CAS constructor guard incorrectly treated a slice of existing CAS
+handles as constructing authority. It now checks AST construction, including
+negative cases for direct, pointer and nested implicit container literals.
+The original-residue opening method was consolidated unchanged into the sole
+CAS constructor owner, retaining access, binding, inventory and generation
+checks. Local `go test -count=1 ./internal/architecture -run
+'TestPrivateCAS|TestEveryRuntimePrivateCAS'` passed (1.585 s); the complete
+`internal/adapters/outbound/finalauthority` package passed (183.916 s).
+This closes that focused guard/ownership failure only; full architecture,
+current-head remote CI and merge acceptance remain open.
