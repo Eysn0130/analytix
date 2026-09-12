@@ -94,12 +94,14 @@ jobs:
         working-directory: packages/runtime-go
         run: |
           umask 077
+          export GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
           go test -count=1 -p 1 -parallel 2 -timeout 5m \
             ./internal/adapters/outbound/processsandbox \
             ./internal/adapters/outbound/process
       - name: Execute all macOS integration contracts with synthetic providers
         run: |
           umask 077
+          export GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
           npm test -- --tags-filter=macos-integration
 
   filesystem-contracts:
@@ -169,9 +171,11 @@ jobs:
           # correctly rejects noncanonical executable ancestors, even for a
           # test binary; fix the fixture path, not the production inspector.
           profile_root="$(cd "$RUNNER_TEMP" && pwd -P)"
+          # go test executes its build target, not the copy requested by -o.
+          export GOTMPDIR="$profile_root"
           # Keep the existing full-suite deadline, not a new performance SLA.
           go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
-            -run "^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
+            -run "^TestRuntimeTestExecutableIsUnpackagedAndCanonical$|^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
             -o "$profile_root/held-restart.test" \
             -cpuprofile "$profile_root/held-restart.cpu" ./internal/runtimeapp | \
             node ../../scripts/go-test-selection.mjs analytix.local/runtime-go/internal/runtimeapp \
@@ -186,7 +190,7 @@ jobs:
           fi
 
   go-tests:
-    name: Go tests (${{ matrix.tags }})
+    name: Go package tests (${{ matrix.tags }})
     needs: filesystem-contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -207,13 +211,51 @@ jobs:
         with:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
-      - name: Test all Go packages with bounded concurrency
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Test all other Go packages with bounded concurrency
         working-directory: packages/runtime-go
         env:
           TEST_TAGS: ${{ matrix.tags }}
         run: |
           umask 077
-          go test -count=1 -p 1 -parallel 2 -timeout 20m -tags "$TEST_TAGS" ./...
+          node ../../scripts/go-ci-shards.mjs packages
+
+  runtime-shards:
+    name: Runtime regression (${{ matrix.tags }}, shard ${{ matrix.shard }})
+    needs: filesystem-contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        tags: ['', analytix_prod]
+        shard: [0, 1, 2, 3]
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Test the complete dynamically discovered runtime partition
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+          TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          umask 077
+          node ../../scripts/go-ci-shards.mjs runtime "$TEST_SHARD"
 
   backend-tests:
     name: Backend tests
@@ -262,7 +304,7 @@ jobs:
   development-gate:
     name: Development gate
     if: ${{ always() }}
-    needs: [source-baseline, application-tests, macos-integration, filesystem-contracts, restart-contracts, go-tests, backend-tests, rust-tests]
+    needs: [source-baseline, application-tests, macos-integration, filesystem-contracts, restart-contracts, runtime-shards, go-tests, backend-tests, rust-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

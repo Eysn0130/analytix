@@ -3,6 +3,28 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { assertDevelopmentCISuccess, requiredDevelopmentJobs } from './development-ci-gate.mjs'
 import { goTestSelection } from './go-test-selection.mjs'
+import { runtimePackage, runtimeTestShards, otherGoPackages, goExitStatus } from './go-ci-shards.mjs'
+
+test('Go partitions cover every discovered package and runtime test exactly once', () => {
+  const packages = ['analytix.local/runtime-go', runtimePackage, `${runtimePackage}/fixture`]
+  assert.deepEqual([...otherGoPackages(packages.join('\n')), runtimePackage].sort(), packages.sort())
+  const names = ['TestAlpha', 'TestBeta', 'TestGamma', 'TestDelta', 'TestRestart', 'ExampleRead', 'FuzzDecode']
+  const listing = values => `${values.join('\n')}\nok\t${runtimePackage}\t0.001s\n`
+  const shards = runtimeTestShards(listing(names))
+  assert.equal(shards.length, 4)
+  assert.deepEqual(shards.flat().sort(), [...names].sort())
+  assert.deepEqual(runtimeTestShards(listing([...names].reverse())), shards)
+  for (const bad of ['', listing(names.slice(0, 3)), listing([...names, names[0]]), listing(names) + 'unknown inventory\n', names.join('\n')]) {
+    assert.throws(() => runtimeTestShards(bad), /inventory/)
+  }
+  for (const bad of ['', packages.filter(name => name !== runtimePackage).join('\n'), [...packages, runtimePackage].join('\n')]) {
+    assert.throws(() => otherGoPackages(bad), /inventory/)
+  }
+  assert.equal(goExitStatus({ status: 0 }), 0)
+  assert.equal(goExitStatus({ status: 2 }), 2)
+  assert.equal(goExitStatus({ status: null, signal: 'SIGKILL' }), 1)
+  assert.equal(goExitStatus({ status: 0, error: new Error('spawn failed') }), 1)
+})
 
 const success = () => Object.fromEntries(requiredDevelopmentJobs.map(name => [name, { result: 'success' }]))
 
@@ -43,7 +65,12 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.match(restart, /set -o pipefail/)
   assert.match(restart, /profile_root="\$\(cd "\$RUNNER_TEMP" && pwd -P\)"/)
   assert.match(restart, /-o "\$profile_root\/held-restart\.test"/)
+  assert.match(restart, /export GOTMPDIR="\$profile_root"/)
+  assert.match(restart, /TestRuntimeTestExecutableIsUnpackagedAndCanonical/)
   assert.match(restart, /node \.\.\/\.\.\/scripts\/go-test-selection\.mjs/)
+  assert.match(workflow, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs packages/)
+  assert.match(workflow, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs runtime "\$TEST_SHARD"/)
+  assert.match(workflow, /shard: \[0, 1, 2, 3\]/)
 })
 
 test('all complete CI job families are required for the merge gate', () => {

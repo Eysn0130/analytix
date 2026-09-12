@@ -65,7 +65,8 @@ Do not merge with failed, cancelled, skipped or missing required CI jobs.
 
 The `Development gate` check aggregates Source baseline, Application tests,
 the required macOS process-integration lane,
-native Filesystem contracts on Linux and macOS, both full Go modes, Backend
+native Filesystem contracts on Linux and macOS, both full Go modes (all other
+packages plus every dynamically discovered runtimeapp shard), Backend
 tests, isolated Linux/macOS held-state restart contracts and all Rust component jobs. The main ruleset
 requires a PR, that check from GitHub Actions, an up-to-date candidate and resolved
 review conversations. It retains force-update/deletion protection with no bypass

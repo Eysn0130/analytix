@@ -384,7 +384,7 @@ isolated Linux/macOS restart jobs now execute each complete subcase in a fresh
 process under the same CPU/memory bounds and existing 20-minute Go deadline,
 and report function-only CPU profiles. Exact subtest run/pass and package pass
 events are required; zero selections, skips, failures and incomplete output fail
-the gate. Full Go coverage and deadlines are unchanged. The cause of the long
+the gate. Full Go coverage and each process's deadline are unchanged. The cause of the long
 Linux traversal still requires these measurements; do not infer deadlock or an
 undersized budget merely from the suite timeout.
 Neither these focused results nor the source baseline imply full regression,
@@ -397,9 +397,18 @@ deadline or a product latency target. CPU profiles show substantial filesystem,
 hashing and allocation work; they do not establish a deadlock. macOS failed
 before the same behavior at package inspection. The diagnostic executable now
 uses the physical `RUNNER_TEMP` path, preserving strict executable-path checks.
-Native sandbox tests retain the original raw-path assertion and add the same
-read/write/link/child-process/ordinary-work assertions with canonical roots to
-separate host alias behavior; macOS CI must establish the result.
+At `c9d946821`, the native sandbox raw-path assertions still failed while the
+same read/write/link/child-process/ordinary-work assertions with canonical roots
+did not. Production terminal, process and MCP composition already supplies
+canonical protected roots. Both process test packages now use isolated canonical
+temporary/home/configuration roots, with a regression for existing and absent
+protected descendants through an aliased ancestor. Full local processsandbox
+and process packages passed; remote confirmation remains required.
+The package-inspection failure persisted with a canonical `-o` destination:
+Go 1.26.4 executes its temporary build target, not that copied output. An aliased
+`GOTMPDIR` reproduced the exact failure locally; physical `GOTMPDIR` passed the
+new current-executable inspection test. CI now sets the actual build root and
+executes this precondition alongside the held-state test.
 
 That Application run reported 6,161 passes and four failures. Two actual
 `/bin/zsh` parent-owned test contracts now join the required macOS integration
@@ -424,6 +433,19 @@ and lock release. These focused guard passes do not waive the other architecture
 failures; the local activation integration remains unverified because its
 non-removable-APFS prerequisite causes a skip, which the exact-event checker
 correctly rejects.
+
+At `c9d946821`, Application CI subsequently passed **6,163 tests** (18 existing
+or native-lane exclusions), and both Linux held-state contracts passed again.
+The accumulated runtimeapp package deadline is now handled by four dynamically
+discovered partitions per Go build mode. Every discovered Test/Example/Fuzz name
+belongs to exactly one partition; no manual name list can omit new tests. All
+other Go packages remain in the complementary package job. Every partition is
+required by Development gate, retains the 20-minute process deadline, and
+propagates nonzero exits/signals. The existing separate exact-event held-state
+gate still rejects skips. Unit tests prove disjoint/full partitions and failure
+propagation; actual local inventories were partitioned for both build modes.
+This is coverage-preserving orchestration, not a full runtime PASS: remaining
+implementation/fixture/architecture failures must still be resolved.
 
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
