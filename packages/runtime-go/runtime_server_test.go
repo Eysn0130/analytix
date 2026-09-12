@@ -841,18 +841,9 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
 	capture := newProviderCaptureServer(t)
-	modelProviders := string(mustJSON(t, map[string]any{
-		"defaultProviderId": "deepseek",
-		"providers": []map[string]any{
-			{
-				"id":             "deepseek",
-				"apiKey":         "test-provider-key",
-				"baseUrl":        capture.URL() + "/v1",
-				"endpointFormat": "chat_completions",
-				"models":         []string{"deepseek-v4-pro"},
-			},
-		},
-	}))
+	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
+		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
+	)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       g1.RuntimeToken,
 		StartedAt:          g1.StartedAt,
@@ -864,6 +855,7 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	connectProviderRegistry(server.URL)
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title":     "Scoped work prompt",
@@ -905,18 +897,9 @@ func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testi
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
 	capture := newProviderCaptureServer(t)
-	modelProviders := string(mustJSON(t, map[string]any{
-		"defaultProviderId": "deepseek",
-		"providers": []map[string]any{
-			{
-				"id":             "deepseek",
-				"apiKey":         "test-provider-key",
-				"baseUrl":        capture.URL() + "/v1",
-				"endpointFormat": "chat_completions",
-				"models":         []string{"deepseek-v4-pro"},
-			},
-		},
-	}))
+	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
+		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
+	)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       g1.RuntimeToken,
 		StartedAt:          g1.StartedAt,
@@ -928,6 +911,7 @@ func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testi
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	connectProviderRegistry(server.URL)
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title":      "Provider mismatch",
@@ -988,18 +972,9 @@ func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
 	capture := newProviderCaptureServer(t)
-	modelProviders := string(mustJSON(t, map[string]any{
-		"defaultProviderId": "deepseek",
-		"providers": []map[string]any{
-			{
-				"id":             "deepseek",
-				"apiKey":         "test-provider-key",
-				"baseUrl":        capture.URL() + "/v1",
-				"endpointFormat": "chat_completions",
-				"models":         []string{"deepseek-v4-pro"},
-			},
-		},
-	}))
+	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
+		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
+	)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       g1.RuntimeToken,
 		StartedAt:          g1.StartedAt,
@@ -1011,6 +986,7 @@ func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T)
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	connectProviderRegistry(server.URL)
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title":      "Stale thread model",
