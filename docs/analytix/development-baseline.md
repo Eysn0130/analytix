@@ -1001,3 +1001,14 @@ Backend, both filesystem platforms, macOS process integration and both Linux
 held-state owner lanes while other required jobs were still running. These
 results precede the legacy-open fix and do not establish its exact-head gate.
 The next pushed SHA must receive complete required CI before Ready or merge.
+
+At 9017375e7 the remaining CodeQL path-flow alerts were 129–134 and 137–138
+(the moved open/read locations received new alert identities). Each was
+reviewed against that exact candidate and classified as a false positive for
+the custom recovery/challenge/physical-path/source-owner constraints described
+above. The disposition links to PR 22 discussion_r3996804873; the eight review
+conversations were resolved. CodeQL reported SUCCESS after this manual triage.
+This is an evidence-backed alert classification, not an unqualified automated
+security proof, a disabled query or elimination of unrelated CodeQL debt.
+The independently reproduced FIFO defect was fixed and tested before triage.
+Complete required CI and post-merge CI remain the authoritative merge evidence.
