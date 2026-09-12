@@ -338,6 +338,17 @@ xattrs remain rejected), and canonicalize the test helper's temporary parent.
 The alias regression failed before the helper correction. These changes do not
 turn fixture evidence into packaged acceptance; the updated native and full CI
 results still decide PR readiness.
+
+At `8fa2265dc`, all five native macOS packages passed in CI and locally; Linux
+passed isolation, final-authority, raw-artifact and full persistence (12.29 s).
+Its one remaining secure-generation failure was `getdents` returning `ENOENT`
+for an already-unlinked held directory. Cleanup now requires exact inode
+identity, zero links and platform detachment proof for that case; it never
+treats a missing inventory as empty. Same-name replacements remain untouched.
+Darwin's ambiguous replacement case continues to fail closed. Parser-only
+packaging fixtures now declare resource presence and inject only synthetic
+toolchain identity probes, without changing production admission or claiming a
+real package build. The separate toolchain contract tests still run.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { hostname, tmpdir } from 'node:os'
-import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { runInNewContext, runInThisContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inspectNativePayload } from './data-analysis/native-payload-identity'
 import { verifyRuntimeNativeComponent } from './data-analysis/native-runtime-integrity'
@@ -13,15 +14,86 @@ import {
 } from './data-analysis/python-runtime-integrity'
 
 const require = createRequire(import.meta.url)
-const builderConfig = require('../../electron-builder.config.cjs')
-const standardWinConfig = require('../../electron-builder.standard-win.cjs')
-const afterPack = require('../../scripts/after-pack.cjs')
+// Configuration-shape tests describe staged resources, not whatever happens
+// to be cached on the test machine. Never load an Owner release.local.env.
+function builderConfigurationFixture(resourcesPresent = true) {
+  const repoRoot = resolve(__dirname, '../..')
+  const present = new Set(resourcesPresent ? [
+    join(repoRoot, 'managed-chrome'),
+    join(repoRoot, 'build/windows-backend-runtime/.python-runtime'),
+    join(repoRoot, 'build/windows-backend-runtime/python-site-packages'),
+    join(repoRoot, 'build/private-pwsh/pwsh/pwsh.exe')
+  ] : [])
+  const environment = { env: {} }
+  const load = (name: string, base?: unknown) => {
+    const filename = join(repoRoot, name)
+    const localRequire = createRequire(filename)
+    const module = { exports: {} as any }
+    runInNewContext(readFileSync(filename, 'utf8'), {
+      module, __dirname: repoRoot, process: environment, URL,
+      require: (id: string) => {
+        if (id === 'node:fs') return {
+          existsSync: (path: string) => present.has(resolve(path)),
+          readFileSync: () => { throw new Error('configuration fixture attempted private environment access') }
+        }
+        if (id === './electron-builder.config.cjs') return base
+        return localRequire(id)
+      }
+    }, { filename })
+    return module.exports
+  }
+  const base = load('electron-builder.config.cjs')
+  return { base, windows: load('electron-builder.standard-win.cjs', base) }
+}
+
+const { base: builderConfig, windows: standardWinConfig } = builderConfigurationFixture()
+
+// Load the unchanged CommonJS implementation with file-local dependencies.
+// No global require cache or production environment switch is modified.
+function fixtureCommonJS(relativePath: string, dependencies: Record<string, unknown>) {
+  const filename = resolve(__dirname, '../..', relativePath)
+  const localRequire = createRequire(filename)
+  const module = { exports: {} as any }
+  const execute = runInThisContext(`(function(exports, require, module, __filename, __dirname) {\n${readFileSync(filename, 'utf8')}\n})`, { filename })
+  execute(module.exports, (id: string) => Object.hasOwn(dependencies, id) ? dependencies[id] : localRequire(id),
+    module, filename, dirname(filename))
+  return module.exports
+}
+
+// These are receipt/parser/publication-race tests using synthetic binaries.
+// Real toolchain admission remains in rust-native-toolchain-contract.test.ts
+// and the candidate build; a version fixture never executes a compiler.
+const fixtureToolchain = {
+  cargo: resolve('synthetic-toolchain/cargo'),
+  rustc: resolve('synthetic-toolchain/rustc'),
+  environment: {},
+  lock: {
+    cargoVersion: 'cargo 1.94.1 (synthetic-parser-fixture)',
+    rustcVersion: 'rustc 1.94.1 (synthetic-parser-fixture)',
+    cargoExecutableSha256: createHash('sha256').update('synthetic cargo identity').digest('hex'),
+    rustcExecutableSha256: createHash('sha256').update('synthetic rustc identity').digest('hex')
+  }
+}
+const nativeComponentContract = fixtureCommonJS('scripts/native-component-contract.cjs', {
+  './rust-native-toolchain-contract.cjs': { resolvePinnedRustToolchain: () => fixtureToolchain },
+  'node:child_process': {
+    spawnSync: (command: string, args: string[]) => {
+      if (args.length !== 1 || args[0] !== '--version') throw new Error('unexpected execution in toolchain identity fixture')
+      const version = command === fixtureToolchain.cargo ? fixtureToolchain.lock.cargoVersion
+        : command === fixtureToolchain.rustc ? fixtureToolchain.lock.rustcVersion : ''
+      if (!version) throw new Error('unregistered toolchain identity fixture')
+      return { status: 0, signal: null, stdout: `${version}\n`, stderr: '' }
+    }
+  }
+})
+const afterPack = fixtureCommonJS('scripts/after-pack.cjs', {
+  './native-component-contract.cjs': nativeComponentContract
+})
 const electronFusePolicy = require('../../scripts/electron-fuse-policy.cjs')
 const packagedLifecycleGuard = require('../../scripts/packaged-lifecycle-guard.cjs')
 const dataNativeBuild = require('../../scripts/build-data-analysis-native-tools.cjs')
 const developmentCacheEnvironment = require('../../scripts/lib/development-cache-environment.cjs')
 const nativeBuildProbeAuthority = require('../../scripts/native-build-probe-authority.cjs')
-const nativeComponentContract = require('../../scripts/native-component-contract.cjs')
 const pythonRuntimeBuild = require('../../scripts/build-windows-backend-runtime-assets.cjs')
 const pythonRuntimeContract = require('../../scripts/windows-python-runtime-contract.cjs')
 const officialWinCache = require('../../scripts/build-windows-release-cache.cjs')
@@ -556,6 +628,13 @@ afterEach(() => {
 })
 
 describe('electron-builder Analytix packaging', () => {
+  it('omits unstaged optional resources while including every staged resource', () => {
+    const absent = builderConfigurationFixture(false)
+    for (const destination of ['managed-chrome', '.python-runtime', 'python-site-packages', 'pwsh']) {
+      expect(absent.windows.extraResources.some((entry: { to: string }) => entry.to === destination)).toBe(false)
+      expect(standardWinConfig.extraResources.some((entry: { to: string }) => entry.to === destination)).toBe(true)
+    }
+  })
   it('packages the admitted pure DOCX document model without the retired HTML converter or native document runtimes', () => {
     const docxSource = readFileSync(
       join(process.cwd(), 'src/main/services/write-docx-service.ts'),

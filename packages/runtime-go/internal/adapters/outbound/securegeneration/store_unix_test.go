@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -264,6 +265,67 @@ func TestPrivateDirectoryLeaseRecognizesAlreadyDetachedExactDirectory(t *testing
 	}
 	if err := lease.Close(); err != nil {
 		t.Fatalf("close detached lease: %v", err)
+	}
+}
+
+func TestPrivateDirectoryLeaseDetachedCleanupPreservesReplacementContents(t *testing.T) {
+	parentPath := t.TempDir()
+	if err := os.Chmod(parentPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := os.Open(parentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	lease, err := CreatePrivateDirectoryLeaseUnder(context.Background(), parent, "native-session-replaced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lease.Close() })
+	original := filepath.Join(parentPath, "native-session-replaced")
+	if err := os.Remove(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(original, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	residue := filepath.Join(original, "replacement-payload")
+	if err := os.WriteFile(residue, []byte("synthetic replacement must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detachedStat unix.Stat_t
+	if err := unix.Fstat(int(lease.directory.Fd()), &detachedStat); err != nil {
+		t.Fatal(err)
+	}
+	already, removeErr := lease.RemoveEmpty(context.Background())
+	if runtime.GOOS == "linux" {
+		if detachedStat.Nlink != 0 || removeErr != nil || !already {
+			t.Fatalf("Linux detached cleanup links=%d already=%v err=%v", detachedStat.Nlink, already, removeErr)
+		}
+	} else {
+		// APFS can retain the old directory's link count and F_GETPATH name
+		// after unlink. If that name now belongs to a replacement, the existing
+		// Darwin proof is indeterminate and must not claim successful cleanup.
+		if !errors.Is(removeErr, ErrCleanupIndeterminate) || already {
+			t.Fatalf("Darwin ambiguous cleanup did not fail closed: already=%v err=%v", already, removeErr)
+		}
+	}
+	after, err := os.Stat(original)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("replacement directory identity changed: %v", err)
+	}
+	if body, err := os.ReadFile(residue); err != nil || string(body) != "synthetic replacement must survive" {
+		t.Fatalf("replacement contents changed: %v", err)
+	}
+	closeErr := lease.Close()
+	if runtime.GOOS == "linux" && closeErr != nil ||
+		runtime.GOOS == "darwin" && !errors.Is(closeErr, ErrCleanupIndeterminate) {
+		t.Fatalf("cleanup disposition was not retained by Close: %v", closeErr)
 	}
 }
 
