@@ -9,7 +9,9 @@ import { goTestPartition } from './go-test-partition.mjs'
 test('Go partitions cover every discovered package and runtime test exactly once', () => {
   const packages = ['analytix.local/runtime-go', runtimePackage, `${runtimePackage}/fixture`]
   assert.deepEqual([...otherGoPackages(packages.join('\n')), runtimePackage].sort(), packages.sort())
-  const required = [...Array.from({ length: runtimeShardCount * 2 + 1 }, (_, i) => `TestFixture${i}`), 'ExampleRead', 'FuzzDecode']
+  const dedicated = 'TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP'
+  const shared = [...Array.from({ length: runtimeShardCount * 2 + 1 }, (_, i) => `TestFixture${i}`), 'ExampleRead', 'FuzzDecode']
+  const required = [...shared, dedicated]
   const external = runtimeExternalDiagnostics.map(entry => entry.test)
   assert.deepEqual(external, [
     'TestRuntimeOptionalPublicFixturePathV1',
@@ -22,7 +24,13 @@ test('Go partitions cover every discovered package and runtime test exactly once
   const listing = values => `${values.join('\n')}\nok\t${runtimePackage}\t0.001s\n`
   const shards = runtimeTestShards(listing(names))
   assert.equal(shards.length, runtimeShardCount)
-  assert.equal(Math.max(...shards.map(shard => shard.length)) - Math.min(...shards.map(shard => shard.length)), 1)
+  const sharedShards = shards.slice(0, runtimeShardCount - 1)
+  assert.equal(Math.max(...sharedShards.map(shard => shard.length)) - Math.min(...sharedShards.map(shard => shard.length)), 1)
+  assert.deepEqual(shards[runtimeShardCount - 1], [dedicated])
+  assert.ok(sharedShards.every(shard => shard.length > 0 && !shard.includes(dedicated)))
+  sharedShards.forEach((shard, index) => {
+    assert.deepEqual(shard, [...shared].sort().filter((_, ordinal) => ordinal % (runtimeShardCount - 1) === index))
+  })
   assert.deepEqual(shards.flat().sort(), [...required].sort())
   const partition = runtimeTestPartition(listing(names))
   assert.deepEqual([
@@ -35,10 +43,12 @@ test('Go partitions cover every discovered package and runtime test exactly once
   assert.equal(partition.platformRequired[0].platform, 'darwin')
   assert.deepEqual(runtimePlatformSelection(listing([...names, runtimePlatformTests[1]])), runtimePlatformTests)
   assert.throws(() => runtimePlatformSelection(listing(names)), /inventory/)
-  for (const name of [...external, runtimePlatformTests[0]]) {
+  for (const name of [...external, runtimePlatformTests[0], dedicated]) {
     assert.throws(() => runtimeTestPartition(listing(names.filter(value => value !== name))), /inventory/)
   }
-  assert.throws(() => runtimeTestPartition(listing([...required.slice(0, 15), runtimePlatformTests[0], ...external])), /empty shard/)
+  assert.throws(() => runtimeTestPartition(listing([...shared.slice(0, runtimeShardCount - 2), dedicated, runtimePlatformTests[0], ...external])), /empty shard/)
+  const minimum = runtimeTestShards(listing([...shared.slice(0, runtimeShardCount - 1), dedicated, runtimePlatformTests[0], ...external]))
+  assert.ok(minimum.every(shard => shard.length === 1))
   assert.deepEqual(runtimeTestShards(listing([...names].reverse())), shards)
   for (const bad of ['', listing(names.slice(0, runtimeShardCount - 1)), listing([...names, names[0]]), listing(names) + 'unknown inventory\n', names.join('\n')]) {
     assert.throws(() => runtimeTestShards(bad), /inventory/)

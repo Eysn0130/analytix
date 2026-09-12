@@ -24,6 +24,10 @@ export const rootPlatformTests = [
 // only 36/91 and 44/92 top-level tests. Smaller partitions retain that deadline
 // and the complete required inventory; JSON execution proves each selection.
 export const runtimeShardCount = 16
+// This held-state restart test took 639.80s in CI and exhausted its shared
+// partition's cumulative deadline. Reserve one existing shard without changing
+// the test, execution deadline or required inventory.
+const runtimeDedicatedTest = 'TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP'
 export const runtimePlatformTests = [
   'TestRuntimeOptionalPluginOrdinaryLifecycle',
   'TestRuntimeHTTPHostScheduleListUsesExactContainedLoopback'
@@ -94,9 +98,15 @@ export function runtimeTestPartition(output) {
     throw new Error('Go runtime partition inventory lost a declared platform or external entry.')
   }
   const required = discovered.filter(name => !assigned.includes(name))
-  if (required.length < runtimeShardCount) throw new Error('Go runtime partition would contain an empty shard.')
+  if (!required.includes(runtimeDedicatedTest)) {
+    throw new Error('Go runtime partition inventory lost its required dedicated test.')
+  }
+  const shared = required.filter(name => name !== runtimeDedicatedTest)
+  const sharedShardCount = runtimeShardCount - 1
+  if (shared.length < sharedShardCount) throw new Error('Go runtime partition would contain an empty shard.')
   const shards = Array.from({ length: runtimeShardCount }, () => [])
-  required.forEach((name, index) => shards[index % runtimeShardCount].push(name))
+  shared.forEach((name, index) => shards[index % sharedShardCount].push(name))
+  shards[sharedShardCount].push(runtimeDedicatedTest)
   return {
     discovered, shards,
     platformRequired: transferred.map(test => ({ test, lane: 'runtime-platform', platform: 'darwin' })),

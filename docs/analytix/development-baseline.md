@@ -939,3 +939,32 @@ the actual production projector, retain the /private/ restriction, reject
 workspace/securityContext disclosure, and require a visible turn_started event
 so withholding everything cannot satisfy the check. All nine original
 success/failure/cancel by archive/events/usage cuts passed (package 3.008 s).
+
+The held/pii profile completed successfully (369.11 s test, 368.25 s profile
+wall time). It attributed 274.78 s cumulative CPU to original-create residue
+revalidation, including repeated protected filesystem observations. Those
+currentness checks cannot be removed without a separately proven owner
+contract. This is distinct from the corrected pending receipt scan.
+
+All eight tests cut off or not started in the remote ordinary shard 8 run
+passed in a fresh local exact-selection run (52.737 s, no skip or missing test).
+The create-residue recovery test took 7.09 s. These are focused local results,
+not a completed remote shard. Existing remote timing samples cover 360 of 368
+required top-level tests; the remaining eight now have local evidence, which
+cannot predict identical hosted-runner timing.
+
+The CI partition correction reserves shard 15 for the exact held-owner test
+and distributes all other automatically discovered required tests across the
+remaining 15 shards. Both build modes, all 32 required runtime jobs, concurrency
+and the 20-minute package budget remain unchanged. Missing dedicated identity,
+empty selection, skipped/incomplete execution and child-process failure still
+fail closed. Eight orchestration regressions passed, including full inventory
+coverage, disjointness, deterministic ordering and minimum inventory boundaries.
+Actual current-SHA remote execution remains required; this scheduling correction
+does not establish a product startup-latency improvement.
+
+After the public-projector assertion correction, the complete local server
+package passed on the stable source candidate (139.422 s, ordinary mode,
+-count=1 -p 1 -parallel 2 -timeout 20m, isolated native synthetic temp profile).
+This closes the nine local closure-privacy failures without claiming a remote
+or production-mode rerun from this local result.
