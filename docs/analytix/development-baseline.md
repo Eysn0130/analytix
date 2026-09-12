@@ -365,6 +365,15 @@ macOS lane with actual process-sandbox tests. The complementary Linux lane runs
 every untagged application test. Neither lane may be omitted from the merge
 gate. This classification does not extend the existing test timeout or pretend
 that Linux process containment is implemented.
+The current-case projector and checkpoint-recovery guards now check the actual
+preservation-aware constructor, exact authority arguments, signed journal,
+prepared plan/apply pair and scoped callback under the held exclusion. Mutation
+tests reject substituted/nil authorities. The focused guards, strict primary
+CAS projection tests and semantic apply/observation tests passed. The provider
+registry's domain method check also no longer imports the HTTP transport
+package solely for the constant `GET`; exact read-only method validation is
+unchanged and covered by negative tests. Other architecture failures, including
+application-layer filesystem imports, remain unresolved and are not exempted.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

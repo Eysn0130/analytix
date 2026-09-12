@@ -1517,8 +1517,6 @@ func TestProductionPublicProjectionUsesCurrentCaseAuthority(t *testing.T) {
 	source := string(data)
 	for _, required := range []string{
 		"NewCurrentCaseThreadAuthorityValidator(caseThreads, filestore.CaseBindingReader{}",
-		"NewTrustedPublicProjectorWithPrimaryCAS(",
-		"trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("production public projection is missing live case authority wiring %q", required)
@@ -1526,6 +1524,42 @@ func TestProductionPublicProjectionUsesCurrentCaseAuthority(t *testing.T) {
 	}
 	if strings.Contains(source, "NewTrustedPublicProjectorWithCurrentCaseAuthority(trustedFinals") {
 		t.Fatal("production public projection can omit strict primary CAS authority")
+	}
+	app := parseGoFile(t, filepath.Join(root, "internal", "runtimeapp", "app.go"), 0)
+	composition := privateCASFunctionDeclaration(t, app, "newRuntimeServerHandlerWithRootsModeE")
+	if !currentCaseProjectionWiringValid(composition) {
+		t.Fatal("production public projector must bind current case, strict primary CAS and the exact restart preservation owner")
+	}
+}
+
+func currentCaseProjectionWiringValid(composition *ast.FuncDecl) bool {
+	calls := privateCASMatchingCalls(composition, "threadapp", "NewTrustedPublicProjectorWithPreservedHistoryV1")
+	if len(calls) != 1 || len(calls[0].Args) != 5 {
+		return false
+	}
+	for index, name := range []string{"trustedFinals", "caseThreads", "currentCaseAuthority", "acceptedFinalCASReader"} {
+		if privateCASIdent(calls[0].Args[index]) != name {
+			return false
+		}
+	}
+	return privateCASSelectorMatches(calls[0].Args[4], "reportRestartPreservation", "report")
+}
+
+func TestCurrentCaseProjectionGuardRejectsMissingOrSubstitutedAuthorities(t *testing.T) {
+	valid := "threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report)"
+	candidates := []string{valid, "", valid + "; " + valid}
+	for _, authority := range []string{"trustedFinals", "caseThreads", "currentCaseAuthority", "acceptedFinalCASReader", "reportRestartPreservation.report"} {
+		candidates = append(candidates, strings.Replace(valid, authority, "nil", 1))
+	}
+	for index, candidate := range candidates {
+		parsed, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package fixture; func compose() { "+candidate+" }", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		composition := privateCASFunctionDeclaration(t, parsed, "compose")
+		if currentCaseProjectionWiringValid(composition) != (index == 0) {
+			t.Fatalf("projection guard misclassified mutation %d", index)
+		}
 	}
 }
 

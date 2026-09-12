@@ -918,7 +918,7 @@ func TestPrivateCASDirectoryAndOwnerRecoveryOrderIsStrict(t *testing.T) {
 	createResidues := callIndex("recoverRuntimePrivateCASCreateResidues")
 	journal := callIndex("semanticBuilder.RecoverAuthenticatedExisting")
 	orphanTopology := callIndex("recoverRuntimePrivateCASOrphanTopology")
-	owners := callIndex("recoverRuntimePrivateCASOwners")
+	owners := callIndex("recoverRuntimePrivateCASOwnersWithPreservationV1")
 	baseline := callIndex("startupapp.BeginReadOnlyStartupPlanV1")
 	if createResidues < 0 || journal < 0 || orphanTopology < 0 || owners < 0 || baseline < 0 ||
 		!(createResidues < journal && journal < orphanTopology && orphanTopology < owners && owners < baseline) {
@@ -934,11 +934,43 @@ func TestPrivateCASDirectoryAndOwnerRecoveryOrderIsStrict(t *testing.T) {
 	}
 }
 
+func privateCASRecoveryPreservationBindingValid(call *ast.CallExpr) bool {
+	if len(call.Args) != 6 || !privateCASSelectorMatches(call.Args[1], "config", "DataDir") {
+		return false
+	}
+	for index, name := range []string{"ctx", "", "privateCASAccessAuthority", "optionalInstallation", "reportRestartPreservation", "privateCASRecoveryJournal"} {
+		if name != "" && privateCASIdent(call.Args[index]) != name {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPrivateCASRecoveryGuardRejectsSubstitutedAuthority(t *testing.T) {
+	valid := "recoverRuntimePrivateCASOwnersWithPreservationV1(ctx, config.DataDir, privateCASAccessAuthority, optionalInstallation, reportRestartPreservation, privateCASRecoveryJournal)"
+	candidates := []string{valid, "recoverRuntimePrivateCASOwnersWithPreservationV1()"}
+	for _, authority := range []string{"ctx", "config.DataDir", "privateCASAccessAuthority", "optionalInstallation", "reportRestartPreservation", "privateCASRecoveryJournal"} {
+		candidates = append(candidates, strings.Replace(valid, authority, "nil", 1))
+	}
+	for index, candidate := range candidates {
+		expression, err := parser.ParseExpr(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if privateCASRecoveryPreservationBindingValid(expression.(*ast.CallExpr)) != (index == 0) {
+			t.Fatalf("recovery guard misclassified mutation %d", index)
+		}
+	}
+}
+
 func TestLiveCheckpointRecoveryCompletesBeforeSemanticBaselineAndUsesOnlyAuthorizedDelta(t *testing.T) {
 	root := runtimeGoRoot(t)
 	app := parseGoFile(t, filepath.Join(root, "internal", "runtimeapp", "app.go"), 0)
 	composition := privateCASFunctionDeclaration(t, app, "newRuntimeServerHandlerWithRootsModeE")
-	owners := privateCASExactlyOneCall(t, composition, "", "recoverRuntimePrivateCASOwners")
+	owners := privateCASExactlyOneCall(t, composition, "", "recoverRuntimePrivateCASOwnersWithPreservationV1")
+	if !privateCASRecoveryPreservationBindingValid(owners) {
+		t.Fatal("owner recovery must retain the exact access, installation, preservation and signed journal authorities")
+	}
 	recoveryCall := privateCASExactlyOneCall(
 		t, composition, "", "recoverAuthenticatedCheckpointOperationsBeforeSemanticBaselineV1",
 	)
@@ -957,12 +989,14 @@ func TestLiveCheckpointRecoveryCompletesBeforeSemanticBaselineAndUsesOnlyAuthori
 		retirement.Pos() < postApplyVerify.Pos()) {
 		t.Fatal("runtime composition does not recover, seal, retire/apply, then post-verify in order")
 	}
-	if len(retirement.Args) != 5 ||
+	if len(retirement.Args) != 7 ||
 		privateCASIdent(retirement.Args[0]) != "ctx" ||
 		!privateCASSelectorMatches(retirement.Args[1], "config", "DataDir") ||
 		privateCASIdent(retirement.Args[2]) != "privateCASAccessAuthority" ||
-		!privateCASCallExpressionMatches(retirement.Args[3], "prepared", "Plan", 0) ||
-		!privateCASSelectorMatches(retirement.Args[4], "prepared", "Apply") {
+		privateCASIdent(retirement.Args[3]) != "optionalInstallation" ||
+		!privateCASCallExpressionMatches(retirement.Args[4], "prepared", "Plan", 0) ||
+		!privateCASSelectorMatches(retirement.Args[5], "prepared", "Apply") ||
+		privateCASIdent(retirement.Args[6]) != "reportRestartPreservation" {
 		t.Fatal("runtime composition does not bind the exact prepared plan/apply pair to the retirement wrapper")
 	}
 	if direct := privateCASMatchingCalls(composition, "prepared", "Apply"); len(direct) != 0 {
@@ -1060,17 +1094,31 @@ func TestLiveCheckpointRecoveryCompletesBeforeSemanticBaselineAndUsesOnlyAuthori
 	prepareSet := privateCASExactlyOneCall(t, exclusion, "", "prepareSecurePrivateCASRecoveryAuthoritySetV4")
 	targets := privateCASExactlyOneCall(t, exclusion, "prepared", "currentTargets")
 	revoke := privateCASExactlyOneCall(t, exclusion, "", "revokePreparedPrivateCASRecoveryGenerationSubsetV4")
-	apply := privateCASExactlyOneCall(t, exclusion, "", "apply")
+	apply := privateCASExactlyOneCall(t, exclusion, "privateCASRecoveryExclusion", "withSemanticObservationV1")
 	if !(acquire.Pos() < prepareSet.Pos() &&
 		prepareSet.Pos() < targets.Pos() &&
 		targets.Pos() < revoke.Pos() &&
 		revoke.Pos() < apply.Pos()) {
 		t.Fatal("finalauthority retirement exclusion does not retire prepared generations before apply")
 	}
-	if len(apply.Args) != 1 || privateCASIdent(apply.Args[0]) != "ctx" ||
+	if len(apply.Args) != 2 || privateCASIdent(apply.Args[0]) != "ctx" || privateCASIdent(apply.Args[1]) != "apply" ||
 		!privateCASReturnsCall(exclusion, apply) ||
 		!privateCASDefersCall(exclusion, "privateCASRecoveryExclusion", "releaseRecovery") {
 		t.Fatal("finalauthority retirement exclusion does not return apply under its held recovery lease")
+	}
+	if len(privateCASMatchingCalls(exclusion, "", "apply")) != 0 {
+		t.Fatal("retirement apply bypasses its bounded semantic observation context")
+	}
+	observationSource := parseGoFile(t, filepath.Join(root, "internal", "adapters", "outbound", "finalauthority", "private_cas_semantic_observation.go"), 0)
+	observation := privateCASFunctionDeclaration(t, observationSource, "withSemanticObservationV1")
+	callback := privateCASExactlyOneCall(t, observation, "", "apply")
+	if len(callback.Args) != 1 || !privateCASCallExpressionMatches(callback.Args[0], "context", "WithValue", 3) ||
+		!privateCASReturnsCall(observation, callback) {
+		t.Fatal("semantic observation must invoke the exact callback with its scoped context and return its error")
+	}
+	boundContext := callback.Args[0].(*ast.CallExpr)
+	if privateCASIdent(boundContext.Args[0]) != "observationContext" || privateCASIdent(boundContext.Args[2]) != "scope" {
+		t.Fatal("semantic callback lost its cancellable context or exact scope")
 	}
 }
 

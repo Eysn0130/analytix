@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"math"
-	"net/http"
 	"net/netip"
 	"net/url"
 	"reflect"
@@ -772,7 +771,7 @@ func (binding OAuthBindingMetadata) Validate() error {
 }
 
 func (binding AccountObservationBinding) Validate() error {
-	if binding.SchemaVersion != 1 || binding.Method != http.MethodGet ||
+	if binding.SchemaVersion != 1 || binding.Method != "GET" ||
 		binding.Projection != "normalized-quota-v1" || !validOAuthEndpoint(binding.Endpoint) {
 		return ErrInvalidRegistry
 	}
