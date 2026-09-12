@@ -862,18 +862,15 @@ func TestProductionPrivateCASRecoveryCannotMaterializeCommittedBodies(t *testing
 	) {
 		t.Fatal("private CAS owner restores eager committed-file materialization API")
 	}
-	reportRecovery, err := os.ReadFile(filepath.Join(
+	reportRecovery := parseGoFile(t, filepath.Join(
 		root, "internal", "adapters", "outbound", "reportpublication", "store_recovery_plan.go",
-	))
-	if err != nil {
-		t.Fatal(err)
+	), 0)
+	validator := privateCASFunctionDeclaration(t, reportRecovery, "validateDomainSemantics")
+	if !reportArtifactRecoveryUsesMetadata(validator) {
+		t.Fatal("report artifact recovery must consume only its bound, body-free material visitor")
 	}
-	if !strings.Contains(string(reportRecovery), `VisitCommittedMaterials(`) ||
-		!strings.Contains(string(reportRecovery), `"artifacts"`) {
-		t.Fatal("report artifact recovery does not use body-free prepared material")
-	}
-	if strings.Contains(string(reportRecovery), `VisitCommittedFiles(ctx, "artifacts"`) {
-		t.Fatal("report artifact recovery materializes protected artifact bodies")
+	if total, metadata := reportArtifactMaterialVisits(reportRecovery); total != 1 || metadata != 1 {
+		t.Fatal("report recovery introduces an extra artifact reader outside its bound validator")
 	}
 }
 
