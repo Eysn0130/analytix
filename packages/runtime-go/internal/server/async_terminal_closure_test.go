@@ -172,14 +172,37 @@ func TestAsyncTerminalClosurePreservesUnpublishedOutcomeAcrossNextTurn(t *testin
 				if err != nil || !reflect.DeepEqual(before["turns"], after["turns"]) {
 					t.Fatal("next turn changed unresolved terminal inventory")
 				}
-				// Do not use a raw error as the public fallback response or history.
+				// Internal durable replay may retain the legitimate security context,
+				// but must not retain the raw failure or private persistence path.
 				replay, err := handler.store.LoadEventsSince(threadID, 0)
 				if err != nil {
 					t.Fatal(err)
 				}
 				body, _ := json.Marshal(replay.Events)
-				if strings.Contains(string(body), "closure-sentinel") || strings.Contains(string(body), "/private/") {
-					t.Fatal("public replay exposed private failure input")
+				if strings.Contains(string(body), "closure-sentinel") || strings.Contains(string(body), handler.store.root) {
+					t.Fatal("durable replay retained private failure input")
+				}
+				// Exercise the actual production projector separately: internal
+				// workspaceRealPath is not evidence of public disclosure.
+				publicStarted := false
+				for _, event := range replay.Events {
+					projected, visible, projectionErr := handler.publicProjector.ProjectEvent(threadID, after, event)
+					if projectionErr != nil {
+						t.Fatal(projectionErr)
+					}
+					if !visible {
+						continue
+					}
+					publicBody, err := json.Marshal(projected)
+					if err != nil || strings.Contains(string(publicBody), "closure-sentinel") ||
+						strings.Contains(string(publicBody), handler.store.root) || strings.Contains(string(publicBody), "/private/") ||
+						strings.Contains(string(publicBody), stringField(after, "workspace")) || projected["securityContext"] != nil {
+						t.Fatal("public replay exposed failure input or private execution context")
+					}
+					publicStarted = publicStarted || stringField(projected, "kind") == "turn_started"
+				}
+				if !publicStarted {
+					t.Fatal("privacy assertion did not exercise a visible public turn event")
 				}
 				terminalCount := 0
 				for _, event := range replay.Events {

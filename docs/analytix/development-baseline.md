@@ -929,3 +929,13 @@ HTTP test (639.80 s), plus 144.30/140.73/119.05 s tests in the same partition.
 The held fixture has only one pending receipt/disposition, so the lifecycle
 optimization cannot be assumed to solve this separate cumulative cost. A
 focused held/pii profile is in progress before any further orchestration change.
+
+The local server privacy failure was a boundary mismatch in the assertion:
+LoadEventsSince returns internal events including the legitimate ordinary
+workspaceRealPath. A blanket /private/ match therefore classified the isolated
+/private/tmp workspace as an error leak. Durable replay still rejects the exact
+fault canary and full persistence root. Public privacy assertions now also run
+the actual production projector, retain the /private/ restriction, reject
+workspace/securityContext disclosure, and require a visible turn_started event
+so withholding everything cannot satisfy the check. All nine original
+success/failure/cancel by archive/events/usage cuts passed (package 3.008 s).
