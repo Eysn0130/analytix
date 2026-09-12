@@ -86,15 +86,22 @@ func (LegacySourceReader) ReadLegacySource(request registryport.LegacySourceRequ
 }
 
 func readLegacySourceFile(path string, before os.FileInfo, limit int64) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := openLegacySourceFile(path)
 	if err != nil {
 		return nil, registryport.ErrVerification
 	}
 	opened, statErr := file.Stat()
+	// Validate the opened object before reading: a path may have changed
+	// since observation, and a byte limit does not bound a special-file read.
+	if statErr != nil || !legacyMigrationRegularSingleLinkFileInfo(opened) ||
+		!os.SameFile(before, opened) || limit <= 0 || opened.Size() <= 0 || opened.Size() > limit {
+		_ = file.Close()
+		return nil, registryport.ErrVerification
+	}
 	loaded, readErr := io.ReadAll(io.LimitReader(file, limit+1))
 	closeErr := file.Close()
 	after, afterErr := os.Lstat(path)
-	if statErr != nil || readErr != nil || closeErr != nil || afterErr != nil ||
+	if readErr != nil || closeErr != nil || afterErr != nil ||
 		!legacyMigrationRegularSingleLinkFileInfo(opened) || !legacyMigrationRegularSingleLinkFileInfo(after) ||
 		!os.SameFile(before, opened) || !os.SameFile(opened, after) || len(loaded) == 0 || int64(len(loaded)) > limit {
 		for index := range loaded {

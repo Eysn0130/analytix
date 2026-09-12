@@ -968,3 +968,36 @@ package passed on the stable source candidate (139.422 s, ordinary mode,
 -count=1 -p 1 -parallel 2 -timeout 20m, isolated native synthetic temp profile).
 This closes the nine local closure-privacy failures without claiming a remote
 or production-mode rerun from this local result.
+
+## PR 22 legacy-source review delta (2026-09-13)
+
+Review-conversation inspection found eight CodeQL path-flow annotations
+(129–136) in the legacy Provider source adapter. They share one request path
+flow. Application authority consumes an exact one-use challenge bound to the
+retained recovery before the adapter runs; the adapter checks device/inode,
+single-link identity and the canonical physical-path digest, and the application
+then checks source bytes/hash and the complete owner challenge contract.
+Those custom constraints must be considered when interpreting the static flow;
+no scanner exclusion or broad sanitizer is added.
+
+The review also identified a concrete open/read race: the old helper opened a
+path normally and checked the opened object's identity only after reading.
+Replacing either source or owner with a FIFO after observation blocked the
+read. A bounded subprocess regression reproduced both failures before the fix
+(5-second deadline each, child reaped). This is a direct PR safety issue and is
+being corrected at the filesystem adapter, without changing migration authority.
+
+The race fix now uses a no-follow, nonblocking Unix open and validates the opened
+regular single-link object, expected identity and bounded nonempty size before
+reading. Windows uses a reparse-point handle and disk/type/link checks without
+an ordinary-open fallback. Existing post-read identity checks and safe errors
+remain. Complete providerregistryfs passed (98.442 s), focused migration and
+recovery contracts passed (136.515 s), and the integration owner's focused
+physical-boundary/replacement rerun passed (7.096 s). Windows amd64 compiled
+successfully; no Windows runtime or packaging acceptance is claimed.
+
+Remote run 34704036542 at 29cacee53 had passed Source baseline, Application,
+Backend, both filesystem platforms, macOS process integration and both Linux
+held-state owner lanes while other required jobs were still running. These
+results precede the legacy-open fix and do not establish its exact-head gate.
+The next pushed SHA must receive complete required CI before Ready or merge.
