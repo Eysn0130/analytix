@@ -507,6 +507,40 @@ individually. Root/server/migration failures remain, and PR #22 is not mergeable
 Native installer and isolated packaged acceptance follow a genuine Development
 gate; they are not implied by these focused results.
 
+At `7d3e60a0f`, both Linux exact held-state jobs passed again (218.41 s /
+282.41 s) after removing the unnecessary restart-lane `TMPDIR` override.
+Canonical `GOTMPDIR` remains, and the short `TMPDIR` applies only to the native
+socket lane. This establishes the bounded environment correction, not a claim
+that all storage locations have equal performance. Source baseline and both
+filesystem lanes passed. Full runtime/architecture regression is still open.
+
+The macOS native processsandbox/process packages now pass remotely. The two
+parent-owned Milestone A tests initially failed because their stderr digest
+exactly matched the Owner cache backing-volume rejection: a synthetic parser
+fixture still sourced the real hardware-specific preflight. Commit `a638a2734`
+supplies a test-only sourced preflight bound to the parent's disposable
+home/temp/cache, including exact exit-1 negative tests. Production preflight
+and acceptance classes are unchanged. The complete local file passed 176 tests;
+all four native Vitest cases passed remotely, but that job remained failing
+on an unhandled AppShell dynamic import during teardown. A tag-excluded suite
+does not run its `afterAll`; collection-owned preloads must settle before its
+environment disappears. The test now explicitly awaits its own preloads during
+collection, with deterministic pending/ready route fixtures instead of a race
+against module-cache speed. Original loading/layout/boot assertions remain and
+a ready-state check was added. All four tests passed locally; tag-excluded
+collection completed without unhandled imports (not a behavior PASS). No errors
+are caught or suppressed. The complete local native-tag lane then passed all
+four selected tests (213.39 s), including the real D-0242 contract, with no
+unhandled errors. Other cases remain covered by the complementary application
+lane. This lifecycle correction still needs current-head remote verification;
+four passing cases alone never
+justify ignoring an unhandled error.
+
+Commit `ab5a5ec08` also passed the three original tool-scope, invalid-model and
+stale-thread-model tests (129.463 s) after explicit synthetic Registry setup.
+Invalid models still cause zero Provider requests and the exact structured
+failure. Existing capability/security assertions were not relaxed.
+
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
 canary and retains its non-disclosure assertion. That does **not** prove the
