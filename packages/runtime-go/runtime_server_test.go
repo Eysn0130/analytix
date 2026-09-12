@@ -453,11 +453,13 @@ func TestRuntimeServerRuntimeInfoReadsVisionBridgeCapabilityConfig(t *testing.T)
 
 	info := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/runtime/info", DefaultRuntimeToken, nil, http.StatusOK)
 	visionBridge := mapField(t, mapField(t, info, "capabilities"), "visionBridge")
-	if visionBridge["status"] != "available" || visionBridge["available"] != true || visionBridge["enabled"] != true {
-		t.Fatalf("runtime info should expose available vision bridge state: %#v", visionBridge)
+	// Legacy capability configuration expresses intent and limits; it cannot
+	// establish Registry media authority or a trusted local image privacy path.
+	if visionBridge["status"] != "unavailable" || visionBridge["available"] != false || visionBridge["enabled"] != true || visionBridge["reasonCode"] != "unavailable" {
+		t.Fatalf("legacy routing must not advertise executable vision authority: %#v", visionBridge)
 	}
-	if visionBridge["providerId"] != "xiaomi" || visionBridge["model"] != "mimo-v2.5" {
-		t.Fatalf("runtime info should preserve configured bridge provider/model: %#v", visionBridge)
+	if visionBridge["providerId"] != nil || visionBridge["model"] != nil {
+		t.Fatalf("runtime info exposed legacy bridge route as current authority: %#v", visionBridge)
 	}
 	if visionBridge["semanticProbeStatus"] != "supported" || jsonIntField(t, visionBridge, "maxScreenshotsPerTurn") != 3 {
 		t.Fatalf("runtime info should preserve probe status and screenshot limit: %#v", visionBridge)
@@ -2349,10 +2351,10 @@ func TestRuntimeServerContractCoversHTTPAndSSESubset(t *testing.T) {
 	if _, ok := thread["latestSeq"].(float64); thread["id"] != "thr_g2_read" || !ok {
 		t.Fatalf("thread read must return ThreadSchema plus latestSeq: %#v", thread)
 	}
-	researchWorkspace := stringField(thread, "workspace")
-	if researchWorkspace == "" {
+	if stringField(thread, "workspace") == "" {
 		t.Fatal("G2 contract thread lacks its host-owned workspace")
 	}
+	researchWorkspace := t.TempDir()
 	patchTarget := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title": "Patch contract target", "workspace": researchWorkspace,
 	}), http.StatusCreated)
@@ -4941,16 +4943,22 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	durableRoot := t.TempDir()
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
-		DurableTempDir: t.TempDir(),
+		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
 		Port:           0,
 		DataDir:        dataDir,
 	}))
 	defer server.Close()
+	owner := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
+		"title": "Attachment owner", "workspace": workspace,
+	}), http.StatusCreated)
+	threadID := stringField(owner, "id")
 
 	rejected := assertLiveJSON(
 		t,
@@ -4960,7 +4968,7 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 		g1.RuntimeToken,
 		mustJSON(t, map[string]any{
 			"name": "private.txt", "mimeType": "text/plain", "dataBase64": "cHJpdmF0ZQ==",
-			"threadId": "thr_other", "workspace": "/tmp/read",
+			"threadId": "thr_other", "workspace": workspace,
 		}),
 		http.StatusForbidden,
 	)
@@ -4975,7 +4983,7 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 		g1.RuntimeToken,
 		mustJSON(t, map[string]any{
 			"name": "private.txt", "mimeType": "text/plain", "dataBase64": "cHJpdmF0ZQ==",
-			"threadId": "thr_g2_read", "workspace": "/tmp/read",
+			"threadId": threadID, "workspace": workspace,
 		}),
 		http.StatusCreated,
 	)
@@ -4983,19 +4991,19 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 	if threadScopedID == "" {
 		t.Fatalf("thread-scoped upload missing id: %#v", threadScoped)
 	}
-	metadataForbidden := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"?thread_id=thr_other&workspace="+url.QueryEscape("/tmp/read"), g1.RuntimeToken, nil, http.StatusForbidden)
+	metadataForbidden := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"?thread_id=thr_other&workspace="+url.QueryEscape(workspace), g1.RuntimeToken, nil, http.StatusForbidden)
 	if metadataForbidden["code"] != "forbidden" {
 		t.Fatalf("attachment metadata was readable without owner authority: %#v", metadataForbidden)
 	}
 	other := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
-		"title": "Other attachment owner", "workspace": "/tmp/read",
+		"title": "Other attachment owner", "workspace": workspace,
 	}), http.StatusCreated)
 	otherThreadID := stringField(other, "id")
-	crossThread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"/content?thread_id="+url.QueryEscape(otherThreadID)+"&workspace="+url.QueryEscape("/tmp/read"), g1.RuntimeToken, nil, http.StatusForbidden)
+	crossThread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"/content?thread_id="+url.QueryEscape(otherThreadID)+"&workspace="+url.QueryEscape(workspace), g1.RuntimeToken, nil, http.StatusForbidden)
 	if crossThread["code"] != "forbidden" {
 		t.Fatalf("cross-thread attachment owner was accepted: %#v", crossThread)
 	}
-	allowed := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"/content?thread_id=thr_g2_read&workspace="+url.QueryEscape("/tmp/read"), g1.RuntimeToken, nil, http.StatusOK)
+	allowed := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/attachments/"+threadScopedID+"/content?thread_id="+url.QueryEscape(threadID)+"&workspace="+url.QueryEscape(workspace), g1.RuntimeToken, nil, http.StatusOK)
 	if allowed["dataBase64"] != "cHJpdmF0ZQ==" {
 		t.Fatalf("exact owner could not read attachment: %#v", allowed)
 	}
@@ -5119,16 +5127,22 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	durableRoot := t.TempDir()
 	firstHandler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
-		DurableTempDir: t.TempDir(),
+		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
 		Port:           0,
 		DataDir:        dataDir,
 	})
 	server := httptest.NewServer(firstHandler)
+	owner := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
+		"title": "Attachment owner", "workspace": workspace,
+	}), http.StatusCreated)
+	threadID := stringField(owner, "id")
 	upload := assertLiveJSON(
 		t,
 		server.URL,
@@ -5139,8 +5153,8 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 			"name":       "hello.txt",
 			"mimeType":   "text/plain",
 			"dataBase64": "aGVsbG8=",
-			"threadId":   "thr_g2_read",
-			"workspace":  "/tmp/read",
+			"threadId":   threadID,
+			"workspace":  workspace,
 		}),
 		http.StatusCreated,
 	)
@@ -5185,13 +5199,13 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
-		DurableTempDir: t.TempDir(),
+		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
 		Port:           0,
 		DataDir:        dataDir,
 	}))
 	defer restarted.Close()
-	content := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/attachments/"+attachmentID+"/content?thread_id=thr_g2_read&workspace="+url.QueryEscape("/tmp/read"), g1.RuntimeToken, nil, http.StatusOK)
+	content := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/attachments/"+attachmentID+"/content?thread_id="+url.QueryEscape(threadID)+"&workspace="+url.QueryEscape(workspace), g1.RuntimeToken, nil, http.StatusOK)
 	if content["dataBase64"] != "aGVsbG8=" || mapField(t, content, "attachment")["localFilePath"] != nil {
 		t.Fatalf("persisted attachment content mismatch after restart: %#v", content)
 	}
@@ -12106,7 +12120,7 @@ func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
 		}
 		projection, err := domaintoolresult.ParsePublicToolResultProjectionV1(item["output"])
 		if err != nil || projection.ProjectionKind != domaintoolresult.ProjectionHostStatus || projection.Status != "failed" ||
-			projection.MessageKey != "tool_failed" || projection.Code != "tool_failed" {
+			projection.MessageKey != "tool_failed" || projection.Code != "validation_error" {
 			t.Fatalf("cross-parent rejection did not use the closed public projection: item=%#v err=%v", item, err)
 		}
 		foundClosedRejection = true
@@ -18600,10 +18614,37 @@ func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
 		t.Fatalf("old-epoch boundary remained projected after case rebinding: %#v", turn)
 	}
 	durableEvents, err := os.ReadFile(filepath.Join(durableRoot, "threads", threadID, "events.jsonl"))
-	if err != nil || !bytes.Contains(durableEvents, []byte(`"acceptedFinal":{`)) ||
-		!bytes.Contains(durableEvents, []byte(`"finalGateVersion":"`+domainevidence.FinalEvidenceGateVersion+`"`)) ||
+	if err != nil || bytes.Contains(durableEvents, []byte(`"acceptedFinal":`)) ||
+		bytes.Contains(durableEvents, []byte(`"finalGateVersion":`)) ||
 		bytes.Contains(durableEvents, []byte("stale-input-secret")) || bytes.Contains(durableEvents, []byte("STALE_CASE_INPUT_FABRICATED_FACT_4200000")) {
-		t.Fatalf("stale case input durable closure mismatch: err=%v events=%s", err, durableEvents)
+		t.Fatalf("stale case input durable closure violated public-only storage: err=%v", err)
+	}
+	publicationSlots := map[string]bool{}
+	for _, line := range bytes.Split(bytes.TrimSpace(durableEvents), []byte("\n")) {
+		var event map[string]any
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		slot := stringField(event, "publicationSlot")
+		if slot == "" {
+			continue
+		}
+		if stringField(event, "threadId") != threadID || stringField(event, "turnId") != turnID ||
+			publicationSlots[slot] || stringField(event, "publicationCommitId") == "" ||
+			stringField(event, "publicationPayloadDigest") != appturn.AcceptedFinalPublicationPayloadDigest(event) {
+			t.Fatal("stale case closure lost exact durable publication binding")
+		}
+		publicationSlots[slot] = true
+		if slot == "assistant-final" {
+			item, _ := event["item"].(map[string]any)
+			view, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(item["acceptedFinalView"])
+			if err != nil || view.Variant != domainevidence.SourceUnavailableAnswer || view.ClaimCount != 0 || view.ReceiptMetadata.Count != 0 {
+				t.Fatal("stale case closure lost its claim-free public final")
+			}
+		}
+	}
+	if !reflect.DeepEqual(publicationSlots, map[string]bool{"assistant-final": true, "usage": true, "terminal": true}) {
+		t.Fatal("stale case closure lost its complete durable publication")
 	}
 }
 
@@ -18979,9 +19020,10 @@ func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t
 	}
 	finalThread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	turn := findRuntimeServerTurn(t, finalThread, turnID)
-	if stringField(turn, "status") != "completed" || turn["acceptedFinal"] == nil {
+	if stringField(turn, "status") != "completed" || turn["acceptedFinal"] != nil {
 		t.Fatalf("shutdown changed the accepted legacy boundary: %#v", turn)
 	}
+	assertLegacySnapshotSourceUnavailable(t, server.URL, threadID, turnID)
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
 	if !strings.Contains(replay, "event: accepted_final_batch") || !strings.Contains(replay, `"kind":"turn_completed"`) ||
 		strings.Contains(replay, "must not write") || strings.Contains(replay, "event: approval_requested") {
@@ -19173,7 +19215,7 @@ func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testi
 	defer restarted.Close()
 	finalThread := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	finalTurn := findRuntimeServerTurn(t, finalThread, turnID)
-	if status := stringField(finalTurn, "status"); status != "completed" || finalTurn["acceptedFinal"] == nil || stringField(finalTurn, "pendingId") != "" || stringField(finalTurn, "pendingKind") != "" {
+	if status := stringField(finalTurn, "status"); status != "completed" || finalTurn["acceptedFinal"] != nil || stringField(finalTurn, "pendingId") != "" || stringField(finalTurn, "pendingKind") != "" {
 		t.Fatalf("restarted legacy boundary was not restored exactly: %#v", finalTurn)
 	}
 	assertLegacySnapshotSourceUnavailable(t, restarted.URL, threadID, turnID)

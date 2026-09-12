@@ -860,3 +860,33 @@ increase. A local external-filesystem run separately exhausted the unchanged
 20-minute cumulative package budget after three complete faults; this is not
 a full lifecycle PASS. Synthetic runtime profiles may use isolated native temp
 roots while compiler/dependency storage remains on the configured cache volume.
+
+At 7099f0015 the complete ordinary root inventory executed all 321 tests:
+312 passed and nine failed, with zero unstarted tests. Eight failures were
+remaining contract/fixture drift. Attachment and research positives referenced
+an uncreated historical workspace; they now create real isolated workspaces
+and threads. Attachment restart reuses the same durable root and owner identity.
+These three public tests passed locally (3.91/3.74/8.46 s). The public-final
+checks now require V3 acceptedFinalView, reject private acceptedFinal in public
+records, and validate complete durable publication slots and payload digests.
+Cross-parent continuation retains the closed validation_error classification
+and all non-disclosure/zero-child-call negatives. Those four tests passed
+locally (4.80/3.66/3.81/8.88 s).
+
+Vision capability configuration is an intent/limit fixture, not executable
+authority. Its legacy route cannot establish Registry media admission or the
+still-unimplemented trusted local image privacy projector; runtime-info must
+remain unavailable and withhold that route. The corrected negative passed
+(3.27 s), retaining enabled intent, probe metadata, budgets and secret/endpoint
+redaction. No working image/vision path is claimed or implemented in this CI
+closure. The remaining stale-child startup fixture and native lifecycle cost
+are still being resolved; these focused results are not full remote PASS.
+
+All ten exact native root process contracts passed locally (43.086 s, no skip).
+The missing-optional-plugin lifecycle completed locally in 347.894 s with CPU
+profiling. Its profile attributes 209.33 s cumulative CPU to pending trusted
+inventory and 193.60 s to individual secure receipt reads. Snapshot inventory
+already reads all receipts twice; disposition validation redundantly rereads
+each receipt and rescans the protected CAS tree. The pending-store fix is being
+validated at that owner boundary, without caching across requests, changing
+replay authority checks, or increasing the existing timeout.
