@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -112,13 +111,25 @@ func TestCompositeLeaseRejectsMissingRootAppearanceAndAncestorSwap(t *testing.T)
 	}
 }
 
-func TestCompositeLeaseBlocksCaseAliasOnCaseInsensitiveVolume(t *testing.T) {
-	base := t.TempDir()
-	aliasBase := filepath.Join(filepath.Dir(base), strings.ToUpper(filepath.Base(base)))
+func TestCompositeLeaseMatchesFilesystemCaseSensitivity(t *testing.T) {
+	parent := t.TempDir()
+	// t.TempDir's final component can be numeric; uppercasing it would probe
+	// the same spelling and misclassify every filesystem as case-insensitive.
+	base := filepath.Join(parent, "CaseProbe")
+	aliasBase := filepath.Join(parent, "CASEPROBE")
+	if err := os.Mkdir(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	baseInfo, baseErr := os.Stat(base)
 	aliasInfo, aliasErr := os.Stat(aliasBase)
-	if baseErr != nil || aliasErr != nil || !os.SameFile(baseInfo, aliasInfo) {
-		return
+	if baseErr != nil || aliasErr != nil && !errors.Is(aliasErr, os.ErrNotExist) {
+		t.Fatalf("case-sensitivity probe failed: base=%v alias=%v", baseErr, aliasErr)
+	}
+	caseInsensitive := aliasErr == nil && os.SameFile(baseInfo, aliasInfo)
+	if !caseInsensitive {
+		if err := os.Mkdir(aliasBase, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	firstRoots, err := ResolveRootSet(filepath.Join(base, "CaseData"), filepath.Join(base, "DurableA"))
 	if err != nil {
@@ -130,15 +141,31 @@ func TestCompositeLeaseBlocksCaseAliasOnCaseInsensitiveVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	aliasRoots, err := ResolveRootSet(filepath.Join(aliasBase, "casedata"), filepath.Join(base, "DurableB"))
+	// Both cold roots must belong to the second ancestor. Sharing base for
+	// DurableB would correctly conflict with the first lease's directory lock.
+	aliasRoots, err := ResolveRootSet(filepath.Join(aliasBase, "casedata"), filepath.Join(aliasBase, "DurableB"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acquireCompositeLeaseAt(aliasRoots, leaseDir); !errors.Is(err, ErrPersistenceInUse) {
-		t.Fatalf("case alias acquired a second writer lease: %v", err)
+	second, secondErr := acquireCompositeLeaseAt(aliasRoots, leaseDir)
+	if second != nil {
+		defer second.Close()
 	}
-	if _, err := ResolveRootSet(filepath.Join(base, "CaseData"), filepath.Join(aliasBase, "casedata", "nested")); err == nil {
-		t.Fatal("case-aliased ancestor roots were not rejected")
+	_, overlapErr := ResolveRootSet(filepath.Join(base, "CaseData"), filepath.Join(aliasBase, "casedata", "nested"))
+	if caseInsensitive {
+		if !errors.Is(secondErr, ErrPersistenceInUse) {
+			t.Fatalf("case alias acquired a second writer lease: %v", secondErr)
+		}
+		if overlapErr == nil {
+			t.Fatal("case-aliased ancestor roots were not rejected")
+		}
+	} else {
+		if secondErr != nil || second == nil {
+			t.Fatalf("distinct case-sensitive roots could not acquire independent leases: %v", secondErr)
+		}
+		if overlapErr != nil {
+			t.Fatalf("distinct case-sensitive roots were treated as overlapping: %v", overlapErr)
+		}
 	}
 }
 

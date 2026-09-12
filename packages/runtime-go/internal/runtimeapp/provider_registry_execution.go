@@ -14,7 +14,9 @@ import (
 )
 
 type providerRegistryExecutionResolverV1 struct {
-	manager *providerregistryapp.Manager
+	manager       *providerregistryapp.Manager
+	pricing       []providerRegistryPricingV1
+	modelMetadata []providerRegistryModelMetadataV1
 }
 
 // ResolveVisionExecution resolves the selected committed media model and its
@@ -147,6 +149,10 @@ func (resolver *providerRegistryExecutionResolverV1) resolveTurnExecutionV1(
 	providerMetadata.ModelProxyURL = resolvedProvider.Proxy
 	providerMetadata.EndpointFormat = endpointFormat
 	providerMetadata.Models = append([]string(nil), resolvedProvider.Models...)
+	providerMetadata.ModelProfiles, err = resolver.boundedModelProfilesV1(resolvedProvider)
+	if err != nil {
+		return provider.TurnExecutionResult{}, err
+	}
 	configured := domainmodel.ModelProvidersConfig{
 		DefaultProviderID: resolvedProvider.ID,
 		Providers:         []domainmodel.ModelProviderConfig{providerMetadata},
@@ -170,7 +176,12 @@ func (resolver *providerRegistryExecutionResolverV1) resolveTurnExecutionV1(
 	// Legacy thread/subagent records may still carry the old field, but it must
 	// never override the selected committed Registry winner.
 	input.RequestEndpointFormat = ""
-	return config.ResolveTurnExecution(input)
+	result, err := config.ResolveTurnExecution(input)
+	if err != nil {
+		return provider.TurnExecutionResult{}, err
+	}
+	resolver.applyPricingV1(resolvedProvider, &result)
+	return result, nil
 }
 
 func providerRegistryEndpointFormatV1(kind string) (string, error) {

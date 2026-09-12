@@ -20,7 +20,6 @@ import (
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	"analytix.local/runtime-go/internal/ports"
-	provider "analytix.local/runtime-go/internal/provider"
 )
 
 const (
@@ -640,7 +639,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			input.ProviderID = intent.ProviderID
 			input.Model = intent.Model
 			input.Effort = intent.Effort
-			input.ProviderCustomRequestShape = provider.CustomEndpointRequestShape(intent.ProviderConfig.BaseURL)
+			input.ProviderCustomRequestShape = domainmodel.CustomEndpointRequestShape(intent.ProviderConfig.BaseURL)
 			privateProtocolKind = appmodel.PrivateProtocolReasoningKindForProvider(
 				input.ProviderConfig, input.ProviderConfig.EndpointFormat, input.ProviderCustomRequestShape,
 			)

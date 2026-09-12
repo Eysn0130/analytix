@@ -219,7 +219,7 @@ func TestRuntimeUnavailablePublicationFreezesWholeOriginalClosure(t *testing.T) 
 					return os.Remove(filepath.Join(stage.DataDir, "private", "controlled-artifact-access", "access-dispositions"))
 				}
 			})
-			if err == nil || !strings.Contains(err.Error(), "original publication") {
+			if err == nil || !strings.Contains(err.Error(), "original preserved publication bytes, mode or absence changed") {
 				t.Fatalf("unavailable original mutation was not rejected: %v", err)
 			}
 			if !reflect.DeepEqual(before, startupWholeTreeRecordMapForTest(t, core.roots.DataDir, core.roots.DurableDir)) {
@@ -305,7 +305,7 @@ func TestRuntimePublicationSignedAddedDependencyCannotHealOriginal(t *testing.T)
 		shutdownOwnedRuntimeHandler(t, handler)
 		t.Fatal("physical healthy prefix concealed unavailable Original")
 	}
-	if !strings.Contains(err.Error(), "original publication") {
+	if !strings.Contains(err.Error(), "original preserved publication bytes, mode or absence changed") {
 		t.Fatalf("rejection did not reach original publication proof: %v", err)
 	}
 	if !reflect.DeepEqual(before, startupWholeTreeRecordMapForTest(t, core.roots.DataDir, core.roots.DurableDir)) {

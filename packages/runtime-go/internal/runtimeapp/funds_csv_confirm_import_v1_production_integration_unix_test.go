@@ -495,17 +495,18 @@ func runtimeFundsCSVConfirmBuildResultV1(
 		return domainsecurity.FundsMaterializationResultV1{}, domainnative.FundsCanonicalCSVSnapshotBuildResultV1{}, err
 	}
 	wire := struct {
-		SchemaVersion                uint8                                       `json:"schemaVersion"`
-		Operation                    string                                      `json:"operation"`
-		Profile                      string                                      `json:"profile"`
-		PrivateImportFileID          string                                      `json:"privateImportFileId"`
-		SourceArtifactSHA256         string                                      `json:"sourceArtifactSha256"`
-		SourceArtifactByteLength     uint64                                      `json:"sourceArtifactByteLength"`
-		SourceRowCount               uint64                                      `json:"sourceRowCount"`
-		SourceMaxTxnTS               string                                      `json:"sourceMaxTxnTs"`
-		SourceMaxID                  uint64                                      `json:"sourceMaxId"`
-		RowHashContract              string                                      `json:"rowHashContract"`
-		FundsMaterializationResultV1 domainsecurity.FundsMaterializationResultV1 `json:"fundsMaterializationResultV1"`
+		SchemaVersion            uint8  `json:"schemaVersion"`
+		Operation                string `json:"operation"`
+		Profile                  string `json:"profile"`
+		PrivateImportFileID      string `json:"privateImportFileId"`
+		SourceArtifactSHA256     string `json:"sourceArtifactSha256"`
+		SourceArtifactByteLength uint64 `json:"sourceArtifactByteLength"`
+		SourceRowCount           uint64 `json:"sourceRowCount"`
+		SourceMaxTxnTS           string `json:"sourceMaxTxnTs"`
+		SourceMaxID              uint64 `json:"sourceMaxId"`
+		RowHashContract          string `json:"rowHashContract"`
+		// Match the native producer's serde(flatten) materialization contract.
+		domainsecurity.FundsMaterializationResultV1
 	}{
 		SchemaVersion: 1, Operation: domainnative.OperationFundsBuildCanonicalCSVSnapshotV1,
 		Profile: domainnative.FundsCanonicalDirectCSVProfileV1, PrivateImportFileID: payload.PrivateImportFileID,

@@ -21,7 +21,6 @@ import (
 	authorityport "analytix.local/runtime-go/internal/ports/authorityadvance"
 	evidenceport "analytix.local/runtime-go/internal/ports/evidenceauthority"
 	recoveryport "analytix.local/runtime-go/internal/ports/generalterminalrecovery"
-	publicationport "analytix.local/runtime-go/internal/ports/reportpublication"
 )
 
 // This is historical audit authority over complete Original records. The
@@ -288,19 +287,7 @@ func prepareRuntimeReportHistoryEndpointV1(ctx context.Context, core *runtimeChi
 				return nil, errors.Join(errors.New("original report selection witness material is invalid"), err)
 			}
 		}
-		if entry.DeliveryOutcome == nil {
-			continue
-		}
-		if entry.Commit == nil {
-			return nil, errors.New("original report outcome lost its commit")
-		}
-		frozen := entry.Stage.Context
-		selector := publicationport.HistoricalProjectedDeliverySelectorV1{
-			DeliveryID: domainpublication.ReportDeliveryOutcomeID(*entry.DeliveryOutcome), OutcomeRecordDigest: domainpublication.ReportDeliveryOutcomeRecordDigest(*entry.DeliveryOutcome),
-			PublicationCommitDigest: entry.Commit.RecordDigest, ThreadID: frozen.ThreadID, TurnID: frozen.TurnID, ContextDigest: frozen.ContextDigest,
-			CaseBindingHash: frozen.CaseBindingHash, ContextEpoch: frozen.ContextEpoch, DatasetSnapshotID: frozen.DatasetSnapshotID, SourceManifestHash: frozen.SourceManifestHash,
-		}
-		if err := historical.VerifyTrustedHistoricalDeliveryOutcomeV1(ctx, selector); err != nil {
+		if err := publicationapp.VerifyStoredAttemptHistoryV1(ctx, historical, entry); err != nil {
 			return nil, err
 		}
 	}

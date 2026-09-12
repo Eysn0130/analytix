@@ -169,7 +169,12 @@ unsafe logs, or unverified claims.
 - Before repository-grounded review, diagnosis, implementation, or mutation,
   run `git status --short --branch` and preserve existing user changes.
 - The canonical `main` tracks `origin/main` in the public repository. Follow
-  `docs/analytix/git-workflow.md` for pull/commit/push and new-clone setup.
+  `docs/analytix/git-workflow.md` for branch/PR/CI/merge and new-clone setup.
+  Normal feature, runtime, plugin, security, dependency and cross-layer work
+  starts on a short-lived `codex/*` branch from the latest `main`. Push that
+  branch, open a PR, and merge only after current CI and applicable acceptance
+  pass. Do not push directly to `main`, bypass required checks or weaken tests.
+  Report branch, PR URL, HEAD, CI status and merge readiness separately.
   Keep the pre-public history, archived branches and local-only resources
   private. Never merge unrelated archive history, force-add excluded files,
   or use `push --all` / `--mirror` to synchronize this repository. The installed

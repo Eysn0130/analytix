@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	fundscsvsourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundscsvsource"
 	fundsquerysourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundsquerysource"
+	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
@@ -461,6 +463,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	acceptedFinalCASReader, err := finalauthority.NewAcceptedFinalCASReader(persistenceRoots.DurableDir)
 	if err != nil {
+		return nil, err
+	}
+	if err := store.BindPrimaryThreadReaderV1(acceptedFinalCASReader); err != nil {
 		return nil, err
 	}
 	if err := store.SeedFromG2Routes(config.Routes); err != nil {
@@ -1025,7 +1030,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var datasetSnapshotAuthorityV2 datasetsnapshotport.AuthorityV2
 	var datasetSnapshotCurrentAuthorityV2 datasetsnapshotport.CurrentAuthorityV2
 	if sharedEvidenceDatasetSnapshotV2.snapshot != nil {
-		datasetSnapshotAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
+		datasetSnapshotAuthorityV2 = runtimeCaseDatasetSnapshotAuthorityV2{
+			snapshot: sharedEvidenceDatasetSnapshotV2.snapshot, registry: sharedEvidenceDatasetSnapshotV2.registryOwner,
+		}
 		datasetSnapshotCurrentAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
 	}
 	identityAuthority, err := newRuntimeHostIdentityAuthority(finalAuthority)
@@ -1529,7 +1536,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, errors.Join(sourceErr, nativeAuthority.Close())
 		}
 		fundsCSVAdmission, err = fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
-			Observer: filestore.CaseBindingReader{}, Identity: identityAuthority,
+			Diagnostics: os.Stderr,
+			Observer:    filestore.CaseBindingReader{}, Identity: identityAuthority,
 			Evidence:  sharedEvidenceDatasetSnapshotV2.evidence,
 			Snapshots: sharedEvidenceDatasetSnapshotV2.snapshot,
 			Materials: datasetSnapshotStoresV2,
@@ -1628,9 +1636,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 		InfoDataDir:       runtimeInfoDataDir,
 		Provider:          providerClient,
 		ProviderConfig:    providerConfig,
-		ProviderExecution: newProviderRegistryExecutionResolverV1(providerRegistryAuthority.Manager()),
+		ProviderExecution: newProviderRegistryExecutionResolverWithPricingV1(providerRegistryAuthority.Manager(), config.ModelProvidersJSON),
 		ProviderRegistry:  providerRegistryAuthority.Service(),
-		MediaExecution:    mediaexecutionapp.New(providerRegistryAuthority.Manager()),
+		MediaExecution:    mediaexecutionapp.New(providerRegistryAuthority.Manager(), mediaexecutiontransport.New),
 		ModelProxyURL:     strings.TrimSpace(config.ModelProxyURL),
 		ApprovalPolicy:    config.ApprovalPolicy,
 		SandboxMode:       config.SandboxMode,

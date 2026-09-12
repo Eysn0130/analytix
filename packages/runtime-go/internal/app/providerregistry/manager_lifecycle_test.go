@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	providerregistryfs "analytix.local/runtime-go/internal/adapters/outbound/providerregistryfs"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
 	registryport "analytix.local/runtime-go/internal/ports/providerregistry"
 	secretstoreport "analytix.local/runtime-go/internal/ports/secretstore"
@@ -1495,7 +1496,7 @@ func (store *memorySecretStore) tamper(ref string) {
 
 func mustManager(t *testing.T, registry registryport.Store, secrets secretstoreport.RegistryStore, faults FaultRecorder) *Manager {
 	t.Helper()
-	manager, err := NewManagerWithFaultRecorder(registry, secrets, faults)
+	manager, err := NewManagerWithFaultRecorder(registry, secrets, faults, providerregistryfs.LegacySourceReader{})
 	if err != nil {
 		t.Fatalf("NewManagerWithFaultRecorder() error = %v", err)
 	}

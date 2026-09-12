@@ -59,6 +59,14 @@ async function makeRuntimeHome(): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), 'analytix-hub-marketplace-')))
 }
 
+// The cached catalog and receipts in this suite describe mac-arm64, regardless
+// of the machine running these platform-independent parsing/authority tests.
+function syncMacFixtureCache(runtimeHome: string) {
+  return syncHubAgentMarketplace(runtimeHome, {
+    mode: 'cache', process: { platform: 'darwin', arch: 'arm64' }
+  })
+}
+
 async function snapshotDirectory(root: string): Promise<Record<string, string>> {
   const snapshot: Record<string, string> = {}
   const visit = async (directory: string, prefix: string): Promise<void> => {
@@ -189,7 +197,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
     const runtimeHome = await makeRuntimeHome()
     await writeCachedHubPlugin(runtimeHome)
 
-    const before = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const before = await syncMacFixtureCache(runtimeHome)
     expect(before.ok && before.plugins[0]).toMatchObject({
       pluginName: 'demo-plugin',
       installed: false,
@@ -224,7 +232,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
     expect(existsSync(installedDir)).toBe(false)
     expect(existsSync(markerPath)).toBe(false)
 
-    const installed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const installed = await syncMacFixtureCache(runtimeHome)
     expect(installed.ok && installed.plugins[0]).toMatchObject({
       pluginName: 'demo-plugin',
       installed: false
@@ -305,7 +313,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       requiredSkills: [{ skillName: 'quick-fact' }]
     }), 'utf8')
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok).toBe(true)
     if (!listed.ok) return
     const funds = listed.plugins.find((plugin) => plugin.pluginName === 'analytix-fund-analysis')
@@ -404,7 +412,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }), 'utf8')
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok).toBe(true)
     if (!listed.ok) return
     const funds = listed.plugins.find((plugin) => plugin.pluginName === 'analytix-fund-analysis')
@@ -470,7 +478,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }), 'utf8')
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok).toBe(true)
     if (!listed.ok) return
     const funds = listed.plugins.find((plugin) => plugin.pluginName === 'analytix-fund-analysis')
@@ -538,7 +546,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }, null, 2), 'utf8')
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok && listed.plugins[0]).toMatchObject({
       pluginName: 'playwright-mcp',
       mcpServerIds: ['playwright']
@@ -583,7 +591,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }, null, 2), 'utf8')
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
 
     expect(listed.ok && listed.plugins[0]).toMatchObject({
       pluginName: 'browser-app',
@@ -722,7 +730,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }, null, 2))
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok && listed.plugins[0]).toMatchObject({
       pluginName: 'demo-plugin',
       requiredInstall: true,
@@ -750,7 +758,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
       }]
     }, null, 2))
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok && listed.plugins[0]).toMatchObject({
       pluginName: 'demo-plugin',
       requiredInstall: false
@@ -780,7 +788,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
     }
     expect(await snapshotDirectory(runtimeHome)).toEqual(beforeInstall)
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok && listed.plugins.some((plugin) => plugin.installed)).toBe(false)
   })
 
@@ -809,7 +817,7 @@ describe('hub-agent-marketplace-service plugin install state', () => {
     }), 'utf8')
     await chmod(markerPath, 0o600)
 
-    const listed = await syncHubAgentMarketplace(runtimeHome, { mode: 'cache' })
+    const listed = await syncMacFixtureCache(runtimeHome)
     expect(listed.ok && listed.plugins[0]).toMatchObject({
       pluginName: 'demo-plugin',
       installed: true

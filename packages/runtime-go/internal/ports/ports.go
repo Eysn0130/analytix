@@ -153,7 +153,7 @@ type WorkspaceStatusResult struct {
 }
 
 type GitStatusProbe interface {
-	PathHasStagedChanges(workspace string, relativePath string) bool
+	PathHasStagedChanges(workspace string, relativePath string) (bool, error)
 }
 
 type WorktreeCreateRequest struct {

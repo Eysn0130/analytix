@@ -217,6 +217,7 @@ func TestRuntimeWitnessedEvidenceRegistryV2RestartAndOptionalCapabilityRecovery(
 		}))
 		defer provider.Close()
 		config.BaseURL = provider.URL + "/v1"
+		seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "synthetic-registry-restart-credential")
 		registryRoot := filepath.Join(fixture.DataDir, "private", "evidence-registry")
 		runtimeWitnessedRegistryAssertAbsentV2(t, registryRoot)
 		initial, err := NewRuntimeServerHandlerE(config)
@@ -892,6 +893,10 @@ func runtimeWitnessedRegistryAssertCanonicalOpaqueBlockerV2(
 		t.Fatalf("canonical opaque blocker escaped the fixed zero-fact boundary: %#v", blocked.accepted)
 	}
 	if providerCalls.Load() != 0 || fixture.TotalAttempts() != 0 {
+		for _, namespace := range []string{domainenrollment.SharedEvidenceNamespaceV1, domainenrollment.ThreadRiskNamespaceV1} {
+			snapshot, _ := fixture.Snapshot(namespace)
+			t.Logf("witness namespace=%s attempts=%d observe=%d advance=%d resolve=%d", namespace, snapshot.AttemptCalls, snapshot.ObserveCalls, snapshot.AdvanceCalls, snapshot.ResolveCalls)
+		}
 		t.Fatalf("canonical opaque blocker reached provider or witness: provider=%d witness=%d", providerCalls.Load(), fixture.TotalAttempts())
 	}
 }
@@ -911,6 +916,7 @@ func runtimeWitnessedRegistryAssertBlockedCaseAndOrdinaryRestartV2(
 	}))
 	defer provider.Close()
 	config.BaseURL = provider.URL + "/v1"
+	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "synthetic-registry-restart-credential")
 
 	handler, err := NewRuntimeServerHandlerE(config)
 	if err != nil {

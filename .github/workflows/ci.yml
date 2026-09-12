@@ -2,7 +2,7 @@ name: Development CI
 
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -67,10 +67,138 @@ jobs:
           # Private-authority fixtures require owner-only creation, matching the
           # qualified local helper. This does not change production validators.
           umask 077
-          npm test
+          npm test -- --tags-filter='!macos-integration'
+
+  macos-integration:
+    name: macOS process integration
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - run: npm ci
+      - name: Exercise actual native process containment
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          go test -count=1 -p 1 -parallel 2 -timeout 5m \
+            ./internal/adapters/outbound/processsandbox \
+            ./internal/adapters/outbound/process
+      - name: Execute all macOS integration contracts with synthetic providers
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          npm test -- --tags-filter=macos-integration
+
+  filesystem-contracts:
+    name: Filesystem contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - name: Verify native filesystem contracts on the actual host
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          go test -count=1 -p 1 -parallel 2 -timeout 5m \
+            ./internal/testsupport/userconfigtest \
+            ./internal/adapters/outbound/securegeneration \
+            ./internal/adapters/outbound/finalauthority \
+            ./internal/adapters/outbound/rawartifact \
+            ./internal/adapters/outbound/persistencefs
+
+  restart-contracts:
+    name: Native held-state restart (${{ matrix.os }}, ${{ matrix.owner }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        owner: [evidence-registry, pii-authorization]
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - name: Reproduce the complete held-state contract in a fresh test process
+        working-directory: packages/runtime-go
+        env:
+          OWNER_FIXTURE: ${{ matrix.owner }}
+        run: |
+          set -o pipefail
+          umask 077
+          # macOS RUNNER_TEMP may name an alias. The real package inspector
+          # correctly rejects noncanonical executable ancestors, even for a
+          # test binary; fix the fixture path, not the production inspector.
+          profile_root="$(cd "$RUNNER_TEMP" && pwd -P)"
+          # go test executes its build target, not the copy requested by -o.
+          export GOTMPDIR="$profile_root"
+          # Keep fixture storage at its platform-native default. Only the
+          # process-sandbox lane needs the shorter Unix-socket temp parent;
+          # testmain independently canonicalizes and isolates fixture paths.
+          # Keep the existing full-suite deadline, not a new performance SLA.
+          go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
+            -run "^TestRuntimeTestExecutableIsUnpackagedAndCanonical$|^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
+            -o "$profile_root/held-restart.test" \
+            -cpuprofile "$profile_root/held-restart.cpu" ./internal/runtimeapp | \
+            node ../../scripts/go-test-selection.mjs analytix.local/runtime-go/internal/runtimeapp \
+              "TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP/${OWNER_FIXTURE}"
+      - name: Report function-level CPU attribution without test data
+        if: ${{ !cancelled() }}
+        run: |
+          if test -s "$RUNNER_TEMP/held-restart.cpu"; then
+            go tool pprof -top -nodecount=20 "$RUNNER_TEMP/held-restart.test" "$RUNNER_TEMP/held-restart.cpu"
+          else
+            echo 'CPU profile unavailable; the preceding test result remains authoritative.'
+          fi
 
   go-tests:
-    name: Go tests (${{ matrix.tags }})
+    name: Go package tests (${{ matrix.tags }})
+    needs: filesystem-contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
@@ -90,13 +218,104 @@ jobs:
         with:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
-      - name: Test all Go packages with bounded concurrency
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Test all other Go packages with bounded concurrency
         working-directory: packages/runtime-go
         env:
           TEST_TAGS: ${{ matrix.tags }}
         run: |
           umask 077
-          go test -count=1 -p 1 -parallel 2 -timeout 20m -tags "$TEST_TAGS" ./...
+          node ../../scripts/go-ci-shards.mjs packages
+
+  runtime-shards:
+    name: Runtime regression (${{ matrix.tags }}, shard ${{ matrix.shard }})
+    needs: filesystem-contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        tags: ['', analytix_prod]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Test the complete dynamically discovered runtime partition
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+          TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          umask 077
+          node ../../scripts/go-ci-shards.mjs runtime "$TEST_SHARD"
+
+  runtime-platform:
+    name: Runtime synthetic process contracts (${{ matrix.tags }})
+    runs-on: macos-15
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        tags: ['', analytix_prod]
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 3GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - run: npm ci
+      - name: Build the current-source schedule MCP entrypoint without packaging
+        run: npm run build
+      - name: Execute synthetic lifecycle and contained schedule contracts
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          ANALYTIX_TEST_SCHEDULE_MCP_NODE_V1="$(node -p 'require("node:fs").realpathSync(process.execPath)')"
+          export ANALYTIX_TEST_SCHEDULE_MCP_NODE_V1
+          export ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1="$GITHUB_WORKSPACE/out/main/claw-schedule-mcp-node-entry.js"
+          test -f "$ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1"
+          node ../../scripts/go-ci-shards.mjs platform
+      - name: Execute root protected-process positives in their own package
+        if: ${{ matrix.tags == '' }}
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          node ../../scripts/go-ci-shards.mjs platform-root
 
   backend-tests:
     name: Backend tests
@@ -141,3 +360,18 @@ jobs:
         run: |
           umask 077
           cargo test --locked --manifest-path "tools/$COMPONENT/Cargo.toml" --all-targets
+
+  development-gate:
+    name: Development gate
+    if: ${{ always() }}
+    needs: [source-baseline, application-tests, macos-integration, filesystem-contracts, restart-contracts, runtime-shards, runtime-platform, go-tests, backend-tests, rust-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Reject failed, cancelled, skipped or missing required suites
+        env:
+          DEVELOPMENT_CI_RESULTS: ${{ toJSON(needs) }}
+        run: node scripts/development-ci-gate.mjs

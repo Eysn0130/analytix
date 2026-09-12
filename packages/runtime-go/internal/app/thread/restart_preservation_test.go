@@ -83,3 +83,17 @@ func TestRestartPreservedThreadServiceRejectsBeforeReadsAndEffects(t *testing.T)
 		t.Fatalf("independent metadata patch failed: %v", err)
 	}
 }
+
+func TestRestartHeldThreadDoesNotBlockIndependentList(t *testing.T) {
+	repo := &restartReadCounterV1{repositoryStub: &repositoryStub{}}
+	service := NewService(Dependencies{Repository: repo})
+	service.caseThreads = restartHeldCaseAuthorityV1{held: "thr_1", knownCase: true}
+	listed, err := service.List(ListInput{})
+	if err != nil || len(listed) != 1 || listed[0]["id"] != "thr_2" || repo.reads != 1 {
+		t.Fatalf("held primary blocked independent list or was read: listed=%#v reads=%d err=%v", listed, repo.reads, err)
+	}
+	repo.highestSeqErr = errors.New("independent cursor unavailable")
+	if listed, err := service.List(ListInput{}); err == nil || listed != nil {
+		t.Fatal("independent observation failure was hidden")
+	}
+}

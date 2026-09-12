@@ -50,7 +50,14 @@ type isolation struct {
 func newIsolation() (*isolation, error) {
 	originalHome := os.Getenv("HOME")
 	originalUserCache, _ := os.UserCacheDir()
-	base, err := os.MkdirTemp("", "analytix-go-test-user-config-")
+	// macOS commonly supplies /var/... as TMPDIR while its real ancestor is
+	// /private/var. Fixtures must use canonical paths before strict no-symlink
+	// production opens; do not relax those opens to accommodate a test alias.
+	temporaryParent, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return nil, err
+	}
+	base, err := os.MkdirTemp(temporaryParent, "analytix-go-test-user-config-")
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +181,10 @@ func validInheritedRoot(base string) bool {
 
 func pathWithinTemporaryRoot(value string) bool {
 	clean := filepath.Clean(value)
-	temporary := filepath.Clean(os.TempDir())
+	temporary, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return false
+	}
 	relative, err := filepath.Rel(temporary, clean)
 	return err == nil && filepath.IsAbs(clean) && relative != "." && relative != ".." &&
 		!strings.HasPrefix(relative, ".."+string(filepath.Separator))

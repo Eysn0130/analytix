@@ -84,6 +84,7 @@ type Manager struct {
 	registry                   registryport.Store
 	secrets                    secretstoreport.RegistryStore
 	faults                     FaultRecorder
+	legacySource               registryport.LegacySourceReader
 	sourceAuthorityMu          sync.Mutex
 	sourceAuthorityChallenges  map[string]legacyMigrationSourceAuthorityChallenge
 	protectedRecoveryMu        sync.Mutex
@@ -214,20 +215,27 @@ type legacyMigrationSourceAuthorityChallenge struct {
 	RecoveryCredentialRef        secretstoreport.CredentialRef
 }
 
-func NewManager(registry registryport.Store, secrets secretstoreport.RegistryStore) (*Manager, error) {
-	return NewManagerWithFaultRecorder(registry, secrets, nil)
+// NewManager permits ordinary Registry operations without a legacy source reader.
+// Source-authority operations fail closed unless a reader is explicitly composed.
+func NewManager(registry registryport.Store, secrets secretstoreport.RegistryStore, legacySource ...registryport.LegacySourceReader) (*Manager, error) {
+	return NewManagerWithFaultRecorder(registry, secrets, nil, legacySource...)
 }
 
 func NewManagerWithFaultRecorder(
 	registry registryport.Store,
 	secrets secretstoreport.RegistryStore,
 	faults FaultRecorder,
+	legacySource ...registryport.LegacySourceReader,
 ) (*Manager, error) {
-	if registry == nil || secrets == nil {
+	if registry == nil || secrets == nil || len(legacySource) > 1 {
 		return nil, registryport.ErrInvalidRequest
 	}
+	var reader registryport.LegacySourceReader
+	if len(legacySource) == 1 {
+		reader = legacySource[0]
+	}
 	return &Manager{
-		registry: registry, secrets: secrets, faults: faults,
+		registry: registry, secrets: secrets, faults: faults, legacySource: reader,
 		protectedRecoveryConfirmed: make(map[string]struct{}),
 	}, nil
 }

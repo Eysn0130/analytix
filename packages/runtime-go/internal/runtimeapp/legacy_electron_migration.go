@@ -112,6 +112,14 @@ func RunDesktopPrivateHistoryMigrationV2(
 		if !electronPreAuthority.TargetPresent() && !childRuns.HasEntries() && !managedSemanticInput {
 			return nil
 		}
+	}
+	// Reject an invalid retired TypeScript lineage before the first startup
+	// authority namespace directory can be created. The semantic callback
+	// repeats this witness after its normal fixed-point preparation.
+	if err := validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(ctx, roots); err != nil {
+		return err
+	}
+	if !existingAuthority {
 		if info, err := os.Lstat(separateRoots[0]); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return errors.New("Electron userData authority root is unavailable")
 		}
@@ -127,7 +135,8 @@ func RunDesktopPrivateHistoryMigrationV2(
 	return appstartup.RunCompositeSemanticThenRetirementV2(
 		ctx, []appstartup.FixedPointOwnerV1{managed, childRuns}, electron,
 		func(ctx context.Context) error {
-			if err := RecoverAuthenticatedExistingSemanticStartupWithPersistenceLeaseContextE(ctx, lease); err != nil {
+			migrationCtx := withRuntimeRetiredTypeScriptAuditMigrationV1(ctx)
+			if err := RecoverAuthenticatedExistingSemanticStartupWithPersistenceLeaseContextE(migrationCtx, lease); err != nil {
 				return err
 			}
 			childInventory, err := jobs.BuildChildRunInventoryV1(childRunRoot)
@@ -137,7 +146,7 @@ func RunDesktopPrivateHistoryMigrationV2(
 			if !managedSemanticInput && (!childInventory.RootExists || len(childInventory.Entries) == 0) {
 				return nil
 			}
-			err = RunRuntimeSemanticStartupMigrationWithPersistenceLeaseContextE(ctx, Config{
+			err = RunRuntimeSemanticStartupMigrationWithPersistenceLeaseContextE(migrationCtx, Config{
 				RuntimeToken:   "desktop-private-history-migration-v2",
 				DataDir:        roots.DataDir,
 				DurableTempDir: roots.DurableDir,

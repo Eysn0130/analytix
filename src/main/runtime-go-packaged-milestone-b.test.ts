@@ -6,9 +6,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -274,14 +276,21 @@ function validCaseCompactionItem(): {
 }
 
 function taskOwnedSandbox(): string {
-  const root = process.env.TMPDIR
-  if (!root || !root.startsWith('/Volumes/AnalytixCache/')) {
-    throw new Error('test TMPDIR must use the trusted Analytix cache')
-  }
+  const root = realpathSync(tmpdir())
   const sandbox = mkdtempSync(join(root, 'milestone-b-contract-test-'))
   chmodSync(sandbox, 0o700)
   sandboxes.push(sandbox)
   return sandbox
+}
+
+function onPlatform<T>(platform: NodeJS.Platform, action: () => T): T {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', { value: platform })
+  try {
+    return action()
+  } finally {
+    Object.defineProperty(process, 'platform', original)
+  }
 }
 
 async function milestoneModule(): Promise<Record<string, any>> {
@@ -554,6 +563,17 @@ afterEach(() => {
 })
 
 describe('packaged Milestone B formal public-seam harness', () => {
+  it.each(['linux', 'win32'] as const)('rejects %s before probing a macOS product volume', async (platform) => {
+    const { managedProductVolumeInfo } = await milestoneModule()
+    const unexpected = () => { throw new Error('non-macOS volume probe must not run') }
+    const evidence = onPlatform(platform, () => managedProductVolumeInfo('/synthetic/product-data', {
+      realpathSync: unexpected,
+      statSync: unexpected,
+      spawnSync: unexpected
+    }))
+    expect(evidence).toEqual({ ok: false, blocker: 'managed_product_data_requires_macos_apfs' })
+  })
+
   it('resolves the product-data volume through the path device before diskutil', async () => {
     const { managedProductVolumeInfo } = await milestoneModule()
     const calls: Array<{ command: string; arguments_: string[] }> = []
@@ -572,7 +592,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
       MountPoint: '/System/Volumes/Data',
       DeviceIdentifier: 'disk3s5'
     }
-    const evidence = managedProductVolumeInfo('/Users/product-owner', {
+    const evidence = onPlatform('darwin', () => managedProductVolumeInfo('/Users/product-owner', {
       realpathSync: (path: string) => path,
       statSync: () => ({ dev: 42 }),
       spawnSync: (command: string, arguments_: string[]) => {
@@ -594,7 +614,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
         }
         throw new Error(`unexpected command: ${command}`)
       }
-    })
+    }))
     expect(evidence).toEqual(expect.objectContaining({
       ok: true,
       mountPoint: '/System/Volumes/Data',
@@ -2431,6 +2451,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        TMPDIR: '',
         ANALYTIX_RUNTIME_GO_PACKAGED_SOURCE_COMMIT: '',
         ANALYTIX_MILESTONE_B_PRODUCT_DATA_OWNER_ROOT: '',
         ANALYTIX_MILESTONE_B_AUTHORITY_BOOTSTRAP: '',
@@ -2453,6 +2474,9 @@ describe('packaged Milestone B formal public-seam harness', () => {
     })
     expect(reportOnly.status).toBe(0)
     const report = JSON.parse(reportOnly.stdout)
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      id: 'trusted-cache-tmpdir', status: 'BLOCKED'
+    }))
     expect(report).toMatchObject({
       id: 'runtime-go-packaged-milestone-b',
       status: 'BLOCKED',
@@ -2513,6 +2537,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        TMPDIR: '',
         ANALYTIX_RUNTIME_GO_PACKAGED_SOURCE_COMMIT: '',
         ANALYTIX_MILESTONE_B_PRODUCT_DATA_OWNER_ROOT: '',
         ANALYTIX_MILESTONE_B_AUTHORITY_BOOTSTRAP: '',
@@ -2535,6 +2560,21 @@ describe('packaged Milestone B formal public-seam harness', () => {
     })
     expect(gated.status).not.toBe(0)
     expect(JSON.parse(gated.stdout).passed).toBe(false)
+
+    // Missing configuration is an unavailable prerequisite, not permission to
+    // downgrade an explicitly invalid cache path to BLOCKED (or to PASS).
+    const invalid = spawnSync(process.execPath, baseArgs, {
+      cwd: repositoryRoot,
+      env: { PATH: process.env.PATH, TMPDIR: 'relative-invalid-cache-fixture' },
+      encoding: 'utf8',
+      stdio: 'pipe'
+    })
+    expect(invalid.status).toBe(1)
+    const invalidReport = JSON.parse(invalid.stdout)
+    expect(invalidReport).toMatchObject({ status: 'FAIL', passed: false })
+    expect(invalidReport.checks).toContainEqual(expect.objectContaining({
+      id: 'trusted-cache-tmpdir', status: 'FAIL'
+    }))
   })
 })
 

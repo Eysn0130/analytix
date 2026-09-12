@@ -42,7 +42,7 @@ func TestRuntimeProviderContinuationUsesSignedPendingWorkAuthority(t *testing.T)
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "pending-provider", "pending-model"),
 	}))
@@ -96,7 +96,7 @@ func TestRuntimeProviderRetryReusesOnePendingWorkAuthority(t *testing.T) {
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL, "retry-provider", "retry-model"),
 	}))
@@ -161,7 +161,7 @@ func TestRuntimeProviderPreOutputReconnectRevalidatesOnePendingWorkAuthority(t *
 		}
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL, "reconnect-provider", "reconnect-model"),
 	}))
@@ -253,6 +253,7 @@ func TestRuntimeProviderPreOutputReconnectRejectsClosedAuthority(t *testing.T) {
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL, "closed-provider", "closed-model"),
 	}
+	config, connectRegistry := prepareRuntimeServerReadyProviderRegistry(t, config)
 	lease, err = runtimeapp.AcquireRuntimePersistenceLease(config)
 	if err != nil {
 		t.Fatal(err)
@@ -262,6 +263,7 @@ func TestRuntimeProviderPreOutputReconnectRejectsClosedAuthority(t *testing.T) {
 		_ = lease.Close()
 		t.Fatal(err)
 	}
+	connectRegistry(handler)
 	t.Cleanup(func() {
 		if lifecycle, ok := handler.(interface{ Shutdown(context.Context) error }); ok {
 			if err := lifecycle.Shutdown(context.Background()); err != nil {
@@ -324,7 +326,7 @@ func TestRuntimeProviderStreamRecoveryClosesEachLogicalContinuation(t *testing.T
 		}
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL, "recovery-provider", "recovery-model"),
 	}))
@@ -422,7 +424,7 @@ func TestRuntimePendingGateRetainsBatchRefsForApprovalAndUserInput(t *testing.T)
 				},
 				{`data: {"choices":[{"delta":{"content":"continued"}}]}`, `data: [DONE]`},
 			})
-			server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+			server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 				RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: dataDir,
 				ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "gate-provider", "gate-model"),
 			}))

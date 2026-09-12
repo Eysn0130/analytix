@@ -81,8 +81,7 @@ func validatePreservedFinalEventInventoryV1(ctx context.Context, input Preserved
 		if err != nil {
 			return err
 		}
-		digestOfTurn, err := domainevidence.AcceptedFinalTurnProjectionSHA256V1(turn)
-		if err != nil || digestOfTurn != observation.TurnProjectionSHA256 {
+		if err := domainevidence.ValidateAcceptedFinalCASObservationForTurnV1(observation, turn); err != nil {
 			return errors.Join(errors.New("original final-event CAS turn changed"), err)
 		}
 		if winner != (observation.HasWinner && reflect.DeepEqual(observation.Winner, record.AcceptedFinal)) {

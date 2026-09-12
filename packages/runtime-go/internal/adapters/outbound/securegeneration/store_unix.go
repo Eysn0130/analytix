@@ -151,6 +151,19 @@ func (lease *PrivateDirectoryLease) RemoveEmpty(ctx context.Context) (alreadyRem
 			return false, ctx.Err()
 		}
 		entries, readErr := readDirectoryEntries(rootFD)
+		if errors.Is(readErr, unix.ENOENT) {
+			// Linux getdents may reject an already-unlinked directory rather
+			// than return an empty inventory. This is not evidence of emptiness:
+			// require the exact held inode to have no links and the platform to
+			// confirm detachment. The final name check below still owns cleanup.
+			var held unix.Stat_t
+			heldErr := unix.Fstat(rootFD, &held)
+			detached, detachedErr := privateDirectoryDetached(rootFD)
+			if heldErr == nil && held.Nlink == 0 && uint64(held.Dev) == lease.authority.dev &&
+				held.Ino == lease.authority.ino && detachedErr == nil && detached {
+				break
+			}
+		}
 		if readErr != nil || len(entries) != 0 {
 			lease.indeterminate = true
 			return false, errors.Join(ErrCleanupIndeterminate, ErrResidue, readErr)

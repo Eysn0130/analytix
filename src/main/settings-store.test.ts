@@ -1385,7 +1385,7 @@ describe('JsonSettingsStore', () => {
     expect(canonicalAuthority.inspection.candidates).toEqual([])
   })
 
-  it('fails closed on malformed, unsupported, or over-limit credential sources without side effects', async () => {
+  describe('fails closed on malformed, unsupported, or over-limit credential sources without side effects', () => {
     const values: Array<{ name: string; raw: Buffer }> = [
       { name: 'malformed JSON', raw: Buffer.from('{ invalid json', 'utf8') },
       { name: 'non-object root', raw: Buffer.from('[]', 'utf8') },
@@ -1417,7 +1417,7 @@ describe('JsonSettingsStore', () => {
       }
     ]
 
-    for (const testCase of values) {
+    it.each(values)('$name', async (testCase) => {
       const userDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-inspection-invalid-'))
       const settingsPath = join(userDataDir, 'analytix-settings.json')
       await writeFile(settingsPath, testCase.raw, { mode: 0o640 })
@@ -1432,23 +1432,27 @@ describe('JsonSettingsStore', () => {
         .toBe('Legacy Provider credential source inspection failed.')
       expect((error as Error).message, testCase.name).not.toContain('synthetic-')
       expect((error as Error).message, testCase.name).not.toContain(settingsPath)
-      expect(await readFile(settingsPath), testCase.name).toEqual(testCase.raw)
+      // Buffer.equals proves the same exact length and bytes without asking
+      // the generic object matcher to traverse millions of numeric properties.
+      expect((await readFile(settingsPath)).equals(testCase.raw), testCase.name).toBe(true)
       expect(await readdir(userDataDir), testCase.name).toEqual(beforeEntries)
       expect((await stat(settingsPath)).mode & 0o777, testCase.name).toBe(beforeMode)
-    }
+    })
 
-    const parentDir = await mkdtemp(join(tmpdir(), 'analytix-settings-inspection-invalid-compat-'))
-    const currentUserDataDir = join(parentDir, 'AnalytixCurrent')
-    const legacyUserDataDir = join(parentDir, 'Kun')
-    const legacySettingsPath = join(legacyUserDataDir, 'analytix-settings.json')
-    const currentSettingsPath = join(currentUserDataDir, 'analytix-settings.json')
-    await mkdir(legacyUserDataDir, { recursive: true })
-    await writeFile(legacySettingsPath, '{ invalid legacy json', 'utf8')
-    await expect(new JsonSettingsStore(currentUserDataDir).inspectLegacyProviderCredentialSources())
-      .rejects.toThrow('Legacy Provider credential source inspection failed.')
-    expect(await readFile(legacySettingsPath, 'utf8')).toBe('{ invalid legacy json')
-    expect(await readdir(legacyUserDataDir)).toEqual(['analytix-settings.json'])
-    await expect(stat(currentSettingsPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    it('malformed compatibility source', async () => {
+      const parentDir = await mkdtemp(join(tmpdir(), 'analytix-settings-inspection-invalid-compat-'))
+      const currentUserDataDir = join(parentDir, 'AnalytixCurrent')
+      const legacyUserDataDir = join(parentDir, 'Kun')
+      const legacySettingsPath = join(legacyUserDataDir, 'analytix-settings.json')
+      const currentSettingsPath = join(currentUserDataDir, 'analytix-settings.json')
+      await mkdir(legacyUserDataDir, { recursive: true })
+      await writeFile(legacySettingsPath, '{ invalid legacy json', 'utf8')
+      await expect(new JsonSettingsStore(currentUserDataDir).inspectLegacyProviderCredentialSources())
+        .rejects.toThrow('Legacy Provider credential source inspection failed.')
+      expect(await readFile(legacySettingsPath, 'utf8')).toBe('{ invalid legacy json')
+      expect(await readdir(legacyUserDataDir)).toEqual(['analytix-settings.json'])
+      await expect(stat(currentSettingsPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    })
   })
 
   it('returns independent candidate buffers and key-free metadata snapshots', async () => {
@@ -1483,7 +1487,7 @@ describe('JsonSettingsStore', () => {
     clearInspectionCredentials(repeated)
   })
 
-  it('cleans exact Provider credential fields from current, compatibility, Kun, canonical, and selected legacy sources', async () => {
+  it('cleans exact Provider credential fields from the current canonical source', async () => {
     const currentCanonical = await inspectCurrentSettings({
       version: 1,
       provider: {
@@ -1532,7 +1536,10 @@ describe('JsonSettingsStore', () => {
     if (process.platform !== 'win32') {
       expect((await stat(currentCanonical.settingsPath)).mode & 0o777).toBe(0o600)
     }
+    clearInspectionCredentials(currentCanonical.inspection)
+  })
 
+  it('cleans exact Provider credential fields from the selected legacy source', async () => {
     const selectedLegacy = await inspectCurrentSettings({
       version: 1,
       agentProvider: 'reasonix',
@@ -1551,7 +1558,10 @@ describe('JsonSettingsStore', () => {
     expect(selectedCleaned.agents.reasonix).not.toHaveProperty('apiKey')
     expect(selectedCleaned.agents.reasonix.unknownAgentMetadata).toEqual({ preserve: 1 })
     expect(selectedCleaned.unknownRootMetadata).toBe('preserve-selected')
+    clearInspectionCredentials(selectedLegacy.inspection)
+  })
 
+  it('cleans exact Provider credential fields from the compatibility source', async () => {
     const compatibilityParent = await mkdtemp(join(tmpdir(), 'analytix-settings-cleanup-compatibility-'))
     const compatibilityCurrentDir = join(compatibilityParent, 'AnalytixCurrent')
     const compatibilitySourceDir = join(compatibilityParent, 'Kun')
@@ -1576,7 +1586,10 @@ describe('JsonSettingsStore', () => {
     expect(compatibilityCleaned.provider.unknownMetadata).toBe('preserve-compatibility')
     await expect(stat(join(compatibilityCurrentDir, 'analytix-settings.json')))
       .rejects.toMatchObject({ code: 'ENOENT' })
+    clearInspectionCredentials(compatibilityInspection)
+  })
 
+  it('cleans exact Provider credential fields from the Kun compatibility source', async () => {
     const kunParent = await mkdtemp(join(tmpdir(), 'analytix-settings-cleanup-kun-'))
     const kunCurrentDir = join(kunParent, 'AnalytixCurrent')
     const kunSourceDir = join(kunParent, 'Kun')
@@ -1615,12 +1628,7 @@ describe('JsonSettingsStore', () => {
     expect(kunCleaned.provider.providers[0].unknownCustomMetadata).toBe('preserve-kun')
     expect(kunCleaned.unknownRootMetadata).toBe('preserve-kun-root')
 
-    for (const inspection of [
-      currentCanonical.inspection,
-      selectedLegacy.inspection,
-      compatibilityInspection,
-      kunInspection
-    ]) clearInspectionCredentials(inspection)
+    clearInspectionCredentials(kunInspection)
   })
 
   it('fails cleanup closed on malformed authority, source CAS drift, and incomplete protection without changing source bytes', async () => {

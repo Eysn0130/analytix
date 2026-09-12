@@ -159,7 +159,7 @@ func TestCheckpointRawUTF16RestoreAndAllowWriteAuthority(t *testing.T) {
 					"bytesBase64": base64.StdEncoding.EncodeToString(beforeRaw), "hash": checkpointapp.HashBytes(beforeRaw),
 				},
 			}
-			preflight := PreflightCheckpointApplyFile(workspace, []string{allowRoot}, plan, snapshot, nil)
+			preflight := PreflightCheckpointApplyFile(workspace, []string{allowRoot}, plan, snapshot, checkpointGitProbeStub{})
 			expectedPath, err := WorkspaceRealPath(path)
 			if err != nil {
 				t.Fatal(err)

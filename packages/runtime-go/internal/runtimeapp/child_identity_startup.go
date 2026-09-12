@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
@@ -11,8 +13,10 @@ import (
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	"analytix.local/runtime-go/internal/jobs"
 	authorityport "analytix.local/runtime-go/internal/ports/finalauthority"
+	runtimeserver "analytix.local/runtime-go/internal/server"
 )
 
 type runtimeChildIdentityStartupV1 struct {
@@ -31,6 +35,174 @@ type runtimeChildIdentityStartupV1 struct {
 	primaries             *runtimeOriginalPrimaryInventoryV1
 	originalCreates       *runtimeOriginalCreateStartupV1
 	originalRegistryTrust *runtimeOriginalRegistryTrustV2
+}
+
+// runtimeRetiredTypeScriptAuditMigrationContextKeyV1 is an in-process
+// capability for the desktop migration barrier. A retired TypeScript record
+// remains outside the current child-producer admission model; the migration
+// may carry its complete inventory forward only long enough for the later
+// exact lineage witness and semantic projection to retire it. Ordinary startup
+// never receives this capability and continues to refuse the incomplete
+// producer inventory.
+type runtimeRetiredTypeScriptAuditMigrationContextKeyV1 struct{}
+
+type runtimeRetiredTypeScriptAuditMigrationCapabilityV1 struct{}
+
+func withRuntimeRetiredTypeScriptAuditMigrationV1(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, runtimeRetiredTypeScriptAuditMigrationContextKeyV1{}, runtimeRetiredTypeScriptAuditMigrationCapabilityV1{})
+}
+
+func allowsRuntimeRetiredTypeScriptAuditMigrationV1(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, ok := ctx.Value(runtimeRetiredTypeScriptAuditMigrationContextKeyV1{}).(runtimeRetiredTypeScriptAuditMigrationCapabilityV1)
+	return ok
+}
+
+type runtimeSemanticStageAccessMarkerV1 interface {
+	IsSemanticStagePrivateCASAccessAuthority() bool
+}
+
+func isRuntimeSemanticStageAccessV1(access finalauthority.SecurePrivateCASRecoveryAccessAuthority) bool {
+	marker, ok := access.(runtimeSemanticStageAccessMarkerV1)
+	return ok && marker.IsSemanticStagePrivateCASAccessAuthority()
+}
+
+// runtimeRetiredTypeScriptAuditParentIDsV1 derives the only parent IDs that
+// the retired audit inventory may temporarily tolerate from the same exact
+// source inventory that the semantic child-run witness verifies. The second
+// observation closes the small gap between the witness' private observation
+// and this planning value; a changed source inventory fails closed.
+func runtimeRetiredTypeScriptAuditParentIDsV1(ctx context.Context, roots persistencefs.RootSet) (map[string]struct{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	childRunRoot := filepath.Join(roots.DataDir, "child-runs")
+	observation, err := jobs.BuildLegacyTypeScriptLineageObservationV1(childRunRoot)
+	if err != nil || len(observation.Entries) == 0 {
+		return nil, errors.Join(pendingworkapp.ErrChildProducerInventoryIncomplete, err)
+	}
+	if _, err := newFrozenLegacyTypeScriptChildLineageWitnessV1(
+		childRunRoot, newLegacyTypeScriptRawThreadReaderV1(roots.DurableDir),
+	); err != nil {
+		return nil, err
+	}
+	current, err := jobs.BuildLegacyTypeScriptLineageObservationV1(childRunRoot)
+	if err != nil {
+		return nil, err
+	}
+	if current.InventoryManifestSHA256 != observation.InventoryManifestSHA256 || len(current.Entries) != len(observation.Entries) {
+		return nil, errors.New("legacy TypeScript child-run inventory changed during lineage witness")
+	}
+	parentIDs := make(map[string]struct{}, len(observation.Entries))
+	for _, entry := range observation.Entries {
+		parentID := strings.TrimSpace(entry.Lineage.ParentThreadID)
+		if !domainthread.IsCanonicalRecordID(parentID) {
+			return nil, pendingworkapp.ErrChildProducerInventoryIncomplete
+		}
+		parentIDs[parentID] = struct{}{}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parentIDs, nil
+}
+
+// validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1 performs the
+// same complete legacy lineage witness before the desktop migration can
+// create its first startup-authority namespace entry. The semantic stage
+// repeats the identity-bound observation; this early read only prevents an
+// invalid retired source from leaving preflight housekeeping behind.
+func validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(
+	ctx context.Context,
+	roots persistencefs.RootSet,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	jobSnapshot, err := jobs.ReadChildRunIdentitySnapshotV1(ctx, filepath.Join(roots.DataDir, "child-runs"))
+	if err != nil {
+		return err
+	}
+	if !jobSnapshot.HasLegacyTypeScript {
+		return nil
+	}
+	_, err = runtimeRetiredTypeScriptAuditParentIDsV1(ctx, roots)
+	return err
+}
+
+// materializeRuntimeRetiredAuditPrimariesV1 runs only against semantic-stage
+// roots. It uses the normal durable recovery/upsert sanitation path, so a
+// metadata-only parent becomes a real stage primary captured by the signed
+// semantic plan before any ordinary startup can observe it.
+func materializeRuntimeRetiredAuditPrimariesV1(
+	ctx context.Context,
+	roots persistencefs.RootSet,
+	snapshot persistencefs.RawSnapshot,
+	parentIDs map[string]struct{},
+) (persistencefs.RawSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(parentIDs) == 0 {
+		return snapshot, nil
+	}
+	files := make(map[string]persistencefs.EntryRecord, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		files[entry.Path] = entry
+	}
+	ids := make([]string, 0, len(parentIDs))
+	for id := range parentIDs {
+		if !domainthread.IsCanonicalRecordID(id) {
+			return persistencefs.RawSnapshot{}, pendingworkapp.ErrChildProducerInventoryIncomplete
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	store, err := runtimeserver.NewRuntimeEventSessionStoreForSemanticStartup(runtimeserver.RuntimeServerConfig{
+		ProductionDurableRoot: roots.DurableDir,
+	})
+	if err != nil {
+		return persistencefs.RawSnapshot{}, err
+	}
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return persistencefs.RawSnapshot{}, err
+		}
+		threadPath := "durable/threads/" + id
+		directory, exists := files[threadPath]
+		if !exists || directory.Type != "directory" {
+			return persistencefs.RawSnapshot{}, pendingworkapp.ErrChildProducerInventoryIncomplete
+		}
+		primary, exists := files[threadPath+"/thread.json"]
+		if exists {
+			if primary.Type != "file" {
+				return persistencefs.RawSnapshot{}, pendingworkapp.ErrChildProducerInventoryIncomplete
+			}
+			continue
+		}
+		thread, err := store.GetThreadForAuthorityRepair(id)
+		if err != nil {
+			return persistencefs.RawSnapshot{}, err
+		}
+		if thread == nil || runtimeappStringFieldV1(thread, "id") != id {
+			return persistencefs.RawSnapshot{}, pendingworkapp.ErrChildProducerInventoryIncomplete
+		}
+		if err := store.ReplaceThreadForAuthorityRepair(id, thread); err != nil {
+			return persistencefs.RawSnapshot{}, err
+		}
+	}
+	return persistencefs.CaptureManagedPreRecoverySnapshotV1(ctx, roots)
 }
 
 // prepareRuntimeChildIdentityStartupV1 runs before recovery, constructors,
@@ -110,10 +282,29 @@ func prepareRuntimeChildIdentityStartupV1(ctx context.Context, roots persistence
 	if err != nil {
 		return nil, err
 	}
-	if jobSnapshot.HasLegacyTypeScript {
+	if jobSnapshot.HasLegacyTypeScript && !allowsRuntimeRetiredTypeScriptAuditMigrationV1(ctx) {
 		return nil, pendingworkapp.ErrChildProducerInventoryIncomplete
 	}
-	primaries, threads, err := readRuntimeOriginalPrimaryInventoryV1(ctx, roots, snapshot)
+	var retiredParentIDs map[string]struct{}
+	if jobSnapshot.HasLegacyTypeScript && allowsRuntimeRetiredTypeScriptAuditMigrationV1(ctx) {
+		retiredParentIDs, err = runtimeRetiredTypeScriptAuditParentIDsV1(ctx, roots)
+		if err != nil {
+			return nil, err
+		}
+		if isRuntimeSemanticStageAccessV1(access) {
+			snapshot, err = materializeRuntimeRetiredAuditPrimariesV1(ctx, roots, snapshot, retiredParentIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	var primaries *runtimeOriginalPrimaryInventoryV1
+	var threads []map[string]any
+	if len(retiredParentIDs) != 0 && allowsRuntimeRetiredTypeScriptAuditMigrationV1(ctx) && !isRuntimeSemanticStageAccessV1(access) {
+		primaries, threads, err = readRuntimeOriginalPrimaryInventoryForRetiredAuditV1(ctx, roots, snapshot, retiredParentIDs)
+	} else {
+		primaries, threads, err = readRuntimeOriginalPrimaryInventoryV1(ctx, roots, snapshot)
+	}
 	if err != nil {
 		return nil, err
 	}

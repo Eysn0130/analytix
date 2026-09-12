@@ -274,11 +274,21 @@ func TestPrivateCASRecoveryJournalRejectsStaleCommittedRetirementBeforeResidueCl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(preparationPath); err != nil {
+	original, err := os.Lstat(preparationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the retired inode alive outside the journal inventory so the
+	// replacement cannot reuse its identity or fail due to an unknown entry.
+	if err := os.Rename(preparationPath, filepath.Join(t.TempDir(), "held-preparation")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(preparationPath, preparationBody, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	replacement, err := os.Lstat(preparationPath)
+	if err != nil || os.SameFile(original, replacement) {
+		t.Fatalf("fixture did not replace preparation identity: %v", err)
 	}
 	tempPath := stagePrivateCASRecoveryAuthenticatedResidueV1(
 		t, fixture, false, privateCASRecoveryRetirementFileV1, retirementBody, maxPrivateCASRecoveryRetirementBytesV1,

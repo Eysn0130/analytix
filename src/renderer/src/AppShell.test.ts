@@ -1,9 +1,30 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import AppShell, { prewarmAppShellSurfaces } from './AppShell'
 import appShellSource from './AppShell.tsx?raw'
 import i18n from './i18n'
+
+// Route loading is an explicit fixture, not a race against the machine's
+// module cache. These tests own the shell/Suspense boundary, not view internals.
+const routeFixture = vi.hoisted(() => ({ pending: true, wait: new Promise<never>(() => {}) }))
+vi.mock('./components/Workbench', () => ({
+  Workbench: () => {
+    if (routeFixture.pending) throw routeFixture.wait
+    return 'fixture-workbench-ready'
+  }
+}))
+vi.mock('./components/SettingsView', () => ({
+  SettingsView: () => {
+    if (routeFixture.pending) throw routeFixture.wait
+    return 'fixture-settings-ready'
+  }
+}))
+
+// Importing AppShell starts its workbench/settings preloads. afterAll does not
+// run when a tag filter excludes every test, so drain collection-owned imports
+// before that environment can be torn down. Do not suppress their failures.
+await prewarmAppShellSurfaces()
 
 function stubWindow(platform: string): void {
   vi.stubGlobal('window', {
@@ -13,11 +34,8 @@ function stubWindow(platform: string): void {
 }
 
 describe('AppShell', () => {
-  afterAll(async () => {
-    await prewarmAppShellSurfaces()
-  })
-
   afterEach(() => {
+    routeFixture.pending = true
     vi.unstubAllGlobals()
   })
 
@@ -51,5 +69,13 @@ describe('AppShell', () => {
     expect(appShellSource).not.toContain('const boot = useChatStore')
     expect(appShellSource).not.toContain('void boot()')
     expect(appShellSource).not.toContain('bootRequestedRef')
+  })
+
+  it('renders the ready route instead of the loading fallback', () => {
+    stubWindow('darwin')
+    routeFixture.pending = false
+    const html = renderToStaticMarkup(createElement(AppShell))
+    expect(html).toContain('fixture-workbench-ready')
+    expect(html).not.toContain('role="status"')
   })
 })

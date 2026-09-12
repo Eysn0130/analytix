@@ -43,5 +43,13 @@ func privateExtendedSecuritySafe(fd int) bool {
 
 func privateFileFlagsSafe(fd int) bool {
 	flags, err := unix.IoctlGetInt(fd, unix.FS_IOC_GETFLAGS)
-	return err == nil && flags == 0
+	return err == nil && privateStorageFlagsSafe(flags)
+}
+
+func privateStorageFlagsSafe(flags int) bool {
+	// Linux UAPI FS_EXTENT_FL describes the inode's storage format, not an
+	// access or mutation policy. ext4 sets it even on fresh private inodes.
+	// All other flags (including unknown flags) remain fail-closed.
+	const fsExtentFlag = 0x00080000
+	return flags & ^fsExtentFlag == 0
 }

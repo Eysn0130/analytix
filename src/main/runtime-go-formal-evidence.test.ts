@@ -1436,7 +1436,7 @@ function fakeReleaseGateRepo(): { directory: string; head: string } {
     'tasks.md'
   )
   mkdirSync(resolve(tasksPath, '..'), { recursive: true })
-  writeFileSync(tasksPath, '- [ ] 1.1 **[RC_REQUIRED]** fixture release blocker\n')
+  writeFileSync(tasksPath, '- [ ] 10.4 **[RC_REQUIRED]** fixture release blocker\n')
   runGit(directory, ['init', '-q'])
   runGit(directory, ['add', '.'])
   runGit(directory, [
@@ -1453,7 +1453,10 @@ function runReleaseGate(
   args: string[] = []
 ) {
   const result = spawnSync(process.execPath, [
-    join(repoRoot, 'scripts', 'runtime-go-release-gate.mjs'),
+    join(repoRoot, 'scripts', 'runtime-go-validation-command.mjs'),
+    'release-execution',
+    '--closure-report', 'docs/analytix/qa/synthetic-closure.md',
+    '--closure-task-ids', '10.4',
     '--json',
     ...args
   ], {

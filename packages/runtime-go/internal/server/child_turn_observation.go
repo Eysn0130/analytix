@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -23,11 +22,7 @@ func (h *runtimeServerHandler) observeRuntimeChildFirstTurnV1(ctx context.Contex
 		record.ParentThreadID != record.SecurityBinding.ParentThreadID || record.ParentTurnID != record.SecurityBinding.ParentTurnID {
 		return unavailable()
 	}
-	reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(h.store.root)
-	if err != nil {
-		return unavailable()
-	}
-	snapshot, err := reader.ReadPrimaryThreadSnapshotV1(ctx, record.ChildThreadID)
+	snapshot, err := h.store.ReadPrimaryThreadSnapshotV1(ctx, record.ChildThreadID)
 	if err != nil {
 		return unavailable()
 	}

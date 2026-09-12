@@ -8,6 +8,22 @@ import (
 	turnapp "analytix.local/runtime-go/internal/app/turn"
 )
 
+var errUsageIndexRebuildHistoryMutation = errors.New("history rewrite is unavailable during usage index rebuild")
+
+// Terminal appends can be merged into a reader's deferred event inventory, but
+// a rewind or compaction can remove the canonical input that reader retained.
+// The caller holds s.mu (also the usage index Owner) until the rewrite ends,
+// so a rebuild cannot start between this check and the durable mutation.
+func (s *DurableEventSessionStore) settleGeneralTerminalPublicationsBeforeHistoryRewriteNoLock(threadID string) error {
+	if s == nil || s.usageIndex == nil {
+		return errors.New("history rewrite usage index is unavailable")
+	}
+	if s.usageIndex.StatsOwnerLocked().RebuildActive {
+		return errUsageIndexRebuildHistoryMutation
+	}
+	return s.settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock(threadID)
+}
+
 // settleGeneralTerminalPublicationsBeforeHistoryMutationNoLock prevents
 // compaction or another destructive history mutation from deleting the only
 // canonical assistant item needed to reconstruct a crash-gap terminal bundle.

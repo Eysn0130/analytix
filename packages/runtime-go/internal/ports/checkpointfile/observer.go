@@ -28,6 +28,8 @@ type PathAuthority struct {
 }
 
 type Observer interface {
+	// ResourcesOverlap compares host paths and equivalent physical root bindings.
+	ResourcesOverlap(PathAuthority, PathAuthority) bool
 	CaptureBefore(context.Context, string, string) (BeforeState, error)
 	Observe(context.Context, string, PathAuthority, string) domaincheckpoint.ObservedOperationPathV2
 	ObserveRelative(context.Context, string, PathAuthority) domaincheckpoint.ObservedOperationPathV2

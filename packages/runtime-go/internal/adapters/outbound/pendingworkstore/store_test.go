@@ -15,6 +15,7 @@ import (
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	pendingworkstoreport "analytix.local/runtime-go/internal/ports/pendingworkstore"
+	privatecasport "analytix.local/runtime-go/internal/ports/privatecas"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	privatecasrecoverytest "analytix.local/runtime-go/internal/testsupport/privatecasrecovery"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
@@ -480,6 +481,141 @@ func TestStoreSnapshotInventoryFailsClosedWhenAppendOnlyInventoryChanges(t *test
 	}
 	if _, _, err := reader.SnapshotInventory(context.Background()); !errors.Is(err, ErrInventoryChanged) {
 		t.Fatalf("changing append-only inventory returned a mixed snapshot: %v", err)
+	}
+}
+
+type receiptInventoryAccessCounter struct {
+	*privatecastest.AccessAuthority
+	receiptAccesses int
+}
+
+func (counter *receiptInventoryAccessCounter) WithPrivateCASAccess(ctx context.Context, root string, access func(privatecasport.RootBinding) error) error {
+	if filepath.Base(root) == "receipts" {
+		counter.receiptAccesses++
+	}
+	return counter.AccessAuthority.WithPrivateCASAccess(ctx, root, access)
+}
+
+func TestStoreSnapshotInventoryReceiptScansDoNotGrowWithDispositions(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pending-work")
+	access, err := privatecastest.NewAccessAuthority(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := &receiptInventoryAccessCounter{AccessAuthority: access}
+	store, err := NewStore(root, counter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, key, input := storeReceiptFixture(t, domainpendingwork.KindToolBatch)
+	receipts := make([]domainpendingwork.PendingWorkReceiptV1, 4)
+	for index := range receipts {
+		input.PayloadHash = domainsecurity.SHA256Hex([]byte{byte(index)})
+		receipts[index] = mustStoreReceipt(t, input, key)
+		if err := store.PutReceiptIfAbsent(context.Background(), receipts[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	baseline := 0
+	for count := 0; count <= len(receipts); count++ {
+		if count > 0 {
+			disposition := mustStoreDisposition(t, receipts[count-1], key, domainpendingwork.StatusCompleted, "tool_batch_completed", input.IssuedAt.Add(time.Minute))
+			if err := store.PutDispositionIfAbsent(context.Background(), disposition); err != nil {
+				t.Fatal(err)
+			}
+		}
+		counter.receiptAccesses = 0
+		gotReceipts, gotDispositions, err := store.SnapshotInventory(context.Background())
+		if err != nil || len(gotReceipts) != len(receipts) || len(gotDispositions) != count {
+			t.Fatalf("snapshot inventory is incomplete: receipts=%d dispositions=%d err=%v", len(gotReceipts), len(gotDispositions), err)
+		}
+		if count == 0 {
+			baseline = counter.receiptAccesses
+			if baseline < 2 {
+				t.Fatal("snapshot omitted its two fresh receipt CAS observations")
+			}
+		} else if counter.receiptAccesses != baseline {
+			t.Fatalf("receipt CAS scans grew with dispositions: dispositions=%d accesses=%d baseline=%d", count, counter.receiptAccesses, baseline)
+		}
+	}
+}
+
+func TestStoreSnapshotInventoryRejectsDispositionCrossBinding(t *testing.T) {
+	for _, fixture := range []string{"missing-receipt", "different-receipt"} {
+		t.Run(fixture, func(t *testing.T) {
+			store, err := newTestPendingWorkStore(t, filepath.Join(t.TempDir(), "pending-work"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, key, input := storeReceiptFixture(t, domainpendingwork.KindToolBatch)
+			if fixture == "different-receipt" {
+				if err := store.PutReceiptIfAbsent(context.Background(), receipt); err != nil {
+					t.Fatal(err)
+				}
+				input.IssuedAt = input.IssuedAt.Add(time.Second)
+				other := mustStoreReceipt(t, input, key)
+				if other.WorkID != receipt.WorkID || other.ReceiptID == receipt.ReceiptID {
+					t.Fatal("fixture did not preserve work identity with a different signed receipt")
+				}
+				receipt = other
+			}
+			disposition := mustStoreDisposition(t, receipt, key, domainpendingwork.StatusCompleted, "tool_batch_completed", input.IssuedAt.Add(time.Minute))
+			body, err := domainpendingwork.PendingWorkDispositionV1Bytes(disposition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Admit a canonical CAS record while bypassing only the cross-owner
+			// write API, so the read must independently reject the hostile link.
+			if err := store.dispositionCAS.PutIfAbsent(context.Background(), disposition.WorkID, body); err != nil {
+				t.Fatal(err)
+			}
+			if receipts, dispositions, err := store.SnapshotInventory(context.Background()); err == nil || receipts != nil || dispositions != nil {
+				t.Fatal("snapshot accepted a disposition without its exact receipt")
+			}
+		})
+	}
+}
+
+func TestStoreSnapshotInventoryRejectsReceiptTamperingBetweenObservations(t *testing.T) {
+	store, err := newTestPendingWorkStore(t, filepath.Join(t.TempDir(), "pending-work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, key, input := storeReceiptFixture(t, domainpendingwork.KindToolBatch)
+	if err := store.PutReceiptIfAbsent(context.Background(), receipt); err != nil {
+		t.Fatal(err)
+	}
+	disposition := mustStoreDisposition(t, receipt, key, domainpendingwork.StatusCompleted, "tool_batch_completed", input.IssuedAt.Add(time.Minute))
+	if err := store.PutDispositionIfAbsent(context.Background(), disposition); err != nil {
+		t.Fatal(err)
+	}
+	store.afterReceiptSnapshot = func() {
+		if err := os.Remove(store.receiptPath(receipt.WorkID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if receipts, dispositions, err := store.SnapshotInventory(context.Background()); err == nil || receipts != nil || dispositions != nil {
+		t.Fatal("same-pass receipt reuse concealed deletion before the confirmation observation")
+	}
+}
+
+func TestStoreSnapshotInventoryRejectsDuplicateReceiptIdentities(t *testing.T) {
+	store, err := newTestPendingWorkStore(t, filepath.Join(t.TempDir(), "pending-work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, key, input := storeReceiptFixture(t, domainpendingwork.KindToolBatch)
+	input.IssuedAt = input.IssuedAt.Add(time.Second)
+	other := mustStoreReceipt(t, input, key)
+	if other.WorkID != receipt.WorkID || other.ReceiptID == receipt.ReceiptID {
+		t.Fatal("duplicate fixture has no conflicting receipt for the same work")
+	}
+	// This is the narrow snapshot join boundary: even two otherwise valid
+	// signed receipts cannot be silently collapsed by its work-ID index.
+	for _, duplicate := range []domainpendingwork.PendingWorkReceiptV1{receipt, other} {
+		if _, err := store.listDispositionsForReceiptSnapshot(context.Background(), []domainpendingwork.PendingWorkReceiptV1{receipt, duplicate}); err == nil {
+			t.Fatal("receipt snapshot silently collapsed a duplicate identity")
+		}
 	}
 }
 

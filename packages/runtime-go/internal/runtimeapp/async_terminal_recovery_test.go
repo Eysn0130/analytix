@@ -400,11 +400,51 @@ drained:
 	shutdownOwnedRuntimeHandler(t, handler)
 	handler = nil
 	checkpoint := startupWholeTreeDigest(t, config.ProductionDurableRoot)
+	checkpointRecords := startupWholeTreeRecordMapForTest(t, config.ProductionDurableRoot)
 	handler, err = NewRuntimeServerHandlerE(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if startupWholeTreeDigest(t, config.ProductionDurableRoot) != checkpoint || calls.Load() != 1 {
-		t.Fatal("second restart changed the authenticated terminal or reexecuted the producer")
+	treeChanged := startupWholeTreeDigest(t, config.ProductionDurableRoot) != checkpoint
+	if treeChanged || calls.Load() != 1 {
+		currentRecords := startupWholeTreeRecordMapForTest(t, config.ProductionDurableRoot)
+		changedKeys := changedWholeTreeRecordKeysForTest(checkpointRecords, currentRecords)
+		regularChanged, directoryOrPresenceChanged := 0, 0
+		for _, key := range changedKeys {
+			if len(strings.Split(checkpointRecords[key], ":")) == 3 || len(strings.Split(currentRecords[key], ":")) == 3 {
+				regularChanged++
+			} else {
+				directoryOrPresenceChanged++
+			}
+		}
+		changed := func(relative string) bool {
+			key := "0:" + filepath.ToSlash(relative)
+			before, beforePresent := checkpointRecords[key]
+			after, afterPresent := currentRecords[key]
+			return beforePresent != afterPresent || before != after
+		}
+		currentBytes, readErr := os.ReadFile(threadPath)
+		var current map[string]any
+		primaryValid := readErr == nil && json.Unmarshal(currentBytes, &current) == nil
+		var currentTerminal any
+		currentTurns, _ := current["turns"].([]any)
+		for _, value := range currentTurns {
+			turn, _ := value.(map[string]any)
+			if contracts.StringField(turn, "id") == turnID {
+				currentTerminal = turn["generalTerminalPublication"]
+			}
+		}
+		originalTerminal := raw["turns"].([]any)[0].(map[string]any)["generalTerminalPublication"]
+		// Only fixed field names, booleans and counts leave the fixture. Paths,
+		// IDs, hashes, terminal payloads and event bodies remain private.
+		t.Fatalf("second restart changed the authenticated terminal or reexecuted the producer: treeChanged=%t providerCalls=%d changedEntries=%d regularChanged=%d directoryOrPresenceChanged=%d rootEntryChanged=%t threadDirectoryChanged=%t threadJSONChanged=%t eventsChanged=%t metadataChanged=%t messagesChanged=%t summariesChanged=%t usageIndexChanged=%t primaryValid=%t terminalChanged=%t",
+			treeChanged, calls.Load(), len(changedKeys), regularChanged, directoryOrPresenceChanged,
+			changed("."), changed(filepath.Join("threads", threadID)),
+			changed(filepath.Join("threads", threadID, "thread.json")),
+			changed(filepath.Join("threads", threadID, "events.jsonl")),
+			changed(filepath.Join("threads", threadID, "metadata.jsonl")),
+			changed(filepath.Join("threads", threadID, "messages.jsonl")),
+			changed("thread_summaries.jsonl"), changed(filepath.Join("usage_events", "index.jsonl")),
+			primaryValid, !reflect.DeepEqual(originalTerminal, currentTerminal))
 	}
 }

@@ -17,7 +17,8 @@ import {
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { AcceptedFinalDeliveryBatchV2Schema } from '../../packages/runtime/src/contracts/events.js'
 import { ThreadDetailResponseV1Schema } from '../../packages/runtime/src/contracts/thread-detail.js'
 import type { AnalytixRuntimeApi } from '../shared/analytix-api'
@@ -36,6 +37,28 @@ const milestoneScriptPath = join(
   'scripts/runtime-go-packaged-milestone-a.mjs'
 )
 const requireFromTest = createRequire(import.meta.url)
+const fixtureCacheRoot = realpathSync(tmpdir())
+const fixtureModuleRoot = mkdtempSync(join(fixtureCacheRoot, 'milestone-a-module-fixture-'))
+const fixtureCacheHelper = join(fixtureModuleRoot, 'synthetic-cache-preflight.zsh')
+const fixtureModules = new Map<boolean, Promise<Record<string, any>>>()
+
+beforeAll(() => {
+  vi.stubEnv('TMPDIR', fixtureCacheRoot)
+  // Parser/parent-process fixtures are not Owner-volume qualification. Exercise
+  // a real sourced preflight against the parent's disposable storage instead.
+  // The production helper and its physical-volume requirements stay unchanged.
+  writeFileSync(fixtureCacheHelper, [
+    '# Synthetic test-only storage preflight; not formal cache acceptance.',
+    '[[ -d "$HOME" && -w "$HOME" && -d "$TMPDIR" && -w "$TMPDIR" ]] || return 1',
+    '[[ -d "$NPM_CONFIG_CACHE" && -w "$NPM_CONFIG_CACHE" ]] || return 1',
+    '[[ "$TMPDIR" == "${HOME:h}/tmp" && "$NPM_CONFIG_CACHE" == "${HOME:h}/npm-cache" ]] || return 1',
+    ''
+  ].join('\n'), { mode: 0o600 })
+})
+afterAll(() => {
+  vi.unstubAllEnvs()
+  rmSync(fixtureModuleRoot, { recursive: true, force: true })
+})
 
 function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8')
@@ -506,19 +529,34 @@ function refreshCompactionProof(item: Record<string, any>): void {
 }
 
 async function milestoneModule(): Promise<Record<string, any>> {
-  return import(pathToFileURL(milestoneScriptPath).href)
+  return fixtureMilestoneModule(false)
 }
 
 async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
-  const root = taskOwnedSandbox()
-  const instrumentedPath = join(root, 'runtime-go-packaged-milestone-a.instrumented.mjs')
+  return fixtureMilestoneModule(true)
+}
+
+function fixtureMilestoneModule(exposeInternals: boolean): Promise<Record<string, any>> {
+  const cached = fixtureModules.get(exposeInternals)
+  if (cached) return cached
+  const instrumentedPath = join(fixtureModuleRoot, `milestone-a-${exposeInternals}.mjs`)
   const originalModuleUrl = pathToFileURL(milestoneScriptPath).href
   const publicationAuthorityUrl = pathToFileURL(join(
     process.cwd(),
     'scripts/lib/packaged-release-publication-authority.mjs'
   )).href
   const originalSource = readFileSync(milestoneScriptPath, 'utf8')
-  const instrumentedSource = originalSource
+  // Existing source-level test instrumentation supplies only the synthetic
+  // cache mount, child preflight and source-relative module bindings. Do not change production
+  // cache policy, parser validation, freshness checks or acceptance classes.
+  const cacheDeclaration = "const CACHE_MOUNT = '/Volumes/AnalytixCache'"
+  if (!originalSource.includes(cacheDeclaration)) throw new Error('milestone_a_cache_fixture_binding_missing')
+  const helperPathExpression = 'repositorySourcePath(\n    CACHE_HELPER_SOURCE_RELATIVE_PATH\n  )'
+  if (originalSource.split(helperPathExpression).length !== 2) throw new Error('milestone_a_helper_fixture_binding_missing')
+  let instrumentedSource = originalSource
+    .replace(cacheDeclaration, `const CACHE_MOUNT = ${JSON.stringify(fixtureCacheRoot)}`)
+    .replace(helperPathExpression, JSON.stringify(fixtureCacheHelper))
+    .replaceAll('import.meta.url', JSON.stringify(originalModuleUrl))
     .replace("'./lib/local-provider-acceptance.mjs'", JSON.stringify(pathToFileURL(join(
       process.cwd(), 'scripts/lib/local-provider-acceptance.mjs'
     )).href))
@@ -529,11 +567,7 @@ async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
       "'./lib/packaged-release-publication-authority.mjs'",
       JSON.stringify(publicationAuthorityUrl)
     )
-    .replace(
-      'createRequire(import.meta.url)',
-      `createRequire(${JSON.stringify(originalModuleUrl)})`
-    )
-    .replace(
+  if (exposeInternals) instrumentedSource = instrumentedSource.replace(
       'async function observeHostToolExecution(',
       'export async function observeHostToolExecution('
     )
@@ -541,13 +575,15 @@ async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
       'function privateHostToolExecutionBindingMatches(',
       'export function privateHostToolExecutionBindingMatches('
     )
-  if (instrumentedSource === originalSource ||
+  if (instrumentedSource === originalSource || exposeInternals && (
     !instrumentedSource.includes('export async function observeHostToolExecution(') ||
-    !instrumentedSource.includes('export function privateHostToolExecutionBindingMatches(')) {
+    !instrumentedSource.includes('export function privateHostToolExecutionBindingMatches('))) {
     throw new Error('milestone_a_test_instrumentation_failed')
   }
   writeFileSync(instrumentedPath, instrumentedSource, 'utf8')
-  return import(`${pathToFileURL(instrumentedPath).href}?test=${Date.now()}`)
+  const loaded = import(pathToFileURL(instrumentedPath).href)
+  fixtureModules.set(exposeInternals, loaded)
+  return loaded
 }
 
 async function packagedAuthorityInternals(): Promise<Record<string, any>> {
@@ -983,7 +1019,7 @@ async function observeToolFailureFixture(
 const taskOwnedSandboxes: string[] = []
 
 function taskOwnedSandbox(): string {
-  const trustedTmpdir = realpathSync(String(process.env.TMPDIR || ''))
+  const trustedTmpdir = realpathSync(tmpdir())
   const path = mkdtempSync(join(trustedTmpdir, 'milestone-a-integrity-test-'))
   taskOwnedSandboxes.push(path)
   return path
@@ -11398,7 +11434,23 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       .not.toBe(acceptance.observedSourceDigest)
   }, 30_000)
 
-  it('accepts a legal equivalent hash and keeps the parent-owned test bound', async () => {
+  it('binds synthetic parent storage preflight to the same isolated home', { tags: ['macos-integration'] }, () => {
+    const root = taskOwnedSandbox()
+    const home = join(root, 'home')
+    const temporary = join(root, 'tmp')
+    const npmCache = join(root, 'npm-cache')
+    for (const directory of [home, temporary, npmCache]) mkdirSync(directory, { mode: 0o700 })
+    const env = { HOME: home, TMPDIR: temporary, NPM_CONFIG_CACHE: npmCache }
+    const invoke = (environment: NodeJS.ProcessEnv) => spawnSync('/bin/zsh', ['-c', 'source "$1"', 'fixture', fixtureCacheHelper], {
+      env: environment, encoding: 'utf8', timeout: 5_000
+    })
+    expect(invoke(env).status).toBe(0)
+    expect(invoke({ ...env, TMPDIR: root }).status).toBe(1)
+    expect(invoke({ ...env, NPM_CONFIG_CACHE: root }).status).toBe(1)
+    expect(invoke({ ...env, HOME: join(root, 'missing') }).status).toBe(1)
+  })
+
+  it('accepts a legal equivalent hash and keeps the parent-owned test bound', { tags: ['macos-integration'], timeout: 30_000 }, async () => {
     const {
       loadMilestoneAExternalRepositoryAcceptance,
       runParentOwnedRepositoryTest,
@@ -11446,7 +11498,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       expectedSourceBound: true,
       expectedSourceDigest: acceptance.observedSourceDigest
     }))
-  }, 30_000)
+  })
 
   it('rejects an unlisted source hash while keeping its observed digest distinct', async () => {
     const {
@@ -12643,7 +12695,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     }))
   })
 
-  it('parses a synthetic multi-commit repository contract without granting formal acceptance', async () => {
+  it('parses a synthetic multi-commit repository contract without granting formal acceptance', { tags: ['macos-integration'], timeout: 120_000 }, async () => {
     const {
       loadMilestoneAExternalRepositoryAcceptance,
       milestoneAPlanArtifactEvidence,
@@ -12680,7 +12732,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       planArtifactExcludeSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       planArtifactExcludeBeforeSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       testCommand:
-        `source '${join(process.cwd(), 'scripts', 'use-analytix-cache.sh')}' && 'node' '--test' 'test/math.test.mjs'`
+        `source '${fixtureCacheHelper}' && 'node' '--test' 'test/math.test.mjs'`
     }))
     expect(verifyMilestoneAExternalRepositoryAcceptance(authority, 'baseline')).toEqual(
       expect.objectContaining({
@@ -12845,7 +12897,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       structuredClone(plan.thread),
       plan.turnId
     )).toEqual(planEvidence)
-  }, 120_000)
+  })
 
   it('closes an authorized-path expected-byte mismatch without exposing repository content', async () => {
     const {

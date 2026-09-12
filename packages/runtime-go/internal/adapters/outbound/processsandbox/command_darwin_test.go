@@ -23,7 +23,24 @@ const (
 )
 
 func TestCommandContextDeniesProtectedFilesystemAccessAndAllowsOrdinaryWork(t *testing.T) {
-	root := t.TempDir()
+	assertProtectedFilesystemAccessAndOrdinaryWork(t, t.TempDir())
+}
+
+// Production composition supplies canonical roots. Exercise that contract
+// separately from the raw temporary-path case so an OS path alias cannot be
+// mistaken for a failure of the canonical policy (or silently ignored).
+func TestCommandContextDeniesCanonicalProtectedFilesystemAccess(t *testing.T) {
+	raw := t.TempDir()
+	root, err := filepath.EvalSymlinks(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("temporary root required canonicalization: %t", root != raw)
+	assertProtectedFilesystemAccessAndOrdinaryWork(t, root)
+}
+
+func assertProtectedFilesystemAccessAndOrdinaryWork(t *testing.T, root string) {
+	t.Helper()
 	protectedRoot := filepath.Join(root, `protected-"quoted"-\backslash-(allow default)`)
 	secondProtectedRoot := filepath.Join(root, "second-protected")
 	ordinaryRoot := filepath.Join(root, "ordinary")
@@ -284,7 +301,10 @@ func TestCommandContextDeniesLocalDeputyTransports(t *testing.T) {
 		return
 	}
 
-	unixRoot, err := os.MkdirTemp("", "analytix-sandbox-deputy-")
+	// AF_UNIX paths on Darwin are limited to 104 bytes. Keep the owned suffix
+	// short inside the canonical, isolated test root; never fall back to a
+	// different filesystem or skip the real socket containment assertion.
+	unixRoot, err := os.MkdirTemp("", "d-")
 	if err != nil {
 		t.Fatalf("create short Unix deputy root: %v", err)
 	}
@@ -294,7 +314,7 @@ func TestCommandContextDeniesLocalDeputyTransports(t *testing.T) {
 		network string
 		listen  string
 	}{
-		{name: "Unix socket", network: "unix", listen: filepath.Join(unixRoot, "d.sock")},
+		{name: "Unix socket", network: "unix", listen: filepath.Join(unixRoot, "s")},
 		{name: "local TCP", network: "tcp4", listen: "127.0.0.1:0"},
 	}
 	for _, testCase := range testCases {

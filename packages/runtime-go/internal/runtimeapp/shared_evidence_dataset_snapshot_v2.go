@@ -26,6 +26,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authoritycredentialsport "analytix.local/runtime-go/internal/ports/authoritycredentials"
 	casecontextport "analytix.local/runtime-go/internal/ports/casecontext"
+	datasetsnapshotport "analytix.local/runtime-go/internal/ports/datasetsnapshot"
 	evidenceregistryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
 	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
@@ -83,6 +84,22 @@ var _ runtimeEvidenceRegistryAuthority = (*evidenceregistryapp.Service)(nil)
 var _ evidenceregistryport.FactFinalWitnessIssuer = (*evidenceregistryapp.Service)(nil)
 
 var errRuntimeCaseEvidenceAuthorityUnavailableV1 = errors.New("case evidence authority is unavailable")
+
+// Turn admission cannot use a snapshot when its evidence registry is locally
+// unavailable. Reject before the shared witness challenge. Import admission
+// retains the underlying snapshot owner so a confirmed import can activate the
+// registry; this turn-facing view observes that activation on each request.
+type runtimeCaseDatasetSnapshotAuthorityV2 struct {
+	snapshot datasetsnapshotport.AuthorityV2
+	registry *runtimeImportActivatedRegistryV1
+}
+
+func (authority runtimeCaseDatasetSnapshotAuthorityV2) ResolveWitnessedV2(ctx context.Context, input datasetsnapshotport.ResolveInputV2) (datasetsnapshotport.ResolvedSnapshotV2, error) {
+	if authority.snapshot == nil || authority.registry == nil || authority.registry.CaseEvidenceAuthorityUnavailableV1() {
+		return datasetsnapshotport.ResolvedSnapshotV2{}, datasetsnapshotport.ErrUnavailable
+	}
+	return authority.snapshot.ResolveWitnessedV2(ctx, input)
+}
 
 // runtimeUnavailableEvidenceRegistryV1 is a stateless host-private capability
 // marker. It owns no files and every registry operation fails closed; startup

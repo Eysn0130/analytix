@@ -251,6 +251,8 @@ Analytix 的第一方版权人及 Project Owner 是 Guoqin He，其公开 GitHub
 ## 源码同步
 
 本项目与 [GitHub main](https://github.com/Eysn0130/analytix) 使用同一公开主线。
-在项目目录执行 `git pull` 获取更新；本地修改后用 `git commit` 记录，再用
-`git push` 上传。新 clone 请先运行 `npm run git:setup`。操作方法、私有历史保护和
+后续开发采用 **Branch → PR → CI/验收 → Merge main**：在干净的 `main` 上
+`git pull --ff-only`，从最新主线创建短期 `codex/*` 分支；修改后 `commit`、
+`push` 到该分支，通过 PR 的 CI 和适用验收再合并。不要直接推送 `main`。
+新 clone 请先运行 `npm run git:setup`。操作方法、私有历史保护和
 未随公开源码提供的资源见[Git 工作流程](docs/analytix/git-workflow.md)。

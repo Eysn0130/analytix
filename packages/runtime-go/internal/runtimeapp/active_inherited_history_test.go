@@ -102,6 +102,9 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.durable.BindPrimaryThreadReaderV1(fixture.primary); err != nil {
+		t.Fatal(err)
+	}
 	fixture.projector = threadapp.NewTrustedPublicProjectorWithPrimaryCAS(nil, fixture.registry, nil, fixture.primary)
 	fixture.durable.SetActiveHistorySourceAdmissionV1(func(source map[string]any) error {
 		_, err := fixture.projector.ProjectThread(source)
@@ -380,6 +383,9 @@ func TestRuntimeActiveHistoryCompactionDurableCommitAndCASRecovery(t *testing.T)
 				registry.SetActiveInheritedHistoryIdentityValidatorV1(fixture.identities)
 				durable, err := server.NewProductionDurableEventSessionStore(fixture.durableRoot)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if err := durable.BindPrimaryThreadReaderV1(fixture.primary); err != nil {
 					t.Fatal(err)
 				}
 				durable.SetCaseThreadAuthority(registry)

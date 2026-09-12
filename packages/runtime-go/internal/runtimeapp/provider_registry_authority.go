@@ -101,7 +101,7 @@ func finishProviderRegistryAuthorityV1(
 	registry *providerregistryfs.Store,
 	secrets *secretstore.Store,
 ) (*providerRegistryAuthorityV1, error) {
-	manager, err := providerregistryapp.NewManager(registry, secrets)
+	manager, err := providerregistryapp.NewManager(registry, secrets, providerregistryfs.LegacySourceReader{})
 	if err != nil {
 		return nil, errors.Join(errors.New("provider registry authority is unavailable"), registry.Close(), secrets.Close())
 	}

@@ -45,11 +45,21 @@ func TestRuntimeDarwinSecretStoreKeychainBindingRejectsPermissionLinkAndIdentity
 			}
 		}},
 		{"drift", func(t *testing.T, binding runtimeDarwinSecretStoreKeychainBindingV1) {
-			if err := os.Remove(binding.KeychainDBPath); err != nil {
+			original, err := os.Lstat(binding.KeychainDBPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Retain the old inode: unlink/recreate may reuse it on Linux and
+			// would not exercise the identity drift this test promises.
+			if err := os.Rename(binding.KeychainDBPath, binding.KeychainDBPath+".held"); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(binding.KeychainDBPath, []byte("replacement"), 0o600); err != nil {
 				t.Fatal(err)
+			}
+			replacement, err := os.Lstat(binding.KeychainDBPath)
+			if err != nil || os.SameFile(original, replacement) {
+				t.Fatalf("fixture did not replace Keychain file identity: %v", err)
 			}
 		}},
 	} {

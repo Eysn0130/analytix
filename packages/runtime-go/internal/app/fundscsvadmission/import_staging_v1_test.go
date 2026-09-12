@@ -96,22 +96,13 @@ func TestNativeBuildFailureRetainsOriginalErrorV1(t *testing.T) {
 		{nil, "OBJECT_VALIDATION", "UNAVAILABLE"},
 	} {
 		func() {
-			reader, writer, err := os.Pipe()
-			if err != nil {
-				t.Fatal("diagnostic capture unavailable")
-			}
-			previous := os.Stderr
-			os.Stderr = writer
-			defer func() { os.Stderr = previous; _ = writer.Close(); _ = reader.Close() }()
+			var output bytes.Buffer
 			stub := &nativeBuildDiagnosticStubV1{err: test.cause}
-			service := &ServiceV1{native: stub}
+			service := &ServiceV1{native: stub, diagnostics: &output}
 			_, got := service.buildNativeV1(context.Background(), build, 1, body)
-			os.Stderr = previous
-			_ = writer.Close()
-			output, readErr := io.ReadAll(reader)
-			if readErr != nil || stub.calls != 1 || !errors.Is(got, ErrUnavailable) || errors.Is(got, ErrInvalidRequest) ||
+			if stub.calls != 1 || !errors.Is(got, ErrUnavailable) || errors.Is(got, ErrInvalidRequest) ||
 				test.cause != nil && !errors.Is(got, test.cause) ||
-				string(output) != "[analytix] event=ANALYTIX_FUNDS_CSV_NATIVE_FAILURE_V1 layer=ADMISSION stage="+test.stage+" class="+test.class+"\n" {
+				output.String() != "[analytix] event=ANALYTIX_FUNDS_CSV_NATIVE_FAILURE_V1 layer=ADMISSION stage="+test.stage+" class="+test.class+"\n" {
 				t.Fatal("diagnostics changed native-call error semantics or lost its exact stage")
 			}
 		}()

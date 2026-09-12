@@ -3,12 +3,11 @@ package checkpoint
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	domaincheckpoint "analytix.local/runtime-go/internal/domain/checkpointauthority"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	checkpointfileport "analytix.local/runtime-go/internal/ports/checkpointfile"
 )
 
 var ErrRestartPreserved = errors.New("checkpoint operation is preserved after restart")
@@ -85,27 +84,22 @@ func (service OperationService) validateRestartPreservedInventoryV1(ctx context.
 			return err
 		}
 	}
-	if err := service.restartPreserved.validateRecoveryResources(states); err != nil {
+	if err := service.restartPreserved.validateRecoveryResources(states, service.Observer); err != nil {
 		return err
 	}
 	return ctx.Err()
 }
 
-type preservedOperationResourceV1 struct {
-	path, rootIdentity, relative string
-}
-
-func operationResourceV1(intent domaincheckpoint.OperationGroupIntentV2, path domaincheckpoint.OperationPathV2) preservedOperationResourceV1 {
-	root := path.AuthorityRoot
-	if path.PathAuthoritySchemaVersion == 0 {
+func operationResourceV1(intent domaincheckpoint.OperationGroupIntentV2, operationPath domaincheckpoint.OperationPathV2) checkpointfileport.PathAuthority {
+	root := operationPath.AuthorityRoot
+	if operationPath.PathAuthoritySchemaVersion == 0 {
 		root = intent.SecurityContext.WorkspaceRealPath
 	}
-	relative := filepath.Clean(filepath.FromSlash(path.RelativePath))
-	return preservedOperationResourceV1{path: filepath.Join(root, relative), rootIdentity: path.AuthorityRootIdentity, relative: relative}
+	return checkpointfileport.PathAuthority{Root: root, RootIdentity: operationPath.AuthorityRootIdentity, RelativePath: operationPath.RelativePath}
 }
 
-func (scope *operationRestartPreservationV1) validateRecoveryResources(states []domaincheckpoint.OperationGroupStateV2) error {
-	var held []preservedOperationResourceV1
+func (scope *operationRestartPreservationV1) validateRecoveryResources(states []domaincheckpoint.OperationGroupStateV2, observer checkpointfileport.Observer) error {
+	var held []checkpointfileport.PathAuthority
 	for _, state := range states {
 		if state.Terminal != nil || !scope.ownsThread(state.Intent.SecurityContext.ThreadID) {
 			continue
@@ -126,17 +120,11 @@ func (scope *operationRestartPreservationV1) validateRecoveryResources(states []
 			}
 			candidate := operationResourceV1(state.Intent, path)
 			for _, protected := range held {
-				if operationResourcePathsOverlapV1(candidate.path, protected.path) ||
-					(candidate.rootIdentity != "" && candidate.rootIdentity == protected.rootIdentity && operationResourcePathsOverlapV1(candidate.relative, protected.relative)) {
+				if observer.ResourcesOverlap(candidate, protected) {
 					return errors.Join(ErrRestartPreserved, errors.New("checkpoint recovery source overlaps a preserved operation resource"))
 				}
 			}
 		}
 	}
 	return nil
-}
-
-func operationResourcePathsOverlapV1(left, right string) bool {
-	separator := string(filepath.Separator)
-	return left == right || strings.HasPrefix(left, right+separator) || strings.HasPrefix(right, left+separator)
 }

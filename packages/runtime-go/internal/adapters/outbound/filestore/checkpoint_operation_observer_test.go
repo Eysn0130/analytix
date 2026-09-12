@@ -120,3 +120,28 @@ func TestCheckpointOperationObserverBindsMissingAllowWriteTargetAndRejectsStaleR
 		t.Fatalf("same-path root replacement did not quarantine: status=%q ok=%t observed=%#v", status, ok, replaced)
 	}
 }
+
+func TestCheckpointOperationResourceOverlapPreservesPhysicalAliases(t *testing.T) {
+	observer := CheckpointOperationObserver{}
+	first := checkpointfileport.PathAuthority{Root: filepath.Join(string(filepath.Separator), "workspace"), RootIdentity: "physical-root", RelativePath: "held/item"}
+	for _, tc := range []struct {
+		name                     string
+		root, identity, relative string
+		overlap                  bool
+	}{
+		{"same", first.Root, "", "held/item", true},
+		{"parent", first.Root, "", "held", true},
+		{"child", first.Root, "", "held/item/child", true},
+		{"adjacent prefix", first.Root, "", "held/items", false},
+		{"canonical relative", first.Root, "", "held/other/../item", true},
+		{"physical alias", first.Root + "-alias", first.RootIdentity, "held/item", true},
+		{"different physical owner", first.Root + "-other", "other-root", "held/item", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			second := checkpointfileport.PathAuthority{Root: tc.root, RootIdentity: tc.identity, RelativePath: tc.relative}
+			if observer.ResourcesOverlap(first, second) != tc.overlap || observer.ResourcesOverlap(second, first) != tc.overlap {
+				t.Fatal("resource overlap does not preserve symmetric ownership")
+			}
+		})
+	}
+}

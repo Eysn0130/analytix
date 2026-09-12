@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"mime/multipart"
-	"net/http"
 	"net/textproto"
 	"net/url"
 	"path"
@@ -17,7 +16,7 @@ import (
 
 	providerregistryapp "analytix.local/runtime-go/internal/app/providerregistry"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
-	"analytix.local/runtime-go/internal/netclient"
+	mediaport "analytix.local/runtime-go/internal/ports/mediaexecution"
 )
 
 const (
@@ -75,15 +74,13 @@ type RegistryAuthority interface {
 	ValidateMediaExecutionCurrent(context.Context, providerregistryapp.ExecutionAuthority) error
 }
 
-type HTTPClientFactory func(proxy string, timeout time.Duration) (*http.Client, error)
-
 type Executor struct {
-	Registry      RegistryAuthority
-	ClientFactory HTTPClientFactory
+	Registry         RegistryAuthority
+	TransportFactory mediaport.Factory
 }
 
-func New(registry RegistryAuthority) *Executor {
-	return &Executor{Registry: registry, ClientFactory: newHTTPClient}
+func New(registry RegistryAuthority, factory mediaport.Factory) *Executor {
+	return &Executor{Registry: registry, TransportFactory: factory}
 }
 
 func (executor *Executor) Execute(ctx context.Context, request Request) (Result, error) {
@@ -99,16 +96,15 @@ func (executor *Executor) Execute(ctx context.Context, request Request) (Result,
 		return Result{}, ErrUnavailable
 	}
 	timeout := requestTimeout(request.TimeoutMS)
-	factory := executor.ClientFactory
+	factory := executor.TransportFactory
 	if factory == nil {
-		factory = newHTTPClient
+		return Result{}, ErrUnavailable
 	}
 	client, err := factory(resolution.Provider.Proxy, timeout)
 	if err != nil || client == nil {
 		return Result{}, ErrUnavailable
 	}
-	defer client.CloseIdleConnections()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	defer client.Close()
 
 	switch request.Operation {
 	case OperationImageGenerate, OperationImageEdit:
@@ -173,7 +169,7 @@ func requestTimeout(milliseconds int) time.Duration {
 
 func (executor *Executor) executeImage(
 	ctx context.Context,
-	client *http.Client,
+	client mediaport.Transport,
 	resolution providerregistryapp.ExecutionResolution,
 	request Request,
 ) (Result, error) {
@@ -251,7 +247,7 @@ func (executor *Executor) executeImage(
 		defer clear(encoded)
 		body = bytes.NewReader(encoded)
 	}
-	response, err := executor.send(ctx, client, resolution, http.MethodPost, endpoint, body, contentType, true)
+	response, err := executor.send(ctx, client, resolution, "POST", endpoint, body, contentType, true)
 	if err != nil {
 		return Result{}, err
 	}
@@ -281,7 +277,7 @@ func (executor *Executor) executeImage(
 
 func (executor *Executor) downloadImage(
 	ctx context.Context,
-	client *http.Client,
+	client mediaport.Transport,
 	original providerregistryapp.ExecutionResolution,
 	rawURL string,
 ) (Result, error) {
@@ -297,7 +293,7 @@ func (executor *Executor) downloadImage(
 	if current.Authority() != original.Authority() {
 		return Result{}, ErrAuthorityChanged
 	}
-	response, err := executor.send(ctx, client, current, http.MethodGet, parsed.String(), nil, "", false)
+	response, err := executor.send(ctx, client, current, "GET", parsed.String(), nil, "", false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -307,7 +303,7 @@ func (executor *Executor) downloadImage(
 		clear(image)
 		return Result{}, ErrProviderFailed
 	}
-	mimeType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	mimeType := strings.TrimSpace(strings.Split(response.ContentType, ";")[0])
 	if !allowedImageMIME(mimeType) {
 		clear(image)
 		return Result{}, ErrProviderFailed
@@ -321,7 +317,7 @@ func (executor *Executor) downloadImage(
 
 func (executor *Executor) executeSpeech(
 	ctx context.Context,
-	client *http.Client,
+	client mediaport.Transport,
 	resolution providerregistryapp.ExecutionResolution,
 	request Request,
 ) (Result, error) {
@@ -377,7 +373,7 @@ func (executor *Executor) executeSpeech(
 	if err != nil {
 		return Result{}, ErrUnavailable
 	}
-	response, err := executor.send(ctx, client, resolution, http.MethodPost, endpoint, body, contentType, true)
+	response, err := executor.send(ctx, client, resolution, "POST", endpoint, body, contentType, true)
 	if err != nil {
 		return Result{}, err
 	}
@@ -400,33 +396,32 @@ func (executor *Executor) executeSpeech(
 
 func (executor *Executor) send(
 	ctx context.Context,
-	client *http.Client,
+	client mediaport.Transport,
 	resolution providerregistryapp.ExecutionResolution,
 	method string,
 	rawURL string,
 	body io.Reader,
 	contentType string,
 	credentialed bool,
-) (*http.Response, error) {
+) (*mediaport.Response, error) {
 	if err := executor.Registry.ValidateMediaExecutionCurrent(ctx, resolution.Authority()); err != nil {
 		return nil, ErrAuthorityChanged
 	}
-	request, err := http.NewRequestWithContext(ctx, method, rawURL, body)
-	if err != nil {
-		return nil, ErrInvalidRequest
-	}
-	if contentType != "" {
-		request.Header.Set("Content-Type", contentType)
-	}
+	var credential []byte
 	if credentialed {
-		request.Header.Set("Authorization", "Bearer "+string(resolution.Credential))
+		credential = resolution.Credential
 	}
-	response, err := client.Do(request)
-	request.Header.Del("Authorization")
+	response, err := client.Send(ctx, mediaport.Request{Method: method, URL: rawURL, Body: body, ContentType: contentType, Credential: credential, Credentialed: credentialed})
 	if err != nil {
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
+		if errors.Is(err, mediaport.ErrInvalidRequest) {
+			return nil, ErrInvalidRequest
+		}
+		return nil, ErrProviderFailed
+	}
+	if response == nil || response.Body == nil {
 		return nil, ErrProviderFailed
 	}
 	if err := executor.Registry.ValidateMediaExecutionCurrent(ctx, resolution.Authority()); err != nil {
@@ -438,22 +433,6 @@ func (executor *Executor) send(
 		return nil, ErrProviderFailed
 	}
 	return response, nil
-}
-
-func newHTTPClient(proxy string, timeout time.Duration) (*http.Client, error) {
-	spec := netclient.ProxySpec{Mode: netclient.ModeOff}
-	if raw := strings.TrimSpace(proxy); raw != "" {
-		parsed, err := url.Parse(raw)
-		if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawFragment != "" {
-			return nil, ErrUnavailable
-		}
-		spec = netclient.ProxySpec{Mode: netclient.ModeCustom, URL: raw}
-	}
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{
-		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
-		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 120 * time.Second,
-		ClientTimeout: timeout,
-	})
 }
 
 func mediaEndpoint(baseURL, suffix string) (string, error) {

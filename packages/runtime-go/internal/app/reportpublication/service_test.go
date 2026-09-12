@@ -4343,9 +4343,30 @@ func verifyStoredControlledOutcomeBindingsFixture(t *testing.T, fixture *reportP
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = piiauthorizationapp.ValidateStoredControlledAccessOutcomeV2(access, candidateOutcome, materials)
+			err = ValidateStoredControlledAccessOutcomeV2(access, candidateOutcome, materials)
 			if (err == nil) != (scenario == "exact projected outcome") {
 				t.Fatalf("actual stored outcome binding classification: %v", err)
+			}
+			body, marshalErr := domainpublication.ReportDeliveryOutcomeV1Bytes(candidateOutcome)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			digest := domainpublication.ReportDeliveryOutcomeID(candidateOutcome)
+			var inventory StoredControlledOutcomesV1
+			if inventory.ValidateAccess(access, materials) == nil {
+				t.Fatal("missing stored outcome admitted access")
+			}
+			if inventory.Add("different-id", body) == nil || inventory.Add(digest, []byte(`{}`)) == nil {
+				t.Fatal("invalid stored outcome entered inventory")
+			}
+			if err := inventory.Add(digest, body); err != nil {
+				t.Fatal(err)
+			}
+			if inventory.Add(digest, body) == nil {
+				t.Fatal("duplicate stored outcome entered inventory")
+			}
+			if err := inventory.ValidateAccess(access, materials); (err == nil) != (scenario == "exact projected outcome") {
+				t.Fatalf("stored owner inventory changed access binding: %v", err)
 			}
 		})
 	}

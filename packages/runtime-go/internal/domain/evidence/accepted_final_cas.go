@@ -10,6 +10,20 @@ import (
 
 const AcceptedFinalCASObservationSchemaVersion = 1
 
+// ValidateAcceptedFinalCASObservationForTurnV1 checks an existing observation's
+// value binding. It cannot issue an observation or return a replacement digest;
+// the strict primary reader remains the producer of CAS observations.
+func ValidateAcceptedFinalCASObservationForTurnV1(observation AcceptedFinalCASObservationV1, turn map[string]any) error {
+	if err := ValidateAcceptedFinalCASObservationV1(observation); err != nil {
+		return err
+	}
+	digest, err := AcceptedFinalTurnProjectionSHA256V1(turn)
+	if err != nil || digest != observation.TurnProjectionSHA256 {
+		return errors.New("accepted final CAS observation differs from the primary turn")
+	}
+	return nil
+}
+
 // AcceptedFinalCASObservationV1 is derived only from the canonical primary
 // thread record. Sidecars and hydrated projections cannot supply a winner.
 type AcceptedFinalCASObservationV1 struct {

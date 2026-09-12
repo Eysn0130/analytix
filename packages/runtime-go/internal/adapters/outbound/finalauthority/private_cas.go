@@ -921,6 +921,77 @@ func SecurePrivateCASDirectoryPresentWithAccessAuthorityContext(
 	return present, err
 }
 
+// OpenPreservingOriginalResiduesV1 opens an existing, unchanged prepared leaf
+// without recovering its original plain residues or empty shards. A linked
+// residue must name its exact committed partner, with exactly two links and no
+// unobserved aliases. The caller owns complete owner semantics and permission
+// to write independent records. Signed transaction phases and incomplete owner
+// topology remain excluded.
+func (prepared *PreparedSecurePrivateCASRecoveryV1) OpenPreservingOriginalResiduesV1(ctx context.Context) (*SecurePrivateCAS, error) {
+	if prepared == nil || !prepared.present || prepared.access == nil || prepared.gate == nil {
+		return nil, errors.New("private CAS original opening requires a present prepared leaf")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if prepared.originalCreates != nil {
+		if err := prepared.originalCreates.Revalidate(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := privateCASRecoveryExclusion.acquireLive(ctx); err != nil {
+		return nil, err
+	}
+	defer privateCASRecoveryExclusion.releaseLive()
+	var store *SecurePrivateCAS
+	err := withExistingPrivateCASAccess(ctx, prepared.access, prepared.rootPath, func(binding privatecasport.RootBinding) error {
+		if binding != prepared.binding {
+			return errors.New("private CAS original opening binding changed")
+		}
+		if err := acquirePrivateCASGate(ctx, prepared.gate); err != nil {
+			return err
+		}
+		defer releasePrivateCASGate(prepared.gate)
+		authority, present, err := existingPrivateCASRootAuthority(binding)
+		if err != nil || !present || authority != prepared.authority {
+			return errors.Join(errors.New("private CAS original opening identity changed"), err)
+		}
+		observation, err := observePrivateCASWithOriginalCreatesV1(ctx, authority, prepared.rootPath, prepared.maxBytes, prepared.originalCreates)
+		if err != nil || observation.fingerprint != prepared.observation.fingerprint {
+			return errors.Join(errors.New("private CAS original opening inventory changed"), err)
+		}
+		pins := privateCASOriginalShardPinsV1(observation.plan)
+		residues, err := privateCASOriginalResiduesFromPlanV1(observation.plan, pins)
+		if err != nil {
+			return err
+		}
+		generation, err := attachPrivateCASRootGeneration(ctx, privateCASRootGenerationKey{binding: binding, rootPath: prepared.rootPath}, authority, pins, prepared.maxBytes, privateCASOriginalOpeningV1{residues: residues, creates: prepared.originalCreates})
+		if err != nil {
+			return err
+		}
+		store = &SecurePrivateCAS{gate: prepared.gate, root: authority, binding: binding, rootPath: prepared.rootPath, maxBytes: prepared.maxBytes, generation: generation, access: prepared.access}
+		current, err := observePrivateCASWithOriginalCreatesV1(ctx, authority, prepared.rootPath, prepared.maxBytes, prepared.originalCreates)
+		if err != nil || current.fingerprint != observation.fingerprint {
+			return errors.Join(errors.New("private CAS original opening changed before activation"), err)
+		}
+		return ctx.Err()
+	})
+	if prepared.originalCreates != nil {
+		err = errors.Join(err, prepared.originalCreates.Revalidate(ctx))
+	}
+	if err != nil {
+		if store != nil {
+			err = errors.Join(err, store.Close())
+		}
+		return nil, err
+	}
+	runtime.SetFinalizer(store, func(current *SecurePrivateCAS) { _ = current.Close() })
+	return store, nil
+}
+
 func openSecurePrivateCAS(
 	ctx context.Context,
 	root string,

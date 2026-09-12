@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,7 +157,7 @@ func TestRuntimeReportEarlyGateAllowsUnrelatedAuthenticatedRecovery(t *testing.T
 	}
 }
 
-func TestRuntimeReportAttemptGatePrecedesRecoveryForOpenAndTerminalStages(t *testing.T) {
+func TestRuntimeReportAttemptMissingOriginalAuthorityPrecedesRecoveryForOpenAndTerminalStages(t *testing.T) {
 	for _, scenario := range []string{"reserved", "aborted"} {
 		t.Run(scenario, func(t *testing.T) { testRuntimeReportAttemptGateV1(t, scenario) })
 	}
@@ -245,9 +246,19 @@ func testRuntimeReportAttemptGateV1(t *testing.T, scenario string) {
 	if handler != nil {
 		shutdownOwnedRuntimeHandler(t, handler)
 	}
-	if scenario == "reserved" || scenario == "aborted" {
-		if !errors.Is(err, errRuntimeReportRestartReconciliationRequired) {
-			t.Errorf("valid reserved/aborted attempt missed original gate: %v", err)
+	if scenario == "reserved" {
+		// These signed records deliberately have no original primary. Signing
+		// alone cannot make a report attempt valid or authorize recovery.
+		// Fully enrolled reserved histories are exercised by the Original
+		// report fixture and its retention/deferred/closed HTTP tests.
+		if err == nil || !strings.Contains(err.Error(), "thread is outside original primary inventory") {
+			t.Errorf("unbacked reserved attempt missed original primary gate: %v", err)
+		}
+	} else if scenario == "aborted" {
+		// A terminal disposition removes unresolved scope, but does not supply
+		// the independent enrollment missing from this fixture.
+		if err == nil || err.Error() != "original registry independent enrollment is unavailable" {
+			t.Errorf("unenrolled terminal attempt missed original trust gate: %v", err)
 		}
 	} else if scenario == "foreign-key" {
 		// This fixture also lacks independent enrollment. The complete
