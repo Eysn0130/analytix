@@ -349,6 +349,14 @@ Darwin's ambiguous replacement case continues to fail closed. Parser-only
 packaging fixtures now declare resource presence and inject only synthetic
 toolchain identity probes, without changing production admission or claiming a
 real package build. The separate toolchain contract tests still run.
+At `da77ff2fd`, both native filesystem CI jobs passed, including the complete
+persistence package; ordinary and production-tag full Go tests remain separate
+required checks. Milestone A/B parser tests now use canonical OS temporary
+fixtures instead of requiring the Owner's cache mount. A's existing test-module
+instrumentation binds only fixture paths and source-relative imports. B's
+mocked APFS test explicitly supplies a Darwin platform, with Linux/Windows
+rejection tests retained as executable negative coverage. Their local complete
+files passed (175 and 34 tests); this is not actual packaged acceptance.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

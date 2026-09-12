@@ -17,7 +17,8 @@ import {
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { AcceptedFinalDeliveryBatchV2Schema } from '../../packages/runtime/src/contracts/events.js'
 import { ThreadDetailResponseV1Schema } from '../../packages/runtime/src/contracts/thread-detail.js'
 import type { AnalytixRuntimeApi } from '../shared/analytix-api'
@@ -36,6 +37,15 @@ const milestoneScriptPath = join(
   'scripts/runtime-go-packaged-milestone-a.mjs'
 )
 const requireFromTest = createRequire(import.meta.url)
+const fixtureCacheRoot = realpathSync(tmpdir())
+const fixtureModuleRoot = mkdtempSync(join(fixtureCacheRoot, 'milestone-a-module-fixture-'))
+const fixtureModules = new Map<boolean, Promise<Record<string, any>>>()
+
+beforeAll(() => { vi.stubEnv('TMPDIR', fixtureCacheRoot) })
+afterAll(() => {
+  vi.unstubAllEnvs()
+  rmSync(fixtureModuleRoot, { recursive: true, force: true })
+})
 
 function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8')
@@ -506,19 +516,31 @@ function refreshCompactionProof(item: Record<string, any>): void {
 }
 
 async function milestoneModule(): Promise<Record<string, any>> {
-  return import(pathToFileURL(milestoneScriptPath).href)
+  return fixtureMilestoneModule(false)
 }
 
 async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
-  const root = taskOwnedSandbox()
-  const instrumentedPath = join(root, 'runtime-go-packaged-milestone-a.instrumented.mjs')
+  return fixtureMilestoneModule(true)
+}
+
+function fixtureMilestoneModule(exposeInternals: boolean): Promise<Record<string, any>> {
+  const cached = fixtureModules.get(exposeInternals)
+  if (cached) return cached
+  const instrumentedPath = join(fixtureModuleRoot, `milestone-a-${exposeInternals}.mjs`)
   const originalModuleUrl = pathToFileURL(milestoneScriptPath).href
   const publicationAuthorityUrl = pathToFileURL(join(
     process.cwd(),
     'scripts/lib/packaged-release-publication-authority.mjs'
   )).href
   const originalSource = readFileSync(milestoneScriptPath, 'utf8')
-  const instrumentedSource = originalSource
+  // Existing source-level test instrumentation supplies only the synthetic
+  // cache mount and source-relative module bindings. Do not change production
+  // cache policy, parser validation, freshness checks or acceptance classes.
+  const cacheDeclaration = "const CACHE_MOUNT = '/Volumes/AnalytixCache'"
+  if (!originalSource.includes(cacheDeclaration)) throw new Error('milestone_a_cache_fixture_binding_missing')
+  let instrumentedSource = originalSource
+    .replace(cacheDeclaration, `const CACHE_MOUNT = ${JSON.stringify(fixtureCacheRoot)}`)
+    .replaceAll('import.meta.url', JSON.stringify(originalModuleUrl))
     .replace("'./lib/local-provider-acceptance.mjs'", JSON.stringify(pathToFileURL(join(
       process.cwd(), 'scripts/lib/local-provider-acceptance.mjs'
     )).href))
@@ -529,11 +551,7 @@ async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
       "'./lib/packaged-release-publication-authority.mjs'",
       JSON.stringify(publicationAuthorityUrl)
     )
-    .replace(
-      'createRequire(import.meta.url)',
-      `createRequire(${JSON.stringify(originalModuleUrl)})`
-    )
-    .replace(
+  if (exposeInternals) instrumentedSource = instrumentedSource.replace(
       'async function observeHostToolExecution(',
       'export async function observeHostToolExecution('
     )
@@ -541,13 +559,15 @@ async function instrumentedMilestoneModule(): Promise<Record<string, any>> {
       'function privateHostToolExecutionBindingMatches(',
       'export function privateHostToolExecutionBindingMatches('
     )
-  if (instrumentedSource === originalSource ||
+  if (instrumentedSource === originalSource || exposeInternals && (
     !instrumentedSource.includes('export async function observeHostToolExecution(') ||
-    !instrumentedSource.includes('export function privateHostToolExecutionBindingMatches(')) {
+    !instrumentedSource.includes('export function privateHostToolExecutionBindingMatches('))) {
     throw new Error('milestone_a_test_instrumentation_failed')
   }
   writeFileSync(instrumentedPath, instrumentedSource, 'utf8')
-  return import(`${pathToFileURL(instrumentedPath).href}?test=${Date.now()}`)
+  const loaded = import(pathToFileURL(instrumentedPath).href)
+  fixtureModules.set(exposeInternals, loaded)
+  return loaded
 }
 
 async function packagedAuthorityInternals(): Promise<Record<string, any>> {
@@ -983,7 +1003,7 @@ async function observeToolFailureFixture(
 const taskOwnedSandboxes: string[] = []
 
 function taskOwnedSandbox(): string {
-  const trustedTmpdir = realpathSync(String(process.env.TMPDIR || ''))
+  const trustedTmpdir = realpathSync(tmpdir())
   const path = mkdtempSync(join(trustedTmpdir, 'milestone-a-integrity-test-'))
   taskOwnedSandboxes.push(path)
   return path
