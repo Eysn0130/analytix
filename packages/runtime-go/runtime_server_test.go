@@ -369,7 +369,7 @@ func decodeTestUTF16LEWithBOM(t *testing.T, data []byte) string {
 }
 
 func TestRuntimeServerDefaultsTurnControlsFromRuntimeSettings(t *testing.T) {
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
 		DataDir:        t.TempDir(),
@@ -428,7 +428,7 @@ func TestRuntimeServerDefaultsTurnControlsFromRuntimeSettings(t *testing.T) {
 }
 
 func TestRuntimeServerRuntimeInfoReadsVisionBridgeCapabilityConfig(t *testing.T) {
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
 		DataDir:        t.TempDir(),
@@ -1024,7 +1024,7 @@ func TestRuntimeServerExplicitTurnModelBecomesThreadCurrentModel(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -1086,7 +1086,7 @@ func TestRuntimeServerSubagentInheritsLatestParentThreadModel(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -1153,7 +1153,7 @@ func TestRuntimeServerSubagentRejectsUnconfiguredChildModelBeforeChildTurn(t *te
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -1499,7 +1499,7 @@ func TestToolAddedDuringStreamStillRejected(t *testing.T) {
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_late","type":"function","function":{"name":"mcp__docs__late_lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "catalog-provider", "catalog-model"),
 		MCPConfigJSON: string(mustJSONNoTest(map[string]any{"mcpServers": map[string]any{
@@ -1574,7 +1574,7 @@ func TestSameNameSchemaSwapRejected(t *testing.T) {
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_schema_swap","type":"function","function":{"name":"mcp__docs__lookup","arguments":"{\"q\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "schema-provider", "schema-model"),
 		MCPConfigJSON: string(mustJSONNoTest(map[string]any{"mcpServers": map[string]any{
@@ -2003,7 +2003,7 @@ func TestRuntimeServerSteerAdmitsAndPromotesMidTurnUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := newMidTurnSteerProviderServer(t)
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -2117,7 +2117,7 @@ func TestRuntimeServerSteerRejectsMismatchedExpectedTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := newMidTurnSteerProviderServer(t)
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -2259,7 +2259,7 @@ func TestRuntimeServerContractCoversHTTPAndSSESubset(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -2780,7 +2780,7 @@ func TestRuntimeServerCheckpointApplyRejectsStalePlanDigest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	handler, checkpointAccess := newRuntimeServerHostAuthorityTestHandler(t, RuntimeServerContractConfig{
+	handler, checkpointAccess := newRuntimeServerProviderReadyHostAuthorityTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: dataDir, Host: "127.0.0.1",
 	})
 	server := httptest.NewServer(handler)
@@ -2866,7 +2866,7 @@ func TestRuntimeServerCheckpointPlanCapturesWriteFileSnapshotAndAppliesFromPriva
 		},
 	})
 	durableRoot := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     durableRoot,
 		Host:               "127.0.0.1",
@@ -3044,7 +3044,7 @@ func TestRuntimeServerCheckpointSnapshotFirstTouchWinsAcrossMultipleWrites(t *te
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -3130,7 +3130,7 @@ func TestRuntimeServerCheckpointAuthorityRejectsUnsafeSnapshotsAndApplyBlocksBin
 	g1 := loadG1Contract(t)
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
-	handler, checkpointAccess := newRuntimeServerHostAuthorityTestHandler(t, RuntimeServerContractConfig{
+	handler, checkpointAccess := newRuntimeServerProviderReadyHostAuthorityTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		DurableTempDir: durableRoot,
@@ -3313,7 +3313,7 @@ func TestRuntimeServerCheckpointApplyBlocksSymlinkTargets(t *testing.T) {
 			tc.setupSymlinks(t)
 			dataDir := t.TempDir()
 			durableRoot := t.TempDir()
-			handler, checkpointAccess := newRuntimeServerHostAuthorityTestHandler(t, RuntimeServerContractConfig{
+			handler, checkpointAccess := newRuntimeServerProviderReadyHostAuthorityTestHandler(t, RuntimeServerContractConfig{
 				RuntimeToken:   g1.RuntimeToken,
 				StartedAt:      g1.StartedAt,
 				DurableTempDir: durableRoot,
@@ -3885,7 +3885,7 @@ Inspect the risky area.
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -4064,7 +4064,7 @@ Check the requested area and return a concise finding.
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -4168,7 +4168,7 @@ Inspect the workspace. The host policy remains authoritative.
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -4335,7 +4335,7 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -4715,7 +4715,7 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -4851,18 +4851,20 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 
 func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T) {
 	g1 := loadG1Contract(t)
-	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
-		Routes:         g2.Routes,
 		DurableTempDir: t.TempDir(),
 		Host:           "127.0.0.1",
 		Port:           0,
 		DataDir:        dataDir,
 	}))
 	defer server.Close()
+	created := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
+		"title": "Live start-turn fields", "workspace": dataDir, "providerId": "deepseek", "model": "deepseek-chat",
+	}), http.StatusCreated)
+	threadID := stringField(created, "id")
 
 	guiPlan := map[string]string{
 		"operation":     "draft",
@@ -4876,7 +4878,7 @@ func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T)
 		t,
 		server.URL,
 		http.MethodPost,
-		"/v1/threads/thr_g2_read/turns",
+		"/v1/threads/"+threadID+"/turns",
 		g1.RuntimeToken,
 		mustJSON(t, map[string]any{
 			"prompt":           "Preserve all turn fields.",
@@ -4895,7 +4897,7 @@ func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T)
 	if turnID == "" {
 		t.Fatalf("turn start response missing turn id: %#v", start)
 	}
-	thread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/thr_g2_read", g1.RuntimeToken, nil, http.StatusOK)
+	thread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, g1.RuntimeToken, nil, http.StatusOK)
 	turn := findRuntimeServerTurn(t, thread, turnID)
 	if turn["mode"] != "plan" ||
 		turn["disableUserInput"] != true ||
@@ -4920,7 +4922,7 @@ func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T)
 		t.Fatalf("user item did not preserve prompt metadata: %#v", userItem)
 	}
 
-	replay := liveSSE(t, server.URL, "/v1/threads/thr_g2_read/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
 	events := runtimeServerEventsForTurn(t, replay, turnID)
 	turnStarted := firstRuntimeServerEvent(t, events, "turn_started")
 	if turnStarted["mode"] != "plan" ||
@@ -4939,7 +4941,7 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -5117,7 +5119,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	firstHandler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -5179,7 +5181,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 		t.Fatalf("shutdown attachment runtime: %v", err)
 	}
 
-	restarted := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	restarted := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
 		Routes:         g2.Routes,
@@ -5319,7 +5321,7 @@ func TestRuntimeServerNormalTextTurnPublishesTypedOrdinaryResult(t *testing.T) {
 		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -5362,7 +5364,7 @@ func TestRuntimeServerSecondTurnIncludesAcceptedHostHistoryOnly(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -5409,7 +5411,7 @@ func TestRuntimeServerReviewPersistsReviewItemAndReplay(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -5474,7 +5476,7 @@ func TestReasoningNotPersistedOrExported(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -5557,7 +5559,7 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -5870,7 +5872,7 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 			},
 		},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -5895,6 +5897,7 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 		{"xiaomi-priced", "mimo-v2.5"},
 	}
 	for _, tc := range cases {
+		selectRuntimeServerFixtureProvider(t, server.URL, DefaultRuntimeToken, tc.providerID)
 		assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
 			"prompt":     "Price " + tc.providerID,
 			"providerId": tc.providerID,
@@ -5943,17 +5946,18 @@ func TestRuntimeServerCacheDiagnosticsIsolateModelNamespaces(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:   DefaultRuntimeToken,
-		DurableTempDir: t.TempDir(),
-		Host:           "127.0.0.1",
-		Port:           0,
-		DataDir:        dataDir,
-		ProviderID:     "deepseek",
-		BaseURL:        upstream.URL() + "/v1",
-		APIKey:         "test-provider-key",
-		EndpointFormat: "chat_completions",
-		Model:          "deepseek-chat",
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
+		RuntimeToken:       DefaultRuntimeToken,
+		DurableTempDir:     t.TempDir(),
+		Host:               "127.0.0.1",
+		Port:               0,
+		DataDir:            dataDir,
+		ProviderID:         "deepseek",
+		BaseURL:            upstream.URL() + "/v1",
+		APIKey:             "test-provider-key",
+		EndpointFormat:     "chat_completions",
+		Model:              "deepseek-chat",
+		ModelProvidersJSON: testModelProvidersJSONWithModels(upstream.URL()+"/v1", "deepseek", "deepseek-chat", "deepseek-reasoner"),
 	}))
 	defer server.Close()
 
@@ -6039,7 +6043,7 @@ func TestRuntimeServerLiveSSEWithholdsProviderDraftUntilTurnCompletes(t *testing
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6177,7 +6181,7 @@ func TestRuntimeServerAsyncTurnResponseReturnsBeforeProviderCompletes(t *testing
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6277,7 +6281,7 @@ func TestRuntimeServerAutoTitleEmitsThreadUpdatedLifecycle(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6370,7 +6374,7 @@ func TestRuntimeServerLiveSSEDoesNotPublishPartialToolCallBeforeProviderComplete
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6507,7 +6511,7 @@ func TestRuntimeServerOpenAICompatibleTextTurnDoesNotEmitReasoning(t *testing.T)
 		`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6582,7 +6586,7 @@ func TestRuntimeServerProviderRetryIsVisible(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6659,7 +6663,7 @@ func TestRuntimeServerPreOutputStreamReplayIsVisible(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6742,7 +6746,7 @@ func TestRuntimeServerPostOutputProviderInterruptionRecoversWithTailPrompt(t *te
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6850,7 +6854,7 @@ func TestRuntimeServerPartialToolCallInterruptionRecoversWithoutExecutingPartial
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -6941,7 +6945,7 @@ func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvi
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7142,13 +7146,13 @@ func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 	}
 }
 
-func TestRuntimeServerRejectsMissingExplicitProviderWithoutDefaultFallback(t *testing.T) {
+func TestRuntimeServerRequestProviderCannotOverrideCommittedSelection(t *testing.T) {
 	dataDir := t.TempDir()
 	var providerCalls int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&providerCalls, 1)
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"committed provider\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer provider.Close()
 
@@ -7162,7 +7166,7 @@ func TestRuntimeServerRejectsMissingExplicitProviderWithoutDefaultFallback(t *te
 			"models":         []string{"configured-model"},
 		}},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7183,9 +7187,15 @@ func TestRuntimeServerRejectsMissingExplicitProviderWithoutDefaultFallback(t *te
 		"model":      "missing-model",
 	}), http.StatusInternalServerError)
 
-	assertClosedTurnFailureResponse(t, failed, "provider_not_configured", "The selected provider is not configured for this runtime.")
+	assertClosedTurnFailureResponse(t, failed, "provider_model_invalid", "The selected model is not configured for this provider.")
 	if got := atomic.LoadInt32(&providerCalls); got != 0 {
 		t.Fatalf("missing provider must not call configured fallback provider, got %d calls", got)
+	}
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"prompt": "Use the committed selection", "providerId": "missing-provider", "model": "configured-model",
+	}), http.StatusAccepted)
+	if got := atomic.LoadInt32(&providerCalls); got != 1 {
+		t.Fatalf("request Provider must retain the committed execution route, calls=%d", got)
 	}
 }
 
@@ -7202,7 +7212,7 @@ func TestRuntimeServerEmptyFinalRecoveryUsesHostBoundary(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7264,7 +7274,7 @@ func TestRuntimeServerEmptyFinalRecoveryExhaustionIsVisible(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7427,7 +7437,7 @@ func TestRuntimeServerReadToolsAllowExternalPathsInFullAccess(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7492,7 +7502,7 @@ func TestRuntimeServerGlobAllowsExternalPatternInFullAccess(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7550,7 +7560,7 @@ func TestRuntimeServerReadToolsPreserveKunAndNumberedPaginationContracts(t *test
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7632,7 +7642,7 @@ func TestRuntimeServerUTF16ReadGrepAndEditPreserveEncoding(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7710,7 +7720,7 @@ func TestRuntimeServerWritePreservesExistingUTF16Encoding(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7787,7 +7797,7 @@ func TestRuntimeServerGlobToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7874,7 +7884,7 @@ func TestRuntimeServerGrepSkipsNoiseHiddenAndProtectedDirs(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -7961,7 +7971,7 @@ func TestRuntimeServerGrepSupportsGlobContextAndColumn(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8044,7 +8054,7 @@ func TestRuntimeServerGrepHonorsRootGitignore(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8135,7 +8145,7 @@ func TestRuntimeServerGrepHonorsGitignore(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8213,7 +8223,7 @@ func TestRuntimeServerGlobRejectsWorkspaceEscape(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8273,7 +8283,7 @@ func TestRuntimeServerCodeIndexToolIsAdvertisedAndSearchesGoSymbols(t *testing.T
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8340,7 +8350,7 @@ func TestRuntimeServerCodeIndexOutlineSkipsNoiseAndFiltersBeforeLimit(t *testing
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8397,7 +8407,7 @@ func TestRuntimeServerCodeIndexRequiresQueryForSearch(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8436,7 +8446,7 @@ func TestRuntimeServerWebFetchDisabledByDefault(t *testing.T) {
 		`data: {"choices":[{"delta":{"content":"plain turn"}}]}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8516,7 +8526,7 @@ func TestRuntimeServerWebFetchToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8614,7 +8624,7 @@ func TestRuntimeServerWebFetchRejectsLinkLocal(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8722,7 +8732,7 @@ func TestRuntimeServerWebFetchUsesConfiguredProxy(t *testing.T) {
 		}
 	}))
 	defer proxyServer.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8814,7 +8824,7 @@ func TestRuntimeServerRunsContiguousReadOnlyToolsInParallel(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8881,7 +8891,7 @@ func TestRuntimeServerExecutesDelegateTaskWithDurableChildRun(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -8981,7 +8991,7 @@ func TestRuntimeServerMaxModelStepsZeroFallsBackToConfiguredBound(t *testing.T) 
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9038,7 +9048,7 @@ func TestRuntimeServerStepLimitConfigFinalAnswerNudge(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9097,7 +9107,7 @@ func TestRuntimeServerStepLimitFailurePersistsErrorItem(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9178,7 +9188,7 @@ func TestRuntimeServerInterruptCancelsActiveAsyncTurnAndPreservesAbortedStatus(t
 		cancelledOnce.Do(func() { close(cancelled) })
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9267,7 +9277,7 @@ func TestRuntimeServerInterruptDiscardExcludesAbortedTurnFromNextProviderHistory
 		_, _ = w.Write([]byte(`data: [DONE]` + "\n\n"))
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9360,7 +9370,7 @@ func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9450,7 +9460,7 @@ func assertRuntimeServerSubagentDefaultMaxSteps(t *testing.T, cases []runtimeSer
 	}
 	provider := newCompleteProviderServer(t, providerFrames)
 	dataDir := t.TempDir()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9532,7 +9542,7 @@ func TestRuntimeServerDelegateTaskAppliesSubagentProfileModelEffortAndToolScope(
 			"models":         []string{"parent-model", "child-model"},
 		}},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9615,7 +9625,7 @@ func TestRuntimeServerSubagentUsageSourceSurvivesRestart(t *testing.T) {
 		},
 	})
 	newHandler := func() http.Handler {
-		return newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+		return newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
 			DurableTempDir:     durableRoot,
 			Host:               "127.0.0.1",
@@ -9716,7 +9726,7 @@ func TestRuntimeServerDelegateTaskAppliesConfiguredDefaultSubagentProfile(t *tes
 			"models":         []string{"parent-model", "configured-child-model"},
 		}},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9800,6 +9810,151 @@ func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing
 			`data: [DONE]`,
 		},
 		{
+			`data: {"choices":[{"delta":{"content":"profile provider child answer"}}]}`,
+			`data: [DONE]`,
+		},
+		{
+			`data: {"choices":[{"delta":{"content":"parent saw profile child"}}]}`,
+			`data: [DONE]`,
+		},
+	})
+	modelProviders := string(mustJSON(t, map[string]any{
+		"defaultProviderId": "profile-parent-provider",
+		"providers": []map[string]any{
+			{
+				"id":             "profile-parent-provider",
+				"apiKey":         "test-parent-provider-key",
+				"baseUrl":        parentProvider.URL(),
+				"endpointFormat": "chat_completions",
+				"models":         []string{"profile-parent-model", "profile-child-model"},
+			},
+		},
+	}))
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
+		RuntimeToken:       DefaultRuntimeToken,
+		DurableTempDir:     t.TempDir(),
+		Host:               "127.0.0.1",
+		Port:               0,
+		DataDir:            dataDir,
+		ModelProvidersJSON: modelProviders,
+		MCPConfigJSON: string(mustJSONNoTest(map[string]any{
+			"subagents": map[string]any{
+				"defaultProfile": "profile-provider-reviewer",
+				"profiles": map[string]any{
+					"profile-provider-reviewer": map[string]any{
+						"providerId":     "profile-parent-provider",
+						"model":          "profile-child-model",
+						"endpointFormat": "chat_completions",
+						"variant":        "fast-lane",
+						"toolPolicy":     "readOnly",
+						"tools":          []string{"ls"},
+					},
+				},
+			},
+		})),
+	}))
+	defer server.Close()
+
+	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"title":      "Profile provider execution",
+		"workspace":  workspace,
+		"providerId": "profile-parent-provider",
+		"model":      "profile-parent-model",
+	}), http.StatusCreated)
+	threadID := stringField(thread, "id")
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"prompt":         "Delegate with the selected Provider profile model.",
+		"approvalPolicy": "auto",
+	}), http.StatusAccepted)
+
+	if parentProvider.RequestCount() != 3 {
+		t.Fatalf("expected parent/child/parent calls through the selected Provider, got %d", parentProvider.RequestCount())
+	}
+	for index := 0; index < 3; index++ {
+		if parentProvider.Path(index) != "/v1/chat/completions" {
+			t.Fatal("selected Provider execution used the wrong protocol route")
+		}
+	}
+	for _, index := range []int{0, 2} {
+		if !strings.Contains(parentProvider.Body(index), `"model":"profile-parent-model"`) {
+			t.Fatalf("parent call %d lost its selected Provider model", index)
+		}
+	}
+	if !strings.Contains(parentProvider.Body(0), "profile-parent-provider") || !strings.Contains(parentProvider.Body(0), "fast-lane") {
+		t.Fatalf("parent tool schema should advertise profile provider/model variant metadata:\n%s", parentProvider.Body(0))
+	}
+	if !strings.Contains(parentProvider.Body(1), `"model":"profile-child-model"`) || strings.Contains(parentProvider.Body(1), "profile-parent-model") {
+		t.Fatalf("child request should use profile provider model only:\n%s", parentProvider.Body(1))
+	}
+	publicRuns := runtimeServerScopedChildRuns(t, server.URL, DefaultRuntimeToken, threadID)
+	if len(publicRuns) != 1 {
+		t.Fatalf("expected one thread-scoped profile-provider child run: %#v", publicRuns)
+	}
+	assertSecurityBoundChildMetadata(t, publicRuns[0], "job-1", "completed", false)
+	internalRuns := runtimeServerInternalChildRuns(t, dataDir, threadID)
+	if len(internalRuns) != 1 {
+		t.Fatalf("expected one internal profile-provider child run: %#v", internalRuns)
+	}
+	run := internalRuns[0]
+	if run.ProviderID != "profile-parent-provider" ||
+		run.Model != "profile-child-model" ||
+		run.EndpointFormat != "" ||
+		run.Variant != "fast-lane" ||
+		run.ModelSource != "subagent-profile" {
+		t.Fatalf("child run should preserve profile execution identity: %#v", run)
+	}
+	modelExecution := run.ModelExecution
+	if modelExecution["providerId"] != "profile-parent-provider" ||
+		modelExecution["modelId"] != "profile-child-model" ||
+		modelExecution["variant"] != "fast-lane" ||
+		modelExecution["source"] != "subagent-profile" ||
+		stringField(modelExecution, "capabilityFingerprint") == "" ||
+		stringField(modelExecution, "resolvedAt") == "" {
+		t.Fatalf("child run modelExecution ref mismatch: %#v", modelExecution)
+	}
+	for _, key := range []string{"endpointFormat", "baseUrlFingerprint", "customFullEndpointFingerprint"} {
+		if _, exists := modelExecution[key]; exists {
+			t.Fatalf("child execution ref persisted Registry route authority: %s", key)
+		}
+	}
+
+	summary := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/summary", DefaultRuntimeToken, nil, http.StatusOK)
+	summarySubagents, _ := summary["subagents"].([]any)
+	if len(summarySubagents) != 1 {
+		t.Fatalf("thread summary should expose one metadata-only child membership: %#v", summary)
+	}
+	summaryChild, _ := summarySubagents[0].(map[string]any)
+	if stringField(summaryChild, "childRunId") != "job-1" || summaryChild["canReadOutput"] != false || summaryChild["outputWithheld"] != true {
+		t.Fatalf("thread summary child projection is not metadata-only: %#v", summaryChild)
+	}
+	for _, forbidden := range []string{"profile provider child answer", "reasoning", "artifactPath", "error"} {
+		if strings.Contains(mustJSONString(t, summaryChild), forbidden) {
+			t.Fatalf("thread summary exposed private child output value %q: %#v", forbidden, summaryChild)
+		}
+	}
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	events := parseRuntimeServerSSEEvents(t, replay)
+	completed := runtimeServerEventWithChildStatus(t, events, "completed")
+	assertSecurityBoundChildMetadata(t, mapField(t, completed, "child"), "job-1", "completed", false)
+	for _, forbidden := range []string{"childModelExecution", "childModelSource", "childProviderId", "profile-child-model", "fast-lane"} {
+		if strings.Contains(replay, forbidden) {
+			t.Fatalf("SSE replay exposed private child execution field %q:\n%s", forbidden, replay)
+		}
+	}
+}
+
+func TestRuntimeServerSubagentProfileCannotOverrideCommittedProvider(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := filepath.Join(dataDir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentProvider := newCompleteProviderServer(t, [][]string{
+		{
+			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_profile_provider","type":"function","function":{"name":"task","arguments":"{\"prompt\":\"Inspect profile provider\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`data: [DONE]`,
+		},
+		{
 			`data: {"choices":[{"delta":{"content":"parent saw profile child"}}]}`,
 			`data: [DONE]`,
 		},
@@ -9829,7 +9984,7 @@ func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing
 			},
 		},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -9866,64 +10021,39 @@ func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing
 		"approvalPolicy": "auto",
 	}), http.StatusAccepted)
 
-	if parentProvider.RequestCount() != 2 || childProvider.RequestCount() != 1 {
-		t.Fatalf("expected parent/child/parent provider split, parent=%d child=%d parentBodies=%#v childBodies=%#v", parentProvider.RequestCount(), childProvider.RequestCount(), parentProvider.Bodies(), childProvider.Bodies())
+	if parentProvider.RequestCount() != 2 || childProvider.RequestCount() != 0 {
+		t.Fatalf("unselected profile Provider executed: selectedCalls=%d unselectedCalls=%d", parentProvider.RequestCount(), childProvider.RequestCount())
 	}
-	if !strings.Contains(parentProvider.Body(0), "profile-child-provider") || !strings.Contains(parentProvider.Body(0), "fast-lane") {
-		t.Fatalf("parent tool schema should advertise profile provider/model variant metadata:\n%s", parentProvider.Body(0))
+	for _, body := range parentProvider.Bodies() {
+		if !strings.Contains(body, `"model":"profile-parent-model"`) {
+			t.Fatal("rejected child profile replaced the selected Provider model")
+		}
 	}
-	if !strings.Contains(childProvider.Body(0), `"model":"profile-child-model"`) || strings.Contains(childProvider.Body(0), "profile-parent-model") {
-		t.Fatalf("child request should use profile provider model only:\n%s", childProvider.Body(0))
+	snapshot := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/provider-registry", DefaultRuntimeToken, nil, http.StatusOK)
+	if snapshot["selectedProviderId"] != "profile-parent-provider" {
+		t.Fatal("subagent profile changed committed Registry selection")
 	}
 	publicRuns := runtimeServerScopedChildRuns(t, server.URL, DefaultRuntimeToken, threadID)
 	if len(publicRuns) != 1 {
-		t.Fatalf("expected one thread-scoped profile-provider child run: %#v", publicRuns)
+		t.Fatalf("expected one admission-failed child run, got %d", len(publicRuns))
 	}
-	assertSecurityBoundChildMetadata(t, publicRuns[0], "job-1", "completed", false)
+	assertSecurityBoundChildMetadata(t, publicRuns[0], "job-1", "failed", false)
 	internalRuns := runtimeServerInternalChildRuns(t, dataDir, threadID)
-	if len(internalRuns) != 1 {
-		t.Fatalf("expected one internal profile-provider child run: %#v", internalRuns)
+	if len(internalRuns) != 1 || internalRuns[0].Status != "failed" || internalRuns[0].ChildThreadID == "" {
+		t.Fatal("cross-provider profile did not reach and fail real child turn admission")
 	}
-	run := internalRuns[0]
-	if run.ProviderID != "profile-child-provider" ||
-		run.Model != "profile-child-model" ||
-		run.EndpointFormat != "chat_completions" ||
-		run.Variant != "fast-lane" ||
-		run.ModelSource != "subagent-profile" {
-		t.Fatalf("child run should preserve profile execution identity: %#v", run)
+	if internalRuns[0].FailureCode != "child_execution_failed" || internalRuns[0].ProviderID != "profile-child-provider" || internalRuns[0].Model != "profile-child-model" {
+		t.Fatalf("failed child admission lost its closed failure or requested execution ref: code=%s", internalRuns[0].FailureCode)
 	}
-	modelExecution := run.ModelExecution
-	if modelExecution["providerId"] != "profile-child-provider" ||
-		modelExecution["modelId"] != "profile-child-model" ||
-		modelExecution["endpointFormat"] != "chat_completions" ||
-		modelExecution["variant"] != "fast-lane" ||
-		modelExecution["source"] != "subagent-profile" ||
-		stringField(modelExecution, "baseUrlFingerprint") == "" ||
-		stringField(modelExecution, "capabilityFingerprint") == "" ||
-		stringField(modelExecution, "resolvedAt") == "" {
-		t.Fatalf("child run modelExecution ref mismatch: %#v", modelExecution)
-	}
-	summary := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/summary", DefaultRuntimeToken, nil, http.StatusOK)
-	summarySubagents, _ := summary["subagents"].([]any)
-	if len(summarySubagents) != 1 {
-		t.Fatalf("thread summary should expose one metadata-only child membership: %#v", summary)
-	}
-	summaryChild, _ := summarySubagents[0].(map[string]any)
-	if stringField(summaryChild, "childRunId") != "job-1" || summaryChild["canReadOutput"] != false || summaryChild["outputWithheld"] != true {
-		t.Fatalf("thread summary child projection is not metadata-only: %#v", summaryChild)
-	}
-	for _, forbidden := range []string{"profile provider child answer", "reasoning", "artifactPath", "error"} {
-		if strings.Contains(mustJSONString(t, summaryChild), forbidden) {
-			t.Fatalf("thread summary exposed private child output value %q: %#v", forbidden, summaryChild)
-		}
-	}
+	_, toolResult := providerHostToolResultForName(t, parentProvider.Body(1), "task")
+	assertSecurityBoundChildMetadata(t, toolResult, "job-1", "failed", false)
+
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	events := parseRuntimeServerSSEEvents(t, replay)
-	completed := runtimeServerEventWithChildStatus(t, events, "completed")
-	assertSecurityBoundChildMetadata(t, mapField(t, completed, "child"), "job-1", "completed", false)
-	for _, forbidden := range []string{"childModelExecution", "childModelSource", "childProviderId", "profile-child-provider", "fast-lane"} {
+	failed := runtimeServerEventWithChildStatus(t, parseRuntimeServerSSEEvents(t, replay), "failed")
+	assertSecurityBoundChildMetadata(t, mapField(t, failed, "child"), "job-1", "failed", false)
+	for _, forbidden := range []string{"profile provider child answer", "childModelExecution", "childModelSource", "childProviderId", "profile-child-provider", "fast-lane"} {
 		if strings.Contains(replay, forbidden) {
-			t.Fatalf("SSE replay exposed private child execution field %q:\n%s", forbidden, replay)
+			t.Fatalf("failed child replay exposed private field %q", forbidden)
 		}
 	}
 }
@@ -9955,7 +10085,7 @@ func TestRuntimeServerSubagentLifecycleCountsChildToolInvocations(t *testing.T) 
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10021,7 +10151,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxChildRuns(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10165,7 +10295,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxParallel(t *testing.T) {
 		return maxActiveChildRequests
 	}
 
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10266,7 +10396,7 @@ func TestRuntimeServerSubagentsDisabledRemovesTaskToolsAndRejectsCalls(t *testin
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10365,7 +10495,7 @@ func TestRuntimeServerSubagentInheritProfileHonorsWorkspaceShellBoundary(t *test
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10467,7 +10597,7 @@ func TestRuntimeServerSubagentFiltersRecursiveAndJobToolsEvenIfCalled(t *testing
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10534,7 +10664,7 @@ func TestApprovalDenyNeverResumesProviderOrStartsChildRun(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     durableRoot,
 		Host:               "127.0.0.1",
@@ -10589,7 +10719,7 @@ func TestRuntimeServerApprovalNeverBlocksMutatingToolExecution(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10693,7 +10823,7 @@ func TestRuntimeServerApprovalNeverRejectsRemoteReadOnlyHintAndMutatingMCP(t *te
 		}
 	}))
 	defer mcpServer.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10771,7 +10901,7 @@ func TestRuntimeServerWriteFileRejectsSymlinkWorkspaceEscape(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10835,7 +10965,7 @@ func TestRuntimeServerWriteFileAllowsConfiguredAllowWriteRoot(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10913,7 +11043,7 @@ func TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot(t *test
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -10984,7 +11114,7 @@ func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T)
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11048,7 +11178,7 @@ func TestRuntimeServerParallelTasksCreateDurableChildRuns(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11140,7 +11270,7 @@ func TestRuntimeServerParallelTasksHonorDependsOnWaves(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11250,7 +11380,7 @@ func TestRuntimeServerParallelTasksRunReadyWaveConcurrently(t *testing.T) {
 		}
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11413,7 +11543,7 @@ func TestRuntimeServerSubagentContinueInheritsSourceIdentityWhenParentModelChang
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11499,7 +11629,7 @@ func TestRuntimeServerRejectsConcurrentSubagentContinueFromSameReference(t *test
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11579,7 +11709,7 @@ func TestRuntimeServerAllowsSubagentForkFromAncestorParentThread(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11668,7 +11798,7 @@ func TestRuntimeServerCopiesAncestorSubagentContinueIntoCurrentParent(t *testing
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11754,7 +11884,7 @@ func TestRuntimeServerRejectsSubagentContinueWhenToolScopeDrifts(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11838,7 +11968,7 @@ func TestRuntimeServerStartupInterruptsStaleRunningSubagentRuns(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -11923,7 +12053,7 @@ func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12036,7 +12166,7 @@ func TestRuntimeServerBackgroundTaskJobsWaitAndOutput(t *testing.T) {
 		}
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12257,7 +12387,7 @@ func TestRuntimeServerBashRunInBackgroundWithholdsOutputAndSupportsKill(t *testi
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12395,7 +12525,7 @@ func TestRuntimeServerModelCannotInspectBackgroundTaskJobsAcrossTurns(t *testing
 		}
 	}))
 	defer provider.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12573,7 +12703,7 @@ func TestRuntimeServerBackgroundTaskJobKillCancelsChildRun(t *testing.T) {
 		}
 	}))
 	defer provider.Close()
-	handler := newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	handler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12708,7 +12838,7 @@ func TestRuntimeServerKunBuiltinToolsAdvertiseAndExecute(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12761,7 +12891,7 @@ func TestRuntimeServerGoalToolsRequireEvidenceBeforeCompletion(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12828,7 +12958,7 @@ func TestRuntimeServerGoalTodoCompleteStepAndFinalReadiness(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12917,7 +13047,7 @@ func TestRuntimeServerCompleteStepRejectsMismatchedTodoIndexBeforeEvidence(t *te
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -12993,7 +13123,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -13110,7 +13240,7 @@ func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 	}})
 	defer mcpServer.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -13199,7 +13329,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 		DataDir:            dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-plan-provider", "claude-plan-model", "messages"),
 	}
-	firstHandler := newRuntimeServerContractTestHandler(t, config)
+	firstHandler := newRuntimeServerProviderReadyTestHandler(t, config)
 	firstServer := httptest.NewServer(firstHandler)
 	thread := assertLiveJSON(t, firstServer.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title": "Implicit Anthropic materialized plan", "workspace": workspace,
@@ -13247,7 +13377,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 	firstServer.Close()
 	shutdownRuntimeTestHandler(t, firstHandler)
 
-	restartedHandler := newRuntimeServerContractTestHandler(t, config)
+	restartedHandler := newRuntimeServerProviderReadyTestHandler(t, config)
 	restarted := httptest.NewServer(restartedHandler)
 	defer restarted.Close()
 	assertLiveJSON(t, restarted.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
@@ -13297,7 +13427,7 @@ func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
 		`data: {"choices":[{"delta":{"content":"## Plan\n经查账户 6222020202020202020 涉案金额 420 万元。UNVERIFIED_PLAN_DRAFT_ACCOUNT_6222020202020202020_AMOUNT_4200000"}}]}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13377,7 +13507,7 @@ func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
 			},
 		},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13386,6 +13516,7 @@ func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	selectRuntimeServerFixtureProvider(t, server.URL, DefaultRuntimeToken, "xiaomi")
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":      "MiMo plan mode",
@@ -13486,7 +13617,7 @@ func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T
 			},
 		},
 	}))
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13495,6 +13626,7 @@ func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	selectRuntimeServerFixtureProvider(t, server.URL, DefaultRuntimeToken, "xiaomi")
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":      "MiMo alias plan mode",
@@ -13564,7 +13696,7 @@ func TestRuntimeServerNormalTurnRejectsForgedCreatePlan(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13679,7 +13811,7 @@ func TestRuntimeServerPlanModeRejectsForgedWriteBeforeMaterializingPlanText(t *t
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13755,7 +13887,7 @@ func TestRuntimeServerOpenAIResponsesToolLoopExecutesAndContinues(t *testing.T) 
 			`data: {"type":"response.completed","response":{"usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}}}`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -13838,7 +13970,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 			`data: {"type":"message_stop"}`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     durableRoot,
 		Host:               "127.0.0.1",
@@ -14030,7 +14162,7 @@ func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) 
 			`data: {"type":"message_stop"}`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     durableRoot,
 		Host:               "127.0.0.1",
@@ -14144,7 +14276,7 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 		DataDir:            dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-restart-provider", "claude-restart-model", "messages"),
 	}
-	firstHandler := newRuntimeServerContractTestHandler(t, config)
+	firstHandler := newRuntimeServerProviderReadyTestHandler(t, config)
 	firstServer := httptest.NewServer(firstHandler)
 	thread := assertLiveJSON(t, firstServer.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":      "Anthropic completed restart",
@@ -14162,7 +14294,7 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 	firstServer.Close()
 	shutdownRuntimeTestHandler(t, firstHandler)
 
-	restartedHandler := newRuntimeServerContractTestHandler(t, config)
+	restartedHandler := newRuntimeServerProviderReadyTestHandler(t, config)
 	restarted := httptest.NewServer(restartedHandler)
 	defer restarted.Close()
 	assertLiveJSON(t, restarted.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
@@ -14225,7 +14357,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-approval-provider", "claude-approval-model", "messages"),
 	}))
@@ -14305,7 +14437,7 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 			`data: {"type":"message_stop"}`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-multi-approval-provider", "claude-multi-approval-model", "messages"),
 	}))
@@ -14384,7 +14516,7 @@ func TestRuntimeServerAnthropicApprovalDenialClearsPrivateProtocolWithoutProvide
 		`data: {"type":"content_block_stop","index":0}`,
 		`data: {"type":"message_stop"}`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-deny-provider", "claude-deny-model", "messages"),
 	}))
@@ -14491,7 +14623,7 @@ func TestRuntimeServerConfiguredHTTPMCPToolLoopRejectsMutationWithoutHostSemanti
 		}
 	}))
 	defer mcpServer.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -14807,7 +14939,7 @@ func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t 
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -14905,7 +15037,7 @@ func TestProviderProtectedCaseFactDraftOnGeneralTurnIsNeverPublished(t *testing.
 		`data: {"choices":[{"delta":{"content":"` + draftSentinel + `"}}]}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "general-draft-provider", "malicious-model"),
 	}))
@@ -14972,7 +15104,7 @@ func TestUnboundProviderFileToolCannotCreateCaseBinding(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "metadata-forger", "malicious-model"),
 	}))
@@ -15314,106 +15446,6 @@ func TestRuntimeServerCaseFundUnverifiedFinalUsesHostBoundary(t *testing.T) {
 	}
 }
 
-func TestRuntimeServerConfiguredStdioMCPToolLoopRejectsMutationWithoutHostSemanticIdentityAndContinues(t *testing.T) {
-	if os.Getenv("ANALYTIX_RUNTIME_STDIO_MCP_HELPER") == "1" {
-		runRuntimeServerStdioMCPHelper()
-		return
-	}
-
-	dataDir := t.TempDir()
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stdio_lookup","type":"function","function":{"name":"mcp__runtime-stdio__lookup","arguments":"{\"query\":\"needle\"}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"stdio mcp complete"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "stdio-mcp-loop-provider", "stdio-mcp-loop-model"),
-		MCPConfigJSON: string(mustJSONNoTest(map[string]any{
-			"mcpServers": map[string]any{
-				"runtime-stdio": map[string]any{
-					"transport":  "stdio",
-					"command":    os.Args[0],
-					"args":       []string{"-test.run=TestRuntimeServerConfiguredStdioMCPToolLoopRejectsMutationWithoutHostSemanticIdentityAndContinues"},
-					"env":        map[string]string{"ANALYTIX_RUNTIME_STDIO_MCP_HELPER": "1"},
-					"trustScope": "user",
-				},
-			},
-		})),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Stdio MCP loop",
-		"workspace":      dataDir,
-		"providerId":     "stdio-mcp-loop-provider",
-		"model":          "stdio-mcp-loop-model",
-		"approvalPolicy": "auto",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Call configured stdio MCP.",
-	}), http.StatusAccepted)
-
-	if provider.RequestCount() != 2 {
-		t.Fatalf("stdio MCP tool loop should call provider twice, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	body := provider.Body(1)
-	_, mcpResult := providerHostToolResultForName(t, body, "mcp__runtime-stdio__lookup")
-	resultJSON := string(mustJSON(t, mcpResult))
-	if !strings.Contains(resultJSON, "side_effect_identity_unavailable") || strings.Contains(resultJSON, "stdio result: needle") || strings.Contains(body, "call_stdio_lookup") {
-		t.Fatalf("second provider call must contain the host rejection and no stdio MCP result: result=%s body=%s", resultJSON, body)
-	}
-}
-
-func runRuntimeServerStdioMCPHelper() {
-	scanner := bufio.NewScanner(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-	for scanner.Scan() {
-		var request struct {
-			ID     int            `json:"id"`
-			Method string         `json:"method"`
-			Params map[string]any `json:"params"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-			continue
-		}
-		switch request.Method {
-		case "notifications/initialized":
-		case "initialize":
-			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": runtimeMCPInitializeResult("runtime-stdio")})
-		case "tools/list":
-			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"tools": []map[string]any{{
-				"name":         "lookup",
-				"description":  "Lookup runtime stdio MCP data",
-				"inputSchema":  map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
-				"outputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-			}}}})
-		case "tools/call":
-			args, _ := request.Params["arguments"].(map[string]any)
-			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"content": []map[string]any{{
-				"type": "text",
-				"text": "stdio result: " + fmt.Sprint(args["query"]),
-			}}, "structuredContent": map[string]any{}}})
-		default:
-			_ = encoder.Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      request.ID,
-				"error":   map[string]any{"code": -32601, "message": "method not found"},
-			})
-		}
-	}
-}
-
 func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.T) {
 	dataDir := t.TempDir()
 	var toolCallCount atomic.Int32
@@ -15476,7 +15508,7 @@ func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.
 		}
 	}))
 	defer mcpServer.Close()
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -15539,7 +15571,7 @@ func TestRuntimeServerEditRequiresFreshReadBeforeEdit(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -15597,7 +15629,7 @@ func TestRuntimeServerEditAfterReadUsesApprovalAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -15705,7 +15737,7 @@ func TestRuntimeServerWriteFileToolReturnsUnifiedDiffMetadata(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -15815,7 +15847,7 @@ func TestRuntimeServerMoveFileToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -15974,7 +16006,7 @@ func TestRuntimeServerMoveFileRejectsDestinationExists(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16086,7 +16118,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndReplacesCell(t *testing.T) 
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16186,7 +16218,7 @@ func TestRuntimeServerNotebookEditInsertsAndDeletesCells(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16280,7 +16312,7 @@ func TestRuntimeServerNotebookEditRejectsInvalidTarget(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16366,7 +16398,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16520,7 +16552,7 @@ func TestRuntimeServerNotebookEditInsertDeleteAndErrors(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16649,7 +16681,7 @@ func TestRuntimeServerDeleteRangeToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16731,7 +16763,7 @@ func TestRuntimeServerDeleteRangeRequiresReadBeforeDelete(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16818,7 +16850,7 @@ func TestRuntimeServerDeleteRangeRejectsDuplicateAnchor(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16905,7 +16937,7 @@ func TestRuntimeServerDeleteSymbolToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -16986,7 +17018,7 @@ func TestRuntimeServerDeleteSymbolRequiresReadBeforeDelete(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17069,7 +17101,7 @@ func TestRuntimeServerDeleteSymbolRejectsMultiNameSpec(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17160,7 +17192,7 @@ func TestRuntimeServerEditFileSupportsReasonixStyleMultiEditAliases(t *testing.T
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17260,7 +17292,7 @@ func TestRuntimeServerMultiEditToolIsAdvertisedAndExecutes(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17353,7 +17385,7 @@ func TestRuntimeServerEditFileMultiEditIsAtomicOnFailure(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17410,7 +17442,7 @@ func TestRuntimeServerApprovalAlwaysRequestsApprovalForAutoReadTool(t *testing.T
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17507,7 +17539,7 @@ func TestStaleApprovalGrantRejectedAfterMCPReconnect(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "stale-approval-provider", "stale-approval-model"),
 		MCPConfigJSON: string(mustJSONNoTest(map[string]any{"mcpServers": map[string]any{
@@ -17573,7 +17605,7 @@ func TestRuntimeServerBashApprovalDenyAndAllowControlExecution(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17647,7 +17679,7 @@ func TestRuntimeServerBashReportsExitCodeAndDiagnostics(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17709,7 +17741,7 @@ func TestRuntimeServerBashTimeoutKillsProcessGroupGrandchild(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17813,7 +17845,7 @@ func TestRuntimeServerSideEffectIntentBlocksSecondEquivalentBashWrite(t *testing
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17903,7 +17935,7 @@ func TestRuntimeServerAllowsRepeatedReadOnlyObservation(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -17973,7 +18005,7 @@ func TestRuntimeServerFailureStormGuardAnnotatesThirdSameToolFailure(t *testing.
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18075,7 +18107,7 @@ func TestRuntimeServerFailureStormGuardResetsAfterSuccessfulTool(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18211,7 +18243,7 @@ func TestRuntimeServerInterruptedToolCallHistoryIsRepairedForProvider(t *testing
 			`data: {"choices":[],"usage":{"prompt_tokens":24,"completion_tokens":4,"total_tokens":28}}`,
 			`data: [DONE]`,
 		}})
-		server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+		server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 			ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "interrupted-provider", "interrupted-model"),
 		}))
@@ -18418,7 +18450,7 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18481,7 +18513,7 @@ func TestUserInputCancelNeverResumesProvider(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18533,7 +18565,7 @@ func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
 		},
 	})
 	caseSource := newPinnedCaseSourceMCPFixture(t)
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "stale-input-provider", "stale-input-model"),
 		MCPConfigJSON: string(mustJSONNoTest(map[string]any{"mcpServers": map[string]any{
@@ -18587,7 +18619,7 @@ func TestRuntimeServerInterruptCancelsPendingUserInputContinuation(t *testing.T)
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18648,7 +18680,7 @@ func TestRuntimeServerUserInputResolutionFailsClosedAfterRestart(t *testing.T) {
 		},
 	})
 	newHandler := func() http.Handler {
-		return newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+		return newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
 			DurableTempDir:     durableRoot,
 			Host:               "127.0.0.1",
@@ -18703,7 +18735,7 @@ func TestRuntimeServerDisableUserInputRemovesInteractiveToolSchemas(t *testing.T
 		`data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`,
 		`data: [DONE]`,
 	}})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18832,7 +18864,7 @@ func TestRuntimeServerApprovalDenyAndAllowControlToolExecution(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -18907,7 +18939,7 @@ func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t
 		`data: [DONE]`,
 	}})
 	caseSource := newPinnedCaseSourceMCPFixture(t)
-	handler := newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	handler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "shutdown-case-provider", "shutdown-case-model"),
 		MCPConfigJSON: string(mustJSONNoTest(map[string]any{"mcpServers": map[string]any{
@@ -18973,7 +19005,7 @@ func TestRuntimeServerInterruptCancelsPendingApprovalContinuation(t *testing.T) 
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
@@ -19038,7 +19070,7 @@ func TestRuntimeServerApprovalResolutionFailsClosedAfterRestart(t *testing.T) {
 		},
 	})
 	newHandler := func() http.Handler {
-		return newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+		return newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
 			DurableTempDir:     durableRoot,
 			Host:               "127.0.0.1",
@@ -19111,7 +19143,7 @@ func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testi
 			}})),
 		}
 	}
-	newHandler := func() http.Handler { return newRuntimeServerContractTestHandler(t, newConfig()) }
+	newHandler := func() http.Handler { return newRuntimeServerProviderReadyTestHandler(t, newConfig()) }
 	firstHandler := newHandler()
 	first := httptest.NewServer(firstHandler)
 	thread := assertLiveJSON(t, first.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
@@ -19300,23 +19332,32 @@ func TestRuntimeServerNormalTurnsDoNotCreateSyntheticApprovalOrUserInputGates(t 
 
 func TestRuntimeServerInternalSubagentLineageUsesExistingGoalContract(t *testing.T) {
 	g1 := loadG1Contract(t)
-	g2 := loadG2Contract(t)
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:   g1.RuntimeToken,
-		StartedAt:      g1.StartedAt,
-		Routes:         g2.Routes,
-		DurableTempDir: t.TempDir(),
-		Host:           "127.0.0.1",
-		Port:           0,
-		DataDir:        t.TempDir(),
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	provider := newCompleteProviderServer(t, [][]string{{
+		`data: {"choices":[{"delta":{"content":"Goal task completed."},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+	}})
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
+		RuntimeToken:       g1.RuntimeToken,
+		StartedAt:          g1.StartedAt,
+		DurableTempDir:     t.TempDir(),
+		Host:               "127.0.0.1",
+		Port:               0,
+		DataDir:            dataDir,
+		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "lineage-provider", "lineage-model"),
 	}))
 	defer server.Close()
+	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
+		"title": "Live internal goal lineage", "workspace": workspace, "providerId": "lineage-provider", "model": "lineage-model",
+	}), http.StatusCreated)
+	threadID := stringField(thread, "id")
 
 	goal := assertLiveJSON(
 		t,
 		server.URL,
 		http.MethodPost,
-		"/v1/threads/thr_g2_read/goal",
+		"/v1/threads/"+threadID+"/goal",
 		g1.RuntimeToken,
 		mustJSON(t, map[string]any{"objective": "Keep subagent lineage internal"}),
 		http.StatusOK,
@@ -19329,17 +19370,32 @@ func TestRuntimeServerInternalSubagentLineageUsesExistingGoalContract(t *testing
 		t,
 		server.URL,
 		http.MethodPost,
-		"/v1/threads/thr_g2_read/turns",
+		"/v1/threads/"+threadID+"/turns",
 		g1.RuntimeToken,
 		mustJSON(t, map[string]any{"prompt": "Run internal child orchestration.", "approvalPolicy": "auto", "disableUserInput": true}),
 		http.StatusAccepted,
 	)
 	turnID := stringField(start, "turnId")
-	replay := liveSSE(t, server.URL, "/v1/threads/thr_g2_read/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
 	events := runtimeServerEventsForTurn(t, replay, turnID)
 	stage := firstRuntimeServerPipelineStageWithChild(t, events, "response_received")
 	child := mapField(t, stage, "child")
-	assertSecurityBoundChildMetadata(t, child, "", "completed", false)
+	assertSecurityBoundChildMetadata(t, child, "job-1", "completed", false)
+	if provider.RequestCount() != 1 {
+		t.Fatalf("expected one real terminal producer call, got %d", provider.RequestCount())
+	}
+	internalRuns := runtimeServerInternalChildRuns(t, dataDir, threadID)
+	if len(internalRuns) != 1 || internalRuns[0].ParentGoalID != parentGoalID || internalRuns[0].ParentThreadID != threadID || internalRuns[0].ParentTurnID != turnID {
+		if len(internalRuns) != 1 {
+			t.Fatalf("child lineage count=%d", len(internalRuns))
+		}
+		t.Fatalf("child lineage mismatch: goal=%t thread=%t turn=%t fallback=%t", internalRuns[0].ParentGoalID == parentGoalID, internalRuns[0].ParentThreadID == threadID, internalRuns[0].ParentTurnID == turnID, internalRuns[0].ParentGoalID == "thread_"+threadID)
+	}
+	for _, forbidden := range []string{"private lineage child answer", "parentGoalId", "childModelExecution", "childModelSource", "childProviderId"} {
+		if strings.Contains(replay, forbidden) {
+			t.Fatalf("public lineage replay exposed private field %q", forbidden)
+		}
+	}
 	for _, forbidden := range []string{"/v1/workflow", "/v1/workflows", "/v1/create-loop", "/v1/subagents", "/v1/autoresearch", "/v1/mcp-indexer"} {
 		response := assertLiveJSON(t, server.URL, http.MethodGet, forbidden, g1.RuntimeToken, nil, http.StatusNotFound)
 		if response["code"] != "not_found" {
@@ -19385,7 +19441,6 @@ func TestRuntimeServerPublicPatchCannotRemoveResearchWorkspace(t *testing.T) {
 
 func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 	g1 := loadG1Contract(t)
-	g2 := loadG2Contract(t)
 	fakeProvider := providerscript.NewScriptedProviderServer()
 	defer fakeProvider.Close()
 	modelProviders := string(mustJSON(t, map[string]any{
@@ -19437,10 +19492,9 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 			},
 		},
 	}))
-	server := httptest.NewServer(newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       g1.RuntimeToken,
 		StartedAt:          g1.StartedAt,
-		Routes:             g2.Routes,
 		DurableTempDir:     t.TempDir(),
 		Host:               "127.0.0.1",
 		Port:               0,
@@ -19448,6 +19502,11 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+
+	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
+		"workspace": t.TempDir(), "providerId": "deepseek-configured", "model": "deepseek-chat",
+	}), http.StatusCreated)
+	threadID := stringField(thread, "id")
 
 	cases := []struct {
 		providerID            string
@@ -19467,11 +19526,12 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 	}
 	turnIDByProviderID := map[string]string{}
 	for _, tc := range cases {
+		selectRuntimeServerFixtureProvider(t, server.URL, g1.RuntimeToken, tc.providerID)
 		start := assertLiveJSON(
 			t,
 			server.URL,
 			http.MethodPost,
-			"/v1/threads/thr_g2_read/turns",
+			"/v1/threads/"+threadID+"/turns",
 			g1.RuntimeToken,
 			mustJSON(t, map[string]string{
 				"prompt":     "Run provider " + tc.family,
@@ -19486,7 +19546,7 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 		turnIDByProviderID[tc.providerID] = stringField(start, "turnId")
 	}
 
-	replay := liveSSE(t, server.URL, "/v1/threads/thr_g2_read/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", g1.RuntimeToken, http.StatusOK)
 	telemetryByProviderID := runtimeServerTurnTelemetryByStartedProviderID(t, parseRuntimeServerSSEEvents(t, replay))
 	namespaceOwner := map[string]string{}
 	for _, tc := range cases {
@@ -19516,7 +19576,11 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 			matchingTerminalFrames++
 		}
 		if matchingTerminalFrames != 1 {
-			t.Fatalf("provider %s terminal frame count = %d, want 1", tc.family, matchingTerminalFrames)
+			diagnostics := []string{}
+			for _, event := range runtimeServerEventsForTurn(t, replay, expectedTurnID) {
+				diagnostics = append(diagnostics, stringField(event, "kind")+":"+stringField(event, "code")+":"+stringField(event, "reasonCode"))
+			}
+			t.Fatalf("provider %s terminal frame count = %d, want 1; eventKinds=%v openAIText=%t", tc.family, matchingTerminalFrames, diagnostics, strings.Contains(replay, "openai compatible hello"))
 		}
 		assertRuntimeServerTypedOrdinaryTerminal(
 			t, replay, expectedTurnID, tc.providerText, "provider_ordinary_only",

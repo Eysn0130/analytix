@@ -49,7 +49,7 @@ func TestRuntimeServerPlanModeContinuesAfterReadBatchAndCreatePlan(t *testing.T)
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -138,7 +138,7 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -228,7 +228,7 @@ func TestRuntimeServerPlanModeAllowsSequentialReadOnlyInvestigationBeforeCreateP
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",
@@ -319,7 +319,7 @@ func TestRuntimeServerPlanModeContinuesAfterMaterializedCreatePlan(t *testing.T)
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
+	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: durableRoot,
 		Host:           "127.0.0.1",

@@ -809,3 +809,23 @@ Missing schedule build inputs are not part of this exclusion. The new platform
 job belongs to the same required Development gate. Root-reviewed Node partition,
 receiver and gate regressions passed (8/8, no skip); real platform and complete
 remote execution are still pending. CI admission is stronger, not relaxed.
+
+Root HTTP tests that actually execute a synthetic Provider now explicitly
+onboard it through real Registry revision/incarnation CAS and protected secret
+ingress. The opt-in fixture rejects non-loopback endpoints and never repopulates
+an existing Registry on restart. Missing-authority tests retain their plain
+constructors. Provider selection tests perform the real select operation;
+caller/profile Provider IDs cannot create a second execution authority.
+
+Live turn, multi-model and goal-lineage tests now create real threads rather
+than reuse a G2 static completed turn lacking current terminal credentials.
+The five-family replay/cache/atomic-terminal test passed (107.84 s). Goal lineage
+is produced by the actual terminal-backed goal completion path, not a fabricated
+event; its exact goal/thread/turn binding and private projection passed (48.85 s).
+The turn-field contract passed (39.29 s), and real contained stdio startup/catalog
+plus mutation-authority rejection passed on macOS (37.89 s). Subagent execution
+keeps the admitted model/variant/source fingerprint but must not persist Registry
+endpoint authority; the positive HTTP/route/absence test passed (47.68 s), and the
+unselected-Provider zero-call negative passed (49.35 s). Earlier combined runs
+failed on stale route-field assertions and fixture cardinality; they are not
+full package PASS. Complete new-head remote root coverage is still required.
