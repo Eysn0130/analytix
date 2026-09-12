@@ -737,3 +737,15 @@ This result covers an already committed Registry; first-import/restart continuit
 with an empty Registry remains a separate contract under review. The combined
 selection still failed on desktop TypeScript retirement before its later owner
 migration, so no full-runtime or desktop-migration PASS is claimed.
+
+Checkpoint preflight no longer interprets a failed Git subprocess as a clean
+index. The filesystem/process adapter proves a non-Git workspace by a complete
+ancestor inventory; repository probes retain containment and propagate a fixed
+unavailable result on lookup, configuration, containment or execution failure.
+The consumer blocks mutation on unavailable or missing probes. Local focused
+process checks passed (1.098 s), including actual contained staged detection and
+protected configuration denial; the unsupported-containment case belongs to its
+non-macOS build and awaits Linux CI. Filestore mutation/UTF16 checks passed
+(0.690 s). The macOS HTTP staged checkpoint contract passed (50.57 s), with target
+and Git index byte equality. No unrestricted Git fallback or safety waiver was
+introduced; Linux protected repository probes remain explicitly fail-closed.

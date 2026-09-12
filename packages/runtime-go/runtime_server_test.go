@@ -3395,6 +3395,10 @@ func TestRuntimeServerCheckpointApplyBlocksStagedGitChanges(t *testing.T) {
 			t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
 		}
 	}
+	indexBefore, err := os.ReadFile(filepath.Join(workspace, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
 	provider := providerscript.NewScriptedProviderServer()
@@ -3450,7 +3454,13 @@ func TestRuntimeServerCheckpointApplyBlocksStagedGitChanges(t *testing.T) {
 		t.Fatalf("checkpoint apply should block staged changes: %#v", apply)
 	}
 	files, _ := result["files"].([]any)
-	if len(files) != 1 || !strings.Contains(stringField(files[0].(map[string]any), "reason"), "staged git changes") {
+	wantReason := "staged git changes"
+	if runtime.GOOS != "darwin" {
+		// Protected subprocess containment is currently macOS-only. An
+		// unavailable check must block restoration rather than imply clean Git.
+		wantReason = "current workspace git status is unavailable"
+	}
+	if len(files) != 1 || !strings.Contains(stringField(files[0].(map[string]any), "reason"), wantReason) {
 		t.Fatalf("checkpoint apply should report staged change reason: %#v", result["files"])
 	}
 	restored, err := os.ReadFile(targetPath)
@@ -3459,6 +3469,10 @@ func TestRuntimeServerCheckpointApplyBlocksStagedGitChanges(t *testing.T) {
 	}
 	if string(restored) != afterContent {
 		t.Fatalf("checkpoint apply overwrote staged file: %q", string(restored))
+	}
+	indexAfter, err := os.ReadFile(filepath.Join(workspace, ".git", "index"))
+	if err != nil || !bytes.Equal(indexBefore, indexAfter) {
+		t.Fatal("blocked checkpoint changed the staged Git index")
 	}
 }
 

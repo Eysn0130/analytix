@@ -11,7 +11,7 @@ import (
 )
 
 type CheckpointGitStatusProbe interface {
-	PathHasStagedChanges(workspace string, relativePath string) bool
+	PathHasStagedChanges(workspace string, relativePath string) (bool, error)
 }
 
 func PreflightCheckpointApplyFiles(
@@ -82,7 +82,16 @@ func checkpointApplyFileState(
 		state.MutationPathError = err.Error()
 		return state
 	}
-	if gitStatus != nil && gitStatus.PathHasStagedChanges(workspace, relativePath) {
+	if gitStatus == nil {
+		state.MutationPathError = "current workspace git status is unavailable"
+		return state
+	}
+	staged, err := gitStatus.PathHasStagedChanges(workspace, relativePath)
+	if err != nil {
+		state.MutationPathError = "current workspace git status is unavailable"
+		return state
+	}
+	if staged {
 		state.HasStagedChanges = true
 		return state
 	}
