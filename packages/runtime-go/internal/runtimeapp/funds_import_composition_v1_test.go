@@ -2,6 +2,9 @@ package runtimeapp
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"strings"
 	"testing"
@@ -51,8 +54,10 @@ func TestFundsImportAndCleaningProductionCompositionReuseOneDSV2DataPlane(t *tes
 		t.Fatal(err)
 	}
 	source := string(body)
+	if !hasSingleFundsImportSourceBindingV1(source) {
+		t.Fatal("production import composition lost its exact source-reader binding")
+	}
 	for _, required := range []string{
-		"ReadImportSource: fundscsvsourceadapter.ReadImportExactV1",
 		"localdisplayapp.ImportMappingPreviewDependenciesV1{",
 		"Identity: identityAuthority, Reader: fundsCSVAdmission",
 		"fundscleaningapp.NewServiceV1",
@@ -86,12 +91,53 @@ func TestFundsImportAndCleaningProductionCompositionReuseOneDSV2DataPlane(t *tes
 	}
 	for _, required := range []string{
 		"if sharedEvidenceDatasetSnapshotV2.snapshot != nil {",
-		"sharedEvidenceConfiguredV2 && sharedEvidenceDatasetSnapshotV2.registry == nil",
+		"sharedEvidenceConfiguredV2 && sharedEvidenceDatasetSnapshotV2.registryOwner == nil",
 		"evidenceStore = runtimeUnavailableEvidenceRegistryV1{}",
 		"if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&\n\t\tsharedEvidenceDatasetSnapshotV2.snapshot != nil {",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("cold-registry Funds composition lost %q", required)
+		}
+	}
+}
+
+func hasSingleFundsImportSourceBindingV1(source string) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "composition.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		return false
+	}
+	bindings, exact := 0, 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		field, ok := node.(*ast.KeyValueExpr)
+		if !ok {
+			return true
+		}
+		name, ok := field.Key.(*ast.Ident)
+		if !ok || name.Name != "ReadImportSource" {
+			return true
+		}
+		bindings++
+		value, ok := field.Value.(*ast.SelectorExpr)
+		if ok && value.Sel.Name == "ReadImportExactV1" {
+			if owner, ok := value.X.(*ast.Ident); ok && owner.Name == "fundscsvsourceadapter" {
+				exact++
+			}
+		}
+		return true
+	})
+	return bindings == 1 && exact == 1
+}
+
+func TestFundsImportSourceBindingGuardRejectsSubstitutionAndCommentOnlyEvidence(t *testing.T) {
+	const exact = "ReadImportSource: fundscsvsourceadapter.ReadImportExactV1,"
+	for _, binding := range []string{exact, strings.ReplaceAll(exact, ": ", ":    ")} {
+		if !hasSingleFundsImportSourceBindingV1("package fixture\nvar c = Config{" + binding + "}") {
+			t.Fatal("exact source binding rejected because of formatting")
+		}
+	}
+	for _, binding := range []string{"", "ReadImportSource: nil,", "ReadImportSource: other.ReadImportExactV1,", exact + exact, "/* " + exact + " */"} {
+		if hasSingleFundsImportSourceBindingV1("package fixture\nvar c = Config{" + binding + "}") {
+			t.Fatal("source binding guard accepted missing, duplicated or substituted authority")
 		}
 	}
 }
