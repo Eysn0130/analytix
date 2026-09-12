@@ -593,3 +593,15 @@ stage/class diagnostic regression, and complete local admission package, passed
 domain validator, preserving the strict primary reader as the observation
 producer. Complete local domain/evidence and app/evidence packages passed
 (1.465 s / 48.723 s), including existing negative bindings.
+
+Server active-history and child observation now use the immutable primary reader
+bound by runtime composition, instead of constructing finalauthority in server.
+The restart fixture binds the same real reader on reopen. Local active-history
+regressions exposed that missing fixture binding; after correction, all four
+compaction commit/crash-cut/absence cases passed (40.40 s), and stored-child seed
+error preservation passed (7.83 s). Historical child lookup exposes a read-only
+resolver using the original terminal validation and cloning, with no mutable
+projection API. The marker-stripped source fixture now requires derivation
+rejection, unchanged source/lineage/inventory and all original privacy checks;
+its focused server test passed (1.35 s). These are local contract/recovery checks,
+not a full server or runtime-suite acceptance.

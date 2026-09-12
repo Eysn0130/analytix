@@ -24,6 +24,7 @@ import (
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	threaddomain "analytix.local/runtime-go/internal/domain/thread"
 	acceptedfinaleventport "analytix.local/runtime-go/internal/ports/acceptedfinalevent"
+	recoveryport "analytix.local/runtime-go/internal/ports/generalterminalrecovery"
 )
 
 type DurableJSONLDiagnostic = eventlog.JSONLDiagnostic
@@ -60,6 +61,7 @@ var errDurableSteeringIDConflict = domainsteering.ErrIdentityConflict
 var errDurableSteeringAuthorityUnavailable = errors.New("steering admission authority is unavailable")
 
 type DurableEventSessionStore struct {
+	primaryReader recoveryport.PrimaryThreadReaderV1
 	*checkpointapp.CapturedEventReconciler
 	root                         string
 	restartPreserved             *eventlog.SemanticRestartPreservationV1

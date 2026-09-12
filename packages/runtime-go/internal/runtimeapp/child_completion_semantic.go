@@ -305,10 +305,10 @@ func (verifier runtimeOriginalStoredChildVerifierV1) VerifyStoredChildCompletion
 	if err != nil {
 		return err
 	}
-	index := gateprojection.NewTrustedFinalProjectionIndex(core.verification)
-	if err := index.SeedTerminalComplete(ctx, []gateprojection.TerminalCompleteFinalAuthorityV1{{PrivateFinal: final, Intent: intent, ProviderClosure: closure, PublicObservation: observation, AcceptedFinalDisposition: disposition, TerminalDisposition: terminal}}); err != nil {
+	resolver, err := gateprojection.NewHistoricalTerminalCompleteResolverV1(ctx, core.verification, []gateprojection.TerminalCompleteFinalAuthorityV1{{PrivateFinal: final, Intent: intent, ProviderClosure: closure, PublicObservation: observation, AcceptedFinalDisposition: disposition, TerminalDisposition: terminal}})
+	if err != nil {
 		return err
 	}
-	stored := subagentapp.NewStoredChildCompletionVerifierV1(contexts.CommittedContextV1, index, core.verification, runtimeOriginalChildParentReaderV1{ctx: ctx, primaries: core.primaries, journal: caseObservation.journal, projection: verifier.projection})
+	stored := subagentapp.NewStoredChildCompletionVerifierV1(contexts.CommittedContextV1, resolver, core.verification, runtimeOriginalChildParentReaderV1{ctx: ctx, primaries: core.primaries, journal: caseObservation.journal, projection: verifier.projection})
 	return stored.VerifyStoredChildCompletion(ctx, record)
 }

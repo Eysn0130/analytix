@@ -236,6 +236,13 @@ func newCompatibilityRuntimeServerHandler(config RuntimeServerConfig) http.Handl
 	if !ok {
 		panic("test runtime handler has an unexpected type")
 	}
+	primaryReader, err := finalauthority.NewAcceptedFinalCASReader(runtimeHandler.store.root)
+	if err != nil {
+		panic(err)
+	}
+	if err := runtimeHandler.store.BindPrimaryThreadReaderV1(primaryReader); err != nil {
+		panic(err)
+	}
 	installHandlerProviderExecutionResolverForTest(runtimeHandler)
 	return runtimeHandler
 }

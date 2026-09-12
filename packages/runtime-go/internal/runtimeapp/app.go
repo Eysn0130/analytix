@@ -464,6 +464,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	if err := store.BindPrimaryThreadReaderV1(acceptedFinalCASReader); err != nil {
+		return nil, err
+	}
 	if err := store.SeedFromG2Routes(config.Routes); err != nil {
 		return nil, err
 	}

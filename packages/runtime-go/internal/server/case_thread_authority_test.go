@@ -92,30 +92,33 @@ func TestFirstCaseTurnMarkerRemovalNeverPublishesOrLaundersDraftFacts(t *testing
 	}
 	assertNoCaseDraftSentinel(t, projected)
 
-	fork, err := store.ForkThread(threadID, map[string]any{"title": "isolated case fork"})
-	if err != nil || fork == nil {
-		t.Fatalf("registered case fork was not isolated through host authority: fork=%#v err=%v", fork, err)
-	}
-	if resume, err := store.ResumeSession(threadID, map[string]any{"workspace": "/cases/other"}); !errors.Is(err, threadapp.ErrCaseDerivationAdmissionAuthorityRequired) || resume != nil {
-		t.Fatalf("case resume accepted a different workspace: resume=%#v err=%v", resume, err)
-	}
-	resume, err := store.ResumeSession(threadID, map[string]any{})
-	if err != nil || resume == nil {
-		t.Fatalf("registered same-workspace case resume was not isolated through host authority: resume=%#v err=%v", resume, err)
-	}
-	for name, derived := range map[string]any{"fork": fork, "resume": resume} {
-		body, _ := json.Marshal(derived)
-		for _, forbidden := range []string{"CASE_DRAFT_SENTINEL", "CASE_APPEND_SENTINEL", "assistant_text", "acceptedFinal", "securityState"} {
-			if strings.Contains(string(body), forbidden) {
-				t.Fatalf("%s retained case authority field %q: %s", name, forbidden, body)
-			}
+	// A registry marker alone is not authenticated active-history admission.
+	// Derivation must fail before creating lineage or exposing a projection.
+	for name, derive := range map[string]func() (map[string]any, error){
+		"fork": func() (map[string]any, error) {
+			return store.ForkThread(threadID, map[string]any{"title": "isolated case fork"})
+		},
+		"resume": func() (map[string]any, error) { return store.ResumeSession(threadID, map[string]any{}) },
+	} {
+		derived, err := derive()
+		if err == nil || derived != nil {
+			t.Fatalf("%s laundered unauthenticated source history: derived=%#v err=%v", name, derived, err)
 		}
 	}
-	if len(authority.threads) != 3 {
-		t.Fatalf("case derivation lineage mismatch: %#v", authority.threads)
+	if resume, err := store.ResumeSession(threadID, map[string]any{"workspace": "/cases/other"}); err == nil || resume != nil {
+		t.Fatalf("case resume accepted a different workspace: resume=%#v err=%v", resume, err)
 	}
-	if all, err := store.ListThreads(false, true, true, ""); err != nil || len(all) != 3 {
-		t.Fatalf("isolated case derivation inventory mismatch: threads=%#v err=%v", all, err)
+	if len(authority.threads) != 1 {
+		t.Fatalf("rejected derivation changed case lineage: %#v", authority.threads)
+	}
+	if all, err := store.ListThreads(false, true, true, ""); err != nil || len(all) != 1 {
+		t.Fatalf("rejected derivation changed thread inventory: threads=%#v err=%v", all, err)
+	}
+	unchanged, err := store.GetThread(threadID)
+	beforeBody, beforeErr := json.Marshal(raw)
+	afterBody, afterErr := json.Marshal(unchanged)
+	if err != nil || beforeErr != nil || afterErr != nil || string(beforeBody) != string(afterBody) {
+		t.Fatal("rejected derivation changed original source history")
 	}
 
 	service := threadapp.NewService(threadapp.Dependencies{Repository: store, PublicProjector: projector})

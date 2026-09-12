@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 
-	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -25,11 +24,7 @@ func (s *DurableEventSessionStore) activeHistorySourceNoLockV1(ctx context.Conte
 	if s.activeHistorySourceAdmission == nil {
 		return recoveryport.PrimaryThreadSnapshotV1{}, errors.New("active history source admission is unavailable")
 	}
-	reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(s.root)
-	if err != nil {
-		return recoveryport.PrimaryThreadSnapshotV1{}, err
-	}
-	snapshot, err := reader.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	snapshot, err := s.ReadPrimaryThreadSnapshotV1(ctx, threadID)
 	if err != nil {
 		return recoveryport.PrimaryThreadSnapshotV1{}, err
 	}
@@ -111,23 +106,34 @@ func (s *DurableEventSessionStore) bindActiveHistoryNoLockV1(ctx context.Context
 	return nil
 }
 
-// ReadPrimaryThreadSnapshotV1 uses the same anchored reader as accepted-final
-// CAS. It deliberately does not reenter the mutation mutex: commit/recovery
-// callers may already own it, and the reader itself performs a stable read.
-func (s *DurableEventSessionStore) ReadPrimaryThreadSnapshotV1(ctx context.Context, threadID string) (recoveryport.PrimaryThreadSnapshotV1, error) {
-	reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(s.root)
-	if err != nil {
-		return recoveryport.PrimaryThreadSnapshotV1{}, err
+// BindPrimaryThreadReaderV1 binds the composition-owned anchored reader once,
+// before the store is exposed. Reads may occur under the mutation mutex, so
+// the immutable reader must not reenter that lock.
+func (s *DurableEventSessionStore) BindPrimaryThreadReaderV1(reader recoveryport.PrimaryThreadReaderV1) error {
+	if s == nil || reader == nil {
+		return errors.New("primary thread reader is unavailable")
 	}
-	return reader.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.primaryReader != nil {
+		return errors.New("primary thread reader is already bound")
+	}
+	s.primaryReader = reader
+	return nil
+}
+
+func (s *DurableEventSessionStore) ReadPrimaryThreadSnapshotV1(ctx context.Context, threadID string) (recoveryport.PrimaryThreadSnapshotV1, error) {
+	if s == nil || s.primaryReader == nil {
+		return recoveryport.PrimaryThreadSnapshotV1{}, errors.New("primary thread reader is unavailable")
+	}
+	return s.primaryReader.ReadPrimaryThreadSnapshotV1(ctx, threadID)
 }
 
 func (s *DurableEventSessionStore) ReadCommittedEventLogSHA256V1(ctx context.Context, threadID string) (string, error) {
-	reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(s.root)
-	if err != nil {
-		return "", err
+	if s == nil || s.primaryReader == nil {
+		return "", errors.New("primary thread reader is unavailable")
 	}
-	return reader.ReadCommittedEventLogSHA256V1(ctx, threadID)
+	return s.primaryReader.ReadCommittedEventLogSHA256V1(ctx, threadID)
 }
 
 var _ recoveryport.PrimaryThreadReaderV1 = (*DurableEventSessionStore)(nil)

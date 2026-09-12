@@ -78,31 +78,62 @@ func NewTrustedFinalProjectionIndexWithReadback(
 }
 
 func (index *TrustedFinalProjectionIndex) SeedTerminalComplete(ctx context.Context, authorities []TerminalCompleteFinalAuthorityV1) error {
+	next, err := index.validatedTerminalCompleteEntries(ctx, authorities)
+	if err != nil {
+		return err
+	}
+	index.mu.Lock()
+	index.records = next
+	index.mu.Unlock()
+	return nil
+}
+
+func (index *TrustedFinalProjectionIndex) validatedTerminalCompleteEntries(ctx context.Context, authorities []TerminalCompleteFinalAuthorityV1) (map[string]trustedFinalProjectionEntry, error) {
 	if index == nil || index.authority == nil {
-		return errors.New("trusted final projection authority is unavailable")
+		return nil, errors.New("trusted final projection authority is unavailable")
 	}
 	next := make(map[string]trustedFinalProjectionEntry, len(authorities))
 	for _, terminalAuthority := range authorities {
 		if domainevidence.FinalAnswerRequiresPublicationSnapshotProof(terminalAuthority.PrivateFinal.Envelope) {
-			return errors.New("fact final projection seed requires startup batch witness authority")
+			return nil, errors.New("fact final projection seed requires startup batch witness authority")
 		}
 		cloned, err := index.validateTerminalComplete(ctx, terminalAuthority)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		key := trustedFinalProjectionKey(cloned.SecurityContext.ThreadID, cloned.SecurityContext.TurnID)
 		if _, duplicate := next[key]; duplicate {
-			return errors.New("trusted final projection turn is duplicated")
+			return nil, errors.New("trusted final projection turn is duplicated")
 		}
 		next[key] = trustedFinalProjectionEntry{
 			record: cloned, disposition: terminalAuthority.AcceptedFinalDisposition,
 			terminalDispositionID: terminalAuthority.TerminalDisposition.DispositionID, published: true,
 		}
 	}
-	index.mu.Lock()
-	index.records = next
-	index.mu.Unlock()
-	return nil
+	return next, nil
+}
+
+// HistoricalTerminalCompleteResolverV1 verifies stored child proof without
+// exposing a mutable projection index, staging, delivery or publication API.
+type HistoricalTerminalCompleteResolverV1 struct {
+	records map[string]trustedFinalProjectionEntry
+}
+
+func NewHistoricalTerminalCompleteResolverV1(ctx context.Context, authority authorityport.Authority, authorities []TerminalCompleteFinalAuthorityV1) (*HistoricalTerminalCompleteResolverV1, error) {
+	validator := NewTrustedFinalProjectionIndex(authority)
+	records, err := validator.validatedTerminalCompleteEntries(ctx, authorities)
+	if err != nil {
+		return nil, err
+	}
+	return &HistoricalTerminalCompleteResolverV1{records: records}, nil
+}
+
+func (resolver *HistoricalTerminalCompleteResolverV1) ResolveCommitted(threadID, turnID string) (domainevidence.PrivateAcceptedFinalRecord, domainevidence.AcceptedFinalDispositionRecord, bool) {
+	if resolver == nil {
+		return domainevidence.PrivateAcceptedFinalRecord{}, domainevidence.AcceptedFinalDispositionRecord{}, false
+	}
+	entry, found := resolver.records[trustedFinalProjectionKey(threadID, turnID)]
+	return cloneTrustedFinalProjectionEntry(entry, found)
 }
 
 func (index *TrustedFinalProjectionIndex) RegisterTerminalComplete(ctx context.Context, authority TerminalCompleteFinalAuthorityV1) error {
@@ -543,7 +574,11 @@ func (index *TrustedFinalProjectionIndex) resolve(threadID, turnID string, inclu
 	index.mu.RLock()
 	entry, found := index.records[trustedFinalProjectionKey(threadID, turnID)]
 	index.mu.RUnlock()
-	if !found || (!includeStaged && !entry.published) {
+	return cloneTrustedFinalProjectionEntry(entry, found && (includeStaged || entry.published))
+}
+
+func cloneTrustedFinalProjectionEntry(entry trustedFinalProjectionEntry, found bool) (domainevidence.PrivateAcceptedFinalRecord, domainevidence.AcceptedFinalDispositionRecord, bool) {
+	if !found {
 		return domainevidence.PrivateAcceptedFinalRecord{}, domainevidence.AcceptedFinalDispositionRecord{}, false
 	}
 	body, err := domainevidence.PrivateAcceptedFinalRecordBytes(entry.record)
