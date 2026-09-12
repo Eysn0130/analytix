@@ -3322,8 +3322,14 @@ func TestRuntimeTurnFailureDoesNotCommitWhenEventInventoryIsUnreadable(t *testin
 			t.Fatalf("terminal event inventory diagnostic leaked %q: %q", sentinel, diagnostic)
 		}
 	}
-	if recordErr == nil || !strings.Contains(recordErr.Error(), "event inventory") {
-		t.Fatalf("expected fail-closed event inventory diagnostics, got %v", recordErr)
+	// The public error text is intentionally closed; the original inventory
+	// failure remains available only through the in-process cause chain.
+	if recordErr == nil || turnapp.GeneralTerminalDetailClassV1(recordErr) != turnapp.GeneralTerminalDetailFinishV1 ||
+		errors.Unwrap(recordErr) == nil || !strings.Contains(errors.Unwrap(recordErr).Error(), "event inventory") {
+		t.Fatal("fail-closed terminal diagnostics lost their finish stage or inventory cause")
+	}
+	if recordErr.Error() != "general terminal failure: terminal_finish" {
+		t.Fatal("terminal diagnostic exposed its private inventory cause")
 	}
 
 	reloaded, err := store.GetThread(threadID)

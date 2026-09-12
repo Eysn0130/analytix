@@ -21,6 +21,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	registryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
+	authorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
 
 type durableAcceptedFinalCrashFixture struct {
@@ -168,6 +169,33 @@ func TestGenericEventSinkRejectsExactAcceptedFinalWithoutAnySideEffect(t *testin
 	}
 }
 
+// Freeze the actual initial inventories before either independent finalizer
+// can create its private record. Otherwise a scheduler may serialize admission
+// and correctly reject the second contender before it reaches the CAS race.
+type durableFinalAdmissionBarrier struct {
+	authorityport.PrivateFinalStore
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (store *durableFinalAdmissionBarrier) List(ctx context.Context) ([]domainevidence.PrivateAcceptedFinalRecord, error) {
+	records, err := store.PrivateFinalStore.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case store.arrived <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-store.release:
+		return records, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func TestAcceptedFinalDurableConcurrentTerminalHasOneWinnerAndQuarantinesContender(t *testing.T) {
 	root := t.TempDir()
 	durableRoot := filepath.Join(root, "durable")
@@ -215,10 +243,13 @@ func TestAcceptedFinalDurableConcurrentTerminalHasOneWinnerAndQuarantinesContend
 	}
 	eventIO := durableAcceptedFinalEventIO(store, casReader)
 	terminalCoordinator := newServerTestTurnTerminalCoordinator(t, authority, privateStore)
+	admission := &durableFinalAdmissionBarrier{PrivateFinalStore: privateStore, arrived: make(chan struct{}, 2), release: make(chan struct{})}
 	finalizers := []evidenceapp.CasePublicationFinalizer{
-		evidenceapp.NewCasePublicationFinalizerWithAuthority(registry, registry, authority, privateStore, eventIO, terminalCoordinator),
-		evidenceapp.NewCasePublicationFinalizerWithAuthority(registry, registry, authority, privateStore, eventIO, terminalCoordinator),
+		evidenceapp.NewCasePublicationFinalizerWithAuthority(registry, registry, authority, admission, eventIO, terminalCoordinator),
+		evidenceapp.NewCasePublicationFinalizerWithAuthority(registry, registry, authority, admission, eventIO, terminalCoordinator),
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	type contenderResult struct {
 		result evidenceapp.PersistCaseBoundaryResult
 		err    error
@@ -227,7 +258,7 @@ func TestAcceptedFinalDurableConcurrentTerminalHasOneWinnerAndQuarantinesContend
 	for index, finalizer := range finalizers {
 		index, finalizer := index, finalizer
 		go func() {
-			result, persistErr := finalizer.PersistBoundary(context.Background(), evidenceapp.PersistCaseBoundaryInput{
+			result, persistErr := finalizer.PersistBoundary(ctx, evidenceapp.PersistCaseBoundaryInput{
 				Store:   store,
 				Context: securityContext, TerminalReason: evidenceapp.TerminalProviderFailure,
 				ThreadID: threadID, TurnID: turnID, AcceptedAt: time.Unix(21+int64(index), 0),
@@ -235,12 +266,20 @@ func TestAcceptedFinalDurableConcurrentTerminalHasOneWinnerAndQuarantinesContend
 			results <- contenderResult{result: result, err: persistErr}
 		}()
 	}
+	for range finalizers {
+		select {
+		case <-admission.arrived:
+		case <-ctx.Done():
+			t.Fatal("both contenders did not reach private admission before the CAS race")
+		}
+	}
+	close(admission.release)
 	contenders := make([]contenderResult, 0, len(finalizers))
 	for range finalizers {
 		select {
 		case result := <-results:
 			contenders = append(contenders, result)
-		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("durable CAS contender did not finish")
 		}
 	}
