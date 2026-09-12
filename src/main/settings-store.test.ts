@@ -1432,7 +1432,9 @@ describe('JsonSettingsStore', () => {
         .toBe('Legacy Provider credential source inspection failed.')
       expect((error as Error).message, testCase.name).not.toContain('synthetic-')
       expect((error as Error).message, testCase.name).not.toContain(settingsPath)
-      expect(await readFile(settingsPath), testCase.name).toEqual(testCase.raw)
+      // Buffer.equals proves the same exact length and bytes without asking
+      // the generic object matcher to traverse millions of numeric properties.
+      expect((await readFile(settingsPath)).equals(testCase.raw), testCase.name).toBe(true)
       expect(await readdir(userDataDir), testCase.name).toEqual(beforeEntries)
       expect((await stat(settingsPath)).mode & 0o777, testCase.name).toBe(beforeMode)
     })

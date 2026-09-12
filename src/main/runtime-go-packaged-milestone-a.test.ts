@@ -11418,7 +11418,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       .not.toBe(acceptance.observedSourceDigest)
   }, 30_000)
 
-  it('accepts a legal equivalent hash and keeps the parent-owned test bound', async () => {
+  it('accepts a legal equivalent hash and keeps the parent-owned test bound', { tags: ['macos-integration'], timeout: 30_000 }, async () => {
     const {
       loadMilestoneAExternalRepositoryAcceptance,
       runParentOwnedRepositoryTest,
@@ -11466,7 +11466,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       expectedSourceBound: true,
       expectedSourceDigest: acceptance.observedSourceDigest
     }))
-  }, 30_000)
+  })
 
   it('rejects an unlisted source hash while keeping its observed digest distinct', async () => {
     const {
@@ -12663,7 +12663,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     }))
   })
 
-  it('parses a synthetic multi-commit repository contract without granting formal acceptance', async () => {
+  it('parses a synthetic multi-commit repository contract without granting formal acceptance', { tags: ['macos-integration'], timeout: 120_000 }, async () => {
     const {
       loadMilestoneAExternalRepositoryAcceptance,
       milestoneAPlanArtifactEvidence,
@@ -12865,7 +12865,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       structuredClone(plan.thread),
       plan.turnId
     )).toEqual(planEvidence)
-  }, 120_000)
+  })
 
   it('closes an authorized-path expected-byte mismatch without exposing repository content', async () => {
     const {

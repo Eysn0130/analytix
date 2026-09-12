@@ -2451,6 +2451,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        TMPDIR: '',
         ANALYTIX_RUNTIME_GO_PACKAGED_SOURCE_COMMIT: '',
         ANALYTIX_MILESTONE_B_PRODUCT_DATA_OWNER_ROOT: '',
         ANALYTIX_MILESTONE_B_AUTHORITY_BOOTSTRAP: '',
@@ -2473,6 +2474,9 @@ describe('packaged Milestone B formal public-seam harness', () => {
     })
     expect(reportOnly.status).toBe(0)
     const report = JSON.parse(reportOnly.stdout)
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      id: 'trusted-cache-tmpdir', status: 'BLOCKED'
+    }))
     expect(report).toMatchObject({
       id: 'runtime-go-packaged-milestone-b',
       status: 'BLOCKED',
@@ -2533,6 +2537,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        TMPDIR: '',
         ANALYTIX_RUNTIME_GO_PACKAGED_SOURCE_COMMIT: '',
         ANALYTIX_MILESTONE_B_PRODUCT_DATA_OWNER_ROOT: '',
         ANALYTIX_MILESTONE_B_AUTHORITY_BOOTSTRAP: '',
@@ -2555,6 +2560,21 @@ describe('packaged Milestone B formal public-seam harness', () => {
     })
     expect(gated.status).not.toBe(0)
     expect(JSON.parse(gated.stdout).passed).toBe(false)
+
+    // Missing configuration is an unavailable prerequisite, not permission to
+    // downgrade an explicitly invalid cache path to BLOCKED (or to PASS).
+    const invalid = spawnSync(process.execPath, baseArgs, {
+      cwd: repositoryRoot,
+      env: { PATH: process.env.PATH, TMPDIR: 'relative-invalid-cache-fixture' },
+      encoding: 'utf8',
+      stdio: 'pipe'
+    })
+    expect(invalid.status).toBe(1)
+    const invalidReport = JSON.parse(invalid.stdout)
+    expect(invalidReport).toMatchObject({ status: 'FAIL', passed: false })
+    expect(invalidReport.checks).toContainEqual(expect.objectContaining({
+      id: 'trusted-cache-tmpdir', status: 'FAIL'
+    }))
   })
 })
 

@@ -1830,7 +1830,10 @@ function packagedAuthorityContext(appPath, target) {
 
 function trustedCacheTempRoot() {
   const configured = String(process.env.TMPDIR || '').trim()
-  if (!configured || !isAbsolute(configured)) {
+  if (!configured) {
+    return { ok: false, blocked: true, blocker: 'analytix_cache_tmpdir_missing', path: '' }
+  }
+  if (!isAbsolute(configured)) {
     return { ok: false, blocker: 'analytix_cache_tmpdir_missing', path: '' }
   }
   try {
