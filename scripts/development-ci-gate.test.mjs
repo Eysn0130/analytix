@@ -72,7 +72,7 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.match(restart, /profile_root="\$\(cd "\$RUNNER_TEMP" && pwd -P\)"/)
   assert.match(restart, /-o "\$profile_root\/held-restart\.test"/)
   assert.match(restart, /export GOTMPDIR="\$profile_root"/)
-  assert.match(restart, /export TMPDIR="\$profile_root"/)
+  assert.doesNotMatch(restart, /export TMPDIR=/)
   assert.match(restart, /TestRuntimeTestExecutableIsUnpackagedAndCanonical/)
   assert.match(restart, /node \.\.\/\.\.\/scripts\/go-test-selection\.mjs/)
   assert.match(workflow, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs packages/)

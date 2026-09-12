@@ -215,7 +215,8 @@ func runRuntimePlanThenProtectedOrdinaryRestartWithCheckpointsV1(t *testing.T, p
 	)
 	planTurnID := contracts.StringField(started, "turnId")
 	if status != http.StatusAccepted || planTurnID == "" {
-		t.Fatalf("plan turn status=%d body=%#v", status, started)
+		t.Fatalf("plan turn status=%d providerCalls=%d code=%s reasonCode=%s", status,
+			providerCalls.Load(), contracts.StringField(started, "code"), contracts.StringField(started, "reasonCode"))
 	}
 	t.Log("ordinary joint phase: plan hydration")
 	planTurn := packagedPlanThenProtectedWaitTurnV1(t, client, server.URL, threadID, planTurnID)

@@ -177,7 +177,9 @@ jobs:
           profile_root="$(cd "$RUNNER_TEMP" && pwd -P)"
           # go test executes its build target, not the copy requested by -o.
           export GOTMPDIR="$profile_root"
-          export TMPDIR="$profile_root"
+          # Keep fixture storage at its platform-native default. Only the
+          # process-sandbox lane needs the shorter Unix-socket temp parent;
+          # testmain independently canonicalizes and isolates fixture paths.
           # Keep the existing full-suite deadline, not a new performance SLA.
           go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
             -run "^TestRuntimeTestExecutableIsUnpackagedAndCanonical$|^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
