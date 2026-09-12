@@ -27,6 +27,7 @@ import (
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnapp "analytix.local/runtime-go/internal/app/turn"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
+	"analytix.local/runtime-go/internal/contracts"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -37,6 +38,11 @@ import (
 )
 
 func runtimeDerivedReportHistoryFixtureV1(t *testing.T, derivation string, compacted ...bool) (*runtimeOriginalReservedReportHistoryFixtureV1, *runtimeOriginalReservedReportHistoryFixtureV1, map[string]any) {
+	t.Helper()
+	return runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t, derivation, false, compacted...)
+}
+
+func runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t *testing.T, derivation string, legacyFinalDisplay bool, compacted ...bool) (*runtimeOriginalReservedReportHistoryFixtureV1, *runtimeOriginalReservedReportHistoryFixtureV1, map[string]any) {
 	t.Helper()
 	ctx := context.Background()
 	witness, config := runtimeWitnessedRegistryConfigV2(t)
@@ -267,6 +273,7 @@ func runtimeDerivedReportHistoryFixtureV1(t *testing.T, derivation string, compa
 	if len(sourceTurns) != len(legacyTurns) {
 		t.Fatal("legacy derivation changed inherited turn count")
 	}
+	legacyFinalDisplays := 0
 	for index, value := range sourceTurns {
 		sourceTurn := value.(map[string]any)
 		legacyTurn := legacyTurns[index].(map[string]any)
@@ -275,7 +282,16 @@ func runtimeDerivedReportHistoryFixtureV1(t *testing.T, derivation string, compa
 		}
 		if marker, present := sourceTurn["caseHistoryProjection"]; present {
 			legacyTurn["caseHistoryProjection"] = marker
+		} else if view, present := sourceTurn["acceptedFinalView"]; legacyFinalDisplay && present {
+			// Historical derivation retained the source's real final display.
+			// Current BuildFork/BuildResume intentionally remove it; restore it
+			// only for the exact legacy preservation contract under test.
+			legacyTurn["acceptedFinalView"] = contracts.CloneValue(view)
+			legacyFinalDisplays++
 		}
+	}
+	if legacyFinalDisplay && legacyFinalDisplays == 0 {
+		t.Fatal("real source finalizer produced no legacy final display fixture")
 	}
 	receipt, err := registry.DeriveWithReceipt(ctx, sourceContext.ThreadID, targetID, derivation)
 	if err != nil {
@@ -485,7 +501,7 @@ func (held runtimeInheritedExecutionDenialV1) CanExecute(threadID string) bool {
 }
 
 func TestRuntimeInheritedFinalReadersKeepSealedDenial(t *testing.T) {
-	_, target, _ := runtimeDerivedReportHistoryFixtureV1(t, "fork", true, true)
+	_, target, _ := runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t, "fork", true, true, true)
 	target.refresh(t)
 	ctx := context.Background()
 	heldID := target.scope.Contexts()[0].ThreadID
@@ -618,6 +634,21 @@ func TestRuntimeInheritedFinalReadersKeepSealedDenial(t *testing.T) {
 	}
 	root := target.core.roots.DurableDir
 	index := filepath.Join(root, "thread_summaries.jsonl")
+	contextlessFinalDisplays := 0
+	for _, raw := range snapshot.Thread["turns"].([]any) {
+		turn := raw.(map[string]any)
+		if view, present := turn["acceptedFinalView"]; present {
+			if _, hasContext := turn["securityContext"]; !hasContext {
+				if view == nil {
+					t.Fatal("legacy final display fixture is null")
+				}
+				contextlessFinalDisplays++
+			}
+		}
+	}
+	if contextlessFinalDisplays == 0 {
+		t.Fatal("sealed-denial fixture has no contextless accepted-final display")
+	}
 	if _, err := eventlog.PrepareSemanticRestartPreservationV1(ctx, root, index, []string{heldID}); err == nil {
 		t.Fatal("contextless accepted-final display passed without inherited proof")
 	}

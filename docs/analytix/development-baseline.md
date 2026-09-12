@@ -696,3 +696,19 @@ durable owners; compiler caches remain external. The existing 30 s ready budget
 is unchanged. Final local focused execution passed both scenarios without skip
 (cold 3.33 s, committed 5.17 s; package 9.194 s). This is synthetic CLI contract
 coverage, not native dataset, Provider, packaging or full remote acceptance.
+
+Remaining runtime contract fixtures now reflect their actual producer seams:
+CSV materialization fields match the native producer's flattened wire contract;
+late-failure startup cases keep the earlier child identity inventory valid and
+inject an invalid lifecycle in the later migration phase; inherited legacy final
+display is taken from the real source finalizer before testing sealed read-only
+preservation. Publication negatives assert the current exact original bytes,
+mode and absence rejection, preserving all mutation and independent-write checks.
+Local individual results passed: CSV composition 1.93 s, pending-work late failure
+4.19 s, final-event late failure 7.95 s, seven publication mutations 6.11 s,
+inherited final readers 7.74 s, and signed-added-dependency rejection 4.21 s.
+The two combined selections also included an unfinished CASE fixture and failed
+on that separate case; they are not full runtime PASS. The intermittent async
+second-restart equality test passed locally (45.56 s) with bounded metadata-only
+failure diagnostics; its remote failure remains unresolved until current-head
+CI establishes the cause and result.

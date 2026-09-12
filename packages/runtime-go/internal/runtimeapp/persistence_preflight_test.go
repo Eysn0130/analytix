@@ -704,7 +704,10 @@ func TestSemanticStartupPendingWorkLateFailureLeavesLiveRootUntouched(t *testing
 	if err := os.MkdirAll(childRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childRoot, "job-1.json"), []byte(`{"id":"wrong-job-id"}`), 0o600); err != nil {
+	// Identity collection now precedes every recovery consumer. Keep that
+	// inventory valid and reject the lifecycle only in the later child-run
+	// migration, after staged pending-work reconciliation has run.
+	if err := os.WriteFile(filepath.Join(childRoot, "job-1.json"), []byte(`{"id":"job-1","status":"invalid-lifecycle"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	roots, err := persistencefs.ResolveRootSet(dataDir, durableRoot)
@@ -717,7 +720,8 @@ func TestSemanticStartupPendingWorkLateFailureLeavesLiveRootUntouched(t *testing
 	}
 	beforeWholeTree := startupWholeTreeDigest(t, dataDir, durableRoot)
 	_, err = NewRuntimeServerHandlerE(Config{RuntimeToken: DefaultRuntimeToken, DataDir: dataDir, DurableTempDir: durableRoot})
-	if err == nil || !strings.Contains(err.Error(), "child-run record identity is invalid") {
+	if err == nil || !strings.Contains(err.Error(), "semantic startup phase child-run-migration:") ||
+		!strings.Contains(err.Error(), "job status is outside the closed lifecycle allowlist") {
 		t.Fatalf("expected failure after staged pending-work reconciliation, got %v", err)
 	}
 	after, err := persistencefs.CaptureStrict(roots)
@@ -1005,7 +1009,8 @@ func TestSemanticStartupFinalEventRepairLateFailureLeavesLiveRootUntouched(t *te
 	if err := os.MkdirAll(childRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childRoot, "job-1.json"), []byte(`{"id":"wrong-job-id"}`), 0o600); err != nil {
+	// Valid identity reaches child-run migration after staged final-event repair.
+	if err := os.WriteFile(filepath.Join(childRoot, "job-1.json"), []byte(`{"id":"job-1","status":"invalid-lifecycle"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	roots, err := persistencefs.ResolveRootSet(dataDir, durableRoot)
@@ -1023,7 +1028,8 @@ func TestSemanticStartupFinalEventRepairLateFailureLeavesLiveRootUntouched(t *te
 	}
 
 	_, err = NewRuntimeServerHandlerE(Config{RuntimeToken: DefaultRuntimeToken, DataDir: dataDir, DurableTempDir: durableRoot})
-	if err == nil || !strings.Contains(err.Error(), "child-run record identity is invalid") {
+	if err == nil || !strings.Contains(err.Error(), "semantic startup phase child-run-migration:") ||
+		!strings.Contains(err.Error(), "job status is outside the closed lifecycle allowlist") {
 		t.Fatalf("expected post-event-repair child-run failure, got %v", err)
 	}
 	afterSnapshot, captureErr := persistencefs.CaptureStrict(roots)
