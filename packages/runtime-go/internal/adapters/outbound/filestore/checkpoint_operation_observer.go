@@ -22,6 +22,17 @@ type CheckpointOperationObserver struct {
 
 var _ checkpointfileport.Observer = CheckpointOperationObserver{}
 
+func (CheckpointOperationObserver) ResourcesOverlap(left, right checkpointfileport.PathAuthority) bool {
+	leftRelative := filepath.Clean(filepath.FromSlash(left.RelativePath))
+	rightRelative := filepath.Clean(filepath.FromSlash(right.RelativePath))
+	overlaps := func(left, right string) bool {
+		separator := string(filepath.Separator)
+		return left == right || strings.HasPrefix(left, right+separator) || strings.HasPrefix(right, left+separator)
+	}
+	return overlaps(filepath.Join(left.Root, leftRelative), filepath.Join(right.Root, rightRelative)) ||
+		(left.RootIdentity != "" && left.RootIdentity == right.RootIdentity && overlaps(leftRelative, rightRelative))
+}
+
 func (observer CheckpointOperationObserver) CaptureBefore(_ context.Context, workspace, resolvedPath string) (checkpointfileport.BeforeState, error) {
 	authority, err := observer.pathAuthority(workspace, resolvedPath)
 	if err != nil {

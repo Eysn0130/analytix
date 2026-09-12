@@ -565,3 +565,11 @@ checks. Local `go test -count=1 ./internal/architecture -run
 `internal/adapters/outbound/finalauthority` package passed (183.916 s).
 This closes that focused guard/ownership failure only; full architecture,
 current-head remote CI and merge acceptance remain open.
+
+Checkpoint restart preservation now delegates host path normalization and
+physical-root alias overlap to its existing filesystem observer port. The
+application retains the held-thread and recovery-source decisions. Symmetric
+exact/parent/child overlap, adjacent-name exclusion and physical aliases have
+focused coverage; complete local checkpoint and filestore packages passed
+(0.469 s / 28.955 s). No overlap rejection, recovery budget or architecture
+import constraint was relaxed.
