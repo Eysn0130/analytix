@@ -247,12 +247,15 @@ func providerRequestContainsPrivateCaseResultV1(request domainmodel.Request) boo
 }
 
 type caseForegroundPublicSeamEvidenceCapabilityV1 struct {
-	mu        sync.Mutex
-	active    bool
-	ctx       context.Context
-	context   domainsecurity.TurnSecurityContext
-	probe     domainsecurity.VerifiedSourceProbe
-	selection datasetsnapshotport.CurrentSelectionV2
+	source       *caseForegroundPublicSeamMCPV1
+	registry     *caseForegroundPublicSeamRegistryV1
+	registryUsed bool
+	mu           sync.Mutex
+	active       bool
+	ctx          context.Context
+	context      domainsecurity.TurnSecurityContext
+	probe        domainsecurity.VerifiedSourceProbe
+	selection    datasetsnapshotport.CurrentSelectionV2
 }
 
 func (capability *caseForegroundPublicSeamEvidenceCapabilityV1) DatasetSelection() (datasetsnapshotport.CurrentSelectionV2, error) {
@@ -270,21 +273,19 @@ func (capability *caseForegroundPublicSeamEvidenceCapabilityV1) UseExact(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	callback func(context.Context) error,
 ) error {
-	capability.mu.Lock()
-	active := capability.active && capability.ctx != nil && capability.ctx.Err() == nil &&
-		securityContext == capability.context && probe == capability.probe &&
-		selection.SelectionDigest == capability.selection.SelectionDigest && callback != nil
-	leaseContext := capability.ctx
-	capability.mu.Unlock()
-	if !active {
+	if callback == nil || capability.currentBinding(securityContext, probe, selection) != nil {
 		return errors.New("case foreground evidence capability exact binding mismatch")
 	}
-	return callback(leaseContext)
+	lease, cancel := context.WithCancel(capability.ctx)
+	defer cancel()
+	useErr := callback(lease)
+	return errors.Join(useErr, lease.Err(), capability.currentBinding(securityContext, probe, selection))
 }
 
 type caseForegroundPublicSeamMCPV1 struct {
 	*providerStepIntegrationMCP
-	dataset *serverSignedCurrentDatasetV1
+	dataset  *serverSignedCurrentDatasetV1
+	registry *caseForegroundPublicSeamRegistryV1
 
 	mu                sync.Mutex
 	probes            map[string]domainsecurity.VerifiedSourceProbe
@@ -299,6 +300,10 @@ type caseForegroundPublicSeamMCPV1 struct {
 }
 
 type caseForegroundPublicSeamFinalizerV1 struct {
+	t                     *testing.T
+	settlements           *evidencesettlementadapter.Store
+	checkRegistryContract sync.Once
+	registryContractErr   error
 	evidenceapp.CasePublicationFinalizer
 	tool   evidenceapp.ToolEvidenceAuthority
 	source *caseForegroundPublicSeamMCPV1
@@ -317,6 +322,18 @@ func (finalizer *caseForegroundPublicSeamFinalizerV1) CommitCurrentToolEvidence(
 	ctx context.Context,
 	input evidenceapp.CommitToolEvidenceInput,
 ) (domainevidence.EvidenceReceipt, error) {
+	finalizer.checkRegistryContract.Do(func() {
+		prepared, err := finalizer.settlements.ResolvePrepared(ctx, input.Marker.SettlementID)
+		if err != nil {
+			finalizer.registryContractErr = err
+			return
+		}
+		assertCaseForegroundRegistryCapabilityBoundaryV1(finalizer.t, finalizer.source, input.Context, prepared, input.Marker)
+	})
+	if finalizer.registryContractErr != nil {
+		finalizer.record(finalizer.registryContractErr)
+		return domainevidence.EvidenceReceipt{}, finalizer.registryContractErr
+	}
 	receipt, err := finalizer.tool.CommitCurrentToolEvidence(ctx, input)
 	finalizer.record(err)
 	return receipt, err
@@ -497,8 +514,14 @@ func (source *caseForegroundPublicSeamMCPV1) WithCurrentProbeAuthority(
 	source.mu.Lock()
 	probe := source.probes[input.Context.ContextDigest]
 	source.mu.Unlock()
+	if input.ConnectionEpoch != probe.ConnectionEpoch || input.Binding != source.dataset.observation {
+		return errors.New("case foreground current host evidence binding mismatch")
+	}
+	leaseContext, cancel := context.WithCancel(ctx)
+	defer cancel()
 	capability := &caseForegroundPublicSeamEvidenceCapabilityV1{
-		active: true, ctx: ctx, context: input.Context, probe: probe,
+		source: source, registry: source.registry,
+		active: true, ctx: leaseContext, context: input.Context, probe: probe,
 		selection: cloneServerCurrentSelectionV1(source.dataset.selection),
 	}
 	defer func() {
@@ -541,8 +564,11 @@ func (source *caseForegroundPublicSeamMCPV1) WithFreshPublicationSnapshotAuthori
 		requirement.DatasetSnapshotID != input.Context.DatasetSnapshotID {
 		return errors.New("case foreground publication source requirement is mismatched")
 	}
+	leaseContext, cancel := context.WithCancel(ctx)
+	defer cancel()
 	capability := &caseForegroundPublicSeamEvidenceCapabilityV1{
-		active: true, ctx: ctx, context: input.Context, probe: probe,
+		source: source, registry: source.registry,
+		active: true, ctx: leaseContext, context: input.Context, probe: probe,
 		selection: cloneServerCurrentSelectionV1(source.dataset.selection),
 	}
 	defer func() {
@@ -658,10 +684,12 @@ func configureCaseForegroundPublicSeamAuthoritiesV1(
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := evidenceregistryadapter.NewStore(filepath.Join(privateRoot, "evidence-registry"), finalSigner)
+	legacyRegistry, err := evidenceregistryadapter.NewStore(filepath.Join(privateRoot, "evidence-registry"), finalSigner)
 	if err != nil {
 		t.Fatal(err)
 	}
+	registry := &caseForegroundPublicSeamRegistryV1{Store: legacyRegistry, authority: finalSigner}
+	source.registry = registry
 	settlements, err := evidencesettlementadapter.NewStore(filepath.Join(privateRoot, "evidence-settlements"))
 	if err != nil {
 		t.Fatal(err)
@@ -702,7 +730,7 @@ func configureCaseForegroundPublicSeamAuthoritiesV1(
 		t.Fatal("case foreground public seam tool evidence authority is unavailable")
 	}
 	finalizer = &caseForegroundPublicSeamFinalizerV1{
-		CasePublicationFinalizer: finalizer, tool: toolAuthority, source: source,
+		CasePublicationFinalizer: finalizer, tool: toolAuthority, source: source, t: t, settlements: settlements,
 	}
 	handler.caseFinalizer = finalizer
 	currentCaseAuthority := threadapp.NewCurrentCaseThreadAuthorityValidator(caseAuthority, dataset, nil)
@@ -832,26 +860,48 @@ func waitForCaseForegroundPublicSeamCompletionV1(
 			return
 		}
 		if time.Now().After(deadline) {
-			var childThread map[string]any
-			var childThreadErr error
-			var childEvents []map[string]any
-			var childEventsErr error
+			parentSummary := caseForegroundPublicSeamStateSummaryV1(handler, threadID)
+			var childSummary map[string]any
 			if len(records) == 1 && strings.TrimSpace(records[0].ChildThreadID) != "" {
-				childThread, childThreadErr = handler.store.GetThread(records[0].ChildThreadID)
-				loaded, loadErr := handler.store.LoadEventsSince(records[0].ChildThreadID, 0)
-				childEventsErr = loadErr
-				for _, event := range loaded.Events {
-					childEvents = append(childEvents, map[string]any{
-						"kind": stringField(event, "kind"), "status": stringField(event, "status"),
-						"stage": stringField(event, "stage"), "code": stringField(event, "code"),
-						"failureCode": stringField(event, "failureCode"), "terminalReason": stringField(event, "terminalReason"),
-					})
-				}
+				childSummary = caseForegroundPublicSeamStateSummaryV1(handler, records[0].ChildThreadID)
 			}
-			t.Fatalf("timed out waiting for foreground case completion: recordStatus=%q failureCode=%q parentCalls=%d childCalls=%d threadStatus=%q err=%v childThread=%#v childThreadErr=%v childEvents=%#v childEventsErr=%v", firstCaseForegroundRecordFieldV1(records, func(record domainjob.Record) string { return record.Status }), firstCaseForegroundRecordFieldV1(records, func(record domainjob.Record) string { return record.FailureCode }), parentCalls, childCalls, stringField(thread, "status"), err, childThread, childThreadErr, childEvents, childEventsErr)
+			t.Fatalf("timed out waiting for foreground case completion: recordStatus=%q failureCode=%q parentCalls=%d childCalls=%d parent=%#v child=%#v", firstCaseForegroundRecordFieldV1(records, func(record domainjob.Record) string { return record.Status }), firstCaseForegroundRecordFieldV1(records, func(record domainjob.Record) string { return record.FailureCode }), parentCalls, childCalls, parentSummary, childSummary)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// Print only state-machine labels; thread bodies, item content, IDs and raw
+// provider output are never failure diagnostics for this privacy seam.
+func caseForegroundPublicSeamStateSummaryV1(handler *runtimeServerHandler, threadID string) map[string]any {
+	thread, err := handler.store.GetThread(threadID)
+	summary := map[string]any{"readFailed": err != nil, "threadStatus": stringField(thread, "status")}
+	turns := listAny(thread["turns"])
+	if len(turns) == 0 {
+		return summary
+	}
+	last, _ := turns[len(turns)-1].(map[string]any)
+	summary["turnStatus"] = stringField(last, "status")
+	summary["failureCode"] = stringField(last, "failureCode")
+	summary["terminalReason"] = stringField(last, "terminalReason")
+	loaded, loadErr := handler.store.LoadEventsSince(threadID, 0)
+	summary["eventsReadFailed"] = loadErr != nil
+	stages := make([]map[string]string, 0)
+	for _, event := range loaded.Events {
+		if stringField(event, "turnId") != stringField(last, "id") {
+			continue
+		}
+		stages = append(stages, map[string]string{
+			"kind": stringField(event, "kind"), "status": stringField(event, "status"),
+			"stage": stringField(event, "stage"), "code": stringField(event, "code"),
+			"failureCode": stringField(event, "failureCode"), "terminalReason": stringField(event, "terminalReason"),
+		})
+	}
+	if len(stages) > 100 {
+		stages = stages[len(stages)-100:]
+	}
+	summary["stages"] = stages
+	return summary
 }
 
 func firstCaseForegroundRecordFieldV1(records []domainjob.Record, project func(domainjob.Record) string) string {

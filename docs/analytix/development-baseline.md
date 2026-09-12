@@ -654,3 +654,17 @@ focused run passed (214.246 s), no skips. An earlier entire witnessed group ran
 into its unchanged local 10-minute budget after reaching the last subcase;
 that run is partial, not full PASS. Sampling and sequential progress indicate
 cumulative filesystem cost; no timeout or CI partition was increased.
+
+The two server child-delegation contracts used a stale synthetic source
+capability lacking the prepared Registry effect surface. Their fixture now
+binds one real signed legacy-store commit to its callback, exact source/context/
+selection/prepared/marker and signed readback. No-op, repeat, mismatch, cancellation,
+revocation and escaped-lease negatives remain fail-closed; this is synthetic
+legacy public-contract evidence, not V2 shared-witness acceptance. A concurrent
+local run subsequently missed parent continuation near its existing task budget;
+no timeout or assertion was changed. Stable serial ordinary and DeepSeek public
+contracts both passed (41.73 s / 43.09 s), including parent=3/child=1, typed handoff,
+durable restart and all original raw/private non-disclosure checks. Primary
+reader missing/rebind/cancellation coverage passed (1.73 s); combined local
+server selection passed (87.203 s). Full current-head remote server/package
+acceptance remains required.
