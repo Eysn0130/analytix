@@ -121,6 +121,7 @@ func TestRuntimeCompositionUsesOneWitnessedRegistryForHostFactFinalization(t *te
 	path := filepath.Join(root, "internal", "runtimeapp", "app.go")
 	parsed := parseGoFile(t, path, 0)
 	selectedSharedRegistry := 0
+	selectedImportActivation := 0
 	hostConstructors := 0
 	compatibilityConstructors := 0
 	exactCaseFinalizerInitializers := 0
@@ -137,9 +138,24 @@ func TestRuntimeCompositionUsesOneWitnessedRegistryForHostFactFinalization(t *te
 			if right, rightOK := typed.Rhs[0].(*ast.SelectorExpr); rightOK {
 				shared, sharedOK := right.X.(*ast.Ident)
 				if sharedOK && left.Name == "evidenceStore" &&
-					shared.Name == "sharedEvidenceDatasetSnapshotV2" && right.Sel.Name == "registry" {
+					shared.Name == "sharedEvidenceDatasetSnapshotV2" && right.Sel.Name == "registryOwner" {
 					selectedSharedRegistry++
 				}
+			}
+			if left.Name == "activateImportRegistry" {
+				method, ok := typed.Rhs[0].(*ast.SelectorExpr)
+				if !ok || method.Sel.Name != "ActivateAfterImport" {
+					t.Fatal("confirmed import activation lost its shared registry method")
+				}
+				owner, ok := method.X.(*ast.SelectorExpr)
+				if !ok || owner.Sel.Name != "registryOwner" {
+					t.Fatal("confirmed import activation bypasses the registry owner")
+				}
+				shared, ok := owner.X.(*ast.Ident)
+				if !ok || shared.Name != "sharedEvidenceDatasetSnapshotV2" {
+					t.Fatal("confirmed import activation selects a different shared registry")
+				}
+				selectedImportActivation++
 			}
 			if left.Name == "caseFinalizer" {
 				outer, ok := typed.Rhs[0].(*ast.CallExpr)
@@ -182,11 +198,11 @@ func TestRuntimeCompositionUsesOneWitnessedRegistryForHostFactFinalization(t *te
 		}
 		return true
 	})
-	if selectedSharedRegistry != 1 || exactCaseFinalizerInitializers != 1 ||
+	if selectedSharedRegistry != 1 || selectedImportActivation != 1 || exactCaseFinalizerInitializers != 1 ||
 		hostConstructors != 1 || compatibilityConstructors != 0 {
 		t.Fatalf(
-			"production witnessed registry composition drifted: sharedSelections=%d exactInitializers=%d hostConstructors=%d compatibilityConstructors=%d",
-			selectedSharedRegistry, exactCaseFinalizerInitializers, hostConstructors, compatibilityConstructors,
+			"production witnessed registry composition drifted: sharedSelections=%d importActivations=%d exactInitializers=%d hostConstructors=%d compatibilityConstructors=%d",
+			selectedSharedRegistry, selectedImportActivation, exactCaseFinalizerInitializers, hostConstructors, compatibilityConstructors,
 		)
 	}
 }

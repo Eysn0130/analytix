@@ -152,12 +152,24 @@ func TestPersistenceKernelDeviceHasSingleProductionOwner(t *testing.T) {
 func TestEvidenceRegistryPreparedCommitHasSingleProductionCaller(t *testing.T) {
 	root := runtimeGoRoot(t)
 	allowed := "internal/app/evidence/receipt_settlement.go"
+	forwarder := "internal/runtimeapp/import_activated_evidence_registry_v1.go"
+	callers, forwarders := 0, 0
 	for _, file := range goFiles(t, root) {
 		if strings.HasSuffix(file, "_test.go") || hasBuildTag(t, file, "!analytix_prod") {
 			continue
 		}
 		parsed := parseGoFile(t, file, 0)
+		if rel(t, root, file) == forwarder && !hasExactRegistryCurrentGuard(parsed) {
+			t.Fatal("registry forwarding no longer holds the current activated owner")
+		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
+			if function, ok := node.(*ast.FuncDecl); ok && rel(t, root, file) == forwarder &&
+				exactRegistryMethod(function, registryCommitForwarderContract) {
+				// This method cannot produce a new input, select authority, or
+				// absorb an error; it forwards the sole settlement call unchanged.
+				forwarders++
+				return false
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -169,8 +181,12 @@ func TestEvidenceRegistryPreparedCommitHasSingleProductionCaller(t *testing.T) {
 			if rel(t, root, file) != allowed {
 				t.Fatalf("%s bypasses the sole settlement-backed evidence registry writer", rel(t, root, file))
 			}
+			callers++
 			return true
 		})
+	}
+	if callers != 1 || forwarders != 1 {
+		t.Fatalf("prepared registry commit must have one producer and one identity-preserving forwarder: %d, %d", callers, forwarders)
 	}
 }
 
