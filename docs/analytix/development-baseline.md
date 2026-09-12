@@ -605,3 +605,10 @@ projection API. The marker-stripped source fixture now requires derivation
 rejection, unchanged source/lineage/inventory and all original privacy checks;
 its focused server test passed (1.35 s). These are local contract/recovery checks,
 not a full server or runtime-suite acceptance.
+
+Provider endpoint protocol-shape classification is now a pure model value
+function shared by application and transport. This removes the loop's reverse
+dependency on the legacy Provider adapter while preserving request URL parsing
+semantics. Complete local loop/model/compat packages passed (20.416 s / 0.580 s /
+0.394 s). Full architecture was still failing on the separately tracked media
+HTTP composition and private report-owner references at this point.

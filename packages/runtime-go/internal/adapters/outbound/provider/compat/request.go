@@ -3,7 +3,6 @@ package compat
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	provideranthropic "analytix.local/runtime-go/internal/adapters/outbound/provider/anthropic"
@@ -106,21 +105,7 @@ func AppendEndpointPath(baseURL string, versionedPath string) string {
 }
 
 func CustomEndpointRequestShape(baseURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil {
-		return "chat_completions"
-	}
-	path := strings.ToLower(strings.TrimRight(parsed.EscapedPath(), "/"))
-	switch {
-	case strings.HasSuffix(path, "/responses"):
-		return "responses"
-	case strings.HasSuffix(path, "/messages"):
-		return "messages"
-	case strings.HasSuffix(path, "/chat/completions"), strings.HasSuffix(path, "/completions"):
-		return "chat_completions"
-	default:
-		return "chat_completions"
-	}
+	return domainmodel.CustomEndpointRequestShape(baseURL)
 }
 
 func firstNonEmpty(values ...string) string {
