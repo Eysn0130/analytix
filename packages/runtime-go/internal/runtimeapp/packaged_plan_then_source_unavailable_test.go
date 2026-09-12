@@ -206,6 +206,7 @@ func runRuntimePlanThenProtectedOrdinaryRestartWithCheckpointsV1(t *testing.T, p
 		"operation": "draft", "workspaceRoot": workspace, "relativePath": planPath,
 		"planId": "plan-async-protected-follow-up", "sourceRequest": planPrompt, "title": "Focused plan",
 	}
+	planStartedAt := time.Now()
 	status, started := packagedSourceUnavailableHydrationHTTPJSONV1(
 		t, client, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns",
 		map[string]any{
@@ -215,8 +216,10 @@ func runRuntimePlanThenProtectedOrdinaryRestartWithCheckpointsV1(t *testing.T, p
 	)
 	planTurnID := contracts.StringField(started, "turnId")
 	if status != http.StatusAccepted || planTurnID == "" {
-		t.Fatalf("plan turn status=%d providerCalls=%d code=%s reasonCode=%s", status,
-			providerCalls.Load(), contracts.StringField(started, "code"), contracts.StringField(started, "reasonCode"))
+		_, planErr := os.Stat(filepath.Join(workspace, filepath.FromSlash(planPath)))
+		t.Fatalf("plan turn status=%d providerCalls=%d code=%s reasonCode=%s elapsed=%s planExists=%t", status,
+			providerCalls.Load(), contracts.StringField(started, "code"), contracts.StringField(started, "reasonCode"),
+			time.Since(planStartedAt).Round(time.Millisecond), planErr == nil)
 	}
 	t.Log("ordinary joint phase: plan hydration")
 	planTurn := packagedPlanThenProtectedWaitTurnV1(t, client, server.URL, threadID, planTurnID)
