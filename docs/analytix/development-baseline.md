@@ -842,3 +842,21 @@ the earlier witness fixes that mutation instead of weakening whole-tree equality
 The final complete desktop-migration selection, strict/wrong-family/unwitnessed
 inventory checks and both invalid-lineage no-mutation branches passed locally.
 Current-head remote runtime acceptance remains required.
+
+The first stronger-admission remote run at 7099f0015 exposed two additional
+issues in the newly required native lane. The schedule HTTP fixture still had
+legacy configuration without admitted Provider Registry authority; it now uses
+the same real synthetic onboarding fixture before composition. Its production
+focused contract passed locally (7.47 s), with current-source Node entrypoint.
+The workflow command substitution now separates assignment from export so
+actionlint can observe failures (SC2155); pinned actionlint 1.7.12 passed.
+Remote Application, production non-runtimeapp package tests (including
+architecture and server), and completed native contracts passed at 7099f0015.
+That SHA is not a complete required-CI PASS: source lint and both runtime-platform
+lanes failed. Both platform runs exposed a one-shot inherited replay timeout
+after fork/restart in the missing-optional-plugin scenario; the other four faults
+passed remotely. This timeout remains under investigation without a budget
+increase. A local external-filesystem run separately exhausted the unchanged
+20-minute cumulative package budget after three complete faults; this is not
+a full lifecycle PASS. Synthetic runtime profiles may use isolated native temp
+roots while compiler/dependency storage remains on the configured cache volume.

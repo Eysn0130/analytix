@@ -136,7 +136,7 @@ func TestRuntimeHTTPHostScheduleListUsesExactContainedLoopback(t *testing.T) {
 	binding := scheduleSpec
 	binding.Args = append([]string(nil), scheduleSpec.Args...)
 	binding.Env = map[string]string{"ELECTRON_RUN_AS_NODE": "1"}
-	handler, err := NewRuntimeServerHandlerE(Config{
+	config := Config{
 		RuntimeToken: DefaultRuntimeToken, ProductionDurableRoot: t.TempDir(),
 		DataDir: t.TempDir(), UserDataDir: t.TempDir(),
 		ProtectedReadDirs: []string{t.TempDir()},
@@ -144,7 +144,9 @@ func TestRuntimeHTTPHostScheduleListUsesExactContainedLoopback(t *testing.T) {
 		APIKey: "test-only", Model: "schedule-public-model",
 		EndpointFormat: "chat_completions", MCPConfigJSON: string(configBytes),
 		HostScheduleMCPServer: &binding,
-	})
+	}
+	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "test-only")
+	handler, err := NewRuntimeServerHandlerE(config)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -300,7 +300,8 @@ jobs:
           GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
           export GOTMPDIR
           export TMPDIR="$GOTMPDIR"
-          export ANALYTIX_TEST_SCHEDULE_MCP_NODE_V1="$(node -p 'require("node:fs").realpathSync(process.execPath)')"
+          ANALYTIX_TEST_SCHEDULE_MCP_NODE_V1="$(node -p 'require("node:fs").realpathSync(process.execPath)')"
+          export ANALYTIX_TEST_SCHEDULE_MCP_NODE_V1
           export ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1="$GITHUB_WORKSPACE/out/main/claw-schedule-mcp-node-entry.js"
           test -f "$ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1"
           node ../../scripts/go-ci-shards.mjs platform
