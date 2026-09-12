@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	providerregistryapp "analytix.local/runtime-go/internal/app/providerregistry"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
+	mediaport "analytix.local/runtime-go/internal/ports/mediaexecution"
 )
 
 type mediaRegistryStub struct {
@@ -74,10 +76,10 @@ func TestImageExecutionUsesCommittedMediaModelCredentialRouteAndProxy(t *testing
 
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "http://proxy.registry.test:8080", "image-model-registry"), credential: secret}
 	var observedProxy string
-	executor := New(registry)
-	executor.ClientFactory = func(proxy string, _ time.Duration) (*http.Client, error) {
+	executor := New(registry, mediaexecutiontransport.New)
+	executor.TransportFactory = func(proxy string, timeout time.Duration) (mediaport.Transport, error) {
 		observedProxy = proxy
-		return upstream.Client(), nil
+		return mediaexecutiontransport.New("", timeout)
 	}
 	result, err := executor.Execute(context.Background(), Request{
 		Operation: OperationImageGenerate, Prompt: "bounded prompt", Size: "1024x1024", TimeoutMS: 5_000,
@@ -111,8 +113,7 @@ func TestImageEditUsesCommittedEditEndpointAndMultipartModel(t *testing.T) {
 	}))
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "image-edit-model"), credential: secret}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	result, err := executor.Execute(context.Background(), Request{
 		Operation: OperationImageEdit, Prompt: "bounded edit", Size: "1024x1024",
 		Images: []ReferenceImage{{
@@ -145,8 +146,7 @@ func TestImageExecutionClassifiesMiniMaxFromCommittedProviderIdentity(t *testing
 	committed := mediaProvider(upstream.URL+"/v1", "", "image-01")
 	committed.ID = "minimax"
 	registry := &mediaRegistryStub{provider: committed, credential: "synthetic-minimax-media-secret"}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	result, err := executor.Execute(context.Background(), Request{Operation: OperationImageGenerate, Prompt: "bounded prompt"})
 	if err != nil || capturedPath != "/v1/image_generation" || !strings.Contains(capturedBody, `"model":"image-01"`) ||
 		string(result.Image) != string(png) {
@@ -173,8 +173,7 @@ func TestSpeechExecutionUsesCommittedMediaModelAndReturnsBoundedTranscript(t *te
 	}))
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "mimo-v2.5-asr"), credential: secret}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	result, err := executor.Execute(context.Background(), Request{
 		Operation:   OperationSpeechTranscribe,
 		AudioBase64: base64.StdEncoding.EncodeToString([]byte("synthetic-audio")),
@@ -209,8 +208,7 @@ func TestOpenAITranscriptionUsesOneLanguageAndCommittedMediaModel(t *testing.T) 
 	registry := &mediaRegistryStub{
 		provider: mediaProvider(upstream.URL+"/v1", "", "whisper-registry"), credential: secret,
 	}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	result, err := executor.Execute(context.Background(), Request{
 		Operation: OperationSpeechTranscribe, AudioBase64: base64.StdEncoding.EncodeToString([]byte("synthetic-audio")),
 		MIMEType: "audio/wav", Language: "zh", TimeoutMS: 5_000,
@@ -238,8 +236,7 @@ func TestImageRedirectIsBlockedAndNeverForwardsCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "image-model"), credential: secret}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	_, err := executor.Execute(context.Background(), Request{Operation: OperationImageGenerate, Prompt: "prompt"})
 	if !errors.Is(err, ErrProviderFailed) || redirectAuthorization != "not-called" {
 		t.Fatalf("redirect was followed or misclassified: err=%v redirectAuthorization=%q", err, redirectAuthorization)
@@ -261,8 +258,7 @@ func TestImageURLDownloadRevalidatesAndNeverForwardsCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "image-model"), credential: secret}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	result, err := executor.Execute(context.Background(), Request{Operation: OperationImageGenerate, Prompt: "prompt"})
 	if err != nil || downloadAuthorization != "" || string(result.Image) != string(png) || registry.resolveCalls != 2 || registry.validations != 5 {
 		t.Fatalf("download authority mismatch: err=%v auth=%q result=%#v resolves=%d validates=%d", err, downloadAuthorization, result, registry.resolveCalls, registry.validations)
@@ -300,8 +296,7 @@ func TestImageExecutionDiscardsBodyAfterAuthorityDrift(t *testing.T) {
 		}
 		return nil
 	}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	type outcome struct {
 		result Result
 		err    error
@@ -350,8 +345,7 @@ func TestSpeechExecutionDiscardsBodyAfterAuthorityDrift(t *testing.T) {
 		}
 		return nil
 	}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	type outcome struct {
 		result Result
 		err    error
@@ -407,8 +401,7 @@ func TestImageDownloadDiscardsBodyAfterAuthorityDrift(t *testing.T) {
 		}
 		return nil
 	}
-	executor := New(registry)
-	executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+	executor := New(registry, mediaexecutiontransport.New)
 	type outcome struct {
 		result Result
 		err    error
@@ -471,8 +464,7 @@ func TestMediaExecutionRejectsPreSendAndPostResponseAuthorityDrift(t *testing.T)
 				}
 				return nil
 			}
-			executor := New(registry)
-			executor.ClientFactory = func(string, time.Duration) (*http.Client, error) { return upstream.Client(), nil }
+			executor := New(registry, mediaexecutiontransport.New)
 			result, err := executor.Execute(context.Background(), Request{Operation: OperationImageGenerate, Prompt: "prompt"})
 			if !errors.Is(err, ErrAuthorityChanged) || len(result.Image) != 0 || calls != test.wantCalls {
 				t.Fatalf("drift was not fail-closed: err=%v result=%#v calls=%d", err, result, calls)

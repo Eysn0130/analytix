@@ -26,6 +26,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	fundscsvsourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundscsvsource"
 	fundsquerysourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundsquerysource"
+	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
@@ -1635,7 +1636,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		ProviderConfig:    providerConfig,
 		ProviderExecution: newProviderRegistryExecutionResolverV1(providerRegistryAuthority.Manager()),
 		ProviderRegistry:  providerRegistryAuthority.Service(),
-		MediaExecution:    mediaexecutionapp.New(providerRegistryAuthority.Manager()),
+		MediaExecution:    mediaexecutionapp.New(providerRegistryAuthority.Manager(), mediaexecutiontransport.New),
 		ModelProxyURL:     strings.TrimSpace(config.ModelProxyURL),
 		ApprovalPolicy:    config.ApprovalPolicy,
 		SandboxMode:       config.SandboxMode,

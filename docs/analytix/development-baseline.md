@@ -612,3 +612,11 @@ dependency on the legacy Provider adapter while preserving request URL parsing
 semantics. Complete local loop/model/compat packages passed (20.416 s / 0.580 s /
 0.394 s). Full architecture was still failing on the separately tracked media
 HTTP composition and private report-owner references at this point.
+
+Media execution now receives a transport factory through a narrow port. HTTP
+client/request construction, committed proxy handling, bounded timeouts and
+redirect refusal belong to the outbound adapter. Application-owned Registry
+revalidation remains before send, after headers and after bounded body reads;
+credentials are cleared and image downloads never receive the Provider header.
+All existing loopback media tests and the new adapter transport tests passed as
+complete local packages (0.490 s / 0.399 s). No live Provider was contacted.
