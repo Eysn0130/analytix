@@ -1636,7 +1636,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		InfoDataDir:       runtimeInfoDataDir,
 		Provider:          providerClient,
 		ProviderConfig:    providerConfig,
-		ProviderExecution: newProviderRegistryExecutionResolverV1(providerRegistryAuthority.Manager()),
+		ProviderExecution: newProviderRegistryExecutionResolverWithPricingV1(providerRegistryAuthority.Manager(), config.ModelProvidersJSON),
 		ProviderRegistry:  providerRegistryAuthority.Service(),
 		MediaExecution:    mediaexecutionapp.New(providerRegistryAuthority.Manager(), mediaexecutiontransport.New),
 		ModelProxyURL:     strings.TrimSpace(config.ModelProxyURL),

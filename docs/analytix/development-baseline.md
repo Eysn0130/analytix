@@ -759,3 +759,18 @@ source evidence. Full G5 control executable comparison and those negatives
 passed locally (0.662 s). The preceding root selection exposed the stale reader
 name after its other four current Registry/Git contracts passed; that combined
 selection was FAIL, not full application or Go acceptance.
+
+The committed Provider resolver now retains the desktop's key-free tariffs,
+reasoning protocol and aliases only for the exact Registry-admitted route and
+canonical models. The Registry remains the sole credential, selection, endpoint
+and executable model authority; legacy profile capabilities are not copied.
+Ambiguous aliases or duplicate attributed routes fail closed. Deterministic
+metadata regressions failed before the fix; the production-mode resolver/pricing
+selection passed afterward (16.280 s, no skip). Public HTTP regressions passed
+for four-provider pricing (81.88 s), cache accounting (58.07 s), caller Provider
+IDs unable to override selection (40.93 s), exact-attempt DeepSeek reasoning
+(57.16 s), subagent model/effort/tool scope (52.92 s), selected Xiaomi (64.23 s)
+and its canonical alias (64.12 s). These fixtures perform actual protected
+synthetic onboarding and explicit selection through the Registry HTTP contract;
+plain unavailable-authority constructors remain unchanged. Full root-package
+and current-head remote acceptance have not yet passed.
