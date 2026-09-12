@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1865,6 +1866,20 @@ func prepareRuntimeServerExplicitProviderRegistryFixture(
 	model string,
 ) (string, func(string)) {
 	t.Helper()
+	return prepareRuntimeServerExplicitProviderRegistryCredentialFixture(
+		t, dataDir, providerURL, providerID, model, "synthetic-runtime-server-provider-credential",
+	)
+}
+
+func prepareRuntimeServerExplicitProviderRegistryCredentialFixture(
+	t *testing.T,
+	dataDir, providerURL, providerID, model, syntheticCredential string,
+) (string, func(string)) {
+	t.Helper()
+	parsed, err := url.Parse(providerURL)
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil || !net.ParseIP(parsed.Hostname()).IsLoopback() {
+		t.Fatal("explicit Registry fixture requires a literal loopback HTTP Provider")
+	}
 	masterKeyDir := filepath.Join(dataDir, "private", "provider-secrets", "master-key")
 	if err := os.MkdirAll(masterKeyDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1910,7 +1925,7 @@ func prepareRuntimeServerExplicitProviderRegistryFixture(
 			t.Fatal("explicit Registry fixture did not expose an exact initial CAS")
 		}
 
-		credential := []byte("synthetic-runtime-server-provider-credential")
+		credential := []byte(syntheticCredential)
 		encodedCredential := base64.StdEncoding.EncodeToString(credential)
 		for index := range credential {
 			credential[index] = 0
@@ -1947,7 +1962,7 @@ func prepareRuntimeServerExplicitProviderRegistryFixture(
 			t.Fatal("explicit Registry connect projection was not valid JSON")
 		}
 		for _, forbidden := range []string{
-			"synthetic-runtime-server-provider-credential", encodedCredential,
+			syntheticCredential, encodedCredential,
 			"credentialRef", "ciphertext", "nonce", "masterKey", "master-key", "valueBase64", "rawBody", "raw_body",
 		} {
 			if strings.Contains(string(connectedProjection), forbidden) {
@@ -1972,7 +1987,7 @@ func prepareRuntimeServerExplicitProviderRegistryFixture(
 			t.Fatal("explicit Registry readback was not valid JSON")
 		}
 		for _, forbidden := range []string{
-			"synthetic-runtime-server-provider-credential", encodedCredential,
+			syntheticCredential, encodedCredential,
 			"credentialRef", "ciphertext", "nonce", "masterKey", "master-key", "valueBase64", "rawBody", "raw_body",
 		} {
 			if strings.Contains(string(readbackProjection), forbidden) {
@@ -7068,22 +7083,20 @@ func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvi
 func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 	const secret = "sk-runtime-provider-secret"
 	dataDir := t.TempDir()
+	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer "+secret {
+			t.Error("synthetic Provider did not receive the Registry-owned fixture credential")
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"message":"Authentication Fails, Your api key: ` + secret + ` is invalid"}}`))
 	}))
 	defer provider.Close()
 
-	modelProviders := string(mustJSON(t, map[string]any{
-		"defaultProviderId": "auth-provider",
-		"providers": []map[string]any{{
-			"id":             "auth-provider",
-			"apiKey":         secret,
-			"baseUrl":        provider.URL + "/v1",
-			"endpointFormat": "chat_completions",
-			"models":         []string{"auth-model"},
-		}},
-	}))
+	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryCredentialFixture(
+		t, dataDir, provider.URL, "auth-provider", "auth-model", secret,
+	)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     t.TempDir(),
@@ -7093,6 +7106,7 @@ func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 		ModelProvidersJSON: modelProviders,
 	}))
 	defer server.Close()
+	connectProviderRegistry(server.URL)
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":     "Provider Auth",
@@ -7105,6 +7119,9 @@ func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 		"model":      "auth-model",
 	}), http.StatusInternalServerError)
 	assertClosedTurnFailureResponse(t, failed, "provider_authentication_failed", "Provider authentication failed. Check the configured credential.")
+	if providerCalls.Load() != 1 {
+		t.Fatalf("expected one request to the synthetic Provider, got %d", providerCalls.Load())
+	}
 	if _, exists := failed["providerError"]; exists {
 		t.Fatalf("closed public failure response must not expose provider diagnostics: %#v", failed)
 	}
