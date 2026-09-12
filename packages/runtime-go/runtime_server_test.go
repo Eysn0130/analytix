@@ -36,6 +36,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
 	apploop "analytix.local/runtime-go/internal/app/loop"
+	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
 	terminalapp "analytix.local/runtime-go/internal/app/terminal"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	appturn "analytix.local/runtime-go/internal/app/turn"
@@ -11941,7 +11942,7 @@ func TestRuntimeServerRejectsSubagentContinueWhenToolScopeDrifts(t *testing.T) {
 	}
 }
 
-func TestRuntimeServerStartupInterruptsStaleRunningSubagentRuns(t *testing.T) {
+func TestRuntimeServerStartupRejectsUnboundStaleRunningSubagentRuns(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -11982,59 +11983,58 @@ func TestRuntimeServerStartupInterruptsStaleRunningSubagentRuns(t *testing.T) {
 			`data: [DONE]`,
 		},
 	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
+	// This historical orphan has no signed ChildProducer association. Current
+	// startup must reject it before recovery writers; legitimate bound recovery
+	// remains covered by server.TestRecordRuntimeRecoveredJobEventsSettlesParentToolResult.
+	durableRoot := t.TempDir()
+	snapshot := func() map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		for index, root := range []string{dataDir, durableRoot} {
+			if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				relative, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				info, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				value := info.Mode().String()
+				if info.Mode().IsRegular() {
+					body, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
+					value += ":" + domainsecurity.SHA256Hex(body)
+				} else if !info.IsDir() {
+					t.Fatal("unexpected non-regular orphan fixture entry")
+				}
+				out[fmt.Sprintf("%d/%s", index, relative)] = value
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out
+	}
+	before := snapshot()
+	handler, startupErr := runtimeapp.NewRuntimeServerHandlerE(RuntimeServerConfig{
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot,
+		DataDir: dataDir, UserDataDir: t.TempDir(),
 		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "stale-provider", "stale-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":      "Stale subagent",
-		"workspace":  workspace,
-		"providerId": "stale-provider",
-		"model":      "stale-model",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	if threadID != "thr_durable_1" {
-		t.Fatalf("test assumes first durable thread id matches stale parent id, got %q", threadID)
+	})
+	if handler != nil {
+		shutdownRuntimeTestHandler(t, handler)
 	}
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt":         "Continue the stale child.",
-		"approvalPolicy": "auto",
-	}), http.StatusAccepted)
-	turnID := stringField(start, "turnId")
-
-	if provider.RequestCount() != 2 {
-		t.Fatalf("interrupted stale run must not launch a child provider call, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
+	if handler != nil || !errors.Is(startupErr, pendingworkapp.ErrChildProducerInventoryIncomplete) {
+		t.Fatalf("unsigned child producer must reject startup: handler=%t err=%v", handler != nil, startupErr)
 	}
-	continuation := provider.Body(1)
-	_, staleResult := providerCurrentTurnHostToolResultForName(t, continuation, "task")
-	resultJSON := string(mustJSON(t, staleResult))
-	if !strings.Contains(resultJSON, "subagent reference") ||
-		!strings.Contains(resultJSON, "job-1") ||
-		!strings.Contains(resultJSON, "interrupted and cannot be continued or forked") {
-		t.Fatalf("parent continuation should receive a host-bound interrupted subagent result: result=%s body=%s", resultJSON, continuation)
-	}
-	publicRuns := runtimeServerScopedChildRuns(t, server.URL, DefaultRuntimeToken, threadID)
-	if len(publicRuns) != 0 {
-		t.Fatalf("unbound stale child membership must not become public: %#v", publicRuns)
-	}
-	internalRuns := runtimeServerInternalChildRuns(t, dataDir, threadID)
-	if len(internalRuns) != 1 || internalRuns[0].ID != "job-1" || internalRuns[0].Status != "interrupted" {
-		t.Fatalf("startup cleanup should mark stale running child run interrupted: %#v", internalRuns)
-	}
-	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	staleEvents := runtimeServerEventsForTurn(t, replay, "turn_stale")
-	if len(staleEvents) != 0 {
-		t.Fatalf("startup cleanup must not create orphan events for a missing parent thread: %#v", staleEvents)
-	}
-	turnEvents := runtimeServerEventsForTurn(t, replay, turnID)
-	if !hasRuntimeServerEvent(turnEvents, "turn_completed") {
-		t.Fatalf("new parent turn should still complete after stale cleanup:\n%s", replay)
+	if !reflect.DeepEqual(before, snapshot()) || provider.RequestCount() != 0 {
+		t.Fatal("unsigned orphan startup changed preserved roots or called the Provider")
 	}
 }
 

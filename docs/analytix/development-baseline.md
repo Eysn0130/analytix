@@ -890,3 +890,14 @@ already reads all receipts twice; disposition validation redundantly rereads
 each receipt and rescans the protected CAS tree. The pending-store fix is being
 validated at that owner boundary, without caching across requests, changing
 replay authority checks, or increasing the existing timeout.
+
+The ninth ordinary-root failure was an unsigned orphan child fixture. Current
+Core startup intentionally rejects that inventory before recovery; treating it
+as an accepted stale child would bypass signed producer association. The same
+fixture now exercises the error-returning constructor and proves exact
+ErrChildProducerInventoryIncomplete, unchanged preserved root contents/modes
+and zero Provider requests (0.44 s). It does not manufacture a receipt or reopen
+a completed job. The existing legitimate producer-allocation, bound parent
+recovery, and stale/lease-expired/orphan recovery endpoint tests were separately
+executed and passed (server selection 1.980 s). This is constructor-negative
+and focused recovery evidence, not a new crash-process acceptance claim.
