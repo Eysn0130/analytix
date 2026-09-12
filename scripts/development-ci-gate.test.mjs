@@ -39,6 +39,9 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.match(native, /runs-on: macos-15/)
   assert.match(native, /npm test -- --tags-filter=macos-integration/)
   assert.doesNotMatch(native, /continue-on-error|passWithNoTests/)
+  const restart = workflow.slice(workflow.indexOf('  restart-contracts:'), workflow.indexOf('  go-tests:'))
+  assert.match(restart, /set -o pipefail/)
+  assert.match(restart, /node \.\.\/\.\.\/scripts\/go-test-selection\.mjs/)
 })
 
 test('all complete CI job families are required for the merge gate', () => {

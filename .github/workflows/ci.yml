@@ -163,6 +163,7 @@ jobs:
         env:
           OWNER_FIXTURE: ${{ matrix.owner }}
         run: |
+          set -o pipefail
           umask 077
           # Keep the existing full-suite deadline, not a new performance SLA.
           go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
