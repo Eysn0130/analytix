@@ -682,3 +682,17 @@ the old aborted assertion; its corrected focused rerun passed. These are local
 focused results, not full runtime acceptance. Remote run 34693285203 independently
 reported a plan-turn 500 in the Ubuntu native PII held-state lane; investigation
 continues before merge admission.
+
+The CLI private-frame HTTP contract now distinguishes a cold Registry from a
+real committed historical Registry. The latter is provisioned through signed
+prepared history, actual Registry CAS and the enrolled shared witness, with
+matching durable turn/grant/result/epoch and case-thread authority. Cold startup
+and admission remain local; committed startup performs read-only reconciliation,
+and an outage on the subsequent case HTTP request reaches the exact shared
+namespace without advancing it. Both retain typed zero-fact source-unavailable
+output and the private-frame/ambient/ready non-disclosure checks. The subprocess
+uses one isolated filesystem and its actual TMPDIR for authority and temporary
+durable owners; compiler caches remain external. The existing 30 s ready budget
+is unchanged. Final local focused execution passed both scenarios without skip
+(cold 3.33 s, committed 5.17 s; package 9.194 s). This is synthetic CLI contract
+coverage, not native dataset, Provider, packaging or full remote acceptance.
