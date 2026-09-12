@@ -758,26 +758,68 @@ func TestProcessAuthorityGenericExecuteSurfaceDoesNotExist(t *testing.T) {
 
 func TestNativeExecutionLeaseHasSingleProductionConsumer(t *testing.T) {
 	root := runtimeGoRoot(t)
-	allowed := "internal/adapters/outbound/nativecomponentrunner/runner_darwin.go"
 	for _, file := range goFiles(t, root) {
 		if strings.HasSuffix(file, "_test.go") || hasBuildTag(t, file, "!analytix_prod") {
 			continue
 		}
 		parsed := parseGoFile(t, file, 0)
-		ast.Inspect(parsed, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
+		for _, declaration := range parsed.Decls {
+			functionName := ""
+			if function, ok := declaration.(*ast.FuncDecl); ok {
+				functionName = function.Name.Name
+			}
+			ast.Inspect(declaration, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || (selector.Sel.Name != "AcquireExecutionLease" && selector.Sel.Name != "TakeExecutionFile") {
+					return true
+				}
+				if !nativeExecutionLeaseCallerAllowed(rel(t, root, file), functionName, selector.Sel.Name) {
+					t.Fatalf("%s consumes native execution authority outside its sole runner", rel(t, root, file))
+				}
 				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || (selector.Sel.Name != "AcquireExecutionLease" && selector.Sel.Name != "TakeExecutionFile") {
-				return true
-			}
-			if rel(t, root, file) != allowed {
-				t.Fatalf("%s consumes native execution authority outside its sole runner", rel(t, root, file))
-			}
-			return true
-		})
+			})
+		}
+	}
+	owner := parseGoFile(t, filepath.Join(root, "internal", "adapters", "outbound", "nativecomponenthost", "owner.go"), 0)
+	validation := privateCASFunctionDeclaration(t, owner, "ValidateCurrentDataEngine")
+	acquire := privateCASExactlyOneCall(t, validation, "registry", "AcquireExecutionLease")
+	closeLease := privateCASExactlyOneCall(t, validation, "lease", "Close")
+	if len(acquire.Args) != 2 || privateCASIdent(acquire.Args[0]) != "executionContext" ||
+		!privateCASSelectorMatches(acquire.Args[1], "domainnative", "ComponentDataEngine") ||
+		closeLease.Pos() <= acquire.Pos() {
+		t.Fatal("native currentness probe must acquire and close only its exact data-engine lease")
+	}
+}
+
+func nativeExecutionLeaseCallerAllowed(file, function, operation string) bool {
+	if file == "internal/adapters/outbound/nativecomponentrunner/runner_darwin.go" {
+		return true
+	}
+	// Currentness validation closes the lease without taking its descriptor;
+	// only the runner may consume executable authority.
+	return operation == "AcquireExecutionLease" && function == "ValidateCurrentDataEngine" &&
+		file == "internal/adapters/outbound/nativecomponenthost/owner.go"
+}
+
+func TestNativeLeaseGuardSeparatesCurrentnessFromExecution(t *testing.T) {
+	owner := "internal/adapters/outbound/nativecomponenthost/owner.go"
+	if !nativeExecutionLeaseCallerAllowed(owner, "ValidateCurrentDataEngine", "AcquireExecutionLease") {
+		t.Fatal("exact currentness probe rejected")
+	}
+	for _, candidate := range [][3]string{
+		{owner, "ValidateCurrentDataEngine", "TakeExecutionFile"},
+		{owner, "Execute", "AcquireExecutionLease"},
+		{owner, "", "AcquireExecutionLease"},
+		{"internal/runtimeapp/app.go", "ValidateCurrentDataEngine", "AcquireExecutionLease"},
+		{"internal/runtimeapp/app.go", "Execute", "TakeExecutionFile"},
+	} {
+		if nativeExecutionLeaseCallerAllowed(candidate[0], candidate[1], candidate[2]) {
+			t.Fatal("native lease authority escaped its exact owner")
+		}
 	}
 }
 
