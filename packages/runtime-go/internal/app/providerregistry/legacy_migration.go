@@ -12,8 +12,6 @@ import (
 	"errors"
 	"io"
 	"math"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -32,7 +30,7 @@ const (
 	maxLegacyMigrationLocatorTotalBytes            = 32 << 10
 	maxLegacyMigrationRollbackArtifactCount        = 64
 	maxLegacyMigrationRecoveryCredentialTotalBytes = 1 << 20
-	maxLegacyMigrationSourceSnapshotBytes          = 256 << 10
+	maxLegacyMigrationSourceSnapshotBytes          = registryport.MaxLegacySourceSnapshotBytes
 	legacyMigrationRecoveryPayloadMagic            = "ALMR"
 	legacyMigrationRecoveryPayloadVersion          = 1
 	legacyMigrationRecoveryPayloadVersionV2        = 2
@@ -43,7 +41,7 @@ const (
 	legacyMigrationSourceLockSuffix                = ".analytix-provider-credential-migration.lock"
 	legacyMigrationSourceAuthorityPrefix           = "lmsa_"
 	maxLegacyMigrationSourceAuthorityPathBytes     = 4096
-	maxLegacyMigrationSourceLockOwnerBytes         = 4096
+	maxLegacyMigrationSourceLockOwnerBytes         = registryport.MaxLegacySourceLockOwnerBytes
 )
 
 type legacyMigrationRollbackCredentialArtifactView struct {
@@ -116,48 +114,6 @@ func validLegacyMigrationSourceLockToken(value string) bool {
 	return true
 }
 
-func legacyMigrationFileInfoUintField(info os.FileInfo, fieldName string) (uint64, bool) {
-	if info == nil || info.Sys() == nil {
-		return 0, false
-	}
-	value := reflect.ValueOf(info.Sys())
-	for value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return 0, false
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return 0, false
-	}
-	field := value.FieldByName(fieldName)
-	if !field.IsValid() {
-		return 0, false
-	}
-	switch field.Kind() {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return field.Uint(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if field.Int() < 0 {
-			return 0, false
-		}
-		return uint64(field.Int()), true
-	default:
-		return 0, false
-	}
-}
-
-func legacyMigrationRegularSingleLinkFileInfo(info os.FileInfo) bool {
-	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return false
-	}
-	links, ok := legacyMigrationFileInfoUintField(info, "Nlink")
-	if !ok {
-		links, ok = legacyMigrationFileInfoUintField(info, "NumberOfLinks")
-	}
-	return ok && links == 1
-}
-
 func legacyMigrationSourcePhysicalIdentity(sourceLocator, physicalPath string) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("analytix-provider-settings-physical-source-v1"))
@@ -204,7 +160,7 @@ func (manager *Manager) IssueLegacyMigrationSourceAuthorityChallenge(
 	ctx context.Context,
 	command IssueLegacyMigrationSourceAuthorityChallengeCommand,
 ) (IssueLegacyMigrationSourceAuthorityChallengeResult, error) {
-	if manager == nil || manager.registry == nil || manager.secrets == nil || ctx == nil ||
+	if manager == nil || manager.registry == nil || manager.secrets == nil || manager.legacySource == nil || ctx == nil ||
 		(command.Operation != LegacyMigrationSourceAuthorityOperationRollbackCommit &&
 			command.Operation != LegacyMigrationSourceAuthorityOperationFinalize &&
 			command.Operation != LegacyMigrationSourceAuthorityOperationRemigrate &&
@@ -298,9 +254,10 @@ func (manager *Manager) consumeLegacyMigrationSourceAuthority(
 	proof LegacyMigrationSourceAuthorityProof,
 	currentSource []byte,
 ) (string, string, error) {
-	if !validLegacyMigrationSourceAuthorityChallenge(proof.Challenge) ||
+	if manager == nil || manager.legacySource == nil ||
+		!validLegacyMigrationSourceAuthorityChallenge(proof.Challenge) ||
 		len(proof.SourcePath) == 0 || len(proof.SourcePath) > maxLegacyMigrationSourceAuthorityPathBytes ||
-		strings.IndexByte(proof.SourcePath, 0) >= 0 || !filepath.IsAbs(proof.SourcePath) ||
+		strings.IndexByte(proof.SourcePath, 0) >= 0 ||
 		!validLegacyMigrationSourceLockToken(proof.LockOwnerToken) {
 		return "", "", registryport.ErrInvalidRequest
 	}
@@ -318,60 +275,27 @@ func (manager *Manager) consumeLegacyMigrationSourceAuthority(
 	if !exists || issued != command {
 		return "", "", registryport.ErrVerification
 	}
-	before, err := os.Lstat(proof.SourcePath)
-	if err != nil || !legacyMigrationRegularSingleLinkFileInfo(before) {
-		return "", "", registryport.ErrVerification
-	}
-	beforeDevice, deviceOK := legacyMigrationFileInfoUintField(before, "Dev")
-	beforeInode, inodeOK := legacyMigrationFileInfoUintField(before, "Ino")
-	if !deviceOK || !inodeOK || beforeDevice != device || beforeInode != inode {
-		return "", "", registryport.ErrVerification
-	}
-	physicalPath, err := filepath.EvalSymlinks(proof.SourcePath)
-	if err != nil || !filepath.IsAbs(physicalPath) ||
-		legacyMigrationSourcePhysicalIdentity(command.SourceLocator, physicalPath) !=
-			command.SourcePhysicalIdentitySHA256 {
-		return "", "", registryport.ErrVerification
-	}
-	file, err := os.Open(proof.SourcePath)
+	snapshot, err := manager.legacySource.ReadLegacySource(registryport.LegacySourceRequest{
+		SourceLocator: command.SourceLocator, SourcePhysicalIdentitySHA256: command.SourcePhysicalIdentitySHA256,
+		SourcePath: proof.SourcePath, SourceDevice: device, SourceInode: inode,
+		LockOwnerToken: proof.LockOwnerToken,
+	})
+	defer snapshot.Clear()
 	if err != nil {
+		if errors.Is(err, registryport.ErrInvalidRequest) {
+			return "", "", registryport.ErrInvalidRequest
+		}
 		return "", "", registryport.ErrVerification
 	}
-	opened, statErr := file.Stat()
-	loaded, readErr := io.ReadAll(io.LimitReader(file, maxLegacyMigrationSourceSnapshotBytes+1))
-	closeErr := file.Close()
-	defer clear(loaded)
-	if statErr != nil || readErr != nil || closeErr != nil || !legacyMigrationRegularSingleLinkFileInfo(opened) ||
-		!os.SameFile(before, opened) || len(loaded) == 0 ||
-		len(loaded) > maxLegacyMigrationSourceSnapshotBytes || !bytes.Equal(loaded, currentSource) ||
-		!validLegacyMigrationSourceRepresentation(command.CurrentSourceSHA256, loaded) {
+	if legacyMigrationSourcePhysicalIdentity(command.SourceLocator, snapshot.PhysicalPath) !=
+		command.SourcePhysicalIdentitySHA256 || len(snapshot.Source) == 0 ||
+		len(snapshot.Source) > maxLegacyMigrationSourceSnapshotBytes ||
+		!bytes.Equal(snapshot.Source, currentSource) ||
+		!validLegacyMigrationSourceRepresentation(command.CurrentSourceSHA256, snapshot.Source) {
 		return "", "", registryport.ErrVerification
 	}
-	after, err := os.Lstat(proof.SourcePath)
-	physicalAfter, physicalErr := filepath.EvalSymlinks(proof.SourcePath)
-	if err != nil || physicalErr != nil || !legacyMigrationRegularSingleLinkFileInfo(after) ||
-		!os.SameFile(opened, after) || physicalAfter != physicalPath {
-		return "", "", registryport.ErrVerification
-	}
-	lockPath := physicalPath + legacyMigrationSourceLockSuffix
-	lockInfo, err := os.Lstat(lockPath)
-	if err != nil || !lockInfo.IsDir() || lockInfo.Mode()&os.ModeSymlink != 0 {
-		return "", "", registryport.ErrVerification
-	}
-	entries, err := os.ReadDir(lockPath)
-	ownerName := "owner-" + proof.LockOwnerToken + ".json"
-	if err != nil || len(entries) != 1 || entries[0].Name() != ownerName ||
-		entries[0].Type()&os.ModeSymlink != 0 {
-		return "", "", registryport.ErrVerification
-	}
-	ownerPath := filepath.Join(lockPath, ownerName)
-	ownerInfo, err := os.Lstat(ownerPath)
-	if err != nil || !legacyMigrationRegularSingleLinkFileInfo(ownerInfo) {
-		return "", "", registryport.ErrVerification
-	}
-	ownerBytes, err := os.ReadFile(ownerPath)
-	defer clear(ownerBytes)
-	if err != nil || len(ownerBytes) == 0 || len(ownerBytes) > maxLegacyMigrationSourceLockOwnerBytes {
+	ownerBytes := snapshot.LockOwner
+	if len(ownerBytes) == 0 || len(ownerBytes) > maxLegacyMigrationSourceLockOwnerBytes {
 		return "", "", registryport.ErrVerification
 	}
 	decoder := json.NewDecoder(bytes.NewReader(ownerBytes))

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -232,4 +233,68 @@ func indexOfEvent(events []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// Physical metadata helpers are test-only fixture checks; production reads live in the filesystem adapter.
+func legacyMigrationFileInfoUintField(info os.FileInfo, fieldName string) (uint64, bool) {
+	if info == nil || info.Sys() == nil {
+		return 0, false
+	}
+	value := reflect.ValueOf(info.Sys())
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return 0, false
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return 0, false
+	}
+	field := value.FieldByName(fieldName)
+	if !field.IsValid() {
+		return 0, false
+	}
+	switch field.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return field.Uint(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if field.Int() < 0 {
+			return 0, false
+		}
+		return uint64(field.Int()), true
+	default:
+		return 0, false
+	}
+}
+
+func legacyMigrationRegularSingleLinkFileInfo(info os.FileInfo) bool {
+	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	links, ok := legacyMigrationFileInfoUintField(info, "Nlink")
+	if !ok {
+		links, ok = legacyMigrationFileInfoUintField(info, "NumberOfLinks")
+	}
+	return ok && links == 1
+}
+
+func TestManagerMissingLegacySourceReaderFailsClosed(t *testing.T) {
+	t.Parallel()
+	manager, err := NewManager(newMemoryRegistryStore(), newMemorySecretStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge := legacyMigrationSourceAuthorityPrefix + strings.Repeat("A", 43)
+	command := legacyMigrationSourceAuthorityChallenge{Operation: LegacyMigrationSourceAuthorityOperationFinalize}
+	manager.sourceAuthorityChallenges = map[string]legacyMigrationSourceAuthorityChallenge{challenge: command}
+	intent, generation, err := manager.consumeLegacyMigrationSourceAuthority(command, LegacyMigrationSourceAuthorityProof{
+		Challenge: challenge, SourcePath: t.TempDir(), SourceDevice: "1", SourceInode: "1",
+		LockOwnerToken: "01234567-89ab-4000-8000-0123456789ab",
+	}, []byte(`{"synthetic":"source"}`))
+	if !errors.Is(err, registryport.ErrInvalidRequest) || intent != "" || generation != "" {
+		t.Fatal("source authority must fail closed without an explicitly composed reader")
+	}
+	if _, exists := manager.sourceAuthorityChallenges[challenge]; !exists {
+		t.Fatal("missing dependency consumed a challenge before input validation")
+	}
 }

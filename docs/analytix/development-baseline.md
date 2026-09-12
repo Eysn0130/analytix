@@ -573,3 +573,15 @@ exact/parent/child overlap, adjacent-name exclusion and physical aliases have
 focused coverage; complete local checkpoint and filestore packages passed
 (0.469 s / 28.955 s). No overlap rejection, recovery budget or architecture
 import constraint was relaxed.
+
+Provider legacy-migration physical source reads now belong to the filesystem
+adapter behind a read-only port. The Manager still owns one-use challenges,
+source/owner equality and registry generation; absent source-reader authority
+fails closed. The adapter retains bounded reads, physical identity before open,
+single-link regular-file checks and before/open/after identity checks. Local
+migration Manager checks passed (3.597 s); new adapter physical-boundary cases
+passed (3.739 s), and the full adapter package passed (505.542 s). A concurrent
+full Manager run timed out after 10 minutes in filesystem crash-point recovery;
+process sampling showed sync I/O, so this is not recorded as full-package PASS.
+No timeout or required CI coverage was changed. Current-head remote closure
+remains required.
