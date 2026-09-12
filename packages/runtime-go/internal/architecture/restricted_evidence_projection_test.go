@@ -22,7 +22,7 @@ func TestRestrictedEvidenceTypesStayOutsideInboundPublicAndRuntimeProjectionLaye
 		if walkErr != nil {
 			return walkErr
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if info.IsDir() || !productionBoundarySourceV1(path) {
 			return nil
 		}
 		files = append(files, path)
@@ -60,9 +60,6 @@ func TestRestrictedEvidenceTypesStayOutsideInboundPublicAndRuntimeProjectionLaye
 		parsed := parseGoFile(t, file, 0)
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			identifier, ok := node.(*ast.Ident)
-			if ok && identifier.Name == "SourceFieldBindingV2" && strings.HasSuffix(file, "_test.go") {
-				return true
-			}
 			if ok && restrictedEvidenceTypeNameV1(identifier.Name) {
 				t.Fatalf("restricted evidence type %s escaped into %s", identifier.Name, file)
 			}

@@ -1397,27 +1397,48 @@ func TestSemanticStageUsesOnlyItsBoundPrivateCASAuthority(t *testing.T) {
 	root := runtimeGoRoot(t)
 	appPath := filepath.Join(root, "internal", "runtimeapp", "app.go")
 	app := parseGoFile(t, appPath, 0)
-	constructorCalls := 0
+	constructorCalls := map[string]int{}
 	for _, file := range goFiles(t, root) {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
 		}
 		parsed := parseGoFile(t, file, 0)
+		relative := rel(t, root, file)
+		observationConstructors := map[*ast.CallExpr]bool{}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || !copiedOriginalStageObservationOwner(relative, function.Name.Name) {
+				continue
+			}
+			if problem := copiedOriginalStageObservationProblem(relative, function); problem != "" {
+				t.Fatalf("%s#%s: %s", relative, function.Name.Name, problem)
+			}
+			for _, call := range privateCASMatchingCalls(function, "", "NewSemanticStagePrivateCASAccessAuthority") {
+				observationConstructors[call] = true
+			}
+		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok || privateCASCallName(call) != "NewSemanticStagePrivateCASAccessAuthority" {
 				return true
 			}
-			constructorCalls++
-			if rel(t, root, file) != "internal/runtimeapp/app.go" {
-				t.Fatalf("%s creates semantic-stage private CAS authority outside runtimeapp", rel(t, root, file))
+			constructorCalls[relative]++
+			if relative != "internal/runtimeapp/app.go" && !observationConstructors[call] {
+				t.Fatalf("%s creates semantic-stage private CAS authority outside runtime composition or bound copied observation", relative)
 			}
 			return true
 		})
 	}
-	if constructorCalls != 1 {
-		t.Fatalf("semantic-stage private CAS authority constructor calls = %d, want 1", constructorCalls)
+	for _, relative := range []string{
+		"internal/runtimeapp/app.go",
+		"internal/adapters/outbound/persistencefs/original_create_residues.go",
+		"internal/adapters/outbound/persistencefs/original_plain_residues.go",
+	} {
+		if constructorCalls[relative] != 1 {
+			t.Fatalf("%s semantic-stage private CAS constructor calls = %d, want 1", relative, constructorCalls[relative])
+		}
 	}
+
 	var callback *ast.FuncLit
 	ast.Inspect(app, func(node ast.Node) bool {
 		literal, ok := node.(*ast.FuncLit)
@@ -1505,6 +1526,186 @@ func TestSemanticStageUsesOnlyItsBoundPrivateCASAuthority(t *testing.T) {
 			"semantic-stage authority wiring invalid: constructor=%v handler=%v named=%v close=%v joined=%v outer=%v",
 			constructorExact, handlerExact, namedStageError, deferredClose, joinedCloseError, usedOuterAuthority,
 		)
+	}
+}
+
+func copiedOriginalStageObservationOwner(relative, function string) bool {
+	return relative == "internal/adapters/outbound/persistencefs/original_create_residues.go" && function == "bindOriginalCreateStageProofV1" ||
+		relative == "internal/adapters/outbound/persistencefs/original_plain_residues.go" && function == "bindOriginalPlainStageContextV1"
+}
+
+// These helpers issue no runtime capability: the access value is a local used
+// only by one copied-proof observation, closed on failure, with Close transferred
+// on success. Match this small lifecycle structurally, not by exempting files.
+func copiedOriginalStageObservationProblem(relative string, function *ast.FuncDecl) string {
+	if !copiedOriginalStageObservationOwner(relative, function.Name.Name) || function.Recv != nil || function.Body == nil {
+		return "copied observation is outside its private persistence owner"
+	}
+	plain := function.Name.Name == "bindOriginalPlainStageContextV1"
+	roots, original, method, prefix := "stageRoots", "original", "ObserveCopiedOriginalCreateResiduesV1", 1
+	if plain {
+		roots, original, method, prefix = "roots", "bound.proof", "ObserveCopiedOriginalPlainResiduesV1", 2
+	}
+	statements := function.Body.List
+	if len(statements) != prefix+7 {
+		return "copied observation has an unreviewed authority use or lifecycle"
+	}
+	if plain {
+		assignment, ok := statements[0].(*ast.AssignStmt)
+		if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 || privateCASIdent(assignment.Lhs[0]) != "bound" || privateCASIdent(assignment.Lhs[1]) != "_" {
+			return "copied plain observation lost its original context proof"
+		}
+		assertion, ok := assignment.Rhs[0].(*ast.TypeAssertExpr)
+		if !ok || privateCASIdent(assertion.Type) != "originalPlainResidueContextV1" || !privateCASCallExpressionMatches(assertion.X, "ctx", "Value", 1) {
+			return "copied plain observation substituted its original context"
+		}
+		key, ok := assertion.X.(*ast.CallExpr).Args[0].(*ast.CompositeLit)
+		if !ok || privateCASIdent(key.Type) != "originalPlainResidueContextKeyV1" || len(key.Elts) != 0 {
+			return "copied plain observation substituted its proof key"
+		}
+	}
+	guard, ok := statements[prefix-1].(*ast.IfStmt)
+	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 {
+		return "copied observation lost its absent-proof guard"
+	}
+	condition, ok := guard.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.EQL || registryObservationExpressionName(condition.X) != original || privateCASIdent(condition.Y) != "nil" {
+		return "copied observation substituted its original proof"
+	}
+	absent, ok := guard.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(absent.Results) != 3 || privateCASIdent(absent.Results[2]) != "nil" {
+		return "absent proof gained effects"
+	}
+	wantAbsent := "nil"
+	if plain {
+		wantAbsent = "ctx"
+	}
+	if privateCASIdent(absent.Results[0]) != wantAbsent {
+		return "absent proof changed its scope"
+	}
+	noop, ok := absent.Results[1].(*ast.FuncLit)
+	if !ok || len(noop.Body.List) != 1 {
+		return "absent proof gained cleanup effects"
+	}
+	noopReturn, ok := noop.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(noopReturn.Results) != 1 || privateCASIdent(noopReturn.Results[0]) != "nil" {
+		return "absent proof gained cleanup effects"
+	}
+	freeze := copiedOriginalStageAssignment(statements[prefix], "root", "FreezeRootAuthority")
+	if freeze == nil || len(freeze.Args) != 1 || privateCASIdent(freeze.Args[0]) != roots {
+		return "copied observation freezes substituted roots"
+	}
+	if !copiedOriginalStageErrorReturn(statements[prefix+1], false) {
+		return "copied observation ignores freeze errors"
+	}
+	constructor := copiedOriginalStageAssignment(statements[prefix+2], "access", "NewSemanticStagePrivateCASAccessAuthority")
+	if constructor == nil || len(constructor.Args) != 2 || privateCASIdent(constructor.Args[0]) != roots || privateCASIdent(constructor.Args[1]) != "root" {
+		return "copied observation substitutes frozen authority"
+	}
+	if !copiedOriginalStageErrorReturn(statements[prefix+3], false) {
+		return "copied observation ignores authority errors"
+	}
+	observe := copiedOriginalStageAssignment(statements[prefix+4], "proof", original+"."+method)
+	if observe == nil || len(observe.Args) != 3 || privateCASIdent(observe.Args[0]) != "ctx" || !privateCASSelectorMatches(observe.Args[1], roots, "DataDir") || privateCASIdent(observe.Args[2]) != "access" {
+		return "copied observation uses another root or access authority"
+	}
+	if !copiedOriginalStageErrorReturn(statements[prefix+5], true) {
+		return "copied observation drops access close or error"
+	}
+	result, ok := statements[prefix+6].(*ast.ReturnStmt)
+	if !ok || len(result.Results) != 3 || !privateCASSelectorMatches(result.Results[1], "access", "Close") || privateCASIdent(result.Results[2]) != "nil" {
+		return "copied observation leaks access or drops close ownership"
+	}
+	if !plain && privateCASIdent(result.Results[0]) != "proof" {
+		return "copied observation returns authority instead of proof"
+	}
+	if plain {
+		if !privateCASCallExpressionMatches(result.Results[0], "", "WithOriginalPlainResiduesV1", 2) {
+			return "copied observation does not retain scoped proof"
+		}
+		call := result.Results[0].(*ast.CallExpr)
+		if privateCASIdent(call.Args[0]) != "ctx" || privateCASIdent(call.Args[1]) != "proof" {
+			return "copied observation substituted scoped proof"
+		}
+	}
+	return ""
+}
+
+func copiedOriginalStageAssignment(statement ast.Stmt, variable, callee string) *ast.CallExpr {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 || privateCASIdent(assignment.Lhs[0]) != variable || privateCASIdent(assignment.Lhs[1]) != "err" {
+		return nil
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	if !ok || registryObservationExpressionName(call.Fun) != callee {
+		return nil
+	}
+	return call
+}
+
+func copiedOriginalStageErrorReturn(statement ast.Stmt, closes bool) bool {
+	guard, ok := statement.(*ast.IfStmt)
+	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 {
+		return false
+	}
+	condition, ok := guard.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.NEQ || privateCASIdent(condition.X) != "err" || privateCASIdent(condition.Y) != "nil" {
+		return false
+	}
+	result, ok := guard.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(result.Results) != 3 || privateCASIdent(result.Results[0]) != "nil" || privateCASIdent(result.Results[1]) != "nil" {
+		return false
+	}
+	if !closes {
+		return privateCASIdent(result.Results[2]) == "err"
+	}
+	if !privateCASCallExpressionMatches(result.Results[2], "errors", "Join", 2) {
+		return false
+	}
+	join := result.Results[2].(*ast.CallExpr)
+	return privateCASIdent(join.Args[0]) == "err" && privateCASCallExpressionMatches(join.Args[1], "access", "Close", 0)
+}
+
+func TestCopiedOriginalStageGuardRejectsSubstitutedAuthorityAndLostClose(t *testing.T) {
+	root := runtimeGoRoot(t)
+	for _, owner := range []struct{ file, function, roots string }{
+		{"original_create_residues.go", "bindOriginalCreateStageProofV1", "stageRoots"},
+		{"original_plain_residues.go", "bindOriginalPlainStageContextV1", "roots"},
+	} {
+		relative := "internal/adapters/outbound/persistencefs/" + owner.file
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := string(body)
+		cases := map[string]string{
+			"original":                       source,
+			"different frozen roots":         strings.Replace(source, "FreezeRootAuthority("+owner.roots+")", "FreezeRootAuthority(otherRoots)", 1),
+			"different access roots":         strings.Replace(source, "NewSemanticStagePrivateCASAccessAuthority("+owner.roots+", root)", "NewSemanticStagePrivateCASAccessAuthority(otherRoots, root)", 1),
+			"outer authority":                strings.Replace(source, "NewSemanticStagePrivateCASAccessAuthority("+owner.roots+", root)", "NewSemanticStagePrivateCASAccessAuthority("+owner.roots+", outerAuthority)", 1),
+			"substituted observation access": strings.Replace(source, owner.roots+".DataDir, access)", owner.roots+".DataDir, outerAccess)", 1),
+			"lost error close":               strings.Replace(source, "errors.Join(err, access.Close())", "err", 1),
+			"lost successful close":          strings.Replace(source, ", access.Close, nil", ", nil, nil", 1),
+			"authority escape":               strings.Replace(source, ", access.Close, nil", ", access, nil", 1),
+			"new writer":                     strings.Replace(source, "proof, err :=", "_ = access.Put(ctx, nil)\nproof, err :=", 1),
+			"new constructor":                strings.Replace(source, "proof, err :=", "_ = NewStore("+owner.roots+")\nproof, err :=", 1),
+		}
+		for name, candidate := range cases {
+			t.Run(owner.file+"/"+name, func(t *testing.T) {
+				if name != "original" && candidate == source {
+					t.Fatal("mutation did not change source")
+				}
+				parsed, err := parser.ParseFile(token.NewFileSet(), relative, candidate, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				function := privateCASFunctionDeclaration(t, parsed, owner.function)
+				problem := copiedOriginalStageObservationProblem(relative, function)
+				if (problem == "") != (name == "original") {
+					t.Fatalf("guard result: %s", problem)
+				}
+			})
+		}
 	}
 }
 

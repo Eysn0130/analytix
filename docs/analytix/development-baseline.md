@@ -620,3 +620,24 @@ revalidation remains before send, after headers and after bounded body reads;
 credentials are cleared and image downloads never receive the Provider header.
 All existing loopback media tests and the new adapter transport tests passed as
 complete local packages (0.490 s / 0.399 s). No live Provider was contacted.
+
+The complete local architecture package now passes (12.008 s). Real violations
+were fixed in their owners: private controlled-access outcome parsing/matching,
+report settlement/history interpretation and restricted dataset-context matching
+stay inside their application owners; runtime composes only bounded read-only
+interfaces. Full local reportpublication/datasetsnapshot/piiauthorization
+packages passed (5.943 s / 0.748 s / 0.842 s), retaining existing negatives and
+adding invalid/missing/duplicate outcome-inventory coverage.
+
+Stale guard assumptions were replaced by narrower structural checks, not
+exemptions: original inventory observation requires its read-only prepared
+physical bracket; copied-stage observation requires frozen roots and complete
+Close/error propagation; historical report composition cannot gain current
+capabilities or escape semantic validation. Mutation negatives exercise those
+violations. Go test fixtures are excluded from the production dependency graph
+using Go's exact _test.go rule; production files and alias imports still fail
+negative tests. The old server line/file cap already failed at public baseline
+`eed7dfb1a` (56 files / 10037 lines against 54 / 8649); it is replaced by exact
+adapter-construction ownership, including alias/indirect/new/literal and duplicate
+construction negatives. Other server layering guards remain. This is a local
+architecture PASS only; current-head remote Development acceptance is pending.

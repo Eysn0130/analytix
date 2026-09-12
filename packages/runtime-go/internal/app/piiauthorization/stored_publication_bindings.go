@@ -68,36 +68,3 @@ func ValidateStoredControlledAccessPublicationV1(access domainpii.ControlledArti
 	}
 	return nil
 }
-
-// ValidateStoredControlledAccessOutcomeV2 checks cross-owner references to an
-// actual signed projected outcome. It does not construct VerifiedArtifactDelivery
-// or replace the live HistoricalAuthority's complete Core report-stage proof.
-func ValidateStoredControlledAccessOutcomeV2(access domainpii.ControlledArtifactAccessReceiptV2, outcome domainpublication.ReportDeliveryOutcomeV1, materials StoredControlledPublicationMaterialsV1) error {
-	if domainpii.ValidateControlledArtifactAccessReceiptForGrantV2(access, materials.Grant) != nil ||
-		ValidateStoredControlledPublicationV1(materials) != nil ||
-		domainpublication.ValidatePublicationCommitReceiptMaterialsV1(materials.Commit, materials.Receipt, materials.Index) != nil ||
-		domainpublication.ValidateReportDeliveryOutcomeV1(outcome) != nil || outcome.Kind != domainpublication.ReportDeliveryOutcomeProjectedV1 {
-		return errors.New("stored controlled access V2 lost its exact projected publication")
-	}
-	projection := outcome.Projection
-	publicationIssuedAt, publicationErr := time.Parse(time.RFC3339Nano, materials.Receipt.IssuedAt)
-	requestedAt, requestErr := time.Parse(time.RFC3339Nano, access.RequestedAt)
-	if access.DeliveryID != domainpublication.ReportDeliveryOutcomeID(outcome) || access.DeliveryOutcomeRecordDigest != projection.RecordDigest ||
-		access.PublicationCommitDigest != projection.CommitRecordDigest || access.PublicationCommitDigest != materials.Commit.RecordDigest ||
-		access.PublicationReceiptDigest != materials.Receipt.RecordDigest ||
-		access.PIIProjectionDigest != projection.PIIProjectionDigest || access.PIIProjectionDigest != materials.Projection.ProjectionDigest ||
-		access.PIIAuthorizationDigest != projection.AuthorizationAuditDigest || access.PIIAuthorizationDigest != materials.Grant.RecordDigest ||
-		access.ClaimLedgerDigest != projection.ClaimLedgerDigest || access.ClaimLedgerDigest != materials.Ledger.LedgerDigest ||
-		access.TargetIdentityDigest != projection.TargetIdentityDigest || access.TargetIdentityDigest != materials.Receipt.TargetIdentityDigest ||
-		access.ArtifactSHA256 != projection.ReportSHA256 || access.ArtifactSHA256 != materials.Receipt.ReportSHA256 ||
-		access.ArtifactByteLength != projection.ReportByteLength || access.ArtifactByteLength != materials.Receipt.ReportByteLength ||
-		access.MediaType != projection.MediaType || access.MediaType != materials.Receipt.MediaType ||
-		projection.PIIProjectionClass != domainpublication.PIIProjectionControlledFull ||
-		projection.ThreadID != access.Context.ThreadID || projection.TurnID != access.Context.TurnID || projection.ContextDigest != access.Context.ContextDigest ||
-		projection.ContextEpoch != access.Context.ContextEpoch || projection.CaseBindingHash != access.Context.CaseBindingHash ||
-		projection.DatasetSnapshotID != access.Context.DatasetSnapshotID || projection.SourceManifestHash != access.Context.SourceManifestHash ||
-		publicationErr != nil || requestErr != nil || requestedAt.Before(publicationIssuedAt) {
-		return errors.New("stored controlled access V2 does not match its projected publication")
-	}
-	return nil
-}

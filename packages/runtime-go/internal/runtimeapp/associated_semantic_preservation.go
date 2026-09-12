@@ -225,27 +225,6 @@ func observeRuntimeAssociatedDomainV1(ctx context.Context, core *runtimeChildIde
 	return inventory, false, nil
 }
 
-func runtimeDatasetRecordHeldV1(record domainsecurity.VersionedDatasetSnapshotAuthorityRecord, scope *pendingapp.ReportRestartScopeV1, contexts []domainsecurity.TurnSecurityContext) bool {
-	var binding domainsecurity.DatasetSnapshotBindingKeyV1
-	var snapshot string
-	if record.V1 != nil {
-		binding, _ = domainsecurity.DatasetSnapshotBindingKeyFromRecordV1(*record.V1)
-		snapshot = record.V1.DatasetSnapshotID
-	} else if record.V2 != nil {
-		binding, snapshot = record.V2.Binding, record.V2.DatasetSnapshotID
-	} else {
-		return false
-	}
-	for _, frozen := range contexts {
-		if scope.OwnsThread(frozen.ThreadID) && snapshot == frozen.DatasetSnapshotID &&
-			binding.TenantID == frozen.TenantID && binding.UserID == frozen.UserID && binding.WorkspaceRealPath == frozen.WorkspaceRealPath &&
-			binding.CaseID == frozen.CaseID && binding.CaseBindingHash == frozen.CaseBindingHash && binding.BindingObservationDigest == frozen.PublicationPolicy.BindingObservationDigest {
-			return true
-		}
-	}
-	return false
-}
-
 func (preserved *runtimeAssociatedOwnerPreservationV1) validateV1(ctx context.Context, core *runtimeChildIdentityStartupV1, owner string, files runtimeOriginalSemanticFilesV1, scope *pendingapp.ReportRestartScopeV1, contexts []domainsecurity.TurnSecurityContext) error {
 	for name, original := range preserved.original {
 		entry, found := files[name]
@@ -273,17 +252,23 @@ func (preserved *runtimeAssociatedOwnerPreservationV1) validateV1(ctx context.Co
 	if err != nil || unavailable {
 		return errors.Join(errors.New("original associated candidate graph is unavailable"), err)
 	}
+	heldContexts := make([]domainsecurity.TurnSecurityContext, 0, len(contexts))
+	for _, frozen := range contexts {
+		if scope.OwnsThread(frozen.ThreadID) {
+			heldContexts = append(heldContexts, frozen)
+		}
+	}
 	for digest, record := range inventory.Records {
 		leaf := "legacy-records"
 		if record.V2 != nil {
 			leaf = "authority-bundles-v2"
 		}
-		if _, found := preserved.original[leaf+"/"+digest[:2]+"/"+digest+".json"]; !found && runtimeDatasetRecordHeldV1(record, scope, contexts) {
+		if _, found := preserved.original[leaf+"/"+digest[:2]+"/"+digest+".json"]; !found && datasetapp.RecordMatchesPreservedContextsV1(record, heldContexts) {
 			return errors.New("original associated candidate adds a held dataset record")
 		}
 	}
 	for digest, index := range inventory.Indexes {
-		if _, found := preserved.original["indexes/"+digest[:2]+"/"+digest+".json"]; !found && runtimeDatasetRecordHeldV1(inventory.Records[index.SnapshotRecordDigest], scope, contexts) {
+		if _, found := preserved.original["indexes/"+digest[:2]+"/"+digest+".json"]; !found && datasetapp.RecordMatchesPreservedContextsV1(inventory.Records[index.SnapshotRecordDigest], heldContexts) {
 			return errors.New("original associated candidate adds an index for a held dataset record")
 		}
 	}

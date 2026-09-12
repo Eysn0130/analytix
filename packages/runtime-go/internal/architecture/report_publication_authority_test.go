@@ -217,11 +217,14 @@ func TestArtifactDeliveryBoundaryDoesNotReexportPrivateReportAuthority(t *testin
 
 func TestReportPublicationSemanticGateMustPrecedeProductionComposition(t *testing.T) {
 	root := runtimeGoRoot(t)
-	const ownerImport = "analytix.local/runtime-go/internal/app/reportpublication"
-	allowedRecoverySelectors := map[string]bool{
-		"VerifyTrustedInventoryV1": true,
-		"PreflightRestartV1":       true,
-		"RestartPreflightConfigV1": true,
+	authority := parseGoFile(t, filepath.Join(root, "internal/app/reportpublication/projected_delivery_authority.go"), 0)
+	bridge := parseGoFile(t, filepath.Join(root, "internal/app/reportpublication/artifact_delivery_bridge.go"), 0)
+	if problem := reportHistoricalOwnerProblem(authority, bridge); problem != "" {
+		t.Fatal(problem)
+	}
+	semantic := parseGoFile(t, filepath.Join(root, "internal/runtimeapp/original_report_semantic_preservation.go"), 0)
+	if problem := reportSemanticCandidateGateProblem(semantic); problem != "" {
+		t.Fatal(problem)
 	}
 	for _, directory := range []string{
 		filepath.Join(root, "internal", "runtimeapp"),
@@ -233,44 +236,9 @@ func TestReportPublicationSemanticGateMustPrecedeProductionComposition(t *testin
 			if strings.HasSuffix(path, "_test.go") || hasBuildTag(t, path, "!analytix_prod") {
 				continue
 			}
-			parsed := parseGoFile(t, path, 0)
-			alias := ""
-			for _, imported := range parsed.Imports {
-				importPath, err := strconv.Unquote(imported.Path.Value)
-				if err != nil {
-					t.Fatalf("unquote import in %s: %v", rel(t, root, path), err)
-				}
-				if importPath != ownerImport {
-					continue
-				}
-				alias = "reportpublication"
-				if imported.Name != nil {
-					alias = imported.Name.Name
-				}
-				if alias == "." || alias == "_" || strings.TrimSpace(alias) == "" {
-					t.Fatalf("%s uses non-auditable report publication import mode %q", rel(t, root, path), alias)
-				}
+			for _, problem := range reportPublicationCompositionProblems(rel(t, root, path), parseGoFile(t, path, 0)) {
+				t.Errorf("%s: %s", rel(t, root, path), problem)
 			}
-			if alias == "" {
-				continue
-			}
-			ast.Inspect(parsed, func(node ast.Node) bool {
-				selector, ok := node.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				owner, ok := selector.X.(*ast.Ident)
-				if !ok || owner.Name != alias {
-					return true
-				}
-				if !allowedRecoverySelectors[selector.Sel.Name] {
-					t.Fatalf(
-						"%s composes report publication selector %s before the deterministic report semantic gate exists",
-						rel(t, root, path), selector.Sel.Name,
-					)
-				}
-				return true
-			})
 		}
 	}
 }

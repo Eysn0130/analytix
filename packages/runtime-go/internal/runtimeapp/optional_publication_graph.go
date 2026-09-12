@@ -7,6 +7,7 @@ import (
 
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	piiauthorizationapp "analytix.local/runtime-go/internal/app/piiauthorization"
+	reportpublicationapp "analytix.local/runtime-go/internal/app/reportpublication"
 	domainpii "analytix.local/runtime-go/internal/domain/piiauthorization"
 	domainpublication "analytix.local/runtime-go/internal/domain/reportpublication"
 )
@@ -143,7 +144,7 @@ func validateRuntimePublicationGraphV1(visit func(string, string, func(finalauth
 	publicationIndexes := make(map[string]domainpublication.PublicationIndexV1)
 	projections := make(map[string]domainpublication.PIIProjectionV1)
 	inspections := make(map[string]domainpublication.RenderInspectionV1)
-	outcomes := make(map[string]domainpublication.ReportDeliveryOutcomeV1)
+	var outcomes reportpublicationapp.StoredControlledOutcomesV1
 	artifacts := make(map[string]domainpii.ControlledPIIArtifactMetadataV1)
 	var domainErr error
 	storageErr := visit("pii-authorization", "grants", func(file finalauthority.SecurePrivateCASFile) {
@@ -219,12 +220,9 @@ func validateRuntimePublicationGraphV1(visit func(string, string, func(finalauth
 		inspections[file.Digest] = record
 	}))
 	storageErr = errors.Join(storageErr, visit("report-publication", "delivery-projections", func(file finalauthority.SecurePrivateCASFile) {
-		outcome, err := domainpublication.ParseReportDeliveryOutcomeV1(file.Body)
-		if err != nil || domainpublication.ReportDeliveryOutcomeID(outcome) != file.Digest {
-			domainErr = errors.New("publication prepared delivery outcome is invalid")
-			return
+		if err := outcomes.Add(file.Digest, file.Body); err != nil {
+			domainErr = err
 		}
-		outcomes[file.Digest] = outcome
 	}))
 	requiredArtifacts := make(map[string]bool)
 	for _, receipt := range receipts {
@@ -274,7 +272,7 @@ func validateRuntimePublicationGraphV1(visit func(string, string, func(finalauth
 	}
 	for _, receipt := range accessReceiptsV2 {
 		grant, found := grants[receipt.PIIAuthorizationDigest]
-		if !found || piiauthorizationapp.ValidateStoredControlledAccessOutcomeV2(receipt, outcomes[receipt.DeliveryID], materials(receipts[receipt.PublicationReceiptDigest], grant, commits[receipt.PublicationCommitDigest])) != nil {
+		if !found || outcomes.ValidateAccess(receipt, materials(receipts[receipt.PublicationReceiptDigest], grant, commits[receipt.PublicationCommitDigest])) != nil {
 			domainErr = errors.New("publication prepared access V2 receipt lost its exact outcome references")
 		}
 	}

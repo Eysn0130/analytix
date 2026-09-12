@@ -15,7 +15,6 @@ import (
 	domainpublication "analytix.local/runtime-go/internal/domain/reportpublication"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
-	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 // This is a verified unfinished cut, distinct from domain unavailability.
@@ -200,29 +199,7 @@ func validateRuntimeDeferredOriginalReportResultV1(ctx context.Context, core *ru
 	if err != nil {
 		return err
 	}
-	active, found := domainsecurity.ExecutionGrantRegistryEntryByID(settled.ActiveRegistry, decision.GrantID)
-	if !found || settled.ActiveRegistry.Sequence != decision.GrantRegistrySequence || settled.ActiveRegistry.StateDigest != decision.GrantRegistryDigest ||
-		active.EntryDigest != decision.GrantRegistryEntryDigest || settled.ActiveRegistry.Sequence != settled.SettledRegistry.Sequence ||
-		settled.ActiveRegistry.StateDigest == settled.SettledRegistry.StateDigest || settled.Grant.GrantID != decision.GrantID ||
-		settled.Grant.ToolCallID != decision.ToolCallID || settled.Grant.ToolName != decision.ToolName ||
-		settled.ResultItemID != domaintoolresult.ToolResultItemIDV1(decision.Context.TurnID, decision.ToolCallID) ||
-		!domainsecurity.IsSHA256Hex(settled.ResultItemDigest) || settled.SettledAt.IsZero() {
-		return errors.New("original report result lost its exact decision grant transition")
-	}
-	if entry.GrantSettlement != nil {
-		if err := domainpublication.ValidateReportGrantSettlementGraphV1(*entry.GrantSettlement, domainpublication.ReportGrantSettlementInputV1{
-			Decision: *decision, Grant: settled.Grant, ActiveRegistry: settled.ActiveRegistry, SettledRegistry: settled.SettledRegistry,
-			ResultItemID: settled.ResultItemID, ResultItemDigest: settled.ResultItemDigest, SettledAt: settled.SettledAt,
-			AuthorityKeyID: core.verification.KeyID(), AuthorityPublicKey: core.verification.PublicKey(),
-		}); err != nil {
-			return err
-		}
-	}
-	return errors.Join(
-		domainsecurity.VerifyExecutionGrantMembership(settled.ActiveRegistry, decision.Context.ThreadID, decision.Context.TurnID, settled.Grant, domainsecurity.GrantRegistryActive),
-		domainsecurity.VerifyExecutionGrantMembership(settled.SettledRegistry, decision.Context.ThreadID, decision.Context.TurnID, settled.Grant, domainsecurity.GrantRegistrySettled),
-		context.Cause(ctx),
-	)
+	return publicationapp.ValidateStoredSettledResultV1(ctx, entry, settled, core.verification.KeyID(), core.verification.PublicKey())
 }
 
 func (deferred *runtimeDeferredReportHistoryV1) validateSemanticV1(ctx context.Context, preserved runtimeReportRestartPreservationV1, operations []domainstartup.SemanticStartupOperationV1) error {
