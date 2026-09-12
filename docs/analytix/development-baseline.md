@@ -774,3 +774,38 @@ and its canonical alias (64.12 s). These fixtures perform actual protected
 synthetic onboarding and explicit selection through the Registry HTTP contract;
 plain unavailable-authority constructors remain unchanged. Full root-package
 and current-head remote acceptance have not yet passed.
+
+First-import continuity is a separate, precisely bounded next-stage seam.
+Current confirmed admission persists DSV2 and activates an in-memory Registry
+service without requiring an evidence receipt. Before the first receipt,
+restart intentionally leaves the generation-zero Registry dormant. The normal
+stage/confirm entrypoint can admit a new source revision and reactivate it; that
+is not automatic restoration of the prior activation. Code review found no
+accepted receipt-free activation continuity requirement that authorizes
+removing the current fail-closed gate. No first-import/no-receipt/restart
+acceptance is claimed here, and the committed-Registry closure fixture above
+must not substitute for it in isolated-development or packaging acceptance.
+
+Runtime shard admission now validates streamed Go JSON execution, in addition
+to deterministic inventory partitioning: every selected test and observed child
+must run and pass exactly once. Empty, missing, duplicate, foreign-package,
+skipped, failed and incomplete execution is rejected. The five synthetic
+ordinary lifecycle faults move to a required macOS lane with a current-source
+schedule entrypoint; that lane also executes the contained schedule contract
+in both build modes. Its ordinary-mode root selection covers ten exact stdio,
+Git and Bash contracts, independently of the Linux package inventory. The
+successful-stdio contract is compiled for Darwin, where containment is supported;
+the unsupported-host process rejection and Linux Bash behavior remain covered.
+All receiver names must exist in the actual discovered inventory. The same
+20-minute Go budget and sixteen runtime shards remain in force.
+
+Four pre-existing explicit external diagnostic entrypoints are classified before
+execution and logged as not_executed, never as required PASS or allowed skips:
+TestRuntimeOptionalPublicFixturePathV1, TestRuntimeOptionalPluginPublicConsumerV1,
+TestRuntimeOptionalPluginUnauthorizedFirstMCPTerminalDiagnosticV1, and
+TestLocalNonPublishablePackageInspectionWhenExplicitlyProvided. They require
+Owner task/corpus/diagnostic authority or an exact packaged executable/data.
+Missing schedule build inputs are not part of this exclusion. The new platform
+job belongs to the same required Development gate. Root-reviewed Node partition,
+receiver and gate regressions passed (8/8, no skip); real platform and complete
+remote execution are still pending. CI admission is stronger, not relaxed.
