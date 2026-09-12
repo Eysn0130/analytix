@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,63 +17,155 @@ import (
 	"testing"
 	"time"
 
-	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
+	casestore "analytix.local/runtime-go/internal/adapters/outbound/casethreadauthority"
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
-	datasetsnapshotapp "analytix.local/runtime-go/internal/app/datasetsnapshot"
+	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
+	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
+	datasetsnapshotport "analytix.local/runtime-go/internal/ports/datasetsnapshot"
 	"analytix.local/runtime-go/internal/server"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
 func newAsyncCaseClosureConfigV1(t *testing.T) (Config, string) {
 	t.Helper()
-	fixture, config := runtimeWitnessedRegistryConfigV2(t)
+	// The runtime is opened after provisioning, so its registry needs an
+	// authenticated nonempty inventory. An admitted Dataset alone, or an empty
+	// registry activated only in the provisioning process, is not restart
+	// authority. This synthetic receipt uses the actual snapshot effect,
+	// enrolled witness and registry CAS; it is not native-analysis evidence.
+	fixture := newPreparedRegistryEffectFixtureV1(t)
+	config := fixture.config
 	config.UserDataDir = t.TempDir()
-	workspace := t.TempDir()
-	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
+	workspace := fixture.resolve.Observation.WorkspaceRealPath
 	if err := os.WriteFile(filepath.Join(workspace, "ordinary.txt"), []byte("ordinary fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	composition := runtimeWitnessedRegistryDirectCompositionV2(t, fixture, config)
 	ctx := context.Background()
-	if _, err := composition.evidence.Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
-	observation, err := (filestore.CaseBindingReader{}).Observe(workspace)
+	durable, err := server.NewProductionDurableEventSessionStore(config.ProductionDurableRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, producer, materials := runtimeSharedEvidenceBoundMaterialsV2(t, observation.WorkspaceRealPath, observation, fixture.InstallationID, fixture.Authority)
-	access, err := privatecastest.NewAccessAuthority(filepath.Join(config.DataDir, "private"))
+	thread, err := durable.CreateThread(map[string]any{"title": "synthetic Registry provisioning"}, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cas, err := finalauthority.OpenSecurePrivateCASWithAccessAuthority(filepath.Join(config.DataDir, "private", "dataset-snapshot-authority", "materials"), 16<<20, access)
+	threadID, _ := thread["id"].(string)
+	previous := fixture.securityContext
+	issuedAt, err := time.Parse(time.RFC3339Nano, previous.IssuedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, records := range materials {
-		for address, body := range records {
-			if err := cas.PutIfAbsent(ctx, address, body); err != nil && !errors.Is(err, os.ErrExist) {
-				_ = cas.Close()
-				t.Fatal(err)
+	input := domainsecurity.TurnSecurityContextInput{ThreadID: threadID, TurnID: previous.TurnID, WorkspaceRealPath: workspace, TenantID: previous.TenantID, UserID: previous.UserID, CaseID: previous.CaseID, CaseBindingHash: previous.CaseBindingHash, DatasetSnapshotID: previous.DatasetSnapshotID, SourceManifestHash: previous.SourceManifestHash, ContextEpoch: previous.ContextEpoch, IssuedAt: issuedAt}
+	frozen, err := securitycontexttest.CaseExecutionContextV2(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.RiskAuthorityBinding = frozen.RiskAuthorityBinding
+	input.PublicationPolicy, err = domainsecurity.NewTurnPublicationPolicyV1(domainsecurity.TurnPublicationPolicyInputV1{ThreadRiskPolicyDigest: frozen.PublicationPolicy.ThreadRiskPolicyDigest, RiskClass: domainsecurity.RiskClassCase, Disposition: domainsecurity.PublicationDispositionCaseEvidenceGate, CaseBindingState: domainsecurity.CaseBindingStateValid, BindingObservationDigest: fixture.resolve.Observation.ObservationDigest, BlockerCode: domainsecurity.PublicationBlockerNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.securityContext, err = domainsecurity.NewTurnSecurityContextV2(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := false
+	if err := fixture.composition.snapshot.WithCurrentSelectionV2(ctx, fixture.resolve, fixture.securityContext,
+		func(selection datasetsnapshotport.CurrentSelectionV2, capability datasetsnapshotport.CurrentSelectionCapabilityV2) error {
+			prepared := fixture.prepare(t, selection)
+			seedAsyncCaseClosureRegistryHistoryV1(t, fixture, durable, prepared)
+			marker, err := domainevidence.NewHostEvidenceSettlementMarker(prepared)
+			if err != nil {
+				return err
 			}
-		}
-	}
-	if err := cas.Close(); err != nil {
+			effect, ok := capability.(datasetsnapshotport.RegistryCommitCapabilityV1)
+			if !ok {
+				t.Fatal("CASE fixture lacks the actual registry commit effect")
+			}
+			return effect.UseExactRegistryCommit(selection, fixture.securityContext, prepared, marker, func(lease context.Context) error {
+				receipt, err := fixture.composition.registryOwner.CommitPrepared(lease, preparedRegistryCommitInputV1(prepared))
+				if err == nil {
+					committed = receipt.ReceiptID == prepared.ReceiptID
+				}
+				return err
+			})
+		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := composition.snapshot.AdmitExactV2(ctx, datasetsnapshotapp.AdmitInputV2{
-		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID, Observation: observation,
-		ManifestReference: manifest, FundsProducerReference: producer, AcceptedAt: time.Now().UTC(),
-	}); err != nil {
+	if !committed {
+		t.Fatal("CASE fixture lacks its actual committed registry receipt")
+	}
+	if err := fixture.composition.registryOwner.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return config, workspace
+}
+
+// Preserve the original authority graph for the real registration across
+// restart. This is signed synthetic historical preparation, not a fabricated
+// receipt, native execution, or accepted final. The receipt itself still comes
+// exclusively from the callback-scoped registry effect above.
+func seedAsyncCaseClosureRegistryHistoryV1(t *testing.T, fixture *preparedRegistryEffectFixtureV1, durable *server.DurableEventSessionStore, prepared domainevidence.PreparedEvidenceSettlement) {
+	t.Helper()
+	ctx := context.Background()
+	frozen := fixture.securityContext
+	at, err := time.Parse(time.RFC3339Nano, frozen.IssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := domainevidence.PreparedEvidenceSettlementBytes(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateRoot := filepath.Join(fixture.config.DataDir, "private")
+	preparedPath := filepath.Join(privateRoot, "evidence-settlements", "prepared", prepared.SettlementID[:2], prepared.SettlementID+".json")
+	if err := os.MkdirAll(filepath.Dir(preparedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(preparedPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clear(body)
+	marker, err := domainevidence.NewHostEvidenceSettlementMarker(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch, err := contextepochapp.PrepareTurn(contextepochapp.PrepareTurnInput{Thread: map[string]any{}, SecurityContext: frozen, At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := prepared.ExecutionGrant
+	registeredAt := preparedRegistryCommitInputV1(prepared).RegisteredAt.Format(time.RFC3339Nano)
+	call := map[string]any{"id": domaintoolcall.ToolCallItemIDV1(frozen.TurnID, grant.ToolCallID), "kind": "tool_call", "role": "assistant", "status": "completed", "threadId": frozen.ThreadID, "turnId": frozen.TurnID, "toolName": grant.ToolName, "callId": grant.ToolCallID, "contextDigest": frozen.ContextDigest, "contextEpoch": frozen.ContextEpoch, "executionGrantId": grant.GrantID, "executionGrant": grant, "arguments": domaintoolcall.WithheldArgumentsProjectionV1(), "createdAt": grant.IssuedAt}
+	result := map[string]any{"id": prepared.ResultItemID, "kind": "tool_result", "role": "tool", "status": "completed", "threadId": frozen.ThreadID, "turnId": frozen.TurnID, "toolName": grant.ToolName, "callId": grant.ToolCallID, "contextDigest": frozen.ContextDigest, "contextEpoch": frozen.ContextEpoch, "executionGrantId": grant.GrantID, "createdAt": registeredAt, "finishedAt": registeredAt, "isError": false, "hostEvidenceSettlement": marker}
+	if err := durable.AppendTurnToThread(frozen.ThreadID, map[string]any{"id": frozen.TurnID, "threadId": frozen.ThreadID, "status": "running", "securityContext": frozen, "contextEpochSnapshot": contextepochapp.PublicSnapshot(epoch.State.AcceptedSnapshot), "items": []any{call, result}}, "", map[string]any{"securityState": frozen, "contextEpochState": contextepochapp.PublicState(epoch.State)}); err != nil {
+		t.Fatal(err)
+	}
+	access, err := privatecastest.NewAccessAuthority(privateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := casestore.NewStore(filepath.Join(privateRoot, "case-thread-authority"), access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases, err := casethreadapp.NewRegistry(ctx, fixture.witness.Authority, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cases.Register(ctx, frozen); err != nil {
+		t.Fatal(err)
+	}
+	if err := cases.Commit(ctx, frozen, epoch.State, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // The cuts occur at exact live CASE finalization phases. The archive failures
@@ -117,6 +208,7 @@ func TestRuntimeAsyncCaseTerminalClosure(t *testing.T) {
 			}
 			var handler http.Handler = &ownedPersistenceLeaseHandler{Handler: inner, lease: lease}
 			var access finalauthority.SecurePrivateCASAccessAuthority = lease
+			baselineAuthority := readAsyncCaseAuthorityLeavesV1(t, config, access)
 			var restore func()
 			defer func() {
 				select {
@@ -251,7 +343,7 @@ func TestRuntimeAsyncCaseTerminalClosure(t *testing.T) {
 			if len(turns) != 1 || contracts.StringField(turns[0].(map[string]any), "id") != turnID {
 				t.Fatal("CASE restart lost original inventory")
 			}
-			assertAsyncCaseCommittedAuthorityV1(t, config, access, original)
+			assertAsyncCaseCommittedAuthorityV1(t, config, access, original, baselineAuthority)
 			assertAsyncCaseSSEV1(t, handler, config, threadID, turnID)
 			recoveredArchive, err := os.ReadFile(path)
 			if err != nil {
@@ -374,14 +466,22 @@ func injectAsyncCaseLongitudinalFaultV1(t *testing.T, config Config, access fina
 func readAsyncCasePrivateFinalV1(t *testing.T, config Config, access finalauthority.SecurePrivateCASAccessAuthority, threadID, turnID string) domainevidence.PrivateAcceptedFinalRecord {
 	t.Helper()
 	files := readAsyncCaseCASV1(t, config, access, "accepted-finals/records")
-	if len(files) != 1 {
-		t.Fatal("CASE fallback created multiple private preparations")
+	var original domainevidence.PrivateAcceptedFinalRecord
+	count := 0
+	for _, file := range files {
+		record, err := domainevidence.ParsePrivateAcceptedFinalRecord(file.Body)
+		if err != nil {
+			t.Fatal("private CASE preparation is invalid")
+		}
+		if record.SecurityContext.ThreadID == threadID && record.SecurityContext.TurnID == turnID {
+			original = record
+			count++
+		}
 	}
-	record, err := domainevidence.ParsePrivateAcceptedFinalRecord(files[0].Body)
-	if err != nil || record.SecurityContext.ThreadID != threadID || record.SecurityContext.TurnID != turnID {
-		t.Fatal("private CASE preparation is not the original exact turn")
+	if count != 1 {
+		t.Fatal("CASE fallback did not retain exactly one preparation for the original turn")
 	}
-	return record
+	return original
 }
 
 func readAsyncCaseAuthorityLeavesV1(t *testing.T, config Config, access finalauthority.SecurePrivateCASAccessAuthority) map[string][]finalauthority.SecurePrivateCASFile {
@@ -393,17 +493,40 @@ func readAsyncCaseAuthorityLeavesV1(t *testing.T, config Config, access finalaut
 	return result
 }
 
-func assertAsyncCaseCommittedAuthorityV1(t *testing.T, config Config, access finalauthority.SecurePrivateCASAccessAuthority, original domainevidence.PrivateAcceptedFinalRecord) {
+func assertAsyncCaseCommittedAuthorityV1(t *testing.T, config Config, access finalauthority.SecurePrivateCASAccessAuthority, original domainevidence.PrivateAcceptedFinalRecord, baseline map[string][]finalauthority.SecurePrivateCASFile) {
 	t.Helper()
 	current := readAsyncCasePrivateFinalV1(t, config, access, original.SecurityContext.ThreadID, original.SecurityContext.TurnID)
 	if !reflect.DeepEqual(original, current) {
 		t.Fatal("restart replaced the authentic private final")
 	}
 	leaves := readAsyncCaseAuthorityLeavesV1(t, config, access)
-	for _, files := range leaves {
-		if len(files) != 1 {
+	for leaf, files := range leaves {
+		if len(files) != len(baseline[leaf])+1 {
 			t.Fatal("CASE recovery lacks one complete authority chain")
 		}
+		for _, previous := range baseline[leaf] {
+			found := false
+			for _, current := range files {
+				found = found || (current.Digest == previous.Digest && bytes.Equal(current.Body, previous.Body))
+			}
+			if !found {
+				t.Fatal("CASE recovery changed the independent historical authority")
+			}
+		}
+		var added []finalauthority.SecurePrivateCASFile
+		for _, current := range files {
+			previous := false
+			for _, before := range baseline[leaf] {
+				previous = previous || before.Digest == current.Digest
+			}
+			if !previous {
+				added = append(added, current)
+			}
+		}
+		if len(added) != 1 {
+			t.Fatal("CASE recovery added more than the exact original authority")
+		}
+		leaves[leaf] = added
 	}
 	disposition, err := domainevidence.ParseAcceptedFinalDispositionRecord(leaves["accepted-finals/dispositions"][0].Body)
 	if err != nil || disposition.State != domainevidence.AcceptedFinalCommitted || disposition.DecisionBasis != domainevidence.AcceptedFinalDecisionSamePublicWinner || disposition.AcceptedFinalDigest != original.AcceptedFinal.RecordDigest || disposition.WinnerDigest != original.AcceptedFinal.RecordDigest {

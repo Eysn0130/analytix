@@ -725,3 +725,15 @@ whole local event domain package passed (0.341 s). Remote failure timestamps
 fit this mechanism, but current-head runtime and native PII CI are still needed
 to establish remote closure. No timeout was increased and no raw-error diagnostic
 was added to HTTP, persistence, model context or production logging.
+
+The CASE terminal-closure fixture now starts with a real nonempty witnessed
+Registry and its exact durable originating turn, signed preparation, grant,
+result marker, epoch and case-thread authority. Counts distinguish that original
+history from the single new terminal chain and prove the historical records are
+unchanged. The complete local candidate/fixed/longitudinal test passed (381.97 s):
+each actual failure phase drains, recovery authenticates the original winner,
+and same-thread ordinary continuation preserves original CAS/private bytes.
+This result covers an already committed Registry; first-import/restart continuity
+with an empty Registry remains a separate contract under review. The combined
+selection still failed on desktop TypeScript retirement before its later owner
+migration, so no full-runtime or desktop-migration PASS is claimed.
