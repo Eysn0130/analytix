@@ -357,6 +357,14 @@ instrumentation binds only fixture paths and source-relative imports. B's
 mocked APFS test explicitly supplies a Darwin platform, with Linux/Windows
 rejection tests retained as executable negative coverage. Their local complete
 files passed (175 and 34 tests); this is not actual packaged acceptance.
+The D-0242 command-availability integration contract requires real macOS
+containment. Non-Darwin production adapters intentionally reject protected
+process invocation; installing Go on Linux cannot satisfy that contract. The
+`macos-integration` Vitest tag routes this unchanged assertion to a required
+macOS lane with actual process-sandbox tests. The complementary Linux lane runs
+every untagged application test. Neither lane may be omitted from the merge
+gate. This classification does not extend the existing test timeout or pretend
+that Linux process containment is implemented.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

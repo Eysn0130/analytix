@@ -5919,7 +5919,10 @@ async function establishD0242ExplicitProviderRegistryWinner(
 }
 
 describe('Go runtime kernel conformance manifest', () => {
-  it('runs the D-0242 Go runtime server contract subset behind the internal candidate boundary', async () => {
+  // The real protected command probe needs macOS containment. Linux's
+  // production adapter correctly fails closed, so CI runs this complete
+  // contract on macOS without changing its assertions or deadline.
+  it('runs the D-0242 Go runtime server contract subset behind the internal candidate boundary', { tags: ['macos-integration'], timeout: 300_000 }, async () => {
     const durableTempDir = await mkdtemp(join(tmpdir(), 'analytix-go-runtime-server-'))
     await prepareD0242SyntheticProviderRegistryMasterKey(durableTempDir)
     let runtimeBuild: GoRuntimeServerBuild | null = null
@@ -6386,7 +6389,7 @@ describe('Go runtime kernel conformance manifest', () => {
         }
       }
     }
-  }, 300_000)
+  })
 
   it('runs the runtime-server crash/restart durable root and rollback scaffold drill', async () => {
     const durableRoot = await mkdtemp(join(tmpdir(), 'analytix-go-runtime-candidate-drill-'))

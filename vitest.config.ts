@@ -12,6 +12,9 @@ export default defineConfig({
     environment: 'node',
     maxWorkers: 1,
     fileParallelism: false,
+    tags: [
+      { name: 'macos-integration', description: 'Real macOS process containment; required native CI lane.' }
+    ],
     include: [
       'src/**/*.test.{ts,tsx}',
       'packages/runtime/tests/**/*.test.{ts,tsx}',

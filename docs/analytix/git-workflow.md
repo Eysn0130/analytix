@@ -64,6 +64,7 @@ gaps in the PR. The template is an evidence checklist, not automatic approval.
 Do not merge with failed, cancelled, skipped or missing required CI jobs.
 
 The `Development gate` check aggregates Source baseline, Application tests,
+the required macOS process-integration lane,
 native Filesystem contracts on Linux and macOS, both full Go modes, Backend
 tests and all Rust component jobs. The main ruleset
 requires a PR, that check from GitHub Actions, an up-to-date candidate and resolved
