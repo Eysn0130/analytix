@@ -447,6 +447,66 @@ propagation; actual local inventories were partitioned for both build modes.
 This is coverage-preserving orchestration, not a full runtime PASS: remaining
 implementation/fixture/architecture failures must still be resolved.
 
+### PR #22 follow-up: persistence and CI attribution
+
+CI run [34687727224](https://github.com/Eysn0130/analytix/actions/runs/34687727224)
+at `b67058578` passed Application, Backend, all four Rust components,
+Linux/macOS filesystem contracts, and **all four exact held-state restart
+jobs**. macOS evidence-registry and pii-authorization executed in 310.95 s and
+572.10 s respectively, with the no-skip JSON-event checker. The physical
+`GOTMPDIR` correction is therefore remotely verified. That run still failed:
+Source baseline found ShellCheck's masked-assignment rule, and macOS process
+integration exceeded the Unix socket pathname limit under the long default
+temporary parent. Separate assignment/export and a short physical `TMPDIR`
+correct those fixture/orchestration causes; remote revalidation is required.
+
+Four runtime partitions were insufficient: after 20 minutes ordinary shards
+0/1 were at top-level entries 45/92 and 37/91, with the active tests only 20 s
+and 9 s old. This is cumulative load, not proof those tests deadlocked. The
+candidate uses sixteen complete dynamic partitions per build mode, at most
+four independent runners concurrently, retaining `-p 1`, `-parallel 2` and
+the original 20-minute Go deadline. Verbose execution exposes individual
+durations. Partition completeness/disjointness, matrix alignment, invalid
+indices and failure propagation pass five local tests. Both actual macOS
+inventories partition completely (367 ordinary / 376 production names);
+Linux selection remains platform-native. This is not yet a runtime PASS.
+
+The history mutation failure was a real concurrency defect: benign terminal
+appends may coexist with usage-index rebuilding, but compaction and rewind
+must not rewrite history across that barrier. Commit `91ea62157` rejects
+destructive rewrites under the same owner lock before effects. Original
+history/event equality assertions remain; rewind rejection and a successful
+post-rebuild retry are covered. Focused ordinary tests passed; production
+compaction/rewind/terminal regression passed (69.803 s), the complete usage
+index package passed (21.123 s), and the combined race check passed (28.666 s).
+No product data directory or real Provider was used.
+
+Commit `f813f41c9` makes the two CAS contenders take their preflight snapshots
+before release, so both actually compete at the intended CAS boundary. All
+winner/loser/disposition/restart assertions remain. Five ordinary and three
+production repetitions passed; sequential competing admission remains denied.
+Diagnostic tests now inspect the retained private error cause and assert the
+exact closed public error separately; no public diagnostic exposure is added.
+
+Provider-authentication regression was reproduced with an empty Registry:
+legacy configuration does not authorize execution under the accepted
+`local-provider-credential-authority` contract. Reusing the explicit synthetic
+Registry Connect/readback fixture restores the actual loopback Provider call
+and preserves the original structured-error/redaction assertions. The fixture
+uses its isolated file-backed encryption authority, not the Owner Keychain.
+Authentication plus existing lightweight-prompt integration passed locally
+(116.890 s). Do not automatically grant credentials to every test: negative,
+multi-provider and restart fixtures require their own explicit state contracts.
+
+The deferred-registry activation and body-free report recovery guards now bind
+the actual prepared closure/visitor, with mutation tests rejecting substituted
+owners and readers. The complete architecture package at `839ead4d7` plus the
+Provider fixture worktree still reports **11 failures**. Actual application
+filesystem/ownership boundaries and stale lexical guards must be resolved
+individually. Root/server/migration failures remain, and PR #22 is not mergeable.
+Native installer and isolated packaged acceptance follow a genuine Development
+gate; they are not implied by these focused results.
+
 One public historical secret-scanning alert identifies a key-shaped negative
 test fixture. The current fixture now constructs an explicitly synthetic
 canary and retains its non-disclosure assertion. That does **not** prove the
