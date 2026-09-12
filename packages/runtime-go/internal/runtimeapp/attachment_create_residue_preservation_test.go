@@ -40,6 +40,12 @@ func TestRuntimeAttachmentOriginalCreateResidueSurvivesEarlyRecovery(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Match startup: freeze the original creation inventory before any
+			// preservation consumer or recovery action receives the Core.
+			core.originalCreates, err = prepareRuntimeOriginalCreateStartupV1(ctx, core.roots, core.access)
+			if err != nil {
+				t.Fatal(err)
+			}
 			preserved, err := prepareRuntimeReportRestartPreservationV1(ctx, core)
 			if err != nil {
 				t.Fatalf("original create residue blocked complete held inventory observation: %v", err)
@@ -155,6 +161,10 @@ func TestRuntimeAttachmentOriginalCreateResidueRecoveryAndIndependentWrite(t *te
 				t.Fatal(err)
 			}
 			before, err := os.Stat(residue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			core.originalCreates, err = prepareRuntimeOriginalCreateStartupV1(ctx, core.roots, core.access)
 			if err != nil {
 				t.Fatal(err)
 			}
