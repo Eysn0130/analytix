@@ -374,6 +374,19 @@ registry's domain method check also no longer imports the HTTP transport
 package solely for the constant `GET`; exact read-only method validation is
 unchanged and covered by negative tests. Other architecture failures, including
 application-layer filesystem imports, remain unresolved and are not exempted.
+The production Go run at `da77ff2fd` still reached the 20-minute runtimeapp
+package deadline. Its active stack was in original attachment inventory
+revalidation/directory traversal. The earlier local 6.812 s / 6.196 s commands
+were exit-zero observations, not verified subcase passes: exact JSON-event
+checking exposed the configured cache volume's removable-APFS fixture skip.
+Those timings must not be used as behavior or performance evidence. Required
+isolated Linux/macOS restart jobs now execute each complete subcase in a fresh
+process under the same CPU/memory bounds and existing 20-minute Go deadline,
+and report function-only CPU profiles. Exact subtest run/pass and package pass
+events are required; zero selections, skips, failures and incomplete output fail
+the gate. Full Go coverage and deadlines are unchanged. The cause of the long
+Linux traversal still requires these measurements; do not infer deadlock or an
+undersized budget merely from the suite timeout.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

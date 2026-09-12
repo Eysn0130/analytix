@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const requiredDevelopmentJobs = [
-  'source-baseline', 'application-tests', 'macos-integration', 'filesystem-contracts', 'go-tests', 'backend-tests', 'rust-tests'
+  'source-baseline', 'application-tests', 'macos-integration', 'filesystem-contracts', 'restart-contracts', 'go-tests', 'backend-tests', 'rust-tests'
 ]
 
 export function assertDevelopmentCISuccess(results) {

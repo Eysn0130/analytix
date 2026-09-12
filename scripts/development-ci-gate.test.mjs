@@ -2,8 +2,32 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { assertDevelopmentCISuccess, requiredDevelopmentJobs } from './development-ci-gate.mjs'
+import { goTestSelection } from './go-test-selection.mjs'
 
 const success = () => Object.fromEntries(requiredDevelopmentJobs.map(name => [name, { result: 'success' }]))
+
+test('a focused Go gate must execute the exact subtest, not merely exit zero', () => {
+  const events = [
+    { Action: 'run', Package: 'fixture', Test: 'TestRestart/owner' },
+    { Action: 'pass', Package: 'fixture', Test: 'TestRestart/owner' },
+    { Action: 'pass', Package: 'fixture' }
+  ]
+  const check = input => {
+    const selection = goTestSelection('fixture', 'TestRestart/owner')
+    input.forEach(event => selection.observe(event))
+    selection.assert()
+  }
+  check(events)
+  for (const invalid of [
+    [], events.slice(1), events.slice(0, 2), [...events, events[1]],
+    [...events, { Action: 'fail', Package: 'fixture', Test: 'TestOther' }],
+    [...events, { Action: 'skip', Package: 'fixture', Test: 'TestRestart/owner' }],
+    events.map(event => ({ ...event, Package: 'other' })),
+    events.map(event => ({ ...event, Test: 'TestRestart/wrong' })),
+    [...events, null],
+    [{ Action: 'output', Package: 'fixture', Output: JSON.stringify(events) }]
+  ]) assert.throws(() => check(invalid), /Go selection failed/)
+})
 
 test('CI routes the complementary platform suites into the same required gate', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
