@@ -165,11 +165,15 @@ jobs:
         run: |
           set -o pipefail
           umask 077
+          # macOS RUNNER_TEMP may name an alias. The real package inspector
+          # correctly rejects noncanonical executable ancestors, even for a
+          # test binary; fix the fixture path, not the production inspector.
+          profile_root="$(cd "$RUNNER_TEMP" && pwd -P)"
           # Keep the existing full-suite deadline, not a new performance SLA.
           go test -json -count=1 -p 1 -parallel 2 -timeout 20m -tags analytix_prod \
             -run "^TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP$/^${OWNER_FIXTURE}$" \
-            -o "$RUNNER_TEMP/held-restart.test" \
-            -cpuprofile "$RUNNER_TEMP/held-restart.cpu" ./internal/runtimeapp | \
+            -o "$profile_root/held-restart.test" \
+            -cpuprofile "$profile_root/held-restart.cpu" ./internal/runtimeapp | \
             node ../../scripts/go-test-selection.mjs analytix.local/runtime-go/internal/runtimeapp \
               "TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP/${OWNER_FIXTURE}"
       - name: Report function-level CPU attribution without test data

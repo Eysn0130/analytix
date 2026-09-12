@@ -41,6 +41,8 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.doesNotMatch(native, /continue-on-error|passWithNoTests/)
   const restart = workflow.slice(workflow.indexOf('  restart-contracts:'), workflow.indexOf('  go-tests:'))
   assert.match(restart, /set -o pipefail/)
+  assert.match(restart, /profile_root="\$\(cd "\$RUNNER_TEMP" && pwd -P\)"/)
+  assert.match(restart, /-o "\$profile_root\/held-restart\.test"/)
   assert.match(restart, /node \.\.\/\.\.\/scripts\/go-test-selection\.mjs/)
 })
 

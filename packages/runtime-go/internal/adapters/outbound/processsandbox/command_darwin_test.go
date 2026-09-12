@@ -23,7 +23,24 @@ const (
 )
 
 func TestCommandContextDeniesProtectedFilesystemAccessAndAllowsOrdinaryWork(t *testing.T) {
-	root := t.TempDir()
+	assertProtectedFilesystemAccessAndOrdinaryWork(t, t.TempDir())
+}
+
+// Production composition supplies canonical roots. Exercise that contract
+// separately from the raw temporary-path case so an OS path alias cannot be
+// mistaken for a failure of the canonical policy (or silently ignored).
+func TestCommandContextDeniesCanonicalProtectedFilesystemAccess(t *testing.T) {
+	raw := t.TempDir()
+	root, err := filepath.EvalSymlinks(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("temporary root required canonicalization: %t", root != raw)
+	assertProtectedFilesystemAccessAndOrdinaryWork(t, root)
+}
+
+func assertProtectedFilesystemAccessAndOrdinaryWork(t *testing.T, root string) {
+	t.Helper()
 	protectedRoot := filepath.Join(root, `protected-"quoted"-\backslash-(allow default)`)
 	secondProtectedRoot := filepath.Join(root, "second-protected")
 	ordinaryRoot := filepath.Join(root, "ordinary")
