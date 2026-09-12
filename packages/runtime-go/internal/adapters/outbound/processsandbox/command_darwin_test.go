@@ -301,7 +301,10 @@ func TestCommandContextDeniesLocalDeputyTransports(t *testing.T) {
 		return
 	}
 
-	unixRoot, err := os.MkdirTemp("", "analytix-sandbox-deputy-")
+	// AF_UNIX paths on Darwin are limited to 104 bytes. Keep the owned suffix
+	// short inside the canonical, isolated test root; never fall back to a
+	// different filesystem or skip the real socket containment assertion.
+	unixRoot, err := os.MkdirTemp("", "d-")
 	if err != nil {
 		t.Fatalf("create short Unix deputy root: %v", err)
 	}
@@ -311,7 +314,7 @@ func TestCommandContextDeniesLocalDeputyTransports(t *testing.T) {
 		network string
 		listen  string
 	}{
-		{name: "Unix socket", network: "unix", listen: filepath.Join(unixRoot, "d.sock")},
+		{name: "Unix socket", network: "unix", listen: filepath.Join(unixRoot, "s")},
 		{name: "local TCP", network: "tcp4", listen: "127.0.0.1:0"},
 	}
 	for _, testCase := range testCases {

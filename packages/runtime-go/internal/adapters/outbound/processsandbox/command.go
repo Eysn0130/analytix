@@ -45,8 +45,9 @@ type Invocation struct {
 // host-verified local deputy may receive one exact loopback TCP port while all
 // other local deputy transports remain denied.
 //
-// Roots are private enforcement inputs. They must be normalized absolute paths
-// and must not be logged.
+// Roots are private enforcement inputs. They must be canonical absolute paths
+// (including resolved ancestors), as supplied by production's protected-root
+// projection, and must not be logged. Seatbelt matches physical paths.
 type FilesystemPolicy struct {
 	DenyRoots             []string
 	AllowReadExecuteRoots []string

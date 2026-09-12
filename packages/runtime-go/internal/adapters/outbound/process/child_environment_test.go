@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"analytix.local/runtime-go/internal/ports"
+	"analytix.local/runtime-go/internal/testsupport/userconfigtest"
 )
 
 func TestMain(m *testing.M) {
@@ -21,7 +22,7 @@ func TestMain(m *testing.M) {
 		fmt.Print("clean")
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	userconfigtest.Run(m)
 }
 
 func TestRuntimeBearerTokenNeverInheritedByCommandProbe(t *testing.T) {
