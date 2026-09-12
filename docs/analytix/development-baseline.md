@@ -901,3 +901,31 @@ a completed job. The existing legitimate producer-allocation, bound parent
 recovery, and stale/lease-expired/orphan recovery endpoint tests were separately
 executed and passed (server selection 1.980 s). This is constructor-negative
 and focused recovery evidence, not a new crash-process acceptance claim.
+
+Pending inventory now reuses only the already-validated receipt set from the
+same observation. Both real CAS listings, both ordered observations, root/store
+locks, exact disposition-to-receipt binding and changed-inventory rejection
+remain intact. Ordinary ListDispositions still performs its original reads.
+The new access-count regression failed before the change (four receipt CAS
+accesses at one disposition versus two at zero) and passes afterward with a
+constant count through four dispositions. Missing, mismatched and duplicate
+receipts, deletion between observations and existing concurrent append tests
+pass; the complete pendingworkstore package passed (10.192 s).
+
+Under the same isolated native-temp profiling setup, the complete missing-fault
+lifecycle fell from 347.894 s to 141.900 s, with every assertion retained. The
+full production platform partition then passed (391.129 s): current-source
+schedule contract plus all five lifecycle faults, admitted by the exact JSON
+execution checker with no skipped or missing test. Broader local pendingwork,
+thread, casethread and architecture packages passed. The whole server package
+run failed a pre-existing blanket /private/ substring assertion when its
+ordinary fixture workspace used /private/tmp; that is being checked separately
+and is not reported as a full server PASS.
+
+Remote ordinary runtime shard 8 at 7099f0015 exhausted the unchanged 20-minute
+package budget after successful tests; its active cancel_after leaf had run
+only one second. The largest completed test was the joint held-owner ordinary
+HTTP test (639.80 s), plus 144.30/140.73/119.05 s tests in the same partition.
+The held fixture has only one pending receipt/disposition, so the lifecycle
+optimization cannot be assumed to solve this separate cumulative cost. A
+focused held/pii profile is in progress before any further orchestration change.

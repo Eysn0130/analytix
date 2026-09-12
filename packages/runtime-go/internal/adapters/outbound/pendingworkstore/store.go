@@ -314,7 +314,7 @@ func (store *Store) SnapshotInventory(ctx context.Context) ([]domainpendingwork.
 	if store.afterReceiptSnapshot != nil {
 		store.afterReceiptSnapshot()
 	}
-	dispositions, err := store.listDispositions(ctx)
+	dispositions, err := store.listDispositionsForReceiptSnapshot(ctx, receipts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -326,7 +326,7 @@ func (store *Store) SnapshotInventory(ctx context.Context) ([]domainpendingwork.
 	if err != nil {
 		return nil, nil, err
 	}
-	dispositionsConfirm, err := store.listDispositions(ctx)
+	dispositionsConfirm, err := store.listDispositionsForReceiptSnapshot(ctx, receiptsConfirm)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -376,6 +376,36 @@ func (store *Store) listReceipts(ctx context.Context) ([]domainpendingwork.Pendi
 }
 
 func (store *Store) listDispositions(ctx context.Context) ([]domainpendingwork.PendingWorkDispositionV1, error) {
+	return store.listDispositionsWithReceiptReader(ctx, func(workID string) (domainpendingwork.PendingWorkReceiptV1, error) {
+		return store.readReceipt(ctx, workID)
+	})
+}
+
+// SnapshotInventory already holds both store gates and observes both CAS roots
+// twice. Bind each disposition to the receipts from that same observation,
+// rather than reopening and rescanning the whole receipt CAS for every entry.
+// The confirmation pass builds a fresh index; nothing survives this snapshot.
+func (store *Store) listDispositionsForReceiptSnapshot(ctx context.Context, receipts []domainpendingwork.PendingWorkReceiptV1) ([]domainpendingwork.PendingWorkDispositionV1, error) {
+	byWork := make(map[string]domainpendingwork.PendingWorkReceiptV1, len(receipts))
+	for _, receipt := range receipts {
+		if _, duplicate := byWork[receipt.WorkID]; duplicate || !validDigest(receipt.WorkID) {
+			return nil, errors.New("private pending work receipt snapshot identity is invalid")
+		}
+		byWork[receipt.WorkID] = receipt
+	}
+	return store.listDispositionsWithReceiptReader(ctx, func(workID string) (domainpendingwork.PendingWorkReceiptV1, error) {
+		if err := contextError(ctx); err != nil {
+			return domainpendingwork.PendingWorkReceiptV1{}, err
+		}
+		receipt, found := byWork[workID]
+		if !found {
+			return domainpendingwork.PendingWorkReceiptV1{}, pendingworkstoreport.ErrNotFound
+		}
+		return receipt, nil
+	})
+}
+
+func (store *Store) listDispositionsWithReceiptReader(ctx context.Context, readReceipt func(string) (domainpendingwork.PendingWorkReceiptV1, error)) ([]domainpendingwork.PendingWorkDispositionV1, error) {
 	files, err := store.dispositionCAS.List(ctx)
 	if err != nil {
 		return nil, err
@@ -386,7 +416,7 @@ func (store *Store) listDispositions(ctx context.Context) ([]domainpendingwork.P
 		if err != nil || disposition.WorkID != file.Digest {
 			return nil, errors.New("private pending work disposition filename does not match its content address")
 		}
-		receipt, err := store.readReceipt(ctx, file.Digest)
+		receipt, err := readReceipt(file.Digest)
 		if err != nil || domainpendingwork.ValidatePendingWorkDispositionForReceiptV1(disposition, receipt) != nil {
 			return nil, errors.New("private pending work disposition lost its exact receipt authority")
 		}
