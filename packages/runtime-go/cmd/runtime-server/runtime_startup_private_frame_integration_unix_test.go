@@ -120,12 +120,32 @@ func TestRuntimePrivateAuthorityFrameReachesRealHandlerHTTPWithExactReadyWitness
 	if attempts := fixture.TotalAttempts(); attempts != 0 {
 		t.Fatalf("private authority startup reached a witness: attempts=%d", attempts)
 	}
+	// The ready protocol intentionally pins the final-publication verification
+	// key for the host. The private envelope and its filesystem locators must
+	// remain absent; that public key may occur only in its declared ready field.
+	if ready.FinalPublicationAuthorityKeyID != anchor.AuthorityKeyID ||
+		ready.FinalPublicationAuthorityPublicKey != anchor.AuthorityPublicKey {
+		t.Fatal("ready final-publication verification key did not match the startup authority")
+	}
+	publicKeyField, err := json.Marshal(map[string]string{
+		"finalPublicationAuthorityPublicKey": anchor.AuthorityPublicKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyEntry := strings.TrimSuffix(strings.TrimPrefix(string(publicKeyField), "{"), "}")
+	if strings.Count(ready.RawPayload, publicKeyEntry) != 1 {
+		t.Fatal("ready verification key is not confined to exactly one declared field")
+	}
+	if strings.Contains(strings.Replace(ready.RawPayload, publicKeyEntry, "", 1), anchor.AuthorityPublicKey) {
+		t.Fatal("ready exposed the authority public key outside its declared verification field")
+	}
 	for _, privateValue := range []string{
-		fixture.AnchorEnvelope, anchor.AuthorityPublicKey, fixture.ManifestRoot,
+		fixture.AnchorEnvelope, fixture.ManifestRoot,
 		fixture.CredentialProfileRoot, fixture.CredentialBundleRoot,
 	} {
 		if strings.Contains(ready.RawPayload, privateValue) {
-			t.Fatalf("ready payload exposed private authority input: %s", ready.RawPayload)
+			t.Fatal("ready payload exposed private authority input")
 		}
 	}
 

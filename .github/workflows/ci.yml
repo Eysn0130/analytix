@@ -94,6 +94,7 @@ jobs:
         run: |
           umask 077
           go test -count=1 -p 1 -parallel 2 -timeout 5m \
+            ./internal/testsupport/userconfigtest \
             ./internal/adapters/outbound/securegeneration \
             ./internal/adapters/outbound/finalauthority \
             ./internal/adapters/outbound/rawartifact \

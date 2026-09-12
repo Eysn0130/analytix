@@ -10,6 +10,24 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestPrivateStorageFlagsOnlyAllowExtentFormat(t *testing.T) {
+	const extent = 0x00080000
+	for _, format := range []int{0, extent} {
+		if !privateStorageFlagsSafe(format) {
+			t.Fatalf("ordinary storage format %#x rejected", format)
+		}
+		for bit := uint(0); bit < 32; bit++ {
+			flag := int(uint32(1) << bit)
+			if flag != extent && privateStorageFlagsSafe(format|flag) {
+				t.Errorf("non-format inode flag %#x accepted with format %#x", flag, format)
+			}
+		}
+	}
+	if privateStorageFlagsSafe(-1) || privateFileFlagsSafe(-1) {
+		t.Fatal("invalid flags or descriptor accepted")
+	}
+}
+
 func TestSecureGenerationLinuxAcceptsFreshPrivateStorageMetadata(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "synthetic-payload")

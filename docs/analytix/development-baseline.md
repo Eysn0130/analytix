@@ -178,8 +178,8 @@ macOS ARM64, bounded-concurrency full Go suites
 suites. Private-authority test jobs use `umask 077`, as the local cache helper
 does; this does not relax permission validators. Source-set tests explicitly
 model Darwin, Linux and Windows instead of assuming the CI host is Darwin.
-The complete secure-generation, final-authority, raw-artifact and persistence
-packages run on both native hosts before the dependent full Go suites. A failed
+The isolation-helper tests and complete secure-generation, final-authority,
+raw-artifact and persistence packages run on both native hosts before the dependent full Go suites. A failed
 filesystem prerequisite blocks those suites and still fails the aggregate; it
 never substitutes a focused pass for the full suites. Native metadata failures
 report inode flags and xattr counts, not file contents or credentials. These
@@ -328,6 +328,16 @@ PASS**. The single previously failing statistics CLI case passed on macOS;
 this does not resolve the Linux CI DuckDB internal error. The main CI also
 reported application and both full Go-suite failures. Keep this PR draft until
 the current candidate's required CI and applicable acceptance actually pass.
+
+The native-filesystem run at `7b8d14d57` established two independent failures:
+Linux ext4 fresh private inodes had `FS_EXTENT_FL` (`0x80000`) and no xattrs,
+but the validators rejected every nonzero flag; macOS synthetic roots retained
+the `/var` ancestor alias, conflicting with strict canonical-path opens. The
+corrections recognize only that storage-format bit (all other inode flags and
+xattrs remain rejected), and canonicalize the test helper's temporary parent.
+The alias regression failed before the helper correction. These changes do not
+turn fixture evidence into packaged acceptance; the updated native and full CI
+results still decide PR readiness.
 Neither these focused results nor the source baseline imply full regression,
 native packaging or formal release readiness.
 

@@ -10,5 +10,12 @@ func largeOpaquePlatformObjectSafe(fd int, _ unix.Stat_t) bool {
 		return false
 	}
 	flags, err := unix.IoctlGetInt(fd, unix.FS_IOC_GETFLAGS)
-	return err == nil && flags == 0
+	return err == nil && largeOpaqueStorageFlagsSafe(flags)
+}
+
+func largeOpaqueStorageFlagsSafe(flags int) bool {
+	// Linux UAPI FS_EXTENT_FL is ext4's ordinary storage-format marker.
+	// Do not admit access/mutation policy flags or any unknown inode flags.
+	const fsExtentFlag = 0x00080000
+	return flags & ^fsExtentFlag == 0
 }
