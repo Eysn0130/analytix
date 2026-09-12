@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1529,7 +1530,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, errors.Join(sourceErr, nativeAuthority.Close())
 		}
 		fundsCSVAdmission, err = fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
-			Observer: filestore.CaseBindingReader{}, Identity: identityAuthority,
+			Diagnostics: os.Stderr,
+			Observer:    filestore.CaseBindingReader{}, Identity: identityAuthority,
 			Evidence:  sharedEvidenceDatasetSnapshotV2.evidence,
 			Snapshots: sharedEvidenceDatasetSnapshotV2.snapshot,
 			Materials: datasetSnapshotStoresV2,

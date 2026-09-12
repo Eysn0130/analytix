@@ -6,7 +6,6 @@ import (
 	cryptorand "crypto/rand"
 	"errors"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -71,6 +70,7 @@ type ImportSourceReaderV1 func(
 ) error
 
 type ConfigV1 struct {
+	Diagnostics      io.Writer
 	Observer         casecontextport.Observer
 	Identity         identityport.Authority
 	Evidence         *evidenceauthorityapp.Authority
@@ -86,6 +86,7 @@ type ConfigV1 struct {
 }
 
 type ServiceV1 struct {
+	diagnostics              io.Writer
 	observer                 casecontextport.Observer
 	identity                 identityport.Authority
 	evidence                 *evidenceauthorityapp.Authority
@@ -165,7 +166,8 @@ func NewServiceV1(config ConfigV1) (*ServiceV1, error) {
 		config.Random = cryptorand.Reader
 	}
 	service := &ServiceV1{
-		observer: config.Observer, identity: config.Identity, evidence: config.Evidence, snapshots: config.Snapshots,
+		diagnostics: config.Diagnostics,
+		observer:    config.Observer, identity: config.Identity, evidence: config.Evidence, snapshots: config.Snapshots,
 		materials: config.Materials, native: config.Native, source: config.Source,
 		readImportSource:         config.ReadImportSource,
 		activateEvidenceRegistry: config.ActivateEvidenceRegistry,
@@ -462,7 +464,7 @@ func (service *ServiceV1) buildNativeV1(
 	sourceBody []byte,
 ) (_ domainevidence.FundsCanonicalCSVNativeBuildResultV1, resultErr error) {
 	stage := "ARGUMENTS"
-	defer func() { writeNativeBuildFailureV1(os.Stderr, stage, resultErr) }()
+	defer func() { writeNativeBuildFailureV1(service.diagnostics, stage, resultErr) }()
 	arguments, err := domainnative.NewFundsCanonicalCSVSnapshotBuildArgumentsV1(
 		domainnative.FundsCanonicalCSVSnapshotBuildInputV1{
 			Binding: build.Binding, PrivateImportFileID: build.PrivateImportFileID,
@@ -510,7 +512,7 @@ func (service *ServiceV1) buildNativeV1(
 // Diagnostics stop at fixed call sites and sentinel classes. In particular,
 // never format the underlying error that the composer deliberately discards.
 func writeNativeBuildFailureV1(output io.Writer, stage string, err error) {
-	if err == nil {
+	if err == nil || output == nil {
 		return
 	}
 	switch stage {

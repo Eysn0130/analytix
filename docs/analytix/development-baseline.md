@@ -585,3 +585,11 @@ full Manager run timed out after 10 minutes in filesystem crash-point recovery;
 process sampling showed sync I/O, so this is not recorded as full-package PASS.
 No timeout or required CI coverage was changed. Current-head remote closure
 remains required.
+
+Funds CSV admission now receives its diagnostic writer from composition; the
+application no longer accesses global process stderr. Its error identity and
+stage/class diagnostic regression, and complete local admission package, passed
+(0.641 s). Existing accepted-final observation/turn equality is now an error-only
+domain validator, preserving the strict primary reader as the observation
+producer. Complete local domain/evidence and app/evidence packages passed
+(1.465 s / 48.723 s), including existing negative bindings.
