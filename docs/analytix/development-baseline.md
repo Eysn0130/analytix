@@ -712,3 +712,16 @@ on that separate case; they are not full runtime PASS. The intermittent async
 second-restart equality test passed locally (45.56 s) with bounded metadata-only
 failure diagnostics; its remote failure remains unresolved until current-head
 CI establishes the cause and result.
+
+The intermittent plan failure has a deterministic privacy-projection defect:
+a valid RFC3339Nano savedAt with seconds 13–19 and nine fractional digits is
+classified by the general prose scanner as an eleven-digit phone number. Seven
+fixed inputs failed against the original event projection despite valid typed
+PlanStatus. The existing exact host-bound, canonical closed-plan metadata path
+now preserves validated savedAt alongside its SHA-256 contentHash. General text,
+lookalikes, invalid timestamps and phone-bearing display fields retain their
+original privacy rejection. All seven regressions and negatives passed; the
+whole local event domain package passed (0.341 s). Remote failure timestamps
+fit this mechanism, but current-head runtime and native PII CI are still needed
+to establish remote closure. No timeout was increased and no raw-error diagnostic
+was added to HTTP, persistence, model context or production logging.

@@ -66,10 +66,10 @@ func ValidatePublicRecord(value any) error {
 	return nil
 }
 
-// publicPrivacyValidationViewV1 keeps a host-bound, closed plan digest out of
-// prose PII classification without weakening the display-bearing plan fields.
-// SHA-256 is structural metadata here: the canonical tool-result projection
-// has already validated its syntax, lifecycle, and host tool-call identity.
+// publicPrivacyValidationViewV1 keeps a host-bound, closed plan digest and
+// timestamp out of prose PII classification without weakening display fields.
+// These are structural metadata: the canonical tool-result projection has
+// already validated their syntax, lifecycle, and host tool-call identity.
 // Lookalike maps and non-canonical tool results remain on the ordinary scanner.
 func publicPrivacyValidationViewV1(value any) any {
 	projected, changed := projectClosedPlanDigestForPrivacyValidationV1(value)
@@ -80,8 +80,8 @@ func publicPrivacyValidationViewV1(value any) any {
 }
 
 // ProjectPublicValuePreservingClosedPlanDigestV1 applies the ordinary PII
-// projector while keeping the SHA-256 metadata of an exact host tool result
-// byte-stable. The staged placeholder is path-bound and restored only if the
+// projector while keeping SHA-256 and timestamp metadata of an exact host tool
+// result byte-stable. Each staged placeholder is path-bound and restored only if the
 // generic projector returns it unchanged; all plan display fields still pass
 // through the ordinary projector.
 func ProjectPublicValuePreservingClosedPlanDigestV1(value any) (any, bool) {
@@ -119,23 +119,25 @@ func stageClosedPlanDigestsV1(
 ) any {
 	switch typed := value.(type) {
 	case map[string]any:
-		if digest, ok := canonicalClosedPlanToolResultDigestV1(typed); ok {
+		if _, ok := canonicalClosedPlanToolResultDigestV1(typed); ok {
 			staged := clonePublicRecordMapV1(typed)
 			output := clonePublicRecordMapV1(staged["output"].(map[string]any))
 			plan := clonePublicRecordMapV1(output["plan"].(map[string]any))
-			placeholder := map[string]any{
-				"kind": "closed_plan_digest_placeholder_v1", "ordinal": float64(len(*entries)),
+			for _, field := range []string{"contentHash", "savedAt"} {
+				placeholder := map[string]any{
+					"kind": "closed_plan_digest_placeholder_v1", "ordinal": float64(len(*entries)),
+				}
+				stagedPlaceholder := clonePublicRecordMapV1(placeholder)
+				metadataPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...),
+					closedPlanDigestProjectionPathV1{kind: "key", key: "output"},
+					closedPlanDigestProjectionPathV1{kind: "key", key: "plan"},
+					closedPlanDigestProjectionPathV1{kind: "key", key: field},
+				)
+				*entries = append(*entries, closedPlanDigestProjectionEntryV1{
+					path: metadataPath, digest: plan[field].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
+				})
+				plan[field] = stagedPlaceholder
 			}
-			stagedPlaceholder := clonePublicRecordMapV1(placeholder)
-			digestPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...),
-				closedPlanDigestProjectionPathV1{kind: "key", key: "output"},
-				closedPlanDigestProjectionPathV1{kind: "key", key: "plan"},
-				closedPlanDigestProjectionPathV1{kind: "key", key: "contentHash"},
-			)
-			*entries = append(*entries, closedPlanDigestProjectionEntryV1{
-				path: digestPath, digest: digest, placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
-			})
-			plan["contentHash"] = stagedPlaceholder
 			output["plan"] = plan
 			staged["output"] = output
 			return staged
@@ -280,6 +282,7 @@ func closedPlanToolResultPrivacyValidationViewV1(item map[string]any) (map[strin
 	}
 	plan = clonePublicRecordMapV1(plan)
 	plan["contentHash"] = "sha256-digest"
+	plan["savedAt"] = "rfc3339-timestamp"
 	output["plan"] = plan
 	out["output"] = output
 	return out, true
