@@ -29,6 +29,7 @@ import (
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authorityfixture "analytix.local/runtime-go/internal/formalauthority"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // This test binds current Go composition to an explicitly selected historical
@@ -66,7 +67,7 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	if runtimePath != rev9RetainedRuntimeServer {
 		t.Fatal("B1 fixed native input is unavailable")
 	}
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	authorityRoot := strings.TrimSpace(os.Getenv("ANALYTIX_TEST_PROFILE_ROOT"))
 	if authorityRoot == "" {
 		authorityRoot = root

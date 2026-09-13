@@ -25,6 +25,7 @@ import (
 	publicationport "analytix.local/runtime-go/internal/ports/reportpublication"
 	startupport "analytix.local/runtime-go/internal/ports/startup"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // This proves the Original composition boundary for a real unresolved Core
@@ -207,7 +208,7 @@ func newRuntimeOriginalMixedClosedOpenFixtureV1(t *testing.T) (*runtimeOriginalR
 	witness, config := runtimeWitnessedRegistryConfigV2(t)
 	contextFor := func(label string) domainsecurity.TurnSecurityContext {
 		frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
-			ThreadID: "thread-mixed-" + label, TurnID: "turn-mixed-" + label, WorkspaceRealPath: t.TempDir(),
+			ThreadID: "thread-mixed-" + label, TurnID: "turn-mixed-" + label, WorkspaceRealPath: workspacetest.New(t),
 			CaseID: "case-mixed-" + label, CaseBindingHash: domainsecurity.SHA256Hex([]byte("mixed-binding-" + label)), ContextEpoch: 1,
 			IssuedAt: time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC),
 		})

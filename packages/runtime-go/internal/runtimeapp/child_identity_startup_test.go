@@ -21,6 +21,7 @@ import (
 	privatecasport "analytix.local/runtime-go/internal/ports/privatecas"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type childIdentityOwnerAccessFailureV1 struct {
@@ -203,7 +204,7 @@ func TestRuntimeChildIdentityClosedMissingJobFloorsSurviveFreshRestart(t *testin
 				t.Fatal(err)
 			}
 			defer shutdownOwnedRuntimeHandler(t, handler)
-			thread := runtimeStartupJSON(t, handler, http.MethodPost, "/v1/threads", map[string]any{"title": "synthetic", "workspace": t.TempDir()}, http.StatusCreated)
+			thread := runtimeStartupJSON(t, handler, http.MethodPost, "/v1/threads", map[string]any{"title": "synthetic", "workspace": workspacetest.New(t)}, http.StatusCreated)
 			if thread["id"] != "thr_durable_701" {
 				t.Fatalf("fresh restart reused a signed missing-child identity: %v", thread["id"])
 			}

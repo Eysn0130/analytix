@@ -24,6 +24,7 @@ type SecurityContextTransition struct {
 	releaseGate   func()
 	threadKey     string
 	workspaceKeys []string
+	delegatedDone chan struct{}
 
 	mu       sync.Mutex
 	prepared bool
@@ -50,7 +51,7 @@ func (s *RuntimeState) BeginSecurityContextTransition(ctx context.Context, scope
 	}
 	return s.beginSecurityContextTransition(effectgateapp.TransitionScope{
 		ThreadID: scope.ThreadID, WorkspaceRealPath: scope.WorkspaceRealPath, TenantID: scope.TenantID, UserID: scope.UserID,
-	}, release, scope.WorkspaceRealPath)
+	}, release, false, scope.WorkspaceRealPath)
 }
 
 // BeginSecurityContextTransitionWithBarrier reserves the target concurrency
@@ -77,7 +78,7 @@ func (s *RuntimeState) BeginSecurityContextTransitionWithBarrier(
 		release()
 		return nil, err
 	}
-	return s.beginSecurityContextTransition(transitionScope, release, scope.WorkspaceRealPath)
+	return s.beginSecurityContextTransition(transitionScope, release, false, scope.WorkspaceRealPath)
 }
 
 // BeginSecurityScopeTransition acquires the shared thread/workspace writer
@@ -100,7 +101,7 @@ func (s *RuntimeState) BeginSecurityScopeTransition(ctx context.Context, scope e
 		release()
 		return nil, err
 	}
-	return s.beginSecurityContextTransition(scope, release, scope.WorkspaceRealPath)
+	return s.beginSecurityContextTransition(scope, release, false, scope.WorkspaceRealPath)
 }
 
 func (s *RuntimeState) BeginSecurityScopeTransitionWithBarrier(
@@ -119,7 +120,7 @@ func (s *RuntimeState) BeginSecurityScopeTransitionWithBarrier(
 		release()
 		return nil, err
 	}
-	return s.beginSecurityContextTransition(scope, release, scope.WorkspaceRealPath)
+	return s.beginSecurityContextTransition(scope, release, false, scope.WorkspaceRealPath)
 }
 
 // BeginDelegatedChildSecurityScopeTransition is the host-only child-turn admission
@@ -142,7 +143,7 @@ func (s *RuntimeState) BeginDelegatedChildSecurityScopeTransition(ctx context.Co
 		release()
 		return nil, err
 	}
-	return s.beginSecurityContextTransition(scope, release, scope.WorkspaceRealPath)
+	return s.beginSecurityContextTransition(scope, release, true, scope.WorkspaceRealPath)
 }
 
 func (s *RuntimeState) BeginSecurityScopeTransitionIdentity(
@@ -186,7 +187,7 @@ func (s *RuntimeState) BeginWorkspaceSecurityScopeTransition(
 		release()
 		return nil, err
 	}
-	return s.beginSecurityContextTransition(target, release, previousWorkspaceRealPath, targetWorkspaceRealPath)
+	return s.beginSecurityContextTransition(target, release, false, previousWorkspaceRealPath, targetWorkspaceRealPath)
 }
 
 // BeginWorkspaceSecurityContextTransition holds the shared thread writer and
@@ -212,10 +213,10 @@ func (s *RuntimeState) BeginWorkspaceSecurityContextTransition(ctx context.Conte
 	}
 	return s.beginSecurityContextTransition(effectgateapp.TransitionScope{
 		ThreadID: target.ThreadID, WorkspaceRealPath: target.WorkspaceRealPath, TenantID: target.TenantID, UserID: target.UserID,
-	}, release, previous.WorkspaceRealPath, target.WorkspaceRealPath)
+	}, release, false, previous.WorkspaceRealPath, target.WorkspaceRealPath)
 }
 
-func (s *RuntimeState) beginSecurityContextTransition(scope effectgateapp.TransitionScope, release func(), workspaces ...string) (*SecurityContextTransition, error) {
+func (s *RuntimeState) beginSecurityContextTransition(scope effectgateapp.TransitionScope, release func(), delegated bool, workspaces ...string) (*SecurityContextTransition, error) {
 	workspaceKeys := make([]string, 0, len(workspaces))
 	seen := map[string]bool{}
 	for _, workspace := range workspaces {
@@ -229,7 +230,13 @@ func (s *RuntimeState) beginSecurityContextTransition(scope effectgateapp.Transi
 		state: s, scope: scope, releaseGate: release,
 		threadKey: securityAuthorityMapKey("thread", scope.TenantID, scope.UserID, scope.ThreadID), workspaceKeys: workspaceKeys,
 	}
+	if delegated {
+		transition.delegatedDone = make(chan struct{})
+	}
 	s.mu.Lock()
+	if s.delegatedWorkspaceTransitions == nil {
+		s.delegatedWorkspaceTransitions = map[string]<-chan struct{}{}
+	}
 	if s.transitionThreads == nil {
 		s.transitionThreads = map[string]bool{}
 	}
@@ -248,6 +255,9 @@ func (s *RuntimeState) beginSecurityContextTransition(scope effectgateapp.Transi
 	s.transitionThreads[transition.threadKey] = true
 	for _, workspaceKey := range transition.workspaceKeys {
 		s.transitionWorkspaces[workspaceKey] = true
+		if transition.delegatedDone != nil {
+			s.delegatedWorkspaceTransitions[workspaceKey] = transition.delegatedDone
+		}
 	}
 	s.mu.Unlock()
 	return transition, nil
@@ -341,6 +351,10 @@ func (transition *SecurityContextTransition) Commit() error {
 	delete(state.transitionThreads, transition.threadKey)
 	for _, workspaceKey := range transition.workspaceKeys {
 		delete(state.transitionWorkspaces, workspaceKey)
+		delete(state.delegatedWorkspaceTransitions, workspaceKey)
+	}
+	if transition.delegatedDone != nil {
+		close(transition.delegatedDone)
 	}
 	state.mu.Unlock()
 	transition.release()
@@ -363,6 +377,10 @@ func (transition *SecurityContextTransition) Abort() {
 	delete(state.transitionThreads, transition.threadKey)
 	for _, workspaceKey := range transition.workspaceKeys {
 		delete(state.transitionWorkspaces, workspaceKey)
+		delete(state.delegatedWorkspaceTransitions, workspaceKey)
+	}
+	if transition.delegatedDone != nil {
+		close(transition.delegatedDone)
 	}
 	state.mu.Unlock()
 	transition.release()

@@ -20,6 +20,7 @@ import (
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	"analytix.local/runtime-go/internal/contracts"
 	"analytix.local/runtime-go/internal/server"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // Authentic terminal records are produced through production HTTP and a
@@ -81,7 +82,7 @@ func TestRuntimeAsyncTerminalRecoveryPreservesAuthenticOutcome(t *testing.T) {
 				}
 				return result
 			}
-			thread := request(http.MethodPost, "/v1/threads", map[string]any{"workspace": t.TempDir(), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
+			thread := request(http.MethodPost, "/v1/threads", map[string]any{"workspace": workspacetest.New(t), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
 			threadID := contracts.StringField(thread, "id")
 			started := request(http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{"prompt": "Complete a concise ordinary response.", "async": true}, http.StatusAccepted)
 			turnID := contracts.StringField(started, "turnId")
@@ -303,7 +304,7 @@ func TestRuntimeAsyncTerminalPrecommitFailureGetsAuthenticRestartDisposition(t *
 			restore()
 		}
 	}()
-	thread := runtimeStartupJSON(t, handler, http.MethodPost, "/v1/threads", map[string]any{"workspace": t.TempDir(), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
+	thread := runtimeStartupJSON(t, handler, http.MethodPost, "/v1/threads", map[string]any{"workspace": workspacetest.New(t), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
 	threadID := contracts.StringField(thread, "id")
 	started := runtimeStartupJSON(t, handler, http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{"prompt": "Complete an ordinary response.", "async": true}, http.StatusAccepted)
 	turnID := contracts.StringField(started, "turnId")

@@ -32,22 +32,25 @@ type backgroundJobControl struct {
 var ErrBackgroundJobStopTimeout = errors.New("background job did not stop before cancellation deadline")
 
 type RuntimeState struct {
-	mu                   sync.Mutex
-	backgroundJobs       map[string]*backgroundJobControl
-	backgroundClosing    bool
-	currentByThread      map[string]domainsecurity.TurnSecurityContext
-	currentByWorkspace   map[string]domainsecurity.TurnSecurityContext
-	transitionThreads    map[string]bool
-	transitionWorkspaces map[string]bool
-	effectGate           *effectgateapp.Gate
-	outputCursors        map[string]int
-	active               int
-	waiters              []chan struct{}
+	mu                            sync.Mutex
+	backgroundJobs                map[string]*backgroundJobControl
+	backgroundClosing             bool
+	admissionClosed               chan struct{}
+	currentByThread               map[string]domainsecurity.TurnSecurityContext
+	currentByWorkspace            map[string]domainsecurity.TurnSecurityContext
+	transitionThreads             map[string]bool
+	transitionWorkspaces          map[string]bool
+	delegatedWorkspaceTransitions map[string]<-chan struct{}
+	effectGate                    *effectgateapp.Gate
+	outputCursors                 map[string]int
+	active                        int
+	waiters                       []chan struct{}
 }
 
 func NewRuntimeState() *RuntimeState {
 	return &RuntimeState{
 		backgroundJobs:       map[string]*backgroundJobControl{},
+		admissionClosed:      make(chan struct{}),
 		currentByThread:      map[string]domainsecurity.TurnSecurityContext{},
 		currentByWorkspace:   map[string]domainsecurity.TurnSecurityContext{},
 		transitionThreads:    map[string]bool{},
@@ -114,7 +117,7 @@ func (s *RuntimeState) RegisterBackgroundJob(id string, cancel context.CancelFun
 }
 
 func (s *RuntimeState) RegisterBackgroundJobWithStartBarrier(id string, cancel context.CancelFunc) (*BackgroundJobStartBarrier, bool) {
-	return s.registerBackgroundJob(id, nil, cancel)
+	return s.registerBackgroundJob(nil, id, nil, cancel)
 }
 
 // RegisterBoundBackgroundJob registers cancellation before any external job
@@ -132,10 +135,10 @@ func (s *RuntimeState) RegisterBoundBackgroundJobWithStartBarrier(id string, bin
 		}
 		return nil, false
 	}
-	return s.registerBackgroundJob(id, binding, cancel)
+	return s.registerBackgroundJob(nil, id, binding, cancel)
 }
 
-func (s *RuntimeState) registerBackgroundJob(id string, binding *domainjob.SecurityBinding, cancel context.CancelFunc) (*BackgroundJobStartBarrier, bool) {
+func (s *RuntimeState) registerBackgroundJob(waitContext context.Context, id string, binding *domainjob.SecurityBinding, cancel context.CancelFunc) (*BackgroundJobStartBarrier, bool) {
 	if cancel == nil {
 		return nil, false
 	}
@@ -149,20 +152,51 @@ func (s *RuntimeState) registerBackgroundJob(id string, binding *domainjob.Secur
 		return nil, false
 	}
 	startBarrier := NewBackgroundJobStartBarrier()
-	s.mu.Lock()
-	if s.backgroundJobs == nil {
-		s.backgroundJobs = map[string]*backgroundJobControl{}
-	}
-	if s.backgroundClosing || s.backgroundJobs[id] != nil || binding != nil && (!s.bindingAllowedLocked(binding) || s.bindingTransitioningLocked(binding)) {
+	for {
+		s.mu.Lock()
+		if s.backgroundJobs == nil {
+			s.backgroundJobs = map[string]*backgroundJobControl{}
+		}
+		if s.admissionClosed == nil {
+			s.admissionClosed = make(chan struct{})
+		}
+		if s.backgroundClosing || s.backgroundJobs[id] != nil || binding != nil && !s.bindingAllowedLocked(binding) || waitContext != nil && waitContext.Err() != nil {
+			s.mu.Unlock()
+			cancel()
+			return nil, false
+		}
+		if binding != nil && s.bindingTransitioningLocked(binding) {
+			threadKey := securityAuthorityMapKey("thread", binding.TenantID, binding.UserID, binding.ParentThreadID)
+			workspaceKey := securityAuthorityMapKey("workspace", binding.TenantID, binding.UserID, binding.ParentWorkspaceRealPath)
+			settled := s.delegatedWorkspaceTransitions[workspaceKey]
+			admissionClosed := s.admissionClosed
+			// A sibling's short child-context commit does not revoke this
+			// parent. Wait only for that delegated transition, then recheck
+			// the exact binding under the same lock used for registration.
+			// Parent and ordinary workspace transitions remain fail-closed.
+			if waitContext == nil || settled == nil || s.transitionThreads[threadKey] {
+				s.mu.Unlock()
+				cancel()
+				return nil, false
+			}
+			s.mu.Unlock()
+			select {
+			case <-settled:
+			case <-admissionClosed:
+				cancel()
+				return nil, false
+			case <-waitContext.Done():
+				cancel()
+				return nil, false
+			}
+			continue
+		}
+		s.backgroundJobs[id] = &backgroundJobControl{
+			cancel: cancel, binding: domainjob.CloneSecurityBinding(binding), startBarrier: startBarrier, done: make(chan struct{}),
+		}
 		s.mu.Unlock()
-		cancel()
-		return nil, false
+		return startBarrier, true
 	}
-	s.backgroundJobs[id] = &backgroundJobControl{
-		cancel: cancel, binding: domainjob.CloneSecurityBinding(binding), startBarrier: startBarrier, done: make(chan struct{}),
-	}
-	s.mu.Unlock()
-	return startBarrier, true
 }
 
 // ObserveSecurityContextAndCancelInvalidatedJobs is the atomic convenience
@@ -388,7 +422,13 @@ func (s *RuntimeState) closeBackgroundAdmissionAndControls() []*backgroundJobCon
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.backgroundClosing = true
+	if !s.backgroundClosing {
+		s.backgroundClosing = true
+		if s.admissionClosed == nil {
+			s.admissionClosed = make(chan struct{})
+		}
+		close(s.admissionClosed)
+	}
 	controls := make([]*backgroundJobControl, 0, len(s.backgroundJobs))
 	for _, control := range s.backgroundJobs {
 		if control != nil && control.cancel != nil {

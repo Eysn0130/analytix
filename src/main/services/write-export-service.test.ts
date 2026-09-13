@@ -440,15 +440,13 @@ describe('write-export-service helpers', () => {
     }
   })
 
-  it('renders markdown exports with resolved links and inlined local images', async () => {
+  it('renders projected markdown typography and resolved links without media', async () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
-    const imagePath = join(workspaceRoot, 'cover.png')
-    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
     const html = await buildWriteExportHtmlDocument({
       sourcePath,
       workspaceRoot,
-      content: '# Heading\n{: align=center}\n\nBody\n{: align=justify}\n\n![Cover](./cover.png)\n\n[Notes](./notes.md)',
+      content: '# Heading\n{: align=center}\n\nBody\n{: align=justify}\n\n[Notes](./notes.md)',
       typography: {
         fontPreset: 'custom',
         customFontFamily: "'FangSong', serif",
@@ -460,23 +458,21 @@ describe('write-export-service helpers', () => {
     expect(html).toContain('--write-export-font-size: 21px')
     expect(html).toContain('data-write-align="center"')
     expect(html).toContain('data-write-align="justify"')
-    expect(html).toContain('src="data:image/png;base64,')
+    expect(html).not.toContain('<img')
     expect(html).toContain(`href="${pathToFileURL(join(workspaceRoot, 'notes.md')).href}"`)
   })
 
-  it('inlines a workspace-local image whose file name begins with two dots', async () => {
+  it('does not treat a dot-prefixed workspace image as privacy-authorized', async () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
     const imagePath = join(workspaceRoot, '..cover.png')
     const imageBytes = Buffer.from('SLICE36_DOT_PREFIX_LOCAL_IMAGE', 'utf8')
     await writeFile(imagePath, imageBytes)
 
-    const html = await buildWriteExportHtmlDocument({
+    await expect(buildWriteExportHtmlDocument({
       sourcePath,
       workspaceRoot,
       content: '# Heading\n\n![Cover](./..cover.png)'
-    })
-
-    expect(html).toContain(`src="data:image/png;base64,${imageBytes.toString('base64')}"`)
+    })).rejects.toThrow('Write export cannot include images because image content privacy checks are unavailable.')
   })
 
   it('renders clipboard html fragments for markdown content', async () => {
@@ -523,26 +519,24 @@ describe('write-export-service helpers', () => {
 
   it('writes html and plain text to the clipboard', async () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
-    const imagePath = join(workspaceRoot, 'cover.png')
-    await writeFile(sourcePath, '# Heading\n\n![Cover](./cover.png)')
-    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    await writeFile(sourcePath, '# Heading\n\n**Ordinary text**')
 
     const result = await copyWriteDocumentAsRichText({
       path: sourcePath,
       workspaceRoot: '/tmp/renderer-forged-workspace',
-      content: '# Heading\n\n![Cover](./cover.png)'
+      content: '# Heading\n\n**Ordinary text**'
     }, { workspaceRoot })
 
     expect(result.ok).toBe(true)
     expect(clipboard.write).toHaveBeenCalledWith(
       expect.objectContaining({
         html: expect.stringContaining('<article class="markdown-body">'),
-        text: '# Heading\n\n![Cover](./cover.png)'
+        text: '# Heading\n\n**Ordinary text**'
       })
     )
     expect(clipboard.write).toHaveBeenCalledWith(
       expect.objectContaining({
-        html: expect.stringContaining('src="data:image/png;base64,')
+        html: expect.stringContaining('<strong>Ordinary text</strong>')
       })
     )
   })
@@ -588,7 +582,7 @@ describe('write-export-service helpers', () => {
       expect(result).toEqual({
         ok: false,
         canceled: false,
-        message: 'Write export local image is unavailable.'
+        message: 'Write export cannot include images because image content privacy checks are unavailable.'
       })
       expect(existsSync(targetPath)).toBe(false)
       expect(JSON.stringify(result)).not.toContain(outsideRoot)
@@ -598,18 +592,12 @@ describe('write-export-service helpers', () => {
     }
   })
 
-  it('embeds an authorized absolute image while projecting prose and public Markdown attributes', async () => {
+  it('projects prose and public Markdown attributes through HTML and DOCX', async () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
-    const imagePath = join(workspaceRoot, 'cover.png')
-    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
     await writeFile(sourcePath, '# Draft')
-    await writeFile(imagePath, image)
-    const content = `# Draft\n\n![Cover](${imagePath})\n\n/Users/synthetic/private-note.md\n\n13800138000\n\n\`\`\`/Users/synthetic/private-language\nsafe\n\`\`\`\n\n[Contact](mailto:alice@example.com)\n\n[](/Users/synthetic/private-note.md)\n\n[Safe](https://example.com/notice)`
+    const content = `# Draft\n\n/Users/synthetic/private-note.md\n\n13800138000\n\n\`\`\`/Users/synthetic/private-language\nsafe\n\`\`\`\n\n[Contact](mailto:alice@example.com)\n\n[](/Users/synthetic/private-note.md)\n\n[Safe](https://example.com/notice)`
     const html = await buildWriteClipboardHtmlFragment({ sourcePath, workspaceRoot, content })
-    expect(html).toContain(`src="data:image/png;base64,${image.toString('base64')}"`)
-    const referenceHtml = await buildWriteClipboardHtmlFragment({ sourcePath, workspaceRoot, content: `![Cover][cover]\n\n[cover]: ${imagePath}` })
-    expect(referenceHtml).toContain(`src="data:image/png;base64,${image.toString('base64')}"`)
-    expect(referenceHtml).not.toContain(workspaceRoot)
+    expect(html).not.toContain('<img')
     expect(html).toContain('https://example.com/notice')
     for (const privateText of [workspaceRoot, 'private-note.md', '13800138000', 'alice@example.com', 'private-language']) expect(html).not.toContain(privateText)
 
@@ -618,7 +606,7 @@ describe('write-export-service helpers', () => {
     const result = await exportWriteDocument({ path: sourcePath, format: 'docx', content }, { workspaceRoot })
     expect(result.ok).toBe(true)
     const zip = await JSZip.loadAsync(await readFile(targetPath))
-    expect(Object.keys(zip.files).filter((path) => path.startsWith('word/media/') && !zip.files[path].dir)).toHaveLength(1)
+    expect(Object.keys(zip.files).filter((path) => path.startsWith('word/media/') && !zip.files[path].dir)).toHaveLength(0)
     const xml = (await Promise.all(Object.values(zip.files).filter((file) => /\.xml$|\.rels$/.test(file.name)).map((file) => file.async('string')))).join('\n')
     expect(xml).toContain('https://example.com/notice')
     for (const privateText of [workspaceRoot, 'private-note.md', '13800138000', 'alice@example.com', 'private-language']) expect(xml).not.toContain(privateText)
@@ -628,7 +616,7 @@ describe('write-export-service helpers', () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
     await writeFile(sourcePath, '# Draft')
     const result = await copyWriteDocumentAsRichText({ path: sourcePath, content: `![Safe](https://example.test/${identifier}.png)` }, { workspaceRoot })
-    expect(result).toEqual({ ok: false, message: 'Write export image URL contains private content and was blocked.' })
+    expect(result).toEqual({ ok: false, message: 'Write export cannot include images because image content privacy checks are unavailable.' })
     expect(clipboard.write).not.toHaveBeenCalled()
   })
 
@@ -651,7 +639,7 @@ describe('write-export-service helpers', () => {
 
       expect(result).toEqual({
         ok: false,
-        message: 'Write export local image is unavailable.'
+        message: 'Write export cannot include images because image content privacy checks are unavailable.'
       })
       expect(clipboard.write).not.toHaveBeenCalled()
       expect(JSON.stringify(result)).not.toContain(outsideRoot)
@@ -895,9 +883,7 @@ describe('write-export-service helpers', () => {
 
   it('does not publish after the Main-owned clipboard authority changes', async () => {
     const sourcePath = join(workspaceRoot, 'draft.md')
-    const imagePath = join(workspaceRoot, 'cover.png')
     await writeFile(sourcePath, '# Draft', 'utf8')
-    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
     const authorityCurrent = vi.fn()
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false)
@@ -905,7 +891,7 @@ describe('write-export-service helpers', () => {
     const result = await copyWriteDocumentAsRichText({
       path: sourcePath,
       workspaceRoot: '/tmp/renderer-forged-workspace',
-      content: '# Draft\n\n![Cover](./cover.png)'
+      content: '# Draft\n\n**Ordinary text**'
     }, { workspaceRoot, authorityCurrent })
 
     expect(result).toEqual({

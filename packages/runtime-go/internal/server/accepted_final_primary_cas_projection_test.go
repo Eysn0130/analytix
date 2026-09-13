@@ -17,6 +17,7 @@ import (
 	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type durablePrimaryCASProjectionFixture struct {
@@ -36,7 +37,7 @@ type durablePrimaryCASProjectionFixture struct {
 
 func newDurablePrimaryCASProjectionFixture(t *testing.T, largeProjectionNumber bool) durablePrimaryCASProjectionFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	durableRoot := filepath.Join(root, "durable")
 	privateRoot := filepath.Join(root, "private")
 	store, err := NewTempDurableEventSessionStore(durableRoot)

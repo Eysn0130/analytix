@@ -285,7 +285,7 @@ func TestWorkspacePatchAdvancesAuthorityForNextProviderDispatch(t *testing.T) {
 }
 
 func TestResearchTurnMaterializesMissingWorkspaceBeforeAuthorityFreeze(t *testing.T) {
-	parent, err := filepath.EvalSymlinks(t.TempDir())
+	parent, err := filepath.EvalSymlinks(workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

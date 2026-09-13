@@ -230,7 +230,7 @@ func TestRuntimeWitnessedEvidenceRegistryV2RestartAndOptionalCapabilityRecovery(
 		}
 		server := httptest.NewServer(initial)
 		status, thread := runtimeSharedEvidenceHTTPJSON(t, server.URL, http.MethodPost, "/v1/threads", map[string]any{
-			"title": "ordinary witnessed registry restart", "workspace": t.TempDir(),
+			"title": "ordinary witnessed registry restart", "workspace": workspacetest.New(t),
 			"providerId": config.ProviderID, "model": config.Model,
 		})
 		threadID, _ := thread["id"].(string)
@@ -930,7 +930,7 @@ func runtimeWitnessedRegistryAssertBlockedCaseAndOrdinaryRestartV2(
 		t.Fatalf("blocked case registry stopped ordinary health: status=%d body=%#v", status, health)
 	}
 
-	ordinaryWorkspace := t.TempDir()
+	ordinaryWorkspace := workspacetest.New(t)
 	status, ordinaryThread := runtimeSharedEvidenceHTTPJSON(t, runtimeServer.URL, http.MethodPost, "/v1/threads", map[string]any{
 		"title": "ordinary work with blocked case registry", "workspace": ordinaryWorkspace,
 		"providerId": config.ProviderID, "model": config.Model,
@@ -947,7 +947,7 @@ func runtimeWitnessedRegistryAssertBlockedCaseAndOrdinaryRestartV2(
 		t.Fatalf("ordinary blocked-registry turn did not reach provider: status=%d calls=%d body=%#v", status, providerCalls.Load(), ordinaryTurn)
 	}
 
-	caseWorkspace := t.TempDir()
+	caseWorkspace := workspacetest.New(t)
 	runtimeSharedEvidenceWriteCaseBindingV2(t, caseWorkspace)
 	status, caseThread := runtimeSharedEvidenceHTTPJSON(t, runtimeServer.URL, http.MethodPost, "/v1/threads", map[string]any{
 		"title": "case work with blocked registry", "workspace": caseWorkspace,
