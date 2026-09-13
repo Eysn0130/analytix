@@ -71,6 +71,7 @@ type Props = {
   input: string; setInput: (value: string) => void
   onSubmitPrompt?: (value: string) => void
   onOpenAgentSettings?: () => void
+  onFocusConversation?: () => void
 }
 
 export function WriteWorkspaceView({
@@ -78,10 +79,10 @@ export function WriteWorkspaceView({
   input,
   setInput,
   onSubmitPrompt,
-  onOpenAgentSettings
+  onOpenAgentSettings,
+  onFocusConversation
 }: Props): ReactElement {
   const { t } = useTranslation('common')
-  const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   // Field-level subscription: this view must follow fileContent, but it should
@@ -271,6 +272,7 @@ export function WriteWorkspaceView({
 
   const setAssistantPrompt = (prompt: string): void => {
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInput(input.trim() ? `${input.trim()}\n\n${prompt}` : prompt)
   }
 
@@ -281,6 +283,7 @@ export function WriteWorkspaceView({
     // context in sendWritePrompt) so it never shows as raw text in the bubble.
     quoteCurrentSelection(workspaceRoot)
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInlineAgentValue('')
     if (onSubmitPrompt) {
       onSubmitPrompt(trimmed)
@@ -292,6 +295,7 @@ export function WriteWorkspaceView({
   const quoteSelectionToAssistant = (): void => {
     if (!workspaceReady || !activeFilePath) return
     quoteCurrentSelection(workspaceRoot)
+    onFocusConversation?.()
     setInlineAgentValue('')
   }
 
@@ -360,6 +364,18 @@ export function WriteWorkspaceView({
     }
     if (selection.ranges.length !== 1) {
       setFileError(t(selection.ranges.length > 1 ? 'writeInlineEditMultiSelection' : 'writeInlineEditNoSelection'))
+      return
+    }
+    if (onSubmitPrompt) {
+      const snapshot = useWriteWorkspaceStore.getState()
+      if (!(await flushSave(workspaceRoot))) return
+      const current = useWriteWorkspaceStore.getState()
+      if (current.workspaceRoot !== snapshot.workspaceRoot || current.activeFilePath !== snapshot.activeFilePath ||
+          current.fileContent !== snapshot.fileContent || current.selection !== snapshot.selection) {
+        setFileError(t('workbenchReferenceChanged'))
+        return
+      }
+      submitInlineAgent(trimmed)
       return
     }
     if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') {
@@ -649,7 +665,6 @@ export function WriteWorkspaceView({
       const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || undefined)
       if (!picked.canceled && picked.path) {
         await addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
       }
     } catch (error) {
       setFileError(formatWorkspacePickerError(error))
@@ -826,19 +841,20 @@ export function WriteWorkspaceView({
   // already on disk) instead of overwriting the document.
   useEffect(() => {
     if (!pendingAgentReview) return
+    if (previewMode !== 'source') {
+      setPreviewMode('source')
+      return
+    }
+    const editor = markdownHandleRef.current
+    if (!editor) return
     const nextContent = pendingAgentReview.nextContent
-    clearPendingAgentReview()
     const baseline = useWriteWorkspaceStore.getState().fileContent
-    const started = markdownHandleRef.current?.beginDiffReview({
+    const started = editor.beginDiffReview({
       original: baseline,
       nextDoc: nextContent
-    }) ?? false
-    if (!started) {
-      // Rich mode / no source editor / identical content: apply directly.
-      setFileContent(nextContent)
-      setReviewActive(false)
-    }
-  }, [pendingAgentReview, clearPendingAgentReview, setFileContent, setReviewActive])
+    })
+    if (started || baseline === nextContent) clearPendingAgentReview()
+  }, [pendingAgentReview, previewMode, setPreviewMode, clearPendingAgentReview, setFileContent, setReviewActive])
 
   useEffect(() => {
     if (saveTimerRef.current) {
@@ -999,7 +1015,7 @@ export function WriteWorkspaceView({
         saveLabel={saveLabel}
         saveStatus={saveStatus}
         reviewActive={reviewActive}
-        setAssistantOpen={setAssistantOpen}
+        setAssistantOpen={(open) => { setAssistantOpen(open); onFocusConversation?.() }}
         setExportMenuOpen={setExportMenuOpen}
         setModeMenuOpen={setModeMenuOpen}
         setPreviewMode={setPreviewMode}

@@ -1,4 +1,12 @@
 {
+  "workbenchCloseDocument": "Close document",
+  "workbenchReopenDocument": "Reopen recent document",
+  "workbenchDocuments": "Documents",
+  "workbenchDock": "Dock workspace",
+  "workbenchFocus": "Focus workspace",
+  "workbenchCollapse": "Collapse workspace",
+  "workbenchReferences": "Selected references",
+  "workbenchReferenceChanged": "The reference changed or belongs to a different conversation workspace. Select it again.",
   "appName": "Analytix",
   "runtimeStatusRestarting": "Analytix is restarting automatically…",
   "runtimeStatusRestartingAttempt": "Analytix is restarting automatically (attempt {{attempt}}/{{max}})…",

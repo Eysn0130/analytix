@@ -1,3 +1,5 @@
+import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
+import { isWriteTextFilePath } from '@shared/write-text-file'
 import type { CSSProperties, ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -60,7 +62,6 @@ import { ShellNavigationControls } from './shell/ShellNavigationControls'
 import { composeWritePrompt } from '../write/quoted-selection'
 import { resolveWriteAgentPreset } from '../write/agent-presets'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
-import { isWriteThreadId } from '../write/write-thread-registry'
 import { buildSddDraftId, createSddDraft, forgetRememberedSddDraft, useSddDraftStore } from '../sdd/sdd-draft-store'
 import type { SddDraft, SddDraftSaveStatus } from '../sdd/sdd-draft-store'
 import { listSddDraftHistory, titleFromSddDraftContent } from '../sdd/sdd-draft-history'
@@ -99,7 +100,6 @@ import {
 import { preloadSharedThreadSummary } from './summary/thread-summary-resource'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { useKeyboardShortcutSettings } from '../lib/keyboard-shortcut-settings'
-import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
 import { useUiModeCameosEnabled, useUiPluginStore } from '../store/ui-plugin-store'
 import { readFocusModePreference, writeFocusModePreference } from '../lib/focus-mode'
 import {
@@ -115,7 +115,6 @@ import {
   type ComposerFileContextEntry
 } from '../lib/composer-file-references'
 import { filesUnderDirectory, loadWorkspaceFileIndex } from '../lib/workspace-file-index'
-import { resolveWriteRuntimeBannerMessage } from '../lib/write-runtime-banner'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
 import { ChatTimelineIsland, useDevPreviewUrls } from './workbench/ChatTimelineIsland'
 import { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
@@ -128,7 +127,7 @@ import {
   ThreadSummaryPanelIsland,
   TodoPanel,
   WorkspaceFilePreviewPanel,
-  WriteAssistantPanelIsland,
+  DocumentWorkspacePanel,
   preloadRightPanelIsland
 } from './workbench/RightPanelIslands'
 import { WorkbenchResizeHandle } from './workbench/WorkbenchResizeHandle'
@@ -136,16 +135,10 @@ import { WorkbenchShell, WorkbenchStage } from './workbench/WorkbenchShell'
 import { useShellPanelMotion } from './workbench/useShellPanelMotion'
 import type { DataAnalysisItemId } from '../data-analysis/DataAnalysisSurface'
 
-const loadWriteWorkspaceView = () =>
-  import('./write/WriteWorkspaceView').then((module) => ({ default: module.WriteWorkspaceView }))
-const loadWriteSidebar = () =>
-  import('./write/WriteSidebar').then((module) => ({ default: module.WriteSidebar }))
 const loadSddDraftEditorView = () =>
   import('./sdd/SddDraftEditorView').then((module) => ({ default: module.SddDraftEditorView }))
 const loadDataAnalysisSurface = () =>
   import('../data-analysis/DataAnalysisSurface').then((module) => ({ default: module.DataAnalysisSurface }))
-const WriteWorkspaceView = lazy(loadWriteWorkspaceView)
-const WriteSidebar = lazy(loadWriteSidebar)
 const SddDraftEditorView = lazy(loadSddDraftEditorView)
 const DataAnalysisSurface = lazy(loadDataAnalysisSurface)
 
@@ -177,7 +170,7 @@ type PendingSddPlanTarget = {
   workspaceRoot: string
 }
 
-type DockedRightPanelRenderMode = Exclude<RightPanelMode, null | 'summary'> | 'write-assistant'
+type DockedRightPanelRenderMode = Exclude<RightPanelMode, null | 'summary'>
 type WorkbenchLoadingSurface = 'main' | 'sidebar' | 'surface'
 type SummaryDisplayMode = 'overlay' | 'shift' | 'gutter'
 
@@ -580,8 +573,6 @@ export function Workbench(): ReactElement {
     setRoute,
     openCode,
     openWrite,
-    ensureWriteThreadForWorkspace,
-    createWriteThread,
     openSettings,
     openPlugins,
     openClaw,
@@ -645,8 +636,6 @@ export function Workbench(): ReactElement {
       setRoute: s.setRoute,
       openCode: s.openCode,
       openWrite: s.openWrite,
-      ensureWriteThreadForWorkspace: s.ensureWriteThreadForWorkspace,
-      createWriteThread: s.createWriteThread,
       openSettings: s.openSettings,
       openPlugins: s.openPlugins,
       openClaw: s.openClaw,
@@ -714,7 +703,6 @@ export function Workbench(): ReactElement {
   const [timelineReturnToBottomState, setTimelineReturnToBottomState] =
     useState<TimelineReturnToBottomState | null>(null)
   const writeAssistantOpen = useWriteWorkspaceStore((s) => s.assistantOpen)
-  const setWriteAssistantOpen = useWriteWorkspaceStore((s) => s.setAssistantOpen)
   const writeAssistantModel = useWriteWorkspaceStore((s) => s.assistantModel)
   const writeAssistantProviderId = useWriteWorkspaceStore((s) => s.assistantProviderId)
   const setWriteAssistantModel = useWriteWorkspaceStore((s) => s.setAssistantModel)
@@ -912,6 +900,45 @@ export function Workbench(): ReactElement {
   })
   const sideChatInspectorOpen =
     rightPanelMode === 'child-agent' && subagentInspector?.parentThreadId === activeThreadId
+  const [documentsMounted, setDocumentsMounted] = useState(false)
+  const [documentFocused, setDocumentFocused] = useState(false)
+  const documentQuotes = useWriteWorkspaceStore((state) => state.quotedSelections)
+  useEffect(() => {
+    if (route !== 'write' && rightPanelMode !== 'documents') return
+    let cancelled = false
+    const root = activeThread?.workspace || workspaceRoot
+    void (async () => {
+      if (root) await useWriteWorkspaceStore.getState().initializeWorkspace(root)
+      if (cancelled) return
+      setDocumentsMounted(true)
+      setRightPanelMode('documents')
+      setRightSidebarWidth((width) => Math.max(width, 640))
+      if (route === 'write') useChatStore.getState().setRoute('chat')
+    })()
+    return () => { cancelled = true }
+  }, [activeThread?.workspace, route, rightPanelMode, workspaceRoot, setRightPanelMode, setRightSidebarWidth])
+
+  useEffect(() => {
+    if (rightPanelMode !== 'file' || !filePreviewTarget || !isWriteTextFilePath(filePreviewTarget.path)) return
+    let cancelled = false
+    const target = filePreviewTarget
+    const root = target.workspaceRoot || workspaceRoot
+    void (async () => {
+      await useWriteWorkspaceStore.getState().initializeWorkspace(root)
+      if (cancelled || useWriteWorkspaceStore.getState().workspaceRoot !== root) return
+      await useWriteWorkspaceStore.getState().openFile(root, target.path)
+      if (cancelled) return
+      setDocumentsMounted(true)
+      setRightPanelMode('documents')
+    })()
+    return () => { cancelled = true }
+  }, [filePreviewTarget, rightPanelMode, workspaceRoot, setRightPanelMode])
+
+  useEffect(() => {
+    useWriteWorkspaceStore.getState().clearQuotedSelections()
+    setDocumentFocused(false)
+  }, [activeThreadId, workspaceRoot])
+
   const workbenchShellStyle = useMemo(
     () => ({ '--ds-shell-navigation-sidebar-width': `${leftSidebarWidth}px` }) as CSSProperties,
     [leftSidebarWidth]
@@ -938,8 +965,6 @@ export function Workbench(): ReactElement {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadWriteWorkspaceView()
-      void loadWriteSidebar()
       void loadPluginMarketplaceView()
       void loadScheduleTasksView()
       preloadRightPanelIsland('todo')
@@ -1052,8 +1077,7 @@ export function Workbench(): ReactElement {
 
   useEffect(() => {
     if (route === 'write') {
-      void loadWriteWorkspaceView()
-      void loadWriteSidebar()
+      preloadRightPanelIsland('documents')
       return
     }
     if (route === 'plugins') {
@@ -1452,7 +1476,6 @@ export function Workbench(): ReactElement {
 
   const codeThreads = useMemo(
     () => threads.filter((thread) =>
-      !isWriteThreadId(thread.id) &&
       !isClawThread(thread, clawChannels) &&
       !isSddAssistantThread(thread)
     ),
@@ -1577,10 +1600,10 @@ export function Workbench(): ReactElement {
 
   const selectedComposerModel = route === 'claw'
     ? activeClawChannel?.model ?? 'auto'
-    : route === 'write' || rightPanelMode === 'sdd-ai'
+    : rightPanelMode === 'sdd-ai'
       ? writeAssistantModel
     : composerModel
-  const selectedComposerProviderId = route === 'write' || rightPanelMode === 'sdd-ai'
+  const selectedComposerProviderId = rightPanelMode === 'sdd-ai'
     ? resolvedWriteAssistantProviderId
     : route === 'chat'
       ? composerProviderId
@@ -1631,10 +1654,6 @@ export function Workbench(): ReactElement {
     const writeWorkspace = useWriteWorkspaceStore.getState().workspaceRoot
     if (route === 'write' && writeWorkspace.trim()) return writeWorkspace
     return threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot || undefined
-  }
-
-  const clearComposerFileReferences = (): void => {
-    setComposerFileReferences([])
   }
 
   const addComposerFileReference = (reference: ComposerFileReference): void => {
@@ -1849,85 +1868,7 @@ export function Workbench(): ReactElement {
   }
 
   const sendWritePrompt = (value: string): void => {
-    const v = value.trim()
-    const attachments = composerAttachments
-    const imageAttachments = attachments.filter((attachment) => attachment.kind === 'image')
-    const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
-    const attachmentIds = attachments.map((attachment) => attachment.id)
-    const publicAttachments = projectAttachmentReferencesForPublicSurfaces(attachments)
-    if (!v && attachmentIds.length === 0 && documentAttachments.length === 0) return
-    if (attachmentIds.length > 0 && !attachmentUploadEnabled) {
-      setAttachmentUploadError(t('composerAttachmentModelUnsupported'))
-      return
-    }
-    if (imageAttachments.length > 0 && !imageAttachmentUploadEnabled) {
-      setAttachmentUploadError(t('composerAttachmentModelUnsupported'))
-      return
-    }
-    const writeState = useWriteWorkspaceStore.getState()
-    const writeWorkspaceRoot = writeState.workspaceRoot || workspaceRoot
-    setInput('')
-    void (async () => {
-      const threadId = await ensureWriteThreadForWorkspace(writeWorkspaceRoot)
-      if (!threadId) {
-        setInput(v)
-        return
-      }
-      const retrievalQuery = [
-        ...writeState.quotedSelections.map((selection) => selection.text),
-        v
-      ].join('\n\n').trim()
-      let retrieval: WriteRetrievalContext | null = null
-      if (retrievalQuery && typeof window.analytix?.write?.retrieveWriteContext === 'function') {
-        try {
-          const result = await window.analytix.write.retrieveWriteContext({
-            workspaceRoot: writeWorkspaceRoot,
-            currentFilePath: writeState.activeFilePath ?? undefined,
-            query: retrievalQuery,
-            maxSnippets: 4,
-            includeCurrentFile: true
-          })
-          if (result.ok) retrieval = result.context
-        } catch (error) {
-          void window.analytix?.logs?.error?.('write-retrieval', 'Failed to retrieve write context', {
-            message: error instanceof Error ? error.message : String(error)
-          })
-        }
-      }
-      const messageText = v || (documentAttachments.length > 0
-        ? t('composerFileOnlyPrompt')
-        : t('composerImageOnlyPrompt'))
-      const activeAgentPreset = writeState.agentPresets.find(
-        (preset) => preset.id === writeState.assistantAgentPresetId
-      )
-      const agentPersona = activeAgentPreset ? resolveWriteAgentPreset(activeAgentPreset).persona : ''
-      const prompt = composeWritePrompt(messageText, writeState.quotedSelections, {
-        workspaceRoot: writeWorkspaceRoot,
-        activeFilePath: writeState.activeFilePath,
-        retrieval,
-        ...(agentPersona ? { agentPersona } : {})
-      })
-      const model = writeState.assistantModel.trim()
-      const providerId =
-        writeState.assistantProviderId.trim() || providerIdForComposerModel(composerModelGroups, model)
-      const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
-      const sent = await sendMessage(prompt, mode === 'plan' ? 'plan' : 'agent', {
-        ...(!v && documentAttachments.length > 0
-          ? { displayText: t('composerFileOnlyDisplay', { count: documentAttachments.length }) }
-          : !v && attachmentIds.length > 0
-            ? { displayText: t('composerImageOnlyDisplay') }
-            : {}),
-        ...(model ? { model } : {}),
-        ...(providerId ? { providerId } : {}),
-        ...(reasoningEffort ? { reasoningEffort } : {}),
-        ...(attachmentIds.length ? { attachmentIds } : {}),
-        ...(publicAttachments.length ? { attachments: publicAttachments } : {})
-      })
-      if (sent) {
-        useWriteWorkspaceStore.getState().clearQuotedSelections()
-        if (attachmentIds.length > 0) clearComposerAttachments()
-      }
-    })()
+    void handleSendAsync(value)
   }
 
   const createSddAssistantThreadForDraft = async (draft: SddDraft): Promise<string | null> => {
@@ -2651,17 +2592,40 @@ export function Workbench(): ReactElement {
     void handleSendAsync()
   }
 
-  const handleSendAsync = async (): Promise<void> => {
-    const v = input.trim()
+  const handleSendAsync = async (overrideInput?: string): Promise<void> => {
+    const v = (overrideInput ?? input).trim()
+    const documentState = useWriteWorkspaceStore.getState()
+    const frozenQuotes = [...documentState.quotedSelections]
+    const documentContext = frozenQuotes.length > 0 || overrideInput !== undefined ||
+      (rightPanelMode === 'documents' && documentState.activeFilePath !== null)
+    const currentReferenceSnapshot = () => {
+      const chat = useChatStore.getState()
+      const doc = useWriteWorkspaceStore.getState()
+      return {
+        threadId: chat.activeThreadId,
+        threadWorkspace: chat.threads.find((thread) => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot,
+        documentWorkspace: doc.workspaceRoot, filePath: doc.activeFilePath,
+        content: doc.activeFileKind === 'pdf' ? String(doc.pdfMtimeMs) : doc.fileContent
+      }
+    }
+    const frozenReference = { ...currentReferenceSnapshot(), quotes: frozenQuotes, documentContext }
+    const referenceCurrent = () => workbenchReferencesCurrent(frozenReference, currentReferenceSnapshot())
+    if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
     const attachments = route === 'chat' || route === 'write' ? composerAttachments : []
     const imageAttachments = attachments.filter((attachment) => attachment.kind === 'image')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
     const attachmentIds = attachments.map((attachment) => attachment.id)
     const publicAttachments = projectAttachmentReferencesForPublicSurfaces(attachments)
     const fileReferences = route === 'chat' ? composerFileReferences : []
+    const clearSubmittedDraft = (): void => {
+      if (overrideInput === undefined) setInput((current) => current === input ? '' : current)
+      setComposerAttachments((current) => current.filter((attachment) => !attachmentIds.includes(attachment.id)))
+      setComposerFileReferences((current) => current.filter((reference) => !fileReferences.includes(reference)))
+      for (const quote of frozenQuotes) useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)
+    }
     const runtimeFileReferences = runtimeFileReferencesFromComposer(fileReferences)
     const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
-    if (!v && attachmentIds.length === 0 && documentAttachments.length === 0 && fileReferences.length === 0) return
+    if (!v && attachmentIds.length === 0 && documentAttachments.length === 0 && fileReferences.length === 0 && frozenQuotes.length === 0) return
     if (attachmentIds.length > 0 && !attachmentUploadEnabled) {
       setAttachmentUploadError(t('composerAttachmentModelUnsupported'))
       return
@@ -2684,12 +2648,32 @@ export function Workbench(): ReactElement {
         : contextAttachmentCount > 0
           ? t('composerFileOnlyDisplay', { count: contextAttachmentCount })
           : t('composerImageOnlyDisplay')
-    const messageText = v || emptyPrompt
+    const rawMessageText = v || (frozenQuotes.length ? t('composerFileOnlyPrompt') : emptyPrompt)
+    const activePreset = documentState.agentPresets.find((preset) => preset.id === documentState.assistantAgentPresetId)
     const prepareChatMessage = async (): Promise<{
       text: string
       displayText?: string
       fileReferences?: UserFileReference[]
     } | null> => {
+      let retrieval: WriteRetrievalContext | null = null
+      if (documentContext && typeof window.analytix?.write?.retrieveWriteContext === 'function') {
+        try {
+          const result = await window.analytix.write.retrieveWriteContext({
+            workspaceRoot: documentState.workspaceRoot,
+            currentFilePath: documentState.activeFilePath ?? undefined,
+            query: [...frozenQuotes.map((quote) => quote.text), rawMessageText].join('\n\n'),
+            maxSnippets: 4,
+            includeCurrentFile: true
+          })
+          if (result.ok) retrieval = result.context
+        } catch {
+          // Retrieval is optional; the frozen selection remains available.
+        }
+      }
+      const messageText = documentContext ? composeWritePrompt(rawMessageText, frozenQuotes, {
+        workspaceRoot: documentState.workspaceRoot, activeFilePath: documentState.activeFilePath, retrieval,
+        ...(activePreset ? { agentPersona: resolveWriteAgentPreset(activePreset).persona } : {})
+      }) : rawMessageText
       if (fileReferences.length === 0) {
         return {
           text: messageText,
@@ -2730,12 +2714,10 @@ export function Workbench(): ReactElement {
     if (route === 'chat' && mode === 'plan') {
       const prepared = await prepareChatMessage()
       if (!prepared) return
-      setInput('')
-      clearComposerAttachments()
-      clearComposerFileReferences()
-      const model = writeAssistantModel.trim()
-      const providerId = resolvedWriteAssistantProviderId.trim()
-      void sendPlanTurn(prepared.text, {
+      if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
+      const model = composerModel.trim()
+      const providerId = composerProviderId.trim()
+      const sent = await sendPlanTurn(prepared.text, {
         ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
         ...(model ? { model } : {}),
         ...(providerId ? { providerId } : {}),
@@ -2744,10 +2726,9 @@ export function Workbench(): ReactElement {
         ...(publicAttachments.length ? { attachments: publicAttachments } : {}),
         ...(prepared.fileReferences?.length ? { fileReferences: prepared.fileReferences } : {})
       })
-      return
-    }
-    if (route === 'write') {
-      sendWritePrompt(v)
+      if (sent) {
+        clearSubmittedDraft()
+      }
       return
     }
     if (route === 'claw') {
@@ -2842,16 +2823,17 @@ export function Workbench(): ReactElement {
     }
     const prepared = await prepareChatMessage()
     if (!prepared) return
-    setInput('')
-    clearComposerAttachments()
-    clearComposerFileReferences()
-    void sendMessage(prepared.text, mode === 'plan' ? 'plan' : 'agent', {
+    if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
+    const sent = await sendMessage(prepared.text, mode === 'plan' ? 'plan' : 'agent', {
       ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),
       ...(publicAttachments.length ? { attachments: publicAttachments } : {}),
       ...(prepared.fileReferences?.length ? { fileReferences: prepared.fileReferences } : {})
     })
+    if (sent) {
+      clearSubmittedDraft()
+    }
   }
 
   const mainComposerModel =
@@ -2964,7 +2946,6 @@ export function Workbench(): ReactElement {
   const openWriteMode = (): void => {
     setConnectPhoneSidebarOpen(false)
     void (async () => {
-      await useWriteWorkspaceStore.getState().openWorkspaceHome()
       await openWrite()
     })()
   }
@@ -3097,41 +3078,9 @@ export function Workbench(): ReactElement {
         : 'chat'
 
   const closeRightPanel = (): void => {
-    if (route === 'write') {
-      setWriteAssistantOpen(false)
-      return
-    }
-    if (rightPanelMode === 'file') setOpenFilePreviewTargets([])
+    setDocumentFocused(false)
     if (rightPanelMode === 'child-agent') setSubagentInspector(null)
     setRightPanelMode(null)
-    setFilePreviewTarget(null)
-  }
-
-  const startNewWriteAssistantConversation = (): void => {
-    const writeState = useWriteWorkspaceStore.getState()
-    const writeWorkspaceRoot = writeState.workspaceRoot || workspaceRoot
-    setInput('')
-    writeState.clearQuotedSelections()
-    void createWriteThread(writeWorkspaceRoot)
-  }
-
-  const pickWriteAssistantWorkspace = async (): Promise<void> => {
-    try {
-      const writeState = useWriteWorkspaceStore.getState()
-      writeState.setFileError(null)
-      if (typeof window.analytix?.workspace?.pickDirectory !== 'function') {
-        throw new Error('workspace:pick-directory unavailable')
-      }
-      const picked = await window.analytix.workspace.pickDirectory(
-        writeState.workspaceRoot || writeState.defaultWorkspaceRoot || workspaceRoot || undefined
-      )
-      if (!picked.canceled && picked.path) {
-        await useWriteWorkspaceStore.getState().addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
-      }
-    } catch (error) {
-      useWriteWorkspaceStore.getState().setFileError(formatWorkspacePickerError(error))
-    }
   }
 
   const renderRuntimeBanner = (message: string, detail?: string | null): ReactElement => (
@@ -3152,11 +3101,6 @@ export function Workbench(): ReactElement {
     />
   )
 
-  const writeRuntimeBannerMessage = resolveWriteRuntimeBannerMessage({
-    runtimeConnection,
-    error,
-    runtimeActionNeedsConnection: t('runtimeActionNeedsConnection')
-  })
   const rightPanelDockedVisible = rightPanelVisible && !planPanelInOverlay
   const fileTreeSidePanelVisible = fileTreeSidePanelOpen && route === 'chat' && !activeSddDraft && !activeDataAnalysis
   const fileTreeSidePanelMotion = useShellPanelMotion({
@@ -3167,11 +3111,7 @@ export function Workbench(): ReactElement {
     ? fileTreeSidePanelMotion.animatedSize + 24 * fileTreeSidePanelMotion.progress
     : 0
   const currentDockedRightPanelMode: DockedRightPanelRenderMode | null =
-    route === 'write' && writeAssistantOpen
-      ? 'write-assistant'
-      : rightPanelMode === 'summary'
-        ? null
-        : rightPanelMode
+    rightPanelMode === 'summary' ? null : rightPanelMode
   const rightPanelMotion = useShellPanelMotion({
     isVisible: rightPanelDockedVisible,
     size: rightSidebarWidth
@@ -3289,7 +3229,7 @@ export function Workbench(): ReactElement {
   }
 
   const renderRightPanel = (): ReactElement | null => {
-    if (!rightPanelDockedVisible && !rightPanelMotion.isMounted) return null
+    if (!rightPanelDockedVisible && !rightPanelMotion.isMounted && !documentsMounted) return null
     const panelMode = rightPanelDockedVisible ? currentDockedRightPanelMode : rightPanelRenderMode
 
     return (
@@ -3301,7 +3241,8 @@ export function Workbench(): ReactElement {
         aria-hidden={!rightPanelDockedVisible}
         style={{
           opacity: rightPanelMotion.opacity,
-          width: rightPanelMotion.animatedSize
+          width: documentFocused && rightPanelMode === 'documents' ? 'auto' : rightPanelMotion.animatedSize,
+          ...(documentFocused && rightPanelMode === 'documents' ? { position: 'absolute', inset: '48px 8px 8px 8px', height: 'auto', zIndex: 60 } as const : {})
         }}
       >
         {rightPanelDockedVisible ? (
@@ -3317,45 +3258,21 @@ export function Workbench(): ReactElement {
           <div
             ref={rightPaneContentRef}
             className="ds-right-sidebar-pane-content"
-            style={{ minWidth: rightSidebarWidth, width: rightSidebarWidth }}
+            style={{ minWidth: documentFocused ? 0 : rightSidebarWidth, width: documentFocused ? '100%' : rightSidebarWidth }}
           >
             <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
-              {panelMode === 'write-assistant' ? (
-                <WriteAssistantPanelIsland
-                  input={input}
-                  setInput={setInput}
-                  mode={mode}
-                  setMode={setMode}
-                  busy={busy}
-                  runtimeConnection={runtimeConnection}
-                  activeThreadId={activeThreadId}
-                  composerModel={writeAssistantModel}
-                  composerProviderId={resolvedWriteAssistantProviderId}
-                  composerPickList={writeAssistantPickList}
-                  composerModelGroups={composerModelGroups}
-                  composerReasoningEffort={composerReasoningEffort}
-                  setComposerModel={setWriteAssistantModel}
-                  setComposerReasoningEffort={setComposerReasoningEffort}
-                  queuedMessages={queuedMessages}
-                  removeQueuedMessage={removeQueuedMessage}
-                  attachments={composerAttachments}
-                  attachmentUploadEnabled={attachmentUploadEnabled}
-                  attachmentUploadBusy={attachmentUploadBusy}
-                  attachmentUploadError={attachmentUploadError}
-                  onPickAttachments={(files) => void handlePickAttachments(files)}
-                  onPasteClipboardImage={(options) => void handlePasteClipboardImage(options)}
-                  onRemoveAttachment={removeComposerAttachment}
-                  onSend={handleSend}
-                  onInterrupt={(options) => void interrupt(options)}
-                  onRetryConnection={() => void probeRuntime('user', { restart: true })}
-                  onOpenSettings={() => openSettings('agents')}
-                  onConfigureProviders={() => openSettings('providers')}
-                  onNewConversation={startNewWriteAssistantConversation}
-                  onPickWorkspace={() => void pickWriteAssistantWorkspace()}
-                  onCollapse={closeRightPanel}
-                  className="h-full max-h-full w-full"
-                />
-              ) : panelMode === 'child-agent' && activeSubagentInspector ? (
+              {documentsMounted ? (
+                <div className="h-full min-h-0" hidden={panelMode !== 'documents'}>
+                  <DocumentWorkspacePanel input={input} setInput={setInput} onSubmitPrompt={sendWritePrompt}
+                    focused={documentFocused} onToggleFocus={() => setDocumentFocused((value) => !value)}
+                    onCollapse={closeRightPanel} onOpenSettings={() => openSettings('write')}
+                    onFocusConversation={() => {
+                      setDocumentFocused(false)
+                      requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor .cm-content')?.focus())
+                    }} />
+                </div>
+              ) : null}
+              {panelMode === 'child-agent' && activeSubagentInspector ? (
                 <SubagentInspectorPanelIsland
                   subagents={activeSubagentInspector.subagents}
                   selectedKey={activeSubagentInspector.selectedKey}
@@ -3548,18 +3465,6 @@ export function Workbench(): ReactElement {
             style={{ minWidth: leftSidebarWidth, width: leftSidebarWidth }}
           >
             {leftSidebarMounted ? (
-              route === 'write' ? (
-                <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
-                  <WriteSidebar
-                    activeView="write"
-                    connectPhoneSidebarOpen={connectPhoneSidebarOpen}
-                    onCodeOpen={openCodeMode}
-                    onWriteOpen={openWriteMode}
-                    onOpenSettings={(section) => openSettings(section)}
-                    onToggleConnectPhone={toggleConnectPhone}
-                  />
-                </Suspense>
-              ) : (
                 <Sidebar
 		                  threads={codeThreads}
 		                  caseProjects={caseProjects}
@@ -3599,7 +3504,6 @@ export function Workbench(): ReactElement {
                   onWriteOpen={openWriteMode}
                   onScheduleOpen={openScheduleView}
                 />
-              )
             ) : null}
           </div>
         </div>
@@ -3625,22 +3529,6 @@ export function Workbench(): ReactElement {
               onOpenThread={openThread}
             />
           </Suspense>
-        ) : route === 'write' ? (
-          <>
-            {writeRuntimeBannerMessage ? renderRuntimeBanner(writeRuntimeBannerMessage, runtimeErrorDetail) : null}
-            <div className="flex min-h-0 flex-1">
-              <Suspense fallback={<WorkbenchLoadingFallback className="min-w-0 flex-1" />}>
-                <WriteWorkspaceView
-                  leftSidebarCollapsed={leftSidebarCollapsed}
-                  input={input}
-                  setInput={setInput}
-                  onSubmitPrompt={sendWritePrompt}
-                  onOpenAgentSettings={() => openSettings('write')}
-                />
-              </Suspense>
-              {renderRightPanel()}
-            </div>
-          </>
         ) : (
           <>
             <div className="flex min-h-0 flex-1">
@@ -3747,6 +3635,18 @@ export function Workbench(): ReactElement {
                           <div data-analytix-return-to-bottom-anchor className="relative h-0">
                             <ComposerReturnToBottomButton state={timelineReturnToBottomState} />
                           </div>
+                          {documentQuotes.length ? (
+                            <div className="mb-2 flex flex-wrap gap-2" aria-label={t('workbenchReferences')}>
+                              {documentQuotes.map((quote) => (
+                                <div key={quote.id} className="flex items-center gap-2 rounded-lg border border-ds-border px-2 py-1 text-xs">
+                                  <button type="button" onClick={() => setRightPanelMode('documents')} title={quote.text}>
+                                    {quote.sourceTitle} · {quote.lineStart ?? quote.pageStart ?? ''}–{quote.lineEnd ?? quote.pageEnd ?? ''}
+                                  </button>
+                                  <button type="button" aria-label={t('writeRemoveQuote')} onClick={() => useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)}>×</button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                           <FloatingComposerIsland
                             activeSkillWorkspace={activeSkillWorkspace}
                             className="max-w-none"

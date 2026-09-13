@@ -83,6 +83,7 @@ type FileBridgeTestOverrides = Partial<{
   renameWorkspaceEntry: Window['analytix']['files']['renameEntry']
   deleteWorkspaceEntry: Window['analytix']['files']['deleteEntry']
   readWorkspacePdf: Window['analytix']['files']['readPdf']
+  readWorkspaceFile: Window['analytix']['files']['read']
 }>
 
 function installDsGui(overrides: FileBridgeTestOverrides): void {
@@ -93,7 +94,8 @@ function installDsGui(overrides: FileBridgeTestOverrides): void {
         createFile: overrides.createWorkspaceFile,
         renameEntry: overrides.renameWorkspaceEntry,
         deleteEntry: overrides.deleteWorkspaceEntry,
-        readPdf: overrides.readWorkspacePdf
+        readPdf: overrides.readWorkspacePdf,
+        read: overrides.readWorkspaceFile
       }
     } as unknown as Window['analytix']
   })
@@ -104,6 +106,38 @@ afterEach(() => {
 })
 
 describe('write workspace file actions', () => {
+  it('discards an older open receipt after another document was opened', async () => {
+    let finishFirst!: (value: unknown) => void
+    const read = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+      .mockResolvedValueOnce({ ok: true, path: '/tmp/write/new.md', content: 'new', size: 3, truncated: false })
+    installDsGui({ readWorkspaceFile: read })
+    const { actions, get, set } = createHarness()
+    set({ workspaceRoot: '/tmp/write' })
+    const first = actions.openFile('/tmp/write', '/tmp/write/old.md')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+    await actions.openFile('/tmp/write', '/tmp/write/new.md')
+    finishFirst({ ok: true, path: '/tmp/write/old.md', content: 'old', size: 3, truncated: false })
+    await first
+    expect(get().activeFilePath).toBe('/tmp/write/new.md')
+    expect(get().fileContent).toBe('new')
+  })
+
+  it('does not reopen a document after the workspace home was selected', async () => {
+    let finishRead!: (value: unknown) => void
+    const read = vi.fn(() => new Promise((resolve) => { finishRead = resolve }))
+    installDsGui({ readWorkspaceFile: read as Window['analytix']['files']['read'] })
+    const { actions, get, set } = createHarness()
+    set({ workspaceRoot: '/tmp/write' })
+    const opening = actions.openFile('/tmp/write', '/tmp/write/old.md')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    expect(await actions.openWorkspaceHome('/tmp/write')).toBe(true)
+    finishRead({ ok: true, path: '/tmp/write/old.md', content: 'old', size: 3, truncated: false })
+    await opening
+    expect(get().activeFilePath).toBeNull()
+    expect(get().fileContent).toBe('')
+  })
+
   it('clears loading state and records list errors when directory IPC throws', async () => {
     installDsGui({
       listWorkspaceDirectory: vi.fn(async () => {

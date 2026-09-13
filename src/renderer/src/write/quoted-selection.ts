@@ -28,6 +28,9 @@ export type WriteQuotedSelection = {
   rects?: WriteSelectionPageRect[]
   charCount: number
   createdAt: string
+  /** Protected-local working copy, never serialized as authority or prompt metadata. */
+  workspaceRoot?: string
+  snapshotContent?: string
 }
 
 function normalizePath(value: string): string {

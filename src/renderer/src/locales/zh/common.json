@@ -1,4 +1,12 @@
 {
+  "workbenchCloseDocument": "关闭文档",
+  "workbenchReopenDocument": "重新打开最近文档",
+  "workbenchDocuments": "文档",
+  "workbenchDock": "恢复侧栏",
+  "workbenchFocus": "专注展开",
+  "workbenchCollapse": "折叠工作区",
+  "workbenchReferences": "本次引用",
+  "workbenchReferenceChanged": "引用已失效或不属于当前会话工作区，请重新选择。",
   "appName": "Analytix",
   "runtimeStatusRestarting": "Analytix 正在自动重启…",
   "runtimeStatusRestartingAttempt": "Analytix 正在自动重启(第 {{attempt}}/{{max}} 次)…",

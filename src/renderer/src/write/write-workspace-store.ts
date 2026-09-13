@@ -41,6 +41,7 @@ export { writeBasenameFromPath, writeDirnameFromPath, writeJoinPath, writeRelati
 
 const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
+let saveInFlight: Promise<boolean> | null = null
 let lastSavedContent = ''
 let externalSyncTimer: number | null = null
 let externalSyncAnimationToken = 0
@@ -296,41 +297,46 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   },
 
   flushSave: async (workspaceRoot) => {
-    const state = get()
-    if (!state.activeFilePath) return true
-    if (state.activeFileKind !== 'text') return true
-    if (state.fileTruncated) return false
-    if (externalSyncTimer !== null) {
-      cancelExternalSyncAnimation()
-      set({ fileContent: lastSavedContent, saveStatus: 'saved', fileError: null })
-      return true
+    // One write at a time. A caller switching documents must also persist edits
+    // made while an earlier save was awaiting its receipt.
+    if (saveInFlight) {
+      if (!(await saveInFlight)) return false
+      return get().flushSave(workspaceRoot)
     }
-    cancelExternalSyncAnimation()
+    const state = get()
+    if (!state.activeFilePath || state.activeFileKind !== 'text') return true
+    if (state.fileTruncated || state.reviewActive) return false
+    if (state.workspaceRoot && state.workspaceRoot !== workspaceRoot) return false
+    if (externalSyncTimer !== null) return false
     if (state.fileContent === lastSavedContent) {
       set({ saveStatus: 'saved' })
       return true
     }
+    cancelExternalSyncAnimation()
     set({ saveStatus: 'saving' })
-    try {
-      const result = await window.analytix.files.write({
-        path: state.activeFilePath,
-        workspaceRoot,
-        content: state.fileContent
-      })
-      if (!result.ok) {
-        set({ saveStatus: 'error', fileError: result.message })
+    const stillActive = (): boolean => get().activeFilePath === state.activeFilePath &&
+      get().workspaceRoot === state.workspaceRoot
+    const operation = (async (): Promise<boolean> => {
+      try {
+        const result = await window.analytix.files.write({
+          path: state.activeFilePath!, workspaceRoot, content: state.fileContent
+        })
+        if (!stillActive()) return false
+        if (!result.ok) {
+          set({ saveStatus: 'error', fileError: result.message })
+          return false
+        }
+        lastSavedContent = state.fileContent
+        const unchanged = get().fileContent === state.fileContent
+        set({ saveStatus: unchanged ? 'saved' : 'dirty', fileError: null })
+        return unchanged
+      } catch (error) {
+        if (stillActive()) set({ saveStatus: 'error', fileError: error instanceof Error ? error.message : String(error) })
         return false
       }
-      lastSavedContent = state.fileContent
-      set({ saveStatus: 'saved', fileError: null })
-      return true
-    } catch (error) {
-      set({
-        saveStatus: 'error',
-        fileError: error instanceof Error ? error.message : String(error)
-      })
-      return false
-    }
+    })()
+    saveInFlight = operation
+    try { return await operation } finally { if (saveInFlight === operation) saveInFlight = null }
   },
 
   setFileError: (message) => {
@@ -376,6 +382,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     if (!state.activeFilePath) return
     const quote = quotedSelectionFromEditor(state.selection, state.activeFilePath, workspaceRoot)
     if (!quote) return
+    quote.workspaceRoot = workspaceRoot
+    quote.snapshotContent = state.activeFileKind === 'pdf' ? String(state.pdfMtimeMs) : state.fileContent
     set((current) => ({
       assistantOpen: true,
       quotedSelections: [...current.quotedSelections, quote],
