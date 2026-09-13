@@ -10,7 +10,7 @@ import pluginMarketplaceViewSource from './PluginMarketplaceView.tsx?raw'
 import settingsShortcutsSource from './settings-section-shortcuts.tsx?raw'
 import sidebarSource from './chat/Sidebar.tsx?raw'
 import sidebarProjectsSectionSource from './chat/SidebarProjectsSection.tsx?raw'
-import workspaceModeTabsSource from './chat/WorkspaceModeTabs.tsx?raw'
+import documentWorkspacePanelSource from './workbench/DocumentWorkspacePanel.tsx?raw'
 import scheduleTasksViewSource from './schedule/ScheduleTasksView.tsx?raw'
 import sidebarPrimitivesSource from './sidebar/SidebarPrimitives.tsx?raw'
 import shellNavigationControlsSource from './shell/ShellNavigationControls.tsx?raw'
@@ -26,7 +26,7 @@ const topLevelRouteSurfaceSource = [
   pluginMarketplaceViewSource,
   sidebarSource,
   sidebarProjectsSectionSource,
-  workspaceModeTabsSource,
+  documentWorkspacePanelSource,
   writeSidebarSource,
   shellNavigationControlsSource,
   chatStoreTypesSource,
