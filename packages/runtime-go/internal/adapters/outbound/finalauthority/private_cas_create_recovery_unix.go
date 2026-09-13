@@ -66,7 +66,7 @@ func securePrivateCASObserveCreateResidueRecovery(
 	mode privateCASDirectoryRecoveryModeV1,
 	ownerScope string,
 	originals ...*PreparedSecurePrivateCASOriginalCreateResiduesV1,
-) (privateCASCreateResiduePreparedPlan, error) {
+) (result privateCASCreateResiduePreparedPlan, resultErr error) {
 	if err := privateCASContextError(ctx); err != nil {
 		return privateCASCreateResiduePreparedPlan{}, err
 	}
@@ -81,7 +81,12 @@ func securePrivateCASObserveCreateResidueRecovery(
 	if err != nil || !present {
 		return privateCASCreateResiduePreparedPlan{dataDirPresent: present}, err
 	}
-	defer unix.Close(dataDir)
+	defer func() {
+		if closeErr := unix.Close(dataDir); closeErr != nil {
+			result = privateCASCreateResiduePreparedPlan{}
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	dataIdentity, err := privateCASUnixCreateRecoveryDataDirExactIdentity(dataDir, binding.RootIdentity.Device)
 	if err != nil {
 		return privateCASCreateResiduePreparedPlan{}, err
@@ -92,6 +97,13 @@ func securePrivateCASObserveCreateResidueRecovery(
 		parents:        make([]privateCASCreateResidueUnixParent, 0, 51),
 		residues:       make([]privateCASCreateResidueUnixCandidate, 0),
 	}
+	// Names may be reused only within this observation. Every path is still
+	// freshly opened, and all observed directories are independently reread
+	// before accepting the plan. No existence or authority decision is cached.
+	inventory := privateCASCreateRecoveryNameInventory{
+		ctx: ctx, dataDir: dataDir, device: binding.RootIdentity.Device,
+		parents: make(map[string]privateCASCreateRecoveryParentNames),
+	}
 	for _, spec := range privateCASCreateResidueParentSpecsV1() {
 		inOwner := ownerScope == "" || spec.relativePath == ownerScope || strings.HasPrefix(spec.relativePath, ownerScope+"/")
 		if !inOwner && spec.relativePath != "." && !strings.HasPrefix(ownerScope, spec.relativePath+"/") {
@@ -100,11 +112,7 @@ func securePrivateCASObserveCreateResidueRecovery(
 		if err := privateCASContextError(ctx); err != nil {
 			return privateCASCreateResiduePreparedPlan{}, err
 		}
-		parent, parentPresent, err := privateCASUnixOpenCreateRecoveryParent(
-			dataDir,
-			spec.relativePath,
-			binding.RootIdentity.Device,
-		)
+		parent, parentPresent, err := inventory.openParent(spec.relativePath)
 		if err != nil {
 			return privateCASCreateResiduePreparedPlan{}, err
 		}
@@ -171,10 +179,137 @@ func securePrivateCASObserveCreateResidueRecovery(
 		}
 		return plan.residues[left].name < plan.residues[right].name
 	})
+	if err := inventory.revalidate(); err != nil {
+		return privateCASCreateResiduePreparedPlan{}, err
+	}
 	if original != nil && !privateCASOriginalCreateResiduePlansEqualV1(original.plan, original.projectV1(plan)) {
 		return privateCASCreateResiduePreparedPlan{}, errors.New("original orphan creation residue projection changed")
 	}
 	return plan, nil
+}
+
+type privateCASCreateRecoveryParentNames struct {
+	identity privateCASCreateResidueUnixExactIdentity
+	names    []string
+}
+
+type privateCASCreateRecoveryNameInventory struct {
+	ctx     context.Context
+	dataDir int
+	device  uint64
+	parents map[string]privateCASCreateRecoveryParentNames
+}
+
+func (inventory *privateCASCreateRecoveryNameInventory) identity(fd int, relative string) (privateCASCreateResidueUnixExactIdentity, error) {
+	if relative == "." {
+		return privateCASUnixCreateRecoveryDataDirExactIdentity(fd, inventory.device)
+	}
+	return privateCASUnixCreateRecoveryExactIdentity(fd, inventory.device)
+}
+
+func (inventory *privateCASCreateRecoveryNameInventory) readNames(fd int) ([]string, error) {
+	names := make([]string, 0)
+	err := privateCASUnixWalkDir(fd, func(entry os.DirEntry) error {
+		if err := privateCASContextError(inventory.ctx); err != nil {
+			return err
+		}
+		if len(names) >= maxPrivateCASCreateRecoveryDirectoryEntries {
+			return errors.New("private CAS Unix create-residue directory entry bound exceeded")
+		}
+		names = append(names, entry.Name())
+		return nil
+	})
+	sort.Strings(names)
+	return names, err
+}
+
+func (inventory *privateCASCreateRecoveryNameInventory) names(fd int, relative string) ([]string, error) {
+	if err := privateCASContextError(inventory.ctx); err != nil {
+		return nil, err
+	}
+	before, err := inventory.identity(fd, relative)
+	if err != nil {
+		return nil, err
+	}
+	if observed, present := inventory.parents[relative]; present {
+		if before != observed.identity {
+			return nil, errors.New("private CAS create-residue parent changed during observation")
+		}
+		return observed.names, nil
+	}
+	names, err := inventory.readNames(fd)
+	after, identityErr := inventory.identity(fd, relative)
+	if err != nil || identityErr != nil || before != after {
+		return nil, errors.Join(errors.New("private CAS create-residue parent changed while reading names"), err, identityErr)
+	}
+	inventory.parents[relative] = privateCASCreateRecoveryParentNames{identity: before, names: names}
+	return names, nil
+}
+
+func (inventory *privateCASCreateRecoveryNameInventory) openParent(relative string) (int, bool, error) {
+	if err := privateCASContextError(inventory.ctx); err != nil {
+		return -1, false, err
+	}
+	current, err := unix.Dup(inventory.dataDir)
+	if err != nil {
+		return -1, false, err
+	}
+	parentRelative := "."
+	if relative == "." {
+		return current, true, nil
+	}
+	for _, component := range strings.Split(relative, "/") {
+		names, err := inventory.names(current, parentRelative)
+		actual := ""
+		if err == nil {
+			for _, name := range names {
+				if strings.EqualFold(name, component) {
+					if actual != "" || name != component {
+						err = errors.New("private CAS Unix create-residue path aliases a component")
+						break
+					}
+					actual = name
+				}
+			}
+		}
+		next := -1
+		if err == nil && actual != "" {
+			next, err = privateCASUnixOpenObservedCreateRecoveryDirectory(current, component, inventory.device)
+		}
+		closeErr := unix.Close(current)
+		if err != nil || closeErr != nil || actual == "" {
+			if next >= 0 {
+				closeErr = errors.Join(closeErr, unix.Close(next))
+			}
+			return -1, false, errors.Join(err, closeErr)
+		}
+		current = next
+		parentRelative = path.Join(parentRelative, component)
+	}
+	return current, true, nil
+}
+
+func (inventory *privateCASCreateRecoveryNameInventory) revalidate() error {
+	for relative, observed := range inventory.parents {
+		if err := privateCASContextError(inventory.ctx); err != nil {
+			return err
+		}
+		// The original uncached walker resolves every ancestor again. An open
+		// handle to a directory moved out of its path cannot satisfy this check.
+		fd, present, err := privateCASUnixOpenCreateRecoveryParent(inventory.dataDir, relative, inventory.device)
+		if err != nil || !present {
+			return errors.Join(errors.New("private CAS create-residue parent no longer resolves"), err)
+		}
+		before, beforeErr := inventory.identity(fd, relative)
+		names, namesErr := inventory.readNames(fd)
+		after, afterErr := inventory.identity(fd, relative)
+		closeErr := unix.Close(fd)
+		if beforeErr != nil || namesErr != nil || afterErr != nil || closeErr != nil ||
+			before != observed.identity || after != observed.identity || !slices.Equal(names, observed.names) {
+			return errors.Join(errors.New("private CAS create-residue directory inventory changed"), beforeErr, namesErr, afterErr, closeErr)
+		}
+	}
+	return privateCASContextError(inventory.ctx)
 }
 
 func privateCASUnixOpenCreateRecoveryDataDir(

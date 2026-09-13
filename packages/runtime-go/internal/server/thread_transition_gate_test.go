@@ -19,11 +19,12 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestWorkspacePatchClosesPausedApprovalBeforeEpochCommit(t *testing.T) {
-	workspaceA := t.TempDir()
-	workspaceB := t.TempDir()
+	workspaceA := workspacetest.New(t)
+	workspaceB := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
@@ -160,7 +161,7 @@ func TestWorkspacePatchClosesPausedApprovalBeforeEpochCommit(t *testing.T) {
 }
 
 func TestStartTurnClosesOldPausedApprovalBeforeNewEpochAdmission(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "start-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
@@ -379,7 +380,7 @@ func TestStartTurnClosesOldPausedApprovalBeforeNewEpochAdmission(t *testing.T) {
 }
 
 func TestStartTurnWaitsForSameThreadBackgroundCompletionTailBeforeBaseline(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "background-tail-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",

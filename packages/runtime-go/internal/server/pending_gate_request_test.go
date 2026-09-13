@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
+)
 
 func TestRecordPendingGateRequestIsIdempotentAndRejectsConflicts(t *testing.T) {
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
@@ -8,7 +12,7 @@ func TestRecordPendingGateRequestIsIdempotentAndRejectsConflicts(t *testing.T) {
 		ProviderID: "provider-a", BaseURL: "https://provider.invalid", APIKey: "test-only",
 		Model: "model-a", EndpointFormat: "chat_completions",
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{"workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

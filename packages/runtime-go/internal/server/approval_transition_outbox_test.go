@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRecordApprovalGrantTransitionIsExactAndRejectsConflicts(t *testing.T) {
@@ -12,7 +13,7 @@ func TestRecordApprovalGrantTransitionIsExactAndRejectsConflicts(t *testing.T) {
 		ProviderID: "provider-a", BaseURL: "https://provider.invalid", APIKey: "test-only",
 		Model: "model-a", EndpointFormat: "chat_completions",
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{"workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

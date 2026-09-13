@@ -25,6 +25,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	provider "analytix.local/runtime-go/internal/provider"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type providerAttemptPostAppendObserver struct {
@@ -146,7 +147,7 @@ func (authority *providerAttemptRevokingCaseAuthority) Commit(ctx context.Contex
 }
 
 func TestValidateCurrentProviderAttemptRejectsPostAppendGeneralAuthorityDrift(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "provider-attempt-general", BaseURL: "https://provider.invalid/v1", APIKey: "provider-key",
@@ -221,7 +222,7 @@ func TestValidateCurrentProviderAttemptRejectsPostAppendGeneralAuthorityDrift(t 
 }
 
 func TestValidateCurrentProviderAttemptRejectsPostAppendGeneralRiskWitnessStaleness(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "provider-attempt-risk", BaseURL: "https://provider.invalid/v1", APIKey: "provider-key",
@@ -283,7 +284,7 @@ func TestValidateCurrentProviderAttemptRejectsPostAppendGeneralRiskWitnessStalen
 }
 
 func TestGeneralTerminalCASRevalidatesCurrentRiskAfterProviderReturns(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	dataDir := t.TempDir()
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{

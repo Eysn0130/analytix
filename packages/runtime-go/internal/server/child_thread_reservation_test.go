@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func childThreadReservationTree(t *testing.T, root string) map[string]string {
@@ -44,7 +46,7 @@ func childThreadReservationTree(t *testing.T, root string) map[string]string {
 }
 
 func TestChildThreadReservationsArePureAndShareCreateForkCounters(t *testing.T) {
-	root, workspace := t.TempDir(), t.TempDir()
+	root, workspace := t.TempDir(), workspacetest.New(t)
 	store, err := NewTempDurableEventSessionStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +117,7 @@ func TestChildThreadReservationsArePureAndShareCreateForkCounters(t *testing.T) 
 }
 
 func TestChildThreadReservationRejectsForeignModeParentSourceAndOccupiedTarget(t *testing.T) {
-	root, workspace := t.TempDir(), t.TempDir()
+	root, workspace := t.TempDir(), workspacetest.New(t)
 	store, err := NewTempDurableEventSessionStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +204,7 @@ func TestCopiedChildThreadReservationCannotRetryFailedConsumption(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := store.CreateThread(map[string]any{"title": "synthetic source"}, t.TempDir())
+	source, err := store.CreateThread(map[string]any{"title": "synthetic source"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

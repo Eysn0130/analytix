@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sync/atomic"
@@ -15,6 +14,7 @@ import (
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const packagedSourceUnavailableHydrationPromptV1 = "Continue in this exact Agent and thread. " +
@@ -40,10 +40,7 @@ func TestRuntimeHTTPRawPackagedProtectedPromptPublishesSourceUnavailableAndHydra
 	defer provider.Close()
 
 	root := t.TempDir()
-	workspace := filepath.Join(root, "ordinary-workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	workspace := workspacetest.New(t)
 	config := Config{
 		RuntimeToken: DefaultRuntimeToken, ProductionDurableRoot: filepath.Join(root, "durable"),
 		DataDir: filepath.Join(root, "runtime-data"), UserDataDir: filepath.Join(root, "user-data"),

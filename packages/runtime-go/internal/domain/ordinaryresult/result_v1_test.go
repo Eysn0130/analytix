@@ -8,7 +8,36 @@ import (
 	"testing"
 
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
+
+func TestResultSlotV1RetainsHistoricalIdentityAndProjectsNewSourceProse(t *testing.T) {
+	const source = "Review /Users/private-owner/SYNTHETIC-PII.csv"
+	current, err := NewResultSlotV1(source)
+	if err != nil || current.Text != "Review [PRIVATE_PATH]" {
+		t.Fatalf("new output retained private prose: %v", err)
+	}
+	legacy := current
+	legacy.Text = source
+	legacy.TextSHA256 = domainsecurity.SHA256Hex([]byte(legacy.Text))
+	legacy.ResultDigest = resultSlotDigestV1(legacy)
+	before, _ := json.Marshal(legacy)
+	if err := ValidateResultSlotV1(legacy); err != nil {
+		t.Fatalf("current output rule invalidated original v1 identity: %v", err)
+	}
+	after, _ := json.Marshal(legacy)
+	if !bytes.Equal(before, after) {
+		t.Fatal("historical result identity was rewritten")
+	}
+	for _, unsafe := range []string{"phone 13800138000", "Authorization: Bearer sk-private-token-1234"} {
+		legacy.Text = unsafe
+		legacy.TextSHA256 = domainsecurity.SHA256Hex([]byte(unsafe))
+		legacy.ResultDigest = resultSlotDigestV1(legacy)
+		if ValidateResultSlotV1(legacy) == nil {
+			t.Fatal("historical identity check lost its existing privacy gate")
+		}
+	}
+}
 
 func TestResultSlotV1ProjectsReasoningCredentialsAndPIIAtFixedPoint(t *testing.T) {
 	slot, err := NewResultSlotV1("public<think>PRIVATE_REASONING</think> phone 13800138000 Authorization: Bearer sk-private-token-1234")

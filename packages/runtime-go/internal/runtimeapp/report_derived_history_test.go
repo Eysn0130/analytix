@@ -35,6 +35,7 @@ import (
 	startupport "analytix.local/runtime-go/internal/ports/startup"
 	"analytix.local/runtime-go/internal/server"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func runtimeDerivedReportHistoryFixtureV1(t *testing.T, derivation string, compacted ...bool) (*runtimeOriginalReservedReportHistoryFixtureV1, *runtimeOriginalReservedReportHistoryFixtureV1, map[string]any) {
@@ -46,7 +47,7 @@ func runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t *testing.T, de
 	t.Helper()
 	ctx := context.Background()
 	witness, config := runtimeWitnessedRegistryConfigV2(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	contextFor := func(threadID, turnID string) domainsecurity.TurnSecurityContext {
 		frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
 			ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: workspace,

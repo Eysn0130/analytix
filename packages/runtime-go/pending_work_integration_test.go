@@ -21,10 +21,11 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	runtimeapp "analytix.local/runtime-go/internal/runtimeapp"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeProviderContinuationUsesSignedPendingWorkAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -72,7 +73,7 @@ func TestRuntimeProviderContinuationUsesSignedPendingWorkAuthority(t *testing.T)
 }
 
 func TestRuntimeProviderRetryReusesOnePendingWorkAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -130,7 +131,7 @@ func TestRuntimeProviderRetryReusesOnePendingWorkAuthority(t *testing.T) {
 }
 
 func TestRuntimeProviderPreOutputReconnectRevalidatesOnePendingWorkAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -181,7 +182,7 @@ func TestRuntimeProviderPreOutputReconnectRevalidatesOnePendingWorkAuthority(t *
 }
 
 func TestRuntimeProviderPreOutputReconnectRejectsClosedAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -295,7 +296,7 @@ func TestRuntimeProviderPreOutputReconnectRejectsClosedAuthority(t *testing.T) {
 }
 
 func TestRuntimeProviderStreamRecoveryClosesEachLogicalContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -409,7 +410,7 @@ func TestRuntimePendingGateRetainsBatchRefsForApprovalAndUserInput(t *testing.T)
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			dataDir := t.TempDir()
+			dataDir := workspacetest.New(t)
 			workspace := filepath.Join(dataDir, "workspace")
 			if err := os.MkdirAll(workspace, 0o755); err != nil {
 				t.Fatal(err)

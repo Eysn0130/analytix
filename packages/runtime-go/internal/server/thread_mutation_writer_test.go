@@ -16,6 +16,7 @@ import (
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type registerBarrierCaseAuthority struct {
@@ -201,7 +202,7 @@ func TestRegisterRequiredToAppendHoldsWriterAgainstPatchAndDelete(t *testing.T) 
 
 func writeThreadMutationCaseBinding(t *testing.T) string {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	realPath, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		t.Fatal(err)

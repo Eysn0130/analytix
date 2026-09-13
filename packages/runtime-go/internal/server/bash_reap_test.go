@@ -4,7 +4,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,9 +14,6 @@ import (
 
 	processadapter "analytix.local/runtime-go/internal/adapters/outbound/process"
 	terminalapp "analytix.local/runtime-go/internal/app/terminal"
-	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
-	domainmodel "analytix.local/runtime-go/internal/domain/model"
-	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
 func TestRuntimeBashToolRequestFromPendingTrimsWorkspaceBeforeValidation(t *testing.T) {
@@ -71,31 +67,6 @@ func TestForegroundBashReapsBackgroundChildrenOnNormalExit(t *testing.T) {
 	}
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 	t.Fatalf("foreground bash left background child process %d alive after normal shell exit", pid)
-}
-
-func runtimeBashPendingForTest(t *testing.T, workspace string, arguments map[string]any) runtimePendingToolCall {
-	t.Helper()
-	now := time.Unix(1_700_000_000, 0).UTC()
-	threadID := "thread-bash-reap"
-	turnID := "turn-bash-reap"
-	securityContext := newServerGeneralContextV2(t, domainsecurity.TurnSecurityContextInput{
-		ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: workspace,
-		SourceManifestHash: turnsecurityapp.SourceManifestHash(nil), ContextEpoch: 1, IssuedAt: now,
-	})
-	argumentBody, err := json.Marshal(arguments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call := domainmodel.ToolCall{ID: serverTestHostToolCallID("bash-reap"), Name: "bash", Arguments: argumentBody}
-	grant := domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{
-		Context: securityContext, Provider: "test-provider", ServerIdentity: "host:builtin", ToolName: call.Name,
-		ToolCallID: call.ID, ArgsHash: domainsecurity.CanonicalJSONHash(argumentBody), SchemaHash: domainsecurity.SHA256Hex([]byte("schema")),
-		ScopeHash: domainsecurity.SHA256Hex([]byte("scope")), ReadOnly: false, ApprovalState: "approved", IssuedAt: now,
-	})
-	return runtimePendingToolCall{
-		ThreadID: threadID, TurnID: turnID, Workspace: workspace, SandboxMode: "danger-full-access",
-		Call: call, SecurityContext: securityContext, ExecutionGrant: grant,
-	}
 }
 
 func waitForProcessExit(pid int, timeout time.Duration) bool {

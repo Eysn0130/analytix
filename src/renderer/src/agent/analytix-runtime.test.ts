@@ -1241,6 +1241,7 @@ describe('AnalytixRuntimeProvider', () => {
     })
     const provider = new AnalytixRuntimeProvider()
     const detail = await provider.getThreadDetail('thr_1')
+    expect(detail.thread).toMatchObject({ id: 'thr_1', title: 'Demo', workspace: '/tmp', model: 'deepseek-chat' })
     expect(detail.blocks.map((block) => block.kind)).toEqual(['user', 'assistant'])
     expect(detail.blocks[0]).toMatchObject({
       kind: 'user',
@@ -1259,6 +1260,12 @@ describe('AnalytixRuntimeProvider', () => {
       cacheHitRate: 0.7,
       turns: 1
     })
+  })
+
+  it('rejects a thread detail belonging to a different requested identity', async () => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: true, status: 200,
+      body: JSON.stringify({ id: 'wrong-thread', title: 'Wrong', turns: [] }) })) })
+    await expect(new AnalytixRuntimeProvider().getThreadDetail('requested-thread')).rejects.toThrow('identity mismatch')
   })
 
   it('drops case assistant drafts unless the host GET carries a matching V3 generic final', async () => {

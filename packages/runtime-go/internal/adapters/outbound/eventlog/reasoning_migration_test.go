@@ -17,6 +17,63 @@ import (
 	testsecurity "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
+func TestSummaryIndexMigrationPreservesTypedNanosecondMetadata(t *testing.T) {
+	stamp := "2026-09-13T07:17:19.123456789Z"
+	thread := map[string]any{
+		"id": "thread-13812345678", "title": "Ordinary response", "status": "idle",
+		"createdAt": stamp, "updatedAt": stamp,
+		"turns": []any{map[string]any{"id": "turn-13812345678", "status": "aborted"}},
+	}
+	record := map[string]any{
+		"schemaVersion": float64(1), "threadId": thread["id"],
+		"summary": threadapp.SummaryIndexProjection(thread), "updatedAt": stamp, "writtenAt": stamp,
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, preserved := range []bool{false, true} {
+		var projected map[string]any
+		var changed bool
+		if preserved {
+			projected, changed, err = preservedReasoningSummaryTransform(record, 1, string(body))
+		} else {
+			projected, changed = reasoningSummaryTransform(record, 1, string(body))
+		}
+		if err != nil || changed || !sameMigrationJSON(record, projected) {
+			t.Fatalf("current summary metadata changed during migration: preserved=%t changed=%t error=%v", preserved, changed, err)
+		}
+	}
+}
+
+func TestSummaryIndexMigrationDoesNotExemptUnsafeDisplayOrUnknownFields(t *testing.T) {
+	for name, summary := range map[string]map[string]any{
+		"title":     {"id": "thread-a", "title": "13812345678"},
+		"preview":   {"id": "thread-a", "preview": "13812345678"},
+		"timestamp": {"id": "thread-a", "createdAt": "13812345678"},
+		"unknown":   {"id": "thread-a", "extra": "13812345678"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := map[string]any{"schemaVersion": float64(1), "threadId": "thread-a", "summary": summary}
+			body, _ := json.Marshal(record)
+			for _, preserved := range []bool{false, true} {
+				var next map[string]any
+				var changed bool
+				var err error
+				if preserved {
+					next, changed, err = preservedReasoningSummaryTransform(record, 1, string(body))
+				} else {
+					next, changed = reasoningSummaryTransform(record, 1, string(body))
+				}
+				encoded, _ := json.Marshal(next)
+				if err != nil || !changed || bytes.Contains(encoded, []byte("13812345678")) {
+					t.Fatalf("unsafe summary was retained: preserved=%t changed=%t error=%v", preserved, changed, err)
+				}
+			}
+		})
+	}
+}
+
 func TestProjectLegacyOrdinaryThreadPrivacyRevalidatesPIIProjectionAgainstReasoningLimits(t *testing.T) {
 	thread := map[string]any{
 		"id":        "thr_post_privacy_reasoning_limit",
@@ -112,6 +169,39 @@ func TestMigrateReasoningThreadJSONPreflightsCurrentAuthorityBeforeSanitizing(t 
 	}
 	if !bytes.Equal(after, before) {
 		t.Fatalf("rejected current authority thread changed bytes:\nwant=%s\ngot=%s", before, after)
+	}
+}
+
+func TestCurrentHistoryLocatorProjectionPreservesRestartAuthority(t *testing.T) {
+	state, err := appcontextepoch.DefaultState("thread-private-prose-restart", 7, time.Unix(7, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const locator = "/Users/private-owner/SYNTHETIC-PII.csv"
+	thread := map[string]any{
+		"id": "thread-private-prose-restart", "status": "idle", "turns": []any{},
+		"contextEpochState": appcontextepoch.PublicState(state), "title": "Review " + locator,
+	}
+	before, err := json.MarshalIndent(thread, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "thread.json")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrateReasoningThreadJSON(path); err != nil {
+			t.Fatalf("new prose rule blocked valid current history: %v", err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(after, before) {
+			t.Fatal("restart rewrote current authority bytes")
+		}
+		public, err := threadapp.ProjectPublicThread(thread)
+		if err != nil || public["title"] != "Review [PRIVATE_PATH]" {
+			t.Fatalf("current publication leaked old prose: %v", err)
+		}
 	}
 }
 

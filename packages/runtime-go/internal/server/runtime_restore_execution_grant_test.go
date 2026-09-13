@@ -19,6 +19,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	casepublicationtest "analytix.local/runtime-go/internal/testsupport/casepublication"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeRestoreMarksOpenApprovedDispatchOutcomeUnknownWithoutResend(t *testing.T) {
@@ -26,7 +27,7 @@ func TestRuntimeRestoreMarksOpenApprovedDispatchOutcomeUnknownWithoutResend(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_restore_approved_dispatch", "title": "Approved dispatch", "workspace": workspace,
 	}, workspace)
@@ -181,7 +182,7 @@ func TestRuntimeRestoreMarksOpenNotRequiredSideEffectIntentOutcomeUnknownWithout
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_restore_side_effect_intent", "title": "Side-effect intent", "workspace": workspace,
 	}, workspace)
@@ -328,7 +329,7 @@ func TestRuntimeRestoreMarksOpenReportStageOutcomeUnknownWithoutRepublish(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_restore_report_stage", "title": "Report stage", "workspace": workspace,
 	}, workspace)
@@ -482,7 +483,7 @@ func TestRuntimeRestoreSettlesDanglingExecutionGrantBeforeAbort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_restore_dangling_grant", "title": "Dangling grant", "workspace": workspace,
 	}, workspace)

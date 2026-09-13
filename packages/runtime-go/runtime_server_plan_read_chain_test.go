@@ -13,10 +13,11 @@ import (
 	"testing"
 
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeServerPlanModeContinuesAfterReadBatchAndCreatePlan(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -115,7 +116,7 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 		acceptedReasoning = "PRIVATE_ACCEPTED_SINGLE_PLAN_REASONING"
 		acceptedPlan      = "# Accepted single plan\n\nRun the focused verification."
 	)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -192,7 +193,7 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 }
 
 func TestRuntimeServerPlanModeAllowsSequentialReadOnlyInvestigationBeforeCreatePlan(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -284,7 +285,7 @@ func TestRuntimeServerPlanModeAllowsSequentialReadOnlyInvestigationBeforeCreateP
 }
 
 func TestRuntimeServerPlanModeContinuesAfterMaterializedCreatePlan(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {

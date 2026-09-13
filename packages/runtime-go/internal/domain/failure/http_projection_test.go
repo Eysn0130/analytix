@@ -19,6 +19,8 @@ func TestHTTPFailureProjectionNeverRelaysUntrustedBody(t *testing.T) {
 		{status: 404, body: map[string]any{"code": "case_history_restricted", "message": sentinel}, code: CodeNotFound},
 		{status: 409, body: map[string]any{"code": sentinel, "message": sentinel}, code: CodeConflict},
 		{status: 500, body: map[string]any{"code": "internal_error", "message": sentinel, "error": sentinel}, code: CodeInternalError},
+		{status: 503, body: map[string]any{"code": "privacy_unavailable", "message": sentinel, "details": sentinel}, code: "privacy_unavailable"},
+		{status: 400, body: map[string]any{"code": "privacy_unavailable", "message": sentinel}, code: "validation_error"},
 	} {
 		projected := ProjectHTTPFailure(test.status, test.body)
 		encoded, _ := json.Marshal(projected)

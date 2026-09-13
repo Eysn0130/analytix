@@ -74,6 +74,8 @@ func (handlers MediaExecutionHandlers) Handle(w http.ResponseWriter, r *http.Req
 			writeMediaExecutionFailure(w, http.StatusConflict, "authority_changed")
 		case errors.Is(err, mediaexecutionapp.ErrUnavailable):
 			writeMediaExecutionFailure(w, http.StatusServiceUnavailable, "unavailable")
+		case errors.Is(err, mediaexecutionapp.ErrPrivacyUnavailable):
+			writeMediaExecutionFailure(w, http.StatusServiceUnavailable, "privacy_unavailable")
 		default:
 			writeMediaExecutionFailure(w, http.StatusBadGateway, "provider_failed")
 		}
@@ -108,6 +110,8 @@ func writeMediaExecutionFailure(w http.ResponseWriter, status int, code string) 
 		message = "media provider is unavailable"
 	} else if code == "authority_changed" {
 		message = "media provider authority changed"
+	} else if code == "privacy_unavailable" {
+		message = "media content cannot be safely projected; this operation is unavailable"
 	}
 	WriteJSON(w, status, map[string]any{
 		"schemaVersion": 1,

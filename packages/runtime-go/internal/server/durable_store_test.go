@@ -44,6 +44,7 @@ import (
 	subagentstartupport "analytix.local/runtime-go/internal/ports/subagentstartup"
 	provider "analytix.local/runtime-go/internal/provider"
 	casepublication "analytix.local/runtime-go/internal/testsupport/casepublication"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const serverPositiveTestTimeout = 15 * time.Second
@@ -53,7 +54,7 @@ func TestDurableStoreRecordEventsAtomicPersistsAndPublishesContiguousBundle(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "Atomic progress bundle"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "Atomic progress bundle"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func TestDurableStoreRecordEventsAtomicDoesNotPublishOnPersistenceFailure(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "Atomic persistence failure"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "Atomic persistence failure"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestDurableStoreRejectsSafeRecordAliasesBeforeForkOrResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := store.CreateThread(map[string]any{"title": "private ordinary history"}, t.TempDir())
+	source, err := store.CreateThread(map[string]any{"title": "private ordinary history"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +279,7 @@ func TestDurableStoreRejectsThreadBodyIdentityMismatchBeforeForkOrResume(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := store.CreateThread(map[string]any{"title": "identity-bound history"}, t.TempDir())
+	source, err := store.CreateThread(map[string]any{"title": "identity-bound history"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +313,7 @@ func TestDurableUpsertRejectsUnknownSidecarLifecycleBeforePrimaryWrite(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "closed sidecar projection"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "closed sidecar projection"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +472,7 @@ func TestDurableStoreRejectsPrivateReasoningWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	thread, err := store.CreateThread(map[string]any{"id": "thr_reasoning_guard", "title": "Reasoning guard"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"id": "thr_reasoning_guard", "title": "Reasoning guard"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
@@ -535,7 +536,7 @@ func TestDurableStoreRejectsTypeConfusedReasoningMetadataWithoutOverwritingThrea
 	}
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_reasoning_metadata_guard", "title": "Reasoning metadata guard",
-	}, t.TempDir())
+	}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +563,7 @@ func TestCaseThreadDurableWriteRejectsRestrictedPII(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "case privacy guard", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -629,7 +630,7 @@ func TestPublicToolResultNeverPersistsOrReplaysRawPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "Closed tool result", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -838,7 +839,7 @@ func recoveredParentSettlementFixture(t *testing.T) (*DurableEventSessionStore, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_recovered_exact", "title": "Recovered exact", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -871,7 +872,7 @@ func TestEnsurePrivateReportToolResultExactSettlesOnceAndNeverProjectsAdmission(
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "Exact private report result", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -1015,7 +1016,7 @@ func TestDurableStoreRejectsLateSecurityBoundToolResultAfterAbort(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "Late result", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -1064,7 +1065,7 @@ func TestDurableStorePublishesOnlyExactGeneralTerminalAssistantEvent(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "General terminal publication", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -1137,7 +1138,7 @@ func TestAcceptedFinalCASObservationNeverUsesSidecars(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "primary CAS only", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -3025,7 +3026,7 @@ func TestDurableEventStorePersistsBeforePublishingAndReplaysFromDisk(t *testing.
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "Persist order"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "Persist order"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3114,7 +3115,7 @@ func TestDurableEventStoreRefreshesSequenceAfterCommittedAtomicAppendError(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "Committed append recovery"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "Committed append recovery"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3156,7 +3157,7 @@ func TestAcceptedFinalBundlePublishesLiveOnlyAfterWholeBundleIsDurable(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "Accepted bundle order"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "Accepted bundle order"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3264,7 +3265,7 @@ func TestRuntimeTurnFailureDoesNotCommitWhenEventInventoryIsUnreadable(t *testin
 	if err != nil {
 		t.Fatalf("seed hostile thread identity: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"title":     "Failure record",
 		"workspace": workspace,
@@ -3365,7 +3366,7 @@ func TestRuntimeTurnFailureDiscardsRejectedAssistantDrafts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_failure_delta",
 		"title":     "Failure delta",
@@ -3456,7 +3457,7 @@ func TestRuntimeRestoreAbortsStaleRunningMainTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_restore_stale_running",
 		"title":     "Stale running",
@@ -3595,7 +3596,7 @@ func TestRuntimeRestoreQuarantinedActiveCaseThreadDiagnosticIsValueFree(t *testi
 	if err != nil {
 		t.Fatalf("seed hostile thread identity: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "Quarantined restart", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
@@ -3845,7 +3846,7 @@ func TestRuntimeRestoreMarksUnreadableContextSourceUnavailableWithoutLoop(t *tes
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
-	thread, err := handler.store.CreateThread(map[string]any{"title": "Restart epoch", "workspace": t.TempDir()}, t.TempDir())
+	thread, err := handler.store.CreateThread(map[string]any{"title": "Restart epoch", "workspace": workspacetest.New(t)}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3886,7 +3887,7 @@ func TestRuntimeRestoreRejectsCorruptContextEpochState(t *testing.T) {
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
-	thread, err := handler.store.CreateThread(map[string]any{"title": "Corrupt epoch", "workspace": t.TempDir()}, t.TempDir())
+	thread, err := handler.store.CreateThread(map[string]any{"title": "Corrupt epoch", "workspace": workspacetest.New(t)}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3914,7 +3915,7 @@ func TestRuntimeThreadEventsLiveAndReplayAfterPersistence(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	thread, err := runtimeHandler.store.CreateThread(map[string]any{"title": "HTTP persist order"}, t.TempDir())
+	thread, err := runtimeHandler.store.CreateThread(map[string]any{"title": "HTTP persist order"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4039,7 +4040,7 @@ func TestRuntimeThreadEventsLiveRejectsAssistantDraftBeforeTurnCompleted(t *test
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := runtimeHandler.store.CreateThread(map[string]any{"title": "HTTP text order", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -4140,7 +4141,7 @@ func TestRuntimeThreadEventsLiveHeartbeatIsStructuredSSE(t *testing.T) {
 	runtimeHandler.heartbeatInterval = 10 * time.Millisecond
 	thread, err := runtimeHandler.store.CreateThread(map[string]any{
 		"title": "Live SSE heartbeat",
-	}, t.TempDir())
+	}, workspacetest.New(t))
 	if err != nil {
 		t.Fatalf("create live SSE thread: %v", err)
 	}
@@ -4194,7 +4195,7 @@ func TestRuntimeThreadEventsLiveSetupErrorUsesStructuredSSE(t *testing.T) {
 	}
 	thread, err := runtimeHandler.store.CreateThread(map[string]any{
 		"title": "Live SSE setup error",
-	}, t.TempDir())
+	}, workspacetest.New(t))
 	if err != nil {
 		t.Fatalf("create live SSE thread: %v", err)
 	}
@@ -4255,7 +4256,7 @@ func TestRuntimeThreadEventsReplaySetupErrorUsesStructuredSSE(t *testing.T) {
 	}
 	thread, err := runtimeHandler.store.CreateThread(map[string]any{
 		"title": "Replay SSE setup error",
-	}, t.TempDir())
+	}, workspacetest.New(t))
 	if err != nil {
 		t.Fatalf("create replay SSE thread: %v", err)
 	}

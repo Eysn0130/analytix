@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	turnapp "analytix.local/runtime-go/internal/app/turn"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestPatchTurnItemStatusRejectsAcceptedFinalWithoutWriting(t *testing.T) {
@@ -14,7 +15,7 @@ func TestPatchTurnItemStatusRejectsAcceptedFinalWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "immutable accepted final"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "immutable accepted final"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

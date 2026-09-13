@@ -58,7 +58,7 @@ func publicHTTPCode(status int, requested string) string {
 		"gate_continuation_terminal_turn", "task_job_output_schema_invalid", "worktree_isolation_authority_required",
 		"attachment_authority_unavailable", "attachment_upload_unavailable",
 		"turn_execution_conflict", CodeNewTurnRequired, "runtime_shutting_down",
-		"accepted_final_hydration_unavailable", "public_projection_pending":
+		"accepted_final_hydration_unavailable", "public_projection_pending", "privacy_unavailable":
 		if publicHTTPSpecialCodeMatchesStatus(requested, status) {
 			return requested
 		}
@@ -99,7 +99,7 @@ func publicHTTPSpecialCodeMatchesStatus(code string, status int) bool {
 	case "task_job_output_schema_invalid":
 		return status >= 500
 	case "attachment_authority_unavailable", "attachment_upload_unavailable", "runtime_shutting_down",
-		"accepted_final_hydration_unavailable", "public_projection_pending":
+		"accepted_final_hydration_unavailable", "public_projection_pending", "privacy_unavailable":
 		return status == 503
 	default:
 		return false
@@ -108,6 +108,8 @@ func publicHTTPSpecialCodeMatchesStatus(code string, status int) bool {
 
 func publicHTTPMessage(status int, code string) string {
 	switch code {
+	case "privacy_unavailable":
+		return "Media content cannot be safely projected; this operation is unavailable."
 	case "validation_error", "invalid_checkpoint_scope":
 		return "The request did not satisfy the runtime contract."
 	case CodeUnauthorized:

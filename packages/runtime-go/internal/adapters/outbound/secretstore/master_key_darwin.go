@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	portsecretstore "analytix.local/runtime-go/internal/ports/secretstore"
 )
@@ -47,7 +48,16 @@ type keychainCommandRunner interface {
 type securityCommandRunner struct{}
 
 func (securityCommandRunner) Run(ctx context.Context, arguments []string, stdin []byte) (keychainCommandResult, error) {
+	// A locked Keychain may wait indefinitely for SecurityAgent interaction.
+	// Unlock is an explicit host operation; credential reads/writes must return
+	// a bounded failure and preserve any unconfirmed write outcome.
+	if ctx == nil || ctx.Err() != nil {
+		return keychainCommandResult{}, portsecretstore.ErrMasterKeyUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	command := exec.CommandContext(ctx, keychainSecurityPath, arguments...)
+	command.WaitDelay = time.Second
 	if stdin != nil {
 		command.Stdin = bytes.NewReader(stdin)
 	}
@@ -86,6 +96,9 @@ type keychainMasterKeyProvider struct {
 	random                 io.Reader
 	keychainDBPath         string
 	keychainSecurityDigest string
+	bindingPath            string
+	binding                darwinExplicitKeychainBindingV2
+	commitHooks            *atomicCommitHooks
 }
 
 func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]byte, error) {
@@ -136,13 +149,21 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 	}
 	readbackProvider := provider
 	refreshedSecurityDigest := ""
+	var refreshedIdentity darwinKeychainSecurityDocumentV1
 	if provider.keychainDBPath != "" {
 		refreshedSecurityDigest, err = explicitDarwinKeychainSecurityDigest(provider.keychainDBPath)
 		if err != nil {
 			clearBytes(candidate)
 			return nil, portsecretstore.ErrMasterKeyUnavailable
 		}
+		refreshedIdentity, err = explicitDarwinKeychainSecurityIdentity(provider.keychainDBPath)
+		if err != nil || (provider.bindingPath != "" && !sameDarwinKeychainStableIdentity(provider.binding.Security, refreshedIdentity)) {
+			clearBytes(candidate)
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
 		refreshedProvider := *provider
+		// A temporary readback pin does not commit or replace restart authority.
+		refreshedProvider.bindingPath = ""
 		refreshedProvider.keychainSecurityDigest = refreshedSecurityDigest
 		readbackProvider = &refreshedProvider
 	}
@@ -165,6 +186,11 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	if provider.keychainDBPath != "" {
+		if err := provider.commitExplicitIdentity(refreshedIdentity); err != nil {
+			clearBytes(candidate)
+			clearBytes(readback)
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
 		provider.keychainSecurityDigest = refreshedSecurityDigest
 	}
 	clearBytes(readback)
@@ -222,6 +248,9 @@ func (provider *keychainMasterKeyProvider) find(ctx context.Context) ([]byte, er
 		}
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
+	if err := provider.validateExplicitBinding(); err != nil {
+		return nil, err
+	}
 	encoded, err := strictKeychainBase64Line(result.stdout)
 	if err != nil {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
@@ -236,6 +265,12 @@ func (provider *keychainMasterKeyProvider) find(ctx context.Context) ([]byte, er
 }
 
 func (provider *keychainMasterKeyProvider) validateExplicitBinding() error {
+	if provider.bindingPath != "" {
+		committed, err := readExplicitDarwinBinding(provider.bindingPath)
+		if err != nil || committed != provider.binding {
+			return portsecretstore.ErrMasterKeyUnavailable
+		}
+	}
 	if provider.keychainDBPath == "" && provider.keychainSecurityDigest == "" {
 		return nil
 	}
@@ -430,11 +465,17 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 		if _, err := os.Lstat(filepath.Join(directory, "master.key")); err == nil || !errors.Is(err, os.ErrNotExist) {
 			return nil, portsecretstore.ErrMasterKeyUnavailable
 		}
-		if err := bindExplicitDarwinKeychain(directory, bindingPath, authorityDigest); err != nil {
+		identity, err := explicitDarwinKeychainSecurityIdentity(options.DarwinKeychainDBPath)
+		if err != nil {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+		binding := darwinExplicitKeychainBindingV2{SchemaVersion: 2, AuthorityDigest: authorityDigest, Security: identity}
+		if err := bindExplicitDarwinKeychain(directory, bindingPath, storePath, binding); err != nil {
 			return nil, portsecretstore.ErrMasterKeyUnavailable
 		}
 		return &keychainMasterKeyProvider{
 			runner: securityCommandRunner{}, random: rand.Reader,
+			bindingPath: bindingPath, binding: binding,
 			keychainDBPath:         options.DarwinKeychainDBPath,
 			keychainSecurityDigest: options.DarwinKeychainSecurityDigest,
 		}, nil
@@ -546,21 +587,21 @@ func darwinSafeTaskKeychainPath(value string) bool {
 		filepath.Base(value) == "analytix-task.keychain-db"
 }
 
-func explicitDarwinKeychainSecurityDigest(path string) (string, error) {
+func explicitDarwinKeychainSecurityIdentity(path string) (darwinKeychainSecurityDocumentV1, error) {
 	if !darwinSafeTaskKeychainPath(path) {
-		return "", portsecretstore.ErrMasterKeyUnavailable
+		return darwinKeychainSecurityDocumentV1{}, portsecretstore.ErrMasterKeyUnavailable
 	}
 	identity, err := os.Lstat(path)
 	if err != nil || !identity.Mode().IsRegular() || identity.Mode().Perm() != 0o600 || identity.Size() <= 0 {
-		return "", portsecretstore.ErrMasterKeyUnavailable
+		return darwinKeychainSecurityDocumentV1{}, portsecretstore.ErrMasterKeyUnavailable
 	}
 	stat, ok := identity.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
-		return "", portsecretstore.ErrMasterKeyUnavailable
+		return darwinKeychainSecurityDocumentV1{}, portsecretstore.ErrMasterKeyUnavailable
 	}
 	real, err := filepath.EvalSymlinks(path)
 	if err != nil || real != path {
-		return "", portsecretstore.ErrMasterKeyUnavailable
+		return darwinKeychainSecurityDocumentV1{}, portsecretstore.ErrMasterKeyUnavailable
 	}
 	pathHash := sha256.Sum256([]byte(path))
 	document := darwinKeychainSecurityDocumentV1{
@@ -569,12 +610,19 @@ func explicitDarwinKeychainSecurityDigest(path string) (string, error) {
 		Owner: strconv.FormatUint(uint64(stat.Uid), 10), Mode: strconv.FormatUint(uint64(identity.Mode().Perm()), 8),
 		Links: strconv.FormatUint(uint64(stat.Nlink), 10),
 	}
+	return document, nil
+}
+
+func explicitDarwinKeychainSecurityDigest(path string) (string, error) {
+	document, err := explicitDarwinKeychainSecurityIdentity(path)
+	if err != nil {
+		return "", err
+	}
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		return "", portsecretstore.ErrMasterKeyUnavailable
 	}
 	digest := sha256.Sum256(encoded)
-	clear(encoded)
 	return hex.EncodeToString(digest[:]), nil
 }
 
@@ -588,34 +636,164 @@ func isSHA256Hex(value string) bool {
 	return valid
 }
 
-func bindExplicitDarwinKeychain(directory string, path string, digest string) error {
+// The legacy filename is retained for inventory compatibility. Digest-only V1
+// records cannot prove a past physical identity and must not be silently upgraded.
+type darwinExplicitKeychainBindingV2 struct {
+	SchemaVersion   int                              `json:"schemaVersion"`
+	AuthorityDigest string                           `json:"authorityDigest"`
+	Security        darwinKeychainSecurityDocumentV1 `json:"security"`
+}
+
+func readExplicitDarwinBinding(path string) (darwinExplicitKeychainBindingV2, error) {
+	var record darwinExplicitKeychainBindingV2
+	content, err := readPrivateCommittedFileWithLinks(path, 2048, true)
+	if err != nil {
+		return record, err
+	}
+	defer clearBytes(content)
+	return parseExplicitDarwinBinding(content)
+}
+
+func parseExplicitDarwinBinding(content []byte) (darwinExplicitKeychainBindingV2, error) {
+	var record darwinExplicitKeychainBindingV2
+	if len(content) == 0 || len(content) > 2048 {
+		return record, portsecretstore.ErrMasterKeyUnavailable
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil || record.SchemaVersion != 2 || !isSHA256Hex(record.AuthorityDigest) {
+		return darwinExplicitKeychainBindingV2{}, portsecretstore.ErrMasterKeyUnavailable
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return darwinExplicitKeychainBindingV2{}, portsecretstore.ErrMasterKeyUnavailable
+	}
+	// Our writer has one canonical encoding. This rejects duplicate keys,
+	// conflicting representations and unsupported hand-written authority.
+	canonical, err := json.Marshal(record)
+	if err != nil || !bytes.Equal(content, canonical) {
+		return darwinExplicitKeychainBindingV2{}, portsecretstore.ErrMasterKeyUnavailable
+	}
+	return record, nil
+}
+
+func bindExplicitDarwinKeychain(directory, path, storePath string, expected darwinExplicitKeychainBindingV2) error {
+	// Only a fresh master-key directory may establish initial authority. A missing
+	// marker in an existing profile is evidence loss, not first provisioning.
+	if _, err := os.Lstat(directory); errors.Is(err, os.ErrNotExist) {
+		// Successful startup owns both trees, including an empty Provider Registry.
+		// Losing the whole key directory must not turn an old profile into genesis.
+		secretRoot := filepath.Dir(directory)
+		registryRoot := filepath.Join(filepath.Dir(secretRoot), "provider-registry")
+		for _, retained := range []string{secretRoot, registryRoot} {
+			if _, err := os.Lstat(retained); !errors.Is(err, os.ErrNotExist) {
+				return portsecretstore.ErrMasterKeyUnavailable
+			}
+		}
+		if _, err := os.Lstat(storePath); !errors.Is(err, os.ErrNotExist) {
+			return portsecretstore.ErrMasterKeyUnavailable
+		}
+		if err := ensurePrivateStoreDirectory(filepath.Dir(directory)); err != nil {
+			return err
+		}
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			return err
+		}
+		content, err := json.Marshal(expected)
+		if err != nil {
+			return err
+		}
+		if err := createPrivateExclusiveFile(path, content); err != nil {
+			return err
+		}
+		if err := syncPrivateStoreDirectory(directory); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
 	if err := ensurePrivateStoreDirectory(directory); err != nil {
 		return err
 	}
-	content := []byte(digest + "\n")
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err == nil {
-		if writeErr := writeAll(file, content); writeErr != nil {
-			_ = file.Close()
-			_ = os.Remove(path)
-			clearBytes(content)
-			return writeErr
-		}
-		err = errors.Join(file.Sync(), file.Close(), syncPrivateStoreDirectory(directory))
-		if err != nil {
-			clearBytes(content)
-			return err
-		}
-	} else if !errors.Is(err, os.ErrExist) {
-		clearBytes(content)
-		return err
-	}
-	committed, readErr := readPrivateCommittedFile(path, 128)
-	defer clearBytes(committed)
-	match := readErr == nil && bytes.Equal(committed, content)
-	clearBytes(content)
-	if !match {
+	// Reject unknown targets before recovery could overwrite them from backup.
+	observed, err := readExplicitDarwinBinding(path)
+	if err != nil || observed != expected {
 		return portsecretstore.ErrMasterKeyUnavailable
 	}
+	if err := recoverPrivateFileCommitValidated(path, func(backup []byte, present bool) error {
+		record, err := parseExplicitDarwinBinding(backup)
+		if !present || err != nil || record != expected {
+			return portsecretstore.ErrMasterKeyUnavailable
+		}
+		current, err := readExplicitDarwinBinding(path)
+		if err != nil || current != expected {
+			return portsecretstore.ErrMasterKeyUnavailable
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	committed, err := readExplicitDarwinBinding(path)
+	if err != nil || committed != expected {
+		return portsecretstore.ErrMasterKeyUnavailable
+	}
+	return nil
+}
+
+func sameDarwinKeychainStableIdentity(before, after darwinKeychainSecurityDocumentV1) bool {
+	before.Inode = after.Inode
+	return before == after
+}
+
+func (provider *keychainMasterKeyProvider) commitExplicitIdentity(identity darwinKeychainSecurityDocumentV1) error {
+	if provider.bindingPath == "" {
+		return nil
+	} // Nonpersistent protocol test provider.
+	expected := provider.binding
+	if !sameDarwinKeychainStableIdentity(expected.Security, identity) {
+		return portsecretstore.ErrMasterKeyUnavailable
+	}
+	committed, err := readExplicitDarwinBinding(provider.bindingPath)
+	if err != nil || committed != expected {
+		return portsecretstore.ErrMasterKeyUnavailable
+	}
+	current, err := explicitDarwinKeychainSecurityIdentity(provider.keychainDBPath)
+	if err != nil || current != identity {
+		return portsecretstore.ErrMasterKeyUnavailable
+	}
+	next := expected
+	next.Security = identity
+	content, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	// Runtime owns the exclusive profile lease. Recheck its pinned record at the
+	// actual replacement seam; never overwrite a concurrently changed authority.
+	hooks := atomicCommitHooks{}
+	if provider.commitHooks != nil {
+		hooks = *provider.commitHooks
+	}
+	beforeReplace := hooks.beforeReplace
+	hooks.beforeReplace = func() error {
+		var hookErr error
+		if beforeReplace != nil {
+			hookErr = beforeReplace()
+		}
+		prior, err := readExplicitDarwinBinding(provider.bindingPath)
+		if err != nil || prior != expected {
+			return errAtomicCommitAuthorityChanged
+		}
+		if hookErr != nil {
+			return hookErr
+		}
+		now, err := explicitDarwinKeychainSecurityIdentity(provider.keychainDBPath)
+		if err != nil || now != identity {
+			return portsecretstore.ErrMasterKeyUnavailable
+		}
+		return nil
+	}
+	if err := writePrivateFileAtomically(provider.bindingPath, content, &hooks); err != nil {
+		return err
+	}
+	provider.binding = next
 	return nil
 }

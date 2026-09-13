@@ -14,6 +14,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	attachmentauthorityport "analytix.local/runtime-go/internal/ports/attachmentauthority"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestTurnStartAttachmentRiskMissingMetadataFailsBeforeProvider(t *testing.T) {
@@ -51,7 +52,7 @@ func TestTurnStartAttachmentRiskCorruptMetadataFailsBeforeProvider(t *testing.T)
 }
 
 func TestTurnStartAttachmentRiskPrivateOwnerMismatchFailsBeforeProvider(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler, threadID, provider, _ := newTurnStartAttachmentRiskHandler(t, workspace)
 	first := createTurnStartRiskAttachment(t, handler, threadID, workspace, "first owner")
 	second := createTurnStartRiskAttachment(t, handler, threadID, workspace, "second owner")
@@ -114,7 +115,7 @@ func TestTurnStartAttachmentRiskExactOwnersClassifyWithoutContent(t *testing.T) 
 }
 
 func TestTurnStartAttachmentRiskExactGenericOwnerRemainsOrdinary(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler, threadID, _, _ := newTurnStartAttachmentRiskHandler(t, workspace)
 	metadata := createTurnStartRiskAttachment(t, handler, threadID, workspace, "ordinary attachment")
 	if err := handler.attachmentAccess.CommitUpload(context.Background(), metadata); err != nil {
@@ -216,7 +217,7 @@ func TestTurnStartCaseBoundAttachmentWithoutAuthorityKeepsIndependentOrdinaryWor
 }
 
 func TestTurnStartExplicitCaseResearchWithoutLexicalCueUsesHostBoundary(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler, threadID, provider, _ := newTurnStartAttachmentRiskHandler(t, workspace)
 	configureSteerTestCaseAuthorities(t, handler, handler.store.root)
 	prompt := "/goal --research Crash before resolving gates."
@@ -256,7 +257,7 @@ func TestTurnStartExplicitCaseResearchWithoutLexicalCueUsesHostBoundary(t *testi
 }
 
 func TestTurnStartPureCaseRiskSkipsAttachmentMetadataAndProvider(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler, threadID, provider, dataDir := newTurnStartAttachmentRiskHandler(t, workspace)
 	configureSteerTestCaseAuthorities(t, handler, handler.store.root)
 	metadata := createTurnStartRiskAttachment(t, handler, threadID, workspace, "known case risk")

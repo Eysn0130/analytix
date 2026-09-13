@@ -18,6 +18,7 @@ import (
 	"analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/provider"
 	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeTaskJobDiagnosticsUsesClosedMetadataProjection(t *testing.T) {
@@ -79,7 +80,7 @@ func TestRuntimeTaskJobWaitToolDefaultsToBlockingUntilBackgroundJobCompletes(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +159,7 @@ func TestTaskJobCaseRiskSteerCannotEnterFrozenGeneralChild(t *testing.T) {
 		t.Fatal("runtime server handler type mismatch")
 	}
 	configureServerGeneralExecution(t, handler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	parent, err := handler.store.CreateThread(map[string]any{
 		"title":     "parent",
 		"workspace": workspace,
@@ -295,7 +296,7 @@ func TestTaskJobSteerContextDigestRaceRejectsCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	workspaceRealPath, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		t.Fatal(err)

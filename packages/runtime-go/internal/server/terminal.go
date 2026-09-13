@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"runtime"
 
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	workspacefs "analytix.local/runtime-go/internal/adapters/outbound/workspacefs"
@@ -61,17 +60,10 @@ func (h *runtimeServerHandler) executeBashRuntimeTool(ctx context.Context, pendi
 	}
 	toolContext.Workspace = workspace
 	toolContext.WorkspaceAbsolute = true
-	// The first-stage process boundary is implemented by the macOS Seatbelt
-	// launcher. Keep ordinary shell behavior unchanged on unsupported targets;
-	// their protected-data capabilities remain unavailable until an equivalent
-	// native boundary exists, while direct callers that request containment
-	// still fail closed in processsandbox.Prepare.
-	if runtime.GOOS == "darwin" {
-		toolContext.ProtectedReadDirs = filestore.EffectiveProcessProtectedRoots(
-			h.protectedReadDirs,
-			toolContext.SandboxMode,
-		)
-	}
+	// Preserve the requested filesystem policy on every host. Unsupported native
+	// adapters must reject it before exec, never receive an empty policy merely
+	// because this platform has no containment implementation yet.
+	toolContext.ProtectedReadDirs = filestore.EffectiveProcessProtectedRoots(h.protectedReadDirs, toolContext.SandboxMode)
 	if boolField(args, "run_in_background") || boolField(args, "runInBackground") {
 		toolContext.ParentGoalID, toolContext.ParentGoalObjective = h.parentGoalForSubagent(pending.ThreadID)
 	}
@@ -126,6 +118,12 @@ func (h *runtimeServerHandler) runtimeBashToolCallbacks(pending runtimePendingTo
 			h.recordRuntimeTaskJobProgress(pending, record, "running", "background bash started")
 		},
 		OnBackgroundProgress: func(record terminalapp.JobRecord, status string, diagnostic string) {
+			if domainjob.TerminalStatusV1(status) || subagentapp.TaskJobTerminal(record) {
+				// A standalone terminal progress event would reserve one member of
+				// the exact completion bundle and block live/restart reconciliation.
+				h.recordRuntimeJobLifecycleEvent(record, status, diagnostic)
+				return
+			}
 			h.recordRuntimeTaskJobProgress(pending, record, status, diagnostic)
 		},
 	}

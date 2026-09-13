@@ -27,6 +27,7 @@ import {
 } from '../../shared/analytix-endpoints'
 import { canonicalPath } from '../services/workspace-paths'
 import { configureLogger, logError } from '../logger'
+import { registerAppIpcHandlers } from './register-app-ipc-handlers'
 
 const handlers = new Map<string, (event: unknown, payload?: unknown) => Promise<unknown>>()
 
@@ -62,7 +63,8 @@ vi.mock('electron', () => ({
     getAllWindows: vi.fn(() => [])
   },
   dialog: {
-    showOpenDialog: vi.fn()
+    showOpenDialog: vi.fn(),
+    showMessageBox: vi.fn()
   },
   shell: {},
   ipcMain: {
@@ -285,10 +287,10 @@ describe('registerAppIpcHandlers', () => {
     writeExportServiceMock.copyWriteDocumentAsRichText.mockReset()
     vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
     vi.mocked(dialog.showOpenDialog).mockReset()
+    vi.mocked(dialog.showMessageBox).mockReset()
   })
 
   it('does not load Hub compatibility during registration or ordinary IPC and loads it only on explicit Hub invocation', async () => {
-    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
     const options = registerOptions()
 
     registerAppIpcHandlers(options)
@@ -1742,6 +1744,93 @@ describe('registerAppIpcHandlers', () => {
     expect(runtimeRequest).not.toHaveBeenCalled()
   })
 
+  it.each(['confirm', 'cancel', 'workspace-change', 'frame-change', 'malformed'] as const)(
+    'requires current native case-creation confirmation: %s', async (mode) => {
+      const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+      const root = mkdtempSync(join(tmpdir(), 'analytix-main-case-creation-'))
+      try {
+        const workspace = await canonicalPath(root)
+        let selectedWorkspace = workspace
+        const sourcePath = join(workspace, 'synthetic.csv')
+        const physicalIdentity = 'b'.repeat(64)
+        const selector = `tlsel1_${'a'.repeat(64)}`
+        const localDisplayRequest = vi.fn(async (_path: string, _body: string) => ({
+          ok: true, status: 202,
+          body: JSON.stringify({ status: 'case_creation_required', intent: mode === 'malformed' ? '/private/canary' : physicalIdentity })
+        })).mockImplementationOnce(async () => ({
+          ok: true, status: 202,
+          body: JSON.stringify({ status: 'case_creation_required', intent: mode === 'malformed' ? '/private/canary' : physicalIdentity })
+        })).mockImplementationOnce(async () => importStageResponseForMainTestV1(selector))
+        const mainFrame = {}
+        const sender = { mainFrame, isDestroyed: () => false, once: vi.fn() }
+        const event = { sender, senderFrame: mainFrame }
+        const mainWindow = { isDestroyed: () => false, webContents: sender }
+        vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [sourcePath] })
+        vi.mocked(dialog.showMessageBox).mockImplementation(async () => {
+          if (mode === 'workspace-change') selectedWorkspace = '/private'
+          if (mode === 'frame-change') sender.mainFrame = {}
+          return { response: mode === 'cancel' ? 0 : 1, checkboxChecked: false }
+        })
+        registerAppIpcHandlers(registerOptions({
+          store: { load: vi.fn(async () => ({ ...settings(), workspaceRoot: selectedWorkspace })) } as never,
+          localDisplayRequest, getMainWindow: () => mainWindow as never
+        }))
+        const result = await handlers.get('runtime:stage-funds-csv-snapshot')?.(event)
+        if (mode === 'confirm') {
+          expect(result).toMatchObject({ ok: true, items: [{ selector }] })
+          expect(localDisplayRequest).toHaveBeenNthCalledWith(2, '/v1/local-display/funds-import/stage',
+            JSON.stringify({ workspaceRoot: workspace, sourcePath, createCaseIntent: physicalIdentity }))
+        } else {
+          expect(result).toMatchObject({ ok: false })
+          expect(localDisplayRequest).toHaveBeenCalledTimes(1)
+        }
+        expect(JSON.stringify(result)).not.toContain(physicalIdentity)
+        expect(JSON.stringify(result)).not.toContain(sourcePath)
+        expect(dialog.showMessageBox).toHaveBeenCalledTimes(mode === 'malformed' ? 0 : 1)
+      } finally { rmSync(root, { recursive: true, force: true }) }
+    }
+  )
+
+  it.each(['capability', 'unknown-code', 'raw-body', 'wrong-status', 'extra-field', 'oversized'] as const)(
+    'projects unavailable import capability only from the closed host response: %s', async (mode) => {
+      const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+      const root = mkdtempSync(join(tmpdir(), 'analytix-import-capability-'))
+      try {
+        const workspace = await canonicalPath(root)
+        const sourcePath = join(workspace, 'synthetic.csv')
+        writeFileSync(sourcePath, 'synthetic input')
+        const canary = '/private/IMPORT_CANARY/input.csv 13800138000'
+        const response = {
+          ok: false, status: mode === 'wrong-status' ? 409 : 503,
+          body: mode === 'raw-body' ? canary : JSON.stringify({
+            code: mode === 'unknown-code' ? 'unrecognized_capability' : 'funds_import_capability_unavailable',
+            message: mode === 'oversized' ? canary.repeat(100) : canary,
+            ...(mode === 'extra-field' ? { raw: canary } : {})
+          })
+        }
+        const localDisplayRequest = vi.fn(async () => response)
+        const mainFrame = {}
+        const sender = { mainFrame, isDestroyed: () => false, once: vi.fn() }
+        const event = { sender, senderFrame: mainFrame }
+        const mainWindow = { isDestroyed: () => false, webContents: sender }
+        vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [sourcePath] })
+        registerAppIpcHandlers(registerOptions({
+          store: { load: vi.fn(async () => ({ ...settings(), workspaceRoot: workspace })) } as never,
+          localDisplayRequest, getMainWindow: () => mainWindow as never
+        }))
+        const result = await handlers.get('runtime:stage-funds-csv-snapshot')?.(event)
+        expect(result).toEqual({
+          ok: false, canceled: false,
+          code: mode === 'capability' ? 'capability_unavailable' : 'runtime_unavailable',
+          message: mode === 'capability' ? 'Trusted data import capability is unavailable in this runtime environment.' : 'Data import failed.'
+        })
+        expect(JSON.stringify(result)).not.toMatch(/IMPORT_CANARY|13800138000/)
+        expect(dialog.showMessageBox).not.toHaveBeenCalled()
+        expect(localDisplayRequest).toHaveBeenCalledTimes(1)
+      } finally { rmSync(root, { recursive: true, force: true }) }
+    }
+  )
+
   it('keeps CSV or ZIP source selection in Main and returns only a short staged inventory', async () => {
     const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
     const root = mkdtempSync(join(tmpdir(), 'analytix-main-csv-admission-'))
@@ -2745,12 +2834,12 @@ describe('registerAppIpcHandlers', () => {
 
   it('routes speech as bounded key-free intent to the fixed private Go media executor', async () => {
     const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
-    const runtimeRequest = vi.fn(async (_path: string, _method: string, _body?: string) => ({
+    const privateMediaRequest = vi.fn(async (_body: string) => ({
       ok: true,
       status: 200,
       body: JSON.stringify({ schemaVersion: 1, status: 'ok', transcript: ' current Registry transcript ' })
     }))
-    registerAppIpcHandlers(registerOptions({ runtimeRequest: runtimeRequest as never }))
+    registerAppIpcHandlers(registerOptions({ privateMediaRequest }))
 
     const result = await handlers.get('speech:transcribe')?.({}, {
       audioBase64: 'UklGRg==',
@@ -2759,10 +2848,8 @@ describe('registerAppIpcHandlers', () => {
     })
 
     expect(result).toEqual({ ok: true, text: 'current Registry transcript' })
-    expect(runtimeRequest).toHaveBeenCalledTimes(1)
-    const [path, method, rawBody] = runtimeRequest.mock.calls[0]
-    expect(path).toBe('/v1/runtime/_private/media-execution')
-    expect(method).toBe('POST')
+    expect(privateMediaRequest).toHaveBeenCalledTimes(1)
+    const [rawBody] = privateMediaRequest.mock.calls[0]
     const body = JSON.parse(String(rawBody)) as Record<string, unknown>
     expect(body).toMatchObject({
       schemaVersion: 1,
@@ -2780,14 +2867,65 @@ describe('registerAppIpcHandlers', () => {
       mimeType: 'audio/wav',
       speechToText: { baseUrl: 'https://renderer-authority.invalid', apiKey: 'forbidden' }
     })).rejects.toThrow(/Invalid payload for speech:transcribe/)
-    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    expect(privateMediaRequest).toHaveBeenCalledTimes(1)
 
     await expect(handlers.get('runtime:request')?.({}, {
       path: '/v1/runtime/_private/media-execution',
       method: 'POST',
       body: JSON.stringify(body)
     })).rejects.toThrow(/Invalid payload for runtime:request/)
-    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    expect(privateMediaRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves Core media privacy refusal as an actionable message without returning raw content', async () => {
+    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+    const privateMediaRequest = vi.fn(async () => ({ ok: false, status: 503,
+      body: JSON.stringify({ schemaVersion: 1, code: 'privacy_unavailable', message: '/Users/private-owner/case.csv 13800138000' }) }))
+    registerAppIpcHandlers(registerOptions({ privateMediaRequest }))
+    const result = await handlers.get('speech:transcribe')?.({}, {
+      audioBase64: 'UklGRg==', mimeType: 'audio/wav', durationMs: 500
+    })
+    expect(result).toEqual({ ok: false, message: 'Audio transcription is unavailable until trusted local privacy inspection is supported.' })
+    expect(JSON.stringify(result)).not.toMatch(/13800138000|private-owner/)
+  })
+
+  it('keeps generated images on the typed private transport and preserves Core refusal for reference edits', async () => {
+    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+    const workspace = mkdtempSync(join(tmpdir(), 'typed-media-ipc-'))
+    const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const runtimeRequest = vi.fn()
+    const privateMediaRequest = vi.fn(async (rawBody: string) => {
+      const request = JSON.parse(rawBody) as { operation: string }
+      return request.operation === 'image.generate'
+        ? { ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, status: 'ok', imageBase64, mimeType: 'image/png' }) }
+        : { ok: false, status: 503, body: JSON.stringify({ code: 'privacy_unavailable', message: '/Users/private-owner/case.csv' }) }
+    })
+    registerAppIpcHandlers(registerOptions({ runtimeRequest, privateMediaRequest }))
+    try {
+      const payload = { text: 'synthetic diagram', filePath: join(workspace, 'document.md'), workspaceRoot: workspace }
+      const generated = await handlers.get('write:generate-infographic')?.({}, payload) as { ok: boolean; absolutePath: string }
+      expect(generated).toMatchObject({ ok: true })
+      expect(readFileSync(generated.absolutePath).toString('base64')).toBe(imageBase64)
+      const referenceImagePath = join(workspace, 'reference.png')
+      writeFileSync(referenceImagePath, Buffer.from(imageBase64, 'base64'))
+      const refused = await handlers.get('write:generate-infographic')?.({}, { ...payload, referenceImagePath })
+      expect(refused).toEqual({ ok: false, message: 'This media content cannot be safely projected. Reference image editing requires trusted local privacy inspection.' })
+      expect(privateMediaRequest.mock.calls.map(([body]) => JSON.parse(body).operation)).toEqual(['image.generate', 'image.edit'])
+      expect(runtimeRequest).not.toHaveBeenCalled()
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when the private media transport is absent without using generic runtime requests', async () => {
+    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+    const runtimeRequest = vi.fn()
+    registerAppIpcHandlers(registerOptions({ runtimeRequest }))
+    const result = await handlers.get('speech:transcribe')?.({}, {
+      audioBase64: 'UklGRg==', mimeType: 'audio/wav', durationMs: 500
+    })
+    expect(result).toEqual({ ok: false, message: 'speech-to-text provider is not configured' })
+    expect(runtimeRequest).not.toHaveBeenCalled()
   })
 
   it('rejects raw dynamic and singular compatibility paths before runtime adapter handoff', async () => {

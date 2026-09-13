@@ -12,7 +12,162 @@ import (
 
 	domainprivatecas "analytix.local/runtime-go/internal/domain/privatecastopology"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	"golang.org/x/sys/unix"
 )
+
+func createRecoveryNameInventoryFixture(t *testing.T) (string, *privateCASCreateRecoveryNameInventory) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "private", "owner", "leaf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := unix.Close(fd); err != nil {
+			t.Error(err)
+		}
+	})
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		t.Fatal(err)
+	}
+	return root, &privateCASCreateRecoveryNameInventory{
+		ctx: context.Background(), dataDir: fd, device: uint64(stat.Dev),
+		parents: make(map[string]privateCASCreateRecoveryParentNames),
+	}
+}
+
+func TestCreateRecoveryNameInventoryReusesOnlyStableObservation(t *testing.T) {
+	_, inventory := createRecoveryNameInventoryFixture(t)
+	for range 4 {
+		fd, present, err := inventory.openParent("private/owner/leaf")
+		if err != nil || !present {
+			t.Fatal("stable parent failed to open", err)
+		}
+		if err := unix.Close(fd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(inventory.parents) != 3 {
+		t.Fatal("shared ancestors did not use one bounded inventory each")
+	}
+	if err := inventory.revalidate(); err != nil {
+		t.Fatal(err)
+	}
+
+}
+
+func TestCreateRecoveryNameInventoryRejectsMutationAfterReuse(t *testing.T) {
+	for _, fault := range []string{"parent-replaced", "fifo", "symlink", "case-alias", "missing-appeared", "mode", "cancelled"} {
+		t.Run(fault, func(t *testing.T) {
+			root, inventory := createRecoveryNameInventoryFixture(t)
+			target := "private/owner/leaf"
+			if fault == "missing-appeared" {
+				target = "private/owner/absent"
+			}
+			fd, present, err := inventory.openParent(target)
+			if err != nil || present != (fault != "missing-appeared") {
+				t.Fatal("initial observation failed", err)
+			}
+			if fd >= 0 {
+				if err := unix.Close(fd); err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner := filepath.Join(root, "private", "owner")
+			leaf := filepath.Join(owner, "leaf")
+			switch fault {
+			case "parent-replaced":
+				if err := os.Rename(owner, owner+"-retained"); err != nil {
+					t.Fatal(err)
+				}
+				err = os.MkdirAll(leaf, 0o700)
+			case "fifo", "symlink", "case-alias":
+				if err := os.Rename(leaf, leaf+"-retained"); err != nil {
+					t.Fatal(err)
+				}
+				if fault == "fifo" {
+					err = unix.Mkfifo(leaf, 0o600)
+				}
+				if fault == "symlink" {
+					err = os.Symlink(leaf+"-retained", leaf)
+				}
+				if fault == "case-alias" {
+					err = os.Mkdir(filepath.Join(owner, "LEAF"), 0o700)
+				}
+			case "missing-appeared":
+				err = os.Mkdir(filepath.Join(owner, "absent"), 0o700)
+			case "mode":
+				err = os.Chmod(owner, 0o755)
+			case "cancelled":
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				inventory.ctx = ctx
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			fd, _, err = inventory.openParent(target)
+			if fd >= 0 {
+				_ = unix.Close(fd)
+			}
+			if err == nil {
+				t.Fatal("changed parent reused its cached names")
+			}
+			if err := inventory.revalidate(); err == nil {
+				t.Fatal("final independent observation accepted changed state")
+			}
+		})
+	}
+}
+
+func TestCreateRecoveryNameInventoryNeverCachesChildSafety(t *testing.T) {
+	root, inventory := createRecoveryNameInventoryFixture(t)
+	fd, present, err := inventory.openParent("private/owner/leaf")
+	if err != nil || !present {
+		t.Fatal(err)
+	}
+	if err := unix.Close(fd); err != nil {
+		t.Fatal(err)
+	}
+	// Changing the child's mode leaves the cached parent name inventory intact.
+	// The next fresh child open must nevertheless reject its changed authority.
+	if err := os.Chmod(filepath.Join(root, "private", "owner", "leaf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fd, _, err = inventory.openParent("private/owner/leaf")
+	if fd >= 0 {
+		_ = unix.Close(fd)
+	}
+	if err == nil {
+		t.Fatal("cached parent names bypassed fresh child safety validation")
+	}
+}
+
+func TestCreateRecoveryNameInventoryReopensAncestorsAtFinalBarrier(t *testing.T) {
+	root, inventory := createRecoveryNameInventoryFixture(t)
+	fd, present, err := inventory.openParent("private/owner/leaf")
+	if err != nil || !present {
+		t.Fatal(err)
+	}
+	if err := unix.Close(fd); err != nil {
+		t.Fatal(err)
+	}
+	// The old directories remain valid openable objects, but their path no
+	// longer belongs to the observed tree. A retained FD alone is insufficient.
+	if err := os.Rename(filepath.Join(root, "private"), filepath.Join(root, "old-private")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "private", "owner", "leaf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.revalidate(); err == nil {
+		t.Fatal("moved original ancestor satisfied final path revalidation")
+	}
+}
 
 func TestPrivateCASCreateResidueRecoveryDeletesMissingPrivateResidueWithoutCreatingPrivate(t *testing.T) {
 	dataDir := t.TempDir()

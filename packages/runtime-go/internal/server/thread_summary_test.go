@@ -13,6 +13,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	jobs "analytix.local/runtime-go/internal/jobs"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestThreadSummaryRoutesProjectGoRuntimeState(t *testing.T) {
@@ -31,7 +32,7 @@ func TestThreadSummaryRoutesProjectGoRuntimeState(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Summary source",
 		"workspace": workspace,
@@ -275,7 +276,7 @@ func TestThreadSummaryProjectsCanceledAndTimeoutTaskJobsAsTerminal(t *testing.T)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Terminal task jobs",
 		"workspace": workspace,
@@ -337,7 +338,7 @@ func TestThreadSummaryRecoversSubagentNameFromChildPrompt(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Summary source",
 		"workspace": workspace,
@@ -434,7 +435,7 @@ func TestThreadSummaryExposesHistoricalChildTaskJobsAsSubagents(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Historical task parent",
 		"workspace": workspace,
@@ -506,7 +507,7 @@ func TestThreadSummaryDoesNotUsePromptLikeChildName(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Summary source",
 		"workspace": workspace,
@@ -574,7 +575,7 @@ func TestThreadSummaryRestartGuardsPolicyAndWorkspace(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	policyThread, err := handler.store.CreateThread(map[string]any{
 		"title":          "Policy blocked",
 		"workspace":      workspace,

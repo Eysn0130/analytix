@@ -12,6 +12,7 @@ import (
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	acceptedfinaleventport "analytix.local/runtime-go/internal/ports/acceptedfinalevent"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestAcceptedFinalStagePublishInterleaveCannotSkipBatch(t *testing.T) {
@@ -19,11 +20,11 @@ func TestAcceptedFinalStagePublishInterleaveCannotSkipBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "accepted final reservation"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "accepted final reservation"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherThread, err := store.CreateThread(map[string]any{"title": "independent thread"}, t.TempDir())
+	otherThread, err := store.CreateThread(map[string]any{"title": "independent thread"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

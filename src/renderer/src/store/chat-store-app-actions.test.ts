@@ -128,6 +128,45 @@ describe('chat-store app actions composer model loading', () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(['chat', 'write'] as const)('retains committed default model groups for a new %s composer', async (route) => {
+    const modelGroups = [{
+      providerId: 'deepseek',
+      label: 'deepseek',
+      modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro']
+    }]
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: modelGroups[0].modelIds,
+      defaultModelId: 'deepseek-v4-pro',
+      modelGroups
+    })
+    state.route = route
+
+    await actions.loadComposerModels()
+
+    expect(state.composerModelGroups).toEqual(modelGroups)
+    expect(state.composerModel).toBe('deepseek-v4-pro')
+    expect(state.composerProviderId).toBe('deepseek')
+    expect(state.composerModelGroups[0].modelProfiles).toBeUndefined()
+  })
+
+  it('resolves an unbound shared model to the Registry selected group supplied first', async () => {
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['shared-model'],
+      defaultModelId: 'shared-model',
+      modelGroups: [
+        { providerId: 'beta', label: 'beta', modelIds: ['shared-model'] },
+        { providerId: 'alpha', label: 'alpha', modelIds: ['shared-model'] }
+      ]
+    })
+
+    await actions.loadComposerModels()
+
+    expect(state.composerModel).toBe('shared-model')
+    expect(state.composerProviderId).toBe('beta')
+  })
+
   it('restores the previously selected custom model after the full model list loads', async () => {
     localStorage.setItem(COMPOSER_MODEL_STORAGE_KEY, 'MiniMax-M2')
     const { actions, state } = buildHarness({

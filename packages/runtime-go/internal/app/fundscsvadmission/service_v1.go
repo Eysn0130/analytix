@@ -79,6 +79,7 @@ type ConfigV1 struct {
 	Native           NativeOwnerV1
 	Source           ImmutableSourceV1
 	ReadImportSource ImportSourceReaderV1
+	CaseCreator      ImportCaseCreatorV1
 	// Called only after a confirmed exact import has admitted its real snapshot.
 	ActivateEvidenceRegistry func(context.Context, domainsecurity.CaseBindingObservationV1, string) error
 	Now                      func() time.Time
@@ -95,6 +96,8 @@ type ServiceV1 struct {
 	native                   NativeOwnerV1
 	source                   ImmutableSourceV1
 	readImportSource         ImportSourceReaderV1
+	caseCreator              ImportCaseCreatorV1
+	pendingCaseCreation      *pendingImportCaseCreationV1
 	activateEvidenceRegistry func(context.Context, domainsecurity.CaseBindingObservationV1, string) error
 	admissionMu              sync.Mutex
 	now                      func() time.Time
@@ -110,6 +113,9 @@ type ServiceV1 struct {
 type StageInputV1 struct {
 	WorkspaceRoot string
 	SourcePath    string
+	// Host-only, single-use intent bound to this runtime, principal, physical
+	// workspace and source selection, returned for native user confirmation.
+	CreateCaseIntent string
 }
 
 type StageResultV1 struct {
@@ -170,6 +176,7 @@ func NewServiceV1(config ConfigV1) (*ServiceV1, error) {
 		observer:    config.Observer, identity: config.Identity, evidence: config.Evidence, snapshots: config.Snapshots,
 		materials: config.Materials, native: config.Native, source: config.Source,
 		readImportSource:         config.ReadImportSource,
+		caseCreator:              config.CaseCreator,
 		activateEvidenceRegistry: config.ActivateEvidenceRegistry,
 		now:                      config.Now, random: config.Random,
 	}

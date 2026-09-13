@@ -16,13 +16,8 @@ import {
 } from '../../shared/app-settings-write'
 import type { WriteTypographySettingsV1 } from '../../shared/app-settings-types'
 import { isWriteOfficialDocumentTypography } from '../../shared/write-official-document'
-import { projectOrdinaryLogPII } from '../../shared/ordinary-log-pii-projection'
-import {
-  containsPrivateAcceptedFinalAuthority,
-  containsPrivateReasoningContent,
-  sanitizePublicSerializedText
-} from '../../shared/public-runtime-content'
-import { redactSecretText } from '../../shared/secret-redaction'
+import { assertOrdinaryWriteExportContentV1, projectOrdinaryWriteExportContentV1, projectWriteExportMarkdownTreeV1, WriteExportPublicError } from './write-export-content'
+export { projectOrdinaryWriteExportContentV1 } from './write-export-content'
 import type {
   WriteExportFormat,
   WriteExportPayload,
@@ -37,33 +32,14 @@ import { buildWriteDocxDocument } from './write-docx-service'
 
 const require = createRequire(import.meta.url)
 
-class WriteExportPublicError extends Error {}
-
-// The generic Write surface is an ordinary, non-controlled export path. Full
-// financial identifiers belong only in an authorized controlled artifact, and
-// private model reasoning must never be converted into clipboard or files.
-export function projectOrdinaryWriteExportContentV1(content: string): string {
-  if (containsStructuredPrivateAcceptedFinalAuthority(content)) {
-    throw new WriteExportPublicError('Write export contains private accepted-final authority and was blocked.')
-  }
-  if (containsPrivateReasoningContent(content)) {
-    throw new WriteExportPublicError('Write export contains private reasoning and was blocked.')
-  }
-  return projectOrdinaryLogPII(redactSecretText(sanitizePublicSerializedText(content)))
-}
-
-function containsStructuredPrivateAcceptedFinalAuthority(content: string): boolean {
-  try {
-    return containsPrivateAcceptedFinalAuthority(JSON.parse(content) as unknown)
-  } catch {
-    return false
-  }
-}
-
 function applyWriteMarkdownAlignmentDirectives() {
   return (tree: Parameters<typeof applyWriteMarkdownAlignmentDirectivesToTree>[0]): void => {
     applyWriteMarkdownAlignmentDirectivesToTree(tree)
   }
+}
+
+function applyWriteExportTextProjection() {
+  return (tree: Parameters<typeof projectWriteExportMarkdownTreeV1>[0]) => projectWriteExportMarkdownTreeV1(tree)
 }
 
 function normalizeExportTypography(typography?: WriteExportPayload['typography']): WriteTypographySettingsV1 {
@@ -490,6 +466,7 @@ function resolveWriteExportAnchorHref(
   sourcePath: string,
   resolveRelativeLinks: boolean | undefined
 ): string | undefined {
+  if (href && projectOrdinaryWriteExportContentV1(href) !== href) return undefined
   if (resolveRelativeLinks === false) {
     if (isPosixOrUncAbsoluteMarkdownLink(href)) return undefined
     if (isRelativeMarkdownLink(href)) return href
@@ -506,7 +483,7 @@ function renderMarkdownFragment(
     createElement(
       ReactMarkdown,
       {
-        remarkPlugins: [remarkGfm, applyWriteMarkdownAlignmentDirectives],
+        remarkPlugins: [remarkGfm, applyWriteMarkdownAlignmentDirectives, applyWriteExportTextProjection],
         components: {
           a: ({
             href,
@@ -532,6 +509,9 @@ function renderMarkdownFragment(
           }: ComponentPropsWithoutRef<'img'> & { src?: string; alt?: string | null }): ReactNode =>
             createElement('img', {
               ...props,
+              // React otherwise hoists a preload containing the original file
+              // URL outside the image that our embedding gate replaces.
+              fetchPriority: 'low',
               src: resolveWriteMarkdownResource(src, sourcePath),
               alt: alt ?? ''
             })
@@ -548,12 +528,12 @@ async function buildWriteHtmlFragment(options: {
   content: string
   resolveRelativeLinks?: boolean
 }): Promise<string> {
-  const publicContent = projectOrdinaryWriteExportContentV1(options.content)
+  assertOrdinaryWriteExportContentV1(options.content)
   const fragment = isMarkdownFile(options.sourcePath)
-    ? renderMarkdownFragment(publicContent, options.sourcePath, {
+    ? renderMarkdownFragment(options.content, options.sourcePath, {
         resolveRelativeLinks: options.resolveRelativeLinks
       })
-    : renderPlainTextFragment(publicContent)
+    : renderPlainTextFragment(projectOrdinaryWriteExportContentV1(options.content))
   const body = await inlineLocalImagesInHtml(fragment, options.workspaceRoot)
   return `<article class="markdown-body">${body}</article>`
 }
@@ -643,7 +623,7 @@ export async function copyWriteDocumentAsRichText(
     const html = await buildWriteClipboardHtmlFragment({
       sourcePath: resolved.path,
       workspaceRoot: options.workspaceRoot,
-      content: publicContent
+      content: payload.content
     })
 
     if (options.authorityCurrent && !(await options.authorityCurrent())) {
@@ -736,7 +716,7 @@ export async function exportWriteDocument(
   }
 ): Promise<WriteExportResult> {
   try {
-    const publicContent = projectOrdinaryWriteExportContentV1(payload.content)
+    assertOrdinaryWriteExportContentV1(payload.content)
     if (options.authorityCurrent && !(await options.authorityCurrent())) {
       return {
         ok: false,
@@ -780,7 +760,8 @@ export async function exportWriteDocument(
       output = await buildWriteDocxDocument({
         sourcePath,
         workspaceRoot: options.workspaceRoot,
-        publicContent,
+        publicContent: payload.content,
+        projectProse: projectOrdinaryWriteExportContentV1,
         typography: normalizeExportTypography(payload.typography),
         title
       })
@@ -788,7 +769,7 @@ export async function exportWriteDocument(
       const html = await buildWriteExportHtmlDocument({
         sourcePath,
         workspaceRoot: options.workspaceRoot,
-        content: publicContent,
+        content: payload.content,
         typography: payload.typography,
         title,
         wordCompatible: payload.format === 'doc',

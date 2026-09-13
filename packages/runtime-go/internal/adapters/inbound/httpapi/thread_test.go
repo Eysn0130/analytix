@@ -302,6 +302,30 @@ func TestThreadHandlersHydrateAcceptedFinalDeliveryOrFailClosed(t *testing.T) {
 	}
 }
 
+func TestThreadHandlersRewindProjectsPublicResponse(t *testing.T) {
+	// The committed mutation carries an internal authority turn. It must not
+	// escape the public RewindThreadResponse contract after the durable cut.
+	result := map[string]any{
+		"threadId": "thr_1", "turnId": "turn_1", "removedTurns": 2,
+		"remainingTurns": 1, "removedTurnIds": []any{"turn_1", "turn_2"},
+		"authorityTurnId": "private_rewind_transition", "futurePrivateField": "private_canary",
+	}
+	handler := ThreadHandlers{Service: &threadServiceStub{rewindResult: result}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/threads/thr_1/rewind", strings.NewReader(`{"turnId":"turn_1"}`))
+	handler.HandleRewind(recorder, request, "thr_1")
+	want := map[string]any{
+		"threadId": "thr_1", "turnId": "turn_1", "removedTurns": float64(2),
+		"remainingTurns": float64(1), "removedTurnIds": []any{"turn_1", "turn_2"},
+	}
+	if body := decodeThreadBody(t, recorder); recorder.Code != http.StatusOK || !reflect.DeepEqual(body, want) {
+		t.Fatalf("rewind public response mismatch: code=%d body=%#v", recorder.Code, body)
+	}
+	if result["authorityTurnId"] != "private_rewind_transition" || len(result) != 7 {
+		t.Fatal("HTTP projection mutated the committed authority result")
+	}
+}
+
 func TestThreadHandlersForkRewindAndCompactErrors(t *testing.T) {
 	stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}, rewindResult: map[string]any{"ok": true}, compactResult: map[string]any{"ok": true}}
 	handler := ThreadHandlers{Service: stub}

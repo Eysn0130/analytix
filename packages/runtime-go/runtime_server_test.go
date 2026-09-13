@@ -37,7 +37,6 @@ import (
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
 	apploop "analytix.local/runtime-go/internal/app/loop"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
-	terminalapp "analytix.local/runtime-go/internal/app/terminal"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domaincheckpoint "analytix.local/runtime-go/internal/domain/checkpointauthority"
@@ -53,6 +52,7 @@ import (
 	runtimeapp "analytix.local/runtime-go/internal/runtimeapp"
 	providerscript "analytix.local/runtime-go/internal/testsupport/providerscript"
 	"analytix.local/runtime-go/internal/testsupport/toolidentity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const (
@@ -394,7 +394,7 @@ func TestRuntimeServerDefaultsTurnControlsFromRuntimeSettings(t *testing.T) {
 		DefaultRuntimeToken,
 		mustJSON(t, map[string]any{
 			"title":     "Default controls",
-			"workspace": t.TempDir(),
+			"workspace": workspacetest.New(t),
 		}),
 		http.StatusCreated,
 	)
@@ -786,7 +786,7 @@ func (c *providerCaptureServer) LastBody(t *testing.T) string {
 func TestRuntimeServerDirectLightweightPromptsDoNotAdvertiseToolsToProvider(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProvidersJSON, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -842,7 +842,7 @@ func TestRuntimeServerDirectLightweightPromptsDoNotAdvertiseToolsToProvider(t *t
 func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -898,7 +898,7 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -939,7 +939,7 @@ func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testi
 }
 
 func TestRuntimeServerThreadCreateDoesNotInventDefaultModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -973,7 +973,7 @@ func TestRuntimeServerThreadCreateDoesNotInventDefaultModel(t *testing.T) {
 func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -1012,7 +1012,7 @@ func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T)
 }
 
 func TestRuntimeServerExplicitTurnModelBecomesThreadCurrentModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1066,7 +1066,7 @@ func TestRuntimeServerExplicitTurnModelBecomesThreadCurrentModel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentInheritsLatestParentThreadModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1141,7 +1141,7 @@ func TestRuntimeServerSubagentInheritsLatestParentThreadModel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentRejectsUnconfiguredChildModelBeforeChildTurn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1485,7 +1485,7 @@ func startRuntimeServerAsyncJSONRequest(serverURL, path, token string, body json
 }
 
 func TestToolAddedDuringStreamStillRejected(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1547,7 +1547,7 @@ func TestToolAddedDuringStreamStillRejected(t *testing.T) {
 }
 
 func TestSameNameSchemaSwapRejected(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2000,7 +2000,7 @@ func TestRuntimeServerSteerAdmitsAndPromotesMidTurnUserMessage(t *testing.T) {
 		clientUserMessageID = "2bf69356-4c8a-4f2d-8af6-1aa76ae9371b"
 		steerText           = "简单总结一下，使用更短版本。"
 	)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2114,7 +2114,7 @@ func TestRuntimeServerSteerAdmitsAndPromotesMidTurnUserMessage(t *testing.T) {
 }
 
 func TestRuntimeServerSteerRejectsMismatchedExpectedTurn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2355,7 +2355,7 @@ func TestRuntimeServerContractCoversHTTPAndSSESubset(t *testing.T) {
 	if stringField(thread, "workspace") == "" {
 		t.Fatal("G2 contract thread lacks its host-owned workspace")
 	}
-	researchWorkspace := t.TempDir()
+	researchWorkspace := workspacetest.New(t)
 	patchTarget := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title": "Patch contract target", "workspace": researchWorkspace,
 	}), http.StatusCreated)
@@ -2593,7 +2593,7 @@ func TestRuntimeServerSSEReplayUsesLastEventIDWhenSinceSeqOmitted(t *testing.T) 
 	connectProviderRegistry(server.URL)
 
 	created := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
-		"workspace": t.TempDir(),
+		"workspace": workspacetest.New(t),
 		"model":     "deepseek-chat",
 	}), http.StatusCreated)
 	threadID := stringField(created, "id")
@@ -2626,7 +2626,7 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 	g1 := loadG1Contract(t)
 	durableRoot := t.TempDir()
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	config := RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -2701,7 +2701,7 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 
 func TestRuntimeServerCheckpointApplyRejectsClientSnapshotWithoutHostAuthority(t *testing.T) {
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	targetPath := filepath.Join(workspace, "notes.txt")
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
@@ -2775,7 +2775,7 @@ func TestRuntimeServerCheckpointApplyRejectsClientSnapshotWithoutHostAuthority(t
 func TestRuntimeServerCheckpointApplyRejectsStalePlanDigest(t *testing.T) {
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	firstPath := filepath.Join(workspace, "first.txt")
 	secondPath := filepath.Join(workspace, "second.txt")
 	for path, content := range map[string]string{firstPath: "first-after", secondPath: "second-after"} {
@@ -2829,7 +2829,7 @@ func TestRuntimeServerCheckpointApplyRejectsStalePlanDigest(t *testing.T) {
 }
 
 func TestRuntimeServerCheckpointPlanCapturesWriteFileSnapshotAndAppliesFromPrivateStore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2995,7 +2995,7 @@ func TestRuntimeServerCheckpointPlanCapturesWriteFileSnapshotAndAppliesFromPriva
 }
 
 func TestRuntimeServerCheckpointSnapshotFirstTouchWinsAcrossMultipleWrites(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -3197,7 +3197,7 @@ func TestRuntimeServerCheckpointAuthorityRejectsUnsafeSnapshotsAndApplyBlocksBin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			targetPath := filepath.Join(workspace, "notes.txt")
 			if err := os.WriteFile(targetPath, tc.targetBytes, 0o644); err != nil {
 				t.Fatalf("write target: %v", err)
@@ -3265,7 +3265,7 @@ func TestRuntimeServerCheckpointApplyBlocksSymlinkTargets(t *testing.T) {
 		t.Skip("symlink checkpoint boundary is POSIX-only in this test")
 	}
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	outsideDir := t.TempDir()
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
@@ -3382,7 +3382,7 @@ func TestRuntimeServerCheckpointApplyBlocksSymlinkTargets(t *testing.T) {
 
 func TestRuntimeServerCheckpointApplyBlocksStagedGitChanges(t *testing.T) {
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
 	targetPath := filepath.Join(workspace, "notes.txt")
@@ -3695,7 +3695,7 @@ func TestRuntimeServerMCPDiagnosticsRefreshDoesNotWriteCallerSelectedThreadEvent
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":     "MCP catalog drift",
-		"workspace": t.TempDir(),
+		"workspace": workspacetest.New(t),
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
 	initial := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/runtime/tools", DefaultRuntimeToken, nil, http.StatusOK)
@@ -3837,7 +3837,7 @@ Alpha body.
 }
 
 func TestRuntimeServerSkillsParseReasonixFrontmatterAndLazyPackageExtras(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4029,7 +4029,7 @@ func TestRuntimeServerSkillsDiscoverFlatAndNestedPackagesCacheSafely(t *testing.
 }
 
 func TestRuntimeServerRunSkillCanExecuteSubagentSkill(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4127,7 +4127,7 @@ Check the requested area and return a concise finding.
 }
 
 func TestRuntimeServerMaliciousSkillCannotAdvertiseOrExecuteWriteTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4337,7 +4337,7 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4717,7 +4717,7 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4854,7 +4854,7 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 
 func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T) {
 	g1 := loadG1Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4944,7 +4944,7 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5014,7 +5014,7 @@ func TestRuntimeServerAttachmentWithoutCaseAuthorityNeverReachesProvider(t *test
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	writeRuntimeCaseProjectBinding(t, workspace, "attachment-authority-boundary")
 	capture := newProviderCaptureServer(t)
 	modelProviders := string(mustJSON(t, map[string]any{
@@ -5128,7 +5128,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	firstHandler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5219,7 +5219,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 func TestRuntimeServerPersistentMemorySurvivesRestartAndMutates(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5291,7 +5291,7 @@ func TestRuntimeServerPersistentMemorySurvivesRestartAndMutates(t *testing.T) {
 }
 
 func TestRuntimeServerProductionDefaultDoesNotSeedFixturesOrExposeProof(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -5330,7 +5330,7 @@ func TestRuntimeServerProductionDefaultDoesNotSeedFixturesOrExposeProof(t *testi
 }
 
 func TestRuntimeServerNormalTextTurnPublishesTypedOrdinaryResult(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"plain ok"}}]}`,
 		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
@@ -5366,7 +5366,7 @@ func TestRuntimeServerNormalTextTurnPublishesTypedOrdinaryResult(t *testing.T) {
 }
 
 func TestRuntimeServerSecondTurnIncludesAcceptedHostHistoryOnly(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"first reply"}}]}`,
@@ -5419,7 +5419,7 @@ func TestRuntimeServerSecondTurnIncludesAcceptedHostHistoryOnly(t *testing.T) {
 }
 
 func TestRuntimeServerReviewPersistsReviewItemAndReplay(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"review model answer"}}]}`,
@@ -5477,7 +5477,7 @@ func TestRuntimeServerReviewPersistsReviewItemAndReplay(t *testing.T) {
 }
 
 func TestReasoningNotPersistedOrExported(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"reasoning_content":"private scratchpad"}}]}`,
@@ -5545,7 +5545,7 @@ func TestReasoningNotPersistedOrExported(t *testing.T) {
 }
 
 func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAttempt(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dataDir, "note.txt"), []byte("note from workspace"), 0o644); err != nil {
 		t.Fatal(err)
@@ -5655,7 +5655,7 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 }
 
 func TestRuntimeServerCommandSeparatesGeneralOnlyFromHostPolicyCaseBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	token := DefaultRuntimeToken
 	provider := newCompleteProviderServer(t, [][]string{{
@@ -5826,7 +5826,7 @@ func TestRuntimeServerProductionCommandTimeoutCoversInstrumentedLifecycle(t *tes
 }
 
 func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"openai priced"}}]}`,
@@ -5948,7 +5948,7 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 }
 
 func TestRuntimeServerCacheDiagnosticsIsolateModelNamespaces(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	upstream := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"first"}}]}`,
@@ -6035,7 +6035,7 @@ func TestRuntimeServerCacheDiagnosticsIsolateModelNamespaces(t *testing.T) {
 }
 
 func TestRuntimeServerLiveSSEWithholdsProviderDraftUntilTurnCompletes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := runtimeServerPrivateToolArgumentTempDir(t, "live-sse")
 	firstFrameSent := make(chan struct{})
 	releaseProvider := make(chan struct{})
 	var releaseOnce sync.Once
@@ -6173,7 +6173,7 @@ func TestRuntimeServerLiveSSEWithholdsProviderDraftUntilTurnCompletes(t *testing
 }
 
 func TestRuntimeServerAsyncTurnResponseReturnsBeforeProviderCompletes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	firstFrameSent := make(chan struct{})
 	releaseProvider := make(chan struct{})
 	var firstOnce sync.Once
@@ -6287,7 +6287,7 @@ func TestRuntimeServerAsyncTurnResponseReturnsBeforeProviderCompletes(t *testing
 }
 
 func TestRuntimeServerAutoTitleEmitsThreadUpdatedLifecycle(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"title ok"},"finish_reason":"stop"}]}` + "\n\n"))
@@ -6341,7 +6341,7 @@ func TestRuntimeServerAutoTitleEmitsThreadUpdatedLifecycle(t *testing.T) {
 }
 
 func TestRuntimeServerLiveSSEDoesNotPublishPartialToolCallBeforeProviderCompletes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -6520,7 +6520,7 @@ func TestRuntimeServerLiveSSEDoesNotPublishPartialToolCallBeforeProviderComplete
 }
 
 func TestRuntimeServerOpenAICompatibleTextTurnDoesNotEmitReasoning(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"plain text only"},"finish_reason":null}]}`,
 		`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`,
@@ -6582,7 +6582,7 @@ func TestRuntimeServerOpenAICompatibleTextTurnDoesNotEmitReasoning(t *testing.T)
 }
 
 func TestRuntimeServerProviderRetryIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -6657,7 +6657,7 @@ func TestRuntimeServerProviderRetryIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerPreOutputStreamReplayIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -6729,7 +6729,7 @@ func TestRuntimeServerPreOutputStreamReplayIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerPostOutputProviderInterruptionRecoversWithTailPrompt(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	bodies := []string{}
@@ -6844,7 +6844,7 @@ func TestRuntimeServerPostOutputProviderInterruptionRecoversWithTailPrompt(t *te
 }
 
 func TestRuntimeServerPartialToolCallInterruptionRecoversWithoutExecutingPartialTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	bodies := []string{}
@@ -6932,7 +6932,7 @@ func TestRuntimeServerPartialToolCallInterruptionRecoversWithoutExecutingPartial
 }
 
 func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"old answer 1"}}]}`,
@@ -7091,7 +7091,7 @@ func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvi
 
 func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 	const secret = "sk-runtime-provider-secret"
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		providerCalls.Add(1)
@@ -7162,7 +7162,7 @@ func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 }
 
 func TestRuntimeServerRequestProviderCannotOverrideCommittedSelection(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var providerCalls int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&providerCalls, 1)
@@ -7215,7 +7215,7 @@ func TestRuntimeServerRequestProviderCannotOverrideCommittedSelection(t *testing
 }
 
 func TestRuntimeServerEmptyFinalRecoveryUsesHostBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
@@ -7278,7 +7278,7 @@ func TestRuntimeServerEmptyFinalRecoveryUsesHostBoundary(t *testing.T) {
 }
 
 func TestRuntimeServerEmptyFinalRecoveryExhaustionIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
@@ -7341,7 +7341,7 @@ func TestRuntimeServerEmptyFinalRecoveryExhaustionIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerExecutesProviderToolCallAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7546,14 +7546,14 @@ func TestRuntimeServerGlobAllowsExternalPatternInFullAccess(t *testing.T) {
 	hostCallID := providerHostToolCallIDForName(t, body, "glob")
 	resultJSON := string(mustJSON(t, providerToolResultForCall(t, body, hostCallID)))
 	if !domainsecurity.IsHostToolCallIDV1(hostCallID) || hostCallID == "call_glob_external" ||
-		!strings.Contains(resultJSON, "report.pdf") || !strings.Contains(resultJSON, external) ||
+		!strings.Contains(resultJSON, "report.pdf") || !strings.Contains(resultJSON, "[PRIVATE_PATH]") || strings.Contains(body, external) ||
 		strings.Contains(resultJSON, "notes.txt") || strings.Contains(resultJSON, "workspace_escape") {
 		t.Fatalf("full access external glob should return PDF match only: host=%q result=%s body=%s", hostCallID, resultJSON, body)
 	}
 }
 
 func TestRuntimeServerReadToolsPreserveKunAndNumberedPaginationContracts(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7627,7 +7627,7 @@ func TestRuntimeServerReadToolsPreserveKunAndNumberedPaginationContracts(t *test
 }
 
 func TestRuntimeServerUTF16ReadGrepAndEditPreserveEncoding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7712,7 +7712,7 @@ func TestRuntimeServerUTF16ReadGrepAndEditPreserveEncoding(t *testing.T) {
 }
 
 func TestRuntimeServerWritePreservesExistingUTF16Encoding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7780,7 +7780,7 @@ func TestRuntimeServerWritePreservesExistingUTF16Encoding(t *testing.T) {
 }
 
 func TestRuntimeServerGlobToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "src"),
@@ -7864,7 +7864,7 @@ func TestRuntimeServerGlobToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerGrepSkipsNoiseHiddenAndProtectedDirs(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "public"),
@@ -7954,7 +7954,7 @@ func TestRuntimeServerGrepSkipsNoiseHiddenAndProtectedDirs(t *testing.T) {
 }
 
 func TestRuntimeServerGrepSupportsGlobContextAndColumn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "src"),
@@ -8037,7 +8037,7 @@ func TestRuntimeServerGrepSupportsGlobContextAndColumn(t *testing.T) {
 }
 
 func TestRuntimeServerGrepHonorsRootGitignore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		workspace,
@@ -8119,7 +8119,7 @@ func TestRuntimeServerGrepHonorsRootGitignore(t *testing.T) {
 }
 
 func TestRuntimeServerGrepHonorsGitignore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, ".git"),
@@ -8220,7 +8220,7 @@ func TestRuntimeServerGrepHonorsGitignore(t *testing.T) {
 }
 
 func TestRuntimeServerGlobRejectsWorkspaceEscape(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8270,7 +8270,7 @@ func TestRuntimeServerGlobRejectsWorkspaceEscape(t *testing.T) {
 }
 
 func TestRuntimeServerCodeIndexToolIsAdvertisedAndSearchesGoSymbols(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8335,7 +8335,7 @@ func TestRuntimeServerCodeIndexToolIsAdvertisedAndSearchesGoSymbols(t *testing.T
 }
 
 func TestRuntimeServerCodeIndexOutlineSkipsNoiseAndFiltersBeforeLimit(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		workspace,
@@ -8404,7 +8404,7 @@ func TestRuntimeServerCodeIndexOutlineSkipsNoiseAndFiltersBeforeLimit(t *testing
 }
 
 func TestRuntimeServerCodeIndexRequiresQueryForSearch(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8452,7 +8452,7 @@ func TestRuntimeServerCodeIndexRequiresQueryForSearch(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchDisabledByDefault(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8498,7 +8498,7 @@ func TestRuntimeServerWebFetchDisabledByDefault(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8608,7 +8608,7 @@ func TestRuntimeServerWebFetchToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchRejectsLinkLocal(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8680,7 +8680,7 @@ func TestRuntimeServerWebFetchRejectsLinkLocal(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchUsesConfiguredProxy(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8780,7 +8780,7 @@ func TestRuntimeServerRunsContiguousReadOnlyToolsInParallel(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFO timing contract is POSIX-only")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8885,7 +8885,7 @@ func TestRuntimeServerRunsContiguousReadOnlyToolsInParallel(t *testing.T) {
 }
 
 func TestRuntimeServerExecutesDelegateTaskWithDurableChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8988,7 +8988,7 @@ func TestRuntimeServerExecutesDelegateTaskWithDurableChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerMaxModelStepsZeroFallsBackToConfiguredBound(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9045,7 +9045,7 @@ func TestRuntimeServerMaxModelStepsZeroFallsBackToConfiguredBound(t *testing.T) 
 }
 
 func TestRuntimeServerStepLimitConfigFinalAnswerNudge(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9104,7 +9104,7 @@ func TestRuntimeServerStepLimitConfigFinalAnswerNudge(t *testing.T) {
 }
 
 func TestRuntimeServerStepLimitFailurePersistsErrorItem(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9184,7 +9184,7 @@ func TestRuntimeServerStepLimitFailurePersistsErrorItem(t *testing.T) {
 }
 
 func TestRuntimeServerInterruptCancelsActiveAsyncTurnAndPreservesAbortedStatus(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9260,7 +9260,7 @@ func TestRuntimeServerInterruptCancelsActiveAsyncTurnAndPreservesAbortedStatus(t
 }
 
 func TestRuntimeServerInterruptDiscardExcludesAbortedTurnFromNextProviderHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9369,74 +9369,6 @@ func TestRuntimeServerInterruptDiscardExcludesAbortedTurnFromNextProviderHistory
 	}
 }
 
-func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {
-	dataDir := t.TempDir()
-	workspace := filepath.Join(dataDir, "workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_cancel","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf started > started.txt; sleep 30\",\"timeout\":60}"}},{"index":1,"id":"call_write_after_cancel","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"out.txt\",\"content\":\"must not write\"}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"should not continue after tool cancel"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "tool-cancel-provider", "tool-cancel-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Interrupt tool batch",
-		"workspace":      workspace,
-		"providerId":     "tool-cancel-provider",
-		"model":          "tool-cancel-model",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Run a long bash then write.",
-		"async":  true,
-	}), http.StatusAccepted)
-	turnID := stringField(start, "turnId")
-	if turnID == "" {
-		t.Fatalf("async turn start missing turn id: %#v", start)
-	}
-	startedPath := filepath.Join(workspace, "started.txt")
-	startDeadline := time.Now().Add(runtimeServerPositiveTestTimeout)
-	for {
-		if _, err := os.Stat(startedPath); err == nil {
-			break
-		}
-		if time.Now().After(startDeadline) {
-			t.Fatalf("bash tool did not start")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	interrupt := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns/"+turnID+"/interrupt", DefaultRuntimeToken, mustJSON(t, map[string]any{}), http.StatusOK)
-	if interrupt["status"] != "aborted" || interrupt["cancelled"] != true {
-		t.Fatalf("interrupt should abort active tool turn: %#v", interrupt)
-	}
-	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	if _, err := os.Stat(filepath.Join(workspace, "out.txt")); !os.IsNotExist(err) {
-		t.Fatalf("write_file after tool cancel must not execute, stat err=%v replay=%s", err, replay)
-	}
-	if !hasRuntimeServerEvent(runtimeServerEventsForTurn(t, replay, turnID), "turn_aborted") ||
-		strings.Contains(replay, "call_write_after_cancel") || strings.Contains(replay, "tool_cancelled") {
-		t.Fatalf("terminal turn must reject all late tool and cancellation results:\n%s", replay)
-	}
-}
-
 type runtimeServerSubagentDefaultMaxStepsCase struct {
 	name         string
 	parentSteps  *int
@@ -9487,7 +9419,7 @@ func assertRuntimeServerSubagentDefaultMaxSteps(t *testing.T, cases []runtimeSer
 
 	for caseIndex, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 				"title":      "Subagent budget",
 				"workspace":  workspace,
@@ -9527,7 +9459,7 @@ func assertRuntimeServerSubagentDefaultMaxSteps(t *testing.T, cases []runtimeSer
 }
 
 func TestRuntimeServerDelegateTaskAppliesSubagentProfileModelEffortAndToolScope(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9618,7 +9550,7 @@ func TestRuntimeServerDelegateTaskAppliesSubagentProfileModelEffortAndToolScope(
 }
 
 func TestRuntimeServerSubagentUsageSourceSurvivesRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -9712,7 +9644,7 @@ func TestRuntimeServerSubagentUsageSourceSurvivesRestart(t *testing.T) {
 }
 
 func TestRuntimeServerDelegateTaskAppliesConfiguredDefaultSubagentProfile(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9814,7 +9746,7 @@ func TestRuntimeServerDelegateTaskAppliesConfiguredDefaultSubagentProfile(t *tes
 }
 
 func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9959,7 +9891,7 @@ func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing
 }
 
 func TestRuntimeServerSubagentProfileCannotOverrideCommittedProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10074,7 +10006,7 @@ func TestRuntimeServerSubagentProfileCannotOverrideCommittedProvider(t *testing.
 }
 
 func TestRuntimeServerSubagentLifecycleCountsChildToolInvocations(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10147,7 +10079,7 @@ func TestRuntimeServerSubagentLifecycleCountsChildToolInvocations(t *testing.T) 
 }
 
 func TestRuntimeServerSubagentConfigEnforcesMaxChildRuns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10229,7 +10161,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxChildRuns(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentConfigEnforcesMaxParallel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10396,7 +10328,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxParallel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentsDisabledRemovesTaskToolsAndRejectsCalls(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10487,7 +10419,7 @@ func TestRuntimeServerSubagentsDisabledRemovesTaskToolsAndRejectsCalls(t *testin
 }
 
 func TestRuntimeServerSubagentInheritProfileHonorsWorkspaceShellBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10589,7 +10521,7 @@ func TestRuntimeServerSubagentInheritProfileHonorsWorkspaceShellBoundary(t *test
 }
 
 func TestRuntimeServerSubagentFiltersRecursiveAndJobToolsEvenIfCalled(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10663,7 +10595,7 @@ func TestRuntimeServerSubagentFiltersRecursiveAndJobToolsEvenIfCalled(t *testing
 }
 
 func TestApprovalDenyNeverResumesProviderOrStartsChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -10719,7 +10651,7 @@ func TestApprovalDenyNeverResumesProviderOrStartsChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalNeverBlocksMutatingToolExecution(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10774,7 +10706,7 @@ func TestRuntimeServerApprovalNeverBlocksMutatingToolExecution(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalNeverRejectsRemoteReadOnlyHintAndMutatingMCP(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_mcp_read_never","type":"function","function":{"name":"mcp__runtime-mcp__lookup","arguments":"{\"query\":\"needle\"}"}},{"index":1,"id":"call_mcp_mutate_never","type":"function","function":{"name":"mcp__runtime-mcp__mutate","arguments":"{\"value\":\"danger\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -10894,7 +10826,7 @@ func TestRuntimeServerWriteFileRejectsSymlinkWorkspaceEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink workspace confinement is POSIX-only in this test")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	outside := filepath.Join(dataDir, "outside")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -11021,7 +10953,7 @@ func TestRuntimeServerWriteFileAllowsConfiguredAllowWriteRoot(t *testing.T) {
 	}
 	deniedResult := providerToolResultForCall(t, body, writeCallIDs[0])
 	allowedResult := providerToolResultForCall(t, body, writeCallIDs[1])
-	if stringField(deniedResult, "code") != "workspace_escape" || stringField(allowedResult, "path") != allowedPath ||
+	if stringField(deniedResult, "code") != "workspace_escape" || stringField(allowedResult, "path") != "[PRIVATE_PATH]" || strings.Contains(body, allowRoot) ||
 		stringField(allowedResult, "code") != "" || stringField(allowedResult, "error") != "" || allowedResult["bytes_written"] != float64(len("allowed")) {
 		t.Fatalf("provider continuation did not contain one denied and one concrete successful write: denied=%#v allowed=%#v", deniedResult, allowedResult)
 	}
@@ -11093,14 +11025,14 @@ func TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot(t *test
 	_, readResult := providerHostToolResultForName(t, body, "read_file")
 	_, editResult := providerHostToolResultForName(t, body, "edit_file")
 	if stringField(readResult, "code") != "" || stringField(readResult, "error") != "" ||
-		stringField(editResult, "path") != allowedPath || editResult["replacements"] != float64(1) ||
+		stringField(editResult, "path") != "[PRIVATE_PATH]" || strings.Contains(body, allowRoot) || editResult["replacements"] != float64(1) ||
 		stringField(editResult, "code") != "" || stringField(editResult, "error") != "" {
 		t.Fatalf("provider continuation did not contain concrete successful allow_write read/edit results: read=%#v edit=%#v", readResult, editResult)
 	}
 }
 
 func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	protectedDir := filepath.Join(workspace, "protected")
 	publicDir := filepath.Join(workspace, "public")
@@ -11168,7 +11100,7 @@ func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T)
 }
 
 func TestRuntimeServerParallelTasksCreateDurableChildRuns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11260,7 +11192,7 @@ func TestRuntimeServerParallelTasksCreateDurableChildRuns(t *testing.T) {
 }
 
 func TestRuntimeServerParallelTasksHonorDependsOnWaves(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11341,7 +11273,7 @@ func TestRuntimeServerParallelTasksHonorDependsOnWaves(t *testing.T) {
 }
 
 func TestRuntimeServerParallelTasksRunReadyWaveConcurrently(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11431,7 +11363,7 @@ func TestRuntimeServerParallelTasksRunReadyWaveConcurrently(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentContinueAndForkUseDurableTranscript(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11527,7 +11459,7 @@ func TestRuntimeServerSubagentContinueAndForkUseDurableTranscript(t *testing.T) 
 }
 
 func TestRuntimeServerSubagentContinueInheritsSourceIdentityWhenParentModelChanges(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11613,7 +11545,7 @@ func TestRuntimeServerSubagentContinueInheritsSourceIdentityWhenParentModelChang
 }
 
 func TestRuntimeServerRejectsConcurrentSubagentContinueFromSameReference(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11693,7 +11625,7 @@ func TestRuntimeServerRejectsConcurrentSubagentContinueFromSameReference(t *test
 }
 
 func TestRuntimeServerAllowsSubagentForkFromAncestorParentThread(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11782,7 +11714,7 @@ func TestRuntimeServerAllowsSubagentForkFromAncestorParentThread(t *testing.T) {
 }
 
 func TestRuntimeServerCopiesAncestorSubagentContinueIntoCurrentParent(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11871,7 +11803,7 @@ func TestRuntimeServerCopiesAncestorSubagentContinueIntoCurrentParent(t *testing
 }
 
 func TestRuntimeServerRejectsSubagentContinueWhenToolScopeDrifts(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12039,7 +11971,7 @@ func TestRuntimeServerStartupRejectsUnboundStaleRunningSubagentRuns(t *testing.T
 }
 
 func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12142,7 +12074,7 @@ func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
 }
 
 func TestRuntimeServerBackgroundTaskJobsWaitAndOutput(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12382,118 +12314,8 @@ func TestRuntimeServerBackgroundTaskJobsWaitAndOutput(t *testing.T) {
 	}
 }
 
-func TestRuntimeServerBashRunInBackgroundWithholdsOutputAndSupportsKill(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("background shell process-group kill uses the POSIX shell path in this contract test")
-	}
-	dataDir := t.TempDir()
-	workspace := filepath.Join(dataDir, "workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_bg","type":"function","function":{"name":"bash","arguments":"{\"command\":\"sleep 20 & echo $! > child.pid; printf started; wait\",\"run_in_background\":true,\"timeout\":120}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"background bash accepted"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "background-shell-provider", "background-shell-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Background shell",
-		"workspace":      workspace,
-		"providerId":     "background-shell-provider",
-		"model":          "background-shell-model",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Start background shell.",
-	}), http.StatusAccepted)
-	turnID := stringField(start, "turnId")
-	if provider.RequestCount() != 2 {
-		t.Fatalf("background bash should start job and continue parent provider loop, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	if !strings.Contains(provider.Body(0), "run_in_background") || !strings.Contains(provider.Body(0), "runInBackground") {
-		t.Fatalf("parent bash schema should advertise background shell controls:\n%s", provider.Body(0))
-	}
-	hostCallID, bashResult := providerHostToolResultForName(t, provider.Body(1), "bash")
-	assertSecurityBoundChildMetadata(t, bashResult, "", "running", true)
-	if strings.Contains(provider.Body(1), "artifactPath") || strings.Contains(provider.Body(1), "background_shell") {
-		t.Fatalf("parent continuation exposed private background shell metadata:\n%s", provider.Body(1))
-	}
-
-	var output map[string]any
-	var internalRun jobs.Record
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		output = assertLiveJSON(t, server.URL, http.MethodPost, "/v1/runtime/task-jobs/output", DefaultRuntimeToken, mustJSON(t, map[string]any{
-			"jobId":    "job-1",
-			"threadId": threadID,
-		}), http.StatusOK)
-		assertSecurityBoundTaskOutputV1(t, output, "job-1", "running")
-		internalRuns := runtimeServerInternalChildRuns(t, dataDir, threadID)
-		if len(internalRuns) == 1 {
-			internalRun = internalRuns[0]
-		}
-		if _, err := os.Stat(filepath.Join(workspace, "child.pid")); err == nil && internalRun.ID != "" {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	if internalRun.Output != "" || internalRun.Error != "" || internalRun.Status != "running" || internalRun.Kind != "background-shell" || internalRun.SecurityBinding == nil {
-		t.Fatalf("background bash must retain only bound control metadata: public=%#v internal=%#v", output, internalRun)
-	}
-	pidBytes, err := os.ReadFile(filepath.Join(workspace, "child.pid"))
-	if err != nil {
-		t.Fatalf("background shell should record child pid: %v", err)
-	}
-	childPID := strings.TrimSpace(string(pidBytes))
-	if childPID == "" {
-		t.Fatalf("background child pid file was empty")
-	}
-	killed := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/runtime/task-jobs/kill", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"jobId":    "job-1",
-		"threadId": threadID,
-		"reason":   "test cleanup",
-	}), http.StatusOK)
-	killedJob := mapField(t, killed, "job")
-	assertSecurityBoundChildMetadata(t, killedJob, "job-1", "killed", true)
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if exec.Command("kill", "-0", childPID).Run() != nil {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	if exec.Command("kill", "-0", childPID).Run() == nil {
-		t.Fatalf("background shell child process %s survived kill_shell cancellation", childPID)
-	}
-	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	events := runtimeServerEventsForTurn(t, replay, turnID)
-	progress := runtimeServerEventWithKindAndChildStatus(t, events, "tool_progress", "running")
-	child := mapField(t, progress, "child")
-	if stringField(progress, "callId") != hostCallID || strings.Contains(replay, "call_bash_bg") {
-		t.Fatalf("background bash replay did not preserve its host call id: progress=%#v", progress)
-	}
-	assertSecurityBoundChildMetadata(t, child, "job-1", "running", true)
-}
-
 func TestRuntimeServerModelCannotInspectBackgroundTaskJobsAcrossTurns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12687,7 +12509,7 @@ func TestRuntimeServerModelCannotInspectBackgroundTaskJobsAcrossTurns(t *testing
 }
 
 func TestRuntimeServerBackgroundTaskJobKillCancelsChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12833,7 +12655,7 @@ func TestRuntimeServerBackgroundTaskJobKillCancelsChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerKunBuiltinToolsAdvertiseAndExecute(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12894,7 +12716,7 @@ func TestRuntimeServerKunBuiltinToolsAdvertiseAndExecute(t *testing.T) {
 }
 
 func TestRuntimeServerGoalToolsRequireEvidenceBeforeCompletion(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_goal_complete","type":"function","function":{"name":"update_goal","arguments":%q}}]},"finish_reason":"tool_calls"}]}`, `{"status":"complete"}`),
@@ -12946,181 +12768,13 @@ func TestRuntimeServerGoalToolsRequireEvidenceBeforeCompletion(t *testing.T) {
 	}
 }
 
-func TestRuntimeServerGoalTodoCompleteStepAndFinalReadiness(t *testing.T) {
-	dataDir := t.TempDir()
-	todoArgs := string(mustJSON(t, map[string]any{
-		"todos": []map[string]any{{"content": "Audit contract", "status": "in_progress"}},
-	}))
-	stepArgs := string(mustJSON(t, map[string]any{
-		"step":   "Audit contract",
-		"result": "contract audited",
-		"evidence": []map[string]any{{
-			"kind":    "verification",
-			"summary": "runtime contract verification ran",
-			"command": "printf verified",
-		}},
-	}))
-	bashArgs := `{"command":"printf verified"}`
-	completeArgs := `{"status":"complete"}`
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_todo_write","type":"function","function":{"name":"todo_write","arguments":%q}},{"index":1,"id":"call_bash_verify","type":"function","function":{"name":"bash","arguments":%q}},{"index":2,"id":"call_complete_step","type":"function","function":{"name":"complete_step","arguments":%q}},{"index":3,"id":"call_goal_complete","type":"function","function":{"name":"update_goal","arguments":%q}}]},"finish_reason":"tool_calls"}]}`, todoArgs, bashArgs, stepArgs, completeArgs),
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"goal complete"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "goal-provider", "goal-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":      "Goal todo",
-		"workspace":  dataDir,
-		"providerId": "goal-provider",
-		"model":      "goal-model",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/goal", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"objective": "Complete with evidence",
-	}), http.StatusOK)
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt":         "Update todos, verify, sign off the step, then complete the goal.",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusAccepted)
-	turnID := stringField(start, "turnId")
-	if provider.RequestCount() != 2 {
-		t.Fatalf("goal todo tool loop should call provider twice, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	body := provider.Body(1)
-	resultsJSON := ""
-	for _, toolName := range []string{"todo_write", "bash", "complete_step", "update_goal"} {
-		_, result := providerHostToolResultForName(t, body, toolName)
-		resultsJSON += string(mustJSON(t, result))
-	}
-	for _, expected := range []string{"Goal achieved", "hostVerified"} {
-		if !strings.Contains(resultsJSON, expected) {
-			t.Fatalf("host-bound goal/todo results missing %s: results=%s body=%s", expected, resultsJSON, body)
-		}
-	}
-	goal := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/goal", DefaultRuntimeToken, nil, http.StatusOK)
-	goalBody := mapField(t, goal, "goal")
-	ledger, _ := goalBody["evidenceLedger"].([]any)
-	if goalBody["status"] != "complete" || len(ledger) != 1 {
-		t.Fatalf("goal should be complete with exactly one evidence entry: %#v", goal)
-	}
-	todos := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/todos", DefaultRuntimeToken, nil, http.StatusOK)
-	todoItems, _ := mapField(t, todos, "todos")["items"].([]any)
-	if len(todoItems) != 1 {
-		t.Fatalf("expected one todo item: %#v", todos)
-	}
-	todoItem, _ := todoItems[0].(map[string]any)
-	if stringField(todoItem, "status") != "completed" {
-		t.Fatalf("complete_step should advance the matching todo to completed: %#v", todos)
-	}
-	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	events := runtimeServerEventsForTurn(t, replay, turnID)
-	for _, kind := range []string{"tool_call_finished", "item_completed", "turn_completed"} {
-		if !hasRuntimeServerEvent(events, kind) {
-			t.Fatalf("goal/todo loop replay missing %s:\n%s", kind, replay)
-		}
-	}
-	if strings.Contains(replay, "event: goal_updated") || strings.Contains(replay, "event: todos_updated") || strings.Contains(replay, "runtime contract verification ran") {
-		t.Fatalf("goal/todo durable replay exposed untyped goal/todo/evidence prose:\n%s", replay)
-	}
-}
-
-func TestRuntimeServerCompleteStepRejectsMismatchedTodoIndexBeforeEvidence(t *testing.T) {
-	dataDir := t.TempDir()
-	stepArgs := string(mustJSON(t, map[string]any{
-		"step":       "Wrong contract",
-		"step_index": 1,
-		"evidence": []map[string]any{{
-			"kind":    "verification",
-			"summary": "runtime contract verification ran",
-			"command": "printf verified",
-		}},
-	}))
-	bashArgs := `{"command":"printf verified"}`
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_verify","type":"function","function":{"name":"bash","arguments":%q}},{"index":1,"id":"call_complete_step","type":"function","function":{"name":"complete_step","arguments":%q}}]},"finish_reason":"tool_calls"}]}`, bashArgs, stepArgs),
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"todo still active"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "goal-provider", "goal-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":      "Goal todo mismatch",
-		"workspace":  dataDir,
-		"providerId": "goal-provider",
-		"model":      "goal-model",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/goal", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"objective": "Complete only matching todos",
-	}), http.StatusOK)
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/todos", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"todos": []map[string]any{{"content": "Audit contract", "status": "in_progress"}},
-	}), http.StatusOK)
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt":         "Verify but try to sign off the wrong todo text.",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusAccepted)
-	if provider.RequestCount() != 2 {
-		t.Fatalf("goal todo mismatch loop should call provider twice, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	body := provider.Body(1)
-	_, stepResult := providerHostToolResultForName(t, body, "complete_step")
-	resultJSON := string(mustJSON(t, stepResult))
-	if !strings.Contains(resultJSON, "todo_step_mismatch") {
-		t.Fatalf("mismatched complete_step should return a host-bound tool error: result=%s body=%s", resultJSON, body)
-	}
-	goal := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/goal", DefaultRuntimeToken, nil, http.StatusOK)
-	ledger, _ := mapField(t, goal, "goal")["evidenceLedger"].([]any)
-	if len(ledger) != 0 {
-		t.Fatalf("mismatched complete_step must not append evidence before todo identity is validated: %#v", goal)
-	}
-	todos := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID+"/todos", DefaultRuntimeToken, nil, http.StatusOK)
-	todoItems, _ := mapField(t, todos, "todos")["items"].([]any)
-	if len(todoItems) != 1 {
-		t.Fatalf("expected one todo item: %#v", todos)
-	}
-	todoItem, _ := todoItems[0].(map[string]any)
-	if stringField(todoItem, "status") != "in_progress" {
-		t.Fatalf("mismatched complete_step must leave the matched index unfinished: %#v", todos)
-	}
-}
-
 func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 	const (
 		reasoningSentinel = "DEEPSEEK_PRIVATE_PLAN_REASONING"
 		planMarkdown      = "# Generated plan\n\nValidation nonce: 30"
 		planContentHash   = "93887a2fccaf8b3b1b51350c0abfc65390966231128774816dce99bc362505e4"
 	)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13231,7 +12885,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 }
 
 func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13302,7 +12956,7 @@ func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
 }
 
 func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13432,7 +13086,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 
 func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
 	const sentinel = "UNVERIFIED_PLAN_DRAFT_ACCOUNT_6222020202020202020_AMOUNT_4200000"
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13483,7 +13137,7 @@ func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13585,7 +13239,7 @@ func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13695,7 +13349,7 @@ func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T
 }
 
 func TestRuntimeServerNormalTurnRejectsForgedCreatePlan(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13806,7 +13460,7 @@ func TestRuntimeServerNormalTurnRejectsForgedCreatePlan(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeRejectsForgedWriteBeforeMaterializingPlanText(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13881,7 +13535,7 @@ func TestRuntimeServerPlanModeRejectsForgedWriteBeforeMaterializingPlanText(t *t
 }
 
 func TestRuntimeServerOpenAIResponsesToolLoopExecutesAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13933,7 +13587,7 @@ func TestRuntimeServerOpenAIResponsesToolLoopExecutesAndContinues(t *testing.T) 
 }
 
 func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14143,7 +13797,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 }
 
 func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14250,7 +13904,7 @@ func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) 
 }
 
 func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14345,7 +13999,7 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 }
 
 func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14419,7 +14073,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 }
 
 func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14514,7 +14168,7 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 }
 
 func TestRuntimeServerAnthropicApprovalDenialClearsPrivateProtocolWithoutProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14581,7 +14235,7 @@ func assertRuntimeFilesExcludeValues(t *testing.T, root string, values ...string
 }
 
 func TestRuntimeServerConfiguredHTTPMCPToolLoopRejectsMutationWithoutHostSemanticIdentityAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_mcp_lookup","type":"function","function":{"name":"mcp__runtime-mcp__lookup","arguments":"{\"query\":\"needle\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -14692,7 +14346,7 @@ func TestRuntimeServerConfiguredHTTPMCPToolLoopRejectsMutationWithoutHostSemanti
 }
 
 func TestRuntimeServerCaseFundPromptScopesProviderToolsToAnalytixFunds(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14784,7 +14438,7 @@ func TestRuntimeServerCaseFundPromptScopesProviderToolsToAnalytixFunds(t *testin
 }
 
 func TestCaseFundUnavailableReplacesFabricatedFinal(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14859,7 +14513,7 @@ func TestCaseFundUnavailableReplacesFabricatedFinal(t *testing.T) {
 }
 
 func TestUnboundHighRiskCaseRequestUsesHostBoundaryBeforeProviderOrSideEffects(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-case-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14902,7 +14556,7 @@ func TestUnboundHighRiskCaseRequestUsesHostBoundaryBeforeProviderOrSideEffects(t
 }
 
 func TestUnboundStructuredBankCardRequestCannotBypassFinalEvidenceGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-card-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14932,7 +14586,7 @@ func TestUnboundStructuredBankCardRequestCannotBypassFinalEvidenceGate(t *testin
 }
 
 func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -15008,7 +14662,7 @@ func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t 
 }
 
 func TestUnboundAmountEntityFactCannotUseGeneralOutput(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-amount-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15042,7 +14696,7 @@ func TestProviderProtectedCaseFactDraftOnGeneralTurnIsNeverPublished(t *testing.
 	if !domainsecurity.ContainsProtectedCaseFactCandidate(draftSentinel) {
 		t.Fatal("regression sentinel must exercise the protected case-fact projection")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "general-draft-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15103,7 +14757,7 @@ func TestProviderProtectedCaseFactDraftOnGeneralTurnIsNeverPublished(t *testing.
 }
 
 func TestUnboundProviderFileToolCannotCreateCaseBinding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15150,7 +14804,7 @@ func TestUnboundProviderFileToolCannotCreateCaseBinding(t *testing.T) {
 }
 
 func TestRuntimeServerCaseFundFullCaseReportBlockedUnderApprovalNever(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15216,7 +14870,7 @@ func TestRuntimeServerCaseFundFullCaseReportBlockedUnderApprovalNever(t *testing
 }
 
 func TestRuntimeServerCaseFundOtherMutatingMCPStillBlockedUnderApprovalNever(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15283,7 +14937,7 @@ func TestRuntimeServerCaseFundOtherMutatingMCPStillBlockedUnderApprovalNever(t *
 }
 
 func TestCaseBoundArbitraryMutatingMCPIsNeverAdvertisedOrExecuted(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	sideEffectPath := filepath.Join(dataDir, "unauthorized-bundle.zip")
 	fixture := newPinnedMCPFixture(t, "server", []map[string]any{{
 		"name":        "generate_bundle",
@@ -15338,7 +14992,7 @@ func TestCaseBoundArbitraryMutatingMCPIsNeverAdvertisedOrExecuted(t *testing.T) 
 }
 
 func TestCaseBoundBuiltinWriteRequiresPublicationAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15393,7 +15047,7 @@ func TestCaseBoundBuiltinWriteRequiresPublicationAuthority(t *testing.T) {
 }
 
 func TestRuntimeServerCaseFundUnverifiedFinalUsesHostBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15461,7 +15115,7 @@ func TestRuntimeServerCaseFundUnverifiedFinalUsesHostBoundary(t *testing.T) {
 }
 
 func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var toolCallCount atomic.Int32
 	provider := newCompleteProviderServer(t, [][]string{
 		{
@@ -15565,7 +15219,7 @@ func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.
 }
 
 func TestRuntimeServerEditRequiresFreshReadBeforeEdit(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15623,7 +15277,7 @@ func TestRuntimeServerEditRequiresFreshReadBeforeEdit(t *testing.T) {
 }
 
 func TestRuntimeServerEditAfterReadUsesApprovalAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15697,7 +15351,7 @@ func TestRuntimeServerEditAfterReadUsesApprovalAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerWriteFileToolReturnsUnifiedDiffMetadata(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15821,7 +15475,7 @@ func TestRuntimeServerWriteFileToolReturnsUnifiedDiffMetadata(t *testing.T) {
 }
 
 func TestRuntimeServerMoveFileToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, "old"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15976,7 +15630,7 @@ func TestRuntimeServerMoveFileToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerMoveFileRejectsDestinationExists(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16096,7 +15750,7 @@ func readRuntimeServerNotebookCells(t *testing.T, path string) []map[string]json
 }
 
 func TestRuntimeServerNotebookEditToolIsAdvertisedAndReplacesCell(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16178,7 +15832,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndReplacesCell(t *testing.T) 
 }
 
 func TestRuntimeServerNotebookEditInsertsAndDeletesCells(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16286,7 +15940,7 @@ func TestRuntimeServerNotebookEditInsertsAndDeletesCells(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditRejectsInvalidTarget(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16364,7 +16018,7 @@ func TestRuntimeServerNotebookEditRejectsInvalidTarget(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16480,7 +16134,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditInsertDeleteAndErrors(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16643,7 +16297,7 @@ func stringFieldFromRawJSON(raw json.RawMessage) string {
 }
 
 func TestRuntimeServerDeleteRangeToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16737,7 +16391,7 @@ func TestRuntimeServerDeleteRangeToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteRangeRequiresReadBeforeDelete(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16813,7 +16467,7 @@ func TestRuntimeServerDeleteRangeRequiresReadBeforeDelete(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteRangeRejectsDuplicateAnchor(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16900,7 +16554,7 @@ func TestRuntimeServerDeleteRangeRejectsDuplicateAnchor(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16996,7 +16650,7 @@ func TestRuntimeServerDeleteSymbolToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolRequiresReadBeforeDelete(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17068,7 +16722,7 @@ func TestRuntimeServerDeleteSymbolRequiresReadBeforeDelete(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolRejectsMultiNameSpec(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17151,7 +16805,7 @@ func TestRuntimeServerDeleteSymbolRejectsMultiNameSpec(t *testing.T) {
 }
 
 func TestRuntimeServerEditFileSupportsReasonixStyleMultiEditAliases(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17252,7 +16906,7 @@ func TestRuntimeServerEditFileSupportsReasonixStyleMultiEditAliases(t *testing.T
 }
 
 func TestRuntimeServerMultiEditToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17346,7 +17000,7 @@ func TestRuntimeServerMultiEditToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerEditFileMultiEditIsAtomicOnFailure(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17437,7 +17091,7 @@ func TestRuntimeServerEditFileMultiEditIsAtomicOnFailure(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalAlwaysRequestsApprovalForAutoReadTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17535,7 +17189,7 @@ func TestStaleApprovalGrantRejectedAfterMCPReconnect(t *testing.T) {
 		}
 	}))
 	defer mcpServer.Close()
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "stale-approval")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17599,316 +17253,6 @@ func TestStaleApprovalGrantRejectedAfterMCPReconnect(t *testing.T) {
 	mcpMu.Unlock()
 	if initializeCount < 2 {
 		t.Fatalf("test did not advance MCP connection identity: initialize=%d", initializeCount)
-	}
-}
-
-func TestRuntimeServerBashApprovalDenyAndAllowControlExecution(t *testing.T) {
-	dataDir := t.TempDir()
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_deny","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi > bash.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_allow","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi > bash.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"bash handled"}}]}`,
-			`data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "bash-provider", "bash-model"),
-	}))
-	t.Cleanup(server.Close)
-
-	runApprovalCase := func(t *testing.T, decision string) string {
-		t.Helper()
-		workspace := t.TempDir()
-		beforeRequests := provider.RequestCount()
-		thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-			"title":          "Bash " + decision,
-			"workspace":      workspace,
-			"providerId":     "bash-provider",
-			"model":          "bash-model",
-			"approvalPolicy": "on-request",
-			"sandboxMode":    "danger-full-access",
-		}), http.StatusCreated)
-		threadID := stringField(thread, "id")
-		start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{"prompt": "Run bash after approval."}), http.StatusAccepted)
-		if start["pendingKind"] != "approval" {
-			t.Fatalf("bash should request approval: %#v", start)
-		}
-		pendingID := stringField(start, "pendingId")
-		assertLiveJSON(t, server.URL, http.MethodPost, "/v1/approvals/"+pendingID, DefaultRuntimeToken, mustJSON(t, map[string]string{"decision": decision}), http.StatusOK)
-		expectedRequests := 2
-		if decision == "deny" {
-			expectedRequests = 1
-		}
-		if got := provider.RequestCount() - beforeRequests; got != expectedRequests {
-			t.Fatalf("approval %s provider request count mismatch: got=%d want=%d", decision, got, expectedRequests)
-		}
-		if decision == "deny" {
-			replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-			if !strings.Contains(replay, "approval_denied") ||
-				!strings.Contains(replay, "no unverified final response was published") ||
-				strings.Contains(replay, "bash handled") {
-				t.Fatalf("denied bash approval did not end at the fixed host boundary:\n%s", replay)
-			}
-		}
-		return workspace
-	}
-
-	deniedWorkspace := runApprovalCase(t, "deny")
-	if _, err := os.Stat(filepath.Join(deniedWorkspace, "bash.txt")); !os.IsNotExist(err) {
-		t.Fatalf("denied bash approval must not execute command, stat err=%v", err)
-	}
-	allowedWorkspace := runApprovalCase(t, "allow")
-	data, err := os.ReadFile(filepath.Join(allowedWorkspace, "bash.txt"))
-	if err != nil || string(data) != "hi" {
-		t.Fatalf("allowed bash approval should execute command, data=%q err=%v", string(data), err)
-	}
-}
-
-func TestRuntimeServerBashReportsExitCodeAndDiagnostics(t *testing.T) {
-	dataDir := t.TempDir()
-	workspace := filepath.Join(dataDir, "workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_exit","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi; exit 7\"}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"exit handled"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "bash-exit-provider", "bash-exit-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Bash exit diagnostics",
-		"workspace":      workspace,
-		"providerId":     "bash-exit-provider",
-		"model":          "bash-exit-model",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Run a command that exits nonzero.",
-	}), http.StatusAccepted)
-	if provider.RequestCount() != 2 {
-		t.Fatalf("bash failure should execute tool and continue provider loop, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	body := provider.Body(1)
-	_, bashResult := providerHostToolResultForName(t, body, "bash")
-	resultJSON := string(mustJSON(t, bashResult))
-	for _, needle := range []string{
-		`"status":"failed"`,
-		`"exitCode":7`,
-		`"timedOut":false`,
-		`"output":"hi"`,
-		`"outputBytes":2`,
-		`"maxOutputBytes":32768`,
-		`"durationMs"`,
-	} {
-		if !strings.Contains(resultJSON, needle) {
-			t.Fatalf("host-bound bash continuation missing diagnostic %q: result=%s body=%s", needle, resultJSON, body)
-		}
-	}
-}
-
-func TestRuntimeServerBashTimeoutKillsProcessGroupGrandchild(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("covered by taskkill fallback; Windows Job Object parity is tracked separately")
-	}
-	dataDir := t.TempDir()
-	workspace := filepath.Join(dataDir, "workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_bash_timeout","type":"function","function":{"name":"bash","arguments":"{\"command\":\"sleep 20 & echo $! > child.pid; wait\",\"timeout\":1}"}}]},"finish_reason":"tool_calls"}]}`,
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"timeout handled"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "bash-timeout-provider", "bash-timeout-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Bash process group timeout",
-		"workspace":      workspace,
-		"providerId":     "bash-timeout-provider",
-		"model":          "bash-timeout-model",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Run a command that times out with a background child.",
-	}), http.StatusAccepted)
-	if provider.RequestCount() != 2 {
-		t.Fatalf("bash timeout should execute tool and continue provider loop, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	body := provider.Body(1)
-	_, bashResult := providerHostToolResultForName(t, body, "bash")
-	resultJSON := string(mustJSON(t, bashResult))
-	for _, needle := range []string{
-		`"status":"timeout"`,
-		`"timedOut":true`,
-		`"exitCode":-1`,
-		`"outputBytes"`,
-		`"maxOutputBytes":32768`,
-		`"durationMs"`,
-	} {
-		if !strings.Contains(resultJSON, needle) {
-			t.Fatalf("host-bound timeout continuation missing bash diagnostic %q: result=%s body=%s", needle, resultJSON, body)
-		}
-	}
-	pidBytes, err := os.ReadFile(filepath.Join(workspace, "child.pid"))
-	if err != nil {
-		t.Fatalf("timed out command should have recorded child pid: %v", err)
-	}
-	childPID := strings.TrimSpace(string(pidBytes))
-	if childPID == "" {
-		t.Fatalf("child pid file was empty")
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if exec.Command("kill", "-0", childPID).Run() != nil {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("background child process %s survived bash timeout; process group kill did not run", childPID)
-}
-
-func TestRuntimeServerSideEffectIntentBlocksSecondEquivalentBashWrite(t *testing.T) {
-	dataDir := t.TempDir()
-	workspace := filepath.Join(dataDir, "workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	bashArgsFirst := mustJSONString(t, map[string]any{"command": "printf x >> repeat.txt"})
-	bashArgsSecond := mustJSONString(t, map[string]any{
-		"command": " printf x >> repeat.txt ", "timeout": terminalapp.DefaultBashTimeoutSeconds, "runInBackground": false,
-	})
-	provider := newCompleteProviderServer(t, [][]string{
-		{
-			"data: " + mustJSONString(t, map[string]any{"choices": []map[string]any{{
-				"delta": map[string]any{"tool_calls": []map[string]any{{
-					"index": 0,
-					"id":    "call_repeat_write_1",
-					"type":  "function",
-					"function": map[string]any{
-						"name":      "bash",
-						"arguments": bashArgsFirst,
-					},
-				}}},
-				"finish_reason": "tool_calls",
-			}}}),
-			`data: [DONE]`,
-		},
-		{
-			"data: " + mustJSONString(t, map[string]any{"choices": []map[string]any{{
-				"delta": map[string]any{"tool_calls": []map[string]any{{
-					"index": 0,
-					"id":    "call_repeat_write_2",
-					"type":  "function",
-					"function": map[string]any{
-						"name":      "bash",
-						"arguments": bashArgsSecond,
-					},
-				}}},
-				"finish_reason": "tool_calls",
-			}}}),
-			`data: [DONE]`,
-		},
-		{
-			`data: {"choices":[{"delta":{"content":"duplicate write blocked"}}]}`,
-			`data: [DONE]`,
-		},
-	})
-	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:       DefaultRuntimeToken,
-		DurableTempDir:     t.TempDir(),
-		Host:               "127.0.0.1",
-		Port:               0,
-		DataDir:            dataDir,
-		ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "repeat-guard-provider", "repeat-guard-model"),
-	}))
-	defer server.Close()
-
-	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title":          "Repeat write guard",
-		"workspace":      workspace,
-		"providerId":     "repeat-guard-provider",
-		"model":          "repeat-guard-model",
-		"approvalPolicy": "auto",
-		"sandboxMode":    "danger-full-access",
-	}), http.StatusCreated)
-	threadID := stringField(thread, "id")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"prompt": "Try repeating the same write command.",
-	}), http.StatusAccepted)
-	if provider.RequestCount() != 3 {
-		t.Fatalf("side-effect gate should continue after blocking the second write, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
-	}
-	data, err := os.ReadFile(filepath.Join(workspace, "repeat.txt"))
-	if err != nil || string(data) != "x" {
-		t.Fatalf("second equivalent bash write must be blocked before execution, data=%q err=%v", string(data), err)
-	}
-	body := provider.Body(2)
-	bashCallIDs := providerHostToolCallIDsForName(t, body, "bash")
-	if len(bashCallIDs) != 2 {
-		t.Fatalf("repeat guard provider history lost host-bound bash calls: ids=%#v body=%s", bashCallIDs, body)
-	}
-	secondCallID := bashCallIDs[1]
-	resultJSON := string(mustJSON(t, providerToolResultForCall(t, body, secondCallID)))
-	for _, expected := range []string{
-		`"code":"side_effect_duplicate"`,
-		`"executed":false`,
-		`"intentStatus":"closed"`,
-		`"factAnswerAllowed":false`,
-		`"evidenceAuthority":false`,
-	} {
-		if !strings.Contains(resultJSON, expected) {
-			t.Fatalf("host-bound final provider result missing duplicate block %q: result=%s body=%s", expected, resultJSON, body)
-		}
-	}
-	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	if !strings.Contains(replay, secondCallID) || !strings.Contains(replay, "side_effect_duplicate") || strings.Contains(replay, "call_repeat_write_2") {
-		t.Fatalf("side-effect duplicate result should be visible in replay:\n%s", replay)
 	}
 }
 
@@ -17983,7 +17327,7 @@ func TestRuntimeServerAllowsRepeatedReadOnlyObservation(t *testing.T) {
 }
 
 func TestRuntimeServerFailureStormGuardAnnotatesThirdSameToolFailure(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18069,7 +17413,7 @@ func TestRuntimeServerFailureStormGuardAnnotatesThirdSameToolFailure(t *testing.
 }
 
 func TestRuntimeServerFailureStormGuardResetsAfterSuccessfulTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18161,7 +17505,7 @@ func TestRuntimeServerFailureStormGuardResetsAfterSuccessfulTool(t *testing.T) {
 }
 
 func TestRuntimeServerForkAndResumePreserveToolPairingHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18246,7 +17590,7 @@ func TestRuntimeServerForkAndResumePreserveToolPairingHistory(t *testing.T) {
 func TestRuntimeServerInterruptedToolCallHistoryIsRepairedForProvider(t *testing.T) {
 	run := func(t *testing.T, toolItem map[string]any) string {
 		t.Helper()
-		dataDir := t.TempDir()
+		dataDir := workspacetest.New(t)
 		durableRoot := t.TempDir()
 		workspace := filepath.Join(dataDir, "workspace")
 		if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -18356,7 +17700,7 @@ func TestRuntimeServerInterruptedToolCallHistoryIsRepairedForProvider(t *testing
 }
 
 func TestRuntimeServerForkTurnIDTruncatesAndRewritesHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18452,7 +17796,7 @@ func TestRuntimeServerForkTurnIDTruncatesAndRewritesHistory(t *testing.T) {
 }
 
 func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18516,7 +17860,7 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 }
 
 func TestUserInputCancelNeverResumesProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input_cancel","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18561,7 +17905,7 @@ func TestUserInputCancelNeverResumesProvider(t *testing.T) {
 }
 
 func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-user-input-stale")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -18649,7 +17993,7 @@ func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
 }
 
 func TestRuntimeServerInterruptCancelsPendingUserInputContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input_abort","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick after abort\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18707,7 +18051,7 @@ func TestRuntimeServerInterruptCancelsPendingUserInputContinuation(t *testing.T)
 }
 
 func TestRuntimeServerUserInputResolutionFailsClosedAfterRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	provider := newCompleteProviderServer(t, [][]string{
 		{
@@ -18770,7 +18114,7 @@ func TestRuntimeServerUserInputResolutionFailsClosedAfterRestart(t *testing.T) {
 }
 
 func TestRuntimeServerDisableUserInputRemovesInteractiveToolSchemas(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := runtimeServerPrivateToolArgumentTempDir(t, "input-disabled")
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"no input needed"}}]}`,
 		`data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`,
@@ -18807,7 +18151,7 @@ func TestRuntimeServerDisableUserInputRemovesInteractiveToolSchemas(t *testing.T
 }
 
 func TestRuntimeServerThreadSummarySearchAndForkCountsMatchProductContract(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace-search-contract")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18889,7 +18233,7 @@ func TestRuntimeServerThreadSummarySearchAndForkCountsMatchProductContract(t *te
 }
 
 func TestRuntimeServerApprovalDenyAndAllowControlToolExecution(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_write_deny","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"out.txt\",\"content\":\"approved content\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18966,7 +18310,7 @@ func TestRuntimeServerApprovalDenyAndAllowControlToolExecution(t *testing.T) {
 }
 
 func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "shutdown-case-approval")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -19032,7 +18376,7 @@ func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t
 }
 
 func TestRuntimeServerInterruptCancelsPendingApprovalContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "approval-abort")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -19094,7 +18438,7 @@ func TestRuntimeServerInterruptCancelsPendingApprovalContinuation(t *testing.T) 
 }
 
 func TestRuntimeServerApprovalResolutionFailsClosedAfterRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "approval-restart")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -19161,7 +18505,7 @@ func TestRuntimeServerApprovalResolutionFailsClosedAfterRestart(t *testing.T) {
 }
 
 func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-context-repair")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -19239,7 +18583,7 @@ func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testi
 }
 
 func TestRuntimeServerUnrecoverableCaseContextQuarantinesOnlyAffectedThread(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-context-quarantine")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -19290,7 +18634,7 @@ func TestRuntimeServerUnrecoverableCaseContextQuarantinesOnlyAffectedThread(t *t
 	defer restarted.Close()
 	assertLiveJSON(t, restarted.URL, http.MethodGet, "/health", DefaultRuntimeToken, nil, http.StatusOK)
 	assertLiveJSON(t, restarted.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title": "Healthy thread after quarantine", "workspace": t.TempDir(),
+		"title": "Healthy thread after quarantine", "workspace": workspacetest.New(t),
 	}), http.StatusCreated)
 	assertLegacySnapshotSourceUnavailable(t, restarted.URL, threadID, turnID)
 	if provider.RequestCount() != 0 || caseSource.ProbeCount(t) != 0 || caseSource.CallCount(t) != 0 || caseSource.EvidenceReadCount(t) != 0 {
@@ -19375,7 +18719,7 @@ func TestRuntimeServerNormalTurnsDoNotCreateSyntheticApprovalOrUserInputGates(t 
 func TestRuntimeServerInternalSubagentLineageUsesExistingGoalContract(t *testing.T) {
 	g1 := loadG1Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"Goal task completed."},"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
@@ -19546,7 +18890,7 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 	defer server.Close()
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
-		"workspace": t.TempDir(), "providerId": "deepseek-configured", "model": "deepseek-chat",
+		"workspace": workspacetest.New(t), "providerId": "deepseek-configured", "model": "deepseek-chat",
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
 
@@ -19878,7 +19222,7 @@ func TestRuntimeServerProviderRequestShapesKeepDeepSeekFieldsScoped(t *testing.T
 func TestRuntimeServerCandidateDurableRootHighRiskFailsClosedAndSurvivesRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	root := filepath.Join(t.TempDir(), "analytix-go-runtime-candidate-durable")
+	root := filepath.Join(workspacetest.New(t), "analytix-go-runtime-candidate-durable")
 
 	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:         g1.RuntimeToken,

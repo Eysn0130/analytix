@@ -572,13 +572,14 @@ func TestTrustedProjectionRejectsCrossFileCASObservations(t *testing.T) {
 
 func TestTrustedPublicProjectorMasksOrdinaryThreadAndSSEContent(t *testing.T) {
 	const account = "6222020000000000000"
+	const privatePath = "/Users/private-owner/SYNTHETIC-PII.csv"
 	thread := map[string]any{
-		"id": "thread-ordinary-privacy", "title": "账号 " + account, "status": "idle",
+		"id": "thread-ordinary-privacy", "title": "账号 " + account, "status": "idle", "workspace": "/Users/developer/project",
 		"turns": []any{map[string]any{
 			"id": "turn-ordinary-privacy", "threadId": "thread-ordinary-privacy", "status": "running",
 			"items": []any{map[string]any{
 				"id": "item-ordinary-privacy", "threadId": "thread-ordinary-privacy", "turnId": "turn-ordinary-privacy",
-				"kind": "user_message", "role": "user", "status": "completed", "text": "账号：" + account,
+				"kind": "user_message", "role": "user", "status": "completed", "text": "账号：" + account + "\nSource: " + privatePath,
 			}},
 		}},
 	}
@@ -588,17 +589,23 @@ func TestTrustedPublicProjectorMasksOrdinaryThreadAndSSEContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	threadBody := string(mustProjectionJSON(t, projected))
+	if strings.Contains(threadBody, privatePath) || !strings.Contains(threadBody, "[PRIVATE_PATH]") || projected["workspace"] != thread["workspace"] {
+		t.Fatal("history prose leaked a locator or changed the typed workspace")
+	}
 	if strings.Contains(threadBody, account) || !strings.Contains(threadBody, "[ACCOUNT]") {
 		t.Fatalf("ordinary thread privacy projection = %s", threadBody)
 	}
 	event, visible, err := projector.ProjectEvent("thread-ordinary-privacy", thread, map[string]any{
 		"kind": "turn_steered", "threadId": "thread-ordinary-privacy", "turnId": "turn-ordinary-privacy",
-		"text": "继续核实卡号 " + account,
+		"text": "继续核实卡号 " + account + "\nSource: " + privatePath,
 	})
 	if err != nil || !visible {
 		t.Fatalf("ordinary event projection failed: event=%#v visible=%t err=%v", event, visible, err)
 	}
 	eventBody := string(mustProjectionJSON(t, event))
+	if strings.Contains(eventBody, privatePath) || !strings.Contains(eventBody, "[PRIVATE_PATH]") {
+		t.Fatal("public SSE retained a prose locator")
+	}
 	if strings.Contains(eventBody, account) || !strings.Contains(eventBody, "[ACCOUNT]") {
 		t.Fatalf("ordinary SSE privacy projection = %s", eventBody)
 	}

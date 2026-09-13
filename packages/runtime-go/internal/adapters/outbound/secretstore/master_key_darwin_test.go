@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,6 +23,17 @@ import (
 type scriptedKeychainStep struct {
 	result keychainCommandResult
 	err    error
+}
+
+func TestSecurityCommandRejectsCancelledContextBeforeStartingV1(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, input := range []context.Context{nil, ctx} {
+		result, err := (securityCommandRunner{}).Run(input, []string{"find-generic-password"}, nil)
+		if !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) || len(result.stdout) != 0 {
+			t.Fatal("cancelled credential operation did not fail without output")
+		}
+	}
 }
 
 type keychainCall struct {
@@ -693,9 +705,9 @@ func TestExplicitTaskKeychainStableAuthorityMarkerPreventsDefaultOrCrossRootReus
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(committedMarker, []byte(wantStableDigest+"\n")) ||
-		bytes.Equal(committedMarker, []byte(first.DarwinKeychainBindingDigest+"\n")) {
-		t.Fatal("explicit authority marker did not persist only the stable private identity")
+	var committedIdentity darwinExplicitKeychainBindingV2
+	if err := json.Unmarshal(committedMarker, &committedIdentity); err != nil || committedIdentity.SchemaVersion != 2 || committedIdentity.AuthorityDigest != wantStableDigest || committedIdentity.Security.Inode == "" {
+		t.Fatal("explicit authority marker did not persist stable authority and committed physical identity")
 	}
 	if _, err := defaultMasterKeyProvider(storePath, Options{}); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
 		t.Fatalf("default reuse error = %v", err)
@@ -1157,5 +1169,270 @@ func assertFindKeychainArguments(t *testing.T, call keychainCall) {
 	}
 	if len(call.stdin) != 0 {
 		t.Fatal("Keychain find unexpectedly received stdin")
+	}
+}
+
+func TestExplicitTaskKeychainRestartRejectsReplacementAndLostBinding(t *testing.T) {
+	for _, change := range []string{"exact-byte-clone", "different-key", "missing", "missing-master-directory", "missing-secret-owner", "corrupt", "legacy-v1"} {
+		t.Run(change, func(t *testing.T) {
+			root := t.TempDir()
+			database := filepath.Join(root, "analytix-task.keychain-db")
+			original := []byte("synthetic-keychain-database")
+			if err := os.WriteFile(database, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := explicitDarwinKeychainSecurityDigest(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := filepath.Join(root, "data", "private", "provider-secrets", "credentials.v1.json")
+			options := Options{DarwinKeychainDBPath: database, DarwinKeychainBindingDigest: strings.Repeat("a", 64), DarwinKeychainSecurityDigest: digest, DarwinKeychainAuthorityStorePath: store}
+			first, err := defaultMasterKeyProvider(store, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := first.(*keychainMasterKeyProvider)
+			marker := provider.bindingPath
+			switch change {
+			case "exact-byte-clone", "different-key":
+				if err := os.Rename(database, database+".retained"); err != nil {
+					t.Fatal(err)
+				}
+				value := original
+				if change == "different-key" {
+					value = []byte("synthetic-different-key-database")
+				}
+				if err := os.WriteFile(database, value, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "missing":
+				if err := os.Remove(marker); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-master-directory":
+				if err := os.RemoveAll(filepath.Dir(marker)); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-secret-owner":
+				registryRoot := filepath.Join(root, "data", "private", "provider-registry")
+				if err := os.Mkdir(registryRoot, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.RemoveAll(filepath.Dir(filepath.Dir(marker))); err != nil {
+					t.Fatal(err)
+				}
+			case "corrupt":
+				if err := os.WriteFile(marker, []byte("corrupt"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "legacy-v1":
+				if err := os.WriteFile(marker, []byte(provider.binding.AuthorityDigest+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Main observes the new inode on each launch. That observation must never
+			// replace the previous committed identity, even for an exact-byte clone.
+			options.DarwinKeychainSecurityDigest, err = explicitDarwinKeychainSecurityDigest(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := defaultMasterKeyProvider(store, options); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+				t.Fatal("restart adopted uncommitted authority")
+			}
+			actual, err := os.ReadFile(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change != "different-key" && !bytes.Equal(actual, original) {
+				t.Fatal("failed admission changed retained database")
+			}
+		})
+	}
+}
+
+func TestExplicitTaskKeychainUncommittedWriteIdentityRemainsUnavailable(t *testing.T) {
+	for _, cut := range []string{"add-error", "wrong-readback", "before-record-replace", "after-record-replace"} {
+		t.Run(cut, func(t *testing.T) {
+			root := t.TempDir()
+			database := filepath.Join(root, "analytix-task.keychain-db")
+			if err := os.WriteFile(database, []byte("synthetic-prior-database"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := explicitDarwinKeychainSecurityDigest(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := filepath.Join(root, "data", "private", "provider-secrets", "credentials.v1.json")
+			options := Options{DarwinKeychainDBPath: database, DarwinKeychainBindingDigest: strings.Repeat("a", 64), DarwinKeychainSecurityDigest: digest, DarwinKeychainAuthorityStorePath: store}
+			master, err := defaultMasterKeyProvider(store, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := master.(*keychainMasterKeyProvider)
+			before, err := os.ReadFile(provider.bindingPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := bytes.Repeat([]byte{0x67}, masterKeySize)
+			readback := candidate
+			if cut == "wrong-readback" {
+				readback = bytes.Repeat([]byte{0x68}, masterKeySize)
+			}
+			runner := &scriptedKeychainRunner{steps: []scriptedKeychainStep{
+				{result: keychainCommandResult{exitCode: keychainNotFoundExit}, err: portsecretstore.ErrMasterKeyUnavailable},
+				{}, {result: keychainCommandResult{stdout: []byte(base64.StdEncoding.EncodeToString(readback) + "\n")}},
+			}}
+			if cut == "add-error" {
+				runner.steps[1].err = portsecretstore.ErrMasterKeyUnavailable
+			}
+			runner.beforeRun = func() {
+				runner.beforeRun = func() {
+					runner.beforeRun = nil
+					if err := os.Rename(database, database+".prior"); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(database, []byte("synthetic-owned-add-result"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			fault := func() error { return errors.New("synthetic identity commit cut") }
+			if cut == "before-record-replace" {
+				provider.commitHooks = &atomicCommitHooks{beforeReplace: fault}
+			}
+			if cut == "after-record-replace" {
+				provider.commitHooks = &atomicCommitHooks{afterReplaceBeforeDirectorySync: fault}
+			}
+			provider.runner = runner
+			provider.random = bytes.NewReader(candidate)
+			key, err := provider.LoadOrCreate(context.Background())
+			clearBytes(key)
+			if !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+				t.Fatalf("cut returned success: %v", err)
+			}
+			options.DarwinKeychainSecurityDigest, err = explicitDarwinKeychainSecurityDigest(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := defaultMasterKeyProvider(store, options); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+				t.Fatal("restart adopted uncommitted Security effect")
+			}
+			after, err := os.ReadFile(provider.bindingPath)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("unconfirmed write changed committed identity")
+			}
+		})
+	}
+}
+
+func TestExplicitTaskKeychainUnknownRecordAtCommitIsPreserved(t *testing.T) {
+	root := t.TempDir()
+	database := filepath.Join(root, "analytix-task.keychain-db")
+	if err := os.WriteFile(database, []byte("synthetic-keychain-database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := explicitDarwinKeychainSecurityDigest(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(root, "data", "private", "provider-secrets", "credentials.v1.json")
+	options := Options{DarwinKeychainDBPath: database, DarwinKeychainBindingDigest: strings.Repeat("a", 64), DarwinKeychainSecurityDigest: digest, DarwinKeychainAuthorityStorePath: store}
+	master, err := defaultMasterKeyProvider(store, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := master.(*keychainMasterKeyProvider)
+	unknown := []byte("synthetic-unknown-authority")
+	provider.commitHooks = &atomicCommitHooks{beforeReplace: func() error {
+		if err := os.WriteFile(provider.bindingPath, unknown, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return errors.New("synthetic concurrent authority change")
+	}}
+	if err := provider.commitExplicitIdentity(provider.binding.Security); !errors.Is(err, errAtomicCommitAuthorityChanged) {
+		t.Fatal("unknown record did not HOLD")
+	}
+	assertPreserved := func() {
+		value, err := os.ReadFile(provider.bindingPath)
+		if err != nil || !bytes.Equal(value, unknown) {
+			t.Fatal("unknown record overwritten by rollback")
+		}
+	}
+	assertPreserved()
+	if _, err := defaultMasterKeyProvider(store, options); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatal("restart adopted unknown target")
+	}
+	assertPreserved()
+}
+
+func TestExplicitTaskKeychainUnknownBackupAndAmbiguousRecordArePreserved(t *testing.T) {
+	for _, mode := range []string{"unknown-backup", "foreign-backup", "duplicate-record", "hardlink-record"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			database := filepath.Join(root, "analytix-task.keychain-db")
+			if err := os.WriteFile(database, []byte("synthetic-keychain"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := explicitDarwinKeychainSecurityDigest(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := filepath.Join(root, "data", "private", "provider-secrets", "credentials.v1.json")
+			options := Options{DarwinKeychainDBPath: database, DarwinKeychainBindingDigest: strings.Repeat("a", 64), DarwinKeychainSecurityDigest: digest, DarwinKeychainAuthorityStorePath: store}
+			master, err := defaultMasterKeyProvider(store, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := master.(*keychainMasterKeyProvider)
+			binding := provider.bindingPath
+			paths := []string{binding}
+			switch mode {
+			case "unknown-backup", "foreign-backup":
+				journal, backup, committed := atomicRecoveryPaths(binding)
+				rollback := atomicRollbackRequiredPath(binding)
+				body := []byte("unknown-authority")
+				if mode == "foreign-backup" {
+					record := provider.binding
+					record.AuthorityDigest = strings.Repeat("b", 64)
+					body, _ = json.Marshal(record)
+				}
+				for path, content := range map[string][]byte{journal: atomicJournalPriorPresent, backup: body, committed: atomicCommittedMarker, rollback: atomicRollbackRequired} {
+					if err := os.WriteFile(path, content, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					paths = append(paths, path)
+				}
+			case "duplicate-record":
+				body, err := os.ReadFile(binding)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = append([]byte(`{"authorityDigest":"ambiguous",`), body[1:]...)
+				if err := os.WriteFile(binding, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "hardlink-record":
+				if err := os.Link(binding, binding+".retained-link"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := map[string][]byte{}
+			for _, path := range paths {
+				content, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				before[path] = content
+			}
+			if _, err := defaultMasterKeyProvider(store, options); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+				t.Fatal("unknown authority recovery did not HOLD")
+			}
+			for _, path := range paths {
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(before[path], after) {
+					t.Fatal("rejected authority recovery mutated retained evidence")
+				}
+			}
+		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestAcceptedFinalBatchSlowSubscriberNeverReceivesPrefix(t *testing.T) {
@@ -66,7 +67,7 @@ func TestAcceptedFinalCursorInsideRangeReplaysWholeBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "accepted-final cursor"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "accepted-final cursor"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

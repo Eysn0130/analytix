@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // This contract requires successful protected stdio startup. The required
@@ -21,7 +23,7 @@ func TestRuntimeServerConfiguredStdioMCPToolLoopRejectsMutationWithoutHostSemant
 		return
 	}
 
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stdio_lookup","type":"function","function":{"name":"mcp__runtime-stdio__lookup","arguments":"{\"query\":\"needle\"}"}}]},"finish_reason":"tool_calls"}]}`,

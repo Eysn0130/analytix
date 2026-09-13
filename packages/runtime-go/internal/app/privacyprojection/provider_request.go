@@ -337,7 +337,7 @@ func bytesEqualStringV1(value []byte, text string) bool {
 func ProjectOrdinaryText(text string) string {
 	current := text
 	for pass := 0; pass < maxProviderProjectionPasses; pass++ {
-		next := domainprivacy.ProjectText(domainsecret.ProjectTextV1(current)).Text
+		next := domainprivacy.ProjectText(domainprivacy.ProjectPrivateSourceText(domainsecret.ProjectTextV1(current))).Text
 		if next == current {
 			if validateOrdinaryText(current) == nil {
 				return current
@@ -542,14 +542,14 @@ func validateProviderCaseTextV1(
 		if domaincaseentity.ContainsReferenceCandidateV1(text) {
 			return ErrProviderPrivacyAuthorityUnavailable
 		}
-		return domainprivacy.ValidateOrdinaryText(text)
+		return validateOrdinaryText(text)
 	}
 	cursor := 0
 	for _, span := range spans {
 		gap := text[cursor:span.start]
 		reference := domaincaseentity.ReferenceV1(text[span.start:span.end])
 		if domaincaseentity.ContainsReferenceCandidateV1(gap) ||
-			domainprivacy.ValidateOrdinaryText(gap) != nil {
+			validateOrdinaryText(gap) != nil {
 			return ErrProviderPrivacyAuthorityUnavailable
 		}
 		if _, ok := allowed[reference]; !ok {
@@ -559,7 +559,7 @@ func validateProviderCaseTextV1(
 	}
 	gap := text[cursor:]
 	if domaincaseentity.ContainsReferenceCandidateV1(gap) ||
-		domainprivacy.ValidateOrdinaryText(gap) != nil {
+		validateOrdinaryText(gap) != nil {
 		return ErrProviderPrivacyAuthorityUnavailable
 	}
 	return nil
@@ -657,10 +657,15 @@ func ProjectProviderRequestForEffect(
 			message.Content = string(validated.canonical)
 			message.PrivateProviderSemanticBinding = nil
 		} else {
-			message.Content = projectProviderTextForEffectV1(
-				message.Content,
-				allowedCaseEntityReferences,
-			)
+			if message.Role == "tool" && len(message.Content) <= maxProviderPrivacyJSONBytes && json.Valid([]byte(message.Content)) {
+				content, _, err := projectProviderJSONValueForEffectV1(json.RawMessage(message.Content), false, allowedCaseEntityReferences)
+				if err != nil {
+					return domainmodel.Request{}, fmt.Errorf("%w: tool result content", ErrProviderPrivacyAuthorityUnavailable)
+				}
+				message.Content = projectProviderTextForEffectV1(string(content), allowedCaseEntityReferences)
+			} else {
+				message.Content = projectProviderTextForEffectV1(message.Content, allowedCaseEntityReferences)
+			}
 		}
 		message.PrivateProviderReferenceBinding = nil
 		for partIndex := range message.Parts {
@@ -1141,11 +1146,19 @@ func projectProviderJSONForEffectV1(
 	raw json.RawMessage,
 	allowedCaseEntityReferences providerCaseReferenceAllowsetV1,
 ) (json.RawMessage, bool, error) {
+	return projectProviderJSONValueForEffectV1(raw, true, allowedCaseEntityReferences)
+}
+
+func projectProviderJSONValueForEffectV1(
+	raw json.RawMessage,
+	requireObject bool,
+	allowedCaseEntityReferences providerCaseReferenceAllowsetV1,
+) (json.RawMessage, bool, error) {
 	if len(raw) == 0 {
 		return nil, false, nil
 	}
 	value, err := domainjsonstrict.DecodeValue(raw, domainjsonstrict.Options{
-		RequireObject: true, MaxBytes: maxProviderPrivacyJSONBytes, MaxDepth: 128,
+		RequireObject: requireObject, MaxBytes: maxProviderPrivacyJSONBytes, MaxDepth: 128,
 		MaxTokens: 200000, MaxStringBytes: maxProviderPrivacyJSONBytes,
 	})
 	if err != nil {
@@ -1156,7 +1169,7 @@ func projectProviderJSONForEffectV1(
 	}
 	projected, changed, err := projectProviderValueForEffectV1(
 		value,
-		true,
+		requireObject,
 		allowedCaseEntityReferences,
 	)
 	if err != nil {
@@ -1237,6 +1250,7 @@ func projectProviderValueForEffectV1(
 			credentialSafe,
 			allowedCaseEntityReferences,
 		)
+		credentialSafe, _ = domainprivacy.ProjectProviderSourceValue(credentialSafe)
 		if requireObject {
 			if _, ok := credentialSafe.(map[string]any); !ok {
 				return nil, false, errors.New("provider JSON projection lost its object shape")
@@ -1694,6 +1708,9 @@ func providerIdentifierRequiresProjection(value string) bool {
 func validateOrdinaryText(text string) error {
 	if err := domainsecret.ValidateValueV1(text); err != nil {
 		return err
+	}
+	if domainprivacy.ProjectPrivateSourceText(text) != text {
+		return ErrProviderPrivacyAuthorityUnavailable
 	}
 	return domainprivacy.ValidateOrdinaryText(text)
 }

@@ -163,11 +163,11 @@ func (s *Store) AppendOwnerLocked(thread map[string]any) error {
 	if record.ThreadID == "" {
 		return nil
 	}
+	projected, err := validatedRecordMapV1(record)
+	if err != nil {
+		return err
+	}
 	if s.restartPreserved != nil {
-		projected, err := preservationRecordMapV1(record)
-		if err != nil {
-			return err
-		}
 		if err := s.restartPreserved.AppendIndependent(context.Background(), projected); err != nil {
 			return err
 		}
@@ -252,18 +252,29 @@ func (s *Store) buildRecordsReadOnly() ([]record, error) {
 
 func (s *Store) writeRecordsOwnerLocked(records []record) error {
 	sortRecords(records)
-	if s.restartPreserved != nil {
-		projected := make([]map[string]any, 0, len(records))
-		for _, record := range records {
-			value, err := preservationRecordMapV1(record)
-			if err != nil {
-				return err
-			}
-			projected = append(projected, value)
+	projected := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		value, err := validatedRecordMapV1(record)
+		if err != nil {
+			return err
 		}
+		projected = append(projected, value)
+	}
+	if s.restartPreserved != nil {
 		return s.restartPreserved.ReplaceIndependent(context.Background(), projected)
 	}
 	return filestore.WriteJSONLFileAtomic(s.Path(), ".thread-summaries-*.tmp", records)
+}
+
+func validatedRecordMapV1(record record) (map[string]any, error) {
+	value, err := preservationRecordMapV1(record)
+	if err != nil {
+		return nil, err
+	}
+	if err := threadapp.ValidateSummaryIndexRecordV1(value); err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
 func preservationRecordMapV1(record record) (map[string]any, error) {

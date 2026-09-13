@@ -129,8 +129,9 @@ type cleaningDiffPreviewRequestV1 struct {
 }
 
 type fundsImportStageRequestV1 struct {
-	WorkspaceRoot string `json:"workspaceRoot"`
-	SourcePath    string `json:"sourcePath"`
+	WorkspaceRoot    string `json:"workspaceRoot"`
+	SourcePath       string `json:"sourcePath"`
+	CreateCaseIntent string `json:"createCaseIntent,omitempty"`
 }
 
 type fundsImportSelectorRequestV1 struct {
@@ -142,6 +143,10 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r != nil && r.URL != nil && r.URL.Path == HostFundsImportStagePathV1 && handler.FundsCSVAdmission == nil {
+		writeFundsImportCapabilityUnavailableV1(w)
+		return
+	}
 	if handler.Service == nil {
 		if r != nil && r.URL != nil && r.URL.Path == HostFundsDeterministicCleaningPathV1 {
 			writeFundsCleaningPreCASFailedV1(w)
@@ -184,24 +189,29 @@ func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Re
 		}
 		WriteJSON(w, http.StatusOK, map[string]bool{"revoked": true})
 	case HostFundsImportStagePathV1:
-		if handler.FundsCSVAdmission == nil {
-			writeLocalDisplayUnavailableV1(w)
-			return
-		}
 		var request fundsImportStageRequestV1
 		if decodeLocalDisplayRequestV1(r, &request) != nil ||
 			!validDirectSourcePreviewWorkspacePathV1(request.WorkspaceRoot) ||
-			!validDirectSourcePreviewWorkspacePathV1(request.SourcePath) {
+			!validDirectSourcePreviewWorkspacePathV1(request.SourcePath) ||
+			(request.CreateCaseIntent != "" && !domainsecurity.IsSHA256Hex(request.CreateCaseIntent)) {
 			writeLocalDisplayInvalidV1(w)
 			return
 		}
 		response, err := handler.FundsCSVAdmission.StageMainSelectedImportV1(
 			r.Context(),
 			fundscsvadmissionapp.StageInputV1{
-				WorkspaceRoot: request.WorkspaceRoot,
-				SourcePath:    request.SourcePath,
+				WorkspaceRoot:    request.WorkspaceRoot,
+				SourcePath:       request.SourcePath,
+				CreateCaseIntent: request.CreateCaseIntent,
 			},
 		)
+		var creation *fundscsvadmissionapp.CaseCreationRequiredV1
+		if errors.As(err, &creation) && domainsecurity.IsSHA256Hex(creation.Intent) {
+			// This typed host-only negotiation has not read or imported source
+			// bytes. Main must obtain explicit confirmation before resubmitting.
+			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "case_creation_required", "intent": creation.Intent})
+			return
+		}
 		if errors.Is(err, fundscsvadmissionapp.ErrInvalidRequest) {
 			writeLocalDisplayInvalidV1(w)
 			return
@@ -408,4 +418,15 @@ func writeLocalDisplayUnavailableV1(w http.ResponseWriter) {
 
 func writeFundsCleaningPreCASFailedV1(w http.ResponseWriter) {
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "pre_cas_failed"})
+}
+
+// This fixed host-private capability response is not a generic error bypass:
+// no caller/provider body or cause can enter it. LocalDisplayMuxV1 supplies the
+// existing bearer-token and typed-header authorization boundary.
+func writeFundsImportCapabilityUnavailableV1(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, `{"code":"funds_import_capability_unavailable","message":"Trusted data import capability is unavailable in this runtime environment."}`)
 }

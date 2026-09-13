@@ -235,6 +235,18 @@ describe('desktop private history startup migration', () => {
     )
   })
 
+  it('keeps admitted compiler caches out of the isolated application home', () => {
+    const { DEVELOPMENT_CACHE_ROOT, DEVELOPMENT_CACHE_ENVIRONMENT } = require('../../../scripts/lib/development-cache-environment.cjs')
+    const input = { HOME: '/synthetic/profile', PATH: '/safe-path', ANALYTIX_DEV_CACHE_ROOT: DEVELOPMENT_CACHE_ROOT,
+      ...DEVELOPMENT_CACHE_ENVIRONMENT, OPENAI_API_KEY: 'synthetic-not-a-key' }
+    const projected = buildDevGoToolchainEnvV1(input)
+    for (const key of ['GOCACHE', 'GOMODCACHE', 'GOTMPDIR']) expect(projected[key]).toBe(DEVELOPMENT_CACHE_ENVIRONMENT[key])
+    expect(projected.HOME).toBe('/synthetic/profile')
+    expect(projected.OPENAI_API_KEY).toBeUndefined()
+    expect(() => buildDevGoToolchainEnvV1({ ...input, GOMODCACHE: '/synthetic/other-cache' })).toThrow(/mismatch/)
+    expect(() => buildDevGoToolchainEnvV1({ ...input, ANALYTIX_DEV_CACHE_ROOT: '/synthetic/other-root' })).toThrow(/not authoritative/)
+  })
+
   it('gives Go discovery and development builds a credential-free fixed environment', () => {
     const env = buildDevGoToolchainEnvV1({
       HOME: '/safe-home',
@@ -1477,6 +1489,37 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('accepts the public rewind response and rejects its private authority turn extension', () => {
+    const response = {
+      threadId: 'thr_rewind',
+      turnId: 'turn_removed',
+      removedTurns: 1,
+      remainingTurns: 2,
+      removedTurnIds: ['turn_removed']
+    }
+    const path = '/v1/threads/thr_rewind/rewind'
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(response)
+    }, path, null, 'POST')
+    expect(accepted.ok).toBe(true)
+    expect(accepted.status).toBe(200)
+    expect(JSON.parse(accepted.body)).toEqual(response)
+
+    const privateAuthorityTurn = 'turn_private_rewind_authority'
+    const rejected = sanitizeRuntimeResponse({
+      ok: true, status: 200,
+      body: JSON.stringify({ ...response, authorityTurnId: privateAuthorityTurn })
+    }, path, null, 'POST')
+    expect(rejected).toEqual({
+      ok: false, status: 502,
+      body: JSON.stringify({
+        code: 'runtime_response_schema_invalid',
+        message: 'Runtime response failed schema validation.'
+      })
+    })
+    expect(rejected.body).not.toContain(privateAuthorityTurn)
+  })
+
   it('rejects a strict V3 generic accepted-final view without its verified delivery seal', () => {
     const text = 'public generic final'
     const threadId = 'thread-v3'
@@ -3334,6 +3377,35 @@ exit 1
     expect(env.ANALYTIX_CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER).toBeUndefined()
     expect(env.ANALYTIX_CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256).toBeUndefined()
 
+  })
+
+  it.each(['lowercase', 'mixed-case'])('removes %s ambient authority before Windows environment folding', (casing) => {
+    const settings = settingsForPort(8127)
+    const runtime = resolveAnalytixRuntimeSettings(settings)
+    const reserved = [
+      'ANALYTIX_API_KEY', 'ANALYTIX_MODEL_PROVIDERS',
+      'ANALYTIX_HUB_TEST_GATEWAY_TOKEN', 'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
+      'ANALYTIX_RUNTIME_GO_DEEPSEEK_API_KEY', 'ANALYTIX_AUTHORITY_ANCHOR_V1',
+      'ANALYTIX_CONTROLLED_ARTIFACT_HOST_V2_TOKEN', 'ANALYTIX_RUNTIME_TOKEN',
+      'ANALYTIX_MCP_CONFIG_PATH', 'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'
+    ]
+    const alias = (name: string): string => casing === 'lowercase'
+      ? name.toLowerCase() : name.replace('ANALYTIX', 'Analytix')
+    const ambient: NodeJS.ProcessEnv = {
+      SystemRoot: 'C:\\Windows', Path: 'C:\\SyntheticTools',
+      ...Object.fromEntries(reserved.map((name) => [alias(name), 'synthetic-stale-authority']))
+    }
+    const child = buildGoRuntimeSidecarEnv(settings, runtime, '/tmp/analytix-casefold', ambient, 'managed-token')
+    expect(child.SystemRoot).toBe(ambient.SystemRoot)
+    expect(child.Path).toBe(ambient.Path)
+    expect(JSON.stringify(child)).not.toContain('synthetic-stale-authority')
+    expect(ambient[alias('ANALYTIX_API_KEY')]).toBe('synthetic-stale-authority')
+    for (const name of reserved) {
+      const keys = Object.keys(child).filter((key) => key.toUpperCase() === name)
+      expect(keys).toEqual(['ANALYTIX_RUNTIME_TOKEN', 'ANALYTIX_MCP_CONFIG_PATH',
+        'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'].includes(name) ? [name] : [])
+    }
+    expect(child.ANALYTIX_RUNTIME_TOKEN).toBe('managed-token')
   })
 
   it('hydrates the Go sidecar env from provider.activeProviderId when runtime providerId is blank', () => {

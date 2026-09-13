@@ -14,9 +14,23 @@ const maxProjectionPassesV1 = 8
 // other projector could not see in the previous representation, so a single
 // secret-then-privacy pass is not a safe ordinary-output boundary.
 func ProjectTextV1(text string, explicitSecrets ...string) string {
+	return projectTextV1(text, true, explicitSecrets...)
+}
+
+// ProjectIdentityTextV1 retains the original secret/PII fixed point used by
+// hash-bound v1 records. It is not a current publication projector. Adding
+// output rules must not reinterpret or rewrite an existing record's identity.
+func ProjectIdentityTextV1(text string) string {
+	return projectTextV1(text, false)
+}
+
+func projectTextV1(text string, privateSources bool, explicitSecrets ...string) string {
 	current := text
 	for pass := 0; pass < maxProjectionPassesV1; pass++ {
 		credentialSafe := domainsecret.ProjectTextV1(current, explicitSecrets...)
+		if privateSources {
+			credentialSafe = domainprivacy.ProjectPrivateSourceText(credentialSafe)
+		}
 		next := domainprivacy.ProjectText(credentialSafe).Text
 		if next == current {
 			return current

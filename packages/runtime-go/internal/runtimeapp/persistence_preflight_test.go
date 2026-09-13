@@ -44,6 +44,7 @@ import (
 	"analytix.local/runtime-go/internal/server"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestStartupCorruptSnapshotProducesZeroDataMutation(t *testing.T) {
@@ -634,7 +635,7 @@ func TestSemanticStartupLateAuthorityFailureLeavesLegacyAndManagedBytesUntouched
 func TestSemanticStartupPendingWorkLateFailureLeavesLiveRootUntouched(t *testing.T) {
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durable, err := server.NewTempDurableEventSessionStore(durableRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -904,7 +905,7 @@ func TestSemanticStartupFinalEventRepairLateFailureLeavesLiveRootUntouched(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "staged final event repair"}, workspace)
 	if err != nil {
 		t.Fatal(err)

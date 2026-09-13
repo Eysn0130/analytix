@@ -781,6 +781,7 @@ export function createThreadActions(
       clearBusyWatchdog()
       const threadSnap = get().threads.find((thread) => thread.id === id) ?? null
       const {
+        thread: detailThread,
         blocks: rawBlocks,
         latestSeq,
         threadStatus,
@@ -791,6 +792,7 @@ export function createThreadActions(
         goal,
         todos
       } = await loadThreadDetailWithCache(p, id, threadSnap)
+      if (detailThread && detailThread.id !== id) throw new Error('Runtime thread response identity mismatch.')
       const blocks = hydrateBlockModelLabels(id, rawBlocks)
       const busy = threadSnapshotLooksRunning(blocks, threadStatus)
       const currentTurnUserId = busy
@@ -804,8 +806,15 @@ export function createThreadActions(
       } else {
         clearActiveStream(id)
       }
-      const composerSelection = composerSelectionForThread(get(), threadSnap)
+      const currentThreads = get().threads
+      const threads = detailThread
+        ? currentThreads.some((thread) => thread.id === id)
+          ? currentThreads.map((thread) => thread.id === id ? { ...thread, ...detailThread } : thread)
+          : [...currentThreads, detailThread]
+        : currentThreads
+      const composerSelection = composerSelectionForThread(get(), detailThread ?? threadSnap)
       set({
+        threads,
         watchTurnCompletion: nextWatch,
         unreadThreadIds: nextUnread,
         activeThreadId: id,

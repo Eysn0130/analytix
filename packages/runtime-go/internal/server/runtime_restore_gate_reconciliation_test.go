@@ -20,6 +20,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRestartReconcilesSignedGateResolutionWithoutContinuation(t *testing.T) {
@@ -34,7 +35,7 @@ func TestRestartReconcilesSignedGateResolutionWithoutContinuation(t *testing.T) 
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			handler := NewRuntimeServerHandler(RuntimeServerConfig{
 				RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 				ProviderID: "provider-a", BaseURL: "https://provider.invalid", APIKey: "test-only",
@@ -106,7 +107,7 @@ func TestRestartReconcilesSignedGateResolutionWithoutContinuation(t *testing.T) 
 }
 
 func TestRestartDoesNotPublishTerminalBeforeGateCancellationEvent(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "provider-a", BaseURL: "https://provider.invalid", APIKey: "test-only",

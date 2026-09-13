@@ -112,9 +112,16 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 		ctx, config, fixture.Authority, stores, evidenceStores, access, observer, nil,
 	)
 	if err != nil || !configured || composition.evidence == nil || composition.snapshot == nil ||
-		composition.registry != nil || fixture.TotalAttempts() != 0 {
+		composition.registry != nil || composition.registryOwner == nil || fixture.TotalAttempts() != 0 {
 		t.Fatal(runtimeFundsCSVConfirmEvidencePhaseV1)
 	}
+	t.Cleanup(func() {
+		if composition.registryOwner != nil {
+			_ = composition.registryOwner.Close()
+		}
+		_ = stores.Close()
+		_ = evidenceStores.Close()
+	})
 	identity, err := newRuntimeHostIdentityAuthority(fixture.Authority)
 	if err != nil {
 		t.Fatal(runtimeFundsCSVConfirmPrincipalPhaseV1)
@@ -124,7 +131,6 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 	if err != nil {
 		t.Fatal(runtimeFundsCSVConfirmStagePhaseV1)
 	}
-	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
 	source := []byte("交易卡号,交易账号,账户开户名称,开户人证件号码,交易时间,交易金额,交易余额,收付标志,交易对手账卡号,现金标志,对手户名,对手身份证号,对手开户银行,摘要说明,交易币种,交易网点名称,交易网点代码,交易发生地,交易是否成功,传票号,终端号,IP地址,MAC地址,对手交易余额,交易流水号,日志号,凭证种类,凭证号,交易柜员号,商户名称,商户号,备注,交易类型,查询反馈结果原因\r\n" +
 		"6222021234567890001,1000001,合成账户甲,SYNTHID0001,2026-08-28 12:00:00,12.5,1000,进,CP001,否,合成对手甲,SYNTHCPID001,合成银行,合成交易,CNY,合成网点,001,合成地,是,V001,T001,127.0.0.1,000000000001,88.5,TXN001,LOG001,SYNTH,VID001,TEL001,合成商户,M001,AB_R2_PRIVATE_SOURCE_SENTINEL_9f07f00d,synthetic,synthetic\r\n")
 	sourcePath := filepath.Join(workspace, "synthetic.csv")
@@ -141,22 +147,41 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 		kinds:  make(map[domainevidence.FundsCanonicalCSVAdmissionMaterialKindV1]int),
 	}
 	snapshots := &runtimeFundsCSVConfirmSnapshotsV1{delegate: composition.snapshot}
-	service, err := fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
-		Observer: observer, Identity: identity, Evidence: composition.evidence,
-		Snapshots: snapshots, Materials: materials, Native: nativeOwner, Source: immutableSource,
-		ReadImportSource: fundscsvsourceadapter.ReadImportExactV1,
-		Now: func() time.Time {
-			return time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
-		},
-		Random: bytes.NewReader(bytes.Repeat([]byte{0x5a}, 1024)),
+	newImportService := func() *fundscsvadmissionapp.ServiceV1 {
+		t.Helper()
+		service, err := fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
+			Observer: observer, Identity: identity, Evidence: composition.evidence,
+			Snapshots: snapshots, Materials: materials, Native: nativeOwner, Source: immutableSource,
+			ReadImportSource:         fundscsvsourceadapter.ReadImportExactV1,
+			CaseCreator:              observer,
+			ActivateEvidenceRegistry: composition.registryOwner.ActivateAfterImport,
+			Now: func() time.Time {
+				return time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+			},
+			Random: bytes.NewReader(bytes.Repeat([]byte{0x5a}, 1024)),
+		})
+		if err != nil {
+			t.Fatal(runtimeFundsCSVConfirmPrincipalPhaseV1)
+		}
+		t.Cleanup(func() { _ = service.Close() })
+		return service
+	}
+	service := newImportService()
+	_, err = service.StageMainSelectedImportV1(ctx, fundscsvadmissionapp.StageInputV1{
+		WorkspaceRoot: workspace, SourcePath: sourcePath,
 	})
-	if err != nil {
-		t.Fatal(runtimeFundsCSVConfirmPrincipalPhaseV1)
+	var creation *fundscsvadmissionapp.CaseCreationRequiredV1
+	if !errors.As(err, &creation) || !domainsecurity.IsSHA256Hex(creation.Intent) {
+		t.Fatal("first import did not request explicit case creation")
+	}
+	if missing, observeErr := observer.Observe(workspace); observeErr != nil || missing.State != domainsecurity.CaseBindingStateMissing || fixture.TotalAttempts() != 0 {
+		t.Fatal("case-creation request mutated case or evidence authority")
 	}
 
 	staged, err := service.StageMainSelectedImportV1(ctx, fundscsvadmissionapp.StageInputV1{
-		WorkspaceRoot: workspace,
-		SourcePath:    sourcePath,
+		WorkspaceRoot:    workspace,
+		SourcePath:       sourcePath,
+		CreateCaseIntent: creation.Intent,
 	})
 	if err != nil || staged.Status != "ready" || staged.TotalRowCount != 1 || len(staged.Items) != 1 ||
 		staged.Items[0].Selector == "" || staged.Items[0].RowCount != 1 || fixture.TotalAttempts() != 0 {
@@ -179,7 +204,7 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 		t.Fatal(runtimeFundsCSVConfirmMaterialPhaseV1)
 	}
 	if snapshots.admitAttempts != 1 || snapshots.admitSuccesses != 1 || snapshots.admitAfterCalls != 0 ||
-		snapshots.resolveAttempts != 1 || snapshots.resolveSuccesses != 0 ||
+		snapshots.resolveAttempts != 2 || snapshots.resolveSuccesses != 1 ||
 		datasetsnapshotport.ValidateResolvedSnapshotV2(snapshots.admitted) != nil {
 		t.Fatal(runtimeFundsCSVConfirmAdmitPhaseV1)
 	}
@@ -197,7 +222,7 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 		resolved.Record.DatasetSnapshotID != snapshots.admitted.Record.DatasetSnapshotID ||
 		resolved.Manifest.ManifestDigest != snapshots.admitted.Manifest.ManifestDigest ||
 		resolved.FundsProducerContent != snapshots.admitted.FundsProducerContent ||
-		snapshots.resolveAttempts != 2 || snapshots.resolveSuccesses != 1 || fixture.TotalAttempts() == 0 {
+		snapshots.resolveAttempts != 3 || snapshots.resolveSuccesses != 2 || fixture.TotalAttempts() == 0 {
 		t.Fatal(runtimeFundsCSVConfirmAdmitPhaseV1)
 	}
 	if current, err := observer.Observe(workspace); err != nil || current != finalObservation {
@@ -208,6 +233,83 @@ func TestFundsCSVConfirmImportV1UsesProductionEvidenceDatasetSnapshotComposition
 	}
 	if hasSnapshots, err := stores.HasRecords(ctx); err != nil || !hasSnapshots {
 		t.Fatal(runtimeFundsCSVConfirmAdmitPhaseV1)
+	}
+	caseView := runtimeCaseDatasetSnapshotAuthorityV2{snapshot: composition.snapshot, registry: composition.registryOwner}
+	resolveInput := datasetsnapshotport.ResolveInputV2{
+		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID,
+		Observation: finalObservation, ExpectedDatasetSnapshotID: resolved.Record.DatasetSnapshotID,
+	}
+	if current, err := caseView.ResolveWitnessedV2(ctx, resolveInput); err != nil || current.Record != resolved.Record {
+		t.Fatal("confirmed import is unavailable to the same-process case snapshot consumer")
+	}
+	if found, err := composition.registryOwner.HasRecords(ctx); err != nil || found {
+		t.Fatal("first import fabricated a registry receipt")
+	}
+
+	// This is a normal close/reopen of the production authority composition.
+	// The native owner remains the deterministic fixture used above; this does
+	// not establish native binary or Electron process-restart qualification.
+	beforeRestart := startupWholeTreeDigest(t, privateRoot)
+	if err := errors.Join(service.Close(), composition.registryOwner.Close(), stores.Close(), evidenceStores.Close()); err != nil {
+		t.Fatal("first-import authority owners did not close normally")
+	}
+	stores, err = datasetsnapshotstore.OpenStoresV2(filepath.Join(privateRoot, "dataset-snapshot-authority"), access)
+	if err != nil {
+		t.Fatal("snapshot stores did not reopen")
+	}
+	evidenceStores, err = openRuntimeSharedEvidenceStoresV2(fixture.DataDir, access)
+	if err != nil {
+		t.Fatal("evidence stores did not reopen")
+	}
+	attemptsBeforeRestart := fixture.TotalAttempts()
+	composition, configured, err = newRuntimeSharedEvidenceDatasetSnapshotV2(
+		ctx, config, fixture.Authority, stores, evidenceStores, access, observer, nil,
+	)
+	if err != nil || !configured || composition.registry != nil || composition.registryOwner == nil ||
+		!composition.registryOwner.CaseEvidenceAuthorityUnavailableV1() {
+		t.Fatal("generation-zero restart automatically activated the registry")
+	}
+	caseView = runtimeCaseDatasetSnapshotAuthorityV2{snapshot: composition.snapshot, registry: composition.registryOwner}
+	if _, err := caseView.ResolveWitnessedV2(ctx, resolveInput); !errors.Is(err, datasetsnapshotport.ErrUnavailable) {
+		t.Fatal("generation-zero case snapshot read did not remain dormant")
+	}
+	if fixture.TotalAttempts() != attemptsBeforeRestart || startupWholeTreeDigest(t, privateRoot) != beforeRestart {
+		t.Fatal("generation-zero restart or case observation changed authority state")
+	}
+	preservedSource, err := os.ReadFile(sourcePath)
+	if err != nil || !bytes.Equal(preservedSource, source) {
+		t.Fatal("generation-zero restart changed the selected source")
+	}
+	clear(preservedSource)
+	if retained, err := composition.snapshot.ResolveWitnessedV2(ctx, resolveInput); err != nil ||
+		retained.Record != resolved.Record || retained.Manifest.ManifestDigest != resolved.Manifest.ManifestDigest {
+		t.Fatal("generation-zero restart lost the retained immutable snapshot")
+	}
+
+	// Resume only through the existing explicit source-selection/confirmation
+	// operation. No startup activation, injected receipt, or reset is used.
+	snapshots = &runtimeFundsCSVConfirmSnapshotsV1{delegate: composition.snapshot}
+	materials = &runtimeFundsCSVConfirmMaterialsV1{stores: stores, kinds: make(map[domainevidence.FundsCanonicalCSVAdmissionMaterialKindV1]int)}
+	service = newImportService()
+	staged, err = service.StageMainSelectedImportV1(ctx, fundscsvadmissionapp.StageInputV1{
+		WorkspaceRoot: workspace, SourcePath: sourcePath,
+	})
+	if err != nil || staged.Status != "ready" || len(staged.Items) != 1 ||
+		!composition.registryOwner.CaseEvidenceAuthorityUnavailableV1() {
+		t.Fatal("explicit restaging failed or activated registry before confirmation")
+	}
+	reconfirmed, err := service.ConfirmImportV1(ctx, staged.Items[0].Selector)
+	if err != nil || reconfirmed.SourceArtifactSHA256 != confirmed.SourceArtifactSHA256 ||
+		reconfirmed.SourceRowCount != confirmed.SourceRowCount {
+		t.Fatal("explicit confirmation after generation-zero restart failed")
+	}
+	resolveInput.ExpectedDatasetSnapshotID = snapshots.admitted.Record.DatasetSnapshotID
+	if current, err := caseView.ResolveWitnessedV2(ctx, resolveInput); err != nil ||
+		datasetsnapshotport.ValidateResolvedSnapshotV2(current) != nil || current.Record != snapshots.admitted.Record {
+		t.Fatal("explicit reconfirmation did not reactivate the shared case snapshot consumer")
+	}
+	if found, err := composition.registryOwner.HasRecords(ctx); err != nil || found {
+		t.Fatal("explicit reconfirmation fabricated a registry receipt")
 	}
 }
 

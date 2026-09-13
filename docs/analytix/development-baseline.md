@@ -89,7 +89,7 @@ archive ancestry, force push, or push all local branches/tags.
 | `npm test` | Application/renderer/host/TS-runtime Vitest suite. Not every Go/Rust/Python/script test. |
 | `npm run dev` | Existing native development build, TS launcher build, then Electron. Default behavior is preserved; this command is not automatically isolated from real user state. |
 | `npm run dev:fast` | Reuses already built native/runtime inputs. Not a bootstrap, isolation or acceptance replacement. |
-| `npm run dev:isolated` | Explicit candidate: checkout-specific private profile, no ambient credentials, native doctor and existing build chain. Refuses launch without an explicit task Keychain; not yet a general first-run bootstrap. |
+| `npm run dev:isolated` | Checkout-specific private profile, explicit native task-Keychain provisioning, filtered build/app environments, native doctor and existing build chain. Whole desktop lifecycle acceptance is separate. |
 | `npm run test:plugin-contracts` | Deterministic Funds production-entry closure and report-scenario contracts; no live model request. Not full plugin acceptance. |
 | `npm run assets:verify` | Pinned resource presence, size and hash checks for the current target. |
 
@@ -100,8 +100,33 @@ development or packaging on Linux/Windows. Windows official packaging still
 requires Windows x64, its signing identity and an implemented/admitted native
 build route; those requirements cannot be supplied by changing a workflow label.
 
+The Electron and CLI Go launchers remove case aliases of their reserved child
+environment names before installing the managed runtime token. Electron also
+removes aliases of its host-owned config/resource paths and existing protected
+authority fields. Unrelated `Path` and `SystemRoot` values retain their original
+names and values. This follows the pinned [Node 22.22.1 child-process environment
+contract](https://nodejs.org/download/release/v22.22.1/docs/api/child_process.html#child-process),
+which folds Windows environment names at spawn. Local producer and subprocess
+tests do not establish Windows-native execution or credential qualification.
+
+Windows process groups/Job Objects and shell discovery do not establish
+filesystem containment. The server now forwards the selected process protected
+roots on every platform, including the mandatory floor under
+`danger-full-access`. Non-Darwin adapters reject that policy before process start until native containment is
+implemented; removing the roots to enable shell execution is not a fallback.
+Windows-native DPAPI reopen/corruption and descendant cleanup/pipe-drain evidence
+remain separate from macOS or cross-compiled tests.
+The current required CI has no Windows-native lane. The accepted first Windows
+installer target remains x64 NSIS; no minimum OS version or WSL qualification is
+established by these source fixes, and no Windows installer is produced here.
+
 The explicit `dev:isolated` candidate retains its own named profile under the configured
-cache's private `tmp` tree, keyed by checkout path. It does not reuse installed
+local `~/.analytix-development` tree, keyed by checkout path. Build caches stay on
+the configured cache volume; protected profile/Keychain storage still requires
+the Core's managed local filesystem admission. Each task has separate `home`
+and `user-data` owners: the default `home/.analytix/data` runtime root cannot
+overlap Electron's root. Existing profiles without this topology are preserved
+and require explicit migration or a separate fresh profile. It does not reuse installed
 Analytix data, import the caller's Provider/Hub credentials, enable Hub bootstrap,
 inherit a prebuilt runtime override, or read the repository's `.env` through
 Vite. Its child-only home/config paths share the existing desktop isolation
@@ -110,15 +135,68 @@ Protocol/login-item registrations and update traffic remain suppressed by that
 boundary. This is **state isolation, not an OS sandbox**; manually selected
 files and explicitly enabled tools still require their normal permissions.
 
-After explicit task-Keychain provisioning and lifecycle qualification, the
-candidate accepts `--fast`, `--profile <name>` and `--fresh`. Do not advertise
-those flags as an already qualified first-run/restart workflow: new directories
-alone cannot satisfy the runtime's Keychain binding. The launcher checks this
-before building or starting Electron, never creates a fake database and never
-falls back to the default/login Keychain. Automatic protected provisioning,
-unlock, identity continuity and whole-launcher restart remain an open work
-package. The default `dev` commands were deliberately **not switched** to this
-incomplete candidate.
+For a new `--profile <name>` or `--fresh` profile the launcher asks for an
+isolated Keychain password through a hidden native dialog, provisions the
+non-login bootstrap database and preserves its inode while binding the final
+task path. Keep that password for `--unlock-keychain`; credentials are never
+copied from an existing profile. `--fast` reuses already built native/runtime
+inputs. Cancellation or missing retained state stops without repair; `--fresh`
+creates a separate profile and preserves the incomplete one.
+
+The Go Secret Store persists committed physical Keychain identity in the V2
+record under the existing private binding filename. Restart rejects replacement
+even when database bytes are identical. Only an owned protected write with
+exact readback may commit an inode transition. Failure between the Security
+write and identity commit preserves state and refuses automatic adoption.
+Older digest-only V1 bindings do not carry the required historical identity;
+they remain preserved and unavailable pending explicitly authorized migration.
+The launcher only reads the Core record before unlock/launch; it never repairs
+or refreshes authority. Pending identity metadata blocks `--unlock-keychain`;
+launch once without that flag to let Core validate and recover metadata first.
+An unconfirmed write remains unavailable. A confirmed write with only cleanup
+residue can recover before the next explicit unlock. Rollback cannot replace a
+valid identity record with an unknown backup. V2 records require the writer's
+canonical encoding; duplicate fields and linked records are rejected. Each
+Security credential command has its own ten-second deadline; a timeout does
+not prove a native write had no side effect. These controls and focused tests do not establish GUI,
+real Provider, installation or complete restart acceptance by themselves.
+
+Ordinary `electron-vite` development runs a cache-built Go executable without
+the native package resource seal. Building native tools does not grant that
+process import authority: data import remains unavailable in this mode. Use
+the existing non-publishable development `.app` build, including its complete
+packaging/signing lifecycle, to assemble the native desktop inputs. That does
+not establish successful GUI launch or installer acceptance. The current
+isolated packaged launch remains blocked: Electron's enabled Cookie encryption
+initializes OS key storage before Core, while the explicit task binding covers
+only the Go Secret Store. The old task-login GUI harness does not satisfy the
+accepted non-login binding contract and must not be reused as a fallback.
+Keep Cookie encryption enabled and preserve the blocked status until a
+separately admitted Chromium storage boundary is implemented and verified.
+
+In a runtime with admitted native import capability, on first CSV/ZIP selection
+in a workspace without a case, Main requests explicit
+native confirmation to create an empty case identity. Core binds that one-use
+intent to its current process, principal, source selection and physical
+workspace. Restart or replacement invalidates the old confirmation. Creation
+does not activate evidence or mint a receipt: the existing preview/confirm and
+snapshot admission path still applies. A canceled preview retains the empty
+case. A confirmed import without a committed evidence receipt retains its source
+and snapshot but needs explicit reconfirmation after restart; it is not reported
+as lost data or as committed evidence.
+
+Independent media requests use a fixed Main-only transport and the Core's final
+outbound projection. Image generation projects text before serialization;
+image editing and speech transcription remain explicitly unavailable while
+trusted local media projection is absent. Authentication or base64 encoding is
+not a privacy projection, and these unavailable operations remain in any
+acceptance denominator that originally required them.
+In particular, the accepted
+[production configuration contract](../../openspec/specs/production-config-truthfulness/spec.md)
+retains speech-to-text and Write image generation in their real Electron
+scopes. Refusing unprojected audio preserves the privacy boundary but leaves
+the speech-to-text functionality gap open. The separate unavailable Go
+text-to-speech/music/video tools do not waive this requirement.
 
 The launcher rejects symlinked, shared or non-canonical profile directories
 instead of silently repairing them. Profiles are not automatically deleted:

@@ -1014,6 +1014,7 @@ export interface AgentProvider {
   }>
   createThread(input: { workspace?: string; title?: string; autoTitle?: boolean; mode?: string; model?: string; providerId?: string }): Promise<NormalizedThread>
   getThreadDetail(threadId: string): Promise<{
+    thread?: NormalizedThread
     blocks: ChatBlock[]
     latestSeq: number
     threadStatus?: string

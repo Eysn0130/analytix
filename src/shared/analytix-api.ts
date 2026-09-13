@@ -218,7 +218,7 @@ export type FundsImportSourceItem = {
 }
 export type FundsCSVSnapshotStageResult =
   | { ok: true; status: FundsImportStatus; totalRowCount: number; items: FundsImportSourceItem[] }
-  | { ok: false; canceled: boolean; code: 'forbidden' | 'invalid_source' | 'runtime_unavailable'; message: string }
+  | { ok: false; canceled: boolean; code: 'forbidden' | 'invalid_source' | 'runtime_unavailable' | 'capability_unavailable'; message: string }
 export type FundsCSVSnapshotConfirmResult =
   | { ok: true; rowCount: number }
   | { ok: false; code: 'forbidden' | 'invalid_source' | 'runtime_unavailable'; message: string }

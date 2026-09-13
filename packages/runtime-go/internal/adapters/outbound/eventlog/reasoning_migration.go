@@ -534,14 +534,14 @@ func migrateReasoningThreadSummariesJSONL(path string) error {
 }
 
 func reasoningSummaryTransform(record map[string]any, lineNumber int, raw string) (map[string]any, bool) {
-	if err := domainevent.ValidatePublicRecord(record); err == nil {
+	if err := threadapp.ValidateSummaryIndexRecordV1(record); err == nil {
 		return record, false
 	}
 	return validatedPrivateContentMigrationProjection(record, lineNumber, raw), true
 }
 
 func preservedReasoningSummaryTransform(record map[string]any, _ int, _ string) (map[string]any, bool, error) {
-	if err := domainevent.ValidatePublicRecord(record); err == nil {
+	if err := threadapp.ValidateSummaryIndexRecordV1(record); err == nil {
 		return record, false, nil
 	}
 	// The raw-row owner has already validated the complete index identity

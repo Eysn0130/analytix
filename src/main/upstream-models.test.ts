@@ -1,243 +1,151 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { mkdtempSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  defaultClawSettings,
-  defaultKeyboardShortcuts,
-  defaultAnalytixRuntimeSettings,
-  defaultModelProviderSettings,
-  defaultScheduleSettings,
-  defaultWriteSettings,
-  type AppSettingsV1
-} from '../shared/app-settings'
-import { fetchUpstreamModelIds, readConfiguredAnalytixModelIds } from './upstream-models'
+  providerRegistrySnapshotResponseSchemaV1,
+  type ProviderRegistryPublicProviderV1,
+  type ProviderRegistryResultV1
+} from '../../packages/runtime/src/contracts/provider-registry'
+import { createProviderRegistryIpcHandler } from './ipc/provider-registry-ipc'
+import { fetchUpstreamModelIds } from './upstream-models'
 
-function settings(dataDir: string, model = 'settings-model'): AppSettingsV1 {
-  const provider = defaultModelProviderSettings()
+function publicProvider(overrides: Partial<ProviderRegistryPublicProviderV1> = {}): ProviderRegistryPublicProviderV1 {
   return {
-    version: 1,
-    locale: 'en',
-    theme: 'system',
-    uiFontScale: 'small',
-    provider: {
-      ...provider,
-      providers: [
-        ...provider.providers,
-        {
-          id: 'custom-provider',
-          name: 'Custom Provider',
-          baseUrl: 'https://custom.example/v1',
-          endpointFormat: 'responses',
-          models: ['custom-provider-model'],
-          modelProfiles: {}
-        }
-      ]
-    },
-    runtime: {
-        ...defaultAnalytixRuntimeSettings(),
-        dataDir,
-        model,
-        providerId: 'custom-provider'
-      },
-    workspaceRoot: '/tmp/workspace',
-    log: { enabled: false, retentionDays: 7 },
-    notifications: { turnComplete: true },
-    appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
-    keyboardShortcuts: defaultKeyboardShortcuts(),
-    write: defaultWriteSettings(),
-    claw: defaultClawSettings(),
-    schedule: defaultScheduleSettings(),
-    guiUpdate: { channel: 'stable' },
-    codePromptPrefix: '',
-    disabledSkillIds: []
+    id: 'deepseek',
+    kind: 'openai-compatible',
+    endpoint: 'https://provider.invalid/v1',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    mediaModels: [],
+    selectedModel: 'deepseek-v4-pro',
+    selectedRoutes: ['primary'],
+    credentialConfigured: true,
+    credentialPurpose: 'provider-api-key',
+    revision: '2',
+    generation: '1',
+    incarnation: `inc_${'b'.repeat(43)}`,
+    tombstone: false,
+    ...overrides
   }
 }
 
-describe('upstream model picker list', () => {
-  it('excludes compatibility-only config model profiles and keeps provider/runtime models', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'analytix-models-'))
-    await mkdir(dataDir, { recursive: true })
-    await writeFile(
-      join(dataDir, 'config.json'),
-      JSON.stringify({
-        contextCompaction: {
-          modelProfiles: {
-            'legacy-model': {}
-          }
-        },
-        models: {
-          profiles: {
-            'custom-model': {
-              aliases: ['vendor/custom-model']
-            }
-          }
-        }
-      }),
-      'utf8'
-    )
-
-    const ids = await readConfiguredAnalytixModelIds(settings(dataDir))
-
-    expect(ids).toEqual(expect.arrayContaining([
-      'deepseek-v4-pro',
-      'deepseek-v4-flash',
-      'settings-model',
-      'custom-provider-model'
-    ]))
-    expect(ids).not.toContain('legacy-model')
-    expect(ids).not.toContain('custom-model')
-    expect(ids).not.toContain('vendor/custom-model')
-    expect(ids).not.toContain('auto')
+function snapshot(providers = [publicProvider()], selectedProviderId: string | undefined = providers.find((provider) => !provider.tombstone)?.id) {
+  return providerRegistrySnapshotResponseSchemaV1.parse({
+    schemaVersion: 1,
+    registryRevision: '3',
+    registryIncarnation: `inc_${'a'.repeat(43)}`,
+    ...(selectedProviderId ? { selectedProviderId } : {}),
+    providers
   })
+}
 
-  it('falls back to configured model ids when upstream cannot be queried', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'analytix-models-'))
-    await mkdir(dataDir, { recursive: true })
-    await writeFile(
-      join(dataDir, 'config.json'),
-      JSON.stringify({
-        models: {
-          profiles: {
-            'deepseek-v4-flash': {
-              aliases: ['deepseek-chat', 'deepseek-reasoner']
-            }
-          }
-        }
-      }),
-      'utf8'
-    )
-    const result = await fetchUpstreamModelIds(settings(dataDir, 'local-only-model'))
+describe('Core Registry composer model catalog', () => {
+  afterEach(() => vi.unstubAllGlobals())
 
-    expect(result).toMatchObject({ ok: true })
-    if (result.ok) {
-      expect(result.modelIds).toContain('local-only-model')
-      expect(result.modelIds).toContain('custom-provider-model')
-      expect(result.modelIds).not.toContain('deepseek-chat')
-      expect(result.modelIds).not.toContain('auto')
-      expect(result.defaultModelId).toBe('local-only-model')
-      expect(result.modelGroups).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          providerId: 'custom-provider',
-          label: 'Custom Provider',
-          modelIds: expect.arrayContaining(['custom-provider-model'])
-        }),
-        expect.objectContaining({
-          providerId: 'deepseek',
-          label: 'DeepSeek',
-          modelIds: expect.arrayContaining(['deepseek-v4-flash'])
-        })
-      ]))
-      const deepseekGroup = result.modelGroups?.find((group) => group.providerId === 'deepseek')
-      expect(deepseekGroup?.modelIds).not.toContain('deepseek-chat')
-      expect(deepseekGroup?.modelIds).not.toContain('deepseek-reasoner')
-    }
-  })
+  it('accepts committed default model IDs through the existing non-secret Registry list transport', async () => {
+    const registry = snapshot()
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(registry) }))
+    const listRegistry = createProviderRegistryIpcHandler(runtimeRequest)
+    const result = await fetchUpstreamModelIds(await listRegistry({ schemaVersion: 1, operation: 'list' }))
 
-  it('never queries the upstream /v1/models catalog for the composer picker (issue #337)', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'analytix-models-'))
-    await mkdir(dataDir, { recursive: true })
-    const fetchMock = vi.fn().mockResolvedValue({
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/provider-registry', 'GET')
+    expect(result).toEqual({
       ok: true,
-      status: 200,
-      text: async () => JSON.stringify({
-        data: [{ id: 'upstream-only-model' }, { id: 'another-upstream-model' }]
-      })
+      modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+      defaultModelId: 'deepseek-v4-pro',
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'] }]
     })
-    vi.stubGlobal('fetch', fetchMock)
+    expect(JSON.stringify(result)).not.toMatch(/credential|endpoint|incarnation/)
+  })
 
-    try {
-      const result = await fetchUpstreamModelIds(settings(dataDir))
+  it('does not manufacture default providers, models, or capabilities for an empty Registry', async () => {
+    expect(await fetchUpstreamModelIds(snapshot([]))).toEqual({ ok: true, modelIds: [], modelGroups: [] })
+  })
 
-      expect(result).toMatchObject({ ok: true })
-      if (result.ok) {
-        // The configured provider models are present...
-        expect(result.modelIds).toContain('custom-provider-model')
-        // ...but the upstream catalog is never pulled in, so a preset
-        // provider's full model list no longer floods the picker.
-        expect(result.modelIds).not.toContain('upstream-only-model')
-        expect(result.modelIds).not.toContain('another-upstream-model')
-        expect(result.modelIds).not.toContain('auto')
-        const customGroup = result.modelGroups?.find((group) => group.providerId === 'custom-provider')
-        expect(customGroup?.modelIds).toEqual(['custom-provider-model'])
-      }
-      expect(fetchMock).not.toHaveBeenCalled()
-    } finally {
-      vi.unstubAllGlobals()
+  it('returns a closed failure when the Registry transport is unavailable without exposing its body', async () => {
+    const canary = 'PRIVATE_REGISTRY_ERROR_CANARY'
+    const listRegistry = createProviderRegistryIpcHandler(vi.fn(async () => ({ ok: false, status: 503, body: canary })))
+    const result = await fetchUpstreamModelIds(await listRegistry({ schemaVersion: 1, operation: 'list' }))
+
+    expect(result).toEqual({ ok: false, message: 'Provider model catalog is unavailable.' })
+    expect(JSON.stringify(result)).not.toContain(canary)
+  })
+
+  it('rejects malformed Registry snapshots and legacy settings without a model fallback', async () => {
+    const malformed = { ...snapshot(), providers: [{ ...publicProvider(), selectedModel: 'not-committed' }] }
+    const legacy = { provider: { providers: [{ id: 'legacy', models: ['legacy-model'] }] }, runtime: { model: 'legacy-model' } }
+    for (const value of [malformed, legacy]) {
+      expect(await fetchUpstreamModelIds(value as unknown as ProviderRegistryResultV1)).toEqual({
+        ok: false,
+        message: 'Provider model catalog is unavailable.'
+      })
     }
   })
 
-  it('uses configured model ids without fetching models for custom full endpoint providers', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'analytix-models-'))
-    await mkdir(dataDir, { recursive: true })
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    const customSettings = settings(dataDir, 'custom-provider-model')
-    customSettings.provider.providers = customSettings.provider.providers.map((provider) =>
-      provider.id === 'custom-provider'
-        ? { ...provider, baseUrl: 'https://gateway.example/custom-path', endpointFormat: 'custom_endpoint' }
-        : provider
-    )
-
-    try {
-      const result = await fetchUpstreamModelIds(customSettings)
-
-      expect(result).toMatchObject({ ok: true })
-      if (result.ok) {
-        expect(result.modelIds).toContain('custom-provider-model')
-        expect(result.defaultModelId).toBe('custom-provider-model')
-      }
-      expect(fetchMock).not.toHaveBeenCalled()
-    } finally {
-      vi.unstubAllGlobals()
-    }
+  it.each([
+    { name: 'missing credential', provider: publicProvider({ credentialConfigured: false, credentialPurpose: undefined }) },
+    { name: 'disconnected provider', provider: publicProvider({ tombstone: true, credentialConfigured: false, credentialPurpose: undefined, selectedRoutes: [] }) }
+  ])('does not offer models from a $name', async ({ provider }) => {
+    expect(await fetchUpstreamModelIds(snapshot([provider]))).toEqual({ ok: true, modelIds: [], modelGroups: [] })
   })
 
-  it('excludes configured non-text (image-output) models from the composer picker', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'analytix-models-'))
-    await mkdir(dataDir, { recursive: true })
-    const base = settings(dataDir)
-    const imageCapableSettings: AppSettingsV1 = {
-      ...base,
-      provider: {
-        ...base.provider,
-        providers: base.provider.providers.map((provider) =>
-          provider.id === 'custom-provider'
-            ? {
-                ...provider,
-                models: [...provider.models, 'banana-canvas'],
-                modelProfiles: {
-                  'banana-canvas': {
-                    inputModalities: ['text'],
-                    outputModalities: ['image'],
-                    supportsToolCalling: false,
-                    messageParts: ['text']
-                  }
-                }
-              }
-            : provider
-        )
-      }
-    }
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
+  it('uses the Registry selected provider and model when model IDs overlap across providers', async () => {
+    const registry = snapshot([
+      publicProvider({ id: 'alpha', models: ['shared-model'], selectedModel: 'shared-model', selectedRoutes: [] }),
+      publicProvider({ id: 'beta', models: ['beta-model', 'shared-model'], selectedModel: 'shared-model' })
+    ], 'beta')
+    const result = await fetchUpstreamModelIds(registry)
 
-    try {
-      const result = await fetchUpstreamModelIds(imageCapableSettings)
+    expect(result).toEqual({
+      ok: true,
+      modelIds: ['beta-model', 'shared-model'],
+      defaultModelId: 'shared-model',
+      modelGroups: [
+        { providerId: 'beta', label: 'beta', modelIds: ['beta-model', 'shared-model'] },
+        { providerId: 'alpha', label: 'alpha', modelIds: ['shared-model'] }
+      ]
+    })
+  })
 
-      expect(result).toMatchObject({ ok: true })
-      if (result.ok) {
-        const customGroup = result.modelGroups?.find((group) => group.providerId === 'custom-provider')
-        expect(customGroup?.modelIds).toContain('custom-provider-model')
-        // An image-output model added to a provider stays out of the text
-        // composer picker, whether in the flat list or the provider submenu.
-        expect(customGroup?.modelIds).not.toContain('banana-canvas')
-        expect(result.modelIds).not.toContain('banana-canvas')
-      }
-      expect(fetchMock).not.toHaveBeenCalled()
-    } finally {
-      vi.unstubAllGlobals()
-    }
+  it('uses only committed model IDs and never queries upstream for custom full endpoints', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const registry = snapshot([publicProvider({
+      kind: 'custom-endpoint',
+      endpoint: 'https://provider.invalid/custom-path',
+      models: ['custom-model'],
+      selectedModel: 'custom-model'
+    })])
+    const before = structuredClone(registry)
+    const result = await fetchUpstreamModelIds(registry)
+
+    expect(result).toEqual({
+      ok: true,
+      modelIds: ['custom-model'],
+      defaultModelId: 'custom-model',
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['custom-model'] }]
+    })
+    expect(registry).toEqual(before)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('excludes declared media and recognized non-chat models without inventing capability profiles', async () => {
+    const result = await fetchUpstreamModelIds(snapshot([publicProvider({
+      models: ['banana-canvas', 'custom-chat', 'text-embedding-3-small', 'whisper-1'],
+      mediaModels: ['banana-canvas'],
+      selectedModel: 'custom-chat'
+    })]))
+
+    expect(result).toEqual({
+      ok: true,
+      modelIds: ['custom-chat'],
+      defaultModelId: 'custom-chat',
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['custom-chat'] }]
+    })
+  })
+
+  it('does not substitute a default chat model for a media-only Registry provider', async () => {
+    const result = await fetchUpstreamModelIds(snapshot([publicProvider({
+      models: ['banana-canvas'], mediaModels: ['banana-canvas'], selectedModel: 'banana-canvas'
+    })]))
+
+    expect(result).toEqual({ ok: true, modelIds: [], modelGroups: [] })
   })
 })

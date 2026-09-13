@@ -8,6 +8,7 @@ import (
 
 	domaincheckpointref "analytix.local/runtime-go/internal/domain/checkpointref"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestDurableCaseCheckpointEventsPersistAndPublishMetadataOnly(t *testing.T) {
@@ -15,7 +16,7 @@ func TestDurableCaseCheckpointEventsPersistAndPublishMetadataOnly(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "case checkpoint audit", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

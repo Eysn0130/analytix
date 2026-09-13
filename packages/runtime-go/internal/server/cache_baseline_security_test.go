@@ -11,6 +11,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	provider "analytix.local/runtime-go/internal/provider"
 	securitytest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeCacheBaselineNeverCrossesCaseBinding(t *testing.T) {
@@ -70,7 +71,7 @@ func TestSourceUnavailableDoesNotAdvanceCacheBaseline(t *testing.T) {
 
 func cacheBaselineHandler(t *testing.T) (*runtimeServerHandler, string, string) {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)

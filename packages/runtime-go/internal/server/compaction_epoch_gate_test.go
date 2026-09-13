@@ -22,6 +22,7 @@ import (
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestCompactionCancelsOrRejectsOldEpochJobs(t *testing.T) {
@@ -451,7 +452,7 @@ func TestCaseCompactionPreservesSignedAuthorityAndAcceptedHistory(t *testing.T) 
 		Repository: handler.store, PublicProjector: handler.publicProjector, CaseThreads: signedAuthority,
 		BeginTransition: threadapp.AdaptBeginTransition(handler.runtimeSubagentState().BeginSecurityContextTransition),
 	})
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{"title": "Case compaction", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -648,7 +649,7 @@ func newUnboundCompactionMissingSuffixFixture(t *testing.T) (*runtimeServerHandl
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
 	t.Cleanup(func() { handler.runtimeSubagentState().CancelBackgroundJobsAndWait(time.Second) })
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	realWorkspace, err := (filestore.CaseBindingReader{}).WorkspaceRealPath(workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -717,7 +718,7 @@ func newUnboundCompactionFixture(t *testing.T) (*runtimeServerHandler, string, d
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
 	t.Cleanup(func() { handler.runtimeSubagentState().CancelBackgroundJobsAndWait(time.Second) })
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	realWorkspace, err := (filestore.CaseBindingReader{}).WorkspaceRealPath(workspace)
 	if err != nil {
 		t.Fatal(err)

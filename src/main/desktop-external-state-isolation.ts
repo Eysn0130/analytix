@@ -84,11 +84,15 @@ export function resolveDesktopExternalStateBoundary(
   const cacheRoot = exactAbsolutePath(env.ANALYTIX_DEV_CACHE_ROOT)
   const requestedUserDataRoot = exactAbsolutePath(env.ANALYTIX_USER_DATA_DIR)
   const trustedTempRoot = resolve(cacheRoot, 'tmp')
+  const trustedStateRoot = env.ANALYTIX_DEV_STATE_ROOT === undefined
+    ? trustedTempRoot
+    : exactAbsolutePath(env.ANALYTIX_DEV_STATE_ROOT)
   const taskRoot = dirname(requestedUserDataRoot)
   if (
     resolve(trustedTempRoot) !== trustedTempRoot ||
     !ownerOnlyDirectory(cacheRoot, dependencies) ||
     !ownerOnlyDirectory(trustedTempRoot, dependencies) ||
+    !ownerOnlyDirectory(trustedStateRoot, dependencies) ||
     !ownerOnlyDirectory(taskRoot, dependencies) ||
     !ownerOnlyDirectory(requestedUserDataRoot, dependencies)
   ) {
@@ -99,14 +103,14 @@ export function resolveDesktopExternalStateBoundary(
   let physicalTaskRoot = ''
   let physicalUserDataRoot = ''
   try {
-    physicalTempRoot = dependencies.realpath(trustedTempRoot)
+    physicalTempRoot = dependencies.realpath(trustedStateRoot)
     physicalTaskRoot = dependencies.realpath(taskRoot)
     physicalUserDataRoot = dependencies.realpath(requestedUserDataRoot)
   } catch {
     throw invalidConfiguration()
   }
   if (
-    physicalTempRoot !== trustedTempRoot ||
+    physicalTempRoot !== trustedStateRoot ||
     physicalTaskRoot !== taskRoot ||
     physicalUserDataRoot !== requestedUserDataRoot ||
     !strictDescendant(physicalTempRoot, physicalTaskRoot) ||
@@ -115,11 +119,19 @@ export function resolveDesktopExternalStateBoundary(
     throw invalidConfiguration()
   }
 
+  // The developer launcher uses separate owners: Electron userData and the
+  // runtime's default HOME/.analytix/data must not contain one another.
+  const stateHomeRoot = env.ANALYTIX_DEV_STATE_ROOT === undefined
+    ? physicalUserDataRoot
+    : resolve(physicalTaskRoot, 'home')
+  if (env.ANALYTIX_DEV_STATE_ROOT !== undefined &&
+    (env.HOME !== stateHomeRoot || !ownerOnlyDirectory(stateHomeRoot, dependencies) ||
+      dependencies.realpath(stateHomeRoot) !== stateHomeRoot)) throw invalidConfiguration()
   return Object.freeze({
     isolated: true,
     isolationRoot: physicalTaskRoot,
     userDataRoot: physicalUserDataRoot,
-    stateHomeRoot: physicalUserDataRoot
+    stateHomeRoot
   })
 }
 

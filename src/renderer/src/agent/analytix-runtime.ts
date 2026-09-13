@@ -550,6 +550,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
   }
 
   async getThreadDetail(threadId: string): Promise<{
+    thread?: NormalizedThread
     blocks: ChatBlock[]
     latestSeq: number
     threadStatus?: string
@@ -578,6 +579,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid thread response'
     )
+    if (thread.id !== threadId) throw new Error('Runtime thread response identity mismatch.')
     const turns = Array.isArray(thread.turns) ? thread.turns : []
     const caseBound = thread.historyAuthority === 'case_boundary_only_v1'
     const acceptedProjectionByTurn = acceptedFinalProjectionsForTurns(
@@ -629,6 +631,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     const latestTurn = turns.at(-1)
     const latestUserMessageId = [...items].reverse().find((item) => item.kind === 'user_message')?.id
     return {
+      thread: threadFromCore(thread),
       blocks,
       latestSeq: thread.latestSeq ?? 0,
       threadStatus: thread.status ?? latestTurn?.status,

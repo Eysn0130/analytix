@@ -17,6 +17,7 @@ import (
 	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestSteerThreadReadFailureUsesFixedPublicProjection(t *testing.T) {
@@ -27,7 +28,7 @@ func TestSteerThreadReadFailureUsesFixedPublicProjection(t *testing.T) {
 		ProviderID: "steer-read-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
 		Model: "steer-read-model", EndpointFormat: "chat_completions",
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "Steer read projection", "workspace": workspace,
 	}, workspace)
@@ -167,7 +168,7 @@ func TestHostClassifiesNonFundAndDisplayCaseRiskBeforeProvider(t *testing.T) {
 		{name: "restricted-account", prompt: "请核实账号 6222020000000000000 的资金流水", forbidden: "6222020000000000000"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			durableRoot := t.TempDir()
 			handler := NewRuntimeServerHandler(RuntimeServerConfig{
 				RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
@@ -329,7 +330,7 @@ func TestHighRiskSteerCannotEnterFrozenGeneralTurn(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			handler := NewRuntimeServerHandler(RuntimeServerConfig{
 				RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 				ProviderID: "steer-security-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",

@@ -13,14 +13,19 @@ import (
 )
 
 var (
-	atomicJournalPriorPresent = []byte("analytix-secret-store-commit:v1:prior-present\n")
-	atomicJournalPriorAbsent  = []byte("analytix-secret-store-commit:v1:prior-absent\n")
-	atomicCommittedMarker     = []byte("analytix-secret-store-commit:v1:committed\n")
-	atomicRollbackRequired    = []byte("analytix-secret-store-commit:v1:rollback-required\n")
+	errAtomicCommitAuthorityChanged = errors.New("private commit authority changed; state preserved")
+	atomicJournalPriorPresent       = []byte("analytix-secret-store-commit:v1:prior-present\n")
+	atomicJournalPriorAbsent        = []byte("analytix-secret-store-commit:v1:prior-absent\n")
+	atomicCommittedMarker           = []byte("analytix-secret-store-commit:v1:committed\n")
+	atomicRollbackRequired          = []byte("analytix-secret-store-commit:v1:rollback-required\n")
 )
 
 func readPrivateCommittedFile(path string, maximum int64) ([]byte, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	return readPrivateCommittedFileWithLinks(path, maximum, false)
+}
+
+func readPrivateCommittedFileWithLinks(path string, maximum int64, singleLink bool) ([]byte, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +39,7 @@ func readPrivateCommittedFile(path string, maximum int64) ([]byte, error) {
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return nil, err
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&0o777 != 0o600 || stat.Uid != uint32(os.Getuid()) {
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&0o777 != 0o600 || stat.Uid != uint32(os.Getuid()) || (singleLink && stat.Nlink != 1) {
 		return nil, errors.New("private file validation failed")
 	}
 	content, err := io.ReadAll(io.LimitReader(file, maximum+1))
@@ -45,6 +50,17 @@ func readPrivateCommittedFile(path string, maximum int64) ([]byte, error) {
 	if int64(len(content)) > maximum {
 		clearBytes(content)
 		return nil, errors.New("private file size invalid")
+	}
+	if singleLink {
+		var current, linked unix.Stat_t
+		if unix.Fstat(fd, &current) != nil || unix.Lstat(path, &linked) != nil ||
+			current.Dev != stat.Dev || current.Ino != stat.Ino || current.Mode != stat.Mode ||
+			current.Uid != stat.Uid || current.Gid != stat.Gid || current.Nlink != 1 || current.Size != int64(len(content)) ||
+			linked.Dev != current.Dev || linked.Ino != current.Ino || linked.Mode != current.Mode ||
+			linked.Uid != current.Uid || linked.Gid != current.Gid || linked.Nlink != 1 || linked.Size != current.Size {
+			clearBytes(content)
+			return nil, errors.New("private authority file changed during read")
+		}
 	}
 	return content, nil
 }
@@ -115,6 +131,11 @@ func writePrivateFileAtomically(path string, content []byte, hooks *atomicCommit
 	}
 	if hooks != nil && hooks.beforeReplace != nil {
 		if err := hooks.beforeReplace(); err != nil {
+			if errors.Is(err, errAtomicCommitAuthorityChanged) {
+				// The target is unknown and was never replaced by this transaction.
+				// Preserve both it and our recovery evidence; do not overwrite it.
+				transactionStarted = false
+			}
 			return err
 		}
 	}
@@ -163,6 +184,12 @@ func writePrivateFileAtomically(path string, content []byte, hooks *atomicCommit
 }
 
 func recoverPrivateFileCommit(path string) error {
+	return recoverPrivateFileCommitValidated(path, nil)
+}
+
+// Authority-bearing records may restrict rollback content before recovery
+// mutates any target or journal. The exact validated bytes are used below.
+func recoverPrivateFileCommitValidated(path string, validate func([]byte, bool) error) error {
 	journalPath, backupPath, committedPath := atomicRecoveryPaths(path)
 	journal, journalExists, err := readOptionalPrivateFile(journalPath, 64)
 	if err != nil {
@@ -179,6 +206,26 @@ func recoverPrivateFileCommit(path string) error {
 		return err
 	}
 	defer clearBytes(rollbackRequired)
+	var validatedBackup []byte
+	defer func() { clearBytes(validatedBackup) }()
+	if validate != nil && journalExists && (rollbackRequiredExists || !committedExists) {
+		switch {
+		case bytes.Equal(journal, atomicJournalPriorPresent):
+			validatedBackup, err = readPrivateCommittedFileWithLinks(backupPath, maxPersistentStoreBytes, true)
+			if err != nil {
+				return errors.New("commit backup unavailable")
+			}
+			if err := validate(validatedBackup, true); err != nil {
+				return err
+			}
+		case bytes.Equal(journal, atomicJournalPriorAbsent):
+			if err := validate(nil, false); err != nil {
+				return err
+			}
+		default:
+			return errors.New("commit journal validation failed")
+		}
+	}
 	if rollbackRequiredExists {
 		if (!bytes.Equal(rollbackRequired, atomicRollbackRequired) && !bytes.Equal(rollbackRequired, atomicCommittedMarker)) || !journalExists {
 			return errors.New("rollback marker validation failed")
@@ -222,7 +269,11 @@ func recoverPrivateFileCommit(path string) error {
 
 	switch {
 	case bytes.Equal(journal, atomicJournalPriorPresent):
-		backup, backupExists, err := readOptionalPrivateFile(backupPath, maxPersistentStoreBytes)
+		backup, backupExists := validatedBackup, validate != nil
+		var err error
+		if validate == nil {
+			backup, backupExists, err = readOptionalPrivateFile(backupPath, maxPersistentStoreBytes)
+		}
 		if err != nil {
 			return err
 		}

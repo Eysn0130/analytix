@@ -22,6 +22,7 @@ import (
 	domainattachment "analytix.local/runtime-go/internal/domain/attachment"
 	"analytix.local/runtime-go/internal/protocol"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimePrivateCASOwnersRecoverBeforeBaseline(t *testing.T) {
@@ -261,7 +262,7 @@ func TestRuntimeStartupQuarantinesOwnerlessAttachmentWithoutDeletingIt(t *testin
 
 func TestRuntimeStartupRejectsCorruptOwnerBackedAttachment(t *testing.T) {
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	config := Config{RuntimeToken: DefaultRuntimeToken, DataDir: dataDir, DurableTempDir: t.TempDir()}
 	initial, err := NewRuntimeServerHandlerE(config)
 	if err != nil {
@@ -295,7 +296,7 @@ func TestRuntimeStartupRejectsCorruptOwnerBackedAttachment(t *testing.T) {
 
 func TestRuntimeAttachmentUploadCommitsPrivateDispositionBeforeCreated(t *testing.T) {
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	config := Config{RuntimeToken: DefaultRuntimeToken, DataDir: dataDir, DurableTempDir: t.TempDir()}
 	handler, err := NewRuntimeServerHandlerE(config)
 	if err != nil {

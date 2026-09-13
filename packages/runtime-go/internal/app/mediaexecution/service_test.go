@@ -114,7 +114,7 @@ func TestImageEditUsesCommittedEditEndpointAndMultipartModel(t *testing.T) {
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "image-edit-model"), credential: secret}
 	executor := New(registry, mediaexecutiontransport.New)
-	result, err := executor.Execute(context.Background(), Request{
+	result, err := executeMediaProtocolForTest(executor, context.Background(), Request{
 		Operation: OperationImageEdit, Prompt: "bounded edit", Size: "1024x1024",
 		Images: []ReferenceImage{{
 			Name: "reference.png", MIMEType: "image/png", DataBase64: base64.StdEncoding.EncodeToString(png),
@@ -174,7 +174,7 @@ func TestSpeechExecutionUsesCommittedMediaModelAndReturnsBoundedTranscript(t *te
 	defer upstream.Close()
 	registry := &mediaRegistryStub{provider: mediaProvider(upstream.URL+"/v1", "", "mimo-v2.5-asr"), credential: secret}
 	executor := New(registry, mediaexecutiontransport.New)
-	result, err := executor.Execute(context.Background(), Request{
+	result, err := executeMediaProtocolForTest(executor, context.Background(), Request{
 		Operation:   OperationSpeechTranscribe,
 		AudioBase64: base64.StdEncoding.EncodeToString([]byte("synthetic-audio")),
 		MIMEType:    "audio/wav", Language: "zh", TimeoutMS: 5_000,
@@ -209,7 +209,7 @@ func TestOpenAITranscriptionUsesOneLanguageAndCommittedMediaModel(t *testing.T) 
 		provider: mediaProvider(upstream.URL+"/v1", "", "whisper-registry"), credential: secret,
 	}
 	executor := New(registry, mediaexecutiontransport.New)
-	result, err := executor.Execute(context.Background(), Request{
+	result, err := executeMediaProtocolForTest(executor, context.Background(), Request{
 		Operation: OperationSpeechTranscribe, AudioBase64: base64.StdEncoding.EncodeToString([]byte("synthetic-audio")),
 		MIMEType: "audio/wav", Language: "zh", TimeoutMS: 5_000,
 	})
@@ -352,7 +352,7 @@ func TestSpeechExecutionDiscardsBodyAfterAuthorityDrift(t *testing.T) {
 	}
 	finished := make(chan outcome, 1)
 	go func() {
-		result, err := executor.Execute(context.Background(), Request{
+		result, err := executeMediaProtocolForTest(executor, context.Background(), Request{
 			Operation: OperationSpeechTranscribe, AudioBase64: base64.StdEncoding.EncodeToString([]byte("synthetic-audio")), MIMEType: "audio/wav",
 		})
 		finished <- outcome{result: result, err: err}
@@ -471,4 +471,24 @@ func TestMediaExecutionRejectsPreSendAndPostResponseAuthorityDrift(t *testing.T)
 			}
 		})
 	}
+}
+
+// Protocol-only regression seam: production Execute rejects raw image/audio
+// before transport creation until trusted local projectors exist. These tests
+// retain wire-format and post-send authority checks independently of admission.
+func executeMediaProtocolForTest(executor *Executor, ctx context.Context, request Request) (Result, error) {
+	resolution, err := executor.Registry.ResolveSelectedMediaForExecution(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer resolution.Clear()
+	client, err := executor.TransportFactory(resolution.Provider.Proxy, requestTimeout(request.TimeoutMS))
+	if err != nil {
+		return Result{}, err
+	}
+	defer client.Close()
+	if request.Operation == OperationSpeechTranscribe {
+		return executor.executeSpeech(ctx, client, resolution, request)
+	}
+	return executor.executeImage(ctx, client, resolution, request)
 }

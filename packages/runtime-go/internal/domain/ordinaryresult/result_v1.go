@@ -140,7 +140,7 @@ func ValidateResultSlotV1(slot ResultSlotV1) error {
 		return errors.New("ordinary result slot host-fixed text is invalid")
 	}
 	filtered, err := domainreasoningmarkup.Filter(slot.Text)
-	if err != nil || filtered.PublicText != slot.Text || domainordinaryprojection.ProjectTextV1(slot.Text) != slot.Text ||
+	if err != nil || filtered.PublicText != slot.Text || domainordinaryprojection.ProjectIdentityTextV1(slot.Text) != slot.Text ||
 		domainprivacy.ValidateOrdinaryText(slot.Text) != nil || domainsecret.ValidateValueV1(slot.Text) != nil ||
 		domainrestrictedevidence.ValidateCanonicalText(slot.Text) != nil ||
 		domainsecurity.ContainsProtectedCaseFactCandidate(slot.Text) || domaincaseentity.ContainsInternalReferenceV1(slot.Text) {

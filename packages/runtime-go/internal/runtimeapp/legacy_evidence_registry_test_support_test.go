@@ -19,6 +19,7 @@ import (
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 	toolidentitytest "analytix.local/runtime-go/internal/testsupport/toolidentity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func seedRuntimeLegacyEvidenceRegistryV1(
@@ -133,7 +134,7 @@ func seedRuntimeDurableLegacyRegistryContextV1(
 	authority finalauthorityport.Authority,
 ) domainsecurity.TurnSecurityContext {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durable, err := server.NewTempDurableEventSessionStore(durableRoot)
 	if err != nil {
 		t.Fatal(err)

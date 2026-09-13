@@ -305,7 +305,14 @@ func (h ThreadHandlers) HandleRewind(w http.ResponseWriter, r *http.Request, thr
 		WriteJSON(w, http.StatusInternalServerError, map[string]any{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	WriteJSON(w, http.StatusOK, response)
+	// The committed mutation also carries Core-owned authority metadata. Only
+	// publish RewindThreadResponse fields so a successful durable cut remains
+	// consumable by the desktop's exact public-contract validator.
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"threadId": response["threadId"], "turnId": response["turnId"],
+		"removedTurns": response["removedTurns"], "remainingTurns": response["remainingTurns"],
+		"removedTurnIds": response["removedTurnIds"],
+	})
 }
 
 func (h ThreadHandlers) HandleGoal(w http.ResponseWriter, r *http.Request, threadID string) {

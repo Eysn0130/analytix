@@ -29,6 +29,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type backgroundAutoContinueProvider struct {
@@ -127,7 +128,7 @@ func TestRuntimeBestEffortEventRecordFailureUsesFixedStderrProjection(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"title": "Record failure", "workspace": workspace,
 	}, workspace)
@@ -230,7 +231,7 @@ func newBackgroundAutoContinueServerFixtureV1(t *testing.T, id string) backgroun
 	}).(*runtimeServerHandler)
 	t.Cleanup(func() { _ = handler.Shutdown(context.Background()) })
 	configureServerGeneralExecution(t, handler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"id": id, "title": "Auto continue", "workspace": workspace,
 		"providerId": "analytix-hub", "model": "test-model",
@@ -375,7 +376,7 @@ func newBackgroundLifecycleCrashFixture(t *testing.T, suffix string) backgroundL
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_lifecycle_crash_" + suffix, "title": "Lifecycle crash", "workspace": workspace,
 	}, workspace)
@@ -523,7 +524,7 @@ func TestRecordRuntimeRecoveredJobEventsSettlesParentToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_recovered_job",
 		"title":     "Recovered job",
@@ -632,7 +633,7 @@ func TestStartupRecoveryDeadLettersArchivedParentWithoutSettlementOrProvider(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_recovered_archived", "title": "Recovered archived", "workspace": workspace,
 	}, workspace)
@@ -736,7 +737,7 @@ func TestRecordRuntimeJobLifecycleEventPersistsBackgroundCompletionReplayItem(t 
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_background_job",
 		"title":     "Background job",
@@ -844,7 +845,7 @@ func TestRecordRuntimeSubagentEventUsesFreshDurableBackgroundStatus(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		workspace := t.TempDir()
+		workspace := workspacetest.New(t)
 		thread, err := store.CreateThread(map[string]any{
 			"id": "thr_fresh_running", "title": "Fresh running", "workspace": workspace,
 		}, workspace)
@@ -894,7 +895,7 @@ func TestRecordRuntimeSubagentEventUsesFreshDurableBackgroundStatus(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		workspace := t.TempDir()
+		workspace := workspacetest.New(t)
 		thread, err := store.CreateThread(map[string]any{
 			"id": "thr_fresh_completed", "title": "Fresh completed", "workspace": workspace,
 		}, workspace)
@@ -1003,7 +1004,7 @@ func TestRecordRuntimeSubagentEventUsesFreshDurableBackgroundStatus(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		workspace := t.TempDir()
+		workspace := workspacetest.New(t)
 		thread, err := store.CreateThread(map[string]any{
 			"id": "thr_wrong_caller_item", "title": "Wrong caller item", "workspace": workspace,
 		}, workspace)
@@ -1103,7 +1104,7 @@ func TestBackgroundJobCompletionDeliveryLedgerDeliveredAndDeduped(t *testing.T) 
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_delivery_job",
 		"title":     "Delivery job",
@@ -1461,7 +1462,7 @@ func TestBackgroundJobCompletionConcurrentLiveRecoveryIsExactlyOnce(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_delivery_concurrent", "title": "Concurrent delivery", "workspace": workspace,
 	}, workspace)
@@ -1664,7 +1665,7 @@ func TestBackgroundJobCompletionRejectsStatusForgeryBeforeParentAppend(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_delivery_status_forgery", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -1725,7 +1726,7 @@ func TestBackgroundJobCompletionIdentityConflictDoesNotOverwriteOrRefinalizePare
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_delivery_identity_conflict", "title": "Delivery conflict", "workspace": workspace,
 	}, workspace)
@@ -1835,7 +1836,7 @@ func TestBackgroundJobDeliveryLedgerIdentityConflictDeadLettersWithoutOverwrite(
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thr_delivery_ledger_conflict", "title": "Delivery ledger conflict", "workspace": workspace,
 	}, workspace)
@@ -1995,7 +1996,7 @@ func TestBackgroundJobCompletionDeliveryDeadLettersIneligibleParent(t *testing.T
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	archivedThread, err := store.CreateThread(map[string]any{
 		"id":        "thr_archived_parent",
 		"title":     "Archived parent",
@@ -2079,7 +2080,7 @@ func TestRecoverRuntimeBackgroundJobDeliveriesRepairsMissingCompletionItem(t *te
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":        "thr_delivery_recover",
 		"title":     "Delivery recover",
@@ -2184,7 +2185,7 @@ func TestRuntimeTaskJobRecoverEndpointSettlesStaleLeaseAndOrphanedJobs(t *testin
 			if err != nil {
 				t.Fatalf("create durable store: %v", err)
 			}
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			thread, err := store.CreateThread(map[string]any{"id": "thr_recover_" + tc.name, "title": tc.name, "workspace": workspace}, workspace)
 			if err != nil {
 				t.Fatalf("create thread: %v", err)
@@ -2252,7 +2253,7 @@ func TestRuntimeTaskJobRecoverEndpointRetriesDeadLetterDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create job manager: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "Retry dead letter", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatalf("create parent thread: %v", err)
@@ -2335,7 +2336,7 @@ func TestRuntimeTaskJobRecoverEndpointClassifiesParentTurnAndSupersededFailures(
 		t.Fatalf("missing parent recover result mismatch: %#v", body)
 	}
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_turn_missing_recover", "title": "Turn missing", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
@@ -2417,7 +2418,7 @@ func TestBackgroundJobAutoContinueOrdinaryChildStartsNewParentTurn(t *testing.T)
 	configureServerGeneralExecution(t, handler)
 	store := handler.store
 	manager := handler.jobs
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{
 		"id":         "thr_auto_continue",
 		"title":      "Auto continue",
@@ -3417,7 +3418,7 @@ func backgroundRecoveryExactFixture(
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_background_exact", "title": "Background exact", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -3447,7 +3448,7 @@ func TestBackgroundJobAutoContinueDoesNotConsumeGateBeforeTerminalState(t *testi
 	if err != nil {
 		t.Fatalf("create durable store: %v", err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_auto_pending", "title": "Auto pending", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)

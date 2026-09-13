@@ -16,6 +16,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type serverBoundJobParent struct {
@@ -94,7 +95,7 @@ func TestStartupRecoveryStaleEpochDeadLettersBeforeParentMutation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_stale_startup_job", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +176,7 @@ func TestBackgroundJobCaseSwitchRejectsLateDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"id": "thr_job_security", "title": "Job security", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +305,7 @@ func TestRuntimeToolDiagnosticsAreThreadScopedAndNeverExposeChildOutput(t *testi
 		{"thread-tools-a", "turn-tools-a", "THREAD_A_OUTPUT"},
 		{"thread-tools-b", "turn-tools-b", "THREAD_B_SECRET_SENTINEL"},
 	} {
-		thread, createErr := store.CreateThread(map[string]any{"id": fixture.threadID, "workspace": t.TempDir()}, t.TempDir())
+		thread, createErr := store.CreateThread(map[string]any{"id": fixture.threadID, "workspace": workspacetest.New(t)}, t.TempDir())
 		if createErr != nil {
 			t.Fatal(createErr)
 		}

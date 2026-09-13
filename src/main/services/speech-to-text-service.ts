@@ -15,7 +15,7 @@ export type PrivateMediaSpeechRequest = {
 
 export type PrivateMediaSpeechResult =
   | { ok: true; transcript: string }
-  | { ok: false; code: 'invalid_request' | 'unavailable' | 'authority_changed' | 'provider_failed' }
+  | { ok: false; code: 'invalid_request' | 'unavailable' | 'privacy_unavailable' | 'authority_changed' | 'provider_failed' }
 
 export type ExecutePrivateMediaSpeechRequest = (
   request: PrivateMediaSpeechRequest
@@ -62,7 +62,9 @@ export async function requestSpeechTranscription(
   if (!result.ok) {
     return {
       ok: false,
-      message: result.code === 'unavailable'
+      message: result.code === 'privacy_unavailable'
+        ? 'Audio transcription is unavailable until trusted local privacy inspection is supported.'
+        : result.code === 'unavailable'
         ? 'speech-to-text provider is not configured'
         : result.code === 'authority_changed'
           ? 'speech provider changed during the request'

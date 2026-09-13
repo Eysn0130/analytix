@@ -169,13 +169,17 @@ export async function startGoRuntimeServe(
   const childEnv: NodeJS.ProcessEnv = {
     ...env
   }
-  for (const name of [
+  const reservedNames = new Set([
     'ANALYTIX_API_KEY',
     'ANALYTIX_MODEL_PROVIDERS',
     'ANALYTIX_HUB_TEST_GATEWAY_TOKEN',
-    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN'
-  ]) {
-    delete childEnv[name]
+    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
+    'ANALYTIX_RUNTIME_TOKEN'
+  ])
+  // Apply the existing child boundary before Windows collapses case aliases;
+  // only the requested runtime token may survive that collapse.
+  for (const name of Object.keys(childEnv)) {
+    if (reservedNames.has(name.toUpperCase())) delete childEnv[name]
   }
   childEnv.ANALYTIX_RUNTIME_TOKEN = launchOptions.runtimeToken || env.ANALYTIX_RUNTIME_TOKEN || ''
   const child = spawn(target.command, [

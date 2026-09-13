@@ -1,7 +1,8 @@
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { runInNewContext } from 'node:vm'
 import {
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV,
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1,
@@ -90,6 +91,26 @@ const launch: ClawScheduleMcpLaunchConfig = {
 }
 
 describe('main-private desktop external-state isolation', () => {
+  it('separates retained state from build cache without accepting a different state owner', async () => {
+    const fixture = await isolatedFixture()
+    const stateRoot = join(fixture.cacheRoot, '..', 'protected-state')
+    const canonicalState = resolve(stateRoot)
+    const taskRoot = join(canonicalState, 'task-one')
+    const userDataRoot = join(taskRoot, 'user-data')
+    const homeRoot = join(taskRoot, 'home')
+    for (const directory of [canonicalState, taskRoot, userDataRoot, homeRoot]) {
+      await mkdir(directory, { mode: 0o700 })
+    }
+    const env = { ...isolatedEnvironment(fixture), ANALYTIX_DEV_STATE_ROOT: canonicalState,
+      ANALYTIX_USER_DATA_DIR: userDataRoot, HOME: homeRoot }
+    expect(resolveDesktopExternalStateBoundary(env).isolationRoot).toBe(taskRoot)
+    expect(resolveDesktopExternalStateBoundary(env).stateHomeRoot).toBe(homeRoot)
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, HOME: userDataRoot })).toThrow()
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, ANALYTIX_USER_DATA_DIR: fixture.userDataRoot })).toThrow()
+    await chmod(canonicalState, 0o755)
+    expect(() => resolveDesktopExternalStateBoundary(env)).toThrow()
+  })
+
   it('preserves the default protocol and login-item integrations when no mode is present', () => {
     const boundary = resolveDesktopExternalStateBoundary({})
     const register = vi.fn(() => true)
@@ -289,7 +310,32 @@ describe('main-private desktop external-state isolation', () => {
     expect(mainSource).toContain('createProviderRegistryIpcHandler(')
     expect(mainSource).toContain('migrateLegacyImAccountCredentials({')
     expect(mainSource).toContain('configureAnalytixProcessMainPrivatePaths({')
-    for (const defaultLaunchSource of [packageJson, builderConfig, releaseScript]) {
+    // The builder may consume the explicit isolation mode to refuse local
+    // release.env reads, but must never inject that mode into a normal package.
+    const evaluateBuilder = (env: Record<string, string>) => {
+      const reads: string[] = []
+      const context = { process: { env }, __dirname: '/synthetic/repo', module: { exports: {} },
+        require: (name: string) => {
+          if (name === 'node:fs') return { existsSync: (path: string) => path.endsWith('release.local.env'),
+            readFileSync: (path: string) => { reads.push(path); return 'ANALYTIX_APP_VERSION=1.2.3' } }
+          if (name === 'node:path') return { join }
+          if (name.includes('macos-signing-policy')) return { requireOfficialTeamIdentifier: () => { throw new Error('unapproved signing') } }
+          if (name.includes('production-mcp-entry-closure-manifest')) return { loadProductionMcpEntryClosureContract: () => ({ files: [] }) }
+          if (name.includes('packaged-lifecycle-guard')) return { _internals: { assertNoPrepackagedCommandLine: () => {} } }
+          throw new Error('unexpected builder dependency')
+        } }
+      runInNewContext(builderConfig, context)
+      return { reads, env, config: context.module.exports }
+    }
+    const isolated = evaluateBuilder({ [ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]: ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1 })
+    expect(isolated.reads).toEqual([])
+    expect(isolated.env.ANALYTIX_APP_VERSION).toBeUndefined()
+    const ordinary = evaluateBuilder({})
+    expect(ordinary.reads).toEqual(['/synthetic/repo/scripts/release.local.env'])
+    expect(ordinary.env.ANALYTIX_APP_VERSION).toBe('1.2.3')
+    expect(ordinary.env[ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]).toBeUndefined()
+    expect(JSON.stringify(ordinary.config)).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
+    for (const defaultLaunchSource of [packageJson, releaseScript]) {
       expect(defaultLaunchSource).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
       expect(defaultLaunchSource).not.toContain(
         ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1

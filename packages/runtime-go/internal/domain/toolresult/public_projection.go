@@ -626,10 +626,18 @@ func validPublicStatus(status string) bool {
 	return oneOf(status, "completed", "failed", "blocked", "cancelled", "unknown")
 }
 
+// ValidatePlanTargetV1 is shared by write admission and the public result. A
+// physical write must not succeed with a target its result cannot represent.
+func ValidatePlanTargetV1(planID, relativePath string) error {
+	if strings.TrimSpace(planID) == "" || len(planID) > 256 || strings.TrimSpace(relativePath) == "" || len(relativePath) > 1024 ||
+		path.IsAbs(strings.ReplaceAll(relativePath, "\\", "/")) || strings.HasPrefix(path.Clean(strings.ReplaceAll(relativePath, "\\", "/")), "../") {
+		return errors.New("plan target exceeds the supported identity/path bounds or is not relative")
+	}
+	return nil
+}
+
 func validatePlanStatus(plan PlanStatusV1) error {
-	if strings.TrimSpace(plan.PlanID) == "" || len(plan.PlanID) > 256 || strings.TrimSpace(plan.RelativePath) == "" || len(plan.RelativePath) > 1024 ||
-		path.IsAbs(strings.ReplaceAll(plan.RelativePath, "\\", "/")) || strings.HasPrefix(path.Clean(strings.ReplaceAll(plan.RelativePath, "\\", "/")), "../") ||
-		!oneOf(plan.Operation, "draft", "refine") || !domainsecurity.IsSHA256Hex(plan.ContentHash) || plan.ByteSize < 0 {
+	if ValidatePlanTargetV1(plan.PlanID, plan.RelativePath) != nil || !oneOf(plan.Operation, "draft", "refine") || !domainsecurity.IsSHA256Hex(plan.ContentHash) || plan.ByteSize < 0 {
 		return errors.New("plan status fields are invalid")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, plan.SavedAt); err != nil {

@@ -1376,8 +1376,22 @@ export function buildDevGoToolchainEnvV1(
   ]) {
     if (env[name] !== undefined) result[name] = env[name]
   }
+  const cacheEnvironment: NodeJS.ProcessEnv = {}
+  if (env.ANALYTIX_DEV_CACHE_ROOT) {
+    const cache = require(join(appRoot(), 'scripts/lib/development-cache-environment.cjs')) as {
+      projectGoDevelopmentCacheEnvironment: (input: NodeJS.ProcessEnv) => { authorizedModuleCache: string }
+      DEVELOPMENT_CACHE_ENVIRONMENT: Record<string, string>
+    }
+    // Retain only the existing repository-authorized cache layout. Ambient
+    // compiler/proxy/credential overrides still never enter the subprocess.
+    const admitted = cache.projectGoDevelopmentCacheEnvironment(env)
+    cacheEnvironment.GOCACHE = cache.DEVELOPMENT_CACHE_ENVIRONMENT.GOCACHE
+    cacheEnvironment.GOMODCACHE = admitted.authorizedModuleCache
+    cacheEnvironment.GOTMPDIR = cache.DEVELOPMENT_CACHE_ENVIRONMENT.GOTMPDIR
+  }
   return {
     ...result,
+    ...cacheEnvironment,
     CGO_ENABLED: '0',
     GOENV: 'off',
     GOINSECURE: '',
@@ -1448,6 +1462,10 @@ function runtimeServerBinaryName(platform: NodeJS.Platform = process.platform): 
 function devGoRuntimeServerCacheRoot(runtimeGoDir: string, env: NodeJS.ProcessEnv): string {
   const explicit = env.ANALYTIX_GO_RUNTIME_SERVER_CACHE_DIR?.trim()
   if (explicit) return explicit
+  if (env.ANALYTIX_DEV_CACHE_ROOT) {
+    buildDevGoToolchainEnvV1(env) // Validate the marker and exact cache inputs first.
+    return join(env.ANALYTIX_DEV_CACHE_ROOT, 'runtime-go', sha256(realpathSync(runtimeGoDir)))
+  }
   return join(appRoot(), '.cache', 'runtime-go', sha256(realpathSync(runtimeGoDir)))
 }
 
@@ -1633,6 +1651,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     sourceDigestSha256,
     toolchainDigestSha256,
     buildMode: 'go-build-trimpath-analytix-prod-v1',
+    cachePolicy: options.env.ANALYTIX_DEV_CACHE_ROOT ? 'repository-cache-v1' : 'ordinary-v1',
     platform,
     arch,
     binaryName
@@ -1647,14 +1666,19 @@ function ensureDevGoRuntimeServerBinary(options: {
     arch,
     binaryName
   }
-  const cacheRoot = ensurePrivateDevGoCacheDirectoryV1(
-    devGoRuntimeServerCacheRoot(options.runtimeGoDir, options.env)
-  )
-  const outputDir = join(cacheRoot, buildContractDigestSha256)
-  if (existsSync(outputDir)) return verifyDevGoRuntimeCacheV1(outputDir, expected)
-
-  let buildDir = ensurePrivateDevGoCacheDirectoryV1(mkdtempSync(join(cacheRoot, '.build-')))
+  const cacheVolume = options.env.ANALYTIX_DEV_CACHE_ROOT
+    ? (require(join(appRoot(), 'scripts/lib/development-cache-environment.cjs')) as {
+      openVerifiedDevelopmentCacheVolume: () => { verify: () => unknown; close: () => void }
+    }).openVerifiedDevelopmentCacheVolume() : undefined
+  let buildDir = ''
   try {
+    const cacheRoot = ensurePrivateDevGoCacheDirectoryV1(
+      devGoRuntimeServerCacheRoot(options.runtimeGoDir, options.env)
+    )
+    const outputDir = join(cacheRoot, buildContractDigestSha256)
+    if (existsSync(outputDir)) return verifyDevGoRuntimeCacheV1(outputDir, expected)
+    buildDir = ensurePrivateDevGoCacheDirectoryV1(mkdtempSync(join(cacheRoot, '.build-')))
+    cacheVolume?.verify()
     const output = join(buildDir, binaryName)
     const result = spawnSync(canonicalGoBinary, [
       'build',
@@ -1670,6 +1694,7 @@ function ensureDevGoRuntimeServerBinary(options: {
       env: buildDevGoToolchainEnvV1(options.env),
       timeout: 120_000
     })
+    cacheVolume?.verify()
     if (result.status !== 0 || !existsSync(output)) {
       const stderr = String(result.stderr || result.stdout || '').slice(-2_000)
       throw new Error(`Failed to build cached Go runtime server binary: ${stderr ? privateTextDiagnosticText(stderr) : `exit ${result.status}`}`)
@@ -1707,7 +1732,8 @@ function ensureDevGoRuntimeServerBinary(options: {
     }
     return verifyDevGoRuntimeCacheV1(outputDir, expected)
   } finally {
-    if (buildDir) rmSync(buildDir, { recursive: true, force: true })
+    try { if (buildDir) rmSync(buildDir, { recursive: true, force: true }) }
+    finally { cacheVolume?.close() }
   }
 }
 
@@ -4422,29 +4448,30 @@ export function buildGoRuntimeSidecarEnv(
   runtimeToken: string = runtime.runtimeToken
 ): NodeJS.ProcessEnv {
   const childEnvironment = { ...env }
-  for (const name of [
+  const reservedNames = new Set<string>([
     'ANALYTIX_API_KEY',
     'ANALYTIX_MODEL_PROVIDERS',
     'ANALYTIX_HUB_TEST_GATEWAY_TOKEN',
-    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN'
-  ]) {
-    delete childEnvironment[name]
-  }
-  for (const providerGroup of PROVIDER_CREDENTIAL_GROUPS) {
-    for (const aliases of providerGroup) {
-      for (const name of aliases) delete childEnvironment[name]
-    }
-  }
-  delete childEnvironment[RETIRED_CONTROLLED_ARTIFACT_HOST_URL_ENV]
-  delete childEnvironment[RETIRED_CONTROLLED_ARTIFACT_HOST_TOKEN_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_URL_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TOKEN_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_BACKEND_GENERATION_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_ALLOCATION_RECORD_DIGEST_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV]
-  for (const name of PROTECTED_AUTHORITY_ENVIRONMENT_V1) {
-    delete childEnvironment[name]
+    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
+    ...PROVIDER_CREDENTIAL_GROUPS.flat(2),
+    RETIRED_CONTROLLED_ARTIFACT_HOST_URL_ENV,
+    RETIRED_CONTROLLED_ARTIFACT_HOST_TOKEN_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_URL_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TOKEN_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_BACKEND_GENERATION_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_ALLOCATION_RECORD_DIGEST_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV,
+    ...PROTECTED_AUTHORITY_ENVIRONMENT_V1,
+    'ANALYTIX_RUNTIME_TOKEN',
+    'ANALYTIX_MCP_CONFIG_PATH',
+    'ANALYTIX_APP_ROOT',
+    'ANALYTIX_RESOURCES_PATH'
+  ])
+  // Windows folds environment names when spawning. Remove every alias before
+  // installing host-owned values, without rewriting unrelated Path/SystemRoot.
+  for (const name of Object.keys(childEnvironment)) {
+    if (reservedNames.has(name.toUpperCase())) delete childEnvironment[name]
   }
   return {
     ...childEnvironment,

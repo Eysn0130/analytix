@@ -42,6 +42,15 @@ func TestMediaExecutionHTTPAcceptsOnlyBoundedKeyFreeIntent(t *testing.T) {
 }
 
 func TestMediaExecutionHTTPRejectsProviderAuthorityFieldsAndProjectsStableErrors(t *testing.T) {
+	t.Run("privacy failure survives the closed HTTP projection", func(t *testing.T) {
+		service := &mediaExecutionHTTPStub{err: mediaexecutionapp.ErrPrivacyUnavailable}
+		recorder := httptest.NewRecorder()
+		MediaExecutionHandlers{Service: service}.Handle(recorder, httptest.NewRequest(http.MethodPost, MediaExecutionPathV1,
+			strings.NewReader(`{"schemaVersion":1,"operation":"image.generate","prompt":"ok"}`)))
+		if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"privacy_unavailable"`) {
+			t.Fatalf("privacy capability status was lost: status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
 	for _, body := range []string{
 		`{"schemaVersion":1,"operation":"image.generate","prompt":"ok","endpoint":"https://forbidden.invalid"}`,
 		`{"schemaVersion":1,"operation":"image.generate","prompt":"ok","credentialRef":"forbidden"}`,

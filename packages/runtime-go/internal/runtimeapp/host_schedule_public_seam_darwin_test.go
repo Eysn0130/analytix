@@ -16,6 +16,7 @@ import (
 	"time"
 
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const (
@@ -125,7 +126,7 @@ func TestRuntimeHTTPHostScheduleListUsesExactContainedLoopback(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	if err := os.WriteFile(
 		filepath.Join(workspace, "ordinary.txt"),
 		[]byte(hostScheduleOrdinaryFileBodyV1+"\n"),

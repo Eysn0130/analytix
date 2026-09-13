@@ -1,6 +1,7 @@
 package threadsummaryindexfs
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -8,8 +9,68 @@ import (
 	"time"
 
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
+	threadapp "analytix.local/runtime-go/internal/app/thread"
 	contracts "analytix.local/runtime-go/internal/contracts"
 )
+
+func TestStoreSummaryMetadataContractMatchesAppendAndRebuild(t *testing.T) {
+	root := t.TempDir()
+	const threadID = "thread-13812345678"
+	const stamp = "2026-09-13T07:17:19.123456789Z"
+	if err := os.MkdirAll(filepath.Join(root, "threads", threadID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	thread := map[string]any{
+		"id": threadID, "title": "Ordinary response", "createdAt": stamp, "updatedAt": stamp,
+		"turns": []any{map[string]any{"id": "turn-13812345678", "status": "aborted"}},
+	}
+	owner := &sync.Mutex{}
+	store := newThreadSummaryStoreForTest(t, root, owner, func(string) (map[string]any, error) {
+		return contracts.CloneMap(thread), nil
+	})
+	for _, appendRecord := range []bool{true, false} {
+		var err error
+		if appendRecord {
+			owner.Lock()
+			err = store.AppendOwnerLocked(thread)
+			owner.Unlock()
+		} else {
+			err = store.Ensure()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		records, err := filestore.ReadJSONLFileRecords[record](store.Path(), nil)
+		if err != nil || len(records) != 1 {
+			t.Fatal("summary writer did not retain the current row")
+		}
+		value, err := preservationRecordMapV1(records[0])
+		if err != nil || threadapp.ValidateSummaryIndexRecordV1(value) != nil {
+			t.Fatal("summary writer produced a row rejected by migration")
+		}
+		if records[0].Summary["createdAt"] != stamp || records[0].Summary["latestTurnId"] != "turn-13812345678" {
+			t.Fatal("summary writer changed typed metadata")
+		}
+	}
+	before, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread["title"] = "13812345678"
+	owner.Lock()
+	err = store.AppendOwnerLocked(thread)
+	owner.Unlock()
+	if err == nil {
+		t.Fatal("summary append accepted raw PII")
+	}
+	if err := store.Ensure(); err == nil {
+		t.Fatal("summary rebuild accepted raw PII")
+	}
+	after, err := os.ReadFile(store.Path())
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("rejected summary changed the existing index")
+	}
+}
 
 func TestStoreRehydratesForgedHintFromCanonicalThread(t *testing.T) {
 	root := t.TempDir()
