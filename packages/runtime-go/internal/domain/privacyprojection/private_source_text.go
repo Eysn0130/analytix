@@ -48,7 +48,7 @@ var quotedPrivateSourceLocators = []*regexp.Regexp{
 	regexp.MustCompile("(?i)`" + privateSourceStart + "[^`\\r\\n]*`"),
 }
 
-var composerMention = regexp.MustCompile(`([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s])*)\)`)
+var composerMention = regexp.MustCompile(`([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s\\])*)\)`)
 var escapedMentionPart = regexp.MustCompile(`\\(.)`)
 var mentionLabelEscaper = strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`)
 

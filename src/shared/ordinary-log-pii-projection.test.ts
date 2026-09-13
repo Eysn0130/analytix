@@ -26,6 +26,18 @@ function canonicalDigits(value: string): string {
 }
 
 describe('ordinary log PII projection', () => {
+  it('projects after long incomplete escaped mentions without backtracking', () => {
+    const incomplete = '$[](' + String.raw`\!`.repeat(5000)
+    expect(projectOrdinaryLogPII(`${incomplete}\n/Users/private-owner/source.csv`)).toBe(`${incomplete}\n[PRIVATE_PATH]`)
+  })
+
+  it('preserves escaped URI punctuation while rejecting a dangling escape as a reference', () => {
+    const valid = String.raw`@[Tool](plugin://report\)part)`
+    expect(projectOrdinaryLogPII(valid)).toBe(valid)
+    const incomplete = String.raw`@[Tool](plugin://report\)`
+    expect(projectOrdinaryLogPII(incomplete)).not.toContain('plugin://')
+  })
+
   it('projects absolute diff header paths without changing ordinary hunks or relative code paths', () => {
     const diff = '--- a//Users/private-owner/Case Files/source.csv\n+++ b//Users/private-owner/Case Files/source.csv\n@@ -1 +1 @@\n-old\n+new\n'
     expect(projectOrdinaryLogPII(diff)).toBe('--- [PRIVATE_PATH]\n+++ [PRIVATE_PATH]\n@@ -1 +1 @@\n-old\n+new\n')

@@ -56,7 +56,9 @@ export const COMPOSER_SKILL_MENTION_PREFIX = 'skill://'
 
 const AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@([^\s@"'\])]*)$/u
 const QUOTED_AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@"([^"\n\r]*)$/u
-const COMPOSER_LINK_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s])*)\)/gu
+// Keep escape pairs disjoint from ordinary URI characters, including for
+// incomplete user input that has no closing parenthesis.
+const COMPOSER_LINK_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s\\])*)\)/gu
 
 function escapeMentionLabel(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')

@@ -29,6 +29,20 @@ func TestPrivateSourceTextProjectsComposerReferenceContents(t *testing.T) {
 	}
 }
 
+func TestPrivateSourceTextComposerEscapesRequireClosingDelimiter(t *testing.T) {
+	valid := `@[Tool](plugin://report\)part)`
+	if got := ProjectPrivateSourceText(valid); got != valid {
+		t.Fatal("escaped closing punctuation in a closed reference changed")
+	}
+	if got := ProjectPrivateSourceText(`@[Tool](plugin://report\)`); strings.Contains(got, "plugin://") {
+		t.Fatal("dangling escape was admitted as a complete reference")
+	}
+	incomplete := "$[](" + strings.Repeat(`\!`, 5000)
+	if got := ProjectPrivateSourceText(incomplete + "\n/Users/private-owner/source.csv"); got != incomplete+"\n[PRIVATE_PATH]" {
+		t.Fatal("incomplete reference bypassed surrounding path projection")
+	}
+}
+
 func TestPrivateSourceProseProjectsStrictRawJSON(t *testing.T) {
 	for _, fixture := range []struct {
 		raw             json.RawMessage

@@ -12,6 +12,16 @@ import {
 } from './composer-mentions'
 
 describe('composer mention helpers', () => {
+  it('keeps long incomplete escaped mentions editable without backtracking', () => {
+    const incomplete = '$[](' + String.raw`\!`.repeat(5000)
+    expect(getComposerMentionDisplayPlan(incomplete)).toMatchObject({ hasMentions: false, editableValue: incomplete })
+  })
+
+  it('parses escaped URI punctuation only when the reference is actually closed', () => {
+    expect(extractComposerPluginMentions(String.raw`@[Tool](plugin://report\)part)`)[0]).toMatchObject({ pluginId: 'report)part' })
+    expect(extractComposerPluginMentions(String.raw`@[Tool](plugin://report\)`)).toEqual([])
+  })
+
   it('detects plain and quoted @ mentions at the cursor', () => {
     expect(getComposerAtMentionAtCursor('ask @plug', 'ask @plug'.length)).toEqual({
       start: 4,

@@ -46,7 +46,9 @@ function projectPrivateSourceLocatorsRaw(text: string): string {
   )
 }
 
-const COMPOSER_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s])*)\)/gu
+// Escape pairs and ordinary URI characters must be disjoint: otherwise a
+// missing closing parenthesis can exponentially re-partition backslashes.
+const COMPOSER_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s\\])*)\)/gu
 
 function safeMentionId(encoded: string): boolean {
   let id = encoded
