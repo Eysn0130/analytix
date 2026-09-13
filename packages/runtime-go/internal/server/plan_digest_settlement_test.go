@@ -35,7 +35,13 @@ func TestCreatePlanPhysicalWriteSettlesDecimalRunDigestAndSurvivesRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	// Keep this positive digest fixture within the existing plan-ID contract,
+	// including when TestMain adds its protected user-config isolation prefix.
+	workspace, err := os.MkdirTemp("", "plan-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workspace) })
 	handler := &runtimeServerHandler{store: store}
 	thread, err := store.CreateThread(map[string]any{
 		"id": "thread_plan_digest_settlement", "title": "Plan digest settlement", "workspace": workspace,
@@ -95,7 +101,7 @@ func TestCreatePlanPhysicalWriteSettlesDecimalRunDigestAndSurvivesRestart(t *tes
 	}
 	projection := toolcatalogapp.BuildPublicToolResultProjectionV1(call.Name, output, false)
 	if projection.ProjectionKind != domaintoolresult.ProjectionPlanStatus || projection.Status != "completed" {
-		t.Fatalf("create_plan did not produce a completed plan projection: %#v", projection)
+		t.Fatalf("create_plan did not produce a completed plan projection: kind=%s workspaceBytes=%d planIDBytes=%d relativePathBytes=%d", projection.ProjectionKind, len(workspace), len(stringField(output.(map[string]any), "plan_id")), len(relativePath))
 	}
 	pending := runtimePendingToolCall{
 		ThreadID: threadID, TurnID: turnID, Workspace: workspace, Mode: "plan",

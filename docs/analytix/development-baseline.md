@@ -100,6 +100,26 @@ development or packaging on Linux/Windows. Windows official packaging still
 requires Windows x64, its signing identity and an implemented/admitted native
 build route; those requirements cannot be supplied by changing a workflow label.
 
+The Electron and CLI Go launchers remove case aliases of their reserved child
+environment names before installing the managed runtime token. Electron also
+removes aliases of its host-owned config/resource paths and existing protected
+authority fields. Unrelated `Path` and `SystemRoot` values retain their original
+names and values. This follows the pinned [Node 22.22.1 child-process environment
+contract](https://nodejs.org/download/release/v22.22.1/docs/api/child_process.html#child-process),
+which folds Windows environment names at spawn. Local producer and subprocess
+tests do not establish Windows-native execution or credential qualification.
+
+Windows process groups/Job Objects and shell discovery do not establish
+filesystem containment. The server now forwards the selected process protected
+roots on every platform, including the mandatory floor under
+`danger-full-access`. Non-Darwin adapters reject that policy before process start until native containment is
+implemented; removing the roots to enable shell execution is not a fallback.
+Windows-native DPAPI reopen/corruption and descendant cleanup/pipe-drain evidence
+remain separate from macOS or cross-compiled tests.
+The current required CI has no Windows-native lane. The accepted first Windows
+installer target remains x64 NSIS; no minimum OS version or WSL qualification is
+established by these source fixes, and no Windows installer is produced here.
+
 The explicit `dev:isolated` candidate retains its own named profile under the configured
 local `~/.analytix-development` tree, keyed by checkout path. Build caches stay on
 the configured cache volume; protected profile/Keychain storage still requires

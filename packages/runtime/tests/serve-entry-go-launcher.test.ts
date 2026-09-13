@@ -208,6 +208,7 @@ describe('analytix serve Go launcher', () => {
     const fakeRuntimeServer = join(root, 'fake-runtime-server.mjs')
     const hubGatewayCanary = 'synthetic-hub-gateway-bootstrap'
     const hubDesktopCanary = 'synthetic-hub-desktop-bootstrap'
+    const systemRoot = process.env.SystemRoot || 'C:\\Windows'
     writeFileSync(fakeRuntimeServer, `
 import { writeFileSync } from 'node:fs'
 const valueAfter = (name) => {
@@ -220,7 +221,11 @@ writeFileSync(process.env.ANALYTIX_CAPTURE_PROVIDER_AUTHORITY, JSON.stringify({
     'ANALYTIX_MODEL_PROVIDERS',
     'ANALYTIX_HUB_TEST_GATEWAY_TOKEN',
     'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN'
-  ].filter((name) => Object.prototype.hasOwnProperty.call(process.env, name)),
+  ].flatMap((name) => Object.keys(process.env).filter((key) => key.toUpperCase() === name)),
+  runtimeTokenKeys: Object.keys(process.env).filter((key) => key.toUpperCase() === 'ANALYTIX_RUNTIME_TOKEN'),
+  runtimeToken: process.env.ANALYTIX_RUNTIME_TOKEN,
+  systemRoot: process.env.SystemRoot,
+  path: process.env.Path,
   modelProvidersJSON: valueAfter('--model-providers-json'),
   baseUrl: valueAfter('--base-url'),
   modelProxyUrl: valueAfter('--model-proxy-url'),
@@ -247,11 +252,20 @@ setInterval(() => undefined, 1000)
         }]
       }
     }, {
-      ...process.env,
+      ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+        !['PATH', 'SYSTEMROOT'].includes(name.toUpperCase())
+      )),
       ANALYTIX_API_KEY: '',
       ANALYTIX_MODEL_PROVIDERS: '',
       ANALYTIX_HUB_TEST_GATEWAY_TOKEN: hubGatewayCanary,
       ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN: hubDesktopCanary,
+      analytix_api_key: 'synthetic-casefold-credential',
+      Analytix_Model_Providers: 'synthetic-casefold-credential',
+      Analytix_Hub_Test_Gateway_Token: hubGatewayCanary,
+      analytix_hub_test_desktop_auth_token: hubDesktopCanary,
+      analytix_runtime_token: 'synthetic-stale-runtime-token',
+      SystemRoot: systemRoot,
+      Path: 'C:\\SyntheticTools',
       ANALYTIX_CAPTURE_PROVIDER_AUTHORITY: capturePath,
       ANALYTIX_RUNTIME_SERVER_BINARY: process.execPath,
       ANALYTIX_RUNTIME_SERVER_BINARY_ARGS_JSON: JSON.stringify([fakeRuntimeServer])
@@ -260,6 +274,10 @@ setInterval(() => undefined, 1000)
     try {
       const captured = JSON.parse(await readFile(capturePath, 'utf8')) as {
         providerEnvironmentKeys: string[]
+        runtimeTokenKeys: string[]
+        runtimeToken: string
+        systemRoot: string
+        path: string
         modelProvidersJSON: string | null
         baseUrl: string | null
         modelProxyUrl: string | null
@@ -268,6 +286,10 @@ setInterval(() => undefined, 1000)
         argv: string[]
       }
       expect(captured.providerEnvironmentKeys).toEqual([])
+      expect(captured.runtimeTokenKeys).toEqual(['ANALYTIX_RUNTIME_TOKEN'])
+      expect(captured.runtimeToken).toBe('test-token')
+      expect(captured.systemRoot).toBe(systemRoot)
+      expect(captured.path).toBe('C:\\SyntheticTools')
       expect(captured.modelProvidersJSON).toBeNull()
       expect(captured.baseUrl).toBeNull()
       expect(captured.modelProxyUrl).toBeNull()

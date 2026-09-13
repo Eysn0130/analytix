@@ -4448,29 +4448,30 @@ export function buildGoRuntimeSidecarEnv(
   runtimeToken: string = runtime.runtimeToken
 ): NodeJS.ProcessEnv {
   const childEnvironment = { ...env }
-  for (const name of [
+  const reservedNames = new Set<string>([
     'ANALYTIX_API_KEY',
     'ANALYTIX_MODEL_PROVIDERS',
     'ANALYTIX_HUB_TEST_GATEWAY_TOKEN',
-    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN'
-  ]) {
-    delete childEnvironment[name]
-  }
-  for (const providerGroup of PROVIDER_CREDENTIAL_GROUPS) {
-    for (const aliases of providerGroup) {
-      for (const name of aliases) delete childEnvironment[name]
-    }
-  }
-  delete childEnvironment[RETIRED_CONTROLLED_ARTIFACT_HOST_URL_ENV]
-  delete childEnvironment[RETIRED_CONTROLLED_ARTIFACT_HOST_TOKEN_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_URL_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TOKEN_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_BACKEND_GENERATION_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_ALLOCATION_RECORD_DIGEST_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER_ENV]
-  delete childEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV]
-  for (const name of PROTECTED_AUTHORITY_ENVIRONMENT_V1) {
-    delete childEnvironment[name]
+    'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
+    ...PROVIDER_CREDENTIAL_GROUPS.flat(2),
+    RETIRED_CONTROLLED_ARTIFACT_HOST_URL_ENV,
+    RETIRED_CONTROLLED_ARTIFACT_HOST_TOKEN_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_URL_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TOKEN_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_BACKEND_GENERATION_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_ALLOCATION_RECORD_DIGEST_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER_ENV,
+    CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV,
+    ...PROTECTED_AUTHORITY_ENVIRONMENT_V1,
+    'ANALYTIX_RUNTIME_TOKEN',
+    'ANALYTIX_MCP_CONFIG_PATH',
+    'ANALYTIX_APP_ROOT',
+    'ANALYTIX_RESOURCES_PATH'
+  ])
+  // Windows folds environment names when spawning. Remove every alias before
+  // installing host-owned values, without rewriting unrelated Path/SystemRoot.
+  for (const name of Object.keys(childEnvironment)) {
+    if (reservedNames.has(name.toUpperCase())) delete childEnvironment[name]
   }
   return {
     ...childEnvironment,

@@ -3379,6 +3379,35 @@ exit 1
 
   })
 
+  it.each(['lowercase', 'mixed-case'])('removes %s ambient authority before Windows environment folding', (casing) => {
+    const settings = settingsForPort(8127)
+    const runtime = resolveAnalytixRuntimeSettings(settings)
+    const reserved = [
+      'ANALYTIX_API_KEY', 'ANALYTIX_MODEL_PROVIDERS',
+      'ANALYTIX_HUB_TEST_GATEWAY_TOKEN', 'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
+      'ANALYTIX_RUNTIME_GO_DEEPSEEK_API_KEY', 'ANALYTIX_AUTHORITY_ANCHOR_V1',
+      'ANALYTIX_CONTROLLED_ARTIFACT_HOST_V2_TOKEN', 'ANALYTIX_RUNTIME_TOKEN',
+      'ANALYTIX_MCP_CONFIG_PATH', 'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'
+    ]
+    const alias = (name: string): string => casing === 'lowercase'
+      ? name.toLowerCase() : name.replace('ANALYTIX', 'Analytix')
+    const ambient: NodeJS.ProcessEnv = {
+      SystemRoot: 'C:\\Windows', Path: 'C:\\SyntheticTools',
+      ...Object.fromEntries(reserved.map((name) => [alias(name), 'synthetic-stale-authority']))
+    }
+    const child = buildGoRuntimeSidecarEnv(settings, runtime, '/tmp/analytix-casefold', ambient, 'managed-token')
+    expect(child.SystemRoot).toBe(ambient.SystemRoot)
+    expect(child.Path).toBe(ambient.Path)
+    expect(JSON.stringify(child)).not.toContain('synthetic-stale-authority')
+    expect(ambient[alias('ANALYTIX_API_KEY')]).toBe('synthetic-stale-authority')
+    for (const name of reserved) {
+      const keys = Object.keys(child).filter((key) => key.toUpperCase() === name)
+      expect(keys).toEqual(['ANALYTIX_RUNTIME_TOKEN', 'ANALYTIX_MCP_CONFIG_PATH',
+        'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'].includes(name) ? [name] : [])
+    }
+    expect(child.ANALYTIX_RUNTIME_TOKEN).toBe('managed-token')
+  })
+
   it('hydrates the Go sidecar env from provider.activeProviderId when runtime providerId is blank', () => {
     const settings = settingsForPort(8124)
     settings.provider = {

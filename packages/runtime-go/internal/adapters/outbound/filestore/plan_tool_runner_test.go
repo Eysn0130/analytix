@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,58 @@ import (
 	sideeffectidentityapp "analytix.local/runtime-go/internal/app/sideeffectidentity"
 	"golang.org/x/text/unicode/norm"
 )
+
+func TestCreatePlanRejectsUnrepresentableTargetBeforeWriting(t *testing.T) {
+	for _, route := range []string{"free-explicit", "free-auto", "reserved-explicit-id", "reserved-derived-id"} {
+		t.Run(route, func(t *testing.T) {
+			workspace := t.TempDir()
+			for len(workspace) <= 256 {
+				workspace = filepath.Join(workspace, strings.Repeat("w", 40))
+			}
+			if err := os.MkdirAll(workspace, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const relative = appplan.CurrentRelativeDir + "/kept.md"
+			input := CreatePlanToolInput{
+				Workspace: workspace, Mode: "plan", SandboxMode: "workspace-write",
+				Args: map[string]any{"operation": "draft", "markdown": "new bytes", "title": "kept"},
+			}
+			if route != "free-auto" {
+				input.Args["plan_relative_path"] = relative
+			}
+			if strings.HasPrefix(route, "reserved-") {
+				input.GUIPlan = map[string]any{"workspaceRoot": workspace, "operation": "draft", "relativePath": relative}
+				if route == "reserved-explicit-id" {
+					input.GUIPlan["planId"] = strings.Repeat("i", 257)
+				}
+			}
+			for _, existing := range []bool{false, true} {
+				planPath := filepath.Join(workspace, filepath.FromSlash(relative))
+				if existing {
+					if err := os.MkdirAll(filepath.Dir(planPath), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(planPath, []byte("retained bytes"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				prepared, failure, failed := PrepareCreatePlanTool(input)
+				if !failed || failure["code"] != "validation_error" || !reflect.DeepEqual(prepared, PreparedCreatePlanTool{}) {
+					t.Fatal("unrepresentable plan target acquired prepared write authority")
+				}
+				if existing {
+					body, err := os.ReadFile(planPath)
+					entries, listErr := os.ReadDir(filepath.Dir(planPath))
+					if err != nil || string(body) != "retained bytes" || listErr != nil || len(entries) != 1 {
+						t.Fatal("rejected plan changed existing bytes or selected another physical target")
+					}
+				} else if _, err := os.Stat(filepath.Join(workspace, ".analytixsdd")); !os.IsNotExist(err) {
+					t.Fatal("rejected plan created a directory or file")
+				}
+			}
+		})
+	}
+}
 
 func TestExecuteCreatePlanToolWritesFreeFormPlan(t *testing.T) {
 	workspace := t.TempDir()

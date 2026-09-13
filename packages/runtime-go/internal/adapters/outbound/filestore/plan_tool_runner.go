@@ -9,6 +9,7 @@ import (
 
 	controlapp "analytix.local/runtime-go/internal/app/control"
 	appplan "analytix.local/runtime-go/internal/app/plan"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 type CreatePlanToolInput struct {
@@ -166,6 +167,9 @@ func resolveCreatePlanTool(input CreatePlanToolInput) (resolvedCreatePlanTool, m
 	target, err := appplan.ResolveTarget(ownerArgs, effectivePlan, input.Workspace, operation, ExistingMarkdownRelativePaths(input.Workspace, appplan.CurrentRelativeDir), input.now().UTC())
 	if err != nil {
 		return resolvedCreatePlanTool{}, map[string]any{"error": err.Error()}, true
+	}
+	if err := domaintoolresult.ValidatePlanTargetV1(target.PlanID, target.RelativePath); err != nil {
+		return resolvedCreatePlanTool{}, map[string]any{"code": "validation_error", "error": err.Error()}, true
 	}
 	absolutePath, ok := ResolveWorkspaceRelativePath(target.WorkspaceRoot, target.RelativePath)
 	if !ok {

@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestPlanTargetBoundsMatchPublicResult(t *testing.T) {
+	for _, tc := range []struct {
+		id, path string
+		valid    bool
+	}{
+		{strings.Repeat("i", 256), strings.Repeat("p", 1024), true},
+		{strings.Repeat("i", 257), "plan.md", false},
+		{"plan", strings.Repeat("p", 1025), false},
+		{"plan", "../plan.md", false},
+		{"plan", "/plan.md", false},
+	} {
+		if valid := ValidatePlanTargetV1(tc.id, tc.path) == nil; valid != tc.valid {
+			t.Fatalf("plan target boundary mismatch: idBytes=%d pathBytes=%d", len(tc.id), len(tc.path))
+		}
+	}
+}
+
 func TestPublicToolResultProjectionV1StrictRoundTrip(t *testing.T) {
 	projection := WithheldProjectionV1("completed", "tool_output_private")
 	record := PublicToolResultProjectionRecordV1(projection)
