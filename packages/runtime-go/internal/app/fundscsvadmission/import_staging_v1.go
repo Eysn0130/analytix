@@ -144,6 +144,9 @@ func (service *ServiceV1) StageMainSelectedImportV1(
 		return ImportStageResultV1{}, ErrUnavailable
 	}
 	service.stagingMu.Lock()
+	if input.CreateCaseIntent == "" {
+		service.pendingCaseCreation = nil
+	}
 	stageContext, invocation, beginErr := service.beginStageInvocationLockedV1(ctx)
 	service.stagingMu.Unlock()
 	if beginErr != nil {
@@ -151,7 +154,7 @@ func (service *ServiceV1) StageMainSelectedImportV1(
 	}
 	defer service.finishStageInvocationV1(invocation)
 
-	principal, observation, err := service.resolveImportAuthorityV1(stageContext, input.WorkspaceRoot)
+	principal, observation, err := service.resolveSelectedImportAuthorityV1(stageContext, input)
 	if err != nil {
 		return ImportStageResultV1{}, err
 	}
@@ -503,6 +506,7 @@ func (service *ServiceV1) Close() error {
 	defer service.stagingMu.Unlock()
 	service.cancelStageInvocationLockedV1()
 	service.clearActiveImportLockedV1()
+	service.pendingCaseCreation = nil
 	return nil
 }
 

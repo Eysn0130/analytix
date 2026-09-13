@@ -46,7 +46,7 @@ export type PrivateMediaImageRequest = {
 
 export type PrivateMediaImageResult =
   | { ok: true; imageBase64: string; mimeType: string }
-  | { ok: false; code: 'invalid_request' | 'unavailable' | 'authority_changed' | 'provider_failed' }
+  | { ok: false; code: 'invalid_request' | 'unavailable' | 'privacy_unavailable' | 'authority_changed' | 'provider_failed' }
 
 export type ExecutePrivateMediaImageRequest = (
   request: PrivateMediaImageRequest
@@ -172,7 +172,9 @@ export async function requestWriteInfographic(
   if (!executed.ok) {
     return {
       ok: false,
-      message: executed.code === 'unavailable'
+      message: executed.code === 'privacy_unavailable'
+        ? 'This media content cannot be safely projected. Reference image editing requires trusted local privacy inspection.'
+        : executed.code === 'unavailable'
         ? 'image generation provider is not configured'
         : executed.code === 'authority_changed'
           ? 'image generation provider changed during the request'

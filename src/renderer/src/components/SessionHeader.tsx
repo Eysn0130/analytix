@@ -105,7 +105,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const [actionsMenuPlacement, setActionsMenuPlacement] = useState<ActionsMenuPlacement | null>(null)
   const [actionsSubmenu, setActionsSubmenu] = useState<ThreadActionsSubmenu>(null)
   const [sourcePreviewOpen, setSourcePreviewOpen] = useState(false)
-  const [fundsCSVStageState, setFundsCSVStageState] = useState<'idle' | 'running' | 'staged' | 'confirming' | 'success' | 'failed'>('idle')
+  const [fundsCSVStageState, setFundsCSVStageState] = useState<'idle' | 'running' | 'staged' | 'confirming' | 'success' | 'failed' | 'capability_unavailable'>('idle')
   const [stagedFundsImport, setStagedFundsImport] = useState<StagedFundsImport | null>(null)
   const [selectedImportItem, setSelectedImportItem] = useState(0)
   const [pinnedThreadIds, setPinnedThreadIds] = useState(() => readPinnedThreadIds())
@@ -335,7 +335,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
         return
       }
       if (!result.ok) {
-        setFundsCSVStageState(result.canceled ? 'idle' : 'failed')
+        setFundsCSVStageState(result.canceled ? 'idle' : result.code === 'capability_unavailable' ? 'capability_unavailable' : 'failed')
         return
       }
       stagedImportSelectorRef.current = result.items[0]?.selector ?? null
@@ -671,12 +671,15 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
               ) : null}
               {fundsCSVStageState === 'success' ? (
                 <p className="text-xs text-emerald-600">{t('fundsCSVStageSuccess')}</p>
+              ) : fundsCSVStageState === 'capability_unavailable' ? (
+                <p className="text-xs text-ds-danger">{t('fundsCSVCapabilityUnavailable')}</p>
               ) : fundsCSVStageState === 'failed' ? (
                 <p className="text-xs text-ds-danger">{t('fundsCSVStageFailed')}</p>
               ) : stagedFundsImport?.status === 'mapping_invalid' ? (
                 <p className="text-xs text-ds-danger">{t('fundsCSVMappingInvalid')}</p>
               ) : null}
             </div>
+            <p className="mt-2 text-xs text-ds-faint">{t('fundsCSVRestartHint')}</p>
             {stagedFundsImport ? (
               <div className="mt-3 border-t border-ds-border pt-3">
                 <div className="mb-2 flex flex-wrap gap-2">

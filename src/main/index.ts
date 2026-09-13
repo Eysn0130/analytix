@@ -119,6 +119,7 @@ import {
   type ClawScheduleMcpLaunchConfig
 } from './claw-schedule-mcp-config'
 import { registerAppIpcHandlers } from './ipc/register-app-ipc-handlers'
+import { createPrivateMediaRuntimeRequest } from './services/private-media-runtime-request'
 import {
   accountCredentialExpectedState,
   createAccountCredentialIpcHandler,
@@ -2352,6 +2353,18 @@ app.whenReady().then(async () => {
       purpose: binding.purpose,
       fingerprint: binding.ownerFingerprint
     })),
+    privateMediaRequest: createPrivateMediaRuntimeRequest({
+      loadSettings: () => store.load(),
+      ensureRuntime,
+      captureAuthorityPin: captureCurrentFinalPublicationAuthorityPin,
+      isCurrentAuthorityPin: isCurrentFinalPublicationAuthorityPin,
+      getBaseUrl: getRuntimeBaseUrlForSettings,
+      getProfileBinding: (settings) => JSON.stringify({
+        profileBinding: oauthProfileBinding,
+        dataDirectory: resolveAnalytixDataDir(getAnalytixRuntimeSettings(settings))
+      }),
+      authHeaders: runtimeAuthHeaders
+    }),
     localDisplayRequest: async (path, body) => {
       const settings = await store.load()
       return localDisplayRuntimeRequest(settings, path, body)
@@ -2459,7 +2472,7 @@ app.whenReady().then(async () => {
 }).catch((error) => {
   desktopStartupBarrierComplete = false
   const diagnostic = runtimeErrorPublicDiagnosticV1(error)
-  publicConsoleError('startup', 'Startup failed.', diagnostic)
+  publicConsoleError('startup', 'Startup failed.', { bytes: diagnostic.errorBytes, sha256: diagnostic.errorSha256 })
   dialog.showErrorBox('Analytix failed to start', 'The desktop application could not complete startup.')
   app.quit()
 })

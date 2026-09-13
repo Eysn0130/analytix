@@ -235,6 +235,18 @@ describe('desktop private history startup migration', () => {
     )
   })
 
+  it('keeps admitted compiler caches out of the isolated application home', () => {
+    const { DEVELOPMENT_CACHE_ROOT, DEVELOPMENT_CACHE_ENVIRONMENT } = require('../../../scripts/lib/development-cache-environment.cjs')
+    const input = { HOME: '/synthetic/profile', PATH: '/safe-path', ANALYTIX_DEV_CACHE_ROOT: DEVELOPMENT_CACHE_ROOT,
+      ...DEVELOPMENT_CACHE_ENVIRONMENT, OPENAI_API_KEY: 'synthetic-not-a-key' }
+    const projected = buildDevGoToolchainEnvV1(input)
+    for (const key of ['GOCACHE', 'GOMODCACHE', 'GOTMPDIR']) expect(projected[key]).toBe(DEVELOPMENT_CACHE_ENVIRONMENT[key])
+    expect(projected.HOME).toBe('/synthetic/profile')
+    expect(projected.OPENAI_API_KEY).toBeUndefined()
+    expect(() => buildDevGoToolchainEnvV1({ ...input, GOMODCACHE: '/synthetic/other-cache' })).toThrow(/mismatch/)
+    expect(() => buildDevGoToolchainEnvV1({ ...input, ANALYTIX_DEV_CACHE_ROOT: '/synthetic/other-root' })).toThrow(/not authoritative/)
+  })
+
   it('gives Go discovery and development builds a credential-free fixed environment', () => {
     const env = buildDevGoToolchainEnvV1({
       HOME: '/safe-home',

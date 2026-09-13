@@ -11,11 +11,15 @@ import (
 	"net/textproto"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
+	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 	providerregistryapp "analytix.local/runtime-go/internal/app/providerregistry"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	mediaport "analytix.local/runtime-go/internal/ports/mediaexecution"
 )
 
@@ -32,10 +36,11 @@ const (
 )
 
 var (
-	ErrInvalidRequest   = errors.New("media execution request is invalid")
-	ErrUnavailable      = errors.New("media provider is unavailable")
-	ErrProviderFailed   = errors.New("media provider request failed")
-	ErrAuthorityChanged = errors.New("media provider authority changed")
+	ErrInvalidRequest     = errors.New("media execution request is invalid")
+	ErrUnavailable        = errors.New("media provider is unavailable")
+	ErrProviderFailed     = errors.New("media provider request failed")
+	ErrAuthorityChanged   = errors.New("media provider authority changed")
+	ErrPrivacyUnavailable = errors.New("media privacy projection is unavailable")
 )
 
 type Operation string
@@ -87,6 +92,17 @@ func (executor *Executor) Execute(ctx context.Context, request Request) (Result,
 	if executor == nil || executor.Registry == nil || ctx == nil || ctx.Err() != nil || validateRequest(request) != nil {
 		return Result{}, ErrInvalidRequest
 	}
+	// Registry execution authority does not admit uninspected source bytes.
+	// The trusted local image/audio projectors are not implemented. Close only
+	// these effects, before credential resolution or transport construction.
+	if request.Operation != OperationImageGenerate {
+		return Result{}, ErrPrivacyUnavailable
+	}
+	prompt, err := projectMediaText(request.Prompt)
+	if err != nil || !mediaMetadataUnchanged(request.Size) || !validImageSize(request.Size) {
+		return Result{}, ErrPrivacyUnavailable
+	}
+	request.Prompt = prompt
 	resolution, err := executor.Registry.ResolveSelectedMediaForExecution(ctx)
 	if err != nil {
 		return Result{}, ErrUnavailable
@@ -94,6 +110,9 @@ func (executor *Executor) Execute(ctx context.Context, request Request) (Result,
 	defer resolution.Clear()
 	if strings.TrimSpace(resolution.Provider.SelectedMedia) == "" {
 		return Result{}, ErrUnavailable
+	}
+	if !mediaMetadataUnchanged(resolution.Provider.SelectedMedia) {
+		return Result{}, ErrPrivacyUnavailable
 	}
 	timeout := requestTimeout(request.TimeoutMS)
 	factory := executor.TransportFactory
@@ -114,6 +133,84 @@ func (executor *Executor) Execute(ctx context.Context, request Request) (Result,
 	default:
 		return Result{}, ErrInvalidRequest
 	}
+}
+
+var mediaLocalPath = regexp.MustCompile(`(?i)(?:file://|/(?:Users|home|private|Volumes|tmp|var)/|(?:^|[^a-z0-9_/])(?:~[\\/]|/(?:[^/\s"'<>]+/|[^/\s"'<>]+\.[a-z0-9])|[a-z]:[\\/]|\\\\))`)
+var mediaDataURI = regexp.MustCompile(`(?i)data:(?:image|audio|video|application)/`)
+var mediaImageSize = regexp.MustCompile(`^[1-9][0-9]{1,4}x[1-9][0-9]{1,4}$`)
+var mediaURLEscape = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
+
+func validImageSize(size string) bool {
+	return size == "" || size == "auto" || mediaImageSize.MatchString(size)
+}
+
+func projectMediaText(text string) (string, error) {
+	// Media has no retained-source path authority. An explicit local path is
+	// unclassified here, not a filename that may be silently sent to a model.
+	if mediaLocalPath.MatchString(text) || mediaDataURI.MatchString(text) {
+		return "", ErrPrivacyUnavailable
+	}
+	projected, err := privacyprojectionapp.ProjectProviderRequest(domainsecurity.TurnSecurityContext{}, domainmodel.Request{
+		Messages: []domainmodel.Message{{Role: "user", Content: text}},
+	})
+	if err != nil || len(projected.Messages) != 1 {
+		return "", ErrPrivacyUnavailable
+	}
+	return projected.Messages[0].Content, nil
+}
+
+func mediaMetadataUnchanged(value string) bool {
+	projected, err := projectMediaText(value)
+	return err == nil && projected == value
+}
+
+func mediaURLContentSafe(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil {
+		return false
+	}
+	// Inspect route components without changing the destination or signature
+	// of either a selected endpoint or a Provider-returned download URL.
+	for _, prefix := range []string{"/Users/", "/home/", "/private/", "/Volumes/", "/tmp/", "/var/"} {
+		if strings.Contains(strings.ToLower(u.Path), strings.ToLower(prefix)) {
+			return false
+		}
+	}
+	values, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return false
+	}
+	// Split before decoding so escaped slashes cannot erase a nested local
+	// path's structure. Each component is then decoded and checked below.
+	parts := strings.Split(u.EscapedPath(), "/")
+	parts = append(parts, strings.Split(u.Hostname(), ".")...)
+	for key, entries := range values {
+		parts = append(parts, key)
+		parts = append(parts, entries...)
+		for _, entry := range entries {
+			// Preserve labels: a short account number is sensitive with its
+			// account cue even when the same bare digits are ordinary data.
+			parts = append(parts, key+": "+entry)
+		}
+	}
+	for _, part := range parts {
+		for pass := 0; ; pass++ {
+			if pass == 8 || !mediaMetadataUnchanged(part) {
+				return false
+			}
+			// Initial URL/query parsing already validated escapes. A decoded
+			// literal percent is legal; decode only remaining complete escapes.
+			decoded := mediaURLEscape.ReplaceAllStringFunc(part, func(escape string) string {
+				value, _ := url.PathUnescape(escape)
+				return value
+			})
+			if decoded == part {
+				break
+			}
+			part = decoded
+		}
+	}
+	return true
 }
 
 func validateRequest(request Request) error {
@@ -404,6 +501,9 @@ func (executor *Executor) send(
 	contentType string,
 	credentialed bool,
 ) (*mediaport.Response, error) {
+	if !mediaURLContentSafe(rawURL) {
+		return nil, ErrPrivacyUnavailable
+	}
 	if err := executor.Registry.ValidateMediaExecutionCurrent(ctx, resolution.Authority()); err != nil {
 		return nil, ErrAuthorityChanged
 	}

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import { assertCommittedDevelopmentKeychainIdentity, prepareDevelopmentKeychain, promptDevelopmentKeychainPassword } from './development-keychain.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // Deliberately not process.env spread: no Provider/Hub credentials, runtime
@@ -30,7 +32,15 @@ function privateDirectory(directory, create = false) {
   }
 }
 
-export function prepareDevelopmentProfile({ root = repo, env = process.env, profile = 'default', fresh = false } = {}) {
+function entryExists(path) {
+  try { lstatSync(path); return true } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+export function prepareDevelopmentProfile({ root = repo, env = process.env, profile = 'default', fresh = false,
+  stateRoot = join(homedir(), '.analytix-development') } = {}) {
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(profile)) throw new Error('Invalid development profile name.')
   const cache = env.ANALYTIX_DEV_CACHE_ROOT
   if (!cache || !/^\/[A-Za-z0-9._/-]+$/.test(cache) || resolve(cache) !== cache) {
@@ -40,32 +50,48 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
   privateDirectory(cache)
   privateDirectory(temporary)
   const checkout = createHash('sha256').update(realpathSync(root)).digest('hex').slice(0, 16)
-  const profiles = join(temporary, `analytix-dev-${checkout}`)
+  // Protected state must not inherit the storage qualification of a cache.
+  // In particular the configured removable APFS cache is not admitted by the
+  // Core's managed-local-filesystem validator. Keep retained state on the
+  // local home volume; Core still performs its complete filesystem admission.
+  if (!/^\/[A-Za-z0-9._/-]+$/.test(stateRoot) || resolve(stateRoot) !== stateRoot) {
+    throw new Error('Development state requires a canonical local state root.')
+  }
+  privateDirectory(stateRoot, true)
+  const profiles = join(stateRoot, `analytix-dev-${checkout}`)
   privateDirectory(profiles, true)
   const taskRoot = fresh ? mkdtempSync(join(profiles, 'fresh-')) : join(profiles, `profile-${profile}`)
-  privateDirectory(taskRoot, true)
+  const created = fresh || !entryExists(taskRoot)
+  privateDirectory(taskRoot, created)
   const userData = join(taskRoot, 'user-data')
-  privateDirectory(userData, true)
-  const config = join(userData, '.config')
-  const appCache = join(userData, '.cache')
-  privateDirectory(config, true)
-  privateDirectory(appCache, true)
-  privateDirectory(join(userData, '.analytix'), true)
-  privateDirectory(join(userData, '.analytix', 'data'), true)
+  privateDirectory(userData, created)
+  const homeRoot = join(taskRoot, 'home')
+  privateDirectory(homeRoot, created)
+  const config = join(homeRoot, '.config')
+  const appCache = join(homeRoot, '.cache')
+  privateDirectory(config, created)
+  privateDirectory(appCache, created)
+  privateDirectory(join(homeRoot, '.analytix'), created)
+  privateDirectory(join(homeRoot, '.analytix', 'data'), created)
   const childEnv = Object.fromEntries(inheritedKeys.filter(key => env[key] !== undefined).map(key => [key, env[key]]))
   Object.assign(childEnv, {
     NODE_ENV: 'development',
     ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE: 'isolated-local-v1',
     ANALYTIX_USER_DATA_DIR: userData,
+    ANALYTIX_DEV_STATE_ROOT: stateRoot,
     // Child-only home: the invoking shell and existing application state are
     // untouched. Libraries using homedir() must see the same isolated boundary.
-    HOME: userData,
+    HOME: homeRoot,
     XDG_CONFIG_HOME: config,
     XDG_CACHE_HOME: appCache,
     TMPDIR: temporary,
-    ANALYTIX_DESKTOP_AUTH_TEST_BOOTSTRAP: '0'
+    ANALYTIX_DESKTOP_AUTH_TEST_BOOTSTRAP: '0',
+    CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    ANALYTIX_UPDATE_CHANNEL: 'beta',
+    ANALYTIX_UPDATE_FEED_URL: 'https://example.invalid/analytix/development/'
   })
-  return { taskRoot, userData, env: childEnv }
+  const needsKeychain = created
+  return { taskRoot, userData, homeRoot, created, needsKeychain, env: childEnv }
 }
 
 // Directory isolation alone is not launch admission. The existing Darwin
@@ -80,34 +106,50 @@ export function assertDevelopmentProfileReady(profile) {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 ||
       stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o600 ||
       stat.size <= 0 || realpathSync(database) !== database) throw new Error('invalid')
+    assertCommittedDevelopmentKeychainIdentity(profile, { allowCoreRecovery: true })
   } catch {
-    throw new Error('Isolated development is not configured: an explicitly provisioned task Keychain is required. No default/login Keychain fallback is allowed. See docs/analytix/development-baseline.md.')
+    throw new Error('Isolated development requires its original task Keychain. Missing or incomplete state is preserved; use --fresh for a separate profile after cancelled setup. No default/login Keychain fallback is allowed. See docs/analytix/development-baseline.md.')
   }
 }
 
 export function parseDevelopmentArgs(args) {
-  const result = { fast: false, fresh: false, profile: 'default' }
+  const result = { fast: false, fresh: false, profile: 'default', unlockKeychain: false }
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--fast') result.fast = true
     else if (args[index] === '--fresh') result.fresh = true
+    else if (args[index] === '--unlock-keychain') result.unlockKeychain = true
     else if (args[index] === '--profile' && args[index + 1]) result.profile = args[++index]
-    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name>]')
+    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --unlock-keychain]')
   }
   if (result.fresh && result.profile !== 'default') throw new Error('Choose --fresh or --profile, not both.')
   return result
 }
 
+export function developmentBuildEnvironment(profile, env = process.env) {
+  // Rustup installation identity is a tool input, not an application home.
+  // Retain the isolated HOME and cache-only Cargo state while allowing the
+  // native builder to verify the already installed pinned Rust toolchain.
+  return { ...profile.env, RUSTUP_HOME: env.RUSTUP_HOME || join(homedir(), '.rustup') }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseDevelopmentArgs(process.argv.slice(2))
+    // Task process and its descendants only; never changes the invoking shell.
+    process.umask(0o077)
     // The current native authority is macOS-only. Never silently open a
     // reduced-capability desktop on an unqualified host.
     if (process.platform !== 'darwin') throw new Error('Native desktop development currently requires the qualified macOS build environment. Source checks remain available on other hosts.')
     const profile = prepareDevelopmentProfile(options)
+    if (profile.needsKeychain || options.unlockKeychain) {
+      const password = promptDevelopmentKeychainPassword()
+      try { await prepareDevelopmentKeychain(profile, password, { create: profile.needsKeychain }) }
+      finally { password.fill(0) }
+    }
     assertDevelopmentProfileReady(profile)
     for (const script of ['doctor', ...(!options.fast ? ['build:data-native:development', 'build:runtime'] : [])]) {
       const args = script === 'doctor' ? ['run', script, '--', '--native'] : ['run', script]
-      const result = spawnSync('npm', args, { cwd: repo, stdio: 'inherit', env: process.env })
+      const result = spawnSync('npm', args, { cwd: repo, stdio: 'inherit', env: developmentBuildEnvironment(profile) })
       if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
     }
     console.log(`[dev] Isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)

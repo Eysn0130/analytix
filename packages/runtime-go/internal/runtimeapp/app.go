@@ -1543,6 +1543,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			Materials: datasetSnapshotStoresV2,
 			Native:    nativeOwner, Source: immutableSource,
 			ReadImportSource:         fundscsvsourceadapter.ReadImportExactV1,
+			CaseCreator:              filestore.CaseBindingReader{},
 			ActivateEvidenceRegistry: activateImportRegistry,
 		})
 		if err != nil {

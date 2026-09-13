@@ -1,3 +1,4 @@
+import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -270,6 +271,8 @@ type RegisterAppIpcHandlersOptions = {
   getCurrentPortableManifest?: () => string | Uint8Array | null | Promise<string | Uint8Array | null>
   getCurrentOwnerBindingInventory?: () => ProtectedRecoveryOwnerBinding[] | Promise<ProtectedRecoveryOwnerBinding[]>
   getCurrentProfile?: () => { profileBinding: string; dataDirectory: string } | null | Promise<{ profileBinding: string; dataDirectory: string } | null>
+  /** Fixed Main-only media transport; absent injection must fail closed. */
+  privateMediaRequest?: PrivateMediaRuntimeRequest
   localDisplayRequest: (path: string, body: string) => Promise<RuntimeRequestResult>
   restartRuntime: () => Promise<void>
   fetchUpstreamModels: () => Promise<UpstreamModelsResult>
@@ -361,7 +364,6 @@ const HOST_FUNDS_IMPORT_STATUS_PATH = '/v1/local-display/funds-import/status'
 const HOST_FUNDS_CLEANING_RUN_PATH = '/v1/local-display/funds-cleaning/run'
 const HOST_FUNDS_CLEANING_REVOKE_PATH = '/v1/local-display/funds-cleaning/revoke'
 const LOCAL_DISPLAY_MAX_RESPONSE_BYTES = 1 << 20
-const PRIVATE_MEDIA_EXECUTION_PATH = '/v1/runtime/_private/media-execution'
 const PRIVATE_MEDIA_MAX_RESPONSE_BYTES = 24 << 20
 
 type PrivateMediaFailureCode = Extract<PrivateMediaImageResult, { ok: false }>['code']
@@ -370,7 +372,7 @@ function privateMediaFailureCode(response: RuntimeRequestResult): PrivateMediaFa
   try {
     const parsed = JSON.parse(response.body) as { code?: unknown }
     if (parsed.code === 'invalid_request' || parsed.code === 'unavailable' ||
-        parsed.code === 'authority_changed' || parsed.code === 'provider_failed') {
+        parsed.code === 'privacy_unavailable' || parsed.code === 'authority_changed' || parsed.code === 'provider_failed') {
       return parsed.code
     }
   } catch {
@@ -387,18 +389,15 @@ function privateMediaFailureCode(response: RuntimeRequestResult): PrivateMediaFa
 }
 
 async function executePrivateMediaImage(
-  runtimeRequest: RegisterAppIpcHandlersOptions['runtimeRequest'],
+  privateMediaRequest: PrivateMediaRuntimeRequest | undefined,
   request: PrivateMediaImageRequest
 ): Promise<PrivateMediaImageResult> {
-  const response = await runtimeRequest(
-    PRIVATE_MEDIA_EXECUTION_PATH,
-    'POST',
-    JSON.stringify({ schemaVersion: 1, ...request })
-  )
-  if (!response.ok) return { ok: false, code: privateMediaFailureCode(response) }
+  if (!privateMediaRequest) return { ok: false, code: 'unavailable' }
+  const response = await privateMediaRequest(JSON.stringify({ schemaVersion: 1, ...request }))
   if (Buffer.byteLength(response.body, 'utf8') > PRIVATE_MEDIA_MAX_RESPONSE_BYTES) {
     return { ok: false, code: 'provider_failed' }
   }
+  if (!response.ok) return { ok: false, code: privateMediaFailureCode(response) }
   try {
     const parsed = JSON.parse(response.body) as Record<string, unknown>
     if (parsed.schemaVersion === 1 && parsed.status === 'ok' &&
@@ -414,18 +413,15 @@ async function executePrivateMediaImage(
 }
 
 async function executePrivateMediaSpeech(
-  runtimeRequest: RegisterAppIpcHandlersOptions['runtimeRequest'],
+  privateMediaRequest: PrivateMediaRuntimeRequest | undefined,
   request: PrivateMediaSpeechRequest
 ): Promise<PrivateMediaSpeechResult> {
-  const response = await runtimeRequest(
-    PRIVATE_MEDIA_EXECUTION_PATH,
-    'POST',
-    JSON.stringify({ schemaVersion: 1, ...request })
-  )
-  if (!response.ok) return { ok: false, code: privateMediaFailureCode(response) }
+  if (!privateMediaRequest) return { ok: false, code: 'unavailable' }
+  const response = await privateMediaRequest(JSON.stringify({ schemaVersion: 1, ...request }))
   if (Buffer.byteLength(response.body, 'utf8') > PRIVATE_MEDIA_MAX_RESPONSE_BYTES) {
     return { ok: false, code: 'provider_failed' }
   }
+  if (!response.ok) return { ok: false, code: privateMediaFailureCode(response) }
   try {
     const parsed = JSON.parse(response.body) as Record<string, unknown>
     if (parsed.schemaVersion === 1 && parsed.status === 'ok' &&
@@ -604,7 +600,7 @@ function fundsImportStatusMatchesAcceptedGeneration(
 }
 
 function fundsCSVStageFailure(
-  code: 'forbidden' | 'invalid_source' | 'runtime_unavailable',
+  code: Extract<FundsCSVSnapshotStageResult, { ok: false }>['code'],
   message: string,
   canceled = false
 ): FundsCSVSnapshotStageResult {
@@ -1050,8 +1046,51 @@ async function stageMainOwnedFundsCSVSnapshot(
       workspaceRoot,
       sourcePath
     }))
+    if (response.ok && response.status === 202 && Buffer.byteLength(response.body, 'utf8') <= 1024) {
+      const creation = z.object({
+        status: z.literal('case_creation_required'),
+        intent: z.string().regex(/^[a-f0-9]{64}$/)
+      }).strict().safeParse(JSON.parse(response.body))
+      const workspaceIsCurrent = async () => {
+        const current = await store.load()
+        if (!current.workspaceRoot.trim()) return false
+        const selected = await canonicalPath(resolve(expandHomePath(current.workspaceRoot.trim())))
+        return selected === workspaceRoot && invocationIsCurrent() && rendererIsCurrent() && !window.isDestroyed()
+      }
+      if (!creation.success || !await workspaceIsCurrent()) {
+        return fundsCSVStageFailure('forbidden', 'Data import authority changed.')
+      }
+      const confirmed = await dialog.showMessageBox(window, {
+        type: 'question', title: '建立案件项目',
+        message: '为当前工作区建立案件项目并预览所选数据？',
+        detail: '此操作会保存案件身份。数据预览后仍需点击“确认建立快照”；取消预览不会删除已建立的案件。',
+        buttons: ['取消', '建立案件并预览'], defaultId: 0, cancelId: 0, noLink: true
+      })
+      if (!await workspaceIsCurrent()) {
+        return fundsCSVStageFailure('forbidden', 'Data import authority changed.')
+      }
+      if (confirmed.response !== 1) {
+        return fundsCSVStageFailure('invalid_source', 'Data import was cancelled.', true)
+      }
+      response = await localDisplayRequest(HOST_FUNDS_IMPORT_STAGE_PATH, JSON.stringify({
+        workspaceRoot, sourcePath, createCaseIntent: creation.data.intent
+      }))
+    }
   } catch {
     return fundsCSVStageFailure('runtime_unavailable', 'Data import failed.')
+  }
+  if (!response.ok && response.status === 503 && Buffer.byteLength(response.body, 'utf8') <= 1024) {
+    try {
+      const capability = z.object({
+        code: z.literal('funds_import_capability_unavailable'),
+        message: z.string().max(256)
+      }).strict().safeParse(JSON.parse(response.body))
+      if (capability.success) {
+        return fundsCSVStageFailure('capability_unavailable', 'Trusted data import capability is unavailable in this runtime environment.')
+      }
+    } catch {
+      // Unknown/malformed failures retain the generic closed projection below.
+    }
   }
   if (!response.ok || Buffer.byteLength(response.body, 'utf8') > 64 * 1024) {
     return fundsCSVStageFailure(
@@ -1334,6 +1373,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     getCurrentOwnerBindingInventory,
     getCurrentProfile,
     localDisplayRequest,
+    privateMediaRequest,
     restartRuntime,
     fetchUpstreamModels,
     getClawRuntime,
@@ -2903,7 +2943,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     requestWriteInfographic(
       await store.load(),
       parseIpcPayload('write:generate-infographic', writeInfographicPayloadSchema, payload),
-      { executeMediaRequest: (request) => executePrivateMediaImage(runtimeRequest, request) }
+      { executeMediaRequest: (request) => executePrivateMediaImage(privateMediaRequest, request) }
     )
   )
   ipcMain.handle('write:authorize-prototype', async (_, payload: unknown) => {
@@ -2920,7 +2960,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     requestSpeechTranscription(
       await store.load(),
       parseIpcPayload('speech:transcribe', speechTranscribePayloadSchema, payload),
-      { executeMediaRequest: (request) => executePrivateMediaSpeech(runtimeRequest, request) }
+      { executeMediaRequest: (request) => executePrivateMediaSpeech(privateMediaRequest, request) }
     )
   )
   ipcMain.handle('write:inline-completion-debug:list', async () => listWriteInlineCompletionDebugEntries())

@@ -97,7 +97,7 @@ func openCaseBindingAbsoluteDirectory(path string) (int, error) {
 }
 
 func readCaseBindingUnixFile(metadata int, maxBytes int) ([]byte, unix.Stat_t, error) {
-	fd, err := unix.Openat(metadata, caseBindingFileName, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	fd, err := unix.Openat(metadata, caseBindingFileName, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, unix.Stat_t{}, classifyCaseBindingUnixOpenError(err, true)
 	}

@@ -226,7 +226,11 @@ func TestFundsImportRoutesFailClosedWithoutService(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusConflict {
+		wantStatus := http.StatusConflict
+		if test.path == HostFundsImportStagePathV1 {
+			wantStatus = http.StatusServiceUnavailable
+		}
+		if response.Code != wantStatus {
 			t.Fatalf("missing funds import service did not fail closed: path=%s status=%d", test.path, response.Code)
 		}
 	}
@@ -307,5 +311,45 @@ func TestFundsImportSelectorRoutesRejectExtraAuthority(t *testing.T) {
 				t.Fatalf("selector route accepted caller authority: path=%s status=%d", path, response.Code)
 			}
 		}
+	}
+}
+
+func TestFundsImportCapabilityUnavailableRemainsTypedAndAuthorized(t *testing.T) {
+	mux := LocalDisplayMuxV1{RuntimeToken: "synthetic-test-token", LocalDisplay: LocalDisplayHandlerV1{}}
+	for _, test := range []struct {
+		name       string
+		authorized bool
+		typed      bool
+		status     int
+	}{
+		{"current Main authority", true, true, http.StatusServiceUnavailable},
+		{"missing token", false, true, http.StatusUnauthorized},
+		{"missing typed header", true, false, http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, HostFundsImportStagePathV1, strings.NewReader(`{"workspaceRoot":"/private/SOURCE_CANARY","sourcePath":"/private/SOURCE_CANARY/input.csv"}`))
+			if test.authorized {
+				request.Header.Set("Authorization", "Bearer synthetic-test-token")
+			}
+			if test.typed {
+				request.Header.Set(LocalDisplayHeaderV1, LocalDisplayHeaderValueV1)
+			}
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != test.status || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "SOURCE_CANARY") {
+				t.Fatal("private capability classification or authorization failed")
+			}
+			var body map[string]string
+			if json.Unmarshal(response.Body.Bytes(), &body) != nil {
+				t.Fatal("response is not JSON")
+			}
+			if test.status == http.StatusServiceUnavailable {
+				if len(body) != 2 || body["code"] != "funds_import_capability_unavailable" || body["message"] != "Trusted data import capability is unavailable in this runtime environment." {
+					t.Fatal("private capability code was lost or envelope expanded")
+				}
+			} else if body["code"] == "funds_import_capability_unavailable" {
+				t.Fatal("unauthorized request reached capability inspection")
+			}
+		})
 	}
 }

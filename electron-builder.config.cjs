@@ -16,6 +16,7 @@ const productionFundsMcpEntryClosure = loadProductionMcpEntryClosureContract(
 const productionFundsMcpEntryClosureFiles = productionFundsMcpEntryClosure.files
 
 function loadLocalReleaseEnv() {
+  if (process.env.ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE === 'isolated-local-v1') return
   const candidates = [
     process.env.ANALYTIX_RELEASE_ENV,
     join(__dirname, 'scripts', 'release.local.env'),
