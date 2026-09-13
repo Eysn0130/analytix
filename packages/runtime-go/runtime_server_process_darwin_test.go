@@ -12,13 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
-// These unchanged protected-process positives run in the required platform-root lane.
+// These protected-process positives run in the required platform-root lane.
 func TestRuntimeServerBashApprovalDenyAndAllowControlExecution(t *testing.T) {
 	dataDir := t.TempDir()
 	provider := newCompleteProviderServer(t, [][]string{
@@ -437,6 +438,29 @@ func TestRuntimeServerBashRunInBackgroundWithholdsOutputAndSupportsKill(t *testi
 		t.Fatalf("background bash replay did not preserve its host call id: progress=%#v", progress)
 	}
 	assertSecurityBoundChildMetadata(t, child, "job-1", "running", true)
+	terminalEvents := make([]map[string]any, 0, 2)
+	for _, event := range events {
+		child, _ := event["child"].(map[string]any)
+		if stringField(child, "id") == "job-1" && stringField(child, "status") == "killed" {
+			terminalEvents = append(terminalEvents, event)
+		}
+	}
+	if len(terminalEvents) != 2 || stringField(terminalEvents[0], "kind") != "tool_progress" ||
+		stringField(terminalEvents[1], "stage") != "background_job_killed" {
+		t.Fatalf("killed background process lacks its complete terminal lifecycle bundle: %#v", terminalEvents)
+	}
+	firstSeq, firstOK := terminalEvents[0]["seq"].(float64)
+	lastSeq, lastOK := terminalEvents[1]["seq"].(float64)
+	if !firstOK || !lastOK || lastSeq != firstSeq+1 {
+		t.Fatal("background terminal lifecycle was not committed as one contiguous bundle")
+	}
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/runtime/task-jobs/kill", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"jobId": "job-1", "threadId": threadID, "reason": "duplicate cleanup",
+	}), http.StatusOK)
+	duplicateReplay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	if !reflect.DeepEqual(events, runtimeServerEventsForTurn(t, duplicateReplay, turnID)) {
+		t.Fatal("repeated kill changed the committed background lifecycle")
+	}
 }
 
 func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {

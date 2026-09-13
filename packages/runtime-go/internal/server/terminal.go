@@ -118,6 +118,12 @@ func (h *runtimeServerHandler) runtimeBashToolCallbacks(pending runtimePendingTo
 			h.recordRuntimeTaskJobProgress(pending, record, "running", "background bash started")
 		},
 		OnBackgroundProgress: func(record terminalapp.JobRecord, status string, diagnostic string) {
+			if domainjob.TerminalStatusV1(status) || subagentapp.TaskJobTerminal(record) {
+				// A standalone terminal progress event would reserve one member of
+				// the exact completion bundle and block live/restart reconciliation.
+				h.recordRuntimeJobLifecycleEvent(record, status, diagnostic)
+				return
+			}
 			h.recordRuntimeTaskJobProgress(pending, record, status, diagnostic)
 		},
 	}
