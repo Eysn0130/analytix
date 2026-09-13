@@ -41,7 +41,7 @@ func BeginBoundChildAdmission(parent context.Context, background bool, state *Ru
 		base = context.Background()
 	}
 	ctx, cancel := context.WithCancel(base)
-	startBarrier, registered := state.RegisterBoundBackgroundJobWithStartBarrier(jobID, binding, cancel)
+	startBarrier, registered := state.registerBackgroundJob(parent, jobID, binding, cancel)
 	if !registered || startBarrier == nil {
 		return nil, parent, errors.New("child job context authority changed before registration")
 	}
