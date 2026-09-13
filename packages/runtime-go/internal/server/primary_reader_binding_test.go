@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestDurablePrimaryReaderRequiresOneCompositionBinding(t *testing.T) {
@@ -12,7 +13,7 @@ func TestDurablePrimaryReaderRequiresOneCompositionBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "synthetic primary"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "synthetic primary"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

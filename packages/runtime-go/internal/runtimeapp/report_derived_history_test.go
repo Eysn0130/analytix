@@ -35,6 +35,7 @@ import (
 	startupport "analytix.local/runtime-go/internal/ports/startup"
 	"analytix.local/runtime-go/internal/server"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func runtimeDerivedReportHistoryFixtureV1(t *testing.T, derivation string, compacted ...bool) (*runtimeOriginalReservedReportHistoryFixtureV1, *runtimeOriginalReservedReportHistoryFixtureV1, map[string]any) {
@@ -46,21 +47,7 @@ func runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t *testing.T, de
 	t.Helper()
 	ctx := context.Background()
 	witness, config := runtimeWitnessedRegistryConfigV2(t)
-	// This workspace is published in a summary during authority repair. Avoid
-	// TempDir's numeric suffix plus /NNN, which can form a PII-shaped identifier.
-	// Keep the real directory under the existing isolated, protected temp root.
-	workspace, err := os.MkdirTemp(os.TempDir(), "analytix-derived-workspace-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(workspace); err != nil {
-			t.Error(err)
-		}
-	})
-	if domainsecurity.ContainsProtectedCaseData(workspace) {
-		t.Fatal("derived report workspace fixture contains a restricted identifier")
-	}
+	workspace := workspacetest.New(t)
 	contextFor := func(threadID, turnID string) domainsecurity.TurnSecurityContext {
 		frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
 			ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: workspace,

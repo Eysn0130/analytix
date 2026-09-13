@@ -14,6 +14,7 @@ import (
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type cancelAfterCurrentObservation struct {
@@ -36,7 +37,7 @@ func TestContinuationLateCancelPersistsOneFixedTerminalWithoutCandidateBytes(t *
 		DurableTempDir: t.TempDir(),
 		DataDir:        t.TempDir(),
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "late continuation cancel", "workspace": workspace,
 	}, workspace)
@@ -70,8 +71,8 @@ func TestContinuationLateCancelPersistsOneFixedTerminalWithoutCandidateBytes(t *
 	handler.store.SetCaseThreadAuthority(caseAuthority)
 	operationContext, cancelOperation := context.WithCancel(context.Background())
 	handler.turnSecurity = turnsecurityapp.WorkspaceSecurityAuthority{
-		Identity: testIdentityAuthority(),
-		Observer: filestore.CaseBindingReader{},
+		Identity:      testIdentityAuthority(),
+		Observer:      filestore.CaseBindingReader{},
 		RiskAuthority: riskAuthority,
 	}
 	if !handler.runtimeControl().RegisterTurnCancel(threadID, turnID, cancelOperation) {
@@ -144,7 +145,7 @@ func TestStartTurnRejectsSameThreadTerminalTailBeforeAppendOrProvider(t *testing
 	configureServerGeneralExecution(t, handler)
 	provider := &countingImmediateWorkspaceProvider{}
 	handler.provider = provider
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "terminal tail admission", "workspace": workspace,
 		"providerId": "tail-provider", "model": "tail-model",

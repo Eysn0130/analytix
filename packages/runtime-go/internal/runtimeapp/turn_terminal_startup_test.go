@@ -34,6 +34,7 @@ import (
 	caseterminaltest "analytix.local/runtime-go/internal/testsupport/caseturnterminal"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 var (
@@ -66,7 +67,7 @@ func newRuntimeTerminalStartupFixtureV1(t *testing.T, suffix string) *runtimeTer
 	t.Helper()
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	store, err := server.NewTempDurableEventSessionStore(durableRoot)
 	if err != nil {
 		t.Fatal(err)

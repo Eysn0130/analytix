@@ -19,6 +19,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type caseSourcePublicSeamFixture struct {
@@ -62,7 +63,7 @@ func newCaseSourcePublicSeamFixture(t *testing.T) caseSourcePublicSeamFixture {
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{"title": "closed case source", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

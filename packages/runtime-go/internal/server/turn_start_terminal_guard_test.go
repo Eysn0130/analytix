@@ -12,6 +12,7 @@ import (
 	"time"
 
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type asyncTurnTerminalGuardFailureProvider struct {
@@ -59,7 +60,7 @@ func TestAsyncTurnFailurePersistenceStderrUsesFixedProjection(t *testing.T) {
 	}
 	handler.turnSeq = 13900000006
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "Async terminal guard", "workspace": workspace, "providerId": "guard-provider", "model": "guard-model",
 	}, workspace)
@@ -195,7 +196,7 @@ func TestPostTerminalGoalLineageFailureStderrUsesFixedProjection(t *testing.T) {
 	provider := &countingImmediateWorkspaceProvider{}
 	handler.provider = provider
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "Post-terminal goal lineage", "workspace": workspace,
 		"providerId": "goal-lineage-provider", "model": "goal-lineage-model",
@@ -284,7 +285,7 @@ func TestPostAppendPreLoopFailureClosesTurn(t *testing.T) {
 	}).(*runtimeServerHandler)
 	configureServerGeneralExecution(t, handler)
 	thread, err := handler.store.CreateThread(map[string]any{
-		"title": "Start guard", "workspace": t.TempDir(), "providerId": "guard-provider", "model": "guard-model",
+		"title": "Start guard", "workspace": workspacetest.New(t), "providerId": "guard-provider", "model": "guard-model",
 	}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +339,7 @@ func TestTurnStartEventPairDoesNotPublishAPartialPrefix(t *testing.T) {
 	}).(*runtimeServerHandler)
 	configureServerGeneralExecution(t, handler)
 	thread, err := handler.store.CreateThread(map[string]any{
-		"title": "Atomic start guard", "workspace": t.TempDir(), "providerId": "guard-provider", "model": "guard-model",
+		"title": "Atomic start guard", "workspace": workspacetest.New(t), "providerId": "guard-provider", "model": "guard-model",
 	}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)

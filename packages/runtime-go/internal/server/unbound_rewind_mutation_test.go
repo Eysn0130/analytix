@@ -14,11 +14,12 @@ import (
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestUnboundRewindCommitsReplacementEpochAndRejectsStaleBindingAfterRestart(t *testing.T) {
 	durableRoot := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
 		ProviderID: "rewind-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",

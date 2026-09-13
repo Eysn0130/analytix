@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestChildIdentityFloorsReachAllThreadAllocatorsBeforeFirstWrite(t *testing.T) {
-	root, workspace := t.TempDir(), t.TempDir()
+	root, workspace := t.TempDir(), workspacetest.New(t)
 	floors := domainpendingwork.ChildIdentityFloorsV1{ThreadSequence: 700, ForkSequence: 900, ResumeSequence: 1100}
 	store, err := NewTempDurableEventSessionStore(root, floors)
 	if err != nil {

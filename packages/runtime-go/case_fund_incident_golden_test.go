@@ -25,6 +25,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	runtimemcp "analytix.local/runtime-go/internal/mcp"
 	sourceprobeport "analytix.local/runtime-go/internal/ports/sourceprobe"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const pinnedFundsMCPVersion = "0.16.16"
@@ -311,7 +312,7 @@ func TestConfiguredFundsMCPIsQuarantinedBeforeProcessCreation(t *testing.T) {
 const caseFactNativeAuthorityUnavailableTestText = "case data source native authority is unavailable"
 
 func TestRuntimeServerFundsEvidenceReadPublishesOnlyHostVerifiedCount(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := newIncidentCaseWorkspace(t, dataDir)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
@@ -359,7 +360,7 @@ func TestRuntimeServerFundsEvidenceReadPublishesOnlyHostVerifiedCount(t *testing
 }
 
 func TestRuntimeServerTruncatedProviderToolArgumentsNeverReceiveGrantOrExecute(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := newIncidentCaseWorkspace(t, dataDir)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_truncated_funds","type":"function","function":{"name":"mcp__analytix_funds__count_case_rows","arguments":"{\"table_name\":\"analysis_txn_detail_idx\""}}]},"finish_reason":"tool_calls"}]}`,
@@ -425,7 +426,7 @@ func TestSyntheticPrivateCaseIncidentGolden(t *testing.T) {
 
 	t.Run("source_unavailable", func(t *testing.T) {
 		provider := newIncidentProvider(t, reasoning, fabricatedFinal)
-		dataDir := t.TempDir()
+		dataDir := workspacetest.New(t)
 		workspace := newIncidentCaseWorkspace(t, dataDir)
 		server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
@@ -449,7 +450,7 @@ func TestSyntheticPrivateCaseIncidentGolden(t *testing.T) {
 		provider := newIncidentProvider(t, reasoning, fabricatedFinal)
 		fundsServer, toolCalls := newIncidentFundsCatalogServer(t)
 		defer fundsServer.Close()
-		dataDir := t.TempDir()
+		dataDir := workspacetest.New(t)
 		workspace := newIncidentCaseWorkspace(t, dataDir)
 		server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
@@ -486,7 +487,7 @@ func TestSyntheticPrivateCaseIncidentGolden(t *testing.T) {
 			"description": "Count current-case rows.",
 			"inputSchema": map[string]any{"type": "object", "additionalProperties": false},
 		}}, nil)
-		dataDir := t.TempDir()
+		dataDir := workspacetest.New(t)
 		workspace := newIncidentCaseWorkspace(t, dataDir)
 		server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 			RuntimeToken:       DefaultRuntimeToken,
@@ -515,7 +516,7 @@ func TestSyntheticPrivateCaseIncidentGolden(t *testing.T) {
 func TestCaseBoundarySkipsAttachmentResolutionAndVisionProviders(t *testing.T) {
 	primaryProvider := newProviderCaptureServer(t)
 	bridgeProvider := newProviderCaptureServer(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := newIncidentCaseWorkspace(t, dataDir)
 	modelProviders := string(mustJSONNoTest(map[string]any{
 		"defaultProviderId": "incident-provider",
@@ -658,7 +659,7 @@ func TestCaseFundStepLimitFinalizationStillUsesHostBoundary(t *testing.T) {
 		"description": "Count current-case rows.",
 		"inputSchema": map[string]any{"type": "object", "additionalProperties": false},
 	}}, nil)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := newIncidentCaseWorkspace(t, dataDir)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
@@ -727,7 +728,7 @@ func TestCaseFundReportToolIsQuarantinedBeforeApprovalOrExecution(t *testing.T) 
 		},
 		"annotations": map[string]any{"readOnlyHint": false},
 	}}, map[string]any{"content": []map[string]any{{"type": "text", "text": "report inputs inspected"}}})
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := newIncidentCaseWorkspace(t, dataDir)
 	unauthorizedReport := filepath.Join(workspace, "unauthorized-report.md")
 	funds.config["env"].(map[string]string)["ANALYTIX_PINNED_FUNDS_MCP_SIDE_EFFECT_PATH"] = unauthorizedReport

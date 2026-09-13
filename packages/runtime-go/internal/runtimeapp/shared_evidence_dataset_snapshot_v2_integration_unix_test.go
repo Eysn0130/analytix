@@ -32,6 +32,7 @@ import (
 	"analytix.local/runtime-go/internal/server"
 	fixturev2 "analytix.local/runtime-go/internal/testsupport/datasetsnapshotv2fixture"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeSharedEvidenceDatasetSnapshotV2OutageKeepsHTTPHealthyAndRecoversSameProcess(t *testing.T) {
@@ -861,7 +862,7 @@ func runtimeWitnessedRegistryAssertCanonicalOpaqueBlockerV2(
 		t.Fatalf("canonical opaque registry blocker advertised case evidence tools: status=%d body=%s", status, toolBody)
 	}
 
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
 	status, thread := runtimeSharedEvidenceHTTPJSON(t, runtimeServer.URL, http.MethodPost, "/v1/threads", map[string]any{
 		"title": "canonical opaque registry blocker", "workspace": workspace,

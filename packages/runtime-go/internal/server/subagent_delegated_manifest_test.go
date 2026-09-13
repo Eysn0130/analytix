@@ -15,6 +15,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	provider "analytix.local/runtime-go/internal/provider"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type caseFundScopeMCPStub struct {
@@ -164,7 +165,7 @@ func assertDelegatedManifestRejectedBeforeProvider(
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

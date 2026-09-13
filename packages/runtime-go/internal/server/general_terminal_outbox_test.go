@@ -23,6 +23,7 @@ import (
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestGeneralTerminalOutboxTreatsCommittedAtomicAppendErrorAsAckLoss(t *testing.T) {
@@ -56,7 +57,7 @@ func TestStartupGeneralTerminalRecoveryStrictlyReplaysEachAuthorityFreeThreadOnc
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	for range 64 {
 		if _, err := store.CreateThread(map[string]any{"title": "legacy ordinary", "workspace": workspace}, workspace); err != nil {
 			t.Fatal(err)
@@ -166,7 +167,7 @@ func TestStartupGeneralTerminalRecoveryNeverBypassesStrictEventValidation(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			thread, err := store.CreateThread(map[string]any{"title": "strict recovery"}, t.TempDir())
+			thread, err := store.CreateThread(map[string]any{"title": "strict recovery"}, workspacetest.New(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -913,7 +914,7 @@ func TestGeneralTerminalRecoveryRejectsThreadAddedAfterPreflight(t *testing.T) {
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("preflight missing outbox: plans=%#v err=%v", plans, err)
 	}
-	if _, err := store.CreateThread(map[string]any{"title": "added after preflight"}, t.TempDir()); err != nil {
+	if _, err := store.CreateThread(map[string]any{"title": "added after preflight"}, workspacetest.New(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ApplyGeneralTerminalPublicationRecoveryV1(plans); err == nil {
@@ -1082,7 +1083,7 @@ func addGeneralTerminalOutboxFixture(
 	suffix string,
 ) (string, string, domainsecurity.TurnSecurityContext) {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "General outbox", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

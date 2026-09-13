@@ -40,6 +40,7 @@ import (
 	datasetsnapshotv2fixture "analytix.local/runtime-go/internal/testsupport/datasetsnapshotv2fixture"
 	evidenceregistryv2fixture "analytix.local/runtime-go/internal/testsupport/evidenceregistryv2"
 	toolidentitytest "analytix.local/runtime-go/internal/testsupport/toolidentity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestNewRuntimeServerHandlerFromComponentsPublishesConcreteFactFinalWitnessAsTypedOutput(t *testing.T) {
@@ -49,7 +50,7 @@ func TestNewRuntimeServerHandlerFromComponentsPublishesConcreteFactFinalWitnessA
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 	}
 	base := NewRuntimeServerHandler(config).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := base.store.CreateThread(map[string]any{
 		"title": "concrete fact-final production composition", "workspace": workspace,
 	}, workspace)

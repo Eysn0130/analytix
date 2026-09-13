@@ -5,6 +5,7 @@ package runtimego
 import (
 	terminalapp "analytix.local/runtime-go/internal/app/terminal"
 	"analytix.local/runtime-go/internal/jobs"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -47,7 +48,7 @@ func TestRuntimeServerBashApprovalDenyAndAllowControlExecution(t *testing.T) {
 
 	runApprovalCase := func(t *testing.T, decision string) string {
 		t.Helper()
-		workspace := t.TempDir()
+		workspace := workspacetest.New(t)
 		beforeRequests := provider.RequestCount()
 		thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 			"title":          "Bash " + decision,
@@ -94,7 +95,7 @@ func TestRuntimeServerBashApprovalDenyAndAllowControlExecution(t *testing.T) {
 }
 
 func TestRuntimeServerBashReportsExitCodeAndDiagnostics(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -156,7 +157,7 @@ func TestRuntimeServerBashTimeoutKillsProcessGroupGrandchild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("covered by taskkill fallback; Windows Job Object parity is tracked separately")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -230,7 +231,7 @@ func TestRuntimeServerBashTimeoutKillsProcessGroupGrandchild(t *testing.T) {
 }
 
 func TestRuntimeServerSideEffectIntentBlocksSecondEquivalentBashWrite(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -332,7 +333,7 @@ func TestRuntimeServerBashRunInBackgroundWithholdsOutputAndSupportsKill(t *testi
 	if runtime.GOOS == "windows" {
 		t.Skip("background shell process-group kill uses the POSIX shell path in this contract test")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -439,7 +440,7 @@ func TestRuntimeServerBashRunInBackgroundWithholdsOutputAndSupportsKill(t *testi
 }
 
 func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -507,7 +508,7 @@ func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {
 }
 
 func TestRuntimeServerGoalTodoCompleteStepAndFinalReadiness(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	todoArgs := string(mustJSON(t, map[string]any{
 		"todos": []map[string]any{{"content": "Audit contract", "status": "in_progress"}},
 	}))
@@ -600,7 +601,7 @@ func TestRuntimeServerGoalTodoCompleteStepAndFinalReadiness(t *testing.T) {
 }
 
 func TestRuntimeServerCompleteStepRejectsMismatchedTodoIndexBeforeEvidence(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	stepArgs := string(mustJSON(t, map[string]any{
 		"step":       "Wrong contract",
 		"step_index": 1,

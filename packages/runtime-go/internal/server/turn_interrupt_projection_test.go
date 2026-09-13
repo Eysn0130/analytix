@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	controlapp "analytix.local/runtime-go/internal/app/control"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestInterruptThreadReadFailureUsesFixedPublicProjection(t *testing.T) {
@@ -17,7 +18,7 @@ func TestInterruptThreadReadFailureUsesFixedPublicProjection(t *testing.T) {
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "Interrupt read projection", "workspace": workspace,
 	}, workspace)

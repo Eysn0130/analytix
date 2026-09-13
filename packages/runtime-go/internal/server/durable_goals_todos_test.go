@@ -8,6 +8,7 @@ import (
 
 	goalapp "analytix.local/runtime-go/internal/app/goal"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestDurablePreparedCompleteStepCommitsGoalAndTodoAtomically(t *testing.T) {
@@ -15,7 +16,7 @@ func TestDurablePreparedCompleteStepCommitsGoalAndTodoAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "goal atomic"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "goal atomic"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestDurablePreparedTodoOpsCASHasOneConcurrentWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "todo cas"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "todo cas"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestDurableTodoTerminalStateSurvivesRestartAndRejectsReplacementBypasses(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := store.CreateThread(map[string]any{"title": "todo lifecycle"}, t.TempDir())
+	thread, err := store.CreateThread(map[string]any{"title": "todo lifecycle"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

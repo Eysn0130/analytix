@@ -12,6 +12,7 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRestartReconcilesGateRequestInventoryCrashCutsWithoutExecution(t *testing.T) {
@@ -117,7 +118,7 @@ func installGateInventoryCrashCut(
 	withItem, withEvent bool,
 ) (*runtimeServerHandler, string, pausedTransitionApprovalFixture, *countingImmediateWorkspaceProvider) {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "provider-a", BaseURL: "https://provider.invalid", APIKey: "test-only",

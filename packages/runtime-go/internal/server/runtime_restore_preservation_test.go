@@ -18,6 +18,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func runtimeRestorePreservedReportFixture(t *testing.T) (*runtimeServerHandler, string, string) {
@@ -149,7 +150,7 @@ func TestRuntimeRestorePreservesReportWhileIndependentOrdinaryStateRecovers(t *t
 	if err := handler.pendingWork.PreserveReportRestartScopeV1(context.Background(), scope); err != nil {
 		t.Fatal(err)
 	}
-	ordinary, err := handler.store.CreateThread(map[string]any{"title": "independent ordinary recovery"}, t.TempDir())
+	ordinary, err := handler.store.CreateThread(map[string]any{"title": "independent ordinary recovery"}, workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,7 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const ignoredCancellationFinalSentinel = "OLD_WORKSPACE_FINAL_MUST_NOT_PUBLISH_927451"
@@ -66,7 +67,7 @@ func (provider *ignoredCancellationProvider) Stream(ctx context.Context, request
 }
 
 func TestTitlePatchDuringForegroundTurnDoesNotCancelExecution(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "title-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
@@ -125,8 +126,8 @@ func TestTitlePatchDuringForegroundTurnDoesNotCancelExecution(t *testing.T) {
 }
 
 func TestWorkspacePatchCancelsAndWaitsForForegroundProviderBeforeRebind(t *testing.T) {
-	workspaceA := t.TempDir()
-	workspaceB := t.TempDir()
+	workspaceA := workspacetest.New(t)
+	workspaceB := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
@@ -228,8 +229,8 @@ func TestWorkspacePatchCancelsAndWaitsForForegroundProviderBeforeRebind(t *testi
 }
 
 func TestWorkspacePatchAdvancesAuthorityForNextProviderDispatch(t *testing.T) {
-	workspaceA := t.TempDir()
-	workspaceB := t.TempDir()
+	workspaceA := workspacetest.New(t)
+	workspaceB := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
 		ProviderID: "rebind-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
@@ -361,7 +362,7 @@ func TestResearchTurnMaterializesMissingWorkspaceBeforeAuthorityFreeze(t *testin
 }
 
 func TestWorkspaceRebindToMissingTargetCannotMintGeneralAuthority(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	missingWorkspace := filepath.Join(t.TempDir(), "missing-rebind-target")
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),

@@ -52,6 +52,7 @@ import (
 	runtimeapp "analytix.local/runtime-go/internal/runtimeapp"
 	providerscript "analytix.local/runtime-go/internal/testsupport/providerscript"
 	"analytix.local/runtime-go/internal/testsupport/toolidentity"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const (
@@ -393,7 +394,7 @@ func TestRuntimeServerDefaultsTurnControlsFromRuntimeSettings(t *testing.T) {
 		DefaultRuntimeToken,
 		mustJSON(t, map[string]any{
 			"title":     "Default controls",
-			"workspace": t.TempDir(),
+			"workspace": workspacetest.New(t),
 		}),
 		http.StatusCreated,
 	)
@@ -785,7 +786,7 @@ func (c *providerCaptureServer) LastBody(t *testing.T) string {
 func TestRuntimeServerDirectLightweightPromptsDoNotAdvertiseToolsToProvider(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProvidersJSON, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -841,7 +842,7 @@ func TestRuntimeServerDirectLightweightPromptsDoNotAdvertiseToolsToProvider(t *t
 func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -897,7 +898,7 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -938,7 +939,7 @@ func TestRuntimeServerRejectsProviderModelMismatchBeforeProviderRequest(t *testi
 }
 
 func TestRuntimeServerThreadCreateDoesNotInventDefaultModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -972,7 +973,7 @@ func TestRuntimeServerThreadCreateDoesNotInventDefaultModel(t *testing.T) {
 func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	capture := newProviderCaptureServer(t)
 	modelProviders, connectProviderRegistry := prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, capture.URL(), "deepseek", "deepseek-v4-pro",
@@ -1011,7 +1012,7 @@ func TestRuntimeServerRejectsStaleThreadModelBeforeDefaultFallback(t *testing.T)
 }
 
 func TestRuntimeServerExplicitTurnModelBecomesThreadCurrentModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1065,7 +1066,7 @@ func TestRuntimeServerExplicitTurnModelBecomesThreadCurrentModel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentInheritsLatestParentThreadModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1140,7 +1141,7 @@ func TestRuntimeServerSubagentInheritsLatestParentThreadModel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentRejectsUnconfiguredChildModelBeforeChildTurn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1484,7 +1485,7 @@ func startRuntimeServerAsyncJSONRequest(serverURL, path, token string, body json
 }
 
 func TestToolAddedDuringStreamStillRejected(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1546,7 +1547,7 @@ func TestToolAddedDuringStreamStillRejected(t *testing.T) {
 }
 
 func TestSameNameSchemaSwapRejected(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -1999,7 +2000,7 @@ func TestRuntimeServerSteerAdmitsAndPromotesMidTurnUserMessage(t *testing.T) {
 		clientUserMessageID = "2bf69356-4c8a-4f2d-8af6-1aa76ae9371b"
 		steerText           = "简单总结一下，使用更短版本。"
 	)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2113,7 +2114,7 @@ func TestRuntimeServerSteerAdmitsAndPromotesMidTurnUserMessage(t *testing.T) {
 }
 
 func TestRuntimeServerSteerRejectsMismatchedExpectedTurn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2354,7 +2355,7 @@ func TestRuntimeServerContractCoversHTTPAndSSESubset(t *testing.T) {
 	if stringField(thread, "workspace") == "" {
 		t.Fatal("G2 contract thread lacks its host-owned workspace")
 	}
-	researchWorkspace := t.TempDir()
+	researchWorkspace := workspacetest.New(t)
 	patchTarget := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
 		"title": "Patch contract target", "workspace": researchWorkspace,
 	}), http.StatusCreated)
@@ -2592,7 +2593,7 @@ func TestRuntimeServerSSEReplayUsesLastEventIDWhenSinceSeqOmitted(t *testing.T) 
 	connectProviderRegistry(server.URL)
 
 	created := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
-		"workspace": t.TempDir(),
+		"workspace": workspacetest.New(t),
 		"model":     "deepseek-chat",
 	}), http.StatusCreated)
 	threadID := stringField(created, "id")
@@ -2625,7 +2626,7 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 	g1 := loadG1Contract(t)
 	durableRoot := t.TempDir()
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	config := RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -2700,7 +2701,7 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 
 func TestRuntimeServerCheckpointApplyRejectsClientSnapshotWithoutHostAuthority(t *testing.T) {
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	targetPath := filepath.Join(workspace, "notes.txt")
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
@@ -2774,7 +2775,7 @@ func TestRuntimeServerCheckpointApplyRejectsClientSnapshotWithoutHostAuthority(t
 func TestRuntimeServerCheckpointApplyRejectsStalePlanDigest(t *testing.T) {
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	firstPath := filepath.Join(workspace, "first.txt")
 	secondPath := filepath.Join(workspace, "second.txt")
 	for path, content := range map[string]string{firstPath: "first-after", secondPath: "second-after"} {
@@ -2828,7 +2829,7 @@ func TestRuntimeServerCheckpointApplyRejectsStalePlanDigest(t *testing.T) {
 }
 
 func TestRuntimeServerCheckpointPlanCapturesWriteFileSnapshotAndAppliesFromPrivateStore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -2994,7 +2995,7 @@ func TestRuntimeServerCheckpointPlanCapturesWriteFileSnapshotAndAppliesFromPriva
 }
 
 func TestRuntimeServerCheckpointSnapshotFirstTouchWinsAcrossMultipleWrites(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -3196,7 +3197,7 @@ func TestRuntimeServerCheckpointAuthorityRejectsUnsafeSnapshotsAndApplyBlocksBin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			targetPath := filepath.Join(workspace, "notes.txt")
 			if err := os.WriteFile(targetPath, tc.targetBytes, 0o644); err != nil {
 				t.Fatalf("write target: %v", err)
@@ -3264,7 +3265,7 @@ func TestRuntimeServerCheckpointApplyBlocksSymlinkTargets(t *testing.T) {
 		t.Skip("symlink checkpoint boundary is POSIX-only in this test")
 	}
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	outsideDir := t.TempDir()
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
@@ -3381,7 +3382,7 @@ func TestRuntimeServerCheckpointApplyBlocksSymlinkTargets(t *testing.T) {
 
 func TestRuntimeServerCheckpointApplyBlocksStagedGitChanges(t *testing.T) {
 	g1 := loadG1Contract(t)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	beforeContent := "before checkpoint\n"
 	afterContent := "after checkpoint\n"
 	targetPath := filepath.Join(workspace, "notes.txt")
@@ -3694,7 +3695,7 @@ func TestRuntimeServerMCPDiagnosticsRefreshDoesNotWriteCallerSelectedThreadEvent
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"title":     "MCP catalog drift",
-		"workspace": t.TempDir(),
+		"workspace": workspacetest.New(t),
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
 	initial := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/runtime/tools", DefaultRuntimeToken, nil, http.StatusOK)
@@ -3836,7 +3837,7 @@ Alpha body.
 }
 
 func TestRuntimeServerSkillsParseReasonixFrontmatterAndLazyPackageExtras(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4028,7 +4029,7 @@ func TestRuntimeServerSkillsDiscoverFlatAndNestedPackagesCacheSafely(t *testing.
 }
 
 func TestRuntimeServerRunSkillCanExecuteSubagentSkill(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4126,7 +4127,7 @@ Check the requested area and return a concise finding.
 }
 
 func TestRuntimeServerMaliciousSkillCannotAdvertiseOrExecuteWriteTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -4336,7 +4337,7 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4716,7 +4717,7 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4853,7 +4854,7 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 
 func TestRuntimeServerTurnContractPreservesAnalytixStartTurnFields(t *testing.T) {
 	g1 := loadG1Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
 		StartedAt:      g1.StartedAt,
@@ -4943,7 +4944,7 @@ func TestRuntimeServerAttachmentOwnerRejectsUnknownAndCrossThreadAuthority(t *te
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5013,7 +5014,7 @@ func TestRuntimeServerAttachmentWithoutCaseAuthorityNeverReachesProvider(t *test
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	writeRuntimeCaseProjectBinding(t, workspace, "attachment-authority-boundary")
 	capture := newProviderCaptureServer(t)
 	modelProviders := string(mustJSON(t, map[string]any{
@@ -5127,7 +5128,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	firstHandler := newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5218,7 +5219,7 @@ func TestRuntimeServerPersistentAttachmentsSurviveRestart(t *testing.T) {
 func TestRuntimeServerPersistentMemorySurvivesRestartAndMutates(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   g1.RuntimeToken,
@@ -5290,7 +5291,7 @@ func TestRuntimeServerPersistentMemorySurvivesRestartAndMutates(t *testing.T) {
 }
 
 func TestRuntimeServerProductionDefaultDoesNotSeedFixturesOrExposeProof(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -5329,7 +5330,7 @@ func TestRuntimeServerProductionDefaultDoesNotSeedFixturesOrExposeProof(t *testi
 }
 
 func TestRuntimeServerNormalTextTurnPublishesTypedOrdinaryResult(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"plain ok"}}]}`,
 		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
@@ -5365,7 +5366,7 @@ func TestRuntimeServerNormalTextTurnPublishesTypedOrdinaryResult(t *testing.T) {
 }
 
 func TestRuntimeServerSecondTurnIncludesAcceptedHostHistoryOnly(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"first reply"}}]}`,
@@ -5418,7 +5419,7 @@ func TestRuntimeServerSecondTurnIncludesAcceptedHostHistoryOnly(t *testing.T) {
 }
 
 func TestRuntimeServerReviewPersistsReviewItemAndReplay(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"review model answer"}}]}`,
@@ -5476,7 +5477,7 @@ func TestRuntimeServerReviewPersistsReviewItemAndReplay(t *testing.T) {
 }
 
 func TestReasoningNotPersistedOrExported(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"reasoning_content":"private scratchpad"}}]}`,
@@ -5544,7 +5545,7 @@ func TestReasoningNotPersistedOrExported(t *testing.T) {
 }
 
 func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAttempt(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dataDir, "note.txt"), []byte("note from workspace"), 0o644); err != nil {
 		t.Fatal(err)
@@ -5654,7 +5655,7 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 }
 
 func TestRuntimeServerCommandSeparatesGeneralOnlyFromHostPolicyCaseBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	token := DefaultRuntimeToken
 	provider := newCompleteProviderServer(t, [][]string{{
@@ -5825,7 +5826,7 @@ func TestRuntimeServerProductionCommandTimeoutCoversInstrumentedLifecycle(t *tes
 }
 
 func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"openai priced"}}]}`,
@@ -5947,7 +5948,7 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 }
 
 func TestRuntimeServerCacheDiagnosticsIsolateModelNamespaces(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	upstream := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"first"}}]}`,
@@ -6172,7 +6173,7 @@ func TestRuntimeServerLiveSSEWithholdsProviderDraftUntilTurnCompletes(t *testing
 }
 
 func TestRuntimeServerAsyncTurnResponseReturnsBeforeProviderCompletes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	firstFrameSent := make(chan struct{})
 	releaseProvider := make(chan struct{})
 	var firstOnce sync.Once
@@ -6286,7 +6287,7 @@ func TestRuntimeServerAsyncTurnResponseReturnsBeforeProviderCompletes(t *testing
 }
 
 func TestRuntimeServerAutoTitleEmitsThreadUpdatedLifecycle(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"title ok"},"finish_reason":"stop"}]}` + "\n\n"))
@@ -6340,7 +6341,7 @@ func TestRuntimeServerAutoTitleEmitsThreadUpdatedLifecycle(t *testing.T) {
 }
 
 func TestRuntimeServerLiveSSEDoesNotPublishPartialToolCallBeforeProviderCompletes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -6519,7 +6520,7 @@ func TestRuntimeServerLiveSSEDoesNotPublishPartialToolCallBeforeProviderComplete
 }
 
 func TestRuntimeServerOpenAICompatibleTextTurnDoesNotEmitReasoning(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"plain text only"},"finish_reason":null}]}`,
 		`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`,
@@ -6581,7 +6582,7 @@ func TestRuntimeServerOpenAICompatibleTextTurnDoesNotEmitReasoning(t *testing.T)
 }
 
 func TestRuntimeServerProviderRetryIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -6656,7 +6657,7 @@ func TestRuntimeServerProviderRetryIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerPreOutputStreamReplayIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -6728,7 +6729,7 @@ func TestRuntimeServerPreOutputStreamReplayIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerPostOutputProviderInterruptionRecoversWithTailPrompt(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	bodies := []string{}
@@ -6843,7 +6844,7 @@ func TestRuntimeServerPostOutputProviderInterruptionRecoversWithTailPrompt(t *te
 }
 
 func TestRuntimeServerPartialToolCallInterruptionRecoversWithoutExecutingPartialTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var mu sync.Mutex
 	requestCount := 0
 	bodies := []string{}
@@ -6931,7 +6932,7 @@ func TestRuntimeServerPartialToolCallInterruptionRecoversWithoutExecutingPartial
 }
 
 func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"content":"old answer 1"}}]}`,
@@ -7090,7 +7091,7 @@ func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvi
 
 func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 	const secret = "sk-runtime-provider-secret"
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		providerCalls.Add(1)
@@ -7161,7 +7162,7 @@ func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
 }
 
 func TestRuntimeServerRequestProviderCannotOverrideCommittedSelection(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var providerCalls int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&providerCalls, 1)
@@ -7214,7 +7215,7 @@ func TestRuntimeServerRequestProviderCannotOverrideCommittedSelection(t *testing
 }
 
 func TestRuntimeServerEmptyFinalRecoveryUsesHostBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
@@ -7277,7 +7278,7 @@ func TestRuntimeServerEmptyFinalRecoveryUsesHostBoundary(t *testing.T) {
 }
 
 func TestRuntimeServerEmptyFinalRecoveryExhaustionIsVisible(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
@@ -7340,7 +7341,7 @@ func TestRuntimeServerEmptyFinalRecoveryExhaustionIsVisible(t *testing.T) {
 }
 
 func TestRuntimeServerExecutesProviderToolCallAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7552,7 +7553,7 @@ func TestRuntimeServerGlobAllowsExternalPatternInFullAccess(t *testing.T) {
 }
 
 func TestRuntimeServerReadToolsPreserveKunAndNumberedPaginationContracts(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7626,7 +7627,7 @@ func TestRuntimeServerReadToolsPreserveKunAndNumberedPaginationContracts(t *test
 }
 
 func TestRuntimeServerUTF16ReadGrepAndEditPreserveEncoding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7711,7 +7712,7 @@ func TestRuntimeServerUTF16ReadGrepAndEditPreserveEncoding(t *testing.T) {
 }
 
 func TestRuntimeServerWritePreservesExistingUTF16Encoding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -7779,7 +7780,7 @@ func TestRuntimeServerWritePreservesExistingUTF16Encoding(t *testing.T) {
 }
 
 func TestRuntimeServerGlobToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "src"),
@@ -7863,7 +7864,7 @@ func TestRuntimeServerGlobToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerGrepSkipsNoiseHiddenAndProtectedDirs(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "public"),
@@ -7953,7 +7954,7 @@ func TestRuntimeServerGrepSkipsNoiseHiddenAndProtectedDirs(t *testing.T) {
 }
 
 func TestRuntimeServerGrepSupportsGlobContextAndColumn(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, "src"),
@@ -8036,7 +8037,7 @@ func TestRuntimeServerGrepSupportsGlobContextAndColumn(t *testing.T) {
 }
 
 func TestRuntimeServerGrepHonorsRootGitignore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		workspace,
@@ -8118,7 +8119,7 @@ func TestRuntimeServerGrepHonorsRootGitignore(t *testing.T) {
 }
 
 func TestRuntimeServerGrepHonorsGitignore(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		filepath.Join(workspace, ".git"),
@@ -8219,7 +8220,7 @@ func TestRuntimeServerGrepHonorsGitignore(t *testing.T) {
 }
 
 func TestRuntimeServerGlobRejectsWorkspaceEscape(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8269,7 +8270,7 @@ func TestRuntimeServerGlobRejectsWorkspaceEscape(t *testing.T) {
 }
 
 func TestRuntimeServerCodeIndexToolIsAdvertisedAndSearchesGoSymbols(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8334,7 +8335,7 @@ func TestRuntimeServerCodeIndexToolIsAdvertisedAndSearchesGoSymbols(t *testing.T
 }
 
 func TestRuntimeServerCodeIndexOutlineSkipsNoiseAndFiltersBeforeLimit(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	for _, dir := range []string{
 		workspace,
@@ -8403,7 +8404,7 @@ func TestRuntimeServerCodeIndexOutlineSkipsNoiseAndFiltersBeforeLimit(t *testing
 }
 
 func TestRuntimeServerCodeIndexRequiresQueryForSearch(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8451,7 +8452,7 @@ func TestRuntimeServerCodeIndexRequiresQueryForSearch(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchDisabledByDefault(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8497,7 +8498,7 @@ func TestRuntimeServerWebFetchDisabledByDefault(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8607,7 +8608,7 @@ func TestRuntimeServerWebFetchToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchRejectsLinkLocal(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8679,7 +8680,7 @@ func TestRuntimeServerWebFetchRejectsLinkLocal(t *testing.T) {
 }
 
 func TestRuntimeServerWebFetchUsesConfiguredProxy(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8779,7 +8780,7 @@ func TestRuntimeServerRunsContiguousReadOnlyToolsInParallel(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFO timing contract is POSIX-only")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8884,7 +8885,7 @@ func TestRuntimeServerRunsContiguousReadOnlyToolsInParallel(t *testing.T) {
 }
 
 func TestRuntimeServerExecutesDelegateTaskWithDurableChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -8987,7 +8988,7 @@ func TestRuntimeServerExecutesDelegateTaskWithDurableChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerMaxModelStepsZeroFallsBackToConfiguredBound(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9044,7 +9045,7 @@ func TestRuntimeServerMaxModelStepsZeroFallsBackToConfiguredBound(t *testing.T) 
 }
 
 func TestRuntimeServerStepLimitConfigFinalAnswerNudge(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9103,7 +9104,7 @@ func TestRuntimeServerStepLimitConfigFinalAnswerNudge(t *testing.T) {
 }
 
 func TestRuntimeServerStepLimitFailurePersistsErrorItem(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9183,7 +9184,7 @@ func TestRuntimeServerStepLimitFailurePersistsErrorItem(t *testing.T) {
 }
 
 func TestRuntimeServerInterruptCancelsActiveAsyncTurnAndPreservesAbortedStatus(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9259,7 +9260,7 @@ func TestRuntimeServerInterruptCancelsActiveAsyncTurnAndPreservesAbortedStatus(t
 }
 
 func TestRuntimeServerInterruptDiscardExcludesAbortedTurnFromNextProviderHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9418,7 +9419,7 @@ func assertRuntimeServerSubagentDefaultMaxSteps(t *testing.T, cases []runtimeSer
 
 	for caseIndex, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := t.TempDir()
+			workspace := workspacetest.New(t)
 			thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
 				"title":      "Subagent budget",
 				"workspace":  workspace,
@@ -9458,7 +9459,7 @@ func assertRuntimeServerSubagentDefaultMaxSteps(t *testing.T, cases []runtimeSer
 }
 
 func TestRuntimeServerDelegateTaskAppliesSubagentProfileModelEffortAndToolScope(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9549,7 +9550,7 @@ func TestRuntimeServerDelegateTaskAppliesSubagentProfileModelEffortAndToolScope(
 }
 
 func TestRuntimeServerSubagentUsageSourceSurvivesRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -9643,7 +9644,7 @@ func TestRuntimeServerSubagentUsageSourceSurvivesRestart(t *testing.T) {
 }
 
 func TestRuntimeServerDelegateTaskAppliesConfiguredDefaultSubagentProfile(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9745,7 +9746,7 @@ func TestRuntimeServerDelegateTaskAppliesConfiguredDefaultSubagentProfile(t *tes
 }
 
 func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -9890,7 +9891,7 @@ func TestRuntimeServerSubagentProfileCarriesProviderModelExecutionRef(t *testing
 }
 
 func TestRuntimeServerSubagentProfileCannotOverrideCommittedProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10005,7 +10006,7 @@ func TestRuntimeServerSubagentProfileCannotOverrideCommittedProvider(t *testing.
 }
 
 func TestRuntimeServerSubagentLifecycleCountsChildToolInvocations(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10078,7 +10079,7 @@ func TestRuntimeServerSubagentLifecycleCountsChildToolInvocations(t *testing.T) 
 }
 
 func TestRuntimeServerSubagentConfigEnforcesMaxChildRuns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10160,7 +10161,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxChildRuns(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentConfigEnforcesMaxParallel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10327,7 +10328,7 @@ func TestRuntimeServerSubagentConfigEnforcesMaxParallel(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentsDisabledRemovesTaskToolsAndRejectsCalls(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10418,7 +10419,7 @@ func TestRuntimeServerSubagentsDisabledRemovesTaskToolsAndRejectsCalls(t *testin
 }
 
 func TestRuntimeServerSubagentInheritProfileHonorsWorkspaceShellBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10520,7 +10521,7 @@ func TestRuntimeServerSubagentInheritProfileHonorsWorkspaceShellBoundary(t *test
 }
 
 func TestRuntimeServerSubagentFiltersRecursiveAndJobToolsEvenIfCalled(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10594,7 +10595,7 @@ func TestRuntimeServerSubagentFiltersRecursiveAndJobToolsEvenIfCalled(t *testing
 }
 
 func TestApprovalDenyNeverResumesProviderOrStartsChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -10650,7 +10651,7 @@ func TestApprovalDenyNeverResumesProviderOrStartsChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalNeverBlocksMutatingToolExecution(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -10705,7 +10706,7 @@ func TestRuntimeServerApprovalNeverBlocksMutatingToolExecution(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalNeverRejectsRemoteReadOnlyHintAndMutatingMCP(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_mcp_read_never","type":"function","function":{"name":"mcp__runtime-mcp__lookup","arguments":"{\"query\":\"needle\"}"}},{"index":1,"id":"call_mcp_mutate_never","type":"function","function":{"name":"mcp__runtime-mcp__mutate","arguments":"{\"value\":\"danger\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -10825,7 +10826,7 @@ func TestRuntimeServerWriteFileRejectsSymlinkWorkspaceEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink workspace confinement is POSIX-only in this test")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	outside := filepath.Join(dataDir, "outside")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -11031,7 +11032,7 @@ func TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot(t *test
 }
 
 func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	protectedDir := filepath.Join(workspace, "protected")
 	publicDir := filepath.Join(workspace, "public")
@@ -11099,7 +11100,7 @@ func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T)
 }
 
 func TestRuntimeServerParallelTasksCreateDurableChildRuns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11191,7 +11192,7 @@ func TestRuntimeServerParallelTasksCreateDurableChildRuns(t *testing.T) {
 }
 
 func TestRuntimeServerParallelTasksHonorDependsOnWaves(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11272,7 +11273,7 @@ func TestRuntimeServerParallelTasksHonorDependsOnWaves(t *testing.T) {
 }
 
 func TestRuntimeServerParallelTasksRunReadyWaveConcurrently(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11362,7 +11363,7 @@ func TestRuntimeServerParallelTasksRunReadyWaveConcurrently(t *testing.T) {
 }
 
 func TestRuntimeServerSubagentContinueAndForkUseDurableTranscript(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11458,7 +11459,7 @@ func TestRuntimeServerSubagentContinueAndForkUseDurableTranscript(t *testing.T) 
 }
 
 func TestRuntimeServerSubagentContinueInheritsSourceIdentityWhenParentModelChanges(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11544,7 +11545,7 @@ func TestRuntimeServerSubagentContinueInheritsSourceIdentityWhenParentModelChang
 }
 
 func TestRuntimeServerRejectsConcurrentSubagentContinueFromSameReference(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11624,7 +11625,7 @@ func TestRuntimeServerRejectsConcurrentSubagentContinueFromSameReference(t *test
 }
 
 func TestRuntimeServerAllowsSubagentForkFromAncestorParentThread(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11713,7 +11714,7 @@ func TestRuntimeServerAllowsSubagentForkFromAncestorParentThread(t *testing.T) {
 }
 
 func TestRuntimeServerCopiesAncestorSubagentContinueIntoCurrentParent(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11802,7 +11803,7 @@ func TestRuntimeServerCopiesAncestorSubagentContinueIntoCurrentParent(t *testing
 }
 
 func TestRuntimeServerRejectsSubagentContinueWhenToolScopeDrifts(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -11970,7 +11971,7 @@ func TestRuntimeServerStartupRejectsUnboundStaleRunningSubagentRuns(t *testing.T
 }
 
 func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12073,7 +12074,7 @@ func TestRuntimeServerRejectsCrossParentSubagentContinue(t *testing.T) {
 }
 
 func TestRuntimeServerBackgroundTaskJobsWaitAndOutput(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12314,7 +12315,7 @@ func TestRuntimeServerBackgroundTaskJobsWaitAndOutput(t *testing.T) {
 }
 
 func TestRuntimeServerModelCannotInspectBackgroundTaskJobsAcrossTurns(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12508,7 +12509,7 @@ func TestRuntimeServerModelCannotInspectBackgroundTaskJobsAcrossTurns(t *testing
 }
 
 func TestRuntimeServerBackgroundTaskJobKillCancelsChildRun(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12654,7 +12655,7 @@ func TestRuntimeServerBackgroundTaskJobKillCancelsChildRun(t *testing.T) {
 }
 
 func TestRuntimeServerKunBuiltinToolsAdvertiseAndExecute(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -12715,7 +12716,7 @@ func TestRuntimeServerKunBuiltinToolsAdvertiseAndExecute(t *testing.T) {
 }
 
 func TestRuntimeServerGoalToolsRequireEvidenceBeforeCompletion(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_goal_complete","type":"function","function":{"name":"update_goal","arguments":%q}}]},"finish_reason":"tool_calls"}]}`, `{"status":"complete"}`),
@@ -12773,7 +12774,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 		planMarkdown      = "# Generated plan\n\nValidation nonce: 30"
 		planContentHash   = "93887a2fccaf8b3b1b51350c0abfc65390966231128774816dce99bc362505e4"
 	)
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -12884,7 +12885,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 }
 
 func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -12955,7 +12956,7 @@ func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
 }
 
 func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13085,7 +13086,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 
 func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
 	const sentinel = "UNVERIFIED_PLAN_DRAFT_ACCOUNT_6222020202020202020_AMOUNT_4200000"
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13136,7 +13137,7 @@ func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13238,7 +13239,7 @@ func TestRuntimeServerPlanModeUsesSelectedXiaomiProviderAndModel(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13348,7 +13349,7 @@ func TestRuntimeServerPlanModeCanonicalizesSelectedXiaomiAliasModel(t *testing.T
 }
 
 func TestRuntimeServerNormalTurnRejectsForgedCreatePlan(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13459,7 +13460,7 @@ func TestRuntimeServerNormalTurnRejectsForgedCreatePlan(t *testing.T) {
 }
 
 func TestRuntimeServerPlanModeRejectsForgedWriteBeforeMaterializingPlanText(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13534,7 +13535,7 @@ func TestRuntimeServerPlanModeRejectsForgedWriteBeforeMaterializingPlanText(t *t
 }
 
 func TestRuntimeServerOpenAIResponsesToolLoopExecutesAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -13586,7 +13587,7 @@ func TestRuntimeServerOpenAIResponsesToolLoopExecutesAndContinues(t *testing.T) 
 }
 
 func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13796,7 +13797,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 }
 
 func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13903,7 +13904,7 @@ func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) 
 }
 
 func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -13998,7 +13999,7 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 }
 
 func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14072,7 +14073,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 }
 
 func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14167,7 +14168,7 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 }
 
 func TestRuntimeServerAnthropicApprovalDenialClearsPrivateProtocolWithoutProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14234,7 +14235,7 @@ func assertRuntimeFilesExcludeValues(t *testing.T, root string, values ...string
 }
 
 func TestRuntimeServerConfiguredHTTPMCPToolLoopRejectsMutationWithoutHostSemanticIdentityAndContinues(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_mcp_lookup","type":"function","function":{"name":"mcp__runtime-mcp__lookup","arguments":"{\"query\":\"needle\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -14345,7 +14346,7 @@ func TestRuntimeServerConfiguredHTTPMCPToolLoopRejectsMutationWithoutHostSemanti
 }
 
 func TestRuntimeServerCaseFundPromptScopesProviderToolsToAnalytixFunds(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14437,7 +14438,7 @@ func TestRuntimeServerCaseFundPromptScopesProviderToolsToAnalytixFunds(t *testin
 }
 
 func TestCaseFundUnavailableReplacesFabricatedFinal(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14512,7 +14513,7 @@ func TestCaseFundUnavailableReplacesFabricatedFinal(t *testing.T) {
 }
 
 func TestUnboundHighRiskCaseRequestUsesHostBoundaryBeforeProviderOrSideEffects(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-case-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14555,7 +14556,7 @@ func TestUnboundHighRiskCaseRequestUsesHostBoundaryBeforeProviderOrSideEffects(t
 }
 
 func TestUnboundStructuredBankCardRequestCannotBypassFinalEvidenceGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-card-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14585,7 +14586,7 @@ func TestUnboundStructuredBankCardRequestCannotBypassFinalEvidenceGate(t *testin
 }
 
 func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -14661,7 +14662,7 @@ func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t 
 }
 
 func TestUnboundAmountEntityFactCannotUseGeneralOutput(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-amount-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14695,7 +14696,7 @@ func TestProviderProtectedCaseFactDraftOnGeneralTurnIsNeverPublished(t *testing.
 	if !domainsecurity.ContainsProtectedCaseFactCandidate(draftSentinel) {
 		t.Fatal("regression sentinel must exercise the protected case-fact projection")
 	}
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "general-draft-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14756,7 +14757,7 @@ func TestProviderProtectedCaseFactDraftOnGeneralTurnIsNeverPublished(t *testing.
 }
 
 func TestUnboundProviderFileToolCannotCreateCaseBinding(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "unbound-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14803,7 +14804,7 @@ func TestUnboundProviderFileToolCannotCreateCaseBinding(t *testing.T) {
 }
 
 func TestRuntimeServerCaseFundFullCaseReportBlockedUnderApprovalNever(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14869,7 +14870,7 @@ func TestRuntimeServerCaseFundFullCaseReportBlockedUnderApprovalNever(t *testing
 }
 
 func TestRuntimeServerCaseFundOtherMutatingMCPStillBlockedUnderApprovalNever(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -14936,7 +14937,7 @@ func TestRuntimeServerCaseFundOtherMutatingMCPStillBlockedUnderApprovalNever(t *
 }
 
 func TestCaseBoundArbitraryMutatingMCPIsNeverAdvertisedOrExecuted(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	sideEffectPath := filepath.Join(dataDir, "unauthorized-bundle.zip")
 	fixture := newPinnedMCPFixture(t, "server", []map[string]any{{
 		"name":        "generate_bundle",
@@ -14991,7 +14992,7 @@ func TestCaseBoundArbitraryMutatingMCPIsNeverAdvertisedOrExecuted(t *testing.T) 
 }
 
 func TestCaseBoundBuiltinWriteRequiresPublicationAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15046,7 +15047,7 @@ func TestCaseBoundBuiltinWriteRequiresPublicationAuthority(t *testing.T) {
 }
 
 func TestRuntimeServerCaseFundUnverifiedFinalUsesHostBoundary(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15114,7 +15115,7 @@ func TestRuntimeServerCaseFundUnverifiedFinalUsesHostBoundary(t *testing.T) {
 }
 
 func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	var toolCallCount atomic.Int32
 	provider := newCompleteProviderServer(t, [][]string{
 		{
@@ -15218,7 +15219,7 @@ func TestRuntimeServerRejectsRemoteReadOnlyHintsWithoutHostAuthority(t *testing.
 }
 
 func TestRuntimeServerEditRequiresFreshReadBeforeEdit(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15276,7 +15277,7 @@ func TestRuntimeServerEditRequiresFreshReadBeforeEdit(t *testing.T) {
 }
 
 func TestRuntimeServerEditAfterReadUsesApprovalAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15350,7 +15351,7 @@ func TestRuntimeServerEditAfterReadUsesApprovalAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerWriteFileToolReturnsUnifiedDiffMetadata(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15474,7 +15475,7 @@ func TestRuntimeServerWriteFileToolReturnsUnifiedDiffMetadata(t *testing.T) {
 }
 
 func TestRuntimeServerMoveFileToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, "old"), 0o755); err != nil {
 		t.Fatal(err)
@@ -15629,7 +15630,7 @@ func TestRuntimeServerMoveFileToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerMoveFileRejectsDestinationExists(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15749,7 +15750,7 @@ func readRuntimeServerNotebookCells(t *testing.T, path string) []map[string]json
 }
 
 func TestRuntimeServerNotebookEditToolIsAdvertisedAndReplacesCell(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15831,7 +15832,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndReplacesCell(t *testing.T) 
 }
 
 func TestRuntimeServerNotebookEditInsertsAndDeletesCells(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -15939,7 +15940,7 @@ func TestRuntimeServerNotebookEditInsertsAndDeletesCells(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditRejectsInvalidTarget(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16017,7 +16018,7 @@ func TestRuntimeServerNotebookEditRejectsInvalidTarget(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16133,7 +16134,7 @@ func TestRuntimeServerNotebookEditToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerNotebookEditInsertDeleteAndErrors(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16296,7 +16297,7 @@ func stringFieldFromRawJSON(raw json.RawMessage) string {
 }
 
 func TestRuntimeServerDeleteRangeToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16390,7 +16391,7 @@ func TestRuntimeServerDeleteRangeToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteRangeRequiresReadBeforeDelete(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16466,7 +16467,7 @@ func TestRuntimeServerDeleteRangeRequiresReadBeforeDelete(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteRangeRejectsDuplicateAnchor(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16553,7 +16554,7 @@ func TestRuntimeServerDeleteRangeRejectsDuplicateAnchor(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16649,7 +16650,7 @@ func TestRuntimeServerDeleteSymbolToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolRequiresReadBeforeDelete(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16721,7 +16722,7 @@ func TestRuntimeServerDeleteSymbolRequiresReadBeforeDelete(t *testing.T) {
 }
 
 func TestRuntimeServerDeleteSymbolRejectsMultiNameSpec(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16804,7 +16805,7 @@ func TestRuntimeServerDeleteSymbolRejectsMultiNameSpec(t *testing.T) {
 }
 
 func TestRuntimeServerEditFileSupportsReasonixStyleMultiEditAliases(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16905,7 +16906,7 @@ func TestRuntimeServerEditFileSupportsReasonixStyleMultiEditAliases(t *testing.T
 }
 
 func TestRuntimeServerMultiEditToolIsAdvertisedAndExecutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -16999,7 +17000,7 @@ func TestRuntimeServerMultiEditToolIsAdvertisedAndExecutes(t *testing.T) {
 }
 
 func TestRuntimeServerEditFileMultiEditIsAtomicOnFailure(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17090,7 +17091,7 @@ func TestRuntimeServerEditFileMultiEditIsAtomicOnFailure(t *testing.T) {
 }
 
 func TestRuntimeServerApprovalAlwaysRequestsApprovalForAutoReadTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17188,7 +17189,7 @@ func TestStaleApprovalGrantRejectedAfterMCPReconnect(t *testing.T) {
 		}
 	}))
 	defer mcpServer.Close()
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "stale-approval")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17326,7 +17327,7 @@ func TestRuntimeServerAllowsRepeatedReadOnlyObservation(t *testing.T) {
 }
 
 func TestRuntimeServerFailureStormGuardAnnotatesThirdSameToolFailure(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17412,7 +17413,7 @@ func TestRuntimeServerFailureStormGuardAnnotatesThirdSameToolFailure(t *testing.
 }
 
 func TestRuntimeServerFailureStormGuardResetsAfterSuccessfulTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17504,7 +17505,7 @@ func TestRuntimeServerFailureStormGuardResetsAfterSuccessfulTool(t *testing.T) {
 }
 
 func TestRuntimeServerForkAndResumePreserveToolPairingHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17589,7 +17590,7 @@ func TestRuntimeServerForkAndResumePreserveToolPairingHistory(t *testing.T) {
 func TestRuntimeServerInterruptedToolCallHistoryIsRepairedForProvider(t *testing.T) {
 	run := func(t *testing.T, toolItem map[string]any) string {
 		t.Helper()
-		dataDir := t.TempDir()
+		dataDir := workspacetest.New(t)
 		durableRoot := t.TempDir()
 		workspace := filepath.Join(dataDir, "workspace")
 		if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -17699,7 +17700,7 @@ func TestRuntimeServerInterruptedToolCallHistoryIsRepairedForProvider(t *testing
 }
 
 func TestRuntimeServerForkTurnIDTruncatesAndRewritesHistory(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -17795,7 +17796,7 @@ func TestRuntimeServerForkTurnIDTruncatesAndRewritesHistory(t *testing.T) {
 }
 
 func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -17859,7 +17860,7 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 }
 
 func TestUserInputCancelNeverResumesProvider(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input_cancel","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -17904,7 +17905,7 @@ func TestUserInputCancelNeverResumesProvider(t *testing.T) {
 }
 
 func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-user-input-stale")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -17992,7 +17993,7 @@ func TestStaleUserInputGrantRejectedAfterCaseBindingSwitch(t *testing.T) {
 }
 
 func TestRuntimeServerInterruptCancelsPendingUserInputContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input_abort","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick after abort\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18050,7 +18051,7 @@ func TestRuntimeServerInterruptCancelsPendingUserInputContinuation(t *testing.T)
 }
 
 func TestRuntimeServerUserInputResolutionFailsClosedAfterRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	provider := newCompleteProviderServer(t, [][]string{
 		{
@@ -18150,7 +18151,7 @@ func TestRuntimeServerDisableUserInputRemovesInteractiveToolSchemas(t *testing.T
 }
 
 func TestRuntimeServerThreadSummarySearchAndForkCountsMatchProductContract(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "workspace-search-contract")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18232,7 +18233,7 @@ func TestRuntimeServerThreadSummarySearchAndForkCountsMatchProductContract(t *te
 }
 
 func TestRuntimeServerApprovalDenyAndAllowControlToolExecution(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_write_deny","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"out.txt\",\"content\":\"approved content\"}"}}]},"finish_reason":"tool_calls"}]}`,
@@ -18309,7 +18310,7 @@ func TestRuntimeServerApprovalDenyAndAllowControlToolExecution(t *testing.T) {
 }
 
 func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "shutdown-case-approval")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18375,7 +18376,7 @@ func TestRuntimeServerShutdownClosesPausedCaseApprovalThroughFinalEvidenceGate(t
 }
 
 func TestRuntimeServerInterruptCancelsPendingApprovalContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	workspace := filepath.Join(dataDir, "approval-abort")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -18437,7 +18438,7 @@ func TestRuntimeServerInterruptCancelsPendingApprovalContinuation(t *testing.T) 
 }
 
 func TestRuntimeServerApprovalResolutionFailsClosedAfterRestart(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "approval-restart")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -18504,7 +18505,7 @@ func TestRuntimeServerApprovalResolutionFailsClosedAfterRestart(t *testing.T) {
 }
 
 func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-context-repair")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -18582,7 +18583,7 @@ func TestRuntimeServerRestartRepairsCommittedCaseContextBeforeFinalGate(t *testi
 }
 
 func TestRuntimeServerUnrecoverableCaseContextQuarantinesOnlyAffectedThread(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "case-context-quarantine")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -18633,7 +18634,7 @@ func TestRuntimeServerUnrecoverableCaseContextQuarantinesOnlyAffectedThread(t *t
 	defer restarted.Close()
 	assertLiveJSON(t, restarted.URL, http.MethodGet, "/health", DefaultRuntimeToken, nil, http.StatusOK)
 	assertLiveJSON(t, restarted.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
-		"title": "Healthy thread after quarantine", "workspace": t.TempDir(),
+		"title": "Healthy thread after quarantine", "workspace": workspacetest.New(t),
 	}), http.StatusCreated)
 	assertLegacySnapshotSourceUnavailable(t, restarted.URL, threadID, turnID)
 	if provider.RequestCount() != 0 || caseSource.ProbeCount(t) != 0 || caseSource.CallCount(t) != 0 || caseSource.EvidenceReadCount(t) != 0 {
@@ -18718,7 +18719,7 @@ func TestRuntimeServerNormalTurnsDoNotCreateSyntheticApprovalOrUserInputGates(t 
 func TestRuntimeServerInternalSubagentLineageUsesExistingGoalContract(t *testing.T) {
 	g1 := loadG1Contract(t)
 	dataDir := t.TempDir()
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{{
 		`data: {"choices":[{"delta":{"content":"Goal task completed."},"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
@@ -18889,7 +18890,7 @@ func TestRuntimeServerMultiModelTurnsDoNotNarrowToDeepSeek(t *testing.T) {
 	defer server.Close()
 
 	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
-		"workspace": t.TempDir(), "providerId": "deepseek-configured", "model": "deepseek-chat",
+		"workspace": workspacetest.New(t), "providerId": "deepseek-configured", "model": "deepseek-chat",
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
 
@@ -19221,7 +19222,7 @@ func TestRuntimeServerProviderRequestShapesKeepDeepSeekFieldsScoped(t *testing.T
 func TestRuntimeServerCandidateDurableRootHighRiskFailsClosedAndSurvivesRestart(t *testing.T) {
 	g1 := loadG1Contract(t)
 	g2 := loadG2Contract(t)
-	root := filepath.Join(t.TempDir(), "analytix-go-runtime-candidate-durable")
+	root := filepath.Join(workspacetest.New(t), "analytix-go-runtime-candidate-durable")
 
 	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:         g1.RuntimeToken,

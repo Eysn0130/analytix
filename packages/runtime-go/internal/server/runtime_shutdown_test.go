@@ -22,6 +22,7 @@ import (
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	providerpkg "analytix.local/runtime-go/internal/provider"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeServerShutdownCancelsActiveExecutionAndDisconnectsMCP(t *testing.T) {
@@ -69,7 +70,7 @@ func TestRuntimeServerShutdownCancelsActiveExecutionAndDisconnectsMCP(t *testing
 }
 
 func TestRuntimeServerShutdownRetriesPausedApprovalTerminalClaim(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", DataDir: t.TempDir(),
 	}).(*runtimeServerHandler)

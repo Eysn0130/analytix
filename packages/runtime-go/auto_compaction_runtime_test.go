@@ -10,10 +10,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestRuntimeServerAutomaticCompactionRunsBeforeAdmissionAndRestoresContinuation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	providerFrames := make([][]string, 0, 5)
 	for index := 1; index <= 3; index++ {

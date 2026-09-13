@@ -30,6 +30,7 @@ import (
 	"analytix.local/runtime-go/internal/server"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitytest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // Counting retains the real installation signer; it only observes whether a
@@ -110,20 +111,7 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 		_, err := fixture.projector.ProjectThread(source)
 		return err
 	})
-	// Summary publication requires an ordinary workspace. TempDir's numeric
-	// parent and /NNN can accidentally join into a restricted identifier.
-	workspace, err := os.MkdirTemp(os.TempDir(), "analytix-active-workspace-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(workspace); err != nil {
-			t.Error(err)
-		}
-	})
-	if domainsecurity.ContainsProtectedCaseData(workspace) {
-		t.Fatal("active history workspace fixture contains a restricted identifier")
-	}
+	workspace := workspacetest.New(t)
 	created, err := fixture.durable.CreateThread(map[string]any{"title": "active history source"}, workspace)
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	"analytix.local/runtime-go/internal/contracts"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type ownerLockedPublicProjectorV1 struct {
@@ -28,7 +29,7 @@ func TestPublicThreadProjectionSharesDurableMutationSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := store.CreateThread(map[string]any{"workspace": t.TempDir()}, "")
+	created, err := store.CreateThread(map[string]any{"workspace": workspacetest.New(t)}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

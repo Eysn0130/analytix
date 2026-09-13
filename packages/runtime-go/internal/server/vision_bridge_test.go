@@ -27,6 +27,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	provider "analytix.local/runtime-go/internal/provider"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type recordingVisionBridgeProvider struct {
@@ -276,7 +277,7 @@ func prepareAuthorizedVisionBridgePending(
 		t.Fatal("vision bridge handler authority is unavailable")
 	}
 	configureServerGeneralExecution(t, handler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{
 		"title": "vision tool result", "workspace": workspace, "providerId": "deepseek", "model": "deepseek-v4-pro",
 	}, workspace)
@@ -586,7 +587,7 @@ func TestRuntimeVisionBridgeUserAttachmentFailsClosedWithoutTrustedProjector(t *
 }
 
 func TestRuntimeTurnQuarantinesImageAndContinuesIndependentPrimaryText(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	dataDir := t.TempDir()
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{

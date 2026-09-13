@@ -18,6 +18,7 @@ import (
 	controlapp "analytix.local/runtime-go/internal/app/control"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type asyncTerminalClosureProviderV1 struct {
@@ -59,7 +60,7 @@ func newAsyncTerminalClosureFixtureV1(t *testing.T, failure error) (*runtimeServ
 		ProviderID: "closure-provider", BaseURL: "https://provider.invalid", APIKey: "test-key", Model: "closure-model", EndpointFormat: "chat_completions",
 	}).(*runtimeServerHandler)
 	configureServerGeneralExecution(t, handler)
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := handler.store.CreateThread(map[string]any{"workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

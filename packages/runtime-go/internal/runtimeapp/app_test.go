@@ -14,6 +14,7 @@ import (
 	threadriskpolicystore "analytix.local/runtime-go/internal/adapters/outbound/threadriskpolicy"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestNewRuntimeServerHandlerAssemblesRunnableHandler(t *testing.T) {
@@ -42,7 +43,7 @@ func TestRuntimeAppRequiresTokenUnlessInsecureIsExplicit(t *testing.T) {
 }
 
 func TestRuntimeHostPolicyProductionCallerIsReachedThroughHTTPCaseTurn(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	metadata := filepath.Join(workspace, ".analytix")
 	if err := os.Mkdir(metadata, 0o755); err != nil {
 		t.Fatal(err)

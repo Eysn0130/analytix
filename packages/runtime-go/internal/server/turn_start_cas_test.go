@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	turnstartapp "analytix.local/runtime-go/internal/app/turnstart"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestDurableTurnStartCASRejectsStalePreparedAndSecondRunningTurn(t *testing.T) {
@@ -12,7 +13,7 @@ func TestDurableTurnStartCASRejectsStalePreparedAndSecondRunningTurn(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	thread, err := store.CreateThread(map[string]any{"title": "turn CAS", "workspace": workspace}, workspace)
 	if err != nil {
 		t.Fatal(err)

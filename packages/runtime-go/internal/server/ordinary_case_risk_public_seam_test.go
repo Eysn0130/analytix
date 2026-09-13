@@ -16,6 +16,7 @@ import (
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type mixedCaseLongContextProviderV1 struct {
@@ -232,7 +233,7 @@ func (providerClient *boundaryOrdinaryReadProvider) Stream(
 }
 
 func TestOrdinaryPlanningHTTPPublicSeamDoesNotAcquireCaseRisk(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -323,7 +324,7 @@ func TestOrdinaryPlanningHTTPPublicSeamDoesNotAcquireCaseRisk(t *testing.T) {
 }
 
 func TestUnboundCaseBoundaryHTTPPublicSeamAllowsLaterOrdinaryContinuation(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	handler := NewRuntimeServerHandler(RuntimeServerConfig{
 		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
@@ -400,7 +401,7 @@ func TestUnboundCaseBoundaryHTTPPublicSeamAllowsLaterOrdinaryContinuation(t *tes
 }
 
 func TestMixedCaseLongContextHTTPPublicSeamCompactsBeforeOrdinaryContinuation(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	providerID := "mixed-case-long-context-provider"
 	largeModel := "mixed-case-large-context"
 	smallModel := "mixed-case-small-context"
@@ -539,7 +540,7 @@ func TestMixedCaseLongContextHTTPPublicSeamCompactsBeforeOrdinaryContinuation(t 
 }
 
 func TestContextHardLimitHTTPPublicSeamEmitsHostAdmissionDiagnostic(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	providerID := "context-admission-provider"
 	modelID := "context-admission-small-model"
 	modelProviders, err := json.Marshal(map[string]any{

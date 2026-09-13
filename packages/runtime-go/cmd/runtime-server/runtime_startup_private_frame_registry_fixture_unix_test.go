@@ -37,6 +37,7 @@ import (
 	"analytix.local/runtime-go/internal/server"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // Provision one synthetic historical registration through the actual signed
@@ -299,7 +300,8 @@ func runtimePrivateFrameAuthorityRootV1(t *testing.T) string {
 	t.Helper()
 	root := strings.TrimSpace(os.Getenv("ANALYTIX_TEST_PROFILE_ROOT"))
 	if root == "" {
-		return t.TempDir()
+		// This ancestor becomes the public workspace; avoid numeric TempDir IDs.
+		return workspacetest.New(t)
 	}
 	absolute, err := filepath.Abs(root)
 	if err != nil || filepath.Clean(absolute) != absolute {
