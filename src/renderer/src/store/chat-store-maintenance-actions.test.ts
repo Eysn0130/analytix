@@ -15,6 +15,7 @@ vi.mock('../agent/registry', () => ({
 }))
 
 import { createMaintenanceActions } from './chat-store-maintenance-actions'
+import { buildThreadEventSink } from './chat-store-runtime'
 
 type GoalPatch = {
   objective?: string
@@ -805,6 +806,54 @@ describe('chat-store-maintenance-actions goal actions', () => {
       provider.rewindThread.mock.invocationCallOrder[0]
     )
     expect(sendMessage).toHaveBeenCalledWith('new text')
+  })
+
+  it('resends unchanged text exactly once after the rewind event precedes the successful HTTP response', async () => {
+    const { actions, get, provider, sendMessage, state } = buildHarness()
+    const originalText = 'retry this unchanged request'
+    const retained: ChatBlock = { kind: 'user', id: 'user_retained', text: 'earlier request', meta: { turnId: 'turn_retained' } }
+    Object.assign(state, {
+      busy: false,
+      blocks: [
+        retained,
+        { kind: 'user', id: 'user_failed', text: originalText, meta: { turnId: 'turn_failed' } },
+        { kind: 'tool', id: 'error_failed', summary: 'Provider unavailable', status: 'error', meta: { turnId: 'turn_failed' } }
+      ],
+      liveAssistant: '',
+      lastSeq: 10,
+      currentTurnId: null,
+      currentTurnUserId: null,
+      turnStartedAtByUserId: { user_retained: 1, user_failed: 2 },
+      turnDurationByUserId: { user_failed: 3 },
+      queuedMessages: []
+    })
+    const set: ChatStoreSet = (partial) => {
+      Object.assign(state, typeof partial === 'function' ? partial(state) : partial)
+    }
+    const sink = buildThreadEventSink(set, get, { threadId: 'thr_existing' })
+    let completeHTTP!: () => void
+    provider.rewindThread.mockImplementationOnce(async () => {
+      sink.onThreadRewound?.({
+        threadId: 'thr_existing', turnId: 'turn_failed', removedTurns: 1,
+        remainingTurns: 1, removedTurnIds: ['turn_failed'], seq: 11
+      })
+      await new Promise<void>((resolve) => { completeHTTP = resolve })
+    })
+
+    const pending = actions.rewindAndResend('user_failed', originalText)
+    expect(provider.rewindThread).toHaveBeenCalledWith('thr_existing', 'turn_failed')
+    expect(state.blocks).toEqual([retained])
+    expect(sendMessage).not.toHaveBeenCalled()
+    completeHTTP()
+    await pending
+
+    expect(provider.rewindThread).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledWith(originalText)
+    expect(state.blocks).toEqual([retained])
+    expect(state.turnStartedAtByUserId).toEqual({ user_retained: 1 })
+    expect(state.turnDurationByUserId).toEqual({})
+    expect(state.error).toBeNull()
   })
 
   it('blocks case-boundary rewind before restoring a git checkpoint', async () => {

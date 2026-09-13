@@ -1489,6 +1489,37 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('accepts the public rewind response and rejects its private authority turn extension', () => {
+    const response = {
+      threadId: 'thr_rewind',
+      turnId: 'turn_removed',
+      removedTurns: 1,
+      remainingTurns: 2,
+      removedTurnIds: ['turn_removed']
+    }
+    const path = '/v1/threads/thr_rewind/rewind'
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(response)
+    }, path, null, 'POST')
+    expect(accepted.ok).toBe(true)
+    expect(accepted.status).toBe(200)
+    expect(JSON.parse(accepted.body)).toEqual(response)
+
+    const privateAuthorityTurn = 'turn_private_rewind_authority'
+    const rejected = sanitizeRuntimeResponse({
+      ok: true, status: 200,
+      body: JSON.stringify({ ...response, authorityTurnId: privateAuthorityTurn })
+    }, path, null, 'POST')
+    expect(rejected).toEqual({
+      ok: false, status: 502,
+      body: JSON.stringify({
+        code: 'runtime_response_schema_invalid',
+        message: 'Runtime response failed schema validation.'
+      })
+    })
+    expect(rejected.body).not.toContain(privateAuthorityTurn)
+  })
+
   it('rejects a strict V3 generic accepted-final view without its verified delivery seal', () => {
     const text = 'public generic final'
     const threadId = 'thread-v3'

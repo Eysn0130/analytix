@@ -159,6 +159,11 @@ func TestUnboundRewindCommitsReplacementEpochAndRejectsStaleBindingAfterRestart(
 		t.Fatalf("restart lost rewind epoch state: state=%#v ok=%t err=%v", restartedState, ok, err)
 	}
 	restartedRaw := rawGeneralTerminalThreadForTest(t, restarted, threadID)
+	restartedTurns := listAny(restartedRaw["turns"])
+	if len(restartedTurns) != 1 || stringField(restartedTurns[0].(map[string]any), "id") != authorityTurnID ||
+		stringField(restartedTurns[0].(map[string]any), "kind") != "rewind_transition" {
+		t.Fatalf("restart lost the exact durable rewind authority: %#v", restartedTurns)
+	}
 	restartedEvents, err := restarted.LoadEventsSince(threadID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -189,8 +194,11 @@ func TestUnboundRewindCommitsReplacementEpochAndRejectsStaleBindingAfterRestart(
 		t.Fatal(err)
 	}
 	recoveredTurns := listAny(recoveredThread["turns"])
-	if len(recoveredTurns) != 1 || stringField(recoveredTurns[0].(map[string]any), "id") != authorityTurnID {
-		t.Fatalf("sidecar recovery resurrected rewound history: %#v", recoveredTurns)
+	// Sidecar fallback is a public read view. The internal authority marker is
+	// retained in the primary above, but must not become a prompt-less public
+	// conversation turn or authorize recovery after the primary is lost.
+	if len(recoveredTurns) != 0 {
+		t.Fatalf("sidecar recovery exposed internal authority or resurrected rewound history: %#v", recoveredTurns)
 	}
 	if domainevent.ContainsPrivateTerminalAuthority(recoveredThread) {
 		t.Fatalf("public sidecar recovered private terminal authority: %#v", recoveredThread)

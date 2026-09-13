@@ -17,6 +17,7 @@ import (
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
 	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
 	appturn "analytix.local/runtime-go/internal/app/turn"
+	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
@@ -642,6 +643,7 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 		return nil, errors.New("ordinary public thread turn projection is incomplete")
 	}
 	seenAuthorities := map[string]bool{}
+	publicTurns := make([]any, 0, len(turns))
 	for index, rawTurn := range turns {
 		sanitizedTurn, _ := rawTurn.(map[string]any)
 		sourceTurn, _ := rawTurns[index].(map[string]any)
@@ -655,7 +657,6 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 			"workspaceCheckpointId", "toolCatalogFingerprint", "toolCatalogToolCount", "toolCatalogDrift",
 			"maxModelSteps", "guiPlan", "mode", "disableUserInput", "error",
 		})
-		turns[index] = turn
 		legacyInterruptedHistory := false
 		if status := strings.TrimSpace(contracts.StringField(turn, "status")); status != "" {
 			switch status {
@@ -676,6 +677,13 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 		if governed {
 			seenAuthorities[turnID] = true
 		}
+		if kind := contracts.StringField(sourceTurn, "kind"); kind == "rewind_transition" || kind == "workspace_transition" {
+			if err := validateOrdinaryAuthorityTransitionV1(thread, sourceTurn, authority); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		publicTurns = append(publicTurns, turn)
 		items, _ := turn["items"].([]any)
 		sourceItems, _ := sourceTurn["items"].([]any)
 		if len(items) != len(sourceItems) {
@@ -749,8 +757,136 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 	if len(seenAuthorities) != len(authorities) {
 		return nil, errors.New("ordinary public projection omitted a context-bound turn")
 	}
-	projected["turns"] = turns
+	projected["turns"] = publicTurns
 	return projected, nil
+}
+
+// Workspace and rewind transitions are durable authority, not conversation turns.
+// Validate its producer shape and sealed epoch witness before omitting it. The
+// ordinary authority inventory above still accounts for every durable turn.
+func validateOrdinaryAuthorityTransitionV1(thread, turn map[string]any, authority domainturnterminal.GeneralTerminalProjectionAuthorityV1) error {
+	invalid := errors.New("ordinary history transition authority is invalid")
+	kind := contracts.StringField(turn, "kind")
+	fields := []string{"id", "threadId", "kind", "status", "createdAt", "completedAt", "securityContext", "contextEpochSnapshot", "items"}
+	switch kind {
+	case "rewind_transition":
+		fields = append(fields, "removedTurnIds")
+	case "workspace_transition":
+	default:
+		return invalid
+	}
+	if len(turn) != len(fields) || !authority.Governed || authority.Terminal {
+		return invalid
+	}
+	for _, field := range fields {
+		if _, present := turn[field]; !present {
+			return invalid
+		}
+	}
+	frozen, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+	items, itemsOK := turn["items"].([]any)
+	if err != nil || !domainsecurity.TurnSecurityContextIsGeneral(frozen) ||
+		domainsecurity.ValidateTurnSecurityContextForExecution(frozen) != nil || frozen.ContextEpoch < 2 ||
+		frozen.ThreadID != contracts.StringField(thread, "id") || frozen.ThreadID != contracts.StringField(turn, "threadId") ||
+		frozen.TurnID != contracts.StringField(turn, "id") || contracts.StringField(turn, "status") != "completed" ||
+		contracts.StringField(turn, "createdAt") != frozen.IssuedAt || contracts.StringField(turn, "completedAt") != frozen.IssuedAt ||
+		!samePublicJSON(turn["securityContext"], turnsecurityapp.PublicRecord(frozen)) ||
+		!itemsOK || len(items) != 0 {
+		return invalid
+	}
+	at, err := time.Parse(time.RFC3339Nano, frozen.IssuedAt)
+	if err != nil {
+		return invalid
+	}
+	expectedSources := []domaincontextepoch.SourceEntry{contextepochapp.SecurityBindingEntry(frozen)}
+	if kind == "rewind_transition" {
+		removed, removedOK := turn["removedTurnIds"].([]any)
+		if !removedOK || len(removed) == 0 {
+			return invalid
+		}
+		removedIDs := map[string]bool{}
+		for _, raw := range removed {
+			id, ok := raw.(string)
+			if !ok || id == "" || strings.TrimSpace(id) != id || removedIDs[id] {
+				return invalid
+			}
+			removedIDs[id] = true
+		}
+		for _, raw := range listAny(thread["turns"]) {
+			retained, _ := raw.(map[string]any)
+			if removedIDs[contracts.StringField(retained, "id")] {
+				return invalid
+			}
+		}
+		if rewindMutationTarget(frozen, removed[0].(string), at) != frozen {
+			return invalid
+		}
+		// The history witness seals the target before the one-epoch advance.
+		previous := frozen
+		previous.ContextEpoch--
+		target := rewindMutationTarget(previous, removed[0].(string), at)
+		expectedSources = append(expectedSources, domaincontextepoch.SourceEntry{
+			Version: domaincontextepoch.ContractVersion, SourceID: "host-history-mutation", Kind: "history-authority",
+			Digest: domainsecurity.SHA256Hex([]byte(target.ContextDigest)), TrustState: domaincontextepoch.TrustTrusted,
+			PromptBoundary: domaincontextepoch.BoundaryStoreOnly, ActivationState: domaincontextepoch.ActivationInactive,
+		})
+	} else {
+		// The producer hashes the requested path, which can be an alias of the
+		// canonical workspace in frozen. Its sealed context and binding witness
+		// carry the identity; do not re-hash a different canonical path here.
+		suffix := strings.TrimPrefix(frozen.TurnID, "turn_workspace_")
+		if suffix == frozen.TurnID || len(suffix) != 24 || suffix != strings.ToLower(suffix) ||
+			!domainsecurity.IsSHA256Hex(strings.Repeat("0", 40)+suffix) {
+			return invalid
+		}
+	}
+	snapshotRecord, ok := turn["contextEpochSnapshot"].(map[string]any)
+	body, err := json.Marshal(snapshotRecord)
+	var snapshot domaincontextepoch.Snapshot
+	if !ok || err != nil || json.Unmarshal(body, &snapshot) != nil ||
+		!sameContextEpochSnapshotV1(snapshotRecord, snapshot) || snapshot.ThreadID != frozen.ThreadID ||
+		snapshot.Epoch != frozen.ContextEpoch || snapshot.AcceptedAt != frozen.IssuedAt {
+		return invalid
+	}
+	if kind == "workspace_transition" {
+		changedBinding := false
+		for _, reason := range snapshot.ChangeReasons {
+			changedBinding = changedBinding || reason == domaincontextepoch.ReasonSourceDigestChanged
+		}
+		if !changedBinding {
+			return invalid
+		}
+	}
+	for _, expected := range expectedSources {
+		found := false
+		for _, source := range snapshot.Sources {
+			if source.SourceID == expected.SourceID {
+				expected.Sequence = source.Sequence
+				found = source.Sequence > 0 && source == domaincontextepoch.SourceSnapshotFromEntry(expected)
+				if kind == "workspace_transition" && source.Sequence != snapshot.BaselineSequence {
+					found = false
+				}
+			}
+		}
+		if !found {
+			return invalid
+		}
+	}
+	state, found, err := contextepochapp.StateFromThread(thread)
+	current, currentFound, currentErr := turnsecurityapp.LatestContext(thread)
+	durableTurns, _ := thread["turns"].([]any)
+	if len(durableTurns) == 0 {
+		return invalid
+	}
+	latestTurn, _ := durableTurns[len(durableTurns)-1].(map[string]any)
+	if err != nil || !found || currentErr != nil || !currentFound || current.ThreadID != frozen.ThreadID ||
+		state.ThreadID != frozen.ThreadID || state.AcceptedSnapshot.Epoch != current.ContextEpoch ||
+		state.AcceptedSnapshot.Epoch < snapshot.Epoch ||
+		(contracts.StringField(latestTurn, "id") == frozen.TurnID && current != frozen) ||
+		(state.AcceptedSnapshot.Epoch == snapshot.Epoch && !sameContextEpochSnapshotV1(snapshotRecord, state.AcceptedSnapshot)) {
+		return invalid
+	}
+	return nil
 }
 
 func projectOrdinaryPublicGoalV1(value any) (map[string]any, bool) {

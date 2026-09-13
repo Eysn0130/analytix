@@ -2428,6 +2428,54 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(html).not.toContain('read detail should stay tucked away')
   })
 
+  it('describes a pending write approval as a file operation without claiming a completed edit', () => {
+    const writeBlock = toolBlock({
+      id: 'tool_write_pending',
+      summary: 'write',
+      toolKind: 'file_change',
+      status: 'running',
+      meta: { toolName: 'write' },
+      filePath: '/tmp/pending-output.txt'
+    })
+    const approvalBlock: ChatBlock = {
+      kind: 'approval',
+      id: 'approval_write_pending',
+      approvalId: 'appr_write_pending',
+      status: 'pending',
+      toolName: 'write',
+      summary: 'Write pending-output.txt'
+    }
+    const html = renderToStaticMarkup(
+      createElement(ProcessSectionRow, {
+        section: { id: 'execution-pending-write', kind: 'execution', blocks: [writeBlock, approvalBlock] },
+        processing: true,
+        viewportRef: { current: null }
+      })
+    )
+
+    expect(html).toContain('1 file operation · 1 approval')
+    expect(html).toMatch(/Approval required|需要审批|approvalTitle/)
+    expect(html).toMatch(/Allow|允许|approvalAllow/)
+    expect(html).not.toMatch(/Edited \d+ files?|修改了/)
+  })
+
+  it('counts repeated operations on one file without claiming a number of edited files', () => {
+    const blocks = [
+      toolBlock({ id: 'tool_write', summary: 'write', toolKind: 'file_change', status: 'success', meta: { toolName: 'write' }, filePath: '/tmp/same-file.txt' }),
+      toolBlock({ id: 'tool_edit', summary: 'edit', toolKind: 'file_change', status: 'error', meta: { toolName: 'edit' }, filePath: '/tmp/same-file.txt' })
+    ]
+    const html = renderToStaticMarkup(
+      createElement(ProcessSectionRow, {
+        section: { id: 'execution-same-file', kind: 'execution', blocks },
+        processing: false,
+        viewportRef: { current: null }
+      })
+    )
+
+    expect(html).toContain('2 file operations')
+    expect(html).not.toMatch(/Edited \d+ files?|修改了/)
+  })
+
   it('auto-expands pending approvals while keeping other tool details tucked away', () => {
     const readBlock: ChatBlock = toolBlock({
       id: 'tool_read',
