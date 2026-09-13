@@ -36,13 +36,50 @@ const CONTEXTUAL_FINANCIAL_IDENTIFIER = new RegExp(
 // used for execution are not rewritten by the PII classification helpers.
 // A closed quote owns the whole locator on that line, including spaces and
 // brackets. Unquoted locators stop at whitespace but permit filename brackets.
-const PRIVATE_SOURCE_LOCATOR = /https?:\/\/[^\s"'`<>]+|(["'`])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\r\n]*?\1|(^|[\s"'`=(:：\[{,，;；])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\s"'`<>{},;，。；！？]+/giu
+const PRIVATE_SOURCE_LOCATOR = /https?:\/\/[^\s"'`<>]+|(["'`])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\r\n]*?\1|(^|[\s"'`=(:：[{,，;；])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\s"'`<>{},;，。；！？]+/giu
+const PRIVATE_DIFF_HEADER = /^((?:---|\+\+\+)[\t ]+)"?[ab]\/(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\r\n]*/gimu
 
-function projectPrivateSourceLocators(text: string): string {
-  return text.replace(PRIVATE_SOURCE_LOCATOR, (match, quote: string | undefined, prefix: string | undefined) =>
+function projectPrivateSourceLocatorsRaw(text: string): string {
+  return text.replace(PRIVATE_DIFF_HEADER, '$1[PRIVATE_PATH]').replace(PRIVATE_SOURCE_LOCATOR, (match, quote: string | undefined, prefix: string | undefined) =>
     quote !== undefined ? `${quote}[PRIVATE_PATH]${quote}` :
       prefix === undefined ? match : `${prefix}[PRIVATE_PATH]`
   )
+}
+
+const COMPOSER_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s])*)\)/gu
+
+function safeMentionId(encoded: string): boolean {
+  let id = encoded
+  // Inspect encoded identifiers as well as their display spelling. Nested
+  // encodings are untrusted and receive a bounded, fail-closed inspection.
+  for (let round = 0; round < 4; round += 1) {
+    if (!id.trim() || projectPrivateSourceLocatorsRaw(id) !== id ||
+      projectPIIIdentifiers(id) !== id || redactSecretText(id) !== id ||
+      containsInternalCaseEntityReference(id) || containsRestrictedEvidence(id)) return false
+    if (!id.includes('%')) return true
+    try { id = decodeURIComponent(id) } catch { return false }
+  }
+  return false
+}
+
+function projectPrivateSourceLocators(text: string): string {
+  let cursor = 0
+  let output = ''
+  for (const match of text.matchAll(COMPOSER_MENTION)) {
+    const [token, marker, rawLabel, rawURI] = match
+    const uri = rawURI.replace(/\\(.)/gu, '$1')
+    const prefix = marker === '@' ? 'plugin://' : 'skill://'
+    if (!uri.startsWith(prefix)) continue
+    output += projectPrivateSourceLocatorsRaw(text.slice(cursor, match.index))
+    const label = rawLabel.replace(/\\(.)/gu, '$1')
+    const projectedLabel = projectPIIIdentifiers(projectPrivateSourceLocatorsRaw(redactSecretText(label)))
+    const escapedLabel = projectedLabel.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
+    output += safeMentionId(uri.slice(prefix.length))
+      ? `${marker}[${escapedLabel}](${rawURI})`
+      : `${projectedLabel} [PRIVATE_REFERENCE]`
+    cursor = match.index + token.length
+  }
+  return output + projectPrivateSourceLocatorsRaw(text.slice(cursor))
 }
 
 const MAX_PUBLIC_PII_DEPTH = 32

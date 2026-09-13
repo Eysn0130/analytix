@@ -21,6 +21,51 @@ import (
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
+func TestProjectProviderRequestProjectsToolArgumentsAndSerializedDiffWithoutRebindingSource(t *testing.T) {
+	const path = "/Users/private-owner/Case Files/source.csv"
+	const code = "// ordinary source comment\nexport const value = 1\n"
+	arguments, _ := json.Marshal(map[string]any{"path": path, "content": code})
+	content, _ := json.Marshal(map[string]any{"path": path, "diff": "--- a/" + path + "\n+++ b/" + path + "\n@@ -1 +1 @@\n-old\n+new\n", "bytes_written": 13})
+	request := domainmodel.Request{Messages: []domainmodel.Message{
+		{Role: "assistant", ToolCalls: []domainmodel.ToolCall{{ID: "call-file", Name: "write_file", Arguments: arguments}}},
+		{Role: "tool", ToolCallID: "call-file", Name: "write_file", Content: string(content)},
+	}}
+	before, err := json.Marshal(request.Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, err := ProjectProviderRequestForEffect(domainsecurity.TurnSecurityContext{}, request, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(projected.Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-owner") || strings.Contains(string(encoded), "source.csv") || !strings.Contains(string(encoded), "[PRIVATE_PATH]") {
+		t.Fatal("serialized request retained private argument or diff paths")
+	}
+	if projected.Messages[0].ToolCalls[0].ID != "call-file" || projected.Messages[1].ToolCallID != "call-file" {
+		t.Fatal("projection changed tool pairing")
+	}
+	var projectedArgs map[string]any
+	if json.Unmarshal(projected.Messages[0].ToolCalls[0].Arguments, &projectedArgs) != nil || projectedArgs["content"] != code {
+		t.Fatal("projection replaced ordinary code with a path placeholder")
+	}
+	var result map[string]any
+	if json.Unmarshal([]byte(projected.Messages[1].Content), &result) != nil || result["bytes_written"] != float64(13) ||
+		!strings.Contains(result["diff"].(string), "@@ -1 +1 @@\n-old\n+new\n") {
+		t.Fatal("projection lost physical effect metadata or diff hunks")
+	}
+	after, err := json.Marshal(request.Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("projection mutated private source request")
+	}
+}
+
 func TestProjectProviderRequestMasksEveryCaseTextLane(t *testing.T) {
 	securityContext := providerPrivacyCaseContext(t)
 	rawAccount := "6222020000000000000"

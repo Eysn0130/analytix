@@ -143,6 +143,14 @@ test('root platform receiver discovers and executes ten exact ordinary-tag tests
     'TestRuntimeServerSideEffectIntentBlocksSecondEquivalentBashWrite'
   ]
   assert.deepEqual(rootPlatformTests, names)
+  const portableSource = readFileSync(new URL('../packages/runtime-go/runtime_server_test.go', import.meta.url), 'utf8')
+  const processSource = readFileSync(new URL('../packages/runtime-go/runtime_server_process_darwin_test.go', import.meta.url), 'utf8')
+  assert.match(processSource, /^\/\/go:build darwin && !analytix_prod\n/)
+  for (const name of names.slice(2)) {
+    const declaration = new RegExp(`^func ${name}\\(`, 'gm')
+    assert.equal([...processSource.matchAll(declaration)].length, 1)
+    assert.equal([...portableSource.matchAll(declaration)].length, 0)
+  }
   const listing = values => `${values.join('\n')}\nok\t${rootPackage}\t0.001s\n`
   assert.deepEqual(rootPlatformSelection(listing([...names, 'TestUnrelated']), ''), names)
   assert.throws(() => rootPlatformSelection(listing(names), 'analytix_prod'), /ordinary build tags/)

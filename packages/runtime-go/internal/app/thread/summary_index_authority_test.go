@@ -85,6 +85,9 @@ func TestSummaryIndexRecordRejectsUnsafeContentAndMetadataLookalikes(t *testing.
 	for name, mutate := range map[string]func(map[string]any, map[string]any){
 		"title PII":   func(_ map[string]any, summary map[string]any) { summary["title"] = "13812345678" },
 		"preview PII": func(_ map[string]any, summary map[string]any) { summary["preview"] = "13812345678" },
+		"numeric temporary workspace": func(_ map[string]any, summary map[string]any) {
+			summary["workspace"] = "/tmp/TestSynthetic13800138/000"
+		},
 		"secret": func(_ map[string]any, summary map[string]any) {
 			summary["preview"] = "api_key=synthetic-secret-material"
 		},

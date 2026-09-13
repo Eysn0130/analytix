@@ -26,6 +26,30 @@ function canonicalDigits(value: string): string {
 }
 
 describe('ordinary log PII projection', () => {
+  it('projects absolute diff header paths without changing ordinary hunks or relative code paths', () => {
+    const diff = '--- a//Users/private-owner/Case Files/source.csv\n+++ b//Users/private-owner/Case Files/source.csv\n@@ -1 +1 @@\n-old\n+new\n'
+    expect(projectOrdinaryLogPII(diff)).toBe('--- [PRIVATE_PATH]\n+++ [PRIVATE_PATH]\n@@ -1 +1 @@\n-old\n+new\n')
+    const ordinary = '--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new\n'
+    expect(projectOrdinaryLogPII(ordinary)).toBe(ordinary)
+  })
+  it('preserves validated composer references while projecting labels and surrounding prose', () => {
+    const text = String.raw`@[Report \[tool\]](plugin://report) $[Audit](skill://audit%2Fskill) /Users/private-owner/source.csv`
+    const expected = String.raw`@[Report \[tool\]](plugin://report) $[Audit](skill://audit%2Fskill) [PRIVATE_PATH]`
+    expect(projectOrdinaryLogPII(text)).toBe(expected)
+    expect(projectOrdinaryLogPII(expected)).toBe(expected)
+    expect(projectOrdinaryLogPII('@[/Users/private-owner/source.csv](plugin://report)')).toBe(String.raw`@[\[PRIVATE_PATH\]](plugin://report)`)
+  })
+
+  it.each(['%2FUsers%2Fprivate-owner%2Fsource.csv', '%252FUsers%252Fprivate-owner%252Fsource.csv',
+    '13800138000', 'alice%40example.com', 'api_key%3Dsyntheticsecret', '%ZZ', ''])('withholds an unsafe encoded reference ID %s', (id) => {
+    expect(projectOrdinaryLogPII(`@[Tool](plugin://${id})`)).toBe('Tool [PRIVATE_REFERENCE]')
+  })
+
+  it.each(['cer1_' + 'a'.repeat(64), 'srow1_' + 'a'.repeat(64), String.raw`\u0063er1_` + 'a'.repeat(64),
+    '{"purpose":"analytix.raw-artifact-source-locator/v1"}'])('withholds encoded private authority in a reference', (id) => {
+    expect(projectOrdinaryLogPII(`@[Tool](plugin://${encodeURIComponent(id)})`)).toBe('Tool [PRIVATE_REFERENCE]')
+  })
+
   it.each([
     '/Users/private-owner/SYNTHETIC-PII.csv',
     '/Volumes/source/notes.md',

@@ -15,7 +15,7 @@ const maxRawMessageBytes = 1 << 20
 // identifiers, digests, epochs, numeric measures, and protocol state are left
 // byte-stable so privacy projection cannot mutate security authority.
 func ProjectPublicValue(value any) (any, bool) {
-	prose, proseChanged := projectPrivateSourceProse(value, false)
+	prose, proseChanged := projectPrivateSourceProse(value, false, false)
 	projected, changed := projectPublicValue(prose, false, "")
 	return projected, changed || proseChanged
 }
@@ -25,7 +25,7 @@ func ProjectPublicValue(value any) (any, bool) {
 // conservative than ProjectPublicValue because provider input has no public
 // display schema that can safely identify prose-only fields.
 func ProjectUntrustedValue(value any) (any, bool) {
-	prose, proseChanged := projectPrivateSourceProse(value, false)
+	prose, proseChanged := projectPrivateSourceProse(value, false, false)
 	projected, changed := projectPublicValue(prose, true, "")
 	return projected, changed || proseChanged
 }

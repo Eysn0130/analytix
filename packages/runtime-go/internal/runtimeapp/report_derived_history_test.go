@@ -46,7 +46,21 @@ func runtimeDerivedReportHistoryWithLegacyFinalDisplayFixtureV1(t *testing.T, de
 	t.Helper()
 	ctx := context.Background()
 	witness, config := runtimeWitnessedRegistryConfigV2(t)
-	workspace := t.TempDir()
+	// This workspace is published in a summary during authority repair. Avoid
+	// TempDir's numeric suffix plus /NNN, which can form a PII-shaped identifier.
+	// Keep the real directory under the existing isolated, protected temp root.
+	workspace, err := os.MkdirTemp(os.TempDir(), "analytix-derived-workspace-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(workspace); err != nil {
+			t.Error(err)
+		}
+	})
+	if domainsecurity.ContainsProtectedCaseData(workspace) {
+		t.Fatal("derived report workspace fixture contains a restricted identifier")
+	}
 	contextFor := func(threadID, turnID string) domainsecurity.TurnSecurityContext {
 		frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
 			ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: workspace,

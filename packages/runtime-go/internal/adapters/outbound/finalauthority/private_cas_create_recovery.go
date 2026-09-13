@@ -44,7 +44,12 @@ func privateCASCreateResidueRecoveryTestCut(phase string, index int) error {
 	return hook(phase, index)
 }
 
-func privateCASCreateResidueParentSpecsV1() []privateCASCreateResidueParentSpec {
+// This immutable catalog contains only schema-derived names, never an observed
+// filesystem identity or owner state. Consumers must not mutate it. Every
+// recovery still performs its fresh physical observations and revalidation.
+var privateCASCreateResidueParentSpecsV1 = sync.OnceValue(buildPrivateCASCreateResidueParentSpecsV1)
+
+func buildPrivateCASCreateResidueParentSpecsV1() []privateCASCreateResidueParentSpec {
 	parentPaths := domainprivatecas.CreateRecoveryScanParentPathsV1()
 	specs := make([]privateCASCreateResidueParentSpec, len(parentPaths))
 	byParent := make(map[string]*privateCASCreateResidueParentSpec, len(parentPaths))

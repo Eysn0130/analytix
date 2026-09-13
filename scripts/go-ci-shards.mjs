@@ -5,9 +5,9 @@ import { runGoTestPartition } from './go-test-partition.mjs'
 
 export const runtimePackage = 'analytix.local/runtime-go/internal/runtimeapp'
 export const rootPackage = 'analytix.local/runtime-go'
-// These actual protected-process positives supplement the Linux root suite.
-// Only the stdio positive is Darwin-only; the other root tests retain their
-// Linux ordinary-shell/fail-closed coverage in the packages partition.
+// These protected-process positives execute on the qualified Darwin adapter.
+// The eight process tests and stdio are Darwin-only; checkpoint retains its
+// distinct Linux fail-closed coverage in the complete packages partition.
 export const rootPlatformTests = [
   'TestRuntimeServerConfiguredStdioMCPToolLoopRejectsMutationWithoutHostSemanticIdentityAndContinues',
   'TestRuntimeServerCheckpointApplyBlocksStagedGitChanges',

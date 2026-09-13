@@ -568,7 +568,7 @@ describe('write-export-service helpers', () => {
     expect(clipboard.write).toHaveBeenCalledOnce()
   })
 
-  it('fails closed before HTML export when an absolute image is outside the trusted workspace', async () => {
+  it.each(['inline', 'reference'])('fails closed before HTML export when an absolute %s image is outside the trusted workspace', async (syntax) => {
     const outsideRoot = await mkdtemp(join(tmpdir(), 'analytix-write-export-private-'))
     try {
       const sourcePath = join(workspaceRoot, 'draft.md')
@@ -582,7 +582,7 @@ describe('write-export-service helpers', () => {
       const result = await exportWriteDocument({
         path: sourcePath,
         format: 'html',
-        content: `# Draft\n\n![Private](${outsideImagePath})`
+        content: syntax === 'inline' ? `# Draft\n\n![Private](${outsideImagePath})` : `# Draft\n\n![Private][cover]\n\n[cover]: ${outsideImagePath}`
       }, { workspaceRoot })
 
       expect(result).toEqual({
@@ -596,6 +596,40 @@ describe('write-export-service helpers', () => {
     } finally {
       await rm(outsideRoot, { recursive: true, force: true })
     }
+  })
+
+  it('embeds an authorized absolute image while projecting prose and public Markdown attributes', async () => {
+    const sourcePath = join(workspaceRoot, 'draft.md')
+    const imagePath = join(workspaceRoot, 'cover.png')
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+    await writeFile(sourcePath, '# Draft')
+    await writeFile(imagePath, image)
+    const content = `# Draft\n\n![Cover](${imagePath})\n\n/Users/synthetic/private-note.md\n\n13800138000\n\n\`\`\`/Users/synthetic/private-language\nsafe\n\`\`\`\n\n[Contact](mailto:alice@example.com)\n\n[](/Users/synthetic/private-note.md)\n\n[Safe](https://example.com/notice)`
+    const html = await buildWriteClipboardHtmlFragment({ sourcePath, workspaceRoot, content })
+    expect(html).toContain(`src="data:image/png;base64,${image.toString('base64')}"`)
+    const referenceHtml = await buildWriteClipboardHtmlFragment({ sourcePath, workspaceRoot, content: `![Cover][cover]\n\n[cover]: ${imagePath}` })
+    expect(referenceHtml).toContain(`src="data:image/png;base64,${image.toString('base64')}"`)
+    expect(referenceHtml).not.toContain(workspaceRoot)
+    expect(html).toContain('https://example.com/notice')
+    for (const privateText of [workspaceRoot, 'private-note.md', '13800138000', 'alice@example.com', 'private-language']) expect(html).not.toContain(privateText)
+
+    const targetPath = join(workspaceRoot, 'draft.docx')
+    vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: false, filePath: targetPath })
+    const result = await exportWriteDocument({ path: sourcePath, format: 'docx', content }, { workspaceRoot })
+    expect(result.ok).toBe(true)
+    const zip = await JSZip.loadAsync(await readFile(targetPath))
+    expect(Object.keys(zip.files).filter((path) => path.startsWith('word/media/') && !zip.files[path].dir)).toHaveLength(1)
+    const xml = (await Promise.all(Object.values(zip.files).filter((file) => /\.xml$|\.rels$/.test(file.name)).map((file) => file.async('string')))).join('\n')
+    expect(xml).toContain('https://example.com/notice')
+    for (const privateText of [workspaceRoot, 'private-note.md', '13800138000', 'alice@example.com', 'private-language']) expect(xml).not.toContain(privateText)
+  })
+
+  it.each(['13912345678', '%31%33%39%31%32%33%34%35%36%37%38'])('rejects private remote image destinations before clipboard publication: %s', async (identifier) => {
+    const sourcePath = join(workspaceRoot, 'draft.md')
+    await writeFile(sourcePath, '# Draft')
+    const result = await copyWriteDocumentAsRichText({ path: sourcePath, content: `![Safe](https://example.test/${identifier}.png)` }, { workspaceRoot })
+    expect(result).toEqual({ ok: false, message: 'Write export image URL contains private content and was blocked.' })
+    expect(clipboard.write).not.toHaveBeenCalled()
   })
 
   it('fails closed before clipboard publication when a workspace image symlink escapes', async () => {

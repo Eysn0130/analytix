@@ -25,6 +25,7 @@ import { extractPlanMetadataFromBlock } from '../plan/plan-tool'
 import type { RightPanelMode } from './chat/WorkbenchTopBar'
 import type { GuiPlanMessageContext, SendMessageOverrides } from '../store/chat-store-types'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
+import { buildGuiPlanId, isGuiPlanRelativePath } from '@shared/gui-plan'
 
 type PlanResultMatch = {
   blockId: string
@@ -72,6 +73,15 @@ function latestSuccessfulPlanBlock(blocks: ChatBlock[]): PlanResultMatch | null 
 
 export function latestSuccessfulPlanBlockId(blocks: ChatBlock[]): string | null {
   return latestSuccessfulPlanBlock(blocks)?.blockId ?? null
+}
+
+export function resolvePlanResultWorkspaceRoot(meta: PlanResultMatch['meta'], threadWorkspace: string | undefined): string | null {
+  const workspace = normalizePlanWorkspaceRoot(threadWorkspace)
+  if (!workspace || !isGuiPlanRelativePath(meta.relativePath)) return null
+  if (meta.workspaceRoot && normalizePlanWorkspaceRoot(meta.workspaceRoot) !== workspace) return null
+  // Compare the established identity; never recover a filesystem root by
+  // splitting a public plan ID or accepting a tool-provided absolute path.
+  return meta.planId === buildGuiPlanId(workspace, meta.relativePath) ? workspace : null
 }
 
 export function resolvePlanTurnWorkspaceRoot(
@@ -146,6 +156,8 @@ export function useWorkbenchPlanController({
   onPlanBuildStarted
 }: WorkbenchPlanControllerOptions) {
   const activeGuiPlan = useGuiPlanStore((s) => s.activePlan)
+  const planThreadId = useChatStore((s) => s.activeThreadId)
+  const planThreadWorkspace = useChatStore((s) => s.threads.find((thread) => thread.id === s.activeThreadId)?.workspace)
   const latestPlanBlockId = useChatStore((s) => latestSuccessfulPlanBlockId(s.blocks))
   const planTurnInFlightRef = useRef(false)
   const lastLoadedPlanBlockIdRef = useRef<string | null>(null)
@@ -240,26 +252,36 @@ export function useWorkbenchPlanController({
 
   const loadPlanFromMeta = useCallback(async (
     meta: PlanResultMatch['meta'],
-    shouldOpen: boolean
-  ): Promise<void> => {
+    shouldOpen: boolean,
+    isCurrent: () => boolean
+  ): Promise<boolean> => {
+    const snapshot = useChatStore.getState()
+    const threadId = snapshot.activeThreadId
+    const threadWorkspace = snapshot.threads.find((thread) => thread.id === threadId)?.workspace
+    const targetWorkspace = resolvePlanResultWorkspaceRoot(meta, threadWorkspace)
+    if (!threadId || !targetWorkspace || !isCurrent()) return false
     const result = await window.analytix.files.read({
-      workspaceRoot: meta.workspaceRoot,
+      workspaceRoot: targetWorkspace,
       path: meta.relativePath
     })
+    const current = useChatStore.getState()
+    if (!isCurrent() || current.activeThreadId !== threadId ||
+      current.threads.find((thread) => thread.id === threadId)?.workspace !== threadWorkspace) return false
     if (!result.ok) {
       useGuiPlanStore.getState().setOperationStatus('error', result.message)
-      return
+      return false
     }
     const base = createGuiPlanArtifact({
-      workspaceRoot: meta.workspaceRoot,
-      threadId: useChatStore.getState().activeThreadId,
+      workspaceRoot: targetWorkspace,
+      threadId,
       relativePath: meta.relativePath,
-      absolutePath: meta.absolutePath ?? result.path,
+      absolutePath: result.path,
       sourceRequest: meta.sourceRequest ?? ''
     })
     const plan = meta.title?.trim() ? { ...base, featureName: meta.title.trim() } : base
     useGuiPlanStore.getState().setActivePlan(plan, result.content)
     if (shouldOpen) openGuiPlanPanel()
+    return true
   }, [openGuiPlanPanel])
 
   const buildGuiPlan = async (): Promise<void> => {
@@ -393,22 +415,27 @@ export function useWorkbenchPlanController({
   }, [mode, route, setMode])
 
   useEffect(() => {
-    if (latestPlanBlockId && lastLoadedPlanBlockIdRef.current === latestPlanBlockId) return
+    const resultKey = `${planThreadId}:${planThreadWorkspace}:${latestPlanBlockId}`
+    if (latestPlanBlockId && lastLoadedPlanBlockIdRef.current === resultKey) return
     if (!latestPlanBlockId) return
     const latestPlanBlock = latestSuccessfulPlanBlock(useChatStore.getState().blocks)
     if (!latestPlanBlock || latestPlanBlock.blockId !== latestPlanBlockId) return
-    lastLoadedPlanBlockIdRef.current = latestPlanBlockId
+    let cancelled = false
     // Keep generated plans inline until the user explicitly opens the preview.
     // This avoids squeezing the chat on portrait/narrow screens after a plan turn.
     const shouldOpen = false
     planTurnInFlightRef.current = false
-    void loadPlanFromMeta(latestPlanBlock.meta, shouldOpen).catch((error) => {
+    void loadPlanFromMeta(latestPlanBlock.meta, shouldOpen, () => !cancelled).then((loaded) => {
+      if (loaded && !cancelled) lastLoadedPlanBlockIdRef.current = resultKey
+    }).catch((error) => {
+      if (cancelled) return
       useGuiPlanStore.getState().setOperationStatus(
         'error',
         error instanceof Error ? error.message : String(error)
       )
     })
-  }, [latestPlanBlockId, loadPlanFromMeta])
+    return () => { cancelled = true }
+  }, [latestPlanBlockId, loadPlanFromMeta, planThreadId, planThreadWorkspace])
 
   useEffect(() => {
     if (!busy) planTurnInFlightRef.current = false

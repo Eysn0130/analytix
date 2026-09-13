@@ -36,6 +36,7 @@ import type { WriteTypographySettingsV1 } from '../../shared/app-settings-types'
 import { isWriteOfficialDocumentTypography } from '../../shared/write-official-document'
 import { containsPrivateReasoningContent } from '../../shared/public-runtime-content'
 import { applyWriteMarkdownAlignmentDirectivesToTree } from '../../shared/write-text-align'
+import { projectWriteExportMarkdownTreeV1 } from './write-export-content'
 
 /** The only user-authored marker which is interpreted as a Word page break. */
 export const WRITE_DOCX_PAGE_BREAK_MARKER = '<!-- analytix:page-break -->'
@@ -71,8 +72,10 @@ export type BuildWriteDocxDocumentOptions = {
   sourcePath: string
   /** The canonical workspace boundary for local image reads. */
   workspaceRoot: string
-  /** Already-projected public Markdown/plain text. Never fetched from a provider here. */
+  /** Caller-owned projection. Image targets retain the format's private read gate. */
   publicContent: string
+  /** Trusted caller's prose policy, applied after parsing without rewriting image targets. */
+  projectProse?: (content: string) => string
   title?: string
   typography?: Partial<WriteTypographySettingsV1>
 }
@@ -571,11 +574,13 @@ function parsePlainText(content: string): MarkdownNode {
   return { type: 'root', children }
 }
 
-function parseContent(sourcePath: string, content: string): MarkdownNode {
+function parseContent(sourcePath: string, content: string, projectProse?: (content: string) => string): MarkdownNode {
   const extension = extname(sourcePath).toLowerCase()
-  if (extension === '.txt' || extension === '.text') return parsePlainText(content)
-  const tree = unified().use(remarkParse).use(remarkGfm).parse(content) as unknown as MarkdownNode
+  const tree = extension === '.txt' || extension === '.text'
+    ? parsePlainText(content)
+    : unified().use(remarkParse).use(remarkGfm).parse(content) as unknown as MarkdownNode
   applyWriteMarkdownAlignmentDirectivesToTree(tree)
+  if (projectProse) projectWriteExportMarkdownTreeV1(tree, projectProse)
   return tree
 }
 
@@ -652,7 +657,7 @@ export async function buildWriteDocxDocument(options: BuildWriteDocxDocumentOpti
     imageCount: 0,
     imageBytes: 0
   }
-  const tree = parseContent(sourcePath, options.publicContent)
+  const tree = parseContent(sourcePath, options.publicContent, options.projectProse)
   const children = await renderBlocks(tree.children ?? [], context)
   const document = new Document({
     title: options.title,

@@ -69,7 +69,9 @@ export function extractPlanMetadataFromBlock(
   const workspaceRoot = typeof plan.workspace_root === 'string' ? plan.workspace_root : ''
   const relativePath = typeof plan.relative_path === 'string' ? plan.relative_path : ''
   const operation = plan.operation === 'draft' || plan.operation === 'refine' ? plan.operation : null
-  if (!planId || !workspaceRoot || !relativePath || !operation) return null
+  // Public plan_status intentionally omits local workspace authority. The
+  // workbench resolves that separately from the current thread context.
+  if (!planId || !relativePath || !operation) return null
   return {
     planId,
     workspaceRoot,

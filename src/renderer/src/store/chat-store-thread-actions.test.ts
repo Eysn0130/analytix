@@ -1211,6 +1211,40 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.blocks.map((block) => block.id)).toContain('user_live')
   })
 
+  it('restores missing registered-thread metadata together with its history', async () => {
+    const restored = { ...thread('thr_restored'), title: 'Restored SDD', workspace: '/Users/synthetic/plan-workspace', historyAuthority: 'case_boundary_only_v1' as const }
+    const blocks = [{ kind: 'user' as const, id: 'restored-user', text: 'Synthetic request' }]
+    const provider = {
+      getThreadDetail: vi.fn(async () => ({ thread: restored, blocks, latestSeq: 7, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    const other = thread('thr_other')
+    state.threads = [other]
+    state.composerPickList = []
+    state.composerModelGroups = []
+    await actions.selectThread(restored.id)
+    expect(state.error).toBeNull()
+    expect(state.activeThreadId).toBe(restored.id)
+    expect(state.threads).toEqual([other, restored])
+    expect(state.blocks).toMatchObject(blocks)
+    expect(state.lastSeq).toBe(7)
+  })
+
+  it('refuses mismatched detail metadata without adopting its history', async () => {
+    registryMock.getProvider.mockReturnValue({ getThreadDetail: vi.fn(async () => ({
+      thread: thread('wrong-thread'), blocks: [{ kind: 'user', id: 'wrong-user', text: 'Wrong' }], latestSeq: 7
+    })) })
+    const { actions, state } = buildHarness()
+    state.activeThreadId = 'thr_other'
+    state.threads = [thread('thr_other')]
+    await actions.selectThread('requested-thread')
+    expect(state.activeThreadId).toBe('thr_other')
+    expect(state.threads.map((entry) => entry.id)).toEqual(['thr_other'])
+    expect(state.blocks.some((block) => block.id === 'wrong-user')).toBe(false)
+  })
+
   it('clears stale active stream when selecting a completed thread detail', async () => {
     resetActiveStream('thr_existing', {
       turnId: 'turn-old',

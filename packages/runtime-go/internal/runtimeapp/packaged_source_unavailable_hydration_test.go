@@ -15,6 +15,7 @@ import (
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
 const packagedSourceUnavailableHydrationPromptV1 = "Continue in this exact Agent and thread. " +
@@ -40,9 +41,19 @@ func TestRuntimeHTTPRawPackagedProtectedPromptPublishesSourceUnavailableAndHydra
 	defer provider.Close()
 
 	root := t.TempDir()
-	workspace := filepath.Join(root, "ordinary-workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
+	// Keep the public workspace independent of TempDir's PII-shaped numeric
+	// suffixes; this fixture must reach the protected effect and restart gates.
+	workspace, err := os.MkdirTemp(os.TempDir(), "analytix-hydration-workspace-")
+	if err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(workspace); err != nil {
+			t.Error(err)
+		}
+	})
+	if domainsecurity.ContainsProtectedCaseData(workspace) {
+		t.Fatal("hydration workspace fixture contains a restricted identifier")
 	}
 	config := Config{
 		RuntimeToken: DefaultRuntimeToken, ProductionDurableRoot: filepath.Join(root, "durable"),

@@ -2,10 +2,32 @@ package privacyprojection
 
 import (
 	"encoding/json"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestPrivateSourceTextProjectsComposerReferenceContents(t *testing.T) {
+	input := `@[Report \[tool\]](plugin://report) $[Audit](skill://audit%2Fskill) /Users/private-owner/source.csv`
+	want := `@[Report \[tool\]](plugin://report) $[Audit](skill://audit%2Fskill) [PRIVATE_PATH]`
+	if got := ProjectPrivateSourceText(input); got != want || ProjectPrivateSourceText(got) != got {
+		t.Fatalf("valid reference structure changed: %q", got)
+	}
+	if got := ProjectPrivateSourceText(`@[/Users/private-owner/source.csv](plugin://report)`); got != `@[\[PRIVATE_PATH\]](plugin://report)` {
+		t.Fatalf("reference label escaped projection: %q", got)
+	}
+	for _, id := range []string{"%2FUsers%2Fprivate-owner%2Fsource.csv", "%252FUsers%252Fprivate-owner%252Fsource.csv", "13800138000", "alice%40example.com", "api_key%3Dsyntheticsecret", "%ZZ", ""} {
+		if got := ProjectPrivateSourceText("@[Tool](plugin://" + id + ")"); got != "Tool [PRIVATE_REFERENCE]" {
+			t.Fatalf("unsafe reference ID was published: %q", got)
+		}
+	}
+	for _, id := range []string{"cer1_" + strings.Repeat("a", 64), "srow1_" + strings.Repeat("a", 64), `\u0063er1_` + strings.Repeat("a", 64), `{"purpose":"analytix.raw-artifact-source-locator/v1"}`} {
+		if got := ProjectPrivateSourceText("@[Tool](plugin://" + url.PathEscape(id) + ")"); got != "Tool [PRIVATE_REFERENCE]" {
+			t.Fatal("encoded private reference or evidence was published")
+		}
+	}
+}
 
 func TestPrivateSourceProseProjectsStrictRawJSON(t *testing.T) {
 	for _, fixture := range []struct {
@@ -60,6 +82,19 @@ func TestPrivateSourceTextPreservesOrdinarySemantics(t *testing.T) {
 	}
 	if got := ProjectPrivateSourceText("https://example.com/home/file /Users/person/input.csv"); got != "https://example.com/home/file [PRIVATE_PATH]" {
 		t.Fatalf("remote URL hid a separate local locator: %q", got)
+	}
+}
+
+func TestPrivateSourceDiffHeadersKeepHunksWithoutPublishingAbsolutePaths(t *testing.T) {
+	input := "--- a//Users/private-owner/Case Files/source.csv\n+++ b//Users/private-owner/Case Files/source.csv\n@@ -1 +1 @@\n-old\n+new\n"
+	want := "--- [PRIVATE_PATH]\n+++ [PRIVATE_PATH]\n@@ -1 +1 @@\n-old\n+new\n"
+	projected, changed := ProjectPublicValue(map[string]any{"diff": input})
+	if !changed || projected.(map[string]any)["diff"] != want || ProjectPrivateSourceText(want) != want {
+		t.Fatal("diff projection lost hunks or retained a private header")
+	}
+	ordinary := "--- a/src/main.go\n+++ b/src/main.go\n@@ -1 +1 @@\n-old\n+new\n"
+	if ProjectPrivateSourceText(ordinary) != ordinary {
+		t.Fatal("ordinary relative code diff changed")
 	}
 }
 
