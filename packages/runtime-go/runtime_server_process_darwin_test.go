@@ -506,12 +506,6 @@ func TestRuntimeServerInterruptStopsLaterToolsInSameProviderStep(t *testing.T) {
 	}
 }
 
-type runtimeServerSubagentDefaultMaxStepsCase struct {
-	name         string
-	parentSteps  *int
-	expectedStep int
-}
-
 func TestRuntimeServerGoalTodoCompleteStepAndFinalReadiness(t *testing.T) {
 	dataDir := t.TempDir()
 	todoArgs := string(mustJSON(t, map[string]any{

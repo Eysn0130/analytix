@@ -9368,6 +9368,12 @@ func TestRuntimeServerInterruptDiscardExcludesAbortedTurnFromNextProviderHistory
 	}
 }
 
+type runtimeServerSubagentDefaultMaxStepsCase struct {
+	name         string
+	parentSteps  *int
+	expectedStep int
+}
+
 func TestRuntimeServerSubagentDefaultMaxStepsOrdinaryBudgets(t *testing.T) {
 	parentSteps := 16
 	assertRuntimeServerSubagentDefaultMaxSteps(t, []runtimeServerSubagentDefaultMaxStepsCase{
