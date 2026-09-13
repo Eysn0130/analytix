@@ -198,6 +198,16 @@ scopes. Refusing unprojected audio preserves the privacy boundary but leaves
 the speech-to-text functionality gap open. The separate unavailable Go
 text-to-speech/music/video tools do not waive this requirement.
 
+Ordinary Write HTML, DOC, DOCX, PDF and rich clipboard exports refuse Markdown
+images, including reference, remote and data-URI images, before publication.
+Current workspace/frame authority and filename checks do not classify media
+content. A synthetic PNG metadata canary reached exported HTML/DOC and embedded
+DOCX media before this gate; this is controlled byte-level evidence, not a claim
+about real user data or pixel/OCR coverage. Masked text and code examples remain
+available. The accepted workspace-image embedding requirement remains **BLOCKED**
+until trusted image content projection is implemented and verified; refusal is
+not feature completion or a source-exact export authorization.
+
 The launcher rejects symlinked, shared or non-canonical profile directories
 instead of silently repairing them. Profiles are not automatically deleted:
 archive/clean exact task-owned paths only after confirming they are no longer

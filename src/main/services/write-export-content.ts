@@ -32,17 +32,19 @@ function isPublicDestination(url: string, projectText: (text: string) => string)
   return false
 }
 
-// Project prose after parsing. Image destinations remain private structure until
-// the existing format-specific workspace checks and byte embedding complete.
-// Rewriting an entire Markdown string can erase image syntax before those gates.
+// Parse before projecting so rewriting prose cannot erase an image reference
+// before its privacy gate. Workspace membership and a safe URL do not classify
+// image bytes; ordinary export must refuse them until trusted content projection
+// exists. This refusal does not satisfy the required image-export capability.
 export function projectWriteExportMarkdownTreeV1(tree: MarkdownNode, projectText = projectOrdinaryWriteExportContentV1): void {
-  const imageReferences = new Set<string>()
   const pending = [tree]
   const nodes: MarkdownNode[] = []
   while (pending.length) {
     const node = pending.pop()!
+    if (node.type === 'image' || node.type === 'imageReference') {
+      throw new WriteExportPublicError('Write export cannot include images because image content privacy checks are unavailable.')
+    }
     nodes.push(node)
-    if (node.type === 'imageReference' && node.identifier) imageReferences.add(node.identifier)
     if (node.children) pending.push(...node.children)
   }
   for (const node of nodes) {
@@ -50,15 +52,12 @@ export function projectWriteExportMarkdownTreeV1(tree: MarkdownNode, projectText
       if (typeof node[key] === 'string') node[key] = projectText(node[key])
     }
     if (typeof node.url === 'string') {
-      const imageTarget = node.type === 'image' || (node.type === 'definition' && !!node.identifier && imageReferences.has(node.identifier))
-      if (!imageTarget && (node.type === 'link' || node.type === 'definition') && !isPublicDestination(node.url, projectText)) {
+      if ((node.type === 'link' || node.type === 'definition') && !isPublicDestination(node.url, projectText)) {
         // A projected target is display text, never replacement link authority.
         if (node.type === 'link' && !node.children?.length) {
           node.children = [{ type: 'text', value: '[PRIVATE_REFERENCE]' }]
         }
         node.url = ''
-      } else if (imageTarget && /^(?:https?:|data:)/iu.test(node.url) && !isPublicDestination(node.url, projectText)) {
-        throw new WriteExportPublicError('Write export image URL contains private content and was blocked.')
       }
     }
   }
