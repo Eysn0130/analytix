@@ -31,6 +31,20 @@ const CONTEXTUAL_FINANCIAL_IDENTIFIER = new RegExp(
   'giu'
 )
 
+// Only free-form display text uses this locator projection. Keep ordinary
+// relative code paths and HTTP(S) URL tokens intact; structured path fields
+// used for execution are not rewritten by the PII classification helpers.
+// A closed quote owns the whole locator on that line, including spaces and
+// brackets. Unquoted locators stop at whitespace but permit filename brackets.
+const PRIVATE_SOURCE_LOCATOR = /https?:\/\/[^\s"'`<>]+|(["'`])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\r\n]*?\1|(^|[\s"'`=(:：\[{,，;；])(?:file:\/\/|\/(?:Users|Volumes|private|var|tmp|home|cases?)\/|[a-z]:[\\/]|~(?:[a-z0-9_.-]+)?[\\/]|\\\\|\/\/)[^\s"'`<>{},;，。；！？]+/giu
+
+function projectPrivateSourceLocators(text: string): string {
+  return text.replace(PRIVATE_SOURCE_LOCATOR, (match, quote: string | undefined, prefix: string | undefined) =>
+    quote !== undefined ? `${quote}[PRIVATE_PATH]${quote}` :
+      prefix === undefined ? match : `${prefix}[PRIVATE_PATH]`
+  )
+}
+
 const MAX_PUBLIC_PII_DEPTH = 32
 const MAX_PUBLIC_PII_NODES = 100_000
 const PUBLIC_TEXT_KEYS = new Set([
@@ -172,6 +186,12 @@ function containsCurrencyAmount(text: string): boolean {
 }
 
 export function projectOrdinaryLogPII(text: string): string {
+  return projectPIIIdentifiers(projectPrivateSourceLocators(String(text)))
+}
+
+// Detection must inspect the original identifiers, including those inside a
+// locator. A private path alone does not establish protected case data.
+function projectPIIIdentifiers(text: string): string {
   const original = String(text)
   const detectionText = original.normalize('NFKC').replace(FORMAT_CHARACTERS, '')
   let projected = detectionText
@@ -205,7 +225,7 @@ export function projectOrdinaryPublicText(text: string): string {
 }
 
 export function containsOrdinaryPublicPII(value: unknown): boolean {
-  if (typeof value === 'string') return projectOrdinaryLogPII(value) !== value
+  if (typeof value === 'string') return projectPIIIdentifiers(value) !== value
   return containsPublicPII(value, false, newPublicPIITraversalState(), 0)
 }
 
@@ -217,11 +237,11 @@ function containsPublicPII(
 ): boolean {
   if (!consumePublicPIINode(state, depth)) return true
   if (typeof value === 'string') {
-    return inheritedText && projectOrdinaryLogPII(value) !== value
+    return inheritedText && projectPIIIdentifiers(value) !== value
   }
   if (!value || typeof value !== 'object') {
     return inheritedText && value !== null && value !== undefined &&
-      projectOrdinaryLogPII(String(value)) !== String(value)
+      projectPIIIdentifiers(String(value)) !== String(value)
   }
   if (state.active.has(value)) return true
   state.active.add(value)

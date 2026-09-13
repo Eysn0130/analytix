@@ -115,6 +115,39 @@ func TestMigrateReasoningThreadJSONPreflightsCurrentAuthorityBeforeSanitizing(t 
 	}
 }
 
+func TestCurrentHistoryLocatorProjectionPreservesRestartAuthority(t *testing.T) {
+	state, err := appcontextepoch.DefaultState("thread-private-prose-restart", 7, time.Unix(7, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const locator = "/Users/private-owner/SYNTHETIC-PII.csv"
+	thread := map[string]any{
+		"id": "thread-private-prose-restart", "status": "idle", "turns": []any{},
+		"contextEpochState": appcontextepoch.PublicState(state), "title": "Review " + locator,
+	}
+	before, err := json.MarshalIndent(thread, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "thread.json")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrateReasoningThreadJSON(path); err != nil {
+			t.Fatalf("new prose rule blocked valid current history: %v", err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(after, before) {
+			t.Fatal("restart rewrote current authority bytes")
+		}
+		public, err := threadapp.ProjectPublicThread(thread)
+		if err != nil || public["title"] != "Review [PRIVATE_PATH]" {
+			t.Fatalf("current publication leaked old prose: %v", err)
+		}
+	}
+}
+
 func TestMigrateReasoningThreadJSONRejectsDuplicateKeysBesideCurrentAuthority(t *testing.T) {
 	state, err := appcontextepoch.DefaultState("thread-current-duplicate", 7, time.Unix(7, 0).UTC())
 	if err != nil {

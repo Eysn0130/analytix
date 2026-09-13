@@ -727,6 +727,33 @@ describe('FloatingComposer model controls', () => {
     expect(html).not.toContain('disabled=""')
   })
 
+  it.each([
+    { surface: 'Code', compact: false, mode: 'select' as const },
+    { surface: 'Write', compact: true, mode: 'combobox' as const }
+  ])('offers committed default models in the $surface picker', ({ compact, mode }) => {
+    const html = renderToStaticMarkup(
+      createElement(FloatingComposerModelPicker, {
+        compact,
+        mode,
+        composerModel: 'deepseek-v4-flash',
+        composerProviderId: 'deepseek',
+        composerPickList: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        composerModelGroups: [{
+          providerId: 'deepseek',
+          label: 'deepseek',
+          modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro']
+        }],
+        canChangeModel: true,
+        onComposerModelChange: () => undefined,
+        onConfigureProviders: () => undefined
+      })
+    )
+
+    expect(html).toContain('deepseek-v4-flash')
+    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).not.toContain('Set up provider')
+  })
+
   it('does not treat default fallback models as configured providers', () => {
     const html = renderToStaticMarkup(
       createElement(FloatingComposerModelPicker, {

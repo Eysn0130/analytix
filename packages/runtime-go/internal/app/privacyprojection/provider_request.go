@@ -337,7 +337,7 @@ func bytesEqualStringV1(value []byte, text string) bool {
 func ProjectOrdinaryText(text string) string {
 	current := text
 	for pass := 0; pass < maxProviderProjectionPasses; pass++ {
-		next := domainprivacy.ProjectText(domainsecret.ProjectTextV1(current)).Text
+		next := domainprivacy.ProjectText(domainprivacy.ProjectPrivateSourceText(domainsecret.ProjectTextV1(current))).Text
 		if next == current {
 			if validateOrdinaryText(current) == nil {
 				return current
@@ -542,14 +542,14 @@ func validateProviderCaseTextV1(
 		if domaincaseentity.ContainsReferenceCandidateV1(text) {
 			return ErrProviderPrivacyAuthorityUnavailable
 		}
-		return domainprivacy.ValidateOrdinaryText(text)
+		return validateOrdinaryText(text)
 	}
 	cursor := 0
 	for _, span := range spans {
 		gap := text[cursor:span.start]
 		reference := domaincaseentity.ReferenceV1(text[span.start:span.end])
 		if domaincaseentity.ContainsReferenceCandidateV1(gap) ||
-			domainprivacy.ValidateOrdinaryText(gap) != nil {
+			validateOrdinaryText(gap) != nil {
 			return ErrProviderPrivacyAuthorityUnavailable
 		}
 		if _, ok := allowed[reference]; !ok {
@@ -559,7 +559,7 @@ func validateProviderCaseTextV1(
 	}
 	gap := text[cursor:]
 	if domaincaseentity.ContainsReferenceCandidateV1(gap) ||
-		domainprivacy.ValidateOrdinaryText(gap) != nil {
+		validateOrdinaryText(gap) != nil {
 		return ErrProviderPrivacyAuthorityUnavailable
 	}
 	return nil
@@ -1694,6 +1694,9 @@ func providerIdentifierRequiresProjection(value string) bool {
 func validateOrdinaryText(text string) error {
 	if err := domainsecret.ValidateValueV1(text); err != nil {
 		return err
+	}
+	if domainprivacy.ProjectPrivateSourceText(text) != text {
+		return ErrProviderPrivacyAuthorityUnavailable
 	}
 	return domainprivacy.ValidateOrdinaryText(text)
 }

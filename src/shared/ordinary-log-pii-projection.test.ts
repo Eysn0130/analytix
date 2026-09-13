@@ -3,6 +3,7 @@ import ordinaryPIICorpusJSON from '../../packages/runtime/src/conformance/fixtur
 import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
+  containsProtectedCaseFactCandidate,
   projectOrdinaryLogPII,
   projectOrdinaryPublicText
 } from './ordinary-log-pii-projection'
@@ -25,6 +26,104 @@ function canonicalDigits(value: string): string {
 }
 
 describe('ordinary log PII projection', () => {
+  it.each([
+    '/Users/private-owner/SYNTHETIC-PII.csv',
+    '/Volumes/source/notes.md',
+    '/private/source/notes.md',
+    '/var/source/notes.md',
+    '/tmp/source/notes.md',
+    '/home/owner/notes.md',
+    '/case/source.csv',
+    '/cases/source.csv',
+    String.raw`C:\Users\private-owner\source.csv`,
+    'D:/private-owner/source.csv',
+    'file:///Users/private-owner/source.csv',
+    'file://server/share/source.csv',
+    '~/source.csv',
+    '~owner/source.csv',
+    String.raw`\\server\share\source.csv`,
+    '//server/share/source.csv'
+  ])('masks private source locator %s only in ordinary text output', (locator) => {
+    const text = `source=${locator}\nordinary document context`
+    expect(projectOrdinaryPublicText(text)).toBe('source=[PRIVATE_PATH]\nordinary document context')
+    expect(projectOrdinaryLogPII(text)).toBe('source=[PRIVATE_PATH]\nordinary document context')
+    expect(projectOrdinaryPublicText(projectOrdinaryPublicText(text))).toBe(projectOrdinaryPublicText(text))
+    expect(containsOrdinaryPublicPII(locator)).toBe(false)
+    expect(containsProtectedCaseFactCandidate(locator)).toBe(false)
+  })
+
+  it.each(['"', "'", '`'])('masks the complete private locator inside closed %s quotes', (quote) => {
+    for (const locator of [
+      '/Users/private-owner/Case Files/SYNTHETIC-PII.csv',
+      '/Users/private-owner/Case Files/SYNTHETIC-PII (copy) [final].csv',
+      String.raw`C:\Users\private-owner\Case Files\SYNTHETIC-PII (copy).csv`,
+      'file:///Users/private-owner/Case Files/SYNTHETIC-PII.csv'
+    ]) {
+      const text = `source=${quote}${locator}${quote} ordinary context`
+      const expected = `source=${quote}[PRIVATE_PATH]${quote} ordinary context`
+      expect(projectOrdinaryPublicText(text)).toBe(expected)
+      expect(projectOrdinaryLogPII(text)).toBe(expected)
+      expect(projectOrdinaryPublicText(expected)).toBe(expected)
+    }
+  })
+
+  it('includes parentheses and brackets in unquoted private filenames', () => {
+    const text = '/Users/private-owner/SYNTHETIC-PII(copy)[final].csv ordinary context'
+    expect(projectOrdinaryPublicText(text)).toBe('[PRIVATE_PATH] ordinary context')
+    expect(projectOrdinaryLogPII(text)).toBe('[PRIVATE_PATH] ordinary context')
+  })
+
+  it.each(['\n', '\r\n'])('does not let a quoted locator consume the next line (%j)', (newline) => {
+    const text = `"/Users/private-owner/source.csv${newline}ordinary document context"`
+    expect(projectOrdinaryPublicText(text)).toBe(`"[PRIVATE_PATH]${newline}ordinary document context"`)
+  })
+
+  it.each(['"', "'", '`'])('preserves quoted relative paths and HTTPS URLs (%s)', (quote) => {
+    for (const value of ['src/Case Files/note (copy) [final].md', 'https://example.com/home/file(copy)[final]']) {
+      const text = `${quote}${value}${quote}`
+      expect(projectOrdinaryPublicText(text)).toBe(text)
+      expect(projectOrdinaryLogPII(text)).toBe(text)
+    }
+  })
+
+  it.each([
+    'src/main/index.ts', './src/main/index.ts', '../notes.md', '/plan',
+    'https://example.com/home/file', 'https://example.com/Users/guide.md',
+    'https://example.com/?next=/private/guide.md'
+  ])('preserves ordinary code paths, commands, and HTTPS URL %s', (text) => {
+    expect(projectOrdinaryPublicText(text)).toBe(text)
+    expect(projectOrdinaryLogPII(text)).toBe(text)
+  })
+
+  it('does not let an HTTPS URL exempt a separate private locator or embedded PII', () => {
+    expect(projectOrdinaryPublicText('https://example.com/home/file /Users/private-owner/source.csv')).toBe(
+      'https://example.com/home/file [PRIVATE_PATH]'
+    )
+    expect(projectOrdinaryPublicText('https://example.com/home/13800138000.csv')).toBe(
+      'https://example.com/home/[PHONE].csv'
+    )
+  })
+
+  it('masks Write context locators without changing the prompt markers or safe excerpt', () => {
+    const text = '[相关文献上下文]\n[1] notes.md:1-2\n路径：`/Users/private-owner/SYNTHETIC-PII.csv`\nordinary document context\n[/相关文献上下文]'
+    expect(projectOrdinaryPublicText(text)).toBe(
+      '[相关文献上下文]\n[1] notes.md:1-2\n路径：`[PRIVATE_PATH]`\nordinary document context\n[/相关文献上下文]'
+    )
+  })
+
+  it('retains PII risk detection inside paths and does not mutate typed path authority', () => {
+    const path = '/Users/private-owner/13800138000.csv'
+    expect(containsOrdinaryPublicPII(path)).toBe(true)
+    expect(containsProtectedCaseFactCandidate(path)).toBe(true)
+    expect(containsOrdinaryPublicPII({ path })).toBe(true)
+    expect(projectOrdinaryPublicText(path)).toBe('[PRIVATE_PATH]')
+
+    const metadata = { workspace: '/Users/private-owner/workspace', path: '/tmp/source.csv', relativePath: 'src/main.ts' }
+    const before = structuredClone(metadata)
+    expect(containsOrdinaryPublicPII(metadata)).toBe(false)
+    expect(metadata).toEqual(before)
+  })
+
   it('detects only the closed internal authority-reference grammars', () => {
     const authorityRef = `cer1_${'a'.repeat(64)}`
     const sourceRowRef = `srow1_${'b'.repeat(64)}`

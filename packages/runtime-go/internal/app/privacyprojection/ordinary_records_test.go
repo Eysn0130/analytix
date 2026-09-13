@@ -30,6 +30,26 @@ func TestProjectSteeringContentPreservesMeasuredAmount(t *testing.T) {
 	}
 }
 
+func TestTurnAndSteeringPrivateSourceProseKeepsTypedWorkspace(t *testing.T) {
+	const text = "SYNTHETIC_WRITE_PRIVACY_01\nSource: /Users/private-owner/SYNTHETIC-PII.csv\nordinary excerpt"
+	const safe = "SYNTHETIC_WRITE_PRIVACY_01\nSource: [PRIVATE_PATH]\nordinary excerpt"
+	plan := map[string]any{"workspaceRoot": "/Users/developer/project", "sourceRequest": text}
+	prompt, display, _, projectedPlan := ProjectTurnContent(text, text, nil, plan)
+	if prompt != safe || display != safe || projectedPlan["sourceRequest"] != safe || projectedPlan["workspaceRoot"] != plan["workspaceRoot"] {
+		t.Fatal("turn prose projection or typed plan binding is incorrect")
+	}
+	steered, display, _ := ProjectSteeringContent(text, text, nil)
+	if steered != safe || display != safe {
+		t.Fatal("steering retained a private locator")
+	}
+	if validateOrdinaryText(text) == nil || validateProviderCaseTextV1(text, nil) == nil {
+		t.Fatal("final Provider validation admitted unprojected prose")
+	}
+	if validateOrdinaryText(safe) != nil || validateProviderCaseTextV1(safe, nil) != nil {
+		t.Fatal("final Provider validation rejected projected prose")
+	}
+}
+
 func TestProjectTurnContentMasksContextBoundShortAccount(t *testing.T) {
 	prompt, display, _, _ := ProjectTurnContent(
 		"核实账号 00123456 的金额 12345678 元",

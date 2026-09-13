@@ -2313,8 +2313,8 @@ app.whenReady().then(async () => {
   }
 
   const fetchModels = async () => {
-    const settings = await store.load()
-    return fetchUpstreamModelIds(settings)
+    const registry = await mainProviderRegistry({ schemaVersion: 1, operation: 'list' })
+    return fetchUpstreamModelIds(registry)
   }
 
   const saveSettingsPatch = async (partial: AppSettingsPatch): Promise<AppSettingsV1> => {

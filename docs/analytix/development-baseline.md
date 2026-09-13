@@ -171,6 +171,12 @@ image editing and speech transcription remain explicitly unavailable while
 trusted local media projection is absent. Authentication or base64 encoding is
 not a privacy projection, and these unavailable operations remain in any
 acceptance denominator that originally required them.
+In particular, the accepted
+[production configuration contract](../../openspec/specs/production-config-truthfulness/spec.md)
+retains speech-to-text and Write image generation in their real Electron
+scopes. Refusing unprojected audio preserves the privacy boundary but leaves
+the speech-to-text functionality gap open. The separate unavailable Go
+text-to-speech/music/video tools do not waive this requirement.
 
 The launcher rejects symlinked, shared or non-canonical profile directories
 instead of silently repairing them. Profiles are not automatically deleted:

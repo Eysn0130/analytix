@@ -323,6 +323,7 @@ func TestRuntimeActiveHistoryCompactionDurableCommitAndCASRecovery(t *testing.T)
 			fixture, prepared := runtimeActiveHistoryCompactionFixtureV1(t)
 			ctx := context.Background()
 			threadID := fixture.target["id"].(string)
+			var missingCASBoundary error
 			if mode == "commit" {
 				result, err := fixture.durable.CommitCompaction(prepared.CommitRequest())
 				if err != nil || !result.Committed || !result.AuthorityCommitted {
@@ -349,7 +350,14 @@ func TestRuntimeActiveHistoryCompactionDurableCommitAndCASRecovery(t *testing.T)
 						if err := os.Remove(shard); err != nil {
 							t.Fatal(err)
 						}
+						missingCASBoundary = os.ErrNotExist
+					} else {
+						// Digests vary with the fixture authority, workspace and
+						// time. A shared shard retains its valid anchor, so the
+						// exact record inventory detects this same missing CAS.
+						missingCASBoundary = finaladapter.ErrSecurePrivateCASIntegrity
 					}
+					t.Logf("missing CAS fault retains shard: %t", len(entries) > 0)
 				}
 				if mode == "recovery_missing_receipt" {
 					altered := runtimeActiveHistoryCloneV1(t, fixture.target)
@@ -367,17 +375,20 @@ func TestRuntimeActiveHistoryCompactionDurableCommitAndCASRecovery(t *testing.T)
 				}
 				signsBeforeRestart := fixture.authority.signs
 				registry, err := casethreadapp.NewRegistry(ctx, fixture.authority, fixture.caseStore)
-				if err != nil {
-					if mode == "recovery_missing_cas" && errors.Is(err, os.ErrNotExist) {
-						// The physical CAS inventory rejects this cut before
-						// semantic recovery; it must not reconstruct the lineage.
-						after, readErr := os.ReadFile(fixture.targetPath())
-						_, recordErr := os.Lstat(fixture.recordPath())
-						if readErr != nil || !bytes.Equal(before, after) || !os.IsNotExist(recordErr) || fixture.authority.signs != signsBeforeRestart {
-							t.Fatal("missing CAS startup rejection reconstructed authority or changed primary")
-						}
-						return
+				if mode == "recovery_missing_cas" {
+					if missingCASBoundary == nil || registry != nil || !errors.Is(err, missingCASBoundary) {
+						t.Fatalf("missing CAS was not rejected at the prepared physical boundary: %v", err)
 					}
+					// Neither physical rejection path may reconstruct lineage,
+					// sign replacement authority, or change the primary target.
+					after, readErr := os.ReadFile(fixture.targetPath())
+					_, recordErr := os.Lstat(fixture.recordPath())
+					if readErr != nil || !bytes.Equal(before, after) || !os.IsNotExist(recordErr) || fixture.authority.signs != signsBeforeRestart {
+						t.Fatal("missing CAS startup rejection reconstructed authority or changed primary")
+					}
+					return
+				}
+				if err != nil {
 					t.Fatal(err)
 				}
 				registry.SetActiveInheritedHistoryIdentityValidatorV1(fixture.identities)

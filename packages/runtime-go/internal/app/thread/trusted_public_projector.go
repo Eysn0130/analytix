@@ -11,6 +11,8 @@ import (
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainordinary "analytix.local/runtime-go/internal/domain/ordinaryprojection"
+	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
@@ -139,6 +141,12 @@ func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (m
 	if out == nil || !domainstartup.FrozenEventOrderAuthorityStableV1(projected, out) {
 		return nil, errors.New("ordinary public thread privacy projection failed")
 	}
+	if err := domainprivacy.ValidatePublicSourceProse(out); err != nil {
+		return nil, err
+	}
+	if !projectedOrdinaryResultIdentitiesV1(out, trustedProjectionThreadRootV1) {
+		return nil, errors.New("ordinary public result identity changed during projection")
+	}
 	if err := domainevent.ValidatePublicRecord(trustedStructuredValidationViewV1(out, trustedProjectionThreadRootV1)); err != nil {
 		return nil, errors.Join(errors.New("ordinary public thread privacy projection failed"), err)
 	}
@@ -158,6 +166,12 @@ func (projector *TrustedPublicProjector) ProjectEvent(routeThreadID string, thre
 	if !domainstartup.FrozenEventOrderAuthorityStableV1(projected, out) {
 		return nil, false, errors.New("ordinary public event projection changed frozen authority")
 	}
+	if err := domainprivacy.ValidatePublicSourceProse(out); err != nil {
+		return nil, false, err
+	}
+	if !projectedOrdinaryResultIdentitiesV1(out, trustedProjectionEventRootV1) {
+		return nil, false, errors.New("ordinary public result identity changed during projection")
+	}
 	if domainevent.ValidatePublicRecord(trustedStructuredValidationViewV1(out, trustedProjectionEventRootV1)) != nil {
 		return nil, false, nil
 	}
@@ -170,6 +184,36 @@ func (projector *TrustedPublicProjector) ProjectEvent(routeThreadID string, thre
 // terminal containers are exact-cloned instead of being rewritten by generic
 // credential heuristics.
 type trustedProjectionScopeV1 uint8
+
+// A historical result is verified under its original v1 identity rules. If a
+// new output rule changes its hash-bound text, withhold that projection rather
+// than emit mismatched hashes or mint a replacement authority during a read.
+func projectedOrdinaryResultIdentitiesV1(record map[string]any, scope trustedProjectionScopeV1) bool {
+	if scope == trustedProjectionItemV1 {
+		if raw, present := record["ordinaryResult"]; present {
+			slot, err := domainordinaryresult.ParseResultSlotV1(raw)
+			return err == nil && contracts.StringField(record, "text") == slot.Text
+		}
+		return true
+	}
+	if scope == trustedProjectionEventRootV1 {
+		if item, ok := record["item"].(map[string]any); ok {
+			return projectedOrdinaryResultIdentitiesV1(item, trustedProjectionItemV1)
+		}
+		return true
+	}
+	key, childScope := "turns", trustedProjectionTurnV1
+	if scope == trustedProjectionTurnV1 {
+		key, childScope = "items", trustedProjectionItemV1
+	}
+	children, _ := record[key].([]any)
+	for _, raw := range children {
+		if child, ok := raw.(map[string]any); ok && !projectedOrdinaryResultIdentitiesV1(child, childScope) {
+			return false
+		}
+	}
+	return true
+}
 
 const (
 	trustedProjectionOrdinaryV1 trustedProjectionScopeV1 = iota
