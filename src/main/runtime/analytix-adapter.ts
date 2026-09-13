@@ -153,6 +153,7 @@ import {
 import {
   providerRegistryAccountObservationResponseSchemaV1,
   providerRegistryDeletedResponseSchemaV1,
+  providerRegistryFailureSchemaV1,
   providerRegistryPortableManifestExportResponseSchemaV1,
   providerRegistryPortableManifestImportResponseSchemaV1,
   providerRegistryProbeResponseSchemaV1,
@@ -4266,6 +4267,12 @@ export function sanitizeRuntimeResponse(
   try {
     const parsed = JSON.parse(response.body) as unknown
     if (!response.ok) {
+      if (path === '/v1/provider-registry' || path.startsWith('/v1/provider-registry/')) {
+        // The downstream typed IPC validates status/operation as well. Keep
+        // only this strict, key-free envelope with canonical error messages.
+        const failure = providerRegistryFailureSchemaV1.safeParse(parsed)
+        if (failure.success) return { ...response, body: JSON.stringify(failure.data) }
+      }
       return { ...response, body: JSON.stringify(projectPublicRuntimeHTTPError(response.status, parsed)) }
     }
     if (containsPrivateAcceptedFinalAuthority(parsed) || containsPrivateRuntimeDiagnosticContent(parsed)) {
