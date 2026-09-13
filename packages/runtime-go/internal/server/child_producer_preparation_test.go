@@ -28,11 +28,12 @@ import (
 	currentdatasettest "analytix.local/runtime-go/internal/testsupport/currentdataset"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func runtimeChildProducerPendingFixtureV1(t *testing.T, tool string, arguments json.RawMessage, caseRoot ...string) (*runtimeServerHandler, runtimePendingToolCall) {
 	t.Helper()
-	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	workspace, err := filepath.EvalSymlinks(workspacetest.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}

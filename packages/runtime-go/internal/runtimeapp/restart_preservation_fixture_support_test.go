@@ -29,6 +29,7 @@ import (
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 	terminaltest "analytix.local/runtime-go/internal/testsupport/turnterminal"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -61,7 +62,7 @@ func runtimeReportPreservationAtRootsFixtureV1(t *testing.T, roots persistencefs
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
-	frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-report-held", TurnID: "turn-report-held", WorkspaceRealPath: t.TempDir(), CaseID: "case-report", CaseBindingHash: domainsecurity.SHA256Hex([]byte("report-binding")), ContextEpoch: 1, IssuedAt: now})
+	frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-report-held", TurnID: "turn-report-held", WorkspaceRealPath: workspacetest.New(t), CaseID: "case-report", CaseBindingHash: domainsecurity.SHA256Hex([]byte("report-binding")), ContextEpoch: 1, IssuedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}

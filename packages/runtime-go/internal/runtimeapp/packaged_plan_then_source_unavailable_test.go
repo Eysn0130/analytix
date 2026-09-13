@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"analytix.local/runtime-go/internal/contracts"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const runtimeOptionalDomainPrivateCanary = "R129_SYNTHETIC_PRIVATE_DOMAIN_CANARY"
@@ -153,7 +154,7 @@ func runRuntimePlanThenProtectedOrdinaryRestartWithCheckpointsV1(t *testing.T, p
 	}))
 	defer provider.Close()
 
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	workspace := filepath.Join(root, "ordinary-workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)

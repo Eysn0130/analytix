@@ -23,6 +23,7 @@ import (
 	registryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // These use the actual enrolled witness, Authority, DSV2 service, secure CAS
@@ -215,7 +216,7 @@ func newPreparedRegistryEffectFixtureV1(t *testing.T) *preparedRegistryEffectFix
 	if _, err := composition.evidence.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
+	workspace := workspacetest.New(t)
 	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
 	observation, err := (filestore.CaseBindingReader{}).Observe(workspace)
 	if err != nil {

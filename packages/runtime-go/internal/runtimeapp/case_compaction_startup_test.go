@@ -21,12 +21,13 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	threaddomain "analytix.local/runtime-go/internal/domain/thread"
 	serverapp "analytix.local/runtime-go/internal/server"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 const runtimeProductionCaseCompactionPrivateSourceV1 = "PRIVATE_CASE_COMPACTION_SOURCE_MUST_NOT_CROSS_PUBLIC_SEAM"
 
 func TestRuntimeProductionAutomaticCaseCompactionSurvivesFreshStartup(t *testing.T) {
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	workspace := filepath.Join(root, "automatic-case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o700); err != nil {
 		t.Fatal(err)
@@ -310,7 +311,7 @@ func TestRuntimeProductionAutomaticCaseCompactionSurvivesFreshStartup(t *testing
 }
 
 func TestRuntimeProductionCaseCompactionSurvivesFreshStartup(t *testing.T) {
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	workspace := filepath.Join(root, "case-workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, ".analytix"), 0o700); err != nil {
 		t.Fatal(err)

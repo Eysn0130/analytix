@@ -25,6 +25,7 @@ import (
 	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	"analytix.local/runtime-go/internal/contracts"
 	"analytix.local/runtime-go/internal/mcp"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // One production-composition driver crosses the same ordinary effects for each
@@ -66,7 +67,7 @@ func runRuntimeOptionalPluginOrdinaryLifecycleModeV1(t *testing.T, fault string,
 			}
 		})
 	} else {
-		root = t.TempDir()
+		root = workspacetest.New(t)
 	}
 	workspace := filepath.Join(root, "ordinary-workspace")
 	skills := filepath.Join(root, "skills")

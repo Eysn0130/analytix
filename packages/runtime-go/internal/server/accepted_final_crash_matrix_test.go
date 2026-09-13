@@ -22,6 +22,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	registryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
 	authorityport "analytix.local/runtime-go/internal/ports/finalauthority"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 type durableAcceptedFinalCrashFixture struct {
@@ -197,7 +198,7 @@ func (store *durableFinalAdmissionBarrier) List(ctx context.Context) ([]domainev
 }
 
 func TestAcceptedFinalDurableConcurrentTerminalHasOneWinnerAndQuarantinesContender(t *testing.T) {
-	root := t.TempDir()
+	root := workspacetest.New(t)
 	durableRoot := filepath.Join(root, "durable")
 	privateRoot := filepath.Join(root, "private")
 	store, err := NewTempDurableEventSessionStore(durableRoot)

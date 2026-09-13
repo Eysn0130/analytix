@@ -311,7 +311,7 @@ func TestRuntimeServerShutdownCancelsBackgroundShellAndMarksJobTerminal(t *testi
 	if runtime.GOOS == "windows" {
 		t.Skip("background shell process-group shutdown uses the POSIX shell path in this contract test")
 	}
-	workspace := filepath.Join(t.TempDir(), "workspace")
+	workspace := filepath.Join(workspacetest.New(t), "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}

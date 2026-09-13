@@ -18,7 +18,7 @@ import (
 )
 
 func TestTurnStartAttachmentRiskMissingMetadataFailsBeforeProvider(t *testing.T) {
-	handler, threadID, provider, _ := newTurnStartAttachmentRiskHandler(t, t.TempDir())
+	handler, threadID, provider, _ := newTurnStartAttachmentRiskHandler(t, workspacetest.New(t))
 
 	_, err := handler.startRuntimeTurn(context.Background(), threadID, startRuntimeTurnRequest{
 		Prompt:        "Summarize the supplied attachment.",
@@ -33,7 +33,7 @@ func TestTurnStartAttachmentRiskMissingMetadataFailsBeforeProvider(t *testing.T)
 }
 
 func TestTurnStartAttachmentRiskCorruptMetadataFailsBeforeProvider(t *testing.T) {
-	handler, threadID, provider, dataDir := newTurnStartAttachmentRiskHandler(t, t.TempDir())
+	handler, threadID, provider, dataDir := newTurnStartAttachmentRiskHandler(t, workspacetest.New(t))
 	metadata := createTurnStartRiskAttachment(t, handler, threadID, t.TempDir(), "corrupt metadata")
 	id := stringField(metadata, "id")
 	if err := os.WriteFile(turnStartRiskMetadataPath(dataDir, id), []byte("{"), 0o600); err != nil {
@@ -87,7 +87,7 @@ func TestTurnStartAttachmentRiskExactOwnersClassifyWithoutContent(t *testing.T) 
 		workspace func(*testing.T) string
 		wantCase  bool
 	}{
-		{name: "ordinary exact owner", workspace: func(t *testing.T) string { return t.TempDir() }},
+		{name: "ordinary exact owner", workspace: func(t *testing.T) string { return workspacetest.New(t) }},
 		{name: "case-bound exact owner", workspace: writeThreadMutationCaseBinding, wantCase: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {

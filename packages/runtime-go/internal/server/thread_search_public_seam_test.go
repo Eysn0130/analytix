@@ -1,6 +1,7 @@
 package server
 
 import (
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,7 +25,7 @@ func TestThreadSearchHTTPUsesClosedCaseLifecycleProjectionAndKeepsOrdinaryTextAd
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	caseWorkspace := t.TempDir()
+	caseWorkspace := workspacetest.New(t)
 	caseThread, err := handler.store.CreateThread(map[string]any{
 		"title":     "SEARCH_CASE_TITLE_SENTINEL",
 		"workspace": caseWorkspace,
@@ -84,7 +85,7 @@ func TestThreadSearchHTTPUsesClosedCaseLifecycleProjectionAndKeepsOrdinaryTextAd
 		t.Fatalf("append case turn: %v", err)
 	}
 
-	ordinaryWorkspace := t.TempDir()
+	ordinaryWorkspace := workspacetest.New(t)
 	ordinaryThread, err := handler.store.CreateThread(map[string]any{
 		"title":     "Ordinary additive title",
 		"workspace": ordinaryWorkspace,

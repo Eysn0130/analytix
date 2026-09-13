@@ -740,7 +740,7 @@ func TestRuntimeActiveHistoryStartupRejectsMissingPrimaryBeforeRepair(t *testing
 		}
 		return result
 	}
-	created := request(http.MethodPost, "/v1/threads", map[string]any{"title": "ordinary sidecar source", "workspace": t.TempDir(), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
+	created := request(http.MethodPost, "/v1/threads", map[string]any{"title": "ordinary sidecar source", "workspace": workspacetest.New(t), "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
 	threadID, _ := created["id"].(string)
 	if threadID == "" {
 		shutdownOwnedRuntimeHandler(t, handler)
