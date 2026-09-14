@@ -1,13 +1,14 @@
+import type { NativeWorkbookReview } from '../../../packages/runtime/src/contracts/native-office-editing'
 // Browser-safe typed transport shared by Main and the sandboxed Office preload.
 export const OFFICE_BIND_IPC = 'analytix-office-surface-bind-v1'
 export const OFFICE_MAX_BYTES = 16 * 1024 * 1024
 export const officeToken = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(v)
 export type OfficeKind = 'docx' | 'xlsx' | 'pptx'
 // Fixed operations only; no arbitrary UNO, URLs, paths or script dispatch.
-export type OfficeCommand = 'open' | 'edit' | 'replace' | 'export' | 'ack' | 'captureSelection' | 'close'
+export type OfficeCommand = 'open' | 'edit' | 'replace' | 'replaceCells' | 'export' | 'ack' | 'captureSelection' | 'close'
 export type OfficeState = { documentId: string; version: string; kind: OfficeKind; changeSequence: number; acknowledgedSequence: number; dirty: boolean }
 export type OfficeEnvelope = { command: OfficeCommand; operationId: string; documentId: string; version: string; channel: string }
-export type OfficeRequest = OfficeEnvelope & { kind?: OfficeKind; bytes?: Uint8Array; status?: 'committed' | 'conflict' | 'failed'; persistedVersion?: string; expectedChangeSequence?: number; discard?: boolean; selectionToken?: string; text?: string; valueType?: 'text'; exportOperationId?: string; exportedSequence?: number }
+export type OfficeRequest = OfficeEnvelope & { kind?: OfficeKind; bytes?: Uint8Array; status?: 'committed' | 'conflict' | 'failed'; persistedVersion?: string; expectedChangeSequence?: number; discard?: boolean; selectionToken?: string; text?: string; valueType?: 'text'; workbook?: NativeWorkbookReview; exportOperationId?: string; exportedSequence?: number }
 export type OfficeRequestInput = Omit<OfficeRequest, 'channel'>
 export type OfficeResult = OfficeEnvelope & { type: 'result'; ok: boolean; state?: OfficeState; selection?: Record<string, unknown>; bytes?: Uint8Array; exportedSequence?: number; error?: string }
 export type OfficeEvent = { type: 'changed' | 'selection' | 'save-requested'; channel: string; operationId: string; documentId: string; version: string; state?: OfficeState; selection?: Record<string, unknown> }
@@ -19,7 +20,7 @@ export const officeCodes = new Set([
   'document-already-open', 'open-failed', 'stale-document-version',
   'unsaved-changes', 'command-unavailable', 'unsupported-command', 'native-controls-hide-failed',
   'operation-in-progress', 'stale-selection', 'unsupported-selection', 'export-too-large', 'export-awaiting-ack', 'ack-mismatch', 'invalid-control-value', 'operation-replayed', 'session-operation-limit',
-  'engine-timeout-state-unknown', 'surface-state-unknown-recreate-required'
+  'typed-mutation-failed', 'engine-timeout-state-unknown', 'surface-state-unknown-recreate-required'
 ])
 const kinds = ['docx', 'xlsx', 'pptx']
 export function officeRecord(v: unknown): v is Record<string, unknown> {
@@ -36,6 +37,7 @@ export function isOfficeRequest(v: unknown): v is OfficeRequest {
   if (v.command === 'open') return exact(v, [...base, 'kind', 'bytes']) && kinds.includes(String(v.kind)) && bytes(v.bytes)
   if (v.command === 'close') return exact(v, [...base, 'expectedChangeSequence', 'discard']) && integer(v.expectedChangeSequence) && typeof v.discard === 'boolean'
   if (['captureSelection', 'edit', 'export'].includes(String(v.command))) return exact(v, base)
+  if (v.command === 'replaceCells') return exact(v, [...base,'selectionToken','expectedChangeSequence','workbook']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && isOfficeWorkbookReview(v.workbook)
   if (v.command === 'replace') return exact(v, [...base, 'selectionToken', 'expectedChangeSequence', 'text', 'valueType']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && text(v.text) && v.valueType === 'text'
   return v.command === 'ack' && exact(v, [...base, 'status', 'exportOperationId', 'exportedSequence'], ['persistedVersion']) && ['committed', 'conflict', 'failed'].includes(String(v.status)) && officeToken(v.exportOperationId) && integer(v.exportedSequence) && (v.status === 'committed' ? officeToken(v.persistedVersion) : v.persistedVersion === undefined)
 }
@@ -67,7 +69,7 @@ export function isOfficeReady(v: unknown): v is OfficeReady {
   return officeRecord(v) && exact(v, ['type', 'channel', 'protocolVersion']) && v.type === 'ready' && officeToken(v.channel) && v.protocolVersion === 1
 }
 export function isOfficeResult(v: unknown): v is OfficeResult {
-  if (!officeRecord(v) || v.type !== 'result' || !identity(v) || !['open', 'edit', 'replace', 'export', 'ack', 'captureSelection', 'close'].includes(String(v.command))) return false
+  if (!officeRecord(v) || v.type !== 'result' || !identity(v) || !['open', 'edit', 'replace', 'replaceCells', 'export', 'ack', 'captureSelection', 'close'].includes(String(v.command))) return false
   const fields = [...base, 'type', 'ok']
   if (v.ok === false) return exact(v, [...fields, 'error']) && typeof v.error === 'string' && officeCodes.has(v.error)
   if (v.ok !== true) return false
@@ -85,4 +87,16 @@ export function isOfficeEvent(v: unknown): v is OfficeEvent {
 }
 export function sameOfficeEnvelope(a: OfficeEnvelope, b: OfficeEnvelope): boolean {
   return base.every(k => a[k as keyof OfficeEnvelope] === b[k as keyof OfficeEnvelope])
+}
+
+export function isOfficeWorkbookReview(v: unknown): v is NativeWorkbookReview {
+  if (!officeRecord(v) || !exact(v,['before','after','results']) || !Array.isArray(v.results) || v.results.length > 256 || !v.results.every(r => text(r,65536))) return false
+  const snapshot = (s:unknown): boolean => {
+    if (!officeRecord(s) || !exact(s,['sheet','sheetName','startColumn','startRow','endColumn','endRow','cells']) || !['sheet','startColumn','startRow','endColumn','endRow'].every(k => integer(s[k])) || !text(s.sheetName,31) || !Array.isArray(s.cells)) return false
+    const a=s as unknown as NativeWorkbookReview['before'], width=a.endColumn-a.startColumn+1, height=a.endRow-a.startRow+1
+    return a.sheet < 20 && a.sheetName.length > 0 && a.endColumn < 1024 && a.endRow < 100000 && width > 0 && height > 0 && width*height === a.cells.length && a.cells.length <= 256 && a.cells.every((c,i) => officeRecord(c) && exact(c,['sheet','column','row','text','formula','value','valueType','numberFormat','rowVisible','columnVisible','merged']) && c.sheet === a.sheet && c.column === a.startColumn+i%width && c.row === a.startRow+Math.floor(i/width) && text(c.text) && text(c.formula) && Number.isFinite(c.value) && integer(c.numberFormat) && c.rowVisible === true && c.columnVisible === true && c.merged === false && ['empty','text','number','formula'].includes(c.valueType))
+  }
+  if (!snapshot(v.before) || !snapshot(v.after)) return false
+  const r=v as unknown as NativeWorkbookReview
+  return ['sheet','sheetName','startColumn','startRow','endColumn','endRow'].every(k => r.before[k as keyof typeof r.before] === r.after[k as keyof typeof r.after]) && r.results.length === r.after.cells.length
 }

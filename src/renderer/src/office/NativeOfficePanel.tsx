@@ -280,6 +280,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     {view?.scope?.threadId === threadId && view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
       {view.proposals.map(proposal => { const review = view.localReviews?.find(item => item.proposalId === proposal.proposalId); return <div key={proposal.proposalId} className="py-1 text-xs">
         <div className="my-1 overflow-hidden rounded border border-ds-border-muted font-mono text-xs">
+          {review?.workbook ? <p>单元格类型与公式修改；Core 验算结果不代表原生缓存值。</p> : null}
           <del aria-label="修改前" className="block whitespace-pre-wrap bg-red-50 px-2 py-1 text-red-800 no-underline dark:bg-red-950/30 dark:text-red-200">{review?.beforeText ?? '原文暂不可核实，请重新选择。'}</del>
           <ins aria-label="修改后" className="block whitespace-pre-wrap bg-emerald-50 px-2 py-1 text-emerald-800 no-underline dark:bg-emerald-950/30 dark:text-emerald-200">{review?.afterText ?? '修改内容暂不可核实。'}</ins>
         </div>

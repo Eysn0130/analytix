@@ -1,6 +1,10 @@
 package objectediting
 
-import "context"
+import (
+	"context"
+
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
+)
 
 // NativeChangeDraft is supplied by Core's approved selection owner. It contains
 // local review text, never model-facing metadata or caller-supplied file bytes.
@@ -11,6 +15,7 @@ type NativeChangeDraft struct {
 	BaseRevision string
 	BeforeText   string
 	AfterText    string
+	Workbook     *office.WorkbookReview `json:"workbook,omitempty"`
 }
 
 type NativeChangeInput struct {
@@ -23,22 +28,23 @@ type NativeChangeInput struct {
 // NativeChangeStatus belongs only to the protected-local display lane. Engine
 // selection tokens are intentionally absent: reopening cannot revive a capture.
 type NativeChangeStatus struct {
-	ChangeID        string `json:"changeId"`
-	ThreadID        string `json:"threadId"`
-	ProposalID      string `json:"proposalId"`
-	BaseRevision    string `json:"baseRevision"`
-	Revision        string `json:"revision"`
-	Status          string `json:"status"`
-	BeforeText      string `json:"beforeText"`
-	AfterText       string `json:"afterText"`
-	SaveOperationID string `json:"saveOperationId"`
-	UndoOperationID string `json:"undoOperationId"`
-	CanUndo         bool   `json:"canUndo"`
-	CanCancel       bool   `json:"canCancel"`
-	CanRetryUndo    bool   `json:"canRetryUndo"`
-	CanResume       bool   `json:"canResume"`
-	CreatedAt       string `json:"createdAt"`
-	SavedAt         string `json:"savedAt"`
+	ChangeID        string                 `json:"changeId"`
+	ThreadID        string                 `json:"threadId"`
+	ProposalID      string                 `json:"proposalId"`
+	BaseRevision    string                 `json:"baseRevision"`
+	Revision        string                 `json:"revision"`
+	Status          string                 `json:"status"`
+	BeforeText      string                 `json:"beforeText"`
+	AfterText       string                 `json:"afterText"`
+	Workbook        *office.WorkbookReview `json:"workbook,omitempty"`
+	SaveOperationID string                 `json:"saveOperationId"`
+	UndoOperationID string                 `json:"undoOperationId"`
+	CanUndo         bool                   `json:"canUndo"`
+	CanCancel       bool                   `json:"canCancel"`
+	CanRetryUndo    bool                   `json:"canRetryUndo"`
+	CanResume       bool                   `json:"canResume"`
+	CreatedAt       string                 `json:"createdAt"`
+	SavedAt         string                 `json:"savedAt"`
 }
 
 type NativeRecovery struct {
@@ -64,7 +70,19 @@ type NativeUndoInput struct {
 // NativeRecoveryFiles is deliberately separate from ordinary text editing.
 // Prepare reads the original through the existing file authority before the
 // isolated engine changes. Commit/undo reuse the same CAS and operation journal.
+type NativeWorkbookInput struct {
+	Workspace      string
+	Path           string
+	ObjectIdentity string
+	BaseRevision   string
+	Selection      office.WorkbookSelection
+	Patch          *office.WorkbookPatch
+}
+
 type NativeRecoveryFiles interface {
+	// ValidateNativeWorkbook reads the authorized original; nil Patch validates
+	// capture only. It never writes an imported workbook or creates a receipt.
+	ValidateNativeWorkbook(context.Context, NativeWorkbookInput) (*office.WorkbookReview, error)
 	PrepareNativeChange(context.Context, NativeChangeInput) (NativeChangeStatus, error)
 	NativeRecovery(context.Context, string, string, string, string) (NativeRecovery, error)
 	CommitNativeChange(context.Context, NativeCommitInput) (Receipt, error)

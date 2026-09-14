@@ -13,7 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"analytix.local/runtime-go/internal/adapters/outbound/workbookcodec"
 	"analytix.local/runtime-go/internal/domain/jsonstrict"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	editing "analytix.local/runtime-go/internal/ports/objectediting"
 )
 
@@ -61,11 +63,12 @@ func nativeRecordDraftHash(r nativeRecoveryRecord) string {
 func nativeCompact(r nativeRecoveryRecord, disposition string) nativeRecoveryRecord {
 	r.DraftHash = nativeRecordDraftHash(r)
 	r.Draft.BeforeText, r.Draft.AfterText, r.Disposition = "", "", disposition
+	r.Draft.Workbook = nil
 	return r
 }
 
 func nativeDraftValid(d editing.NativeChangeDraft) bool {
-	return objectEditingHash(d.ChangeID) && objectEditingHash(d.BaseRevision) && nativeRecoveryThread.MatchString(d.ThreadID) && nativeRecoveryProposal.MatchString(d.ProposalID) &&
+	return (d.Workbook == nil || (d.Workbook.Before.Validate() == nil && d.Workbook.After.Validate() == nil && len(d.Workbook.Results) == len(d.Workbook.After.Cells))) && objectEditingHash(d.ChangeID) && objectEditingHash(d.BaseRevision) && nativeRecoveryThread.MatchString(d.ThreadID) && nativeRecoveryProposal.MatchString(d.ProposalID) &&
 		len(d.BeforeText) <= 65536 && len(d.AfterText) <= 65536 && utf8.ValidString(d.BeforeText) && utf8.ValidString(d.AfterText) && !strings.ContainsRune(d.BeforeText+d.AfterText, 0)
 }
 func (s *ObjectEditingFiles) nativePath(identity, change, suffix string) string {
@@ -105,7 +108,7 @@ func (s *ObjectEditingFiles) writeNativePrivate(path string, body []byte, expect
 	return nil
 }
 func nativeDecode(body []byte, destination any, maxBytes int) error {
-	if jsonstrict.Validate(body, jsonstrict.Options{RequireObject: true, MaxBytes: maxBytes, MaxDepth: 3, MaxTokens: 128, MaxStringBytes: 65536}) != nil {
+	if jsonstrict.Validate(body, jsonstrict.Options{RequireObject: true, MaxBytes: maxBytes, MaxDepth: 8, MaxTokens: 32768, MaxStringBytes: 65536}) != nil {
 		return editing.ErrPersistence
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -131,7 +134,7 @@ func (s *ObjectEditingFiles) nativeIndex(target objectEditingTarget, identity st
 	seen := map[string]bool{index.Current: true, index.Pending: true}
 	if index.Preparing != nil {
 		r := index.Preparing
-		if !nativeRecordValid(*r, target, identity, r.Draft.ChangeID, s.officeKind) || r.DraftHash == "" || r.Draft.BeforeText != "" || r.Draft.AfterText != "" || r.AfterHash != "" || r.UndoStarted || r.Disposition != "" || seen[r.Draft.ChangeID] {
+		if !nativeRecordValid(*r, target, identity, r.Draft.ChangeID, s.officeKind) || r.DraftHash == "" || r.Draft.BeforeText != "" || r.Draft.AfterText != "" || r.Draft.Workbook != nil || r.AfterHash != "" || r.UndoStarted || r.Disposition != "" || seen[r.Draft.ChangeID] {
 			return index, "", editing.ErrPersistence
 		}
 		seen[r.Draft.ChangeID] = true
@@ -169,10 +172,13 @@ func (s *ObjectEditingFiles) nativeRecord(target objectEditingTarget, identity, 
 	return record, hash, nil
 }
 func nativeRecordValid(record nativeRecoveryRecord, target objectEditingTarget, identity, change, kind string) bool {
+	if record.Draft.Workbook != nil && kind != "xlsx" {
+		return false
+	}
 	if record.Version != 1 || record.ObjectIdentity != identity || record.PathBinding != target.binding || record.Kind != kind || record.Draft.ChangeID != change || !nativeDraftValid(record.Draft) || (record.AfterHash != "" && !objectEditingHash(record.AfterHash)) || (record.DraftHash != "" && !objectEditingHash(record.DraftHash)) || (record.UndoStarted && record.AfterHash == "") {
 		return false
 	}
-	if record.Disposition != "" && (record.Disposition != "cancelled" && record.Disposition != "superseded" || record.DraftHash == "" || record.Draft.BeforeText != "" || record.Draft.AfterText != "") {
+	if record.Disposition != "" && (record.Disposition != "cancelled" && record.Disposition != "superseded" || record.DraftHash == "" || record.Draft.BeforeText != "" || record.Draft.AfterText != "" || record.Draft.Workbook != nil) {
 		return false
 	}
 	_, err := time.Parse(time.RFC3339Nano, record.CreatedAt)
@@ -392,6 +398,9 @@ func (s *ObjectEditingFiles) PrepareNativeChange(ctx context.Context, input edit
 	if s.validateNativeObject(state.Content) != nil {
 		return editing.NativeChangeStatus{}, editing.ErrNotText
 	}
+	if input.Draft.Workbook != nil && (s.officeKind != "xlsx" || workbookcodec.ValidateReview(ctx, *input.Draft.Workbook) != nil || workbookcodec.VerifySelectionPackage(ctx, state.Content, input.Draft.Workbook.Before) != nil) {
+		return editing.NativeChangeStatus{}, editing.ErrInvalidInput
+	}
 	if index.Preparing == nil {
 		record = nativeRecoveryRecord{Version: 1, ObjectIdentity: input.ObjectIdentity, PathBinding: target.binding, Kind: s.officeKind, Draft: input.Draft, DraftHash: nativeDraftHash(input.Draft), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 		reservation := nativeCompact(record, "")
@@ -452,7 +461,7 @@ func (s *ObjectEditingFiles) retireNativePreparing(target objectEditingTarget, i
 
 func (s *ObjectEditingFiles) nativeStatus(ctx context.Context, target objectEditingTarget, record nativeRecoveryRecord) (editing.NativeChangeStatus, error) {
 	d := record.Draft
-	status := editing.NativeChangeStatus{ChangeID: d.ChangeID, ThreadID: d.ThreadID, ProposalID: d.ProposalID, BaseRevision: d.BaseRevision, Status: "prepared", BeforeText: d.BeforeText, AfterText: d.AfterText, SaveOperationID: nativeSaveID(d.ChangeID), UndoOperationID: nativeUndoID(d.ChangeID), CreatedAt: record.CreatedAt}
+	status := editing.NativeChangeStatus{ChangeID: d.ChangeID, ThreadID: d.ThreadID, ProposalID: d.ProposalID, BaseRevision: d.BaseRevision, Status: "prepared", BeforeText: d.BeforeText, AfterText: d.AfterText, Workbook: d.Workbook, SaveOperationID: nativeSaveID(d.ChangeID), UndoOperationID: nativeUndoID(d.ChangeID), CreatedAt: record.CreatedAt}
 	if ctx.Err() != nil {
 		return status, ctx.Err()
 	}
@@ -657,12 +666,20 @@ func (s *ObjectEditingFiles) CommitNativeChange(ctx context.Context, input editi
 			return editing.Receipt{}, err
 		}
 	}
-	if _, err := s.nativeOriginal(record); err != nil {
+	original, err := s.nativeOriginal(record)
+	if err != nil {
 		return editing.Receipt{}, err
 	}
 	encoded, err := s.encodeObject(input.Content, "office-base64")
 	if err != nil {
 		return editing.Receipt{}, err
+	}
+	if record.Draft.Workbook != nil {
+		if err = workbookcodec.VerifyPatchedPackage(ctx, original, encoded, *record.Draft.Workbook); errors.Is(err, workbookcodec.ErrUnsupportedWorkbook) {
+			return editing.Receipt{}, editing.ErrTooLarge
+		} else if err != nil {
+			return editing.Receipt{}, editing.ErrInvalidInput
+		}
 	}
 	afterHash := digestAtomicText(encoded)
 	if record.AfterHash != "" && record.AfterHash != afterHash {
@@ -818,4 +835,41 @@ func (s *ObjectEditingFiles) CancelNativeChange(ctx context.Context, input editi
 		return result, err
 	}
 	return s.nativeRecoveryLocked(ctx, target, input.ObjectIdentity, input.ThreadID)
+}
+
+func (s *ObjectEditingFiles) ValidateNativeWorkbook(ctx context.Context, input editing.NativeWorkbookInput) (*office.WorkbookReview, error) {
+	if s.officeKind != "xlsx" || !objectEditingHash(input.ObjectIdentity) || !objectEditingHash(input.BaseRevision) || input.Selection.Validate() != nil {
+		return nil, editing.ErrInvalidInput
+	}
+	if err := objectEditingLock(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-objectEditingGate }()
+	target, err := s.target(input.Workspace, input.Path)
+	if err != nil {
+		return nil, err
+	}
+	state, err := s.inspectObject(target.path)
+	if err != nil {
+		return nil, err
+	}
+	if digestAtomicText(state.Content) != input.BaseRevision {
+		return nil, editing.ErrConflict
+	}
+	if InspectOfficePackage(state.Content, "xlsx") != nil {
+		return nil, editing.ErrInvalidInput
+	}
+	if err = workbookcodec.VerifySelectionPackage(ctx, state.Content, input.Selection); errors.Is(err, workbookcodec.ErrUnsupportedWorkbook) {
+		return nil, editing.ErrTooLarge
+	} else if err != nil {
+		return nil, editing.ErrInvalidInput
+	}
+	if input.Patch == nil {
+		return nil, nil
+	}
+	review, err := workbookcodec.ValidatePatch(ctx, input.Selection, *input.Patch)
+	if err != nil || workbookcodec.ValidateReview(ctx, review) != nil {
+		return nil, editing.ErrInvalidInput
+	}
+	return &review, nil
 }

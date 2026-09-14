@@ -5,6 +5,7 @@ import (
 
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
@@ -12,6 +13,7 @@ import (
 // NativeRecoveryService is an optional native-only extension. A missing durable
 // owner never falls back to a Main-supplied original or untracked native commit.
 type NativeRecoveryService interface {
+	ValidateNativeWorkbook(context.Context, string, string, office.WorkbookSelection, *office.WorkbookPatch) (*office.WorkbookReview, error)
 	PrepareNativeChange(context.Context, string, fileport.NativeChangeDraft) (fileport.NativeChangeStatus, error)
 	NativeRecovery(context.Context, string, string) (fileport.NativeRecovery, error)
 	CommitNativeChange(context.Context, string, string, string, string, string, string) (fileport.Receipt, error)

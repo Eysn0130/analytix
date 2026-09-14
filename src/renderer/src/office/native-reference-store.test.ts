@@ -15,12 +15,13 @@ describe('native annotation references', () => {
     expect(isNativeSelectionEditable(view, { ...selection, capture: { ...selection.capture!, complete: false, truncated: true } })).toBe(false)
     expect(isNativeSelectionEditable(view, { ...selection, text: '' })).toBe(false)
   })
-  it('does not grant a scope for multi-cell, merged or multi-shape selections', () => {
+  it('rejects incomplete, merged or multi-shape selections while typed numbers retain explicit edit scope', () => {
     const cells: NativeOfficeSelection = { ...selection, kind: 'cells', scope: 'sheet-range-address-at-version-and-change-sequence', text: 'Value', ranges: [{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}], cells:[{sheet:0,column:0,row:0,text:'Value',formula:'',value:0,valueType:'text',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}] }
     expect(isNativeSelectionEditable(view, cells)).toBe(true)
     expect(isNativeSelectionEditable(view, { ...cells, ranges:[{...cells.ranges[0],endRow:1}] })).toBe(false)
     expect(isNativeSelectionEditable(view, { ...cells, cells:[{...cells.cells![0],merged:true}] })).toBe(false)
-    for (const valueType of ['number','formula'] as const) expect(isNativeSelectionEditable(view, {...cells,cells:[{...cells.cells![0],valueType}]})).toBe(false)
+    expect(isNativeSelectionEditable({...view,kind:'xlsx'}, {...cells,cells:[{...cells.cells![0],valueType:'number',value:1,text:'1',formula:'1'}]})).toBe(true)
+    expect(isNativeSelectionEditable({...view,kind:'xlsx'}, {...cells,cells:[{...cells.cells![0],valueType:'formula',value:1,text:'1',formula:'=1'}]})).toBe(true)
     const shape = {pageIndex:0,shapeIndex:0,name:'Text',type:'text',text:'Value'}
     const shapes: NativeOfficeSelection = { ...selection, kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[shape] }
     expect(isNativeSelectionEditable(view, shapes)).toBe(true)

@@ -6,7 +6,20 @@ const identity = r => r && token(r.channel) && token(r.operationId) && token(r.d
 const key = r => r.command + ':' + r.operationId;
 const matches = (a, b) => a.channel === b.channel && a.operationId === b.operationId && a.documentId === b.documentId && a.version === b.version && a.command === b.command;
 const kinds = ['docx', 'xlsx', 'pptx'];
-const previewCommands = ['open', 'edit', 'replace', 'export', 'ack', 'captureSelection', 'close'];
+const previewCommands = ['open', 'edit', 'replace', 'replaceCells', 'export', 'ack', 'captureSelection', 'close'];
+function validWorkbookReview(value) {
+  const record=v=>v && Object.getPrototypeOf(v)===Object.prototype;
+  const exact=(v,keys)=>record(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+  const integer=v=>Number.isSafeInteger(v)&&v>=0;
+  const text=(v,max)=>typeof v==='string'&&v.length<=max;
+  const fields=['sheet','sheetName','startColumn','startRow','endColumn','endRow','cells'];
+  const snapshot=s=> {
+    if(!exact(s,fields)||!['sheet','startColumn','startRow','endColumn','endRow'].every(k=>integer(s[k]))||s.sheet>=20||s.endColumn>=1024||s.endRow>=100000||!text(s.sheetName,31)||!s.sheetName||!Array.isArray(s.cells)||s.cells.length>256)return false;
+    const width=s.endColumn-s.startColumn+1,height=s.endRow-s.startRow+1;
+    return width>0&&height>0&&width*height===s.cells.length&&s.cells.every((c,i)=>exact(c,['sheet','column','row','text','formula','value','valueType','numberFormat','rowVisible','columnVisible','merged'])&&c.sheet===s.sheet&&c.column===s.startColumn+i%width&&c.row===s.startRow+Math.floor(i/width)&&text(c.text,4096)&&text(c.formula,4096)&&Number.isFinite(c.value)&&integer(c.numberFormat)&&c.rowVisible===true&&c.columnVisible===true&&c.merged===false&&['empty','text','number','formula'].includes(c.valueType));
+  };
+  return exact(value,['before','after','results'])&&snapshot(value.before)&&snapshot(value.after)&&fields.filter(k=>k!=='cells').every(k=>value.before[k]===value.after[k])&&Array.isArray(value.results)&&value.results.length===value.after.cells.length&&value.results.every(v=>text(v,65536));
+}
 function validRequest(r) {
   if (!identity(r) || Object.getPrototypeOf(r) !== Object.prototype) return false;
   let extra = [];
@@ -16,6 +29,9 @@ function validRequest(r) {
   } else if (r.command === 'close') {
     if (!Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0 || typeof r.discard !== 'boolean') return false;
     extra = ['expectedChangeSequence', 'discard'];
+  } else if (r.command === 'replaceCells') {
+    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook)) return false;
+    extra=['selectionToken','expectedChangeSequence','workbook'];
   } else if (r.command === 'replace') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) return false;
     if (typeof r.text !== 'string' || r.text.length > 4096 || r.valueType !== 'text') return false;
@@ -275,7 +291,7 @@ function installSurface() {
       if (!bound || !identity(r) || r.channel !== channel) return;
       try { if (r.command === 'open') loading('正在打开文档…'); const result = await engine.request(r); render(result); bridge.send(result); }
       catch (error) {
-        const known = ['stale-selection','unsupported-selection','invalid-control-value','invalid-request','already-bound','engine-operation-failed','engine-load-failed',
+        const known = ['typed-mutation-failed','stale-selection','unsupported-selection','invalid-control-value','invalid-request','already-bound','engine-operation-failed','engine-load-failed',
           'document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch',
           'unsaved-changes','command-unavailable','unsupported-command','native-controls-hide-failed',
           'operation-in-progress','export-too-large','engine-timeout-state-unknown','surface-state-unknown-recreate-required'];

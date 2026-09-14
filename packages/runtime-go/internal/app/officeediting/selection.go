@@ -12,6 +12,7 @@ import (
 
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	ordinary "analytix.local/runtime-go/internal/domain/ordinaryprojection"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
@@ -47,6 +48,7 @@ type nativeScope struct {
 	Sequence                                              int64
 	Editable                                              bool
 	originalText                                          string
+	Workbook                                              *office.WorkbookSelection
 	revoked                                               bool
 	proposalOrder                                         []string
 	Binding                                               adapterport.Binding
@@ -57,6 +59,8 @@ type nativeScope struct {
 }
 type nativeProposal struct {
 	ID, Status                        string
+	Workbook                          *office.WorkbookPatch
+	Review                            *office.WorkbookReview
 	Parts                             []editingapp.PatchPart
 	digest                            string
 	operationID                       string
@@ -127,10 +131,18 @@ func (a *Adapter) validateScope(ctx context.Context, scope *nativeScope, princip
 	return nil
 }
 func scopeOutput(scope *nativeScope) map[string]any {
-	return map[string]any{"scopeId": scope.ID, "sessionId": scope.SessionID, "threadId": scope.ThreadID, "selectionToken": scope.SelectionToken, "baseRevision": scope.BaseRevision, "changeSequence": scope.Sequence, "editable": scope.Editable, "parts": nativeParts(scope.Parts)}
+	out := map[string]any{"scopeId": scope.ID, "sessionId": scope.SessionID, "threadId": scope.ThreadID, "selectionToken": scope.SelectionToken, "baseRevision": scope.BaseRevision, "changeSequence": scope.Sequence, "editable": scope.Editable, "parts": nativeParts(scope.Parts)}
+	if scope.Workbook != nil {
+		out["workbook"] = scope.Workbook
+	}
+	return out
 }
 func proposalOutput(proposal *nativeProposal) map[string]any {
-	return map[string]any{"proposalId": proposal.ID, "status": proposal.Status, "parts": nativeParts(proposal.Parts)}
+	out := map[string]any{"proposalId": proposal.ID, "status": proposal.Status, "parts": nativeParts(proposal.Parts)}
+	if proposal.Workbook != nil {
+		out["workbook"] = proposal.Workbook
+	}
+	return out
 }
 func (a *Adapter) invalidateSelection(sessionID string) {
 	for id, scope := range a.scopes {
@@ -153,8 +165,9 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		thread, _ := input["threadId"].(string)
 		operation := ""
 		var parts []editingapp.PatchPart
+		var patch *office.WorkbookPatch
 		if call.Operation == "model-selection-propose" {
-			if !exactKeys(input, "scopeId", "threadId", "operationId", "parts") {
+			if !exactKeys(input, "scopeId", "threadId", "operationId", "parts") && !exactKeys(input, "scopeId", "threadId", "operationId", "workbook") {
 				return failure(fileport.ErrInvalidInput)
 			}
 			operation, _ = input["operationId"].(string)
@@ -162,14 +175,20 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 				return failure(fileport.ErrInvalidInput)
 			}
 			var err error
-			parts, err = decodeNativeParts(input["parts"])
+			if value, ok := input["workbook"]; ok {
+				body, _ := json.Marshal(value)
+				p, e := office.ParseWorkbookPatch(body)
+				patch, err = &p, e
+			} else {
+				parts, err = decodeNativeParts(input["parts"])
+			}
 			if err != nil {
 				return failure(err)
 			}
 		} else if !exactKeys(input, "scopeId", "threadId") {
 			return failure(fileport.ErrInvalidInput)
 		}
-		result, err := a.modelSelectionLocked(ctx, call.Principal, thread, call.Binding, scopeID, operation, parts)
+		result, err := a.modelSelectionLocked(ctx, call.Principal, thread, call.Binding, scopeID, operation, parts, patch)
 		if err != nil {
 			return failure(err)
 		}
@@ -181,7 +200,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		return failure(editingapp.ErrSession)
 	}
 	if call.Operation == "capture-selection" {
-		if !exactKeys(input, "sessionId", "threadId", "selectionToken", "changeSequence", "baseRevision", "text", "editable") {
+		if !exactKeys(input, "sessionId", "threadId", "selectionToken", "changeSequence", "baseRevision", "text", "editable") && !exactKeys(input, "sessionId", "threadId", "selectionToken", "changeSequence", "baseRevision", "text", "editable", "workbook") {
 			return failure(fileport.ErrInvalidInput)
 		}
 		thread, _ := input["threadId"].(string)
@@ -194,15 +213,20 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if !nativeThread.MatchString(thread) || !nativeSelectionToken.MatchString(token) || !revisionPattern.MatchString(revision) || !ok || len(text) > editingapp.MaxSelectionBytes || !utf8.ValidString(text) || !editableOK || !numberOK || err != nil || sequence < 0 || sequence > 9007199254740991 {
 			return failure(fileport.ErrInvalidInput)
 		}
-		if editable && nativeUTF16Length(text) > MaxNativeSelectionUTF16 {
+		if editable && input["workbook"] == nil && nativeUTF16Length(text) > MaxNativeSelectionUTF16 {
 			return failure(editingapp.ErrProposal)
 		}
 		scope := &nativeScope{SessionID: sessionID, ThreadID: thread, SelectionToken: token, BaseRevision: revision, Sequence: sequence, Editable: editable, originalText: strings.Clone(text), Binding: call.Binding, proposals: map[string]*nativeProposal{}, operations: map[string]string{}}
 		if err := a.validateScope(ctx, scope, call.Principal); err != nil {
 			return failure(err)
 		}
+		if value, ok := input["workbook"]; ok {
+			if err := a.captureWorkbook(ctx, session, scope, value); err != nil {
+				return failure(err)
+			}
+		}
 		ranges, err := a.projector.AuthorizeAndProject(ctx, editingapp.ProjectionInput{ScopeAuthority: a.selectionAuthority(session, scope), Text: text})
-		if err != nil || len(ranges) > editingapp.MaxProtectedSpans {
+		if err != nil || len(ranges) > editingapp.MaxProtectedSpans || scope.Workbook != nil && len(ranges) != 0 {
 			return failure(editingapp.ErrProjection)
 		}
 		scope.ID, err = nativeID()
@@ -303,6 +327,10 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			proposals = append(proposals, proposalOutput(proposal))
 			// The model-facing proposal output stays redacted. Local review is
 			// reconstructed from the exact protected selection owned by Core.
+			if proposal.Review != nil {
+				reviews = append(reviews, map[string]any{"proposalId": id, "beforeText": workbookReviewText(proposal.Review.Before, nil), "afterText": workbookReviewText(proposal.Review.After, proposal.Review.Results), "workbook": proposal.Review})
+				continue
+			}
 			after, err := renderNativeProposal(scope, proposal.Parts)
 			if err == nil {
 				reviews = append(reviews, map[string]any{"proposalId": id, "beforeText": scope.originalText, "afterText": after})
@@ -359,6 +387,12 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			return failure(editingapp.ErrScope)
 		}
 		replacement, err := renderNativeProposal(scope, proposal.Parts)
+		beforeText := scope.originalText
+		if proposal.Review != nil {
+			beforeText = workbookReviewText(proposal.Review.Before, nil)
+			replacement = workbookReviewText(proposal.Review.After, proposal.Review.Results)
+			err = nil
+		}
 		if err != nil {
 			return failure(err)
 		}
@@ -368,7 +402,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		}
 		changeHash := sha256.Sum256([]byte("analytix.native-change/v1\x00" + session.document.ObjectID + "\x00" + scope.ThreadID + "\x00" + id + "\x00" + op))
 		changeID := hex.EncodeToString(changeHash[:])
-		prepared, err := recovery.PrepareNativeChange(ctx, sessionID, fileport.NativeChangeDraft{ChangeID: changeID, ThreadID: scope.ThreadID, ProposalID: id, BaseRevision: revision, BeforeText: scope.originalText, AfterText: replacement})
+		prepared, err := recovery.PrepareNativeChange(ctx, sessionID, fileport.NativeChangeDraft{ChangeID: changeID, ThreadID: scope.ThreadID, ProposalID: id, BaseRevision: revision, BeforeText: beforeText, AfterText: replacement, Workbook: proposal.Review})
 		if err != nil {
 			return failure(err)
 		}
@@ -376,7 +410,11 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		proposal.decisionDigest = digest
 		proposal.decisionOperation = op
 		scope.operations[op] = digest
-		return output(map[string]any{"ok": true, "replacement": map[string]any{"proposalId": id, "operationId": op, "changeId": prepared.ChangeID, "saveOperationId": prepared.SaveOperationID, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}})
+		result := map[string]any{"proposalId": id, "operationId": op, "changeId": prepared.ChangeID, "saveOperationId": prepared.SaveOperationID, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}
+		if proposal.Review != nil {
+			result["workbook"] = proposal.Review
+		}
+		return output(map[string]any{"ok": true, "replacement": result})
 	}
 	return failure(fileport.ErrInvalidInput)
 }
@@ -407,7 +445,7 @@ func renderNativeProposal(scope *nativeScope, parts []editingapp.PatchPart) (str
 		default:
 			return "", editingapp.ErrProtected
 		}
-		if scope.Editable && units > MaxNativeSelectionUTF16 {
+		if scope.Editable && scope.Workbook == nil && units > MaxNativeSelectionUTF16 {
 			return "", editingapp.ErrProposal
 		}
 		if out.Len() > editingapp.MaxPatchBytes {
@@ -427,7 +465,7 @@ func renderNativeProposal(scope *nativeScope, parts []editingapp.PatchPart) (str
 
 // ModelSelection is called only by the existing Harness with current principal,
 // thread and package binding. Model input contains no session/path/UNO selector.
-func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydomain.PrincipalV1, threadID string, binding adapterport.Binding, scopeID, operationID string, parts []editingapp.PatchPart) (map[string]any, error) {
+func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydomain.PrincipalV1, threadID string, binding adapterport.Binding, scopeID, operationID string, parts []editingapp.PatchPart, patches ...*office.WorkbookPatch) (map[string]any, error) {
 	scope := a.scopes[scopeID]
 	if scope == nil || scope.revoked || scope.ThreadID != threadID || scope.Binding.GenerationID != binding.GenerationID || scope.Binding.ActivationRevision != binding.ActivationRevision || scope.Binding.PackageID != binding.PackageID {
 		return nil, editingapp.ErrScope
@@ -436,15 +474,38 @@ func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydo
 		return nil, err
 	}
 	if operationID == "" {
-		return map[string]any{"scopeId": scope.ID, "editable": scope.Editable, "parts": nativeParts(scope.Parts)}, nil
+		out := map[string]any{"scopeId": scope.ID, "editable": scope.Editable, "parts": nativeParts(scope.Parts)}
+		if scope.Workbook != nil {
+			out["workbook"] = scope.Workbook
+		}
+		return out, nil
 	}
 	if !scope.Editable || !operationPattern.MatchString(operationID) {
 		return nil, editingapp.ErrScope
 	}
-	if _, err := renderNativeProposal(scope, parts); err != nil {
-		return nil, err
+	var patch *office.WorkbookPatch
+	var review *office.WorkbookReview
+	if len(patches) > 0 {
+		patch = patches[0]
+	}
+	if scope.Workbook != nil {
+		var err error
+		review, err = a.workbookProposal(ctx, scope, patch)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if patch != nil {
+			return nil, editingapp.ErrProposal
+		}
+		if _, err := renderNativeProposal(scope, parts); err != nil {
+			return nil, err
+		}
 	}
 	body, _ := json.Marshal(parts)
+	if patch != nil {
+		body, _ = json.Marshal(patch)
+	}
 	hash := sha256.Sum256(body)
 	digest := hex.EncodeToString(hash[:])
 	for _, proposal := range scope.proposals {
@@ -465,7 +526,7 @@ func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydo
 	if err != nil {
 		return nil, err
 	}
-	proposal := &nativeProposal{ID: id, Status: "proposed", Parts: nativeParts(parts), digest: digest, operationID: operationID}
+	proposal := &nativeProposal{ID: id, Status: "proposed", Parts: nativeParts(parts), Workbook: patch, Review: review, digest: digest, operationID: operationID}
 	scope.proposals[id] = proposal
 	scope.proposalOrder = append(scope.proposalOrder, id)
 	scope.operations[operationID] = "propose:" + digest

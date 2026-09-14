@@ -11,7 +11,7 @@ import {
   objectEditingResponseSchema, type ObjectEditingResponse
 } from '../../../packages/runtime/src/contracts/object-editing'
 import {
-  nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds, type NativeOfficeAppearance,
+  nativeTypedWorkbookSelection, nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds, type NativeOfficeAppearance,
   type NativeOfficeError, type NativeOfficeKind, type NativeOfficeResponse,
   type NativeOfficeSelection, type NativeOfficeView
 } from '../../shared/native-office'
@@ -633,6 +633,27 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     await finishRecovery(document)
   }
 
+  async function restoreFailedWorkbook(document: Active) {
+    // No partially changed worker may export. Recovery loads exact Core bytes;
+    // the durable approved change remains pending for explicit cancellation.
+    document.failed=true;document.ready=false
+    delete document.approvedChange;delete document.pendingSave
+    await destroySurface(document)
+    try {
+      const opened=await invoke(document,'open-object',{object:{workspace:document.workspace,path:document.requestedPath}})
+      if (!opened.ok || !('document' in opened)) fail('unknown')
+      const current=opened.document,bytes=decodeContent(current.content)
+      if (current.objectId!==document.view.objectId || current.sessionId!==document.sessionId || current.path!==document.view.path || current.revision!==document.view.revision || hash(bytes)!==current.revision) fail('conflict')
+      const surface=await options.createSurface(event=>{if(document.surface===surface)onEvent(document,event)})
+      document.surface=surface;document.failed=false;delete document.destroyed
+      document.view={...document.view,changeSequence:0,acknowledgedSequence:0,dirty:false,editing:false,canUndo:false,saving:false,status:'loading',selection:undefined,scope:undefined,proposals:undefined,localReviews:undefined}
+      document.selections.clear();document.decisionOperations.clear();document.openOperationId=newOperationId()
+      await engine(document,{command:'open',documentId:document.view.objectId,version:current.revision,operationId:document.openOperationId,kind:document.view.kind,bytes})
+      document.ready=true;document.view.status='ready'
+      if(active===document&&visible)await surface.attach(document.bounds,document.appearance)
+      await recover(document,document.threadId);publish()
+    }catch {document.failed=true;document.ready=false;setError(document,'unknown')}
+  }
   async function reference(document: Active, request: Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>, {action:'reference'}>) {
     if (document.threadId !== request.threadId) await recover(document, request.threadId)
     const selection = document.selections.get(request.selectionToken)
@@ -641,8 +662,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const single = selection.kind === 'text' || (selection.kind === 'shapes' && selection.shapes.length === 1) || (selection.kind === 'cells' && selection.cells?.length === 1 && selection.ranges.length === 1 && selection.ranges[0].startRow === selection.ranges[0].endRow && selection.ranges[0].startColumn === selection.ranges[0].endColumn)
     const textCell = selection.kind !== 'cells' || selection.cells?.every(cell =>
       (cell.valueType === 'text' || cell.valueType === 'empty') && !cell.merged)
-    if (request.editable && (!document.view.editing || !single || !selection.capture?.complete || !text || !textCell)) fail('unsupported_selection')
-    const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable})
+    const workbook = selection.kind === 'cells' && !(single && selection.cells?.[0]?.valueType === 'text') ? nativeTypedWorkbookSelection(selection) : null
+    if (request.editable && (!document.view.editing || (!workbook && (!single || !selection.capture?.complete || !text || !textCell)))) fail('unsupported_selection')
+    const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable,...(request.editable && workbook ? {workbook} : {})})
     if (!result.ok || !('scope' in result)) fail('invalid_response')
     const parsedScope = nativeOfficeSelectionScopeSchema.safeParse(result.scope)
     if (!parsedScope.success) fail('invalid_response')
@@ -673,10 +695,17 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       if (!result.ok || !('replacement' in result)) fail('invalid_response')
       const replacement = result.replacement
       if (replacement.operationId !== operationId || replacement.proposalId !== proposalId || replacement.selectionToken !== scope.selectionToken || replacement.changeSequence !== scope.changeSequence || replacement.baseRevision !== scope.baseRevision) fail('invalid_response')
-      if (replacement.text.length > 4096) fail('unsupported_selection')
+      if (!replacement.workbook && replacement.text.length > 4096) fail('unsupported_selection')
       document.approvedChange = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
       document.view.canUndo = false
+      if (replacement.workbook) {
+        if (!scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
+        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook}) }
+        catch { await restoreFailedWorkbook(document); fail('save_failed') }
+      } else {
+        if (scope.workbook) fail('invalid_response')
       await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})
+      }
       document.appliedProposals.add(proposalId)
       document.view.appliedProposals = [...document.appliedProposals].slice(-16)
       await save(document)

@@ -1,4 +1,4 @@
-import { nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativeWorkbookSelectionSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema } from '../../packages/runtime/src/contracts/native-office-editing'
 import { z } from 'zod'
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -98,3 +98,9 @@ export type NativeOfficeError = z.infer<typeof nativeOfficeErrorSchema>
 export type NativeOfficeKind = z.infer<typeof nativeOfficeKindSchema>
 
 export type NativeOfficeAppearance = z.infer<typeof nativeOfficeAppearanceSchema>
+
+export function nativeTypedWorkbookSelection(selection: NativeOfficeSelection) {
+  if (selection.kind !== 'cells' || selection.ranges.length !== 1 || !selection.capture?.complete || selection.capture.truncated || !selection.cells) return null
+  const parsed=nativeWorkbookSelectionSchema.safeParse({...selection.ranges[0],cells:selection.cells})
+  return parsed.success ? parsed.data : null
+}

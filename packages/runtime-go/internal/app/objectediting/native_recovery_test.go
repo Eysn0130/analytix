@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 )
 
@@ -170,12 +171,17 @@ func TestNativeRecoveryServiceMissingOwnerAndRevokedSessionFailClosed(t *testing
 }
 
 func TestNativeRecoveryServiceRevalidatesIdentityAfterStorage(t *testing.T) {
-	for _, operation := range []string{"prepare", "recovery", "commit", "undo", "cancel", "resume"} {
+	for _, operation := range []string{"prepare", "recovery", "commit", "undo", "cancel", "resume", "workbook"} {
 		t.Run(operation, func(t *testing.T) {
 			s, identity, files, opened := nativeRecoveryServiceFixture(t)
 			ctx := context.Background()
 			files.onNative = func() { identity.unavailable = true }
 			switch operation {
+			case "workbook":
+				out, err := s.ValidateNativeWorkbook(ctx, opened.SessionID, opened.Revision, office.WorkbookSelection{}, nil)
+				if !errors.Is(err, ErrUnavailable) || out != nil {
+					t.Fatal("typed validation escaped revoked identity", err)
+				}
 			case "cancel":
 				out, err := s.CancelNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision)
 				if !errors.Is(err, ErrUnavailable) || out.Current != nil || out.Pending != nil {
@@ -209,4 +215,9 @@ func TestNativeRecoveryServiceRevalidatesIdentityAfterStorage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (f *nativeRecoveryTestFiles) ValidateNativeWorkbook(_ context.Context, input fileport.NativeWorkbookInput) (*office.WorkbookReview, error) {
+	f.observed()
+	return &office.WorkbookReview{Before: input.Selection}, nil
 }

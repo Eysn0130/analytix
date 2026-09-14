@@ -35,6 +35,79 @@ Module.zetajs.then(zeta => {
     while (handles.size > 32) handles.delete(handles.keys().next().value);
     return token;
   }
+  function rememberWorkbook(target, text, kind, ranges, cells) {
+    const token=remember(target,text,kind);
+    if (ranges.length===1) handles.get(token).workbook=JSON.parse(JSON.stringify({...ranges[0],cells}));
+    return token;
+  }
+  const formulaKey = value => {
+    let out='',quoted=false;const source=String(value).replace(/^=/,'');
+    for(let i=0;i<source.length;i++){let c=source[i];if(c==='"'){if(quoted&&source[i+1]==='"'){out+='""';i++;continue;}quoted=!quoted;}if(!quoted&&c===';')c=',';out+=c;}return out;
+  };
+  const nativeFormula = value => {
+    let out='=',quoted=false;const source=formulaKey(value);
+    for(let i=0;i<source.length;i++){let c=source[i];if(c==='"'){if(quoted&&source[i+1]==='"'){out+='""';i++;continue;}quoted=!quoted;}if(!quoted&&c===',')c=';';out+=c;}return out;
+  };
+  function workbookCell(sheet, before) {
+    const cell=sheet.getCellByPosition(before.column,before.row), nativeType=cell.getType();
+    const type=typeof nativeType==='number'?nativeType:nativeType.value;
+    return {sheet:before.sheet,column:before.column,row:before.row,text:cell.getString(),formula:cell.getFormula(),value:cell.getValue(),valueType:['empty','number','text','formula'][type],numberFormat:Number(cell.getPropertyValue('NumberFormat')),rowVisible:sheet.getRows().getByIndex(before.row).getPropertyValue('IsVisible'),columnVisible:sheet.getColumns().getByIndex(before.column).getPropertyValue('IsVisible'),merged:cell.getIsMerged()};
+  }
+  function workbookFormulaReferences(expression, scope, budget) {
+    let input=formulaKey(expression), refs=[];
+    const functions=['SUM','AVERAGE','MIN','MAX','COUNT','COUNTA','COUNTIF','SUMIF','IF','ROUND','ABS'];
+    const point=value=>{let col=0;const match=/^\$?([A-Z]+)\$?([0-9]+)$/i.exec(value);for(const c of match[1].toUpperCase())col=col*26+c.charCodeAt(0)-64;const row=Number(match[2])-1;col--;if(col<scope.startColumn||col>scope.endColumn||row<scope.startRow||row>scope.endRow)throw Error('invalid-control-value');return {col,row};};
+    while(input.length){input=input.trimStart();if(!input)break;
+      const literal=/^"(?:[^"]|"")*"/.exec(input);if(literal){input=input.slice(literal[0].length);continue;}
+      const sheet=/^'((?:[^']|'')+)'!/.exec(input);if(sheet){if(sheet[1].replace(/''/g,"'")!==scope.sheetName)throw Error('invalid-control-value');input=input.slice(sheet[0].length);continue;}
+      const numeric=/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/.exec(input);if(numeric){if(!Number.isFinite(Number(numeric[0])))throw Error('invalid-control-value');input=input.slice(numeric[0].length);continue;}
+      const ref=/^\$?[A-Z]{1,3}\$?[1-9][0-9]*/i.exec(input);if(ref){const a=point(ref[0]);input=input.slice(ref[0].length);let b=a;const end=/^\s*:\s*(\$?[A-Z]{1,3}\$?[1-9][0-9]*)/i.exec(input);if(end){b=point(end[1]);input=input.slice(end[0].length);}if(b.col<a.col||b.row<a.row)throw Error('invalid-control-value');for(let row=a.row;row<=b.row;row++)for(let col=a.col;col<=b.col;col++){if(++budget.work>1000000)throw Error('invalid-control-value');refs.push((row-scope.startRow)*(scope.endColumn-scope.startColumn+1)+col-scope.startColumn);}continue;}
+      const name=/^[A-Za-z_][A-Za-z0-9_]*/.exec(input);if(name){input=input.slice(name[0].length);if(input.startsWith('!')){if(name[0]!==scope.sheetName)throw Error('invalid-control-value');input=input.slice(1);continue;}if(!['TRUE','FALSE'].includes(name[0].toUpperCase())&&(!functions.includes(name[0].toUpperCase())||!input.trimStart().startsWith('(')))throw Error('invalid-control-value');continue;}
+      if(/^[+*/^&%=(),:<>-]/.test(input)){input=input.slice(1);continue;}
+      throw Error('invalid-control-value');
+    }return refs;
+  }
+  function validateWorkbookFormulas(scope){
+    const budget={work:0},graph=scope.cells.map(c=>c.valueType==='formula'?workbookFormulaReferences(c.formula,scope,budget):[]),state=[],depths=[];
+    const visit=(i,depth)=>{if(depth>64||state[i]===1)throw Error('invalid-control-value');if(state[i]===2)return depths[i];state[i]=1;let height=1;for(const j of graph[i])if(scope.cells[j].valueType==='formula')height=Math.max(height,visit(j,depth+1)+1);if(height>64)throw Error('invalid-control-value');state[i]=2;depths[i]=height;return height;};
+    for(let i=0;i<graph.length;i++)visit(i,1);
+  }
+  function replaceWorkbook(r) {
+    const handle=targetFor(r), review=r.workbook, saved=handle.workbook;
+    if(active.kind!=='xlsx'||!saved||!review||!review.before||!review.after)throw Error('unsupported-selection');
+    const before=review.before,after=review.after,keys=['sheet','sheetName','startColumn','startRow','endColumn','endRow'];
+    if(!keys.every(k=>before[k]===saved[k]&&after[k]===saved[k])||before.cells.length!==saved.cells.length||after.cells.length!==saved.cells.length||saved.cells.length===0||saved.cells.length>256)throw Error('stale-selection');
+    const width=before.endColumn-before.startColumn+1,height=before.endRow-before.startRow+1;
+    if(width<1||height<1||width*height!==saved.cells.length)throw Error('unsupported-selection');
+    const sheet=model.getSheets().getByIndex(before.sheet), targets=[];
+    if(sheet.getName()!==before.sheetName)throw Error('stale-selection');
+    for(let i=0;i<before.cells.length;i++){
+      const b=before.cells[i],a=after.cells[i],old=saved.cells[i],current=workbookCell(sheet,b);
+      if(!Object.keys(current).every(k=>current[k]===b[k]&&b[k]===old[k]))throw Error('stale-selection');
+      if(b.column!==before.startColumn+i%width||b.row!==before.startRow+Math.floor(i/width)||!b.rowVisible||!b.columnVisible||b.merged||a.sheet!==b.sheet||a.row!==b.row||a.column!==b.column||a.numberFormat!==b.numberFormat||!a.rowVisible||!a.columnVisible||a.merged)throw Error('unsupported-selection');
+      if(!['empty','text','number','formula'].includes(a.valueType)||!Number.isFinite(a.value)||typeof a.text!=='string'||a.text.length>4096||typeof a.formula!=='string'||a.formula.length>4096)throw Error('invalid-control-value');
+      if(a.valueType==='text'&&!['empty','text'].includes(b.valueType)||a.valueType==='empty'&&b.valueType!=='empty')throw Error('invalid-control-value');
+      if(a.valueType==='formula'&&(!a.formula.startsWith('=')||a.formula.length>1025))throw Error('invalid-control-value');
+      targets.push(sheet.getCellByPosition(b.column,b.row));
+    }
+    validateWorkbookFormulas(after);
+    try {
+      mutate(()=>{
+        for(let i=0;i<targets.length;i++){
+          const c=after.cells[i],old=before.cells[i];
+          if(c.valueType===old.valueType&&(c.valueType==='formula'?formulaKey(c.formula)===formulaKey(old.formula):c.valueType==='number'?c.value===old.value:c.text===old.text))continue;
+          if(c.valueType==='number')targets[i].setValue(c.value);
+          else if(c.valueType==='formula')targets[i].setFormula(nativeFormula(c.formula));
+          else targets[i].setString(c.text);
+        }
+        model.calculateAll();
+        for(let i=0;i<targets.length;i++){
+          const c=after.cells[i],actual=workbookCell(sheet,c);
+          if(actual.valueType!==c.valueType||actual.numberFormat!==c.numberFormat||actual.merged||!actual.rowVisible||!actual.columnVisible||c.valueType==='number'&&actual.value!==c.value||c.valueType==='text'&&actual.text!==c.text||c.valueType==='formula'&&(formulaKey(actual.formula)!==formulaKey(c.formula)||targets[i].getError()!==0))throw Error('typed-mutation-failed');
+        }
+      });
+    }catch {active.mutationFailed=true;handles.clear();throw Error('typed-mutation-failed');}
+  }
   function selection() {
     const base = {documentId:active.documentId, version:active.version, changeSequence:active.sequence};
     try {
@@ -71,7 +144,7 @@ Module.zetajs.then(zeta => {
         const one = addresses.length === 1 && totalCells === 1;
         const a = addresses[0];
         const target = one ? model.getSheets().getByIndex(a.Sheet).getCellByPosition(a.StartColumn, a.StartRow) : selected;
-        return {...base, kind:'cells', scope:'sheet-range-address-at-version-and-change-sequence', ranges, cells, text:boundedText(text), capture:captured(text, complete), token:remember(target, one ? target.getString() : null, one ? 'cell' : 'range')};
+        return {...base, kind:'cells', scope:'sheet-range-address-at-version-and-change-sequence', ranges, cells, text:boundedText(text), capture:captured(text, complete), token:rememberWorkbook(target, one ? target.getString() : null, one ? 'cell' : 'range', ranges, cells)};
       }
       const page = controller.getCurrentPage(), pages = model.getDrawPages();
       let pageIndex = -1;
@@ -158,7 +231,7 @@ Module.zetajs.then(zeta => {
     model = controller = active = modifyListener = selectionListener = null;
     handles.clear();
   }
-  function requireEditing() { if (!active.editing || model.isReadonly() !== true) throw Error('unsupported-command'); }
+  function requireEditing() { if(active.mutationFailed)throw Error('typed-mutation-failed'); if (!active.editing || model.isReadonly() !== true) throw Error('unsupported-command'); }
   function targetFor(r) {
     requireEditing();
     const handle = handles.get(r.selectionToken);
@@ -247,6 +320,8 @@ Module.zetajs.then(zeta => {
         }
         mutate(() => handle.target.setString(r.text));
         reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'replaceCells') {
+        replaceWorkbook(r);reply({ok:true,state:state(),selection:selection()});
       } else if (r.command === 'export') {
         requireEditing();
         if (active.pendingExport) throw Error('export-awaiting-ack');
@@ -278,7 +353,7 @@ Module.zetajs.then(zeta => {
         close(); reply({ok:true});
       } else throw Error('unsupported-command');
     } catch (error) {
-      const known = ['stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
+      const known = ['typed-mutation-failed','stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
       const code = known.includes(error.message) ? error.message : 'engine-operation-failed';
       reply({ok:false, error:code});
     }

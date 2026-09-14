@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { MaxNativeOfficeBytes, nativeOfficeCommitInputSchema, nativeOfficeStatusInputSchema, nativeOfficeSelectionCaptureInputSchema, nativeOfficeProposalRejectInputSchema, nativeOfficeProposalDecisionInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeProposalSchema, nativeOfficeReplacementSchema, nativeOfficeChangeSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from './native-office-editing'
+import { nativeWorkbookSelectionSchema, nativeWorkbookPatchSchema, MaxNativeOfficeBytes, nativeOfficeCommitInputSchema, nativeOfficeStatusInputSchema, nativeOfficeSelectionCaptureInputSchema, nativeOfficeProposalRejectInputSchema, nativeOfficeProposalDecisionInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeProposalSchema, nativeOfficeReplacementSchema, nativeOfficeChangeSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from './native-office-editing'
 import { objectEditingRequestSchema, objectEditingResponseSchema } from './object-editing'
 import { nativeOfficeAnnotationSchema } from './native-office-editing'
 import { nativeOfficeRequestSchema } from '../../../../src/shared/native-office'
@@ -137,4 +137,16 @@ describe('durable protected-local recovery contracts',()=>{
     expect(nativeOfficeChangeSchema.safeParse({...change(),beforeText:'x'.repeat(65537)}).success).toBe(false)
     expect(nativeOfficeRecoverySchema.safeParse({current:change(),pending:null,raw:'unexpected'}).success).toBe(false)
   })
+})
+
+
+describe('finite typed workbook transport',()=>{
+ const cell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+ const workbook={sheet:0,sheetName:'统计',startColumn:0,endColumn:0,startRow:0,endRow:255,cells:Array.from({length:256},(_,row)=>({...cell,row}))}
+ it('requires a complete ordered unhidden rectangle and explicit value types',()=>{
+  expect(nativeWorkbookSelectionSchema.safeParse(workbook).success).toBe(true)
+  for(const bad of [{...workbook,cells:workbook.cells.slice(1)},{...workbook,cells:[...workbook.cells,{...cell,row:256}],endRow:256},{...workbook,cells:workbook.cells.map((c,i)=>i?c:{...c,merged:true})},{...workbook,cells:workbook.cells.map((c,i)=>i?c:{...c,columnVisible:false})}])expect(nativeWorkbookSelectionSchema.safeParse(bad).success).toBe(false)
+  for(const patch of [{kind:'number',value:2},{kind:'formula',formula:'SUM(A1:A2)'},{kind:'range',cells:[{rowOffset:0,columnOffset:0,type:'number',value:2}]}])expect(nativeWorkbookPatchSchema.safeParse(patch).success).toBe(true)
+  for(const patch of [{kind:'number',value:'2'},{kind:'formula',formula:'1',value:1},{kind:'range',cells:[{rowOffset:0,columnOffset:0,type:'number',value:2,path:'/private'}]},{kind:'range',cells:[]}])expect(nativeWorkbookPatchSchema.safeParse(patch).success).toBe(false)
+ })
 })

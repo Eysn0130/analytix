@@ -114,19 +114,19 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	limit, stringLimit, depth := 16<<10, 4096, 2
+	tokens := 2048
 	if call.Operation == "annotation-write" {
 		limit, stringLimit = fileport.MaxAnnotationRecordBytes, fileport.MaxAnnotationNoteBytes
 	}
 	if call.Operation == "capture-selection" || call.Operation == "model-selection-propose" {
 		limit, stringLimit = (512 << 10), editingapp.MaxSelectionBytes
+		depth, tokens = 6, 16384
 	}
 	if call.Operation == "commit-object" {
 		limit, stringLimit = MaxInputBytes, base64.StdEncoding.EncodedLen(MaxOfficeBytes)
 	}
-	if call.Operation == "model-selection-propose" {
-		depth = 3
-	}
-	input, err := jsonstrict.DecodeObject(call.Input, jsonstrict.Options{MaxBytes: limit, MaxDepth: depth, MaxTokens: 2048, MaxStringBytes: stringLimit})
+
+	input, err := jsonstrict.DecodeObject(call.Input, jsonstrict.Options{MaxBytes: limit, MaxDepth: depth, MaxTokens: tokens, MaxStringBytes: stringLimit})
 	if err != nil {
 		return failure(fileport.ErrInvalidInput)
 	}

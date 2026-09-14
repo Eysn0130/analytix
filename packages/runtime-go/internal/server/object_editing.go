@@ -191,12 +191,26 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 	if !ok {
 		return failure()
 	}
+	for key := range args {
+		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook") {
+			return failure()
+		}
+	}
+	if _, typed := args["workbook"]; typed {
+		if _, text := args["parts"]; text {
+			return failure()
+		}
+	}
 	operation := "model-selection-read"
 	input := map[string]any{"scopeId": scopeID, "threadId": pending.ThreadID}
 	if pending.Call.Name == "native_selection_propose" {
 		operation = "model-selection-propose"
 		input["operationId"] = args["operationId"]
-		input["parts"] = args["parts"]
+		if value, ok := args["workbook"]; ok {
+			input["workbook"] = value
+		} else {
+			input["parts"] = args["parts"]
+		}
 	}
 	body, err := json.Marshal(input)
 	if err != nil {

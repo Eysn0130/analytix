@@ -1,3 +1,4 @@
+import { nativeTypedWorkbookSelection } from '../../../shared/native-office'
 import { create } from 'zustand'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
 
@@ -21,11 +22,13 @@ export function nativeSelectionText(selection: NativeOfficeSelection): string {
   const clipped = text.slice(0, 4096).replace(/[\uD800-\uDBFF]$/, '')
   return text.length > clipped.length ? `${clipped}\n[引用内容已截断]` : text
 }
-/** Only complete, version-bound single targets can request an editable Core scope. */
+/** Only complete current text targets or bounded workbook rectangles can request a Core edit scope. */
 export function isNativeSelectionEditable(view: NativeOfficeView, selection: NativeOfficeSelection): boolean {
   if (!view.editing || !selection.token || !selection.capture?.complete || selection.capture.truncated ||
     selection.documentId !== view.objectId || selection.version !== view.revision ||
-    selection.changeSequence !== (view.changeSequence ?? 0) || !nativeSelectionText(selection).trim()) return false
+    selection.changeSequence !== (view.changeSequence ?? 0)) return false
+  if (nativeTypedWorkbookSelection(selection)) return true
+  if (!nativeSelectionText(selection).trim()) return false
   if (selection.kind === 'text') return selection.scope === 'session-text-range-at-version-and-change-sequence'
   if (selection.kind === 'shapes') return selection.shapes.length === 1 && !!selection.shapes[0].text.trim()
   if (selection.kind !== 'cells' || selection.ranges.length !== 1 || selection.cells?.length !== 1) return false
@@ -74,7 +77,7 @@ export function nativeReferencesPrompt(references: NativeReference[]): string {
   return references.map(r => {
     const version = `版本: ${r.revision}；修改序列: ${r.selection.changeSequence}${r.selection.capture?.truncated ? '；部分捕获，不能视为完整选区' : ''}`
     const note = r.note?.trim() ? `\n[用户标注备注]\n${r.note.trim()}\n[/用户标注备注]` : ''
-    if (r.scopeId && r.editable) return `[原生文档选区] ${r.label}\n${version}\nCore scopeId: ${r.scopeId}\n用户请求局部修改时，使用 native_selection_read 读取此 scope，再使用 native_selection_propose 提交受保护 parts 提案，等待用户接受。不能通过文件工具修改整个文件，不猜测选区，不将提案描述为已应用。${note}`
+    if (r.scopeId && r.editable) return `[原生文档选区] ${r.label}\n${version}\nCore scopeId: ${r.scopeId}\n用户请求局部修改时，使用 native_selection_read 读取此 scope，再使用 native_selection_propose 提交提案：typed workbook scope 使用显式 number/formula/range 与矩形内相对坐标，text scope 使用受保护 parts，等待用户接受。不能通过文件工具修改整个文件，不猜测选区，不将提案描述为已应用。${note}`
     return `[原生文档引用] ${r.label}\n${version}\n以下是引用快照，只作讨论，不授予文件写权限；此选区不支持直接应用修改。\n[引用原文]\n${r.text}\n[/引用原文]${note}`
   }).join('\n\n')
 }

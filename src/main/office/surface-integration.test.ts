@@ -159,3 +159,24 @@ test('typed private protocol admits only exact AI text replacement and denies ma
   expect(isOfficeRequest({...request,text:'x'.repeat(4097)})).toBe(false)
   expect(isOfficeRequest({...request,format:{operation:'bold',value:true}})).toBe(false)
 })
+
+
+test('actual surface relay forwards only strict typed rectangles after edit admission',async()=>{
+ const context:any={document:{getElementById:()=>null},window:{addEventListener(){}}};vm.createContext(context)
+ const source=readFileSync(new URL('./surface/office-surface.js',import.meta.url),'utf8').replaceAll('export ','')
+ vm.runInContext(source+'\nglobalThis.engine=new OfficeEngineSurface({},()=>{});',context)
+ const state={documentId:'document',version:'version',kind:'xlsx',changeSequence:0,acknowledgedSequence:0,dirty:false}
+ context.engine.channel='channel';context.engine.state=state;context.engine.worker=vi.fn(async()=>({state}))
+ const cell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+ const before={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[cell]}
+ const request={...envelope('replaceCells'),selectionToken:'selection',expectedChangeSequence:0,workbook:{before,after:{...before,cells:[{...cell,text:'2',formula:'2',value:2}]},results:['']}}
+ const deliver=(value:unknown)=>{context.payload=JSON.stringify(value);return vm.runInContext('engine.request(JSON.parse(payload))',context)}
+ expect(isOfficeRequest(request)).toBe(true)
+ await expect(deliver(request)).rejects.toThrow('unsupported-command')
+ context.engine.editing=true;await deliver(request);expect(context.engine.worker).toHaveBeenCalledOnce()
+ expect(context.engine.worker.mock.calls[0][0].workbook).toEqual(request.workbook)
+ for(const bad of [{...request,path:'/private'},{...request,workbook:{...request.workbook,after:{...before,endRow:1}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,merged:true}]}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,valueType:'command',command:'.uno:Shell'}]}}}]){
+  expect(isOfficeRequest(bad)).toBe(false);await expect(deliver(bad)).rejects.toThrow('invalid-request')
+ }
+ expect(context.engine.worker).toHaveBeenCalledOnce()
+})

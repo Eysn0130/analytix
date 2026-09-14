@@ -3,6 +3,7 @@ package objectediting
 import (
 	"context"
 
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 )
 
@@ -130,4 +131,26 @@ func (s *Service) ResumeNativeChange(ctx context.Context, id, thread, change, ba
 		return receipt, err
 	}
 	return s.verifyCurrentReceipt(ctx, current, receipt)
+}
+
+// ValidateNativeWorkbook resolves paths and principal only from the live session.
+func (s *Service) ValidateNativeWorkbook(ctx context.Context, id, base string, selected office.WorkbookSelection, patch *office.WorkbookPatch) (*office.WorkbookReview, error) {
+	if s == nil {
+		return nil, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	files, ok := s.files.(fileport.NativeRecoveryFiles)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	result, err := files.ValidateNativeWorkbook(ctx, fileport.NativeWorkbookInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base, Selection: selected, Patch: patch})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return nil, ErrUnavailable
+	}
+	return result, err
 }
