@@ -24,6 +24,7 @@ import {
 import { DEFAULT_COMPOSER_MODEL_IDS } from '@shared/default-composer-models'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import { projectModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
+import './model-picker.css'
 
 export type ComposerReasoningEffort = ModelReasoningEffort
 
@@ -75,6 +76,7 @@ type ComposerModelMenuGroup = {
   label: string
   subtitleKey?: string
   modelIds: string[]
+  modelLabels?: Record<string, string>
   modelProfiles?: Record<string, ModelProviderModelProfileV1>
 }
 
@@ -181,10 +183,15 @@ export function FloatingComposerModelPicker({
   const canOpenModelControls = canChangeModel || (needsProviderSetup && Boolean(onConfigureProviders))
   const modelLabel = needsProviderSetup
     ? t('composerNoProvidersShort')
-    : fullModelLabel(composerModel, t('autoLabel'))
+    : composerModelDisplayLabel(providerMenuGroups, currentModel, selectedProviderId, t('autoLabel'))
+  const modelIdentity = needsProviderSetup ? modelLabel : [
+    providerMenuGroups.find((group) => group.providerId === selectedProviderId)?.label,
+    modelLabel,
+    currentModel !== modelLabel ? currentModel : undefined
+  ].filter(Boolean).join(' · ')
   const controlsTitle = reasoningEnabled
-    ? `${modelLabel} / ${currentReasoningLabel}`
-    : modelLabel
+    ? `${modelIdentity} / ${currentReasoningLabel}`
+    : modelIdentity
   const activeProviderGroup =
     providerMenuGroups.find((group) => group.menuId === activeProviderId) ?? null
   const activeProviderModelIds = activeProviderGroup?.modelIds ?? []
@@ -214,6 +221,19 @@ export function FloatingComposerModelPicker({
     }
     window.addEventListener('pointerdown', onPointerDown)
     return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault()
+      event.stopPropagation()
+      setMenuOpen(false)
+      pickerRef.current?.querySelector('button')?.focus()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [menuOpen])
 
   useEffect(() => {
@@ -335,7 +355,7 @@ export function FloatingComposerModelPicker({
           ref={menuRef}
           role="menu"
           style={menuStyle}
-          className={className}
+          className={`ds-model-menu ${className}`}
         >
           {reasoningEnabled && !needsProviderSetup ? (
             <>
@@ -385,7 +405,7 @@ export function FloatingComposerModelPicker({
                 const selectedModel = groupHasCurrentModel
                   ? currentModel
                   : ''
-                const subtitle = group.subtitleKey ? t(group.subtitleKey) : selectedModel
+                const subtitle = group.subtitleKey ? t(group.subtitleKey) : group.modelLabels?.[selectedModel] ?? selectedModel
                 return (
                   <ProviderRow
                     key={group.menuId}
@@ -411,7 +431,7 @@ export function FloatingComposerModelPicker({
             role="menu"
             aria-label={activeProviderGroup.label}
             style={submenuStyle}
-            className="fixed z-[1001] overflow-y-auto rounded-xl border border-ds-border bg-white p-1.5 text-[13px] text-ds-muted shadow-[0_18px_48px_rgba(20,47,95,0.16)] dark:bg-ds-card"
+            className="ds-model-menu fixed z-[1001] overflow-y-auto rounded-xl border border-ds-border bg-ds-card p-1.5 text-[13px] text-ds-muted shadow-lg"
           >
             {activeProviderModelIds.length > 0 ? (
               activeProviderModelIds.map((id) => (
@@ -425,7 +445,8 @@ export function FloatingComposerModelPicker({
                     modelId: id,
                     aliases: modelProfileForModel(activeProviderGroup, id)?.aliases
                   })}
-                  title={id}
+                  title={activeProviderGroup.modelLabels?.[id] ?? id}
+                  detail={id}
                   rightSlot={
                     <ModelCapabilityBadge
                       kind={composerModelCapabilityKind(activeProviderGroup, id)}
@@ -483,7 +504,7 @@ export function FloatingComposerModelPicker({
           title={controlsTitle}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
-          aria-label={t('composerModelControls')}
+          aria-label={`${t('composerModelControls')}: ${controlsTitle}`}
           className={`flex h-9 min-w-0 flex-1 items-center justify-end gap-1 rounded-full py-2 pl-3 pr-1 text-[13px] font-medium outline-none transition ${
             canOpenModelControls
               ? 'text-current focus-visible:ring-2 focus-visible:ring-accent/25'
@@ -527,12 +548,12 @@ export function FloatingComposerModelPicker({
         }`}
         aria-expanded={menuOpen}
         aria-haspopup="menu"
-        aria-label={t('composerModelControls')}
+        aria-label={`${t('composerModelControls')}: ${controlsTitle}`}
         title={controlsTitle}
       >
-        <span className="min-w-0 whitespace-nowrap">{modelLabel}</span>
+        <span className="min-w-0 truncate">{modelLabel}</span>
         {reasoningEnabled ? (
-          <span className="shrink-0 text-ds-faint">
+          <span className="shrink-0 border-l border-ds-border pl-1.5 text-[12px] font-normal text-ds-faint">
             {t(reasoningLabelKey(currentReasoning))}
           </span>
         ) : null}
@@ -776,10 +797,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
-function fullModelLabel(model: string, autoLabel: string): string {
+export function composerModelDisplayLabel(
+  groups: readonly Pick<ComposerModelMenuGroup, 'providerId' | 'modelLabels'>[],
+  model: string,
+  providerId: string | null,
+  autoLabel: string
+): string {
   const trimmed = model.trim()
   if (!trimmed || trimmed.toLowerCase() === 'auto') return autoLabel
-  return trimmed
+  return groups.find((group) => group.providerId === providerId)?.modelLabels?.[trimmed] || trimmed
 }
 
 function estimatedModelSubmenuHeight(modelCount: number): number {
@@ -1029,6 +1055,7 @@ function PickerRow({
   selectedIndicator = 'check',
   selected,
   title,
+  detail,
   rightSlot,
   onClick
 }: {
@@ -1036,6 +1063,7 @@ function PickerRow({
   selectedIndicator?: 'check' | 'rail'
   selected: boolean
   title: string
+  detail?: string
   rightSlot?: ReactElement | null
   onClick: () => void
 }): ReactElement {
@@ -1045,7 +1073,8 @@ function PickerRow({
       type="button"
       role="menuitemradio"
       aria-checked={selected}
-      title={title}
+      title={detail && detail !== title ? `${title} · ${detail}` : title}
+      aria-label={detail && detail !== title ? `${title} · ${detail}` : title}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       className={`relative flex w-full items-center gap-2 rounded-lg text-left transition ${rowDensityClass} ${

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Code2,
   Files,
+  FilePenLine,
   FolderOpen,
   MessageCirclePlus,
   Terminal
@@ -16,6 +17,7 @@ import { readPreferredEditorId, writePreferredEditorId } from '../../lib/editor-
 import { shellToolbarIconButtonClass, ToolbarTooltip } from '../shell/ShellToolbar'
 
 export type RightPanelMode =
+  | 'documents'
   | 'todo'
   | 'changes'
   | 'browser'
@@ -62,6 +64,7 @@ export function WorkbenchTopBar({
   const [failedIconIds, setFailedIconIds] = useState<Set<string>>(() => new Set())
   const editorMenuRef = useRef<HTMLDivElement>(null)
   const items = [
+    { mode: 'documents' as const, label: t('workbenchDocuments'), icon: FilePenLine },
     { mode: 'todo' as const, label: t('rightPanelTodo'), icon: AnalytixIconRegistry.icons.taskList },
     { mode: 'summary' as const, label: t('rightPanelSummary'), icon: PinnedSummaryIcon },
     ...(planPanelEnabled

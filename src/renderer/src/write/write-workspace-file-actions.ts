@@ -57,9 +57,14 @@ export function createWriteFileActions({
   cancelExternalSyncAnimation,
   setLastSavedContent
 }: WriteFileActionContext): WriteFileActions {
+  let navigationRevision = 0
   return {
     initializeWorkspace: async (workspaceRoot) => {
+      const revision = ++navigationRevision
       const normalized = normalizePath(workspaceRoot.trim())
+      const previous = get()
+      if (previous.workspaceRoot !== normalized && !(await previous.flushSave(previous.workspaceRoot))) return
+      if (revision !== navigationRevision) return
       if (!normalized) {
         cancelExternalSyncAnimation()
         setLastSavedContent('')
@@ -73,7 +78,7 @@ export function createWriteFileActions({
       cancelExternalSyncAnimation()
       set({ ...initialState(), workspaceRoot: normalized })
       const root = await get().loadDirectory(normalized)
-      if (!root) return
+      if (!root || revision !== navigationRevision) return
       set((state) => ({ rootDirectory: root, expandedDirs: new Set([...state.expandedDirs, root]) }))
       const remembered = readRememberedActiveFile(normalized)
       if (remembered.trim() && isWriteWorkspaceFilePath(remembered)) {
@@ -84,6 +89,7 @@ export function createWriteFileActions({
     },
 
     loadDirectory: async (workspaceRoot, path) => {
+      const ownerRoot = get().workspaceRoot
       const requestedRoot = normalizePath(path || workspaceRoot)
       const targetKey = path ? requestedRoot : '__root__'
       set((state) => ({ loadingDirs: { ...state.loadingDirs, [targetKey]: true } }))
@@ -91,12 +97,14 @@ export function createWriteFileActions({
       try {
         result = await window.analytix.files.listDirectory({ workspaceRoot, path })
       } catch (error) {
+        if (get().workspaceRoot !== ownerRoot) return null
         set((state) => ({
           loadingDirs: withoutLoadingDirs(state.loadingDirs, [targetKey, requestedRoot]),
           treeError: formatActionError(error)
         }))
         return null
       }
+      if (get().workspaceRoot !== ownerRoot) return null
       set((state) => {
         const loadingDirs = withoutLoadingDirs(state.loadingDirs, [
           targetKey,
@@ -156,9 +164,10 @@ export function createWriteFileActions({
     },
 
     openWorkspaceHome: async (workspaceRoot) => {
+      const revision = ++navigationRevision
       const root = normalizePath(workspaceRoot || get().workspaceRoot)
-      const saved = await get().flushSave(root)
-      if (!saved) return false
+      const saved = await get().flushSave(get().workspaceRoot || root)
+      if (!saved || revision !== navigationRevision) return false
       cancelExternalSyncAnimation()
       setLastSavedContent('')
       rememberActiveFile(root, null)
@@ -186,9 +195,10 @@ export function createWriteFileActions({
     },
 
     openFile: async (workspaceRoot, path) => {
+      const revision = ++navigationRevision
       cancelExternalSyncAnimation()
-      const saved = await get().flushSave(workspaceRoot)
-      if (!saved) return
+      const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
+      if (!saved || revision !== navigationRevision) return
       if (!isWriteWorkspaceFilePath(path)) {
         set({
           fileLoading: false,
@@ -200,6 +210,7 @@ export function createWriteFileActions({
       try {
         if (isWriteImageFilePath(path)) {
           const result = await window.analytix.files.readImage({ path, workspaceRoot })
+          if (revision !== navigationRevision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -228,6 +239,7 @@ export function createWriteFileActions({
 
         if (isWritePdfFilePath(path)) {
           const result = await window.analytix.files.readPdf({ path, workspaceRoot })
+          if (revision !== navigationRevision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -255,6 +267,7 @@ export function createWriteFileActions({
         }
 
         const result = await window.analytix.files.read({ path, workspaceRoot })
+        if (revision !== navigationRevision) return
         if (!result.ok) {
           set({ fileLoading: false, fileError: result.message })
           return
@@ -279,6 +292,7 @@ export function createWriteFileActions({
           quotedSelections: []
         })
       } catch (error) {
+        if (revision !== navigationRevision) return
         if (isWriteImageFilePath(path) && isMissingImageIpc(error)) {
           setLastSavedContent('')
           rememberActiveFile(workspaceRoot, path)

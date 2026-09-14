@@ -32,6 +32,50 @@ afterEach(() => {
 })
 
 describe('write workspace store', () => {
+  it('does not mark edits made during persistence as saved or allow a document switch', async () => {
+    let finish: (value: { ok: true; path: string }) => void = () => undefined
+    const write = vi.fn(() => new Promise<{ ok: true; path: string }>((resolve) => { finish = resolve }))
+    vi.stubGlobal('window', { analytix: { files: { write } } })
+    activateTextFile()
+    useWriteWorkspaceStore.setState({ workspaceRoot: '/tmp/write' })
+    useWriteWorkspaceStore.getState().setFileContent('first revision')
+    const saving = useWriteWorkspaceStore.getState().flushSave('/tmp/write')
+    useWriteWorkspaceStore.getState().setFileContent('newer revision')
+    finish({ ok: true, path: '/tmp/write/draft.md' })
+    expect(await saving).toBe(false)
+    expect(useWriteWorkspaceStore.getState()).toMatchObject({ fileContent: 'newer revision', saveStatus: 'dirty' })
+    expect(write).toHaveBeenCalledExactlyOnceWith({ workspaceRoot: '/tmp/write', path: '/tmp/write/draft.md', content: 'first revision' })
+    const retry = useWriteWorkspaceStore.getState().flushSave('/tmp/write')
+    finish({ ok: true, path: '/tmp/write/draft.md' })
+    expect(await retry).toBe(true)
+    expect(useWriteWorkspaceStore.getState().saveStatus).toBe('saved')
+  })
+
+  it('refuses a wrong workspace save and retains a draft after a failed receipt', async () => {
+    const write = vi.fn(async () => ({ ok: false, message: 'read-only synthetic target' }))
+    vi.stubGlobal('window', { analytix: { files: { write } } })
+    activateTextFile()
+    useWriteWorkspaceStore.setState({ workspaceRoot: '/tmp/write' })
+    useWriteWorkspaceStore.getState().setFileContent('retained draft')
+    expect(await useWriteWorkspaceStore.getState().flushSave('/tmp/other')).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+    expect(await useWriteWorkspaceStore.getState().openWorkspaceHome('/tmp/write')).toBe(false)
+    expect(useWriteWorkspaceStore.getState()).toMatchObject({ activeFilePath: '/tmp/write/draft.md', fileContent: 'retained draft', saveStatus: 'error' })
+  })
+
+  it('keeps a failed workspace transition on the original document', async () => {
+    const write = vi.fn(async () => ({ ok: false, message: 'disk full' }))
+    const listDirectory = vi.fn()
+    vi.stubGlobal('window', { analytix: { files: { write, listDirectory } } })
+    activateTextFile()
+    useWriteWorkspaceStore.setState({ workspaceRoot: '/tmp/write', rootDirectory: '/tmp/write' })
+    useWriteWorkspaceStore.getState().setFileContent('unsaved original')
+    await useWriteWorkspaceStore.getState().initializeWorkspace('/tmp/other')
+    expect(write).toHaveBeenCalledWith({ workspaceRoot: '/tmp/write', path: '/tmp/write/draft.md', content: 'unsaved original' })
+    expect(listDirectory).not.toHaveBeenCalled()
+    expect(useWriteWorkspaceStore.getState()).toMatchObject({ workspaceRoot: '/tmp/write', fileContent: 'unsaved original' })
+  })
+
   it('reports read errors when syncing the active text file from disk', async () => {
     installDsGui({
       readWorkspaceFile: vi.fn(async () => {

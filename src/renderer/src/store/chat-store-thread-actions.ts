@@ -1272,10 +1272,6 @@ export function createThreadActions(
       return false
     }
     const p = getProvider()
-    if (get().route === 'write') {
-      const writeThreadId = await get().ensureWriteThreadForWorkspace()
-      if (!writeThreadId) return false
-    }
     const hasPendingActiveTurn = threadHasPendingRuntimeWork(get().blocks)
     if (get().busy || hasPendingActiveTurn) {
       if (overrides?.guiPlan) {

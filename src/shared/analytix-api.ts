@@ -452,6 +452,8 @@ export type ModelProviderModelGroup = {
   providerId: string
   label: string
   modelIds: string[]
+  /** Display-only labels projected from the committed provider endpoint. */
+  modelLabels?: Record<string, string>
   modelProfiles?: Record<string, ModelProviderModelProfileV1>
 }
 export type ModelCapabilityProbeRequest = {

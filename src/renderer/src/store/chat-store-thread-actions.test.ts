@@ -6,6 +6,11 @@ import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
 import i18n from '../i18n'
+import { useWriteWorkspaceStore } from '../write/write-workspace-store'
+import { composeWritePrompt } from '../write/quoted-selection'
+import { emptySelection } from '../write/write-workspace-store-helpers'
+
+vi.mock('electron', () => ({ clipboard: {} }))
 
 const registryMock = vi.hoisted(() => ({
   getProvider: vi.fn()
@@ -113,6 +118,67 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 }
 
 describe('chat-store-thread-actions queued messages', () => {
+  it('opens, edits, saves and reopens a real synthetic file, then sends its selection in the existing conversation', async () => {
+    // Load host fixtures at runtime so Node/Electron ambient globals do not
+    // change the renderer's browser type environment.
+    const { mkdtemp, readFile, writeFile, rm } = await vi.importActual<{
+      mkdtemp: (prefix: string) => Promise<string>
+      readFile: (path: string, encoding: 'utf8') => Promise<string>
+      writeFile: (path: string, content: string) => Promise<void>
+      rm: (path: string, options: { recursive: boolean; force: boolean }) => Promise<void>
+    }>('node:fs/promises')
+    const { tmpdir } = await vi.importActual<{ tmpdir: () => string }>('node:os')
+    const { readWorkspaceFile, writeWorkspaceFile } = await vi.importActual<{
+      readWorkspaceFile: Window['analytix']['files']['read']
+      writeWorkspaceFile: Window['analytix']['files']['write']
+    }>('../../../main/services/workspace-files')
+    const root = await mkdtemp(`${tmpdir()}/analytix-workbench-roundtrip-`)
+    const filePath = `${root}/report.md`
+    const provider = {
+      sendUserMessage: vi.fn(async (_threadId: string, _text: string, _options: unknown) => ({ threadId: 'thr_existing', turnId: 'turn_roundtrip', userMessageItemId: 'user_roundtrip' })),
+      subscribeThreadEvents: vi.fn(async () => undefined)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      files: { read: readWorkspaceFile, write: writeWorkspaceFile },
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    try {
+      await writeFile(filePath, '# 合成报告\n\n原始段落\n')
+      useWriteWorkspaceStore.getState().resetWorkspace()
+      useWriteWorkspaceStore.setState({ workspaceRoot: root })
+      await useWriteWorkspaceStore.getState().openFile(root, filePath)
+      expect(useWriteWorkspaceStore.getState().fileContent).toContain('原始段落')
+      const content = '# 合成报告\n\n已编辑的中文段落\n'
+      useWriteWorkspaceStore.getState().setFileContent(content)
+      expect(await useWriteWorkspaceStore.getState().flushSave(root)).toBe(true)
+      expect(await readFile(filePath, 'utf8')).toBe(content)
+      expect(await useWriteWorkspaceStore.getState().openWorkspaceHome(root)).toBe(true)
+      await useWriteWorkspaceStore.getState().openFile(root, filePath)
+      expect(useWriteWorkspaceStore.getState().fileContent).toBe(content)
+      const selected = '已编辑的中文段落'
+      const from = content.indexOf(selected)
+      useWriteWorkspaceStore.getState().setSelection({ ...emptySelection(), text: selected, charCount: selected.length,
+        ranges: [{ from, to: from + selected.length, text: selected, startLine: 3, endLine: 3, startColumn: 1, endColumn: selected.length + 1, charCount: selected.length }] })
+      useWriteWorkspaceStore.getState().quoteCurrentSelection(root)
+      const quotes = useWriteWorkspaceStore.getState().quotedSelections
+      expect(quotes).toHaveLength(1)
+      expect(quotes[0].snapshotContent).toBe(content)
+      const prompt = composeWritePrompt('解释这个选区', quotes, { workspaceRoot: root, activeFilePath: filePath })
+      const { actions, state } = buildHarness()
+      state.busy = false
+      state.threads[0].workspace = root
+      expect(await actions.sendMessage(prompt, 'agent')).toBe(true)
+      expect(state.activeThreadId).toBe('thr_existing')
+      expect(provider.sendUserMessage).toHaveBeenCalledWith('thr_existing', expect.stringContaining(selected), expect.any(Object))
+      expect(provider.sendUserMessage.mock.calls[0][1]).not.toContain('snapshotContent')
+    } finally {
+      useWriteWorkspaceStore.getState().resetWorkspace()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   beforeEach(() => {
     rendererRuntimeClient.invalidateSettings()
     registryMock.getProvider.mockReset()
@@ -1938,6 +2004,7 @@ describe('chat-store-thread-actions queued messages', () => {
       providerId: 'minimax-token-plan'
     })).resolves.toBe(true)
 
+    expect(state.ensureWriteThreadForWorkspace).not.toHaveBeenCalled()
     expect(saveSettingsSilent).not.toHaveBeenCalled()
     expect(restartRuntime).not.toHaveBeenCalled()
     expect(provider.connect).not.toHaveBeenCalled()

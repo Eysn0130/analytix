@@ -17,7 +17,6 @@ import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import { confirmDialog } from '../../lib/confirm-dialog'
 import { formatWorkspacePickerError } from '../../lib/format-workspace-picker-error'
-import { useChatStore, type SettingsRouteSection } from '../../store/chat-store'
 import {
   useWriteWorkspaceStore,
   writeBasenameFromPath,
@@ -25,27 +24,14 @@ import {
   writeJoinPath,
   writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
-import { ConnectPhoneSidebarPanel } from '../chat/ConnectPhoneView'
-import { WorkspaceModeTabs } from '../chat/WorkspaceModeTabs'
 import {
   SidebarCollapseMotion,
   SidebarCommandRow,
-  SidebarFooterActions,
-  SidebarFrame,
   SidebarIconButton,
   SidebarSectionHeader,
   SidebarTreeRow
 } from '../sidebar/SidebarPrimitives'
 import { WriteFileTree } from './WriteFileTree'
-
-type Props = {
-  activeView: 'chat' | 'write' | 'claw' | 'schedule'
-  connectPhoneSidebarOpen: boolean
-  onCodeOpen: () => void
-  onWriteOpen: () => void
-  onOpenSettings: (section?: SettingsRouteSection) => void
-  onToggleConnectPhone: () => void
-}
 
 type EntryDialog =
   | { kind: 'create-file'; parentDirectory?: string; value: string }
@@ -55,20 +41,9 @@ type EntryDialog =
 
 type Translate = (key: string, opts?: Record<string, unknown>) => string
 
-export function WriteSidebar({
-  activeView,
-  connectPhoneSidebarOpen,
-  onCodeOpen,
-  onWriteOpen,
-  onOpenSettings,
-  onToggleConnectPhone
-}: Props): ReactElement {
+// The former Write navigation is now a file surface inside the right workspace.
+export function WriteSidebar(): ReactElement {
   const { t } = useTranslation('common')
-  const clawChannels = useChatStore((s) => s.clawChannels)
-  const addClawChannel = useChatStore((s) => s.addClawChannel)
-  const deleteClawChannel = useChatStore((s) => s.deleteClawChannel)
-  const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
-  const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null)
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
   // Field-level subscription: the sidebar must not re-render on fileContent or
@@ -225,7 +200,6 @@ export function WriteSidebar({
       const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || defaultWorkspaceRoot || undefined)
       if (!picked.canceled && picked.path) {
         await addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
       }
     } catch (error) {
       setFileError(formatWorkspacePickerError(error))
@@ -234,7 +208,6 @@ export function WriteSidebar({
 
   const selectWorkspaceAndThread = async (workspacePath: string): Promise<void> => {
     await selectWriteWorkspace(workspacePath)
-    if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(workspacePath)
   }
 
   const toggleWorkspaceGroup = async (workspacePath: string): Promise<void> => {
@@ -257,24 +230,8 @@ export function WriteSidebar({
 
   return (
     <>
-    <SidebarFrame
-      title={t('appName')}
-      footer={
-        <SidebarFooterActions
-          settingsLabel={t('settings')}
-          connectPhoneLabel={t('claw')}
-          onOpenSettings={() => onOpenSettings('write')}
-          onToggleConnectPhone={onToggleConnectPhone}
-          connectPhoneActive={connectPhoneSidebarOpen}
-        />
-      }
-    >
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="ds-no-drag flex flex-col px-0.5">
-        <WorkspaceModeTabs
-          activeView={activeView}
-          onCodeOpen={onCodeOpen}
-          onWriteOpen={onWriteOpen}
-        />
         <SidebarCommandRow
           icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}
           label={t('writeCreateFile')}
@@ -290,17 +247,6 @@ export function WriteSidebar({
 
       <div className="ds-no-drag mx-1.5 my-3" />
 
-      {connectPhoneSidebarOpen ? (
-        <ConnectPhoneSidebarPanel
-          channels={clawChannels}
-          onAddProvider={async (provider, agentProfile, platformAccount, options) => {
-            await addClawChannel(provider, agentProfile, platformAccount, options)
-            onToggleConnectPhone()
-          }}
-          onDisconnect={(channelId) => deleteClawChannel(channelId)}
-          onOpenSettings={() => onOpenSettings('claw')}
-        />
-      ) : (
       <div className="ds-no-drag flex min-h-0 flex-1 flex-col">
         <SidebarSectionHeader
           label={t('writeSpaces')}
@@ -445,8 +391,7 @@ export function WriteSidebar({
           })}
         </div>
       </div>
-      )}
-    </SidebarFrame>
+    </div>
     {entryDialog && entryDialogPortalTarget ? createPortal(
       <WriteEntryDialog
         dialog={entryDialog}

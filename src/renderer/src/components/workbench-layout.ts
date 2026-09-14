@@ -181,12 +181,12 @@ function persistBoolean(key: string, value: boolean, scope: string): void {
 
 function readStoredRightPanelMode(scope: string): RightPanelMode {
   const raw = readScopedStorageItem(RIGHT_PANEL_MODE_KEY, scope)
-  return raw === 'todo' || raw === 'changes' || raw === 'browser' ? raw : null
+  return raw === 'documents' || raw === 'todo' || raw === 'changes' || raw === 'browser' ? raw : null
 }
 
 function persistRightPanelMode(mode: RightPanelMode, scope: string): void {
   const key = workbenchLayoutStorageKey(RIGHT_PANEL_MODE_KEY, scope)
-  if (mode === 'todo' || mode === 'changes' || mode === 'browser') {
+  if (mode === 'documents' || mode === 'todo' || mode === 'changes' || mode === 'browser') {
     writeBrowserStorageItem(key, mode)
   } else {
     writeBrowserStorageItem(key, 'none')
@@ -290,7 +290,7 @@ export function useWorkbenchLayout({
   latestDevPreviewUrl,
   route,
   workspaceRoot,
-  writeAssistantOpen
+  writeAssistantOpen: _writeAssistantOpen
 }: {
   activeThreadId: string | null
   latestAutoOpenDevPreviewUrl: string | null
@@ -324,9 +324,7 @@ export function useWorkbenchLayout({
   const rightPaneContentRef = useRef<HTMLDivElement | null>(null)
   const previewThreadId = useRef<string | null>(activeThreadId)
   const autoOpenedPreviewUrlRef = useRef<string | null>(null)
-  const rightPanelVisible = route === 'write'
-    ? writeAssistantOpen
-    : rightPanelMode !== null && rightPanelMode !== 'summary'
+  const rightPanelVisible = rightPanelMode !== null && rightPanelMode !== 'summary'
 
   useEffect(() => {
     const nextLayout = readWorkbenchLayoutStorage(workspaceRoot)
@@ -401,13 +399,9 @@ export function useWorkbenchLayout({
     if (!latestAutoOpenDevPreviewUrl || route !== 'chat') return
     if (autoOpenedPreviewUrlRef.current === latestAutoOpenDevPreviewUrl) return
     autoOpenedPreviewUrlRef.current = latestAutoOpenDevPreviewUrl
-    setRightPanelMode('browser')
+    // A background preview is offered by the launch card without stealing focus.
   }, [latestAutoOpenDevPreviewUrl, route])
 
-  useEffect(() => {
-    if (route !== 'write') return
-    if (rightPanelMode !== null) setRightPanelMode(null)
-  }, [route, rightPanelMode])
 
   useLayoutEffect(() => {
     const sync = (): void => {

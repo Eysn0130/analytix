@@ -4,6 +4,9 @@ import { extractLatestTurnDevPreviewUrls } from '../../lib/dev-preview-detection
 import { useChatStore } from '../../store/chat-store'
 import { useChatTimelinePanelState, useDevPreviewUrls } from './ChatTimelineIsland'
 
+const loadDocumentWorkspacePanel = () => import('./DocumentWorkspacePanel').then((module) => ({ default: module.DocumentWorkspacePanel }))
+export const DocumentWorkspacePanel = lazy(loadDocumentWorkspacePanel)
+
 const loadChangeInspector = () =>
   import('../ChangeInspector').then((module) => ({ default: module.ChangeInspector }))
 
@@ -44,6 +47,7 @@ export const ThreadSummaryPanelIsland = lazy(loadThreadSummaryPanel)
 export const SubagentInspectorPanelIsland = lazy(loadSubagentInspectorPanel)
 
 export type RightPanelIslandPreloadTarget =
+  | 'documents'
   | 'todo'
   | 'changes'
   | 'browser'
@@ -58,6 +62,9 @@ export function preloadRightPanelIsland(
   target: RightPanelIslandPreloadTarget | null | undefined
 ): void {
   switch (target) {
+    case 'documents':
+      void loadDocumentWorkspacePanel()
+      break
     case 'todo':
       void loadTodoPanel()
       break

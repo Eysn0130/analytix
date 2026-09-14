@@ -442,7 +442,7 @@ export function looksLikeActiveTurnError(error: unknown): boolean {
 export function isCodeThread(
   thread: NormalizedThread,
   clawChannels: ClawImChannelV1[] = [],
-  writeRegistry?: WriteThreadRegistry
+  _writeRegistry?: WriteThreadRegistry
 ): boolean {
   const workspace = normalizeWorkspaceRoot(thread.workspace)
   return Boolean(workspace) &&
@@ -450,7 +450,6 @@ export function isCodeThread(
     !isInternalTemporaryWorkspace(thread.workspace) &&
     !isClawWorkspacePath(thread.workspace) &&
     !isClawThread(thread, clawChannels) &&
-    !isWriteThreadId(thread.id, writeRegistry) &&
     !isSddAssistantThread(thread)
 }
 
@@ -477,7 +476,7 @@ function notifyWriteWorkspaceFileRefresh(
   get: () => ChatState,
   event?: Pick<ToolEventPayload, 'filePath' | 'status' | 'toolKind'>
 ): void {
-  if (get().route !== 'write') return
+  if (get().route !== 'write' && get().route !== 'chat') return
   if (event && (event.toolKind !== 'file_change' || event.status !== 'success')) return
 
   const writeState = useWriteWorkspaceStore.getState()

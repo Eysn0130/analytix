@@ -123,7 +123,7 @@ let patches: unknown[]
 const originalNotice = useChatStore.getState().showTopNotice
 
 function keyInput(): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"]')
+  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"], input[placeholder="modelProviderApiKeySavedPlaceholder"]')
   expect(Boolean(input)).toBe(true)
   return input!
 }
@@ -232,6 +232,20 @@ afterEach(async () => {
 })
 
 describe('mounted Provider credential lifecycle', () => {
+  it('shows committed credential state after remount without restoring the secret into the input', async () => {
+    expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
+    expect(container.textContent).toContain('modelProviderApiKeySavedHint')
+    expect(keyInput().value).toBe('')
+    await unmount()
+    await mount()
+    expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
+    expect(keyInput().value).toBe('')
+    await addDraft()
+    expect(keyInput().placeholder).toBe('modelProviderApiKeyPlaceholder')
+    expect(container.textContent).not.toContain('modelProviderApiKeySavedHint')
+    expect(registry.mutations()).toHaveLength(0)
+  })
+
   it('clears an unchanged successful input after a real helper write and readback', async () => {
     await enter(keyInput(), firstInput)
     expect(keyInput().value === firstInput).toBe(true)
