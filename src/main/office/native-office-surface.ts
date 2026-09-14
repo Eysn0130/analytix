@@ -1,4 +1,5 @@
 import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type MessagePortMain, type Rectangle, type Session } from 'electron'
+import type { NativeOfficeAppearance } from '../../shared/native-office'
 import { randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
@@ -27,6 +28,8 @@ export class NativeOfficeSurface {
   private starting?: Promise<void>
   private ready = false
   private attached = false
+  private appearanceKey?: string
+  private appearanceCSS?: string
   private visibilityEpoch = 0
   private destroyed = false
   private terminalCode = 'office-surface-destroyed'
@@ -45,7 +48,7 @@ export class NativeOfficeSurface {
     options.owner.once('closed', this.ownerClosed)
   }
 
-  async attach(bounds: Rectangle): Promise<void> {
+  async attach(bounds: Rectangle, appearance?: NativeOfficeAppearance): Promise<void> {
     if (!validBounds(bounds)) throw failure('office-invalid-bounds')
     const epoch = ++this.visibilityEpoch
     await this.start()
@@ -55,7 +58,23 @@ export class NativeOfficeSurface {
     // Renderer rectangles are CSS pixels; native child views use window DIPs.
     const zoom = this.options.owner.webContents.getZoomFactor()
     this.view!.setBounds({ x: Math.round(bounds.x * zoom), y: Math.round(bounds.y * zoom), width: Math.round(bounds.width * zoom), height: Math.round(bounds.height * zoom) })
-    this.view!.setVisible(true)
+    if (appearance) await this.applyAppearance(appearance)
+    if (epoch === this.visibilityEpoch && !this.destroyed) this.view!.setVisible(true)
+  }
+
+  private async applyAppearance(appearance: NativeOfficeAppearance): Promise<void> {
+    const key = `${appearance.theme}:${appearance.reducedMotion}`
+    if (key === this.appearanceKey) return
+    const contents = this.view!.webContents
+    // Only closed, validated appearance values reach CSS; document pixels are untouched.
+    const colors = appearance.theme === 'dark'
+      ? '--preview-bg:#1d1f23;--preview-bar:#24262a;--preview-line:#393c42;--preview-text:#c1c5cd;--preview-hover:#363a42;--preview-press:#424853;--preview-focus:#adbdd4'
+      : '--preview-bg:#f3f4f6;--preview-bar:#fafbfc;--preview-line:#e5e7eb;--preview-text:#5e6673;--preview-hover:#e9ecf0;--preview-press:#dde2e9;--preview-focus:#536780'
+    const css = `:root{color-scheme:${appearance.theme}!important;${colors.split(';').map(rule => `${rule}!important`).join(';')}}${appearance.reducedMotion ? 'button{transition:none!important}' : ''}`
+    const previous = this.appearanceCSS
+    this.appearanceCSS = await contents.insertCSS(css)
+    this.appearanceKey = key
+    if (previous) await contents.removeInsertedCSS(previous)
   }
 
   hide(): void { this.visibilityEpoch++; if (!this.destroyed) this.view?.setVisible(false) }

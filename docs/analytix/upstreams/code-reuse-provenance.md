@@ -303,3 +303,10 @@ the actual source/destination diff before adding a notice or declaring closure.
   The WASM fontconfig loader uses `/usr/share/fonts/analytix` before startup.
   Independent native Writer rendering and export/reopen passed; this does not
   establish emoji coverage or waive the engine distribution gap above.
+
+### 2026-09-14 — Office preview design-method intake
+
+- Scope: research/tooling-only; no third-party CSS, JS, font or asset enters the product.
+- Taste `ccbc15639c97057cbfcf32ecebc38ef716e4bb37`: selected redesign/minimalist prompts loaded unchanged in task-local tooling; MIT copyright/license retained with the selected files. Exact source paths/blobs, tool destinations and dispositions are recorded in [the scoped research record](office-preview-ui-research-2026-09-14.md).
+- transitions.dev `598d3d6ad89dabb4bdf742fd2e887ca53914a888`: public behavior/method study only. Tool MIT and transition usage terms are distinct; prompt redistribution is unverified, so no Skill or recipe is copied into Analytix.
+- Reuse mode: clean-room-reference for product changes; original Analytix implementation of observed UI requirements. Reviewer: current primary integrator. Verification: pinned remote/tree and file-level source review; runtime acceptance remains in the separate candidate QA record. Disposition: approved for this bounded research use, not distribution admission.

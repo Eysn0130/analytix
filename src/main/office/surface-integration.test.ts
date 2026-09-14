@@ -109,7 +109,7 @@ test('preview input guard blocks mutation and preserves navigation, selection an
     listeners.get(type)!(e)
     expect(e.stopImmediatePropagation).toHaveBeenCalledOnce()
   }
-  for (const input of [{ key: 'ArrowDown' }, { key: 'PageDown' }, { key: 'c', metaKey: true }]) {
+  for (const input of [{ key: 'ArrowDown' }, { key: 'PageDown' }, { key: 'c', metaKey: true }, { key: 'q', metaKey: true }]) {
     const e = { ...input, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() }
     listeners.get('keydown')!(e)
     expect(e.preventDefault).not.toHaveBeenCalled()

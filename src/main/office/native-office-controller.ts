@@ -9,7 +9,7 @@ import {
   objectEditingResponseSchema, type ObjectEditingResponse
 } from '../../../packages/runtime/src/contracts/object-editing'
 import {
-  nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds,
+  nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds, type NativeOfficeAppearance,
   type NativeOfficeError, type NativeOfficeKind, type NativeOfficeResponse,
   type NativeOfficeSelection, type NativeOfficeView
 } from '../../shared/native-office'
@@ -50,7 +50,7 @@ export type NativeOfficeEngineRequest = {
 )
 /** The isolated surface owns its channel and transport correlation. */
 export interface NativeOfficeSurface {
-  attach(bounds: NativeOfficeBounds): void | Promise<void>
+  attach(bounds: NativeOfficeBounds, appearance?: NativeOfficeAppearance): void | Promise<void>
   hide(): void | Promise<void>
   request(envelope: NativeOfficeEngineRequest): Promise<unknown>
   destroy(): void | Promise<void>
@@ -216,7 +216,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (active) {
       if (active.ready && active.workspace === request.workspace && active.requestedPath === request.path) {
         active.binding = await listBinding(active.view.kind, active.binding)
-        await active.surface.attach(request.bounds)
+        await active.surface.attach(request.bounds, request.appearance)
         active.view.status = 'ready'
         delete active.view.error
         publish()
@@ -246,7 +246,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         binding: holder.binding, surface, openOperationId: newOperationId(), ready: false, failed: false }
       active = document
       publish()
-      await surface.attach(request.bounds)
+      await surface.attach(request.bounds, request.appearance)
       await engine(document, { command: 'open', documentId: opened.objectId, version: opened.revision, operationId: document.openOperationId, kind, bytes })
       document.ready = true
       document.view.status = 'ready'
@@ -333,7 +333,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         }
         if (request.action === 'hide') { await active?.surface.hide(); return }
         const document = requireActive()
-        if (request.action === 'bounds') { await document.surface.attach(request.bounds); return }
+        if (request.action === 'bounds') { await document.surface.attach(request.bounds, request.appearance); return }
         try {
           document.binding = await listBinding(document.view.kind, document.binding)
           if (request.action !== 'captureSelection') fail('invalid_request')

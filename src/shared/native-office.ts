@@ -7,6 +7,7 @@ export const nativeOfficeBoundsSchema = z.object({
   x: z.number().int().min(0).max(16384), y: z.number().int().min(0).max(16384),
   width: z.number().int().min(1).max(16384), height: z.number().int().min(1).max(16384)
 }).strict()
+export const nativeOfficeAppearanceSchema = z.object({ theme: z.enum(['light', 'dark']), reducedMotion: z.boolean() }).strict()
 const localPath = z.string().min(1).max(4096).refine(value => value.trim() === value && !['\0', '\r', '\n'].some(char => value.includes(char)) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value))
 export const nativeOfficePickerRequestSchema = z.object({ kind: nativeOfficeKindSchema, workspace: localPath }).strict()
 export const nativeOfficePickerResponseSchema = z.union([
@@ -16,8 +17,8 @@ export const nativeOfficePickerResponseSchema = z.union([
 
 /** Renderer commands contain no native bytes, URLs, engine envelopes or UNO. */
 export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('open'), workspace: localPath, path: localPath, bounds: nativeOfficeBoundsSchema }).strict(),
-  z.object({ action: z.literal('bounds'), bounds: nativeOfficeBoundsSchema }).strict(),
+  z.object({ action: z.literal('open'), workspace: localPath, path: localPath, bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional() }).strict(),
+  z.object({ action: z.literal('bounds'), bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional() }).strict(),
   z.object({ action: z.literal('hide') }).strict(),
   z.object({ action: z.literal('status') }).strict(),
   z.object({ action: z.literal('captureSelection') }).strict(),
@@ -53,3 +54,5 @@ export type NativeOfficeSelection = z.infer<typeof nativeOfficeSelectionSchema>
 export type NativeOfficeResponse = z.infer<typeof nativeOfficeResponseSchema>
 export type NativeOfficeError = z.infer<typeof nativeOfficeErrorSchema>
 export type NativeOfficeKind = z.infer<typeof nativeOfficeKindSchema>
+
+export type NativeOfficeAppearance = z.infer<typeof nativeOfficeAppearanceSchema>

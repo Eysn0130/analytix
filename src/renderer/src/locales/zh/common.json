@@ -2192,7 +2192,8 @@
   "nativeOfficeOpen": "预览文件",
   "nativeOfficeEditor": "办公文件预览",
   "nativeOfficeOperationFailed": "预览暂时不可用。请检查插件状态后重新打开文件。",
-  "nativeOfficeStatus_loading": "正在打开",
+  "nativeOfficeRetry": "重新打开预览",
+  "nativeOfficeStatus_loading": "正在打开预览…",
   "nativeOfficeStatus_error": "操作失败",
   "nativeOfficeStatus_ready": "只读预览"
 }

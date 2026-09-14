@@ -12,6 +12,7 @@ vi.mock('electron', async () => {
   }
   class Contents extends EventEmitter {
     dead = false; url = ''; options: any
+    insertCSS = vi.fn(async (_css: string) => 'css-key'); removeInsertedCSS = vi.fn(async (_key: string) => {})
     setWindowOpenHandler = vi.fn(); setWebRTCIPHandlingPolicy = vi.fn()
     async loadURL(url: string) { this.url = url }
     isDestroyed() { return this.dead }
@@ -182,4 +183,17 @@ test('read-only protocol retains exact fields and bounded selection and input by
   expect(isOfficeResult({ ...reply, bytes: new Uint8Array([1]) })).toBe(false)
   expect(isOfficeResult({ ...reply, selection: { ...selection(), text: 'x'.repeat(4097) } })).toBe(false)
   expect(isOfficeResult({ ...reply, selection: { ...selection(), version: 'wrong' } })).toBe(false)
+})
+
+test('synchronizes shell appearance once per change without changing document pixels', async () => {
+  const s = await setup()
+  await s.surface.attach(bounds, { theme: 'dark', reducedMotion: true })
+  const css = s.view.webContents.insertCSS.mock.calls[0][0]
+  expect(css).toContain('color-scheme:dark')
+  expect(css).toContain('button{transition:none!important}')
+  expect(css).not.toContain('canvas')
+  await s.surface.attach({ ...bounds, x: 4 }, { theme: 'dark', reducedMotion: true })
+  expect(s.view.webContents.insertCSS).toHaveBeenCalledTimes(1)
+  await s.surface.attach(bounds, { theme: 'light', reducedMotion: false })
+  expect(s.view.webContents.removeInsertedCSS).toHaveBeenCalledWith('css-key')
 })

@@ -33,7 +33,7 @@ export class OfficeEngineSurface {
     const intercept = event => {
       if (event.target?.closest?.('[data-view]') && ['Enter',' '].includes(event.key)) return;
       if (modifiers.has(event.key) || navigation.has(event.key)) return;
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && ['a','c'].includes(event.key.toLowerCase())) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && ['a','c','q'].includes(event.key.toLowerCase())) return;
       block(event);
     };
     for (const type of ['keydown','keypress','keyup']) window.addEventListener(type, intercept, true);
@@ -180,6 +180,8 @@ function installSurface() {
     const fit = document.getElementById('fitView');
     fit.textContent = slides ? '适合页面' : engine.state.kind === 'docx' ? '适合宽度' : '100%';
     fit.setAttribute('aria-label', fit.textContent);
+    fit.setAttribute('aria-pressed', String(view.fit));
+    fit.title = fit.textContent;
     for (const button of viewControls.querySelectorAll('[data-view]')) {
       button.disabled = button.dataset.view === 'previous-page' ? view.page <= 1 : button.dataset.view === 'next-page' ? view.page >= view.pages : button.dataset.view === 'zoom-out' ? view.zoom <= 20 : button.dataset.view === 'zoom-in' ? view.zoom >= 400 : false;
     }
@@ -206,8 +208,9 @@ function installSurface() {
   for (const type of ['keyup','mouseup','wheel']) canvas.addEventListener(type, scheduleRead, {passive:true});
   addEventListener('resize', () => { if (engine?.state && (!engine.view || engine.view.fit)) scheduleView(engine.view ? 'fit' : 'reset'); });
   for (const button of viewControls.querySelectorAll('[data-view]')) {
-    button.addEventListener('mousedown', event => event.preventDefault());
-    button.addEventListener('click', () => { void applyView(button.dataset.view); canvas.focus(); });
+    // Keep focus on the activated control so Tab / Enter can continue through
+    // the toolbar. Native canvas navigation resumes when the user focuses it.
+    button.addEventListener('click', () => { void applyView(button.dataset.view); });
   }
   function loading(message) { status.textContent = message; preview.setAttribute('aria-busy','true'); footer.dataset.error = 'false'; }
   function render(result) {

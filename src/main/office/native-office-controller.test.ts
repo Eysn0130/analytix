@@ -247,3 +247,10 @@ describe('Main-owned read-only native Office preview', () => {
     expectReadOnly(h)
   })
 })
+
+it('accepts only closed appearance metadata at the renderer boundary', () => {
+  expect(nativeOfficeRequestSchema.safeParse({ ...open, appearance: { theme: 'dark', reducedMotion: true } }).success).toBe(true)
+  for (const appearance of [{ theme: 'url(https://outside.invalid)', reducedMotion: false }, { theme: 'light', reducedMotion: 'false' }, { theme: 'light', reducedMotion: false, css: 'body{}' }]) {
+    expect(nativeOfficeRequestSchema.safeParse({ ...open, appearance }).success).toBe(false)
+  }
+})

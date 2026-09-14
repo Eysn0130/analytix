@@ -2192,7 +2192,8 @@
   "nativeOfficeOpen": "Preview file",
   "nativeOfficeEditor": "Office file preview",
   "nativeOfficeOperationFailed": "Preview is unavailable. Check the plugin status and reopen the file.",
-  "nativeOfficeStatus_loading": "Opening",
+  "nativeOfficeRetry": "Reopen preview",
+  "nativeOfficeStatus_loading": "Opening preview…",
   "nativeOfficeStatus_error": "Operation failed",
   "nativeOfficeStatus_ready": "Read-only preview"
 }
