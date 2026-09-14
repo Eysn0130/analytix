@@ -2,8 +2,9 @@ import type { ResolvedWriteQuickAction } from '../write/quick-actions'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText, RotateCcw, Undo2, Quote, Pencil } from 'lucide-react'
-import type { NativeOfficeRequest, NativeOfficeSelection } from '@shared/native-office'
+import type { NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeSelection } from '@shared/native-office'
 import { useNativeOfficeStore } from './native-office-store'
+import { nativeSelectionActions } from './native-selection-actions'
 
 import { useNativeReferenceStore, nativeSelectionLabel, nativeSelectionText, isNativeSelectionEditable, type NativeReference } from './native-reference-store'
 
@@ -30,6 +31,11 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   const shown = useRef(visible); shown.current = visible
   const generation = useRef(0)
   const surface = useRef<HTMLDivElement>(null)
+  const menuHandler = useRef<(target?: NativeOfficeMenuTarget) => Promise<void>>(async () => {})
+  const menuOpen = useRef(false)
+  const menuContext = useRef('')
+  useEffect(() => { shown.current = visible; return () => { generation.current++; shown.current = false } }, [])
+  useEffect(() => window.analytix.office.onMenuRequested?.(target => { void menuHandler.current(target) }), [])
   const bounds = () => {
     const rect = surface.current?.getBoundingClientRect()
     return { x: Math.max(0, Math.round(rect?.x ?? 0)), y: Math.max(0, Math.round(rect?.y ?? 0)),
@@ -44,10 +50,10 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     }
     try {
       const result = await window.analytix.office.request(request)
-      if (request.action === 'reference') {
+      if (request.action === 'reference' || request.action === 'annotate') {
         // Core revokes all earlier scopes for this object, even if focus moved
         // while capture was in flight. Reflect that fact without accepting old UI.
-        if (result.ok && result.view?.scope?.editable) useNativeReferenceStore.getState().revokeScopes(request.objectId)
+        if (request.action === 'reference' && result.ok && result.view?.scope?.editable) useNativeReferenceStore.getState().revokeScopes(request.objectId)
         const current = useNativeOfficeStore.getState().view
         if (!current || current.objectId !== request.objectId || current.revision !== request.revision ||
           (current.changeSequence ?? 0) !== request.expectedChangeSequence) return undefined
@@ -158,11 +164,15 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   }, [draftKey, annotationIdentity, selectionMatches])
   const quote = async (allowEdit = editable, actionPrompt?: string) => {
     if (!visible || !view || !selection || !target || !hasSelection) return false
+    const current = useNativeOfficeStore.getState().view
+    if (!shown.current || currentThread.current !== threadId || currentTarget.current !== target ||
+      current?.objectId !== view.objectId || current.revision !== selection.version ||
+      (current.changeSequence ?? 0) !== selection.changeSequence) return false
     const epoch = generation.current
     const owner = currentTarget.current
     let scopeId: string | undefined
     if (allowEdit) {
-      if (!editable || !threadId || !targetRequest || !selection.token) return false
+      if (!isNativeSelectionEditable(useNativeOfficeStore.getState().view ?? view, selection) || !threadId || !targetRequest || !selection.token) return false
       const result = await invoke({action:'reference', ...targetRequest, selectionToken:selection.token, threadId, editable:true})
       if (epoch !== generation.current || owner !== currentTarget.current || currentThread.current !== threadId || !shown.current) return false
       if (!result?.ok || !result.view?.scope?.editable) return false
@@ -177,7 +187,42 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     return true
   }
   const errors: Record<string, string> = {conflict:'文件已在外部修改；草稿保留，请核对版本。', unknown:'修改结果尚未确认，请查询本次更新状态。', unsaved_changes:'文档更新尚未完成，请稍后重试。', stale_selection:'选区已过期，请重新选择。', unsupported_selection:'此选区暂不支持该操作。', package_changed:'插件版本已变化；草稿保留。', capacity:'已有两个原生文档，请先完成更新并关闭一个。', save_failed:'更新未完成，可重试；工作副本保留。'}
-  return <div className="office-preview-host relative flex min-h-0 flex-1 flex-col" aria-busy={!!loading}>
+  const canRequestEdit = !!(threadId && view && selection && selectionMatches && isNativeSelectionEditable({...view,editing:true},selection))
+  const actions = nativeSelectionActions({quickActions,hasSelection,editable:canRequestEdit,busy,canSubmit:!!onSubmitPrompt,
+    labels:{copy:t('nativeActionCopy'),quote:t('nativeActionQuote')},
+    copy:async () => {
+      try { if (selection) await navigator.clipboard.writeText(nativeSelectionText(selection)) }
+      catch { if (shown.current) useNativeOfficeStore.setState({error:'unavailable'}) }
+    },
+    quote:() => quote(),task:async action => {
+      if (action.mode === 'edit' && !view?.editing) {
+        if (!targetRequest) return
+        const epoch = generation.current
+        const result = await invoke({action:'annotate',...targetRequest})
+        if (!result?.ok || epoch !== generation.current || !shown.current) return
+      }
+      await quote(action.mode === 'edit',action.prompt)
+    }})
+  const contextIdentity = JSON.stringify([threadId,target?.workspace,target?.path,view?.objectId,view?.revision,view?.changeSequence,annotationIdentity])
+  menuContext.current = contextIdentity
+  menuHandler.current = async requested => {
+    if (!visible || !targetRequest || !hasSelection || busy || menuOpen.current || !window.analytix.office.showActionMenu) return
+    if (requested && (requested.objectId !== targetRequest.objectId || requested.revision !== targetRequest.revision || requested.expectedChangeSequence !== targetRequest.expectedChangeSequence)) return
+    const epoch = generation.current
+    menuOpen.current = true
+    try {
+      const choice = await window.analytix.office.showActionMenu({...targetRequest,actions:actions.map(({id,label,enabled}) => ({id,label:label.replace(/[\x00-\x1f]/g,' ').trim(),enabled}))})
+      if (epoch !== generation.current || !shown.current || menuContext.current !== contextIdentity) return
+      const action = actions.find(action => action.id === choice.actionId)
+      if (action?.enabled) await action.run()
+    } catch { if (epoch === generation.current && shown.current && menuContext.current === contextIdentity) useNativeOfficeStore.setState({error:'unavailable'}) }
+    finally { menuOpen.current = false }
+  }
+  return <div className="office-preview-host relative flex min-h-0 flex-1 flex-col" aria-busy={!!loading} onKeyDown={event => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return
+    if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) { event.preventDefault(); void menuHandler.current() }
+  }}>
     {view?.status === 'ready' || view?.editing || view?.saving ? <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-ds-border-muted px-2 py-1" role="toolbar" aria-label="文档操作">
       <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" disabled={busy || view.editing} aria-label="标注文档" aria-pressed={!!view.editing} title="标注" onClick={() => targetRequest && void invoke({action:'annotate', ...targetRequest})}><Pencil className="h-3.5 w-3.5" />标注</button>
       {view.canUndo ? <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" disabled={busy || view.saving || view.dirty} aria-label="撤销修改" onClick={() => targetRequest && void invoke({action:'undoChange', ...targetRequest})}><Undo2 className="h-3.5 w-3.5" />撤销</button> : null}
@@ -190,9 +235,9 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
         <p className="text-[11px] text-ds-muted">{editable ? '可让 AI 提出局部修改，接受后应用。' : '仅供讨论，此选区不支持直接应用修改。'}</p>
         <div className="flex items-center gap-2">
           <input aria-label="标注备注" placeholder="备注（可选）" maxLength={4096} className="min-w-0 flex-1 bg-transparent text-xs" value={note} onChange={event => { setNote(event.target.value); setAdded(false) }} />
-          <button className="inline-flex shrink-0 items-center gap-1 text-xs" disabled={busy || !hasSelection} onClick={() => void quote()}><Quote className="h-3.5 w-3.5" />加入对话</button>
+          <button className="inline-flex shrink-0 items-center gap-1 text-xs" disabled={busy || !hasSelection} onClick={() => void actions.find(action => action.id === 'quote')?.run()}><Quote className="h-3.5 w-3.5" />加入对话</button>
         </div>
-        {quickActions.length ? <div className="flex flex-wrap gap-2">{quickActions.map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={busy || !hasSelection || !onSubmitPrompt || (action.mode === 'edit' && !editable)} onClick={() => void quote(action.mode === 'edit', action.prompt)}>{action.label}</button>)}</div> : null}
+        <div className="flex flex-wrap gap-2">{actions.filter(action => action.id !== 'quote').slice(0,4).map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={!action.enabled} onClick={() => void action.run()}>{action.label}</button>)}<button className="text-xs text-ds-muted" disabled={busy || !hasSelection} onClick={() => void menuHandler.current()}>{t('nativeActionMore')}</button></div>
         {added ? <p role="status" className="text-[11px] text-ds-muted">标注已加入对话，尚未发送。</p> : null}
       </> : <p className="text-xs text-ds-muted">{view.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'}</p>}
     </div> : null}

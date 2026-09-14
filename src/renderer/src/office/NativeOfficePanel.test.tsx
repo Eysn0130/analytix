@@ -6,6 +6,7 @@ import { NativeOfficePanel } from './NativeOfficePanel'
 import { useNativeOfficeStore } from './native-office-store'
 import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection } from '@shared/native-office'
+import { nativeOfficeActionMenuSchema } from '@shared/native-office'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
@@ -172,6 +173,41 @@ async function fillNote(value: string) {
   })
 }
 describe('native document annotation workflow', () => {
+  it('opens compatible menu ids for existing custom actions and starts editing from preview in one click', async () => {
+    const onSubmitPrompt = vi.fn()
+    window.analytix.office.showActionMenu = vi.fn(async payload => {
+      expect(nativeOfficeActionMenuSchema.safeParse(payload).success).toBe(true)
+      return {actionId:'task:0'}
+    })
+    await renderAnnotation({...annotationView,editing:false},{onSubmitPrompt,quickActions:[{id:'中文 custom action',label:'润色',mode:'edit',prompt:'请润色'}]})
+    request.mockImplementation(async (input:NativeOfficeRequest) => ({ok:true,view:input.action === 'reference'
+      ? {...annotationView,scope:{scopeId:'a'.repeat(48),editable:true,threadId:'thread'}} : annotationView}))
+    await clickNamed('nativeActionMore')
+    expect(request.mock.calls.map(([input])=>input.action).filter(action=>action==='annotate'||action==='reference')).toEqual(['annotate','reference'])
+    expect(onSubmitPrompt).toHaveBeenCalledExactlyOnceWith('请润色',[expect.objectContaining({editable:true,selection:annotationSelection})])
+  })
+  it('uses the same action handler for a native menu choice without sending on menu open', async () => {
+    const onSubmitPrompt=vi.fn()
+    let menuRequested!: (target:any)=>void, choose!: (choice:{actionId:string|null})=>void
+    window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return ()=>{}}
+    window.analytix.office.showActionMenu=vi.fn(()=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    await renderAnnotation(annotationView,{onSubmitPrompt,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'请润色'}]})
+    await act(async()=>menuRequested({objectId:view.objectId,revision:view.revision,expectedChangeSequence:0}))
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+    expect(request.mock.calls.some(([input])=>input.action==='reference')).toBe(false)
+    await act(async()=>choose({actionId:'task:0'}))
+    expect(onSubmitPrompt).toHaveBeenCalledExactlyOnceWith('请润色',[expect.objectContaining({selection:annotationSelection})])
+  })
+  it('drops a native menu choice if the selection changes while the menu is open', async () => {
+    const onSubmitPrompt=vi.fn()
+    let choose!: (choice:{actionId:string|null})=>void
+    window.analytix.office.showActionMenu=vi.fn(()=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    await renderAnnotation(annotationView,{onSubmitPrompt,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'请润色'}]})
+    await clickNamed('nativeActionMore')
+    await act(async()=>useNativeOfficeStore.getState().receive({...annotationView,selection:{...annotationSelection,token:'different-token',text:'Another'}}))
+    await act(async()=>choose({actionId:'task:0'}))
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+  })
   it('starts annotation without exposing any manual Office editing controls', async () => {
     await renderAnnotation(view)
     await clickNamed('标注文档')

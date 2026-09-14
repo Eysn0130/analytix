@@ -2200,5 +2200,8 @@
   "nativeOfficeRetry": "重新打开预览",
   "nativeOfficeStatus_loading": "正在打开预览…",
   "nativeOfficeStatus_error": "操作失败",
-  "nativeOfficeStatus_ready": "只读预览"
+  "nativeOfficeStatus_ready": "只读预览",
+  "nativeActionCopy": "复制",
+  "nativeActionQuote": "加入对话",
+  "nativeActionMore": "更多"
 }

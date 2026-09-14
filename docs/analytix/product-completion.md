@@ -24,7 +24,7 @@ below are not yet installed-application evidence.
 | Required outcome | As built / current work | Remaining evidence or implementation |
 | --- | --- | --- |
 | Unified workspace | Main conversation, object/tool tabs and separate terminal layout exist | Full keyboard, IME, narrow/wide, theme, scale and native geometry journey |
-| Explicit native quick task | Same-thread callback carries its own frozen reference; excludes other composer attachments, file references and text quotes | Real Provider/GUI journey; native floating/context/keyboard action catalog |
+| Explicit native quick task | Same-thread callback carries its own frozen reference; shared action strip and owner-native context/keyboard menu, with preview-to-proposal dispatch | Real Provider/GUI journey and selection-positioned surface interaction |
 | Quote-only send | Native references count toward composer send eligibility; quoting does not dispatch | Real Enter/button/IME journey and full action-entry integration |
 | Annotation lifecycle | Per-thread/object in-memory draft survives collapse; stale revision keeps note and requires selection | Protected persistent storage, normal restart, capacity and closed-tab recovery |
 | Native proposal refresh | Single-flight polling with failure backoff; new events supersede pending reads | Tool-completion refresh integration and installed behavior |
@@ -37,7 +37,7 @@ below are not yet installed-application evidence.
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core scopes, protected parts, CAS and status queries exist | Real local original-value Diff, third-object eviction, pending-operation and undo restart recovery |
 | Installation | Native assets remain `source-experiment`; packaged rejection retained | Exact engine/Qt/font/source obligations, admitted packaged resolution, local installer and installed end-to-end journey |
-| Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved | Exact-candidate CodeQL, applicable CI/review, file alias/race and other required negative cases |
+| Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
 The numeric/formula text-path restriction is interim damage prevention. It is not
 acceptance of a text-only spreadsheet product. In-memory note retention is not
@@ -51,6 +51,16 @@ and note-retention regressions failed before their fixes; numeric/formula coerci
 also failed for both native types before the worker guard. Deferred-response tests
 cover version change, superseding events, collapse/remount polling and scope
 revocation after changing tabs. This is synthetic source-level evidence only.
+
+The native menu checks cover owner/main-frame validation, target-version changes,
+opening without dispatch, selection changes while open, existing non-ASCII custom
+action IDs, and one-click preview-to-proposal capture. The renderer suite passed
+27 tests separately; Main IPC/surface suites passed 27 tests. Mixed-environment
+runs encountered a Vitest worker-start timeout, not a passing combined run.
+Hard-link regressions failed before the repair and passed after integration;
+ordinary text-tool hard-link compatibility remains covered. Independent review
+accepted these bounded source changes. Cross-compilation is not Windows runtime
+evidence, and no CodeQL closure is claimed from the local filesystem tests.
 
 ## Completion evidence
 

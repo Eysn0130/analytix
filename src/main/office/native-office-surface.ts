@@ -137,8 +137,18 @@ export class NativeOfficeSurface {
       } })
       this.view.setVisible(false)
       const contents = this.view.webContents
+      const requestMenu = () => {
+        if (!this.attached || !this.current || this.options.owner.isDestroyed()) return
+        this.options.owner.webContents.send('office:menu-requested', {
+          objectId:this.current.documentId, revision:this.current.version, expectedChangeSequence:this.current.changeSequence
+        })
+      }
       contents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown' || input.isAutoRepeat || !this.current) return
+        if (!input.isComposing && !input.control && !input.meta && !input.alt &&
+          (input.key === 'ContextMenu' || input.key === 'F10' && input.shift)) {
+          event.preventDefault(); requestMenu(); return
+        }
         const command = nativeWorkspaceCommandFromInput(input)
         if (!command) return
         event.preventDefault()
@@ -150,7 +160,7 @@ export class NativeOfficeSurface {
       contents.on('will-frame-navigate', event => event.preventDefault())
       contents.on('will-redirect', event => event.preventDefault())
       contents.on('will-attach-webview', event => event.preventDefault())
-      contents.on('context-menu', event => event.preventDefault())
+      contents.on('context-menu', event => { event.preventDefault(); requestMenu() })
       contents.on('will-prevent-unload', event => event.preventDefault())
       contents.on('render-process-gone', () => this.fail('office-engine-closed-unknown'))
       contents.on('destroyed', () => { if (!this.destroyed) this.fail('office-engine-closed-unknown') })

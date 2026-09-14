@@ -3,12 +3,13 @@ import { EventEmitter } from 'node:events'
 const state = vi.hoisted(() => ({
   packaged: false, handlers: new Map<string, (...args: any[]) => any>(),
   lifecycle: new Map<string, (...args: any[]) => void>(),
-  request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn()
+  request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn(), menu: vi.fn(), popup: vi.fn()
 }))
 vi.mock('electron', () => ({
   app: { get isPackaged() { return state.packaged }, getAppPath: () => '/source', getLocale: () => 'en',
     on: (name: string, handler: (...args: any[]) => void) => state.lifecycle.set(name, handler), quit: state.quit },
-  dialog: { showMessageBox: state.dialog, showOpenDialog: state.picker }, ipcMain: { handle: (name: string, handler: (...args: any[]) => any) => state.handlers.set(name, handler) }
+  dialog: { showMessageBox: state.dialog, showOpenDialog: state.picker }, ipcMain: { handle: (name: string, handler: (...args: any[]) => any) => state.handlers.set(name, handler) },
+  Menu: { buildFromTemplate: state.menu }
 }))
 vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (...args: unknown[]) => {
   state.create(...args)
@@ -19,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks(); state.packaged = false; state.handlers.clear(); state.lifecycle.clear()
   state.request.mockResolvedValue({ ok: true, view: null }); state.getView.mockReturnValue(null)
   state.destroy.mockResolvedValue(undefined)
+  state.menu.mockReturnValue({ popup: state.popup })
 })
 function setup() {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
@@ -30,6 +32,20 @@ function setup() {
     pick: (payload: unknown = { kind: 'docx', workspace: '/workspace' }, e: unknown = event) => state.handlers.get('office:pick-file')!(e, payload),
     replace: () => { current = null } }
 }
+it('opens only a current owner native action menu and rechecks its target when chosen', async () => {
+  const h=setup(); await h.invoke()
+  const view={objectId:'a'.repeat(64),revision:'b'.repeat(64),changeSequence:0}
+  state.getView.mockReturnValue(view)
+  const payload={objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,actions:[{id:'task:polish',label:'Polish',enabled:true}]}
+  const menu=(event=h.event,request:any=payload)=>state.handlers.get('office:action-menu')!(event,request)
+  expect(await menu({sender:{},senderFrame:{}} as any)).toEqual({actionId:null})
+  expect(await menu(h.event,{...payload,revision:'c'.repeat(64)})).toEqual({actionId:null})
+  expect(state.menu).not.toHaveBeenCalled()
+  const first=menu(); state.menu.mock.calls.at(-1)![0][0].click()
+  expect(await first).toEqual({actionId:'task:polish'})
+  const second=menu(); state.getView.mockReturnValue({...view,changeSequence:1}); state.menu.mock.calls.at(-1)![0][0].click()
+  expect(await second).toEqual({actionId:null})
+})
 it('uses an Office-only single-file picker and preserves cancellation without opening an object', async () => {
   const h = setup()
   state.picker.mockResolvedValue({ canceled: false, filePaths: ['/workspace/example.docx'] })

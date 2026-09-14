@@ -1256,6 +1256,8 @@ export type AnalytixDiagnosticsApi = {
 
 export type AnalytixDomainFacade = {
   office: {
+    onMenuRequested: (handler: (target: import('./native-office').NativeOfficeMenuTarget) => void) => () => void
+    showActionMenu: (request: import('./native-office').NativeOfficeActionMenu) => Promise<{actionId:string | null}>
     onWorkspaceCommand: (handler: (command: import('./native-office').NativeWorkspaceCommand) => void) => () => void
     pickFile: (request: import('zod').infer<typeof import('./native-office').nativeOfficePickerRequestSchema>) => Promise<import('zod').infer<typeof import('./native-office').nativeOfficePickerResponseSchema>>
     request: (request: import('./native-office').NativeOfficeRequest) => Promise<import('./native-office').NativeOfficeResponse>

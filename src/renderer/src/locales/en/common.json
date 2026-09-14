@@ -2200,5 +2200,8 @@
   "nativeOfficeRetry": "Reopen preview",
   "nativeOfficeStatus_loading": "Opening preview…",
   "nativeOfficeStatus_error": "Operation failed",
-  "nativeOfficeStatus_ready": "Read-only preview"
+  "nativeOfficeStatus_ready": "Read-only preview",
+  "nativeActionCopy": "Copy",
+  "nativeActionQuote": "Quote in conversation",
+  "nativeActionMore": "More"
 }

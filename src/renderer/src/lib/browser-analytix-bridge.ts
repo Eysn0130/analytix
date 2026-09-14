@@ -1300,6 +1300,8 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       openEditorPath: async () => ({ ok: false, message: browserPreviewUnavailable('Open editor') })
     },
     office: {
+      onMenuRequested: () => () => undefined,
+      showActionMenu: async () => ({actionId:null}),
       onWorkspaceCommand: () => () => undefined,
       pickFile: async () => ({ ok: false, error: 'unavailable' }),
       request: async () => ({ ok: false, view: null, error: 'unavailable' }),

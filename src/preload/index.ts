@@ -1,4 +1,4 @@
-import { nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema } from '../shared/native-office'
+import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
@@ -575,6 +575,18 @@ const api = {
     openEditorPath: flatApi.openEditorPath
   },
   office: {
+    onMenuRequested: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeOfficeMenuTargetSchema.safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:menu-requested', listener)
+      return () => ipcRenderer.removeListener('office:menu-requested', listener)
+    },
+    showActionMenu: async (request) => {
+      const parsed = nativeOfficeActionChoiceSchema.safeParse(await ipcRenderer.invoke('office:action-menu', request))
+      return parsed.success ? parsed.data : {actionId:null}
+    },
     onWorkspaceCommand: (handler) => {
       const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
         const parsed = nativeWorkspaceCommandSchema.safeParse(value)

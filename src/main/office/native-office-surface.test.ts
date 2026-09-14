@@ -59,6 +59,18 @@ async function openSurface(s: any) {
   s.peer.peer.messages.length = 0
   return r
 }
+test('routes native right click and Shift+F10 to the same versioned menu intent without engine mutation', async () => {
+  const s=await setup(); await openSurface(s)
+  const preventDefault=vi.fn()
+  s.view.webContents.emit('context-menu',{preventDefault})
+  expect(s.owner.webContents.send).toHaveBeenLastCalledWith('office:menu-requested',{objectId:'document',revision:'version-1',expectedChangeSequence:0})
+  const count=s.owner.webContents.send.mock.calls.length
+  s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'F10',shift:true,isComposing:true})
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(count)
+  s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'F10',shift:true})
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(count+1)
+  expect(s.peer.peer.messages).toHaveLength(0)
+})
 test('source-only sandbox view rejects network, navigation, permissions, popup and download', async () => {
   const s = await setup(), prefs = s.view.options.webPreferences
   expect(prefs).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInWorker: false, webSecurity: true, webviewTag: false, devTools: false })

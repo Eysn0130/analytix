@@ -28,6 +28,15 @@ export const nativeOfficePickerResponseSchema = z.union([
 
 const selectionToken = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/)
 const editingTarget = { objectId: digest, revision: digest, expectedChangeSequence: index }
+export const nativeOfficeMenuTargetSchema = z.object(editingTarget).strict()
+const actionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
+export const nativeOfficeActionMenuSchema = z.object({
+  ...editingTarget,
+  actions: z.array(z.object({id:actionId,label:z.string().min(1).max(120).regex(/^[^\x00-\x1f]+$/),enabled:z.boolean()}).strict()).min(1).max(32)
+}).strict().refine(value => new Set(value.actions.map(action => action.id)).size === value.actions.length)
+export const nativeOfficeActionChoiceSchema = z.object({actionId:actionId.nullable()}).strict()
+export type NativeOfficeMenuTarget = z.infer<typeof nativeOfficeMenuTargetSchema>
+export type NativeOfficeActionMenu = z.infer<typeof nativeOfficeActionMenuSchema>
 
 /** Renderer commands contain no native bytes, URLs, engine envelopes or UNO. */
 export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [

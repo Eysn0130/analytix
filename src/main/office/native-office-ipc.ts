@@ -1,7 +1,7 @@
-import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, Menu, type BrowserWindow } from 'electron'
 import { extname, isAbsolute, join } from 'node:path'
 import { realpathSync } from 'node:fs'
-import { nativeOfficePickerRequestSchema, nativeOfficeRequestSchema } from '../../shared/native-office'
+import { nativeOfficeActionMenuSchema, nativeOfficePickerRequestSchema, nativeOfficeRequestSchema } from '../../shared/native-office'
 import { createNativeOfficeController } from './native-office-controller'
 import { NativeOfficeSurface } from './native-office-surface'
 import type { PluginPackageHostRequest, PluginPackageHostResponse } from '../../../packages/runtime/src/contracts/plugin-package-host'
@@ -13,6 +13,24 @@ export function registerNativeOfficeIpc(
 ): void {
   let owner: BrowserWindow | undefined
   let controller: ReturnType<typeof createNativeOfficeController> | undefined
+  ipcMain.handle('office:action-menu', async (event, payload: unknown) => {
+    const main = getMainWindow(), parsed = nativeOfficeActionMenuSchema.safeParse(payload)
+    const cancelled = {actionId:null}
+    if (!parsed.success || !main || main.isDestroyed() || owner !== main ||
+      event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return cancelled
+    const frame = main.webContents.mainFrame, target = parsed.data
+    const current = () => {
+      const view = controller?.getView()
+      return getMainWindow() === main && !main.isDestroyed() && main.webContents.mainFrame === frame &&
+        view?.objectId === target.objectId && view.revision === target.revision && (view.changeSequence ?? 0) === target.expectedChangeSequence
+    }
+    if (!current()) return cancelled
+    return await new Promise<{actionId:string | null}>(resolve => {
+      const menu = Menu.buildFromTemplate(target.actions.map(action => ({label:action.label,enabled:action.enabled,
+        click:() => resolve(action.enabled && current() ? {actionId:action.id} : cancelled)})))
+      menu.popup({window:main,callback:() => resolve(cancelled)})
+    })
+  })
   ipcMain.handle('office:pick-file', async (event, payload: unknown) => {
     const main = getMainWindow()
     const unavailable = { ok: false as const, error: 'unavailable' as const }
