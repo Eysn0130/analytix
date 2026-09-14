@@ -140,8 +140,19 @@ isolated Keychain password through a hidden native dialog, provisions the
 non-login bootstrap database and preserves its inode while binding the final
 task path. Keep that password for `--unlock-keychain`; credentials are never
 copied from an existing profile. `--fast` reuses already built native/runtime
-inputs. Cancellation or missing retained state stops without repair; `--fresh`
+inputs. Keychain creation or explicit unlock runs after successful prerequisites,
+immediately before application launch, so build time does not consume the
+unlocked window. Cancellation or missing retained state stops without repair; `--fresh`
 creates a separate profile and preserves the incomplete one.
+
+Use the same checkout and named profile for daily development; do not pass
+`--fresh` on every launch. Successfully committed Provider credentials remain
+in that profile's protected Secret Store. A blank credential field on restart
+does not mean the key was lost; the UI shows whether Registry has a committed
+credential, and leaving the field blank preserves it. The task Keychain's lock
+password is separate from the Provider API key. Locking does not remove the
+Provider configuration; restore access to the same Keychain instead of entering
+the API key again. Keep the existing lock policy and explicit unlock workflow.
 
 The Go Secret Store persists committed physical Keychain identity in the V2
 record under the existing private binding filename. Restart rejects replacement
@@ -157,7 +168,12 @@ An unconfirmed write remains unavailable. A confirmed write with only cleanup
 residue can recover before the next explicit unlock. Rollback cannot replace a
 valid identity record with an unknown backup. V2 records require the writer's
 canonical encoding; duplicate fields and linked records are rejected. Each
-Security credential command has its own ten-second deadline; a timeout does
+Security credential command has its own ten-second deadline. Explicit task
+commands first run a bounded, noninteractive native lock-metadata check; an
+already locked or unqualified Keychain fails before starting `security`. This
+does not change the lock policy or read credentials in the metadata process.
+Locking after preflight remains a race covered by the command deadline, so this
+does not guarantee suppression of every possible OS authorization dialog. A timeout does
 not prove a native write had no side effect. These controls and focused tests do not establish GUI,
 real Provider, installation or complete restart acceptance by themselves.
 

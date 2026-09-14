@@ -2068,12 +2068,19 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         }}
                         visible={showApiKey}
                         onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
-                        placeholder={t('modelProviderApiKeyPlaceholder')}
+                        placeholder={t(activeRegistryProvider?.credentialConfigured === true
+                          ? 'modelProviderApiKeySavedPlaceholder'
+                          : 'modelProviderApiKeyPlaceholder')}
                         autoComplete="off"
                         showLabel={t('showSecret')}
                         hideLabel={t('hideSecret')}
                       />
                     </div>
+                    {activeRegistryProvider?.credentialConfigured === true ? (
+                      <span className="text-[12px] font-normal text-ds-muted">
+                        {t('modelProviderApiKeySavedHint')}
+                      </span>
+                    ) : null}
                   </label>
                   <label className={fieldLabelClass}>
                     {t('modelProviderBaseUrl')}

@@ -234,6 +234,8 @@
   "modelProviderIdLocked": "默认与预设供应商的 ID 不可修改",
   "modelProviderApiKey": "API Key",
   "modelProviderApiKeyPlaceholder": "填写此供应商的 API Key",
+  "modelProviderApiKeySavedPlaceholder": "已安全保存；留空保留现有密钥",
+  "modelProviderApiKeySavedHint": "已保存凭据，仅需在更换时填写。系统凭据存储锁定时应解锁，无需重新填写 API Key。",
   "modelProviderBaseUrl": "Base URL",
   "modelProviderEndpointFormat": "端点格式",
   "modelEndpointChatCompletions": "/v1/chat/completions",

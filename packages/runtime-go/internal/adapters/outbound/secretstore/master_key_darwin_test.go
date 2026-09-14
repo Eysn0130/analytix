@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	portsecretstore "analytix.local/runtime-go/internal/ports/secretstore"
 )
@@ -23,6 +24,51 @@ import (
 type scriptedKeychainStep struct {
 	result keychainCommandResult
 	err    error
+}
+
+func TestLockedTaskKeychainDoesNotStartSecurityCommand(t *testing.T) {
+	for _, arguments := range [][]string{{"help"}, {"-i"}} {
+		checked := false
+		runner := securityCommandRunner{
+			keychainDBPath: "/synthetic/analytix-task.keychain-db",
+			checkUnlocked: func(ctx context.Context, database string) bool {
+				checked = true
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) > 10*time.Second || database != "/synthetic/analytix-task.keychain-db" {
+					t.Fatal("preflight did not retain the operation deadline and exact binding")
+				}
+				return false
+			},
+		}
+		result, err := runner.Run(context.Background(), arguments, nil)
+		if !checked || !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) || len(result.stdout) != 0 {
+			t.Fatal("locked Keychain was not rejected before the otherwise successful security command")
+		}
+	}
+}
+
+func TestTaskKeychainMetadataProbeFailsClosed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if taskKeychainUnlocked(ctx, "relative") || taskKeychainUnlocked(ctx, filepath.Join(t.TempDir(), "analytix-task.keychain-db")) {
+		t.Fatal("invalid or nonexistent Keychain admitted")
+	}
+	directory := t.TempDir()
+	target := filepath.Join(directory, "synthetic-database")
+	if err := os.WriteFile(target, []byte("not a keychain"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "analytix-task.keychain-db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if taskKeychainUnlocked(ctx, link) {
+		t.Fatal("symlink admitted by private metadata entry")
+	}
+	cancel()
+	if taskKeychainUnlocked(ctx, "/synthetic/analytix-task.keychain-db") {
+		t.Fatal("cancelled preflight admitted")
+	}
 }
 
 func TestSecurityCommandRejectsCancelledContextBeforeStartingV1(t *testing.T) {
