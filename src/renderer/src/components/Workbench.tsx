@@ -1,5 +1,5 @@
 import { nativeWorkspaceCommandFromInput, type NativeWorkspaceCommand } from '@shared/native-office'
-import { useNativeReferenceStore, nativeReferencesPrompt } from '../office/native-reference-store'
+import { useNativeReferenceStore, nativeReferencesPrompt, nativeActionReferencesCurrent, type NativeReference } from '../office/native-reference-store'
 import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
 import { useThreadComposerDraft } from './chat/use-thread-composer-draft'
 import { isNativeOfficeFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
@@ -1764,8 +1764,8 @@ export function Workbench(): ReactElement {
     await handlePickAttachments([clipboardImageToFile(image)], { localFilePaths: [image.localFilePath] })
   }
 
-  const sendWritePrompt = (value: string): void => {
-    void handleSendAsync(value)
+  const sendWritePrompt = (value: string, references?: NativeReference[]): void => {
+    void handleSendAsync(value, references)
   }
 
   const createSddAssistantThreadForDraft = async (draft: SddDraft): Promise<string | null> => {
@@ -2489,12 +2489,14 @@ export function Workbench(): ReactElement {
     void handleSendAsync()
   }
 
-  const handleSendAsync = async (overrideInput?: string): Promise<void> => {
+  const handleSendAsync = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
     const v = (overrideInput ?? input).trim()
+    const nativeAction = actionReferences !== undefined
     const documentState = useWriteWorkspaceStore.getState()
-    const frozenQuotes = [...documentState.quotedSelections]
-    const frozenNativeReferences = useNativeReferenceStore.getState().references.filter(r => r.threadId === activeThreadId)
-    const documentContext = frozenQuotes.length > 0 || overrideInput !== undefined
+    const frozenQuotes = nativeAction ? [] : [...documentState.quotedSelections]
+    const frozenNativeReferences = structuredClone(actionReferences ?? useNativeReferenceStore.getState().references.filter(r => r.threadId === activeThreadId))
+    const editorRequest = overrideInput !== undefined && !nativeAction
+    const documentContext = frozenQuotes.length > 0 || editorRequest
     const currentReferenceSnapshot = () => {
       const chat = useChatStore.getState()
       const doc = useWriteWorkspaceStore.getState()
@@ -2506,16 +2508,24 @@ export function Workbench(): ReactElement {
       }
     }
     const frozenReference = { ...currentReferenceSnapshot(), quotes: frozenQuotes, documentContext }
-    const referenceCurrent = () => workbenchReferencesCurrent(frozenReference, currentReferenceSnapshot())
+    const referenceCurrent = () => {
+      const current = currentReferenceSnapshot()
+      const native = useNativeOfficeStore.getState()
+      return workbenchReferencesCurrent(frozenReference, current) &&
+        (!nativeAction || route === 'chat' && !!current.threadId) &&
+        (!nativeAction || nativeActionReferencesCurrent(frozenNativeReferences, [...(native.view ? [native.view] : []), ...Object.values(native.views)])) &&
+        frozenNativeReferences.every(reference => reference.threadId === current.threadId &&
+          normalizeWorkspaceRoot(reference.workspace) === normalizeWorkspaceRoot(current.threadWorkspace))
+    }
     if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
-    const attachments = route === 'chat' || route === 'write' ? composerAttachments : []
+    const attachments = !nativeAction && (route === 'chat' || route === 'write') ? composerAttachments : []
     const imageAttachments = attachments.filter((attachment) => attachment.kind === 'image')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
     const attachmentIds = attachments.map((attachment) => attachment.id)
     const publicAttachments = projectAttachmentReferencesForPublicSurfaces(attachments)
-    const fileReferences = route === 'chat' ? composerFileReferences : []
+    const fileReferences = !nativeAction && route === 'chat' ? composerFileReferences : []
     const clearSubmittedDraft = (): void => {
-      clearSubmittedComposer({ includeInput: overrideInput === undefined, attachments, fileReferences })
+      if (!nativeAction) clearSubmittedComposer({ includeInput: overrideInput === undefined, attachments, fileReferences })
       for (const reference of frozenNativeReferences) useNativeReferenceStore.getState().remove(reference.id)
       for (const quote of frozenQuotes) useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)
     }
@@ -2535,7 +2545,7 @@ export function Workbench(): ReactElement {
     )
     const emptyDisplayText = v ? undefined : t(emptyMessage.display, { count: emptyMessage.count })
     const rawMessageText = v || t(emptyMessage.prompt)
-    const editorPreset = overrideInput === undefined ? undefined : documentState.agentPresets.find(
+    const editorPreset = !editorRequest ? undefined : documentState.agentPresets.find(
       (preset) => preset.id === documentState.assistantAgentPresetId
     )
     const prepareChatMessage = async (): Promise<{
@@ -2544,7 +2554,7 @@ export function Workbench(): ReactElement {
       fileReferences?: UserFileReference[]
     } | null> => {
       const documentMessage = await prepareWorkbenchDocumentMessage({
-        input: rawMessageText, quotes: frozenQuotes, editorRequest: overrideInput !== undefined,
+        input: rawMessageText, quotes: frozenQuotes, editorRequest,
         workspaceRoot: documentState.workspaceRoot, activeFilePath: documentState.activeFilePath,
         requestUserInputAvailable: typeof getProvider().submitUserInputResponse === 'function',
         editorPersona: editorPreset ? resolveWriteAgentPreset(editorPreset).persona : undefined,
@@ -2578,11 +2588,11 @@ export function Workbench(): ReactElement {
       }
     }
 
-    if (activeSddDraft && rightPanelMode === 'sdd-ai') {
+    if (!nativeAction && activeSddDraft && rightPanelMode === 'sdd-ai') {
       void sendSddAssistantPrompt(v)
       return
     }
-    const planCommand = parseGuiPlanCommand(v)
+    const planCommand = nativeAction ? null : parseGuiPlanCommand(v)
     if (planCommand) {
       setInput('')
       void handleGuiPlanCommand(planCommand.kind === 'create' ? planCommand.request : undefined)
@@ -3519,7 +3529,7 @@ export function Workbench(): ReactElement {
                             onConfigureProviders={() => openSettings('providers')}
                             onOpenPermissionSettings={() => openSettings('permissions')}
                             onSend={composerController.send}
-                            documentReferenceCount={documentQuotes.length}
+                            documentReferenceCount={documentQuotes.length + nativeReferences.filter(reference => reference.threadId === activeThreadId).length}
                             attachments={composerAttachments}
                             attachmentUploadEnabled={attachmentUploadEnabled}
                             attachmentUploadBusy={attachmentUploadBusy}

@@ -5,18 +5,21 @@ import { FileText, RotateCcw, Undo2, Quote, Pencil } from 'lucide-react'
 import type { NativeOfficeRequest, NativeOfficeSelection } from '@shared/native-office'
 import { useNativeOfficeStore } from './native-office-store'
 
-import { useNativeReferenceStore, nativeSelectionLabel, nativeSelectionText, isNativeSelectionEditable } from './native-reference-store'
+import { useNativeReferenceStore, nativeSelectionLabel, nativeSelectionText, isNativeSelectionEditable, type NativeReference } from './native-reference-store'
 
 const appearance = () => ({ theme: document.documentElement.dataset.theme === 'dark' ? 'dark' as const : 'light' as const, reducedMotion: document.documentElement.dataset.motionReduced === 'true' })
 
-export function NativeOfficePanel({ visible, onFocusConversation, threadId = null, quickActions = [], fileActions }: { visible: boolean; fileActions?: ReactNode; quickActions?: ResolvedWriteQuickAction[]; threadId?: string | null; onFocusConversation?: () => void; setInput?: (value: string) => void }) {
+export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt, threadId = null, quickActions = [], fileActions }: { visible: boolean; fileActions?: ReactNode; quickActions?: ResolvedWriteQuickAction[]; threadId?: string | null; onFocusConversation?: () => void; onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void; setInput?: (value: string) => void }) {
   const { t } = useTranslation('common')
   const target = useNativeOfficeStore((s) => s.target)
   const view = useNativeOfficeStore((s) => s.view)
   const error = useNativeOfficeStore((s) => s.error)
   const targetMatches = !target || view?.path === target.path || view?.path === `${target.workspace.replace(/\/$/, '')}/${target.path}`
   const loading = !error && (!view || view.status === 'loading' || !targetMatches)
-  const [note, setNote] = useState('')
+  const draftKey = JSON.stringify([threadId, target?.workspace, target?.path])
+  const draft = useNativeReferenceStore(state => state.drafts[draftKey])
+  const note = draft?.note ?? ''
+  const setNote = (value: string) => useNativeReferenceStore.getState().setDraft(draftKey, {note:value,selection:draft?.selection})
   const [added, setAdded] = useState(false)
   const frozenSelection = useRef<{ owner: string; selection: NativeOfficeSelection } | null>(null)
   const annotationThread = useRef(threadId)
@@ -41,6 +44,14 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
     }
     try {
       const result = await window.analytix.office.request(request)
+      if (request.action === 'reference') {
+        // Core revokes all earlier scopes for this object, even if focus moved
+        // while capture was in flight. Reflect that fact without accepting old UI.
+        if (result.ok && result.view?.scope?.editable) useNativeReferenceStore.getState().revokeScopes(request.objectId)
+        const current = useNativeOfficeStore.getState().view
+        if (!current || current.objectId !== request.objectId || current.revision !== request.revision ||
+          (current.changeSequence ?? 0) !== request.expectedChangeSequence) return undefined
+      }
       if (epoch === generation.current) useNativeOfficeStore.getState().receive(result.view, result.ok ? null : result.error ?? 'unavailable')
       if (!shown.current) void window.analytix.office.request({action:'hide'})
       return result
@@ -50,7 +61,6 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
   useEffect(() => window.analytix.office.onChange((next) => useNativeOfficeStore.getState().receive(next, next?.error ?? null)), [])
   useEffect(() => {
     generation.current++
-    setNote('')
     setAdded(false)
     setBusy(false)
     if (!target || !visible) return
@@ -96,19 +106,30 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
   useEffect(() => {
     if (!visible || !scopeId || !objectId || !threadId || scopeThreadId !== threadId) return
     let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let delay = 2000
     const poll = async () => {
+      if (!useNativeOfficeStore.getState().beginProposalPoll()) {
+        timer = setTimeout(() => { void poll() }, delay)
+        return
+      }
+      const received = useNativeOfficeStore.getState().receiveSequence
       try {
         const result = await window.analytix.office.request({action:'proposals',objectId,scopeId})
-        if (!stopped && result.ok) useNativeOfficeStore.getState().receive(result.view)
-      } catch { /* Existing view remains usable during a bounded status-read failure. */ }
+        if (!stopped && result.ok && received === useNativeOfficeStore.getState().receiveSequence) useNativeOfficeStore.getState().receive(result.view)
+        delay = result.ok ? 2000 : Math.min(delay * 2, 16000)
+      } catch { delay = Math.min(delay * 2, 16000) }
+      finally {
+        useNativeOfficeStore.getState().endProposalPoll()
+        if (!stopped) timer = setTimeout(() => { void poll() }, delay)
+      }
     }
-    const timer = setInterval(() => { void poll() }, 2000)
     void poll()
-    return () => { stopped = true; clearInterval(timer) }
+    return () => { stopped = true; clearTimeout(timer) }
   }, [visible, objectId, scopeId, scopeThreadId, threadId])
   const liveSelection = view?.selection
   const liveIdentity = JSON.stringify(liveSelection) ?? ''
-  const selectionOwner = visible && target && view ? JSON.stringify([threadId, target.workspace, target.path, view.objectId, view.revision, view.changeSequence ?? 0]) : ''
+  const selectionOwner = target && view ? JSON.stringify([threadId, target.workspace, target.path, view.objectId, view.revision, view.changeSequence ?? 0]) : ''
   if (annotationThread.current !== threadId) {
     annotationThread.current = threadId
     ignoredSelection.current = liveIdentity
@@ -122,13 +143,19 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
     liveSelection.changeSequence === (view.changeSequence ?? 0) && nativeSelectionText(liveSelection).trim()) {
     frozenSelection.current = {owner:selectionOwner, selection:liveSelection}
   }
-  const selection = frozenSelection.current?.selection
+  const selection = frozenSelection.current?.selection ?? draft?.selection
   const targetRequest = view ? {objectId:view.objectId, revision:view.revision, expectedChangeSequence:view.changeSequence ?? 0} : null
   const selectionMatches = !!(selection && view && targetMatches && selection.documentId === view.objectId && selection.version === view.revision && selection.changeSequence === (view.changeSequence ?? 0))
   const hasSelection = selectionMatches && !!selection && !!nativeSelectionText(selection).trim()
   const editable = !!(threadId && view && selection && selectionMatches && isNativeSelectionEditable(view, selection))
   const annotationIdentity = JSON.stringify(selection)
-  useEffect(() => { setNote(''); setAdded(false) }, [threadId, annotationIdentity])
+  useEffect(() => {
+    setAdded(false)
+    if (selectionMatches && selection) {
+      const state = useNativeReferenceStore.getState()
+      state.setDraft(draftKey, {note:state.drafts[draftKey]?.note ?? '',selection:structuredClone(selection)})
+    }
+  }, [draftKey, annotationIdentity, selectionMatches])
   const quote = async (allowEdit = editable, actionPrompt?: string) => {
     if (!visible || !view || !selection || !target || !hasSelection) return false
     const epoch = generation.current
@@ -142,8 +169,10 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
       scopeId = result.view.scope.scopeId
     }
     const annotationNote = [note.trim(), actionPrompt?.trim()].filter(Boolean).join('\n')
-    useNativeReferenceStore.getState().add({threadId, ...(scopeId ? {scopeId,editable:true} : {editable:false}), workspace:target.workspace, path:view.path, objectId:view.objectId, revision:selection.version, selection:structuredClone(selection), label:nativeSelectionLabel(view, selection), text:nativeSelectionText(selection), ...(annotationNote ? {note:annotationNote} : {})})
-    setAdded(true)
+    const reference: NativeReference = {id:crypto.randomUUID(),threadId, ...(scopeId ? {scopeId,editable:true} : {editable:false}), workspace:target.workspace, path:view.path, objectId:view.objectId, revision:selection.version, selection:structuredClone(selection), label:nativeSelectionLabel(view, selection), text:nativeSelectionText(selection), ...(annotationNote ? {note:annotationNote} : {})}
+    if (!actionPrompt) useNativeReferenceStore.getState().add(reference)
+    setAdded(!actionPrompt)
+    if (actionPrompt) onSubmitPrompt?.(actionPrompt, [reference])
     onFocusConversation?.()
     return true
   }
@@ -156,14 +185,14 @@ export function NativeOfficePanel({ visible, onFocusConversation, threadId = nul
       {fileActions}
     </div> : null}
     {view?.status === 'ready' || view?.editing ? <div className="shrink-0 space-y-1 border-b border-ds-border-muted px-2 py-2" aria-label="文档标注">
-      {hasSelection && selection ? <>
-        <p className="truncate text-xs" title={nativeSelectionLabel(view, selection)}>{nativeSelectionLabel(view, selection)}</p>
+      {hasSelection && selection || note ? <>
+        <p className="truncate text-xs">{hasSelection && selection ? nativeSelectionLabel(view, selection) : '选区已过期，请重新选择；备注已保留。'}</p>
         <p className="text-[11px] text-ds-muted">{editable ? '可让 AI 提出局部修改，接受后应用。' : '仅供讨论，此选区不支持直接应用修改。'}</p>
         <div className="flex items-center gap-2">
           <input aria-label="标注备注" placeholder="备注（可选）" maxLength={4096} className="min-w-0 flex-1 bg-transparent text-xs" value={note} onChange={event => { setNote(event.target.value); setAdded(false) }} />
-          <button className="inline-flex shrink-0 items-center gap-1 text-xs" disabled={busy} onClick={() => void quote()}><Quote className="h-3.5 w-3.5" />加入对话</button>
+          <button className="inline-flex shrink-0 items-center gap-1 text-xs" disabled={busy || !hasSelection} onClick={() => void quote()}><Quote className="h-3.5 w-3.5" />加入对话</button>
         </div>
-        {quickActions.length ? <div className="flex flex-wrap gap-2">{quickActions.map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={busy || (action.mode === 'edit' && !editable)} onClick={() => void quote(action.mode === 'edit', action.prompt)}>{action.label}</button>)}</div> : null}
+        {quickActions.length ? <div className="flex flex-wrap gap-2">{quickActions.map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={busy || !hasSelection || !onSubmitPrompt || (action.mode === 'edit' && !editable)} onClick={() => void quote(action.mode === 'edit', action.prompt)}>{action.label}</button>)}</div> : null}
         {added ? <p role="status" className="text-[11px] text-ds-muted">标注已加入对话，尚未发送。</p> : null}
       </> : <p className="text-xs text-ds-muted">{view.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'}</p>}
     </div> : null}

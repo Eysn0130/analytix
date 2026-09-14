@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
-import { isNativeSelectionEditable, nativeReferencesPrompt, useNativeReferenceStore, type NativeReference } from './native-reference-store'
+import { isNativeSelectionEditable, nativeActionReferencesCurrent, nativeReferencesPrompt, useNativeReferenceStore, type NativeReference } from './native-reference-store'
 
 const view: NativeOfficeView = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), path: '/synthetic/report.docx', kind: 'docx', status: 'ready', dirty: false, editing: true, changeSequence: 2 }
 const selection: NativeOfficeSelection = { kind: 'text', documentId: view.objectId, version: view.revision, changeSequence: 2, token: 'selection-token', scope: 'session-text-range-at-version-and-change-sequence', text: 'Synthetic text', capture: { capturedCharacters: 14, totalCharacters: 14, unit: 'utf-16', truncated: false, complete: true } }
@@ -20,6 +20,7 @@ describe('native annotation references', () => {
     expect(isNativeSelectionEditable(view, cells)).toBe(true)
     expect(isNativeSelectionEditable(view, { ...cells, ranges:[{...cells.ranges[0],endRow:1}] })).toBe(false)
     expect(isNativeSelectionEditable(view, { ...cells, cells:[{...cells.cells![0],merged:true}] })).toBe(false)
+    for (const valueType of ['number','formula'] as const) expect(isNativeSelectionEditable(view, {...cells,cells:[{...cells.cells![0],valueType}]})).toBe(false)
     const shape = {pageIndex:0,shapeIndex:0,name:'Text',type:'text',text:'Value'}
     const shapes: NativeOfficeSelection = { ...selection, kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[shape] }
     expect(isNativeSelectionEditable(view, shapes)).toBe(true)
@@ -39,6 +40,17 @@ describe('native annotation references', () => {
     expect(prompt).toContain(reference.note)
     expect(prompt).not.toContain('native_selection_propose')
   })
+})
+
+it('rechecks the native task revision, sequence and scoped thread after asynchronous message preparation', () => {
+  const scoped = {...reference,editable:true,scopeId:'a'.repeat(48)}
+  const current = {...view,scope:{scopeId:scoped.scopeId,threadId:reference.threadId} as NativeOfficeView['scope']}
+  expect(nativeActionReferencesCurrent([scoped],[current])).toBe(true)
+  expect(nativeActionReferencesCurrent([scoped],[{...current,revision:'c'.repeat(64)}])).toBe(false)
+  expect(nativeActionReferencesCurrent([scoped],[{...current,changeSequence:3}])).toBe(false)
+  expect(nativeActionReferencesCurrent([scoped],[{...current,scope:undefined}])).toBe(false)
+  expect(nativeActionReferencesCurrent([{...scoped,threadId:'another'}],[current])).toBe(false)
+  expect(nativeActionReferencesCurrent([scoped],[])).toBe(false)
 })
 
 

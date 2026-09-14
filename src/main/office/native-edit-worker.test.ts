@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { expect, test, vi } from 'vitest'
 
-function worker(text = '重复文本', kind = 'docx') {
+function worker(text = '重复文本', kind = 'docx', cellType = 2) {
   let selected = 1, readonly = true, modified = false, listener: any
   const paragraphs = ['重复文本', text]
   const messages: any[] = [], properties: any[][] = []
@@ -13,7 +13,10 @@ function worker(text = '重复文本', kind = 'docx') {
   })
   const ranges = [range(0), range(1)]
   const controller: any = { getSelection: () => ({getCount: () => 1, getByIndex: () => ranges[selected]}), getFrame: () => ({getContainerWindow: () => ({}), LayoutManager:{setVisible(){},isVisible:()=>false}}), addSelectionChangeListener(){}, removeSelectionChangeListener(){} }
-  const model = {isReadonly:()=>readonly,isModified:()=>modified,setModified:(v:boolean)=>{modified=v},getCurrentController:()=>controller,addModifyListener:(l:any)=>{listener=l},removeModifyListener(){},close(){},storeToURL:vi.fn()}
+  const sheet = {getName:()=> 'Sheet1',getCellByPosition:()=>ranges[selected],getRows:()=>({getByIndex:()=>({getPropertyValue:()=>true})}),getColumns:()=>({getByIndex:()=>({getPropertyValue:()=>true})})}
+  for (const cell of ranges) Object.assign(cell,{getType:()=>cellType,getFormula:()=>cellType === 3 ? '=SUM(A1:A2)' : '',getValue:()=>123,getPropertyValue:()=>0,getIsMerged:()=>false})
+  if (kind === 'xlsx') controller.getSelection = () => ({getRangeAddress:()=>({Sheet:0,StartColumn:0,EndColumn:0,StartRow:0,EndRow:0})})
+  const model = {getSheets:()=>({getByIndex:()=>sheet}),isReadonly:()=>readonly,isModified:()=>modified,setModified:(v:boolean)=>{modified=v},getCurrentController:()=>controller,addModifyListener:(l:any)=>{listener=l},removeModifyListener(){},close(){},storeToURL:vi.fn()}
   const css = {frame:{Desktop:{create:()=>({loadComponentFromURL: (_url:any,_target:any,_flags:any,p:any[])=>{properties.push(p);readonly=p.find(v=>v.Name==='ReadOnly').Value; return model}})}},beans:{PropertyValue:function(this:any,p:any){Object.assign(this,p)}},util:{XModifyListener:{}},view:{XSelectionChangeListener:{}}}
   const port:any={postMessage:(v:any)=>messages.push(v)}
   const zeta={sameUnoObject:(a:any,b:any)=>a===b,uno:{com:{sun:{star:css}}},getUnoComponentContext(){},unoObject:(_:any,v:any)=>v,mainPort:port,Any:function(this:any,_:any,v:any){this.value=v}}
@@ -23,6 +26,14 @@ function worker(text = '重复文本', kind = 'docx') {
   send('bind');send('open',{kind})
   return {send,paragraphs,properties,model,ranges,select:(i:number)=>{selected=i},change:()=>{modified=true;listener.modified()},revision:(value:string)=>{revision=value}}
 }
+test.each([1,3])('never coerces native numeric/formula cell type %s through text replacement', cellType => {
+  const w=worker('123','xlsx',cellType); w.send('edit')
+  const captured=w.send('captureSelection')
+  expect(captured.selection.cells[0].valueType).toBe(cellType === 1 ? 'number' : 'formula')
+  expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'变成文本',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
+  expect(w.paragraphs[1]).toBe('123')
+  expect(w.model.isModified()).toBe(false)
+})
 test('private AI edit preserves the readonly native model, macro prohibition and existing selection',()=>{
   const w=worker()
   expect(w.send('replace',{selectionToken:'invented',expectedChangeSequence:0,text:'x',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-command'})

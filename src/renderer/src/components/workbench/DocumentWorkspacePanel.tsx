@@ -3,6 +3,7 @@ import type { WorkspaceTab } from '../../store/workspace-tabs-store'
 import { useWorkspaceTabsStore, workspaceObjectTabId } from '../../store/workspace-tabs-store'
 import { isNativeOfficeFilePath } from '@shared/write-text-file'
 import { NativeOfficePanel } from '../../office/NativeOfficePanel'
+import type { NativeReference } from '../../office/native-reference-store'
 import { useNativeOfficeStore } from '../../office/native-office-store'
 import { useEffect, useRef, useState, type ReactNode, type ReactElement } from 'react'
 import { Files, Maximize2, Minimize2, PanelRightClose, RotateCcw, X } from 'lucide-react'
@@ -18,7 +19,7 @@ export function DocumentWorkspacePanel({ threadId, activeTab, visible, input, se
   visible: boolean
   input: string
   setInput: (value: string) => void
-  onSubmitPrompt: (value: string) => void
+  onSubmitPrompt: (value: string, references?: NativeReference[]) => void
   focused: boolean
   onToggleFocus: () => void
   onCollapse: () => void
@@ -97,7 +98,7 @@ export function DocumentWorkspacePanel({ threadId, activeTab, visible, input, se
       </header> : null}
       <div className="relative flex min-h-0 flex-1">
         {filesOpen && visible ? <div className="document-workspace-files relative w-52 shrink-0 border-r border-ds-border bg-ds-card">{fileBrowser}</div> : null}
-        {nativeActive ? <NativeOfficePanel fileActions={fileActions} quickActions={quickActions} threadId={threadId} visible={visible} onFocusConversation={onFocusConversation} setInput={(text) => setInput(input ? `${input}\n${text}` : text)} /> : <WriteWorkspaceView leftSidebarCollapsed={false} input={input} setInput={setInput} onSubmitPrompt={onSubmitPrompt} onOpenAgentSettings={onOpenSettings} onFocusConversation={onFocusConversation} />}
+        {nativeActive ? <NativeOfficePanel fileActions={fileActions} quickActions={quickActions} threadId={threadId} visible={visible} onFocusConversation={onFocusConversation} onSubmitPrompt={onSubmitPrompt} /> : <WriteWorkspaceView leftSidebarCollapsed={false} input={input} setInput={setInput} onSubmitPrompt={onSubmitPrompt} onOpenAgentSettings={onOpenSettings} onFocusConversation={onFocusConversation} />}
       </div>
     </section>
   )

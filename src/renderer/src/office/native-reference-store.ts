@@ -30,21 +30,44 @@ export function isNativeSelectionEditable(view: NativeOfficeView, selection: Nat
   if (selection.kind === 'shapes') return selection.shapes.length === 1 && !!selection.shapes[0].text.trim()
   if (selection.kind !== 'cells' || selection.ranges.length !== 1 || selection.cells?.length !== 1) return false
   const range = selection.ranges[0], cell = selection.cells[0]
-  return !cell.merged && range.startColumn === range.endColumn && range.startRow === range.endRow &&
+  return !cell.merged && (cell.valueType === 'text' || cell.valueType === 'empty') && range.startColumn === range.endColumn && range.startRow === range.endRow &&
     range.sheet === cell.sheet && range.startColumn === cell.column && range.startRow === cell.row && !!cell.text.trim()
+}
+/** Recheck an explicit task after asynchronous preparation; the Core still owns authority. */
+export function nativeActionReferencesCurrent(references: readonly NativeReference[], views: readonly NativeOfficeView[]): boolean {
+  return references.length > 0 && references.every(reference => {
+    const view = views.find(candidate => candidate.objectId === reference.objectId)
+    return !!view && view.revision === reference.revision &&
+      (view.changeSequence ?? 0) === reference.selection.changeSequence &&
+      (!reference.editable || view.scope?.scopeId === reference.scopeId && view.scope?.threadId === reference.threadId)
+  })
 }
 /** Frozen local snapshots. A quote remains a discussion reference after switching tabs. */
 export const useNativeReferenceStore = create<{
   references: NativeReference[]
-  add: (reference: Omit<NativeReference, 'id'>) => void
+  drafts: Record<string, { note: string; selection?: NativeOfficeSelection }>
+  setDraft: (key: string, draft: { note: string; selection?: NativeOfficeSelection }) => void
+  revokeScopes: (objectId: string) => void
+  add: (reference: Omit<NativeReference, 'id'>) => NativeReference
   remove: (id: string) => void
 }>((set) => ({
   references: [],
-  add: reference => set(state => ({references:[...state.references.slice(-7).map(previous => {
+  drafts: {},
+  setDraft: (key, draft) => set(state => ({drafts:{...state.drafts,[key]:draft}})),
+  revokeScopes: objectId => set(state => ({references:state.references.map(previous => {
+    if (!previous.scopeId || previous.objectId !== objectId) return previous
+    const {scopeId: _scopeId, ...snapshot} = previous
+    return {...snapshot,editable:false}
+  })})),
+  add: reference => {
+    const snapshot = {...reference, id:crypto.randomUUID()}
+    set(state => ({references:[...state.references.slice(-7).map(previous => {
     if (!reference.scopeId || !previous.scopeId || previous.objectId !== reference.objectId || previous.threadId !== reference.threadId) return previous
     const {scopeId: _scopeId, ...snapshot} = previous
     return {...snapshot, editable:false}
-  }), {...reference, id:crypto.randomUUID()}]})),
+  }), snapshot]}))
+    return snapshot
+  },
   remove: id => set(state => ({references:state.references.filter(r => r.id !== id)}))
 }))
 export function nativeReferencesPrompt(references: NativeReference[]): string {

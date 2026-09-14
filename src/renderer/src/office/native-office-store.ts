@@ -9,11 +9,22 @@ export const useNativeOfficeStore = create<{
   view: NativeOfficeView | null
   views: Record<string, NativeOfficeView>
   error: string | null
+  receiveSequence: number
+  proposalInFlight: boolean
+  beginProposalPoll: () => boolean
+  endProposalPoll: () => void
   select: (workspace: string, path: string) => Promise<boolean>
   receive: (view: NativeOfficeView | null, error?: string | null) => void
   close: (workspace: string, path: string) => Promise<boolean>
 }>((set, get) => ({
-  target: null, view: null, views: {}, error: null,
+  target: null, view: null, views: {}, error: null, receiveSequence: 0,
+  proposalInFlight: false,
+  beginProposalPoll: () => {
+    if (get().proposalInFlight) return false
+    set({proposalInFlight:true})
+    return true
+  },
+  endProposalPoll: () => set({proposalInFlight:false}),
   select: async (workspace, path) => {
     const old = get().target
     if (old?.workspace === workspace && old.path === path) return true
@@ -26,7 +37,7 @@ export const useNativeOfficeStore = create<{
     // Late A updates must never replace B's title, content or selection.
     if (view && !target) return {}
     if (view && target && view.path !== target.path && view.path !== `${target.workspace.replace(/\/$/, '')}/${target.path}`) return {}
-    return { view, error, ...(view && target ? { views: {...state.views, [key(target.workspace, target.path)]: view} } : {}) }
+    return { view, error, receiveSequence:state.receiveSequence + 1, ...(view && target ? { views: {...state.views, [key(target.workspace, target.path)]: view} } : {}) }
   }),
   close: async (workspace, path) => {
     const identity = key(workspace, path), view = get().views[identity]

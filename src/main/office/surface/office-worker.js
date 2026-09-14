@@ -238,6 +238,13 @@ Module.zetajs.then(zeta => {
         const handle = targetFor(r);
         if (!['text','cell','shape'].includes(handle.kind) || typeof r.text !== 'string' || r.text.length > 4096) throw Error('unsupported-selection');
         if (r.valueType !== 'text') throw Error('invalid-control-value');
+        if (handle.kind === 'cell') {
+          // The engine, not a renderer-supplied type, owns the current cell type.
+          // Numeric/formula changes require verified typed operations; never coerce them.
+          const nativeType = handle.target.getType();
+          const type = typeof nativeType === 'number' ? nativeType : nativeType.value;
+          if (![0,2].includes(type) || handle.target.getIsMerged()) throw Error('unsupported-selection');
+        }
         mutate(() => handle.target.setString(r.text));
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'export') {

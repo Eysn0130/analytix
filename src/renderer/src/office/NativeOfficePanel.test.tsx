@@ -40,8 +40,8 @@ beforeEach(() => {
   request = vi.fn(async (_input: NativeOfficeRequest) => ({ ok: true, view }))
   unsubscribe = vi.fn()
   Object.defineProperty(window, 'analytix', { configurable: true, value: { office: { request, onChange: () => unsubscribe } } })
-  useNativeOfficeStore.setState({ target: null, view, error: null })
-  useNativeReferenceStore.setState({ references: [] })
+  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false })
+  useNativeReferenceStore.setState({ references: [], drafts: {} })
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
 })
@@ -205,23 +205,85 @@ describe('native document annotation workflow', () => {
     expect(namedButton('加入对话')).toBeUndefined()
     expect(container.textContent).toContain('请在文档中选择')
   })
-  it('keeps AI quick actions as annotation notes without adding a manual replacement flow', async () => {
-    const setInput = vi.fn()
-    await renderAnnotation(annotationView,{setInput,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'请润色这段话'}]})
+  it('dispatches an explicit quick task with only its frozen reference, preserving the composer', async () => {
+    const setInput = vi.fn(), onSubmitPrompt = vi.fn()
+    await renderAnnotation(annotationView,{setInput,onSubmitPrompt,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'请润色这段话'}]})
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
     await clickNamed('润色')
-    expect(useNativeReferenceStore.getState().references[0].note).toBe('请润色这段话')
+    expect(onSubmitPrompt).toHaveBeenCalledExactlyOnceWith('请润色这段话', [expect.objectContaining({threadId:'thread',selection:annotationSelection,editable:true})])
     expect(setInput).not.toHaveBeenCalled()
     expect(request.mock.calls.some(([input]) => ['replace','format','undo','redo'].includes(input.action))).toBe(false)
   })
+  it('does not consume or evict existing chips when a quick task acquires a new scope', async () => {
+    const onSubmitPrompt = vi.fn()
+    await renderAnnotation(annotationView,{onSubmitPrompt,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'润色'}]})
+    for (let i=0;i<8;i++) useNativeReferenceStore.getState().add({threadId:'thread',workspace:'/synthetic',path:view.path,objectId:view.objectId,revision:view.revision,selection:annotationSelection,label:`ref${i}`,text:`draft${i}`,scopeId:'b'.repeat(48),editable:true})
+    const before = useNativeReferenceStore.getState().references.map(reference => reference.id)
+    await clickNamed('润色')
+    expect(onSubmitPrompt).toHaveBeenCalledOnce()
+    expect(useNativeReferenceStore.getState().references.map(reference => reference.id)).toEqual(before)
+    expect(useNativeReferenceStore.getState().references.every(reference => !reference.editable && !reference.scopeId)).toBe(true)
+  })
+  it('rejects an old scope response before it can restore an old document or dispatch a task', async () => {
+    const onSubmitPrompt = vi.fn()
+    await renderAnnotation(annotationView,{onSubmitPrompt,quickActions:[{id:'polish',label:'润色',mode:'edit',prompt:'润色'}]})
+    let finish!: (value:unknown) => void
+    request.mockImplementation((input:NativeOfficeRequest) => input.action === 'reference' ? new Promise(resolve => {finish=resolve}) : Promise.resolve({ok:true,view:annotationView}))
+    await act(async () => namedButton('润色').click())
+    const changed = {...annotationView,revision:'c'.repeat(64),selection:undefined}
+    await act(async () => useNativeOfficeStore.getState().receive(changed))
+    await act(async () => finish({ok:true,view:{...annotationView,scope:{scopeId:'a'.repeat(48),editable:true,threadId:'thread'}}}))
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+    expect(useNativeOfficeStore.getState().view?.revision).toBe(changed.revision)
+  })
+  it('keeps polling single-flight across collapse and rejects responses superseded by an event', async () => {
+    vi.useFakeTimers()
+    try {
+      const scoped = {...annotationView,scope:{scopeId:'a'.repeat(48),threadId:'thread'} as NativeOfficeView['scope']}
+      let finish!: (value:unknown) => void
+      request.mockImplementation((input:NativeOfficeRequest) => input.action === 'proposals' ? new Promise(resolve => {finish=resolve}) : Promise.resolve({ok:true,view:scoped}))
+      useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:view.path},view:scoped})
+      const renderPanel = async (visible:boolean) => { await act(async () => root!.render(createElement(NativeOfficePanel,{visible,threadId:'thread'}))) }
+      await renderPanel(true)
+      await act(async () => vi.advanceTimersByTimeAsync(6000))
+      expect(request.mock.calls.filter(([input]) => input.action === 'proposals')).toHaveLength(1)
+      await renderPanel(false); await renderPanel(true)
+      expect(request.mock.calls.filter(([input]) => input.action === 'proposals')).toHaveLength(1)
+      await act(async () => root!.unmount())
+      root = createRoot(container)
+      await renderPanel(true)
+      expect(request.mock.calls.filter(([input]) => input.action === 'proposals')).toHaveLength(1)
+      await act(async () => finish({ok:true,view:scoped}))
+      await act(async () => vi.advanceTimersByTimeAsync(2000))
+      expect(request.mock.calls.filter(([input]) => input.action === 'proposals')).toHaveLength(2)
+      const newer = {...scoped,canUndo:true}
+      await act(async () => useNativeOfficeStore.getState().receive(newer))
+      await act(async () => finish({ok:true,view:scoped}))
+      expect(useNativeOfficeStore.getState().view?.canUndo).toBe(true)
+    } finally { vi.useRealTimers() }
+  })
+  it('retains a note across collapse and a stale document version without silently rebinding it', async () => {
+    await renderAnnotation(annotationView)
+    await fillNote('不要丢失这条备注')
+    await act(async () => root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread'})))
+    await act(async () => root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'})))
+    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    await act(async () => useNativeOfficeStore.getState().receive({...annotationView,revision:'c'.repeat(64),selection:undefined}))
+    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    expect(namedButton('加入对话').disabled).toBe(true)
+  })
   it('does not add an annotation after its scope request finishes on another tab', async () => {
     await renderAnnotation(annotationView)
+    useNativeReferenceStore.getState().add({threadId:'other-thread',workspace:'/synthetic',path:view.path,objectId:view.objectId,revision:view.revision,selection:annotationSelection,label:'old',text:'keep text',note:'keep note',scopeId:'b'.repeat(48),editable:true})
     let finish!: (value:unknown) => void
     request.mockImplementation((input:NativeOfficeRequest) => input.action === 'reference' ? new Promise(resolve => {finish=resolve}) : Promise.resolve({ok:true,view:annotationView}))
     await act(async () => namedButton('加入对话').click())
     const other = {...view,objectId:'c'.repeat(64),path:'/synthetic/other.docx'}
     await act(async () => useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:other.path},view:other}))
     await act(async () => finish({ok:true,view:{...annotationView,scope:{scopeId:'a'.repeat(48),editable:true,threadId:'thread'}}}))
-    expect(useNativeReferenceStore.getState().references).toHaveLength(0)
+    expect(useNativeReferenceStore.getState().references).toHaveLength(1)
+    expect(useNativeReferenceStore.getState().references[0]).toMatchObject({threadId:'other-thread',text:'keep text',note:'keep note',editable:false})
+    expect(useNativeReferenceStore.getState().references[0].scopeId).toBeUndefined()
   })
 })
 

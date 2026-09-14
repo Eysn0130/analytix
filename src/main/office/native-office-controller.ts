@@ -470,7 +470,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (!selection || selection.version !== document.view.revision || selection.changeSequence !== document.view.changeSequence) fail('stale_selection')
     const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.text
     const single = selection.kind === 'text' || (selection.kind === 'shapes' && selection.shapes.length === 1) || (selection.kind === 'cells' && selection.cells?.length === 1 && selection.ranges.length === 1 && selection.ranges[0].startRow === selection.ranges[0].endRow && selection.ranges[0].startColumn === selection.ranges[0].endColumn)
-    if (request.editable && (!document.view.editing || !single || !selection.capture?.complete || !text)) fail('unsupported_selection')
+    const textCell = selection.kind !== 'cells' || selection.cells?.every(cell =>
+      (cell.valueType === 'text' || cell.valueType === 'empty') && !cell.merged)
+    if (request.editable && (!document.view.editing || !single || !selection.capture?.complete || !text || !textCell)) fail('unsupported_selection')
     const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable})
     if (!result.ok || !('scope' in result)) fail('invalid_response')
     const parsedScope = nativeOfficeSelectionScopeSchema.safeParse(result.scope)
