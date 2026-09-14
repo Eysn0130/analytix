@@ -2177,5 +2177,16 @@
   "visionBridgeProviderDesc": "Reuses the provider API key and Base URL unless custom bridge fields are set.",
   "visionBridgeProviderActive": "Active provider",
   "visionBridgeModel": "Bridge model",
-  "visionBridgeModelDesc": "Use a real vision model such as Xiaomi mimo-v2.5, Qwen-VL, GPT-4o-class, or GLM vision."
+  "visionBridgeModelDesc": "Use a real vision model such as Xiaomi mimo-v2.5, Qwen-VL, GPT-4o-class, or GLM vision.",
+  "officePluginsTitle": "Built-in Office",
+  "officePluginsRefresh": "Refresh built-in plugins",
+  "officePluginsUnavailable": "Plugin state could not be confirmed. Refresh to retry.",
+  "officePluginsNotConfigured": "Office editors are not configured for this application.",
+  "officePluginsReady": "Ready to open files in the workspace",
+  "officePluginsOff": "Not enabled",
+  "officePluginsDisabled": "Disabled",
+  "officePluginsEditorUnavailable": "Enabled; editor is currently unavailable",
+  "officePluginsToggle": "Toggle {{name}}",
+  "officePluginsDisable": "Disable",
+  "officePluginsEnable": "Enable"
 }

@@ -4473,6 +4473,7 @@ export function buildGoRuntimeSidecarEnv(
     'ANALYTIX_RUNTIME_TOKEN',
     'ANALYTIX_MCP_CONFIG_PATH',
     'ANALYTIX_APP_ROOT',
+    'ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT',
     'ANALYTIX_RESOURCES_PATH'
   ])
   // Windows folds environment names when spawning. Remove every alias before
@@ -4484,6 +4485,7 @@ export function buildGoRuntimeSidecarEnv(
     ...childEnvironment,
     ANALYTIX_RUNTIME_TOKEN: runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveGoRuntimeMCPConfigPath(dataDir),
+    ...(app.isPackaged ? {} : { ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: appRoot() }),
     ANALYTIX_APP_ROOT: appRoot(),
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }

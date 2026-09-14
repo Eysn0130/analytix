@@ -14,6 +14,7 @@ import (
 type runtimeReadinessStatus = readiness.RuntimeReadinessStatus
 
 type RuntimeServerConfig struct {
+	DevelopmentPluginSourceRoot               string
 	RuntimeToken                              string
 	Insecure                                  bool
 	StartedAt                                 string

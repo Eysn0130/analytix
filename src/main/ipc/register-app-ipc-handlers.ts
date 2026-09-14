@@ -1,5 +1,6 @@
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { createObjectEditingHandler } from './object-editing-ipc'
+import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -2714,6 +2715,16 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   ipcMain.handle('editor:open-path', async (_, payload: unknown) =>
     openEditorPath(parseIpcPayload('editor:open-path', openEditorPathPayloadSchema, payload))
   )
+
+  const packageHost = createPluginPackageHostHandler(localDisplayRequest)
+  ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
+        event.senderFrame !== main.webContents.mainFrame) {
+      return { ok: false, code: 'identity_invalid', message: 'Plugin control requires the main workspace.' }
+    }
+    return packageHost(payload)
+  })
 
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
   ipcMain.handle('object:editing', async (event, payload: unknown) => {

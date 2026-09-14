@@ -1,5 +1,6 @@
 export const LOCAL_DISPLAY_RUNTIME_PATHS_V1 = [
   '/v1/local-display/object-editing',
+  '/v1/local-display/plugin-package-host',
   '/v1/local-display/import-mapping-preview',
   '/v1/local-display/cleaning-diff-preview',
   '/v1/local-display/direct-source-preview',

@@ -573,6 +573,9 @@ const api = {
     listEditors: flatApi.listEditors,
     openEditorPath: flatApi.openEditorPath
   },
+  packageHost: {
+    request: (request) => ipcRenderer.invoke('plugin:package-host', request)
+  },
   objects: {
     request: (request) => ipcRenderer.invoke('object:editing', request)
   },

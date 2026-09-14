@@ -2177,5 +2177,16 @@
   "visionBridgeProviderDesc": "默认复用该 provider 的 API Key 和 Base URL，除非单独覆盖。",
   "visionBridgeProviderActive": "当前 Provider",
   "visionBridgeModel": "桥接模型",
-  "visionBridgeModelDesc": "请选择真实视觉模型，例如 Xiaomi mimo-v2.5、Qwen-VL、GPT-4o-class 或 GLM vision。"
+  "visionBridgeModelDesc": "请选择真实视觉模型，例如 Xiaomi mimo-v2.5、Qwen-VL、GPT-4o-class 或 GLM vision。",
+  "officePluginsTitle": "内置办公",
+  "officePluginsRefresh": "刷新内置插件状态",
+  "officePluginsUnavailable": "无法确认插件状态，请刷新后重试。",
+  "officePluginsNotConfigured": "当前应用尚未配置办公编辑器。",
+  "officePluginsReady": "可在工作台打开文件",
+  "officePluginsOff": "未启用",
+  "officePluginsDisabled": "已停用",
+  "officePluginsEditorUnavailable": "已启用，编辑器暂不可用",
+  "officePluginsToggle": "切换 {{name}}",
+  "officePluginsDisable": "停用",
+  "officePluginsEnable": "启用"
 }
