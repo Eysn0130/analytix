@@ -16,7 +16,8 @@ type SetDesiredStateRequestV1 struct {
 }
 
 // PackageStateStore is scoped to one exact package ID at construction. Missing
-// activation is unavailable, never an enabled state or a synthetic receipt.
+// activation returns ErrNotFound only after verifying the current materialization
+// and storage container; it is never an enabled state or a synthetic receipt.
 // Runtime reconciliation and session capability grants belong to its caller.
 type PackageStateStore interface {
 	Store

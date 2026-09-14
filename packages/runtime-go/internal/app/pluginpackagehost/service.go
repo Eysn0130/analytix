@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -160,7 +159,7 @@ func (s *Service) activation(ctx context.Context, registration Registration, cur
 	if errors.Is(err, materializationport.ErrCorrupt) {
 		return domainplugin.ActivationV1{}, false, ErrUnavailable
 	}
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, materializationport.ErrNotFound) {
 		return domainplugin.ActivationV1{}, false, nil
 	}
 	if err != nil || domainplugin.ValidateTrustedActivationForReceiptV1(activation, current.Receipt, s.authority.KeyID(), s.authority.PublicKey()) != nil {

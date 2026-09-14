@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"path/filepath"
+	pathsyntax "path"
 	"regexp"
 	"strings"
 	"sync"
@@ -131,7 +131,9 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		}
 		workspace, validWorkspace := boundedString(object, "workspace", 4096)
 		path, validPath := boundedString(object, "path", 4096)
-		if !validWorkspace || !filepath.IsAbs(workspace) || !validPath {
+		// Native source composition currently admits Linux/macOS only. This is
+		// lexical grammar; the existing file port still authorizes the real path.
+		if !validWorkspace || !pathsyntax.IsAbs(workspace) || !validPath {
 			return failure(fileport.ErrInvalidInput)
 		}
 		doc, err := a.service.Open(ctx, workspace, path)

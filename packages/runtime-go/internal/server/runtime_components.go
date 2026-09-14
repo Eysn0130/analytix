@@ -44,6 +44,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	managededitingport "analytix.local/runtime-go/internal/ports/managedediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
@@ -64,6 +65,7 @@ type ProviderExecutionCurrentnessValidator interface {
 }
 
 type RuntimeServerComponents struct {
+	ManagedEditingFiles      managededitingport.Files
 	OfficeAdapters           map[string]adapterport.Adapter
 	OfficePackageHost        *packagehostapp.Service
 	ObjectEditing            *objecteditingapp.Service
@@ -261,7 +263,7 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	}
 	handler.control = controlapp.NewController(runtimeControlDriver{handler: handler})
 	handler.sessions = sessionapp.NewService(sessionapp.Dependencies{Repository: handler.store})
-	handler.managedEditing = managededitingapp.New(handler.workspaceMutations)
+	handler.managedEditing = managededitingapp.New(handler.workspaceMutations, components.ManagedEditingFiles)
 	handler.shellRunner = managedEditingShellRunner{next: handler.shellRunner, registry: handler.managedEditing}
 	handler.objectEditing = components.ObjectEditing
 	handler.officePackageHost = components.OfficePackageHost

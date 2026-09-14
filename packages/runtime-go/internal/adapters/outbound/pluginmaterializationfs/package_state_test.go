@@ -73,7 +73,7 @@ func TestPackageStoresCoexistWithLegacyFundsAndPersistDisabledV1(t *testing.T) {
 		if fixture.store.activeIndexPath() == funds.store.activeIndexPath() {
 			t.Fatal("package shares legacy index")
 		}
-		if _, err := fixture.store.ReadActivation(context.Background(), fixture.authority); !errors.Is(err, os.ErrNotExist) {
+		if _, err := fixture.store.ReadActivation(context.Background(), fixture.authority); !errors.Is(err, pluginport.ErrNotFound) {
 			t.Fatalf("missing activation was not unavailable: %v", err)
 		}
 		state, err := fixture.store.SetDesiredState(context.Background(), pluginport.SetDesiredStateRequestV1{
@@ -186,7 +186,7 @@ func TestPackageActivationRejectsOldGenerationAndBadSignatureV1(t *testing.T) {
 	if first.Receipt.GenerationID == second.Receipt.GenerationID {
 		t.Fatal("fixture did not rotate generation")
 	}
-	if _, err := fixture.store.ReadActivation(context.Background(), fixture.authority); !errors.Is(err, os.ErrNotExist) {
+	if _, err := fixture.store.ReadActivation(context.Background(), fixture.authority); !errors.Is(err, pluginport.ErrNotFound) {
 		t.Fatalf("inherited old activation: %v", err)
 	}
 	if _, err := fixture.store.SetDesiredState(context.Background(), pluginport.SetDesiredStateRequestV1{
@@ -265,5 +265,25 @@ func TestPackageActivationFailureReceiptsAreHonestV1(t *testing.T) {
 				t.Fatal("post-commit recovery did not read actual durable state")
 			}
 		})
+	}
+}
+
+func TestActivationNotFoundRequiresVerifiedStorageContainerV1(t *testing.T) {
+	fixture := packageStateFixtureV1(t, realTempDir(t), "synthetic-documents")
+	current := materializePackageStateFixtureV1(t, fixture)
+	if _, err := fixture.store.ReadActivation(context.Background(), fixture.authority); !errors.Is(err, pluginport.ErrNotFound) || !errors.Is(err, pluginport.ErrUnavailable) {
+		t.Fatalf("missing activation did not use the port vocabulary: %v", err)
+	}
+	root := filepath.Dir(fixture.store.activationPathV1(current.Receipt.GenerationID))
+	if err := os.Rename(root, root+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.readActivationV1(current.Receipt, fixture.authority.KeyID(), fixture.authority.PublicKey()); !errors.Is(err, pluginport.ErrCorrupt) || errors.Is(err, pluginport.ErrNotFound) {
+		t.Fatalf("missing storage container was mislabeled absent activation: %v", err)
+	}
+	if _, err := fixture.store.SetDesiredState(context.Background(), pluginport.SetDesiredStateRequestV1{
+		GenerationID: current.Receipt.GenerationID, DesiredState: domainplugin.DesiredEnabledV1,
+	}, fixture.authority, fixture.now); err == nil || errors.Is(err, pluginport.ErrNotFound) {
+		t.Fatalf("storage loss was treated as initial activation: %v", err)
 	}
 }

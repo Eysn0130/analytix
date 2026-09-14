@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -71,7 +70,7 @@ func (f *fakeState) ReadActivation(context.Context, materializationport.Installa
 		return domainplugin.ActivationV1{}, f.readErr
 	}
 	if f.activation.Revision == 0 {
-		return domainplugin.ActivationV1{}, errors.Join(materializationport.ErrUnavailable, os.ErrNotExist)
+		return domainplugin.ActivationV1{}, errors.Join(materializationport.ErrUnavailable, materializationport.ErrNotFound)
 	}
 	return f.activation, nil
 }
@@ -370,10 +369,38 @@ func TestSetFailureDoesNotAssumeRollbackAndErrorsStayClosed(t *testing.T) {
 	if _, err := f.host.Invoke(ctx, f.invokeRequest()); err != ErrAdapterUnavailable {
 		t.Fatal("raw adapter error escaped", err)
 	}
-	f.state.readErr = errors.Join(materializationport.ErrCorrupt, os.ErrNotExist)
+	f.state.readErr = errors.Join(materializationport.ErrCorrupt, materializationport.ErrNotFound)
 	views, err = f.host.List(ctx)
 	if err != nil || views[0].ActivationState != "unavailable" {
 		t.Fatal("corrupt storage mislabeled unset", err)
+	}
+}
+
+func TestActivationAbsenceUsesPortErrorWithoutHidingPersistenceFailures(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		err   error
+		state string
+		want  error
+	}{
+		{"missing", materializationport.ErrNotFound, "unset", ErrDisabled},
+		{"unavailable", materializationport.ErrUnavailable, "unavailable", ErrUnavailable},
+		{"corrupt-missing", errors.Join(materializationport.ErrCorrupt, materializationport.ErrNotFound), "unavailable", ErrUnavailable},
+		{"storage-failure", errors.New("private storage failure"), "unavailable", ErrUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := fixture(t)
+			f.state.readErr = test.err
+			views, err := f.host.List(context.Background())
+			if err != nil || len(views) != 1 || views[0].ActivationState != test.state || views[0].Available {
+				t.Fatalf("unexpected activation projection: %+v, %v", views, err)
+			}
+			request := f.invokeRequest()
+			request.ExpectedRevision = 1
+			if _, err := f.host.Invoke(context.Background(), request); err != test.want || len(f.adapter.calls) != 0 {
+				t.Fatalf("activation error authorized adapter or escaped vocabulary: %v", err)
+			}
+		})
 	}
 }
 

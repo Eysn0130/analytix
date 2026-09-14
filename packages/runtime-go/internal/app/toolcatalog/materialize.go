@@ -10,6 +10,7 @@ import (
 )
 
 type MaterializeInput struct {
+	NativeSelections           bool
 	Prompt                     string
 	PromptRoute                string
 	ToolScope                  []string
@@ -82,6 +83,7 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 		return nil
 	}
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{
+		NativeSelections:    input.NativeSelections && !input.Subagent,
 		AllowBackgroundBash: input.AllowBackgroundBash,
 		WebFetch:            input.WebFetch,
 	})

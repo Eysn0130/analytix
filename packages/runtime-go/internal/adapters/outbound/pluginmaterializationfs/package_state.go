@@ -112,7 +112,7 @@ func (store *Store) readActivationV1(receipt domainplugin.ReceiptV1, keyID strin
 	}
 	body, err := stableReadFile(path, domainplugin.MaxContractBytesV1)
 	if errors.Is(err, os.ErrNotExist) {
-		return domainplugin.ActivationV1{}, errors.Join(pluginport.ErrUnavailable, os.ErrNotExist)
+		return domainplugin.ActivationV1{}, errors.Join(pluginport.ErrUnavailable, pluginport.ErrNotFound)
 	}
 	if err != nil {
 		return domainplugin.ActivationV1{}, errors.Join(pluginport.ErrCorrupt, err)
@@ -161,7 +161,7 @@ func (store *Store) SetDesiredState(ctx context.Context, request pluginport.SetD
 		return domainplugin.ActivationV1{}, pluginport.ErrConflict
 	}
 	previous, err := store.readActivationV1(current.Receipt, keyID, publicKey)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, pluginport.ErrNotFound) {
 		return domainplugin.ActivationV1{}, err
 	}
 	if previous.Revision != request.ExpectedRevision {

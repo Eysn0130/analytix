@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -9,8 +10,31 @@ import (
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	"analytix.local/runtime-go/internal/contracts"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
+
+type selectionObserver func(string) (domainsecurity.CaseBindingObservationV1, error)
+
+func (observe selectionObserver) Observe(path string) (domainsecurity.CaseBindingObservationV1, error) {
+	return observe(path)
+}
+
+func TestNativeSelectionCannotBypassInjectedWorkspaceObservation(t *testing.T) {
+	p, _, scope := newSelectionProjectorFixture(t)
+	calls := 0
+	p.handler.turnSecurity.Observer = selectionObserver(func(string) (domainsecurity.CaseBindingObservationV1, error) {
+		calls++
+		return domainsecurity.CaseBindingObservationV1{}, errors.New("unavailable")
+	})
+	if p.ValidateCurrent(context.Background(), scope) == nil || calls != 1 {
+		t.Fatal("selection bypassed the injected workspace observer")
+	}
+	p.handler.turnSecurity.Observer = nil
+	if p.ValidateCurrent(context.Background(), scope) == nil {
+		t.Fatal("selection inferred filesystem authority without an observer")
+	}
+}
 
 func newSelectionProjectorFixture(t *testing.T) (runtimeObjectProjector, map[string]any, editingapp.ScopeAuthority) {
 	t.Helper()

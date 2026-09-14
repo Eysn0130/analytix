@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T) {
-	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: true, WebFetch: true})
+	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: true, WebFetch: true, NativeSelections: true})
 	if len(tools) != 20 {
 		t.Fatalf("builtin schema count drifted: %d", len(tools))
 	}
@@ -28,7 +28,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 	if !schemaHasProperty(t, schemaByName(t, tools, "bash"), "run_in_background") {
 		t.Fatalf("foreground bash schema should allow background when configured")
 	}
-	foregroundOnly := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: false, WebFetch: false})
+	foregroundOnly := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: false, WebFetch: false, NativeSelections: true})
 	if len(foregroundOnly) != 19 {
 		t.Fatalf("foreground-only schema count drifted: %d", len(foregroundOnly))
 	}
@@ -119,7 +119,7 @@ func schemaPropertyDescription(t *testing.T, tool domainmodel.ToolSchema, proper
 }
 
 func TestNativeSelectionSchemasExposeOnlyScopedProposalAuthority(t *testing.T) {
-	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{})
+	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{NativeSelections: true})
 	for _, name := range []string{"native_selection_read", "native_selection_propose"} {
 		tool := schemaByName(t, tools, name)
 		if !schemaHasProperty(t, tool, "scopeId") {

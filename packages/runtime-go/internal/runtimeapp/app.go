@@ -26,6 +26,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	fundscsvsourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundscsvsource"
 	fundsquerysourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundsquerysource"
+	"analytix.local/runtime-go/internal/adapters/outbound/managededitingfiles"
 	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
@@ -1617,8 +1618,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
-		ObjectEditing:  objectEditingHandler.Service,
-		OfficeAdapters: officeAdapters, OfficePackageHost: officePackageHost,
+		ManagedEditingFiles: managededitingfiles.New(),
+		ObjectEditing:       objectEditingHandler.Service,
+		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
 		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
 		AsyncTurnPhaseObserverV1: phaseObserver,

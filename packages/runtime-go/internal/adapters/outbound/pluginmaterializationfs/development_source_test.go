@@ -136,7 +136,7 @@ func TestDevelopmentSourceThreePackagesMaterializeAndRestoreSignedActivationV1(t
 			if _, err := service.ResolveActive(ctx); err == nil {
 				t.Fatal("old binding resolved new source generation")
 			}
-			if _, err := reopened.ReadActivation(ctx, authority); !errors.Is(err, os.ErrNotExist) {
+			if _, err := reopened.ReadActivation(ctx, authority); !errors.Is(err, pluginport.ErrNotFound) {
 				t.Fatal("new generation inherited activation", err)
 			}
 			if _, err := reopened.SetDesiredState(ctx, pluginport.SetDesiredStateRequestV1{GenerationID: result.Receipt.GenerationID, ExpectedRevision: state.Revision, DesiredState: domainplugin.DesiredEnabledV1}, authority, now); !errors.Is(err, pluginport.ErrConflict) {
@@ -307,7 +307,7 @@ func assertDevelopmentPreviewUpgradeV1(t *testing.T, store *Store, authority tes
 	if _, err := service.ResolveActive(ctx); err != nil {
 		t.Fatal("new preview unavailable", err)
 	}
-	if _, err := store.ReadActivation(ctx, authority); !errors.Is(err, os.ErrNotExist) {
+	if _, err := store.ReadActivation(ctx, authority); !errors.Is(err, pluginport.ErrNotFound) {
 		t.Fatal("new preview inherited enabled state", err)
 	}
 	if _, err := store.SetDesiredState(ctx, pluginport.SetDesiredStateRequestV1{GenerationID: old.Receipt.GenerationID, ExpectedRevision: state.Revision, DesiredState: domainplugin.DesiredEnabledV1}, authority, now); !errors.Is(err, pluginport.ErrConflict) {

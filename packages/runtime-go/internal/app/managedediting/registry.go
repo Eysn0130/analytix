@@ -5,14 +5,11 @@ package managedediting
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
 	"regexp"
-	"strings"
 	"sync"
 
 	"analytix.local/runtime-go/internal/app/workspacemutation"
+	filesport "analytix.local/runtime-go/internal/ports/managedediting"
 )
 
 var (
@@ -28,8 +25,8 @@ var (
 
 type capture struct {
 	path      string
-	identity  os.FileInfo
-	ancestors []os.FileInfo
+	identity  filesport.Identity
+	ancestors []filesport.Identity
 	refs      int
 }
 
@@ -38,13 +35,14 @@ type capture struct {
 // Lock order is Coordinator -> mu. Releases take only mu, never Coordinator.
 type Registry struct {
 	coordinator    *workspacemutation.Coordinator
+	files          filesport.Files
 	mu             sync.Mutex
 	captures       map[string]*capture
 	opaqueObserved bool
 }
 
-func New(coordinator *workspacemutation.Coordinator) *Registry {
-	return &Registry{coordinator: coordinator, captures: make(map[string]*capture)}
+func New(coordinator *workspacemutation.Coordinator, files filesport.Files) *Registry {
+	return &Registry{coordinator: coordinator, files: files, captures: make(map[string]*capture)}
 }
 
 // Capture retains a reference until its idempotent release is called. A second
@@ -67,7 +65,7 @@ func (r *Registry) WithCapture(ctx context.Context, sessionID, canonicalAbsolute
 }
 
 func (r *Registry) withCapture(ctx context.Context, sessionID, path string, readBaseline func() error) (func(), error) {
-	if r == nil || r.coordinator == nil || ctx == nil || !sessionPattern.MatchString(sessionID) {
+	if r == nil || r.coordinator == nil || r.files == nil || ctx == nil || !sessionPattern.MatchString(sessionID) {
 		return nil, ErrUnavailable
 	}
 	unlock, err := r.coordinator.Acquire(ctx)
@@ -83,14 +81,14 @@ func (r *Registry) withCapture(ctx context.Context, sessionID, path string, read
 		r.mu.Unlock()
 		return nil, ErrUncontainedExecution
 	}
-	identity, ancestors, err := inspectPath(path, false)
-	if err != nil || identity == nil || !identity.Mode().IsRegular() || !singleLink(identity) {
+	identity, ancestors, err := r.files.Inspect(path, false)
+	if err != nil || identity == nil || !identity.Regular() || !identity.SingleLink() {
 		r.mu.Unlock()
 		return nil, ErrUnsafePath
 	}
 	current := r.captures[sessionID]
 	if current != nil {
-		if current.path != path || !os.SameFile(current.identity, identity) {
+		if current.path != path || !r.files.SameFile(current.identity, identity) {
 			r.mu.Unlock()
 			return nil, ErrSessionMismatch
 		}
@@ -145,40 +143,43 @@ func (r *Registry) CheckMutation(paths ...string) error {
 	if len(r.captures) == 0 {
 		return nil
 	}
+	if r.files == nil {
+		return ErrUnavailable
+	}
 	if len(paths) == 0 {
 		return ErrUnsafePath
 	}
 	for _, path := range paths {
 		for _, current := range r.captures {
 			// Keep protecting the original name even after external removal/replacement.
-			if containsPath(path, current.path) {
+			if r.files.Contains(path, current.path) {
 				return ErrMutationBlocked
 			}
 		}
-		identity, _, err := inspectPath(path, true)
+		identity, _, err := r.files.Inspect(path, true)
 		if err != nil {
 			return ErrUnsafePath
 		}
 		for _, current := range r.captures {
-			latest, parents, err := inspectPath(current.path, false)
-			if err != nil || latest == nil || !latest.Mode().IsRegular() {
+			latest, parents, err := r.files.Inspect(current.path, false)
+			if err != nil || latest == nil || !latest.Regular() {
 				return ErrUnsafePath
 			}
 			if identity == nil {
 				continue
 			}
-			if os.SameFile(identity, current.identity) || os.SameFile(identity, latest) {
+			if r.files.SameFile(identity, current.identity) || r.files.SameFile(identity, latest) {
 				return ErrMutationBlocked
 			}
 			// Compare both captured and current ancestors, covering case/volume aliases
 			// and externally renamed directories without trusting path spelling alone.
 			for _, parent := range current.ancestors {
-				if os.SameFile(identity, parent) {
+				if r.files.SameFile(identity, parent) {
 					return ErrMutationBlocked
 				}
 			}
 			for _, parent := range parents {
-				if os.SameFile(identity, parent) {
+				if r.files.SameFile(identity, parent) {
 					return ErrMutationBlocked
 				}
 			}
@@ -219,76 +220,4 @@ func (r *Registry) HasCaptures() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.captures) > 0
-}
-
-func containsPath(parent, path string) bool {
-	if !filepath.IsAbs(parent) || filepath.Clean(parent) != parent {
-		return false
-	}
-	relative, err := filepath.Rel(parent, path)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
-}
-
-// inspectPath rejects symlinks in every existing component, including the final
-// component. It never normalizes an ambiguous caller path into an allowed path.
-func inspectPath(path string, allowMissing bool) (os.FileInfo, []os.FileInfo, error) {
-	if path == "" || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return nil, nil, ErrUnsafePath
-	}
-	root := filepath.VolumeName(path) + string(filepath.Separator)
-	current := root
-	info, err := os.Lstat(current)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, nil, ErrUnsafePath
-	}
-	var ancestors []os.FileInfo
-	if path == root {
-		return info, ancestors, nil
-	}
-	components := strings.Split(strings.TrimPrefix(path, root), string(filepath.Separator))
-	for index, component := range components {
-		ancestors = append(ancestors, info)
-		current = filepath.Join(current, component)
-		info, err = os.Lstat(current)
-		if err != nil {
-			if allowMissing && errors.Is(err, os.ErrNotExist) {
-				return nil, ancestors, nil
-			}
-			return nil, nil, ErrUnsafePath
-		}
-		if info.Mode()&os.ModeSymlink != 0 || (index < len(components)-1 && !info.IsDir()) {
-			return nil, nil, ErrUnsafePath
-		}
-		resolved, err := filepath.EvalSymlinks(current)
-		if err != nil || resolved != current {
-			return nil, nil, ErrUnsafePath
-		}
-	}
-	return info, ancestors, nil
-}
-
-// Unix Stat_t exposes Nlink; some other FileInfo implementations expose
-// NumberOfLinks. When the platform cannot prove nlink==1 we fail closed rather
-// than equate os.SameFile (known identity comparison) with absence of aliases.
-func singleLink(info os.FileInfo) bool {
-	value := reflect.ValueOf(info.Sys())
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return false
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return false
-	}
-	for _, name := range []string{"Nlink", "NumberOfLinks"} {
-		field := value.FieldByName(name)
-		switch field.Kind() {
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			return field.Uint() == 1
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return field.Int() == 1
-		}
-	}
-	return false
 }

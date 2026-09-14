@@ -1,9 +1,10 @@
 # 标签工作区与原生文档标注
 
-Status: Reference / 当前候选验收记录。2026-09-14。
+Status: Reference / 当前候选验收记录。2026-09-14；2026-09-15 补充 CI 反馈。
 分支 `codex/workbench-product-delivery-20260914`，起始 HEAD
-`1d7a500ad401e3a5d9e0936e02c36df4aff7758c`；以下源码仍属本轮工作区候选，
-不以起始提交冒充新候选 SHA，也不构成可发布或正式 Office 分发准入。
+`1d7a500ad401e3a5d9e0936e02c36df4aff7758c`；首个整合提交为
+`dc034390e944f8fc0c72b8145898341f3dc540da`，后续 Go 修复单独记录。
+不以起始提交或旧提交检查冒充新候选证据，也不构成可发布或正式 Office 分发准入。
 
 ## 范围
 
@@ -43,9 +44,10 @@ Status: Reference / 当前候选验收记录。2026-09-14。
 - 顶层 domain conformance 指定回归通过；使用 TypeScript AST 排除嵌套方法，
   精确补齐 HEAD 已有的 office/packageHost/objects 三域。
 - `npm run typecheck` 通过（web 与 node）。
-- 最终收敛候选的 runtime TypeScript、Main、preload、Renderer 完整构建通过，
-  固定源清单中的 6173 个文件与 canonical 源码核对，非文档源码漂移为零。
+- 首个整合提交 `dc034390e` 的 runtime TypeScript、Main、preload、Renderer 完整构建通过，
+  固定源清单中的 6173 个文件与当时 canonical 源码核对，非文档源码漂移为零。
   `npm run typecheck` 再次通过；改动文件 ESLint 0 errors，保留一个既有 Hook 依赖 warning。
+  后续 Go 修复由独立 Go 检查验证，不能把这份旧快照称作新提交完整构建。
   构建通过不等于 GUI 或 Provider 验收。
 
 原生固定 WASM 独立合成验证：XLSX、PPTX 已验证恒只读模型下原生选区、
@@ -60,8 +62,41 @@ Status: Reference / 当前候选验收记录。2026-09-14。
   既有合成 QA 身份的 Keychain 已锁定，原控制台入口不可恢复；已按正常方式退出
   未进入工作区的测试应用，未新建身份、复制凭据、绕过解锁或触碰真实 Provider。
   该环境阻塞不等于产品旅程通过，也不把所有启动错误归因为 Keychain。
-- 当前候选 PR/完整 mandatory CI 与对应 SHA。
+- [Draft PR #28](https://github.com/Eysn0130/analytix/pull/28) 已建立；完整 mandatory CI 尚未通过。
 - 旧全量测试在范围修正前启动，暴露基线 fixture 漂移及若干本机封包相关失败，
   又发生 worker 启动超时；已停止该过期运行，其结果不作为本候选 gate PASS。
   已修复与本工作区/对象契约直接相关的 fixture；未弱化正式封包或签名检查。
 - mock、真实 Provider、引擎实验、应用 GUI 和 packaged 分发须分别记录。
+
+## 完整 CI 的反馈与修复
+
+首个已推送候选 `dc034390e944f8fc0c72b8145898341f3dc540da` 的完整 Application、
+Source baseline、Backend、两平台文件系统及 macOS 进程检查通过。
+`Go package tests (analytix_prod)` 的失败来自应用层 filesystem import 与
+server 新建 outbound 依赖两条既有架构门禁，不能作为可合并候选。
+
+修复将 managed editing 的文件身份检查迁到 outbound，由 runtimeapp 注入端口；
+Registry 保留共享 Coordinator、租约和原路径/符号链接/硬链接/祖先检查算法。
+插件未激活通过端口 ErrNotFound 表达，只在已验证容器内缺少 activation 时成立；
+损坏或缺失容器继续拒绝。Office 使用 POSIX 路径语法校验（当前源运行时只准入
+Linux/macOS），实际文件授权仍由原 file port 执行；选区使用已注入的工作区 Observer。
+
+原 LayerImport 与 GravityWellBudget 门禁普通及 analytix_prod 均通过，断言未改动。
+Registry/adapter 双模式回归通过；服务选区/对象装配聚焦验证通过。
+插件 Host 全包、activation/missing 与历史升级聚焦回归在两种模式通过。
+本机普通 outbound 全包在既有 authority-rotation fault matrix 长测试中诊断中断，
+不记为全包通过；CI 全量检查继续使用原门禁。
+
+普通 Go CI 还暴露两个根因独立的问题：原生工具无条件加入普通会话导致工具预算超限；
+`tool_not_advertised` 的合法 SHA 含长数字段，被普通 PII 扫描误判后阻止错误终态落盘。
+前者改为 Core 有捕获租约且 Office host 可用时才提供工具，子任务继续不提供；
+执行时的线程/版本/scope 权威检查保留。原工具预算集成测试通过，catalog 双模式通过，
+新增捕获/释放/host 不可用生命周期测试双模式通过，没有增加工具预算上限。
+后者通过单独固定数字段哈希回归修复，不能靠工具列表改变后的哈希碰巧不触发来验收。
+只有严格闭合 `error`/`turn_failed` record 的合法五个 SHA 字段获得结构元数据处理；
+普通 details/hash、额外 raw 与伪 schema 继续受原扫描约束。固定哈希测试已 RED→GREEN，
+event 全包普通及 analytix_prod 通过，原
+`TestRuntimeServerNormalTurnRejectsForgedCreatePlan` 集成测试通过，HTTP/落盘断言保留。
+
+这次只调整 Go 边界，没有重做 Renderer 构建或 GUI，也不把前一 SHA 的完整 CI
+转记给新候选。后续候选与检查状态以 [PR #28](https://github.com/Eysn0130/analytix/pull/28) 为准。

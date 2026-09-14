@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"analytix.local/runtime-go/internal/adapters/outbound/managededitingfiles"
 	"analytix.local/runtime-go/internal/app/workspacemutation"
 )
 
@@ -28,7 +29,7 @@ func fixture(t *testing.T) (*Registry, *workspacemutation.Coordinator, string, s
 		t.Fatal(err)
 	}
 	coordinator := workspacemutation.NewCoordinator()
-	return New(coordinator), coordinator, root, path
+	return New(coordinator, managededitingfiles.New()), coordinator, root, path
 }
 func captureFile(t *testing.T, r *Registry, session, path string) func() {
 	t.Helper()
@@ -295,7 +296,7 @@ func TestRegistryOpaqueObservationPersistsWithoutBlockingOtherTools(t *testing.T
 func TestRegistryCaptureOpaqueRaceHasOneWinner(t *testing.T) {
 	_, _, _, path := fixture(t)
 	for index := 0; index < 32; index++ {
-		r := New(workspacemutation.NewCoordinator())
+		r := New(workspacemutation.NewCoordinator(), managededitingfiles.New())
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -334,11 +335,21 @@ func TestRegistryCancelledWaitAndUnavailableCoordinator(t *testing.T) {
 	if r.HasCaptures() {
 		t.Fatal("cancelled request retained capture")
 	}
-	unavailable := New(nil)
+	unavailable := New(nil, managededitingfiles.New())
 	if _, err := unavailable.Capture(context.Background(), "session", path); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("replacement coordinator created")
 	}
 	if !errors.Is(unavailable.CheckMutation(path), ErrUnavailable) || !errors.Is(unavailable.BeginOpaque(context.Background()), ErrUnavailable) {
 		t.Fatal("unavailable registry failed open")
+	}
+}
+
+func TestRegistryMissingFileObservationsFailClosed(t *testing.T) {
+	r := New(workspacemutation.NewCoordinator(), nil)
+	if release, err := r.Capture(context.Background(), "session", "/document.txt"); release != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatal("missing file observations allowed capture")
+	}
+	if r.CheckMutation("/document.txt") != nil || r.BeginOpaque(context.Background()) != nil {
+		t.Fatal("missing file observations restricted uncaptured tools")
 	}
 }

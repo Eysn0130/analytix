@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
+	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
@@ -67,7 +68,8 @@ func ValidatePublicRecord(value any) error {
 }
 
 // publicPrivacyValidationViewV1 keeps a host-bound, closed plan digest and
-// timestamp out of prose PII classification without weakening display fields.
+// timestamp, or closed tool-failure diagnostic hashes, out of prose PII
+// classification without weakening display fields.
 // These are structural metadata: the canonical tool-result projection has
 // already validated their syntax, lifecycle, and host tool-call identity.
 // Lookalike maps and non-canonical tool results remain on the ordinary scanner.
@@ -83,7 +85,8 @@ func publicPrivacyValidationViewV1(value any) any {
 // projector while keeping SHA-256 and timestamp metadata of an exact host tool
 // result byte-stable. Each staged placeholder is path-bound and restored only if the
 // generic projector returns it unchanged; all plan display fields still pass
-// through the ordinary projector.
+// through the ordinary projector. The same bounded mechanism preserves the five
+// SHA-256 fields of exact tool_not_advertised failure records.
 func ProjectPublicValuePreservingClosedPlanDigestV1(value any) (any, bool) {
 	entries := []closedPlanDigestProjectionEntryV1{}
 	staged := stageClosedPlanDigestsV1(value, nil, &entries)
@@ -119,6 +122,26 @@ func stageClosedPlanDigestsV1(
 ) any {
 	switch typed := value.(type) {
 	case map[string]any:
+		if details, ok := closedToolFailureDetailsForPrivacyV1(typed); ok {
+			staged := clonePublicRecordMapV1(typed)
+			metadata := clonePublicRecordMapV1(details)
+			for _, field := range closedToolFailureDigestFieldsV1 {
+				placeholder := map[string]any{
+					"kind": "closed_tool_failure_digest_placeholder_v1", "ordinal": float64(len(*entries)),
+				}
+				stagedPlaceholder := clonePublicRecordMapV1(placeholder)
+				metadataPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...),
+					closedPlanDigestProjectionPathV1{kind: "key", key: "details"},
+					closedPlanDigestProjectionPathV1{kind: "key", key: field},
+				)
+				*entries = append(*entries, closedPlanDigestProjectionEntryV1{
+					path: metadataPath, digest: details[field].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
+				})
+				metadata[field] = stagedPlaceholder
+			}
+			staged["details"] = metadata
+			return staged
+		}
 		if _, ok := canonicalClosedPlanToolResultDigestV1(typed); ok {
 			staged := clonePublicRecordMapV1(typed)
 			output := clonePublicRecordMapV1(staged["output"].(map[string]any))
@@ -223,6 +246,15 @@ func restoreClosedPlanDigestAtPathV1(
 func projectClosedPlanDigestForPrivacyValidationV1(value any) (any, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
+		if details, ok := closedToolFailureDetailsForPrivacyV1(typed); ok {
+			projected := clonePublicRecordMapV1(typed)
+			metadata := clonePublicRecordMapV1(details)
+			for _, field := range closedToolFailureDigestFieldsV1 {
+				metadata[field] = "sha256-digest"
+			}
+			projected["details"] = metadata
+			return projected, true
+		}
 		if projected, ok := closedPlanToolResultPrivacyValidationViewV1(typed); ok {
 			return projected, true
 		}
@@ -263,6 +295,47 @@ func projectClosedPlanDigestForPrivacyValidationV1(value any) (any, bool) {
 	default:
 		return value, false
 	}
+}
+
+var closedToolFailureDigestFieldsV1 = []string{
+	"rejectedToolNormalizedNameSha256", "advertisedToolManifestHash", "advertisedNameSetSortedHash",
+	"providerRequestToolManifestHash", "runToolStepManifestHash",
+}
+
+// This is a privacy classification, not publication authority. The existing
+// terminal CAS/outbox validation still authenticates the complete record.
+// Never exempt a bare details map, an arbitrary *Hash key, or a failure with
+// unknown fields: only five validated digest values leave the prose scanner.
+func closedToolFailureDetailsForPrivacyV1(record map[string]any) (map[string]any, bool) {
+	if record["code"] != "tool_not_advertised" || record["status"] != "failed" || !isClosedFailureRecordV1(record) {
+		return nil, false
+	}
+	details, ok := record["details"].(map[string]any)
+	if !ok || !domainfailure.ValidateToolNotAdvertisedDetails(details) {
+		return nil, false
+	}
+	required := []string{"kind", "threadId", "turnId", "status", "code", "message", "severity", "details"}
+	var optional []string
+	switch record["kind"] {
+	case "error":
+		if record["role"] != "system" {
+			return nil, false
+		}
+		required = append(required, "id", "role", "createdAt", "finishedAt")
+		optional = []string{"generalTerminalCASBinding"}
+	case "turn_failed":
+		if record["terminalReason"] != "tool_failure" {
+			return nil, false
+		}
+		required = append(required, "itemId", "timestamp", "terminalReason")
+		optional = append([]string{"error", "seq", "generalTerminalCASBindingDigest"}, generalTerminalDeliveryPublicationMarkerNames...)
+	default:
+		return nil, false
+	}
+	if !generalTerminalDeliveryAllowedKeysV1(record, required, optional) {
+		return nil, false
+	}
+	return details, true
 }
 
 func closedPlanToolResultPrivacyValidationViewV1(item map[string]any) (map[string]any, bool) {

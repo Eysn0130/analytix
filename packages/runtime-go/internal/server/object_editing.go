@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"time"
 
-	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
@@ -24,12 +23,13 @@ type runtimeObjectProjector struct{ handler *runtimeServerHandler }
 
 func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editingapp.ScopeAuthority) error {
 	h := p.handler
-	if ctx == nil || ctx.Err() != nil || h == nil || h.store == nil || h.turnSecurity.Identity == nil ||
+	if ctx == nil || ctx.Err() != nil || h == nil || h.store == nil || h.turnSecurity.Identity == nil || h.turnSecurity.Observer == nil ||
 		(scope.Purpose != "discuss" && scope.Purpose != "edit") ||
 		h.turnSecurity.Identity.ValidateCurrent(ctx, scope.Principal) != nil {
 		return editingapp.ErrProjection
 	}
-	workspace, err := (filestore.CaseBindingReader{}).WorkspaceRealPath(scope.Workspace)
+	observation, err := h.turnSecurity.Observer.Observe(scope.Workspace)
+	workspace := observation.WorkspaceRealPath
 	if err != nil || workspace != scope.Workspace {
 		return editingapp.ErrProjection
 	}
@@ -42,8 +42,8 @@ func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editi
 	if err != nil || stringField(thread, "id") != scope.ThreadID {
 		return editingapp.ErrProjection
 	}
-	threadWorkspace, err := (filestore.CaseBindingReader{}).WorkspaceRealPath(stringField(thread, "workspace"))
-	if err != nil || threadWorkspace != workspace {
+	threadObservation, err := h.turnSecurity.Observer.Observe(stringField(thread, "workspace"))
+	if err != nil || threadObservation.WorkspaceRealPath != workspace {
 		return editingapp.ErrProjection
 	}
 	securityContext, err := p.selectionSecurityContext(ctx, thread, scope)
