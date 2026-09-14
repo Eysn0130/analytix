@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useChatStore } from './store/chat-store'
 import { supportsDesktopTitleBar, WindowsTitleBar } from './components/WindowsTitleBar'
 import { RuntimeStatusBanner } from './components/RuntimeStatusBanner'
+import { DevelopmentInstanceBar } from './components/DevelopmentInstanceBar'
 import { TopNoticeHost } from './components/TopNoticeHost'
 import { AnalytixLoadingPage } from './components/brand/AnalytixLoadingPage'
 import i18n from './i18n'
@@ -84,6 +85,7 @@ export default function AppShell(): React.ReactElement {
     <div className={hasDesktopTitleBar ? 'ds-windows-app-frame relative flex h-full min-h-0 flex-col bg-ds-main' : 'relative flex h-full min-h-0 flex-col bg-transparent'}>
       <div aria-hidden className="ds-native-window-controls-hitbox" />
       {hasDesktopTitleBar ? <WindowsTitleBar platform={platform} /> : null}
+      <DevelopmentInstanceBar />
       <div className="flex min-h-0 flex-1 flex-col">
         <RuntimeStatusBanner />
         <Suspense fallback={<RouteFallback />}>

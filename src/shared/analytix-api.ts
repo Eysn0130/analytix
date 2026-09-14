@@ -1,3 +1,5 @@
+import type { DesktopEnvironment } from './desktop-environment'
+import type { ProviderEndpointKind } from './provider-display'
 import type {
   AppSettingsPatch,
   AppSettingsV1,
@@ -451,6 +453,7 @@ export type UpstreamModelsResult =
 export type ModelProviderModelGroup = {
   providerId: string
   label: string
+  endpointKind?: ProviderEndpointKind
   modelIds: string[]
   /** Display-only labels projected from the committed provider endpoint. */
   modelLabels?: Record<string, string>
@@ -972,6 +975,7 @@ export type AnalytixFlatApi = {
     payload: TurnCompleteNotificationPayload
   ) => Promise<SystemNotificationResult>
   getAppVersion: () => Promise<string>
+  getDesktopEnvironment: () => Promise<DesktopEnvironment>
   getGuiUpdateState: () => Promise<GuiUpdateState>
   checkGuiUpdate: (channel?: GuiUpdateChannel) => Promise<GuiUpdateInfo>
   downloadGuiUpdate: (channel?: GuiUpdateChannel) => Promise<GuiUpdateDownloadResult>
@@ -1225,6 +1229,7 @@ export type AnalytixAppApi = {
   onQueryCacheInvalidated: AnalytixFlatApi['onQueryCacheInvalidated']
   showTurnCompleteNotification: AnalytixFlatApi['showTurnCompleteNotification']
   getVersion: AnalytixFlatApi['getAppVersion']
+  getEnvironment: AnalytixFlatApi['getDesktopEnvironment']
   listSkills: AnalytixFlatApi['listSkills']
   listSkillRoots: AnalytixFlatApi['listSkillRoots']
   saveSkillFile: AnalytixFlatApi['saveSkillFile']

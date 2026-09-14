@@ -1,5 +1,5 @@
 import type i18next from 'i18next'
-import { DEFAULT_ANALYTIX_MODEL, type AppSettingsV1 } from '@shared/app-settings'
+import { DEFAULT_ANALYTIX_MODEL, isComposerChatModelId, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import type { ChatState, ChatStoreGet, ChatStoreSet, InitialSetupMode, PluginHostRoute, SettingsRouteSection } from './chat-store-types'
 import {
@@ -10,7 +10,8 @@ import {
   providerIdMatchesComposerModel,
   readThreadComposerSelection,
   rememberThreadComposerSelection,
-  readStoredComposerProviderId
+  readStoredComposerProviderId,
+  readStoredComposerSelection
 } from './chat-store-helpers'
 import { clearedThreadSelection } from './chat-store-runtime-helpers'
 
@@ -108,7 +109,9 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
     dismissTopNotice,
 
     setComposerModel: (modelId, providerId) => {
-      const nextModelId = canonicalComposerModelForSelection(get().composerModelGroups, modelId) || modelId.trim()
+      const groups = get().composerModelGroups
+      const selectionGroups = providerId?.trim() ? groups.filter((group) => group.providerId === providerId.trim()) : groups
+      const nextModelId = canonicalComposerModelForSelection(selectionGroups, modelId) || modelId.trim()
       const nextProviderId = providerId?.trim() || providerIdForComposerModel(get().composerModelGroups, nextModelId)
       const activeThreadId = get().activeThreadId
       if (activeThreadId) {
@@ -143,6 +146,22 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
             ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
             : null
           const threadSelection = activeThread ? readThreadComposerSelection(activeThread.id) : null
+          const explicitSelection = activeThread
+            ? threadSelection
+            : state.composerProviderId.trim()
+              ? { model: state.composerModel.trim(), providerId: state.composerProviderId.trim() }
+              : readStoredComposerSelection()
+          // A catalog refresh is not authorization to move an explicit selection
+          // to another Provider. Keep the unavailable pair visible for correction.
+          if (explicitSelection?.providerId && isComposerChatModelId(explicitSelection.model) &&
+              (!res.ok || !providerIdMatchesComposerModel(groups, explicitSelection.providerId, explicitSelection.model))) {
+            return {
+              composerPickList: pick,
+              composerModelGroups: groups,
+              composerModel: explicitSelection.model,
+              composerProviderId: explicitSelection.providerId
+            }
+          }
           const currentModel = state.composerModel.trim()
           const normalizedCurrentModel = currentModel.toLowerCase() === 'auto' ? '' : currentModel
           const storedModel = readStoredComposerModel(pick)
@@ -165,7 +184,10 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
             model = fallbackComposerModel(pick, runtimeDefault)
             shouldPersist = false
           }
-          const canonicalModel = canonicalComposerModelForSelection(groups, model)
+          const selectionGroups = explicitSelection?.providerId
+            ? groups.filter((group) => group.providerId === explicitSelection.providerId)
+            : groups
+          const canonicalModel = canonicalComposerModelForSelection(selectionGroups, model)
           if (canonicalModel && canonicalModel !== model) {
             model = canonicalModel
             shouldPersist = !activeThread
@@ -176,7 +198,9 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
               ? threadSelection.providerId
               : ''
           const storedProviderId = activeThread ? '' : readStoredComposerProviderId(groups, model)
-          const providerId = threadProviderId || storedProviderId || providerIdForComposerModel(groups, model)
+          const currentProviderId = explicitSelection && providerIdMatchesComposerModel(groups, explicitSelection.providerId, model)
+            ? explicitSelection.providerId : ''
+          const providerId = currentProviderId || threadProviderId || storedProviderId || providerIdForComposerModel(groups, model)
           if (!activeThread && providerId !== state.composerProviderId) persistComposerProviderId(providerId)
           if (
             activeThread &&

@@ -271,6 +271,13 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
 }
 
 describe('registerAppIpcHandlers', () => {
+  it('provides captured instance metadata without reading Provider or Hub credentials', async () => {
+    registerAppIpcHandlers(registerOptions())
+    const result = await handlers.get('app:environment')?.({})
+    expect(result).toMatchObject({ mode: 'development', mock: false })
+    expect(JSON.stringify(result)).not.toContain(tmpdir())
+    expect(await handlers.get('app:environment')?.({})).toEqual(result)
+  })
   beforeEach(() => {
     handlers.clear()
     gitCheckpointMock.createGitCheckpoint.mockReset()

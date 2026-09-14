@@ -717,6 +717,21 @@ describe('FloatingComposer model controls', () => {
     expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'official', 'Auto')).toBe('V4.1 Flash')
     expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'custom', 'Auto')).toBe('deepseek-v4-flash')
     expect(composerModelDisplayLabel(groups, 'future-model', 'official', 'Auto')).toBe('future-model')
+    expect(composerModelDisplayLabel(groups, 'constructor', 'official', 'Auto')).toBe('constructor')
+    expect(composerModelDisplayLabel(groups, '__proto__', 'official', 'Auto')).toBe('__proto__')
+  })
+
+  it.each([true, false])('preserves the unavailable provider identity when catalog has other providers: %s', (hasOtherProvider) => {
+    const html = renderToStaticMarkup(createElement(FloatingComposerModelPicker, {
+      compact: true, mode: 'select', composerModel: 'deepseek-v4-flash', composerProviderId: 'missing-local',
+      composerPickList: ['deepseek-v4-flash'],
+      composerModelGroups: hasOtherProvider ? [{ providerId: 'official', label: 'DeepSeek',
+        modelIds: ['deepseek-v4-flash'], modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash' } }] : [],
+      canChangeModel: true, onComposerModelChange: () => undefined
+    }))
+    expect(html).toContain('deepseek-v4-flash')
+    expect(html).not.toContain('V4.1 Flash')
+    expect(html).toContain('missing-local')
   })
 
   it.each(['select', 'combobox'] as const)('renders a concise %s label with the API identity accessible', (mode) => {

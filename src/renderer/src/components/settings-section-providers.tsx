@@ -1,4 +1,4 @@
-import { providerDisplayName, providerModelDisplayName } from '@shared/provider-display'
+import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from '@shared/provider-display'
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type {
   AppSettingsPatch,
@@ -1922,6 +1922,9 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate text-[14px] font-semibold text-ds-ink">
                       {providerDisplayName(activeProvider.id, activeProvider.name, activeProvider.baseUrl)}
+                    </span>
+                    <span className="text-[11px] font-normal text-ds-faint">
+                      {t(`providerConnection_${providerEndpointKind(activeProvider.baseUrl)}`)}
                     </span>
                     {!canEditActiveProviderId ? (
                       <span title={t('modelProviderIdLocked')} className="text-ds-faint">

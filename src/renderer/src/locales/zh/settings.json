@@ -1,4 +1,8 @@
 {
+  "providerConnection_official-deepseek": "官方接口",
+  "providerConnection_local": "本地服务",
+  "providerConnection_remote": "远程服务",
+  "providerConnection_unknown": "来源未知",
   "title": "设置",
   "subtitle": "管理界面偏好、默认目录和 AI 助手行为。",
   "back": "返回",
@@ -435,7 +439,7 @@
   "modelProviderDeleteInUseVideo": "视频生成正在使用该供应商，删除后将改为自定义视频生成 API。",
   "modelProviderDeleteInUseWrite": "写作内联补全正在使用该供应商，删除后将改为跟随对话供应商。",
   "modelProviderDeleteAction": "删除",
-  "modelProviderDangerHint": "删除会立即生效，引用该供应商的功能将自动回退。",
+  "modelProviderDangerHint": "删除会立即生效。使用该供应商的功能可能不可用，请重新选择。",
   "modelProviderImageCapability": "图片生成能力",
   "modelProviderImageCapabilityDesc": "可选。带图片能力的供应商可以直接被图片生成使用，不需要重复填写密钥。",
   "modelProviderSpeechCapability": "语音转文字能力",

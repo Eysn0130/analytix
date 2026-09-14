@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { providerDisplayName, providerModelDisplayName } from './provider-display'
+import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from './provider-display'
 
 describe('provider presentation', () => {
+  it.each(['http://localhost:5500/v1', 'http://127.0.0.1:5500', 'http://[::1]:5500', 'http://127.1:5500'])(
+    'identifies %s as local without asserting that it is a mock or an official model', (endpoint) => {
+      expect(providerEndpointKind(endpoint)).toBe('local')
+      expect(providerModelDisplayName('deepseek-v4-flash', endpoint)).toBe('deepseek-v4-flash')
+    }
+  )
+  it('does not confuse official-looking hosts, remote gateways, and unsupported URLs', () => {
+    expect(providerEndpointKind('https://api.deepseek.com')).toBe('official-deepseek')
+    expect(providerEndpointKind('https://localhost.evil.test')).toBe('remote')
+    expect(providerEndpointKind('https://gateway.test')).toBe('remote')
+    expect(providerEndpointKind('file:///private/anything')).toBe('unknown')
+  })
   it.each(['https://api.deepseek.com', 'https://api.deepseek.com/v1/'])(
     'labels official aliases without rewriting the request ID at %s', (endpoint) => {
       expect(providerModelDisplayName('deepseek-v4-flash', endpoint)).toBe('V4.1 Flash')

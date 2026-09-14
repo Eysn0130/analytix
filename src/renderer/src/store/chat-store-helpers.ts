@@ -49,6 +49,12 @@ export function persistComposerModel(model: string): void {
   writeBrowserStorageItem(COMPOSER_MODEL_STORAGE_KEY, model)
 }
 
+export function readStoredComposerSelection(): ThreadComposerSelection | null {
+  const model = readBrowserStorageItem(COMPOSER_MODEL_STORAGE_KEY)?.trim() ?? ''
+  const providerId = readBrowserStorageItem(COMPOSER_PROVIDER_STORAGE_KEY)?.trim() ?? ''
+  return model && providerId ? { model, providerId } : null
+}
+
 export function readStoredComposerProviderId(
   modelGroups: readonly ModelProviderModelGroup[],
   modelId: string

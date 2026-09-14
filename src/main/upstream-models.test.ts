@@ -48,13 +48,13 @@ describe('Core Registry composer model catalog', () => {
       modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       defaultModelId: 'deepseek-v4-pro',
       modelGroups: [{
-        providerId: 'deepseek', label: 'DeepSeek',
+        providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'official-deepseek',
         modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
         modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash', 'deepseek-v4-pro': 'V4 Pro' }
       }]
     })
     expect(registry).toEqual(before)
-    expect(JSON.stringify(result)).not.toMatch(/credential|endpoint|incarnation/)
+    expect(JSON.stringify(result)).not.toMatch(/credential|"endpoint":|incarnation|https?:\/\//)
   })
 
   it('accepts committed default model IDs through the existing non-secret Registry list transport', async () => {
@@ -68,9 +68,9 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       defaultModelId: 'deepseek-v4-pro',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'] }]
     })
-    expect(JSON.stringify(result)).not.toMatch(/credential|endpoint|incarnation/)
+    expect(JSON.stringify(result)).not.toMatch(/credential|"endpoint":|incarnation|https?:\/\//)
   })
 
   it('does not manufacture default providers, models, or capabilities for an empty Registry', async () => {
@@ -116,8 +116,8 @@ describe('Core Registry composer model catalog', () => {
       modelIds: ['beta-model', 'shared-model'],
       defaultModelId: 'shared-model',
       modelGroups: [
-        { providerId: 'beta', label: 'beta', modelIds: ['beta-model', 'shared-model'] },
-        { providerId: 'alpha', label: 'alpha', modelIds: ['shared-model'] }
+        { providerId: 'beta', label: 'beta', endpointKind: 'remote', modelIds: ['beta-model', 'shared-model'] },
+        { providerId: 'alpha', label: 'alpha', endpointKind: 'remote', modelIds: ['shared-model'] }
       ]
     })
   })
@@ -138,7 +138,7 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['custom-model'],
       defaultModelId: 'custom-model',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['custom-model'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['custom-model'] }]
     })
     expect(registry).toEqual(before)
     expect(fetch).not.toHaveBeenCalled()
@@ -155,7 +155,7 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['custom-chat'],
       defaultModelId: 'custom-chat',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', modelIds: ['custom-chat'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['custom-chat'] }]
     })
   })
 

@@ -2325,6 +2325,7 @@ app.whenReady().then(async () => {
   }
 
   registerAppIpcHandlers({
+    desktopIsolated: desktopExternalState.isolated,
     store,
     loadHubAccountService,
     getMainWindow: () => mainWindow,

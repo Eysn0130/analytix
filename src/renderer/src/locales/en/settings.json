@@ -1,4 +1,8 @@
 {
+  "providerConnection_official-deepseek": "Official API",
+  "providerConnection_local": "Local service",
+  "providerConnection_remote": "Remote service",
+  "providerConnection_unknown": "Unknown source",
   "title": "Settings",
   "subtitle": "Manage interface preferences, default folders, and assistant behavior.",
   "back": "Back",
@@ -435,7 +439,7 @@
   "modelProviderDeleteInUseVideo": "Video generation is using this provider and will switch to the custom video generation API.",
   "modelProviderDeleteInUseWrite": "Write inline completion is using this provider and will follow the chat provider instead.",
   "modelProviderDeleteAction": "Delete",
-  "modelProviderDangerHint": "Deletion takes effect immediately; features using this provider fall back automatically.",
+  "modelProviderDangerHint": "Deletion takes effect immediately. Features using this provider may become unavailable; select another provider to continue.",
   "modelProviderImageCapability": "Image generation capability",
   "modelProviderImageCapabilityDesc": "Optional. Providers with this capability can be selected by Image generation without re-entering credentials.",
   "modelProviderSpeechCapability": "Speech-to-text capability",

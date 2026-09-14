@@ -237,6 +237,31 @@ not yet a general development bootstrap and has not replaced the default entry.
 See [development baseline](development-baseline.md) for the full development
 loop, platform limits and remaining CI/package work.
 
+### Identify a GUI candidate before comparing it
+
+The development shell shows a compact instance label on both the workbench and
+settings routes. Its disclosure contains an opaque profile ID, application
+version and startup Main-bundle fingerprint. The fingerprint identifies only
+that Main output, not the whole source candidate or the Renderer. Packaged
+applications do not display this development control. No profile paths or
+credential values are exposed by the identity API.
+
+An isolated Mock fixture can use `--label-mock` with `dev:isolated`, or pass
+`mockLabel: true` to `prepareDevelopmentProfile`. This labels a declared test
+instance only: it does not start a Mock, configure a Provider, change endpoints,
+read credentials or authorize requests. Ambient shell flags are not inherited.
+Production packages ignore this marker. A loopback endpoint is labeled **local
+service**, never automatically **Mock**; local real models remain legitimate.
+
+For GUI acceptance across tasks, retain the source commit plus task-owned dirty
+blob manifest, frozen Main/preload/Renderer build, profile ID and connection
+kind alongside screenshots. Use one integrator for canonical source changes.
+Do not keep acceptance attached to a shared HMR build while another task edits
+that source. A Mock screenshot and an official-Provider screenshot exercise
+different configurations; neither substitutes for the other. Investigate a
+suspected regression by comparing those identities before reverting code or
+reinitializing any protected profile.
+
 ## Validation Matrix
 
 Choose the smallest evidence that can fail on the changed behavior.

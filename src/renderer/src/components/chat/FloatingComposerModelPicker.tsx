@@ -24,6 +24,7 @@ import {
 import { DEFAULT_COMPOSER_MODEL_IDS } from '@shared/default-composer-models'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import { projectModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
+import { modelLabelFromCatalog, type ProviderEndpointKind } from '@shared/provider-display'
 import './model-picker.css'
 
 export type ComposerReasoningEffort = ModelReasoningEffort
@@ -74,6 +75,7 @@ type ComposerModelMenuGroup = {
   menuId: string
   providerId: string
   label: string
+  endpointKind?: ProviderEndpointKind
   subtitleKey?: string
   modelIds: string[]
   modelLabels?: Record<string, string>
@@ -163,35 +165,38 @@ export function FloatingComposerModelPicker({
     })
   }, [composerModelGroups, modelOptions, t])
   const currentModel = composerModel.trim()
+  const explicitProviderId = composerProviderId.trim()
   const selectedProviderGroup = providerMenuGroups.find((group) =>
-    group.providerId === composerProviderId.trim() &&
+    (!explicitProviderId || group.providerId === explicitProviderId) &&
     group.modelIds.some((id) => modelIdsMatch(group, id, currentModel))
   ) ?? null
-  const selectedProviderId = selectedProviderGroup?.providerId ?? providerMenuGroups.find((group) =>
-    group.modelIds.some((id) => modelIdsMatch(group, id, currentModel))
-  )?.providerId ?? null
-  const currentModelProfile = modelProfileForSelection(providerMenuGroups, currentModel, selectedProviderId)
+  const selectedProviderId = selectedProviderGroup?.providerId ?? null
+  const providerUnavailable = Boolean(explicitProviderId && !selectedProviderGroup)
+  const currentModelProfile = providerUnavailable ? undefined : modelProfileForSelection(providerMenuGroups, currentModel, selectedProviderId)
   const needsProviderSetup = shouldShowProviderSetupPrompt(providerMenuGroups)
   const reasoningOptions = composerReasoningMenuOptionsForModel(currentModelProfile)
   const reasoningEnabled =
-    !needsProviderSetup && Boolean(onComposerReasoningEffortChange) && reasoningOptions.length > 0
+    !needsProviderSetup && !providerUnavailable && Boolean(onComposerReasoningEffortChange) && reasoningOptions.length > 0
   const currentReasoning = normalizeComposerReasoningMenuEffort(
     composerReasoningEffort,
     currentModelProfile
   )
   const currentReasoningLabel = t(reasoningLabelKey(currentReasoning))
   const canOpenModelControls = canChangeModel || (needsProviderSetup && Boolean(onConfigureProviders))
-  const modelLabel = needsProviderSetup
+  const modelLabel = needsProviderSetup && !providerUnavailable
     ? t('composerNoProvidersShort')
     : composerModelDisplayLabel(providerMenuGroups, currentModel, selectedProviderId, t('autoLabel'))
-  const modelIdentity = needsProviderSetup ? modelLabel : [
-    providerMenuGroups.find((group) => group.providerId === selectedProviderId)?.label,
+  const modelIdentity = needsProviderSetup && !providerUnavailable ? modelLabel : [
+    selectedProviderGroup?.label ?? explicitProviderId,
     modelLabel,
     currentModel !== modelLabel ? currentModel : undefined
   ].filter(Boolean).join(' · ')
+  const sourceLabel = providerUnavailable ? t('composerProviderUnavailable')
+    : selectedProviderGroup?.endpointKind && selectedProviderGroup.endpointKind !== 'official-deepseek'
+      ? t(`providerConnection_${selectedProviderGroup.endpointKind}`) : ''
   const controlsTitle = reasoningEnabled
-    ? `${modelIdentity} / ${currentReasoningLabel}`
-    : modelIdentity
+    ? `${modelIdentity} / ${currentReasoningLabel}${sourceLabel ? ` · ${sourceLabel}` : ''}`
+    : [modelIdentity, sourceLabel].filter(Boolean).join(' · ')
   const activeProviderGroup =
     providerMenuGroups.find((group) => group.menuId === activeProviderId) ?? null
   const activeProviderModelIds = activeProviderGroup?.modelIds ?? []
@@ -405,7 +410,10 @@ export function FloatingComposerModelPicker({
                 const selectedModel = groupHasCurrentModel
                   ? currentModel
                   : ''
-                const subtitle = group.subtitleKey ? t(group.subtitleKey) : group.modelLabels?.[selectedModel] ?? selectedModel
+                const subtitle = [
+                  group.subtitleKey ? t(group.subtitleKey) : modelLabelFromCatalog(group.modelLabels, selectedModel),
+                  group.endpointKind ? t(`providerConnection_${group.endpointKind}`) : ''
+                ].filter(Boolean).join(' · ')
                 return (
                   <ProviderRow
                     key={group.menuId}
@@ -445,7 +453,7 @@ export function FloatingComposerModelPicker({
                     modelId: id,
                     aliases: modelProfileForModel(activeProviderGroup, id)?.aliases
                   })}
-                  title={activeProviderGroup.modelLabels?.[id] ?? id}
+                  title={modelLabelFromCatalog(activeProviderGroup.modelLabels, id)}
                   detail={id}
                   rightSlot={
                     <ModelCapabilityBadge
@@ -514,6 +522,7 @@ export function FloatingComposerModelPicker({
           <span className="min-w-0 truncate text-right">
             {modelLabel}
           </span>
+          {sourceLabel ? <span className="shrink-0 rounded bg-ds-hover px-1.5 text-[11px] font-normal text-ds-muted">{sourceLabel}</span> : null}
           {reasoningEnabled ? (
             <span className="shrink-0 text-[12px] font-semibold text-ds-faint">
               {currentReasoningLabel}
@@ -552,6 +561,7 @@ export function FloatingComposerModelPicker({
         title={controlsTitle}
       >
         <span className="min-w-0 truncate">{modelLabel}</span>
+        {sourceLabel ? <span className="shrink-0 rounded bg-ds-hover px-1.5 text-[11px] font-normal text-ds-muted">{sourceLabel}</span> : null}
         {reasoningEnabled ? (
           <span className="shrink-0 border-l border-ds-border pl-1.5 text-[12px] font-normal text-ds-faint">
             {t(reasoningLabelKey(currentReasoning))}
@@ -805,7 +815,7 @@ export function composerModelDisplayLabel(
 ): string {
   const trimmed = model.trim()
   if (!trimmed || trimmed.toLowerCase() === 'auto') return autoLabel
-  return groups.find((group) => group.providerId === providerId)?.modelLabels?.[trimmed] || trimmed
+  return modelLabelFromCatalog(groups.find((group) => group.providerId === providerId)?.modelLabels, trimmed)
 }
 
 function estimatedModelSubmenuHeight(modelCount: number): number {
@@ -930,7 +940,8 @@ function modelProfileForModel(
   const key = normalizeModelCapabilityKey(modelId)
   if (!key) return undefined
   const profiles = group.modelProfiles ?? {}
-  const direct = profiles[key] ?? profiles[modelId.trim()]
+  const direct = Object.prototype.hasOwnProperty.call(profiles, key) ? profiles[key]
+    : Object.prototype.hasOwnProperty.call(profiles, modelId.trim()) ? profiles[modelId.trim()] : undefined
   if (direct) return direct
   return Object.values(profiles).find((profile) =>
     profile.aliases?.some((alias) => normalizeModelCapabilityKey(alias) === key)

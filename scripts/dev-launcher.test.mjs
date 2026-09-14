@@ -18,6 +18,19 @@ function fixture(t) {
   return { root, stateRoot: join(root, 'state'), env: { ANALYTIX_DEV_CACHE_ROOT: cache, PATH: process.env.PATH } }
 }
 
+test('Mock labels require explicit launch intent and never change Provider configuration', t => {
+  const f = fixture(t)
+  f.env.ANALYTIX_DEV_PROVIDER_MODE = 'mock'
+  const normal = prepareDevelopmentProfile(f)
+  assert.equal(normal.env.ANALYTIX_DEV_PROVIDER_MODE, undefined)
+  const mock = prepareDevelopmentProfile({ ...f, mockLabel: true })
+  assert.equal(mock.env.ANALYTIX_DEV_PROVIDER_MODE, 'mock')
+  assert.equal(mock.taskRoot, normal.taskRoot)
+  assert.deepEqual({ ...mock.env, ANALYTIX_DEV_PROVIDER_MODE: undefined },
+    { ...normal.env, ANALYTIX_DEV_PROVIDER_MODE: undefined })
+  assert.equal(parseDevelopmentArgs(['--label-mock']).mockLabel, true)
+})
+
 test('isolated development rejects ambient credentials, live-state and code-injection overrides', t => {
   const f = fixture(t)
   Object.assign(f.env, {

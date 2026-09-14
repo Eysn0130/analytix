@@ -4,7 +4,7 @@ import {
 } from '../../packages/runtime/src/contracts/provider-registry'
 import { isComposerChatModelId } from '../shared/app-settings'
 import type { ModelProviderModelGroup, UpstreamModelsResult } from '../shared/analytix-api'
-import { providerDisplayName, providerModelDisplayName } from '../shared/provider-display'
+import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from '../shared/provider-display'
 
 /**
  * Projects the Core Registry's committed, non-secret catalog for every composer.
@@ -30,6 +30,7 @@ export async function fetchUpstreamModelIds(registry: ProviderRegistryResultV1):
     modelGroups.push({
       providerId: provider.id,
       label: providerDisplayName(provider.id, provider.id, provider.endpoint),
+      endpointKind: providerEndpointKind(provider.endpoint),
       modelIds,
       ...(Object.keys(modelLabels).length > 0 ? { modelLabels } : {})
     })

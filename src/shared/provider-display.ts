@@ -1,4 +1,26 @@
 /** Presentation only. Never use these labels as routing or capability evidence. */
+export type ProviderEndpointKind = 'official-deepseek' | 'local' | 'remote' | 'unknown'
+
+export function providerEndpointKind(endpoint: string): ProviderEndpointKind {
+  if (isOfficialDeepSeekEndpoint(endpoint)) return 'official-deepseek'
+  try {
+    const url = new URL(endpoint)
+    if (!['http:', 'https:'].includes(url.protocol)) return 'unknown'
+    const host = url.hostname.toLowerCase()
+    // Loopback is a location, never evidence that a server is a Mock.
+    if (host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host)) return 'local'
+    return 'remote'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export function modelLabelFromCatalog(labels: Record<string, string> | undefined, modelId: string): string {
+  if (!labels || !Object.prototype.hasOwnProperty.call(labels, modelId)) return modelId
+  const label = labels[modelId]
+  return typeof label === 'string' && label.trim() ? label : modelId
+}
+
 function isOfficialDeepSeekEndpoint(endpoint: string): boolean {
   try {
     const url = new URL(endpoint)
