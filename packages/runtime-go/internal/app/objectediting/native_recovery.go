@@ -110,3 +110,24 @@ func (s *Service) CancelNativeChange(ctx context.Context, id, thread, change, ba
 	}
 	return result, err
 }
+
+func (s *Service) ResumeNativeChange(ctx context.Context, id, thread, change, baseRevision string) (fileport.Receipt, error) {
+	if s == nil {
+		return fileport.Receipt{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.Receipt{}, err
+	}
+	files, ok := s.files.(fileport.NativeRecoveryFiles)
+	if !ok {
+		return fileport.Receipt{}, ErrUnavailable
+	}
+	receipt, err := files.ResumeNativeChange(ctx, fileport.NativeUndoInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, ThreadID: thread, ChangeID: change, BaseRevision: baseRevision})
+	if err != nil {
+		return receipt, err
+	}
+	return s.verifyCurrentReceipt(ctx, current, receipt)
+}

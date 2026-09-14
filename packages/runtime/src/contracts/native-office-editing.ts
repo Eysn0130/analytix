@@ -84,7 +84,7 @@ export const nativeOfficeChangeSchema = z.object({
   status: z.enum(['prepared', 'unknown', 'committed', 'conflict', 'undone', 'cancelled', 'superseded']),
   beforeText: selectionText, afterText: selectionText,
   saveOperationId: nativeOperation, undoOperationId: nativeOperation, canUndo: z.boolean(),
-  canCancel: z.boolean(), canRetryUndo: z.boolean(),
+  canCancel: z.boolean(), canRetryUndo: z.boolean(), canResume: z.boolean(),
   createdAt: z.string().max(64), savedAt: z.string().max(64)
 }).strict()
 export const nativeOfficeRecoverySchema = z.object({current:nativeOfficeChangeSchema.nullable(),pending:nativeOfficeChangeSchema.nullable()}).strict()

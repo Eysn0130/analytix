@@ -35,7 +35,7 @@ below are not yet installed-application evidence.
 | Plugin Skills | All three Office 0.2.0 packages declare original workflows, fixed generation capabilities and installed snapshots; discovery and generation follow their signed activation | Canvas contribution, remaining dependency handlers and installed end-to-end evidence |
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
-| Apply / recovery / Diff | Candidate adds Core-owned originals and approved changes, thread-bound discovery, protected-local original-value Diff, restart undo and explicit cancellation of proven unsubmitted changes | Complete interrupted-save recovery, native format fidelity and actual third-object/restart GUI journey |
+| Apply / recovery / Diff | Core-owned originals, exact save candidates and approved changes; thread-bound discovery, protected-local Diff, explicit interrupted-save continuation, restart undo and cancellation of proven unsubmitted changes | Native format fidelity and actual third-object/restart GUI journey |
 | Installation | Native assets remain `source-experiment`; packaged rejection retained | Exact engine/Qt/font/source obligations, admitted packaged resolution, local installer and installed end-to-end journey |
 | Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
@@ -187,12 +187,31 @@ Diff, missing-review refusal and thread isolation. Both TypeScript checks pass;
 focused ESLint has zero errors and three existing effect-dependency warnings.
 Independent storage review found no additional concrete defect in that candidate.
 
-Remaining: if a save journal is pending while the file still equals its original
-revision and Main's candidate bytes were lost, the current path keeps the outcome
-unknown. Persisting the exact candidate and providing an explicit Core continuation
-is still required; generic v1 replay must not silently rewrite the file. Native
-GUI/format fidelity, persistent annotation drafts and installed recovery remain
-unverified by these source/fixture checks.
+Core now retains the exact exported candidate, bounded to 16 MiB, before the first
+save journal. A fresh session can explicitly continue that approved change using
+only its identity and original revision. Core checks private file identity, hash,
+OOXML kind, thread ownership and current original bytes before the same-operation
+CAS. A completed journal remains query-only. Ordinary commit retries and status
+queries never resume a pending write, including when the journal is absent.
+Legacy records without the retained candidate cannot gain resume permission from
+caller-supplied bytes. Retired originals and candidates are emptied through CAS.
+
+The desktop exposes this continuation separately from result checking. A failed
+query refreshes the Core recovery capabilities without writing; a new explicit
+click is required to continue. After a lost reply, fixed-operation result checking
+and exact current-byte validation precede native reload. This preserves uncertainty
+without permanently locking the Main controller after a pre-journal interruption.
+Native GUI/format fidelity, persistent annotation drafts and installed recovery
+remain unverified by these source/fixture checks.
+
+The explicit-continuation candidate passes the two Go application suites and
+the focused filestore native recovery/resume and object-editing tests (8.900s).
+The three desktop/controller/contract files pass 75 tests, including query-only
+capability refresh, fresh-controller continuation and lost replies. Both
+TypeScript configurations pass. Independent review caught and verified the fix
+for ordinary replay with a missing journal; that path now returns unknown without
+creating a journal or candidate. These checks use synthetic files on the configured
+macOS host and do not establish installed recovery or native formatting quality.
 
 ## Completion evidence
 

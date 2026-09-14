@@ -259,7 +259,8 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
       </div>})}
     </div> : null}
     {view?.recovery && [view.recovery.pending, view.recovery.current].filter(change => change?.threadId === threadId).map(change => change && <details key={change.changeId} className="max-h-40 shrink-0 overflow-auto border-b border-ds-border-muted px-2 py-1 text-xs">
-      <summary>{change.status === 'committed' ? '已保存的修改' : change.status === 'undone' ? '已撤销的修改' : change.status === 'prepared' ? '已批准，尚未确认保存' : change.status === 'conflict' ? '文件已变化，保留修改记录' : '保存结果待确认'}</summary>
+      <summary>{change.status === 'committed' ? '已保存的修改' : change.status === 'undone' ? '已撤销的修改' : change.status === 'prepared' ? '已批准，尚未确认保存' : change.status === 'conflict' ? '文件已变化，保留修改记录' : '修改结果待确认'}</summary>
+      {change.canResume ? <button disabled={busy} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'resumeChange',...targetRequest,threadId,changeId:change.changeId})}>继续保存此修改</button> : null}
       {change.canCancel ? <button disabled={busy} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
       {change.status === 'unknown' ? <button disabled={busy} className="my-1" onClick={() => void invoke({action:'saveStatus',objectId:view.objectId})}>核实结果</button> : null}
       <del aria-label="已记录的修改前" className="block whitespace-pre-wrap no-underline">{change.beforeText}</del>

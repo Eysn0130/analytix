@@ -9,40 +9,42 @@ const threadId = 'thread-native', changeId = '9'.repeat(64), saveOperationId = '
 const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds:{x:0,y:0,width:800,height:600}}
 function setup() {
   let current = {documentId:objectId,version:revision,kind:'docx' as const,changeSequence:0,acknowledgedSequence:0,dirty:false}
-  let onEvent:(event:unknown)=>void = ()=>{}, opened = '', saved = revision, commitCalls=0, undoCalls=0, cancelCalls=0, statusCalls=0
+  let onEvent:(event:unknown)=>void = ()=>{}, opened = '', saved = revision, commitCalls=0, undoCalls=0, cancelCalls=0, resumeCalls=0, statusCalls=0
   let receipt:any, deferCommit:((value:any)=>void)|undefined
   let delay=false, conflict=false, hidden=0, destroyed=0, revoked=0, loseCommit=false, failReload=false, rejectCommit=false
   const scopeId='d'.repeat(48), proposalId='f'.repeat(48)
-  let persisted:any, foreignRecovery=false, corruptOpen=false, corruptReceipt=false
+  let persisted:any, foreignRecovery=false, corruptOpen=false, corruptReceipt=false, corruptReload=false
+  let interruptSave=false, interruptResume=false, interruptUndo=false, loseResumeReceipt=false, pendingCandidate:Uint8Array|undefined
+  const statusOperationIds:string[]=[]
   const receipts = new Map<string, any>()
   let scope:any, loseDecision=false, acceptedOperation:string|undefined, replacementText='proposed'
   let openGate:Promise<void>|undefined, releaseOpen:(()=>void)|undefined
-  const pkg:PluginPackageView={packageId:'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change']}
+  const pkg:PluginPackageView={packageId:'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
   const selection=()=>({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text:'selected',token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}})
   const requests:NativeOfficeEngineRequest[]=[]
   const createController=()=>createNativeOfficeController({
     async packageHost(r):Promise<any>{
       if(r.action==='list')return {ok:true,packages:[pkg]}
       if(r.action!=='invoke')throw Error('not authorized')
-      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:'/workspace/a.docx',revision:saved,content:Buffer.from(corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
+      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
       if(r.operation==='capture-selection'){scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}]};delete scope.text;return {ok:true,output:{ok:true,scope}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
       if(r.operation==='object-recovery'){
         const owned=persisted && (persisted.threadId===r.input.threadId || foreignRecovery) ? structuredClone(persisted) : null
-        return {ok:true,output:{ok:true,recovery:{current:owned?.revision?owned:null,pending:owned&&!owned.revision?owned:null}}}
+        return {ok:true,output:{ok:true,recovery:{current:owned?.revision&&!pendingCandidate?owned:null,pending:owned&&(!owned.revision||pendingCandidate)?owned:null}}}
       }
       if(r.operation==='cancel-change'){
         cancelCalls++
         expect(r.input).toEqual({sessionId,threadId,changeId,baseRevision:saved})
         expect(persisted.canCancel).toBe(true);expect(persisted.revision).toBe('')
-        persisted=undefined
+        persisted=undefined;pendingCandidate=undefined
         return {ok:true,output:{ok:true,recovery:{current:null,pending:null}}}
       }
       if(r.operation==='selection-revoke'){revoked++;return {ok:true,output:{ok:true,revoked:true}}}
       if(r.operation==='proposal-accept'){
         if(acceptedOperation)expect(r.input.operationId).toBe(acceptedOperation)
         acceptedOperation=r.input.operationId as string
-        persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
+        persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
         if(loseDecision){loseDecision=false;throw Error('transport lost after Core accepted')}
         return {ok:true,output:{ok:true,replacement:{proposalId,changeId,saveOperationId,operationId:r.input.operationId,text:replacementText,selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision}}}
       }
@@ -54,6 +56,12 @@ function setup() {
         const content = new Uint8Array(Buffer.from(input.content.data, 'base64'))
         expect(input.content).toEqual({encoding:'base64',kind:'docx',data:Buffer.from(content).toString('base64'),sha256:hash(content),byteLength:3})
         expect(input.baseRevision).toBe(saved)
+        if(interruptSave){
+          interruptSave=false;pendingCandidate=content.slice()
+          persisted={...persisted,status:'unknown',revision:hash(content),canUndo:false,canCancel:false,canResume:true}
+          receipts.set(saveOperationId,{operationId:saveOperationId,revision:'',status:'pending',savedAt:''})
+          throw Error('transport lost after durable candidate, before replacing original')
+        }
         receipt={operationId:input.operationId,revision:conflict?'':corruptReceipt?revision:hash(content),status:conflict?'conflict':'committed',savedAt:new Date().toISOString()}
         if(!conflict)saved=hash(content)
         persisted={...persisted,status:conflict?'conflict':'committed',revision:conflict?'':hash(content),savedAt:receipt.savedAt,canUndo:!conflict,canCancel:false}
@@ -62,9 +70,29 @@ function setup() {
         if(delay)return await new Promise(resolve=>{deferCommit=resolve})
         return {ok:true,output:{ok:true,receipt}}
       }
+      if(r.operation==='resume-change'){
+        resumeCalls++
+        expect(r.input).toEqual({sessionId,threadId,changeId,baseRevision:revision})
+        expect(persisted.canResume).toBe(true)
+        expect(pendingCandidate).toEqual(edited)
+        expect(hash(pendingCandidate!)).toBe(persisted.revision)
+        expect(saved).toBe(persisted.baseRevision)
+        if(interruptResume){interruptResume=false;throw Error('resume interrupted before replacing original')}
+        saved=hash(pendingCandidate!);pendingCandidate=undefined
+        persisted={...persisted,status:'committed',canResume:false,canUndo:true,savedAt:'2026-09-15T00:02:00Z'}
+        receipt={operationId:saveOperationId,revision:corruptReceipt?revision:saved,status:'committed',savedAt:persisted.savedAt}
+        receipts.set(saveOperationId,receipt)
+        if(loseResumeReceipt){loseResumeReceipt=false;throw Error('resume response lost after persistence')}
+        return {ok:true,output:{ok:true,receipt}}
+      }
       if(r.operation==='undo-change'){
         undoCalls++
         expect(r.input).toEqual({sessionId,threadId,changeId,baseRevision:hash(edited)})
+        if(interruptUndo){
+          interruptUndo=false;persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}
+          receipts.set(undoOperationId,{operationId:undoOperationId,revision:'',status:'pending',savedAt:''})
+          throw Error('undo interrupted before rollback journal completed')
+        }
         if(rejectCommit){rejectCommit=false;return {ok:true,output:{ok:false,code:'not_text',message:'unsupported'}}}
         receipt={operationId:undoOperationId,revision:conflict?'':revision,status:conflict?'conflict':'committed',savedAt:'2026-09-15T00:01:00Z'}
         receipts.set(undoOperationId,receipt)
@@ -72,7 +100,7 @@ function setup() {
         if(loseCommit){loseCommit=false;throw Error('reply lost after undo')}
         return {ok:true,output:{ok:true,receipt}}
       }
-      if(r.operation==='object-status'){statusCalls++;return {ok:true,output:{ok:true,receipt:receipts.get(r.input.operationId as string)}}}
+      if(r.operation==='object-status'){statusCalls++;statusOperationIds.push(r.input.operationId as string);return {ok:true,output:{ok:true,receipt:receipts.get(r.input.operationId as string)}}}
       throw Error('unexpected Core operation')
     },
     createSurface(listener){onEvent=listener;return {attach(){},hide(){hidden++},destroy(){destroyed++},async request(r){
@@ -88,7 +116,7 @@ function setup() {
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -304,4 +332,115 @@ test('an uncertain proposal cannot be cancelled by Main or a different thread',a
   expect(await h.controller.request({action:'cancelChange',threadId:'other-thread',changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
   expect(h.getCancelCalls()).toBe(0);expect(h.getCommitCalls()).toBe(0)
   expect(h.getSaved()).toBe(revision)
+})
+
+
+async function pendingSaveAfterRestart(h:ReturnType<typeof setup>){
+  h.interruptSave()
+  expect(await applyProposal(h)).toMatchObject({ok:false,error:'unknown',view:{dirty:true,saving:true}})
+  expect(h.getSaved()).toBe(revision)
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown'})
+  expect(h.getSaved()).toBe(revision);expect(h.getCommitCalls()).toBe(1);expect(h.getResumeCalls()).toBe(0)
+  // Simulate losing Main entirely; only the fake Core journal and candidate survive.
+  h.restart()
+  expect(await h.controller.request(open)).toMatchObject({ok:true,view:{revision,dirty:false,recovery:{pending:{changeId,baseRevision:revision,revision:hash(edited),canResume:true}}}})
+}
+test('an unknown save survives a new controller and only explicit resume publishes the durable candidate once',async()=>{
+  const h=setup();await pendingSaveAfterRestart(h)
+  const engineCount=h.requests.length
+  for(let i=0;i<2;i++)expect((await h.controller.request({action:'saveStatus',objectId})).ok).toBe(true)
+  expect(h.getSaved()).toBe(revision);expect(h.getResumeCalls()).toBe(0);expect(h.getCommitCalls()).toBe(1)
+  const request={action:'resumeChange',threadId,changeId,...h.target()}
+  expect(await h.controller.request(request)).toMatchObject({ok:true,view:{revision:hash(edited),dirty:false,saving:false,canUndo:true,recovery:{current:{status:'committed',canResume:false},pending:null}}})
+  expect(h.requests.slice(engineCount).filter(r=>r.command==='replace'||r.command==='export')).toHaveLength(0)
+  expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({bytes:edited,version:hash(edited)})
+  expect(await h.controller.request(request)).toMatchObject({ok:false,error:'stale_selection'})
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect(h.getResumeCalls()).toBe(1);expect(h.getCommitCalls()).toBe(1)
+  await h.controller.request({action:'close'});h.restart()
+  expect(await h.controller.request(open)).toMatchObject({ok:true,view:{revision:hash(edited),canUndo:true,recovery:{current:{changeId,status:'committed'},pending:null}}})
+})
+test('a lost resume receipt is queried by the original save operation without another write or engine export',async()=>{
+  const h=setup();await pendingSaveAfterRestart(h);h.loseResumeReceipt()
+  const engineCount=h.requests.length
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'unknown'})
+  expect(h.getResumeCalls()).toBe(1)
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:true,view:{revision:hash(edited),saving:false,dirty:false,canUndo:true}})
+  expect(h.getStatusOperationIds()).toEqual([saveOperationId,saveOperationId])
+  expect(h.getResumeCalls()).toBe(1);expect(h.getCommitCalls()).toBe(1)
+  expect(h.requests.slice(engineCount).filter(r=>r.command==='replace'||r.command==='export')).toHaveLength(0)
+  await h.controller.request({action:'close'});h.restart()
+  expect(await h.controller.request(open)).toMatchObject({ok:true,view:{revision:hash(edited),recovery:{current:{changeId},pending:null}}})
+})
+test('resume rejects another thread, stale canvas version and a mismatched Core base revision',async()=>{
+  const h=setup();await pendingSaveAfterRestart(h)
+  expect(await h.controller.request({action:'resumeChange',threadId:'other-thread',changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target(),revision:'0'.repeat(64)})).toMatchObject({ok:false,error:'stale_selection'})
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId:'8'.repeat(64),...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target(),content:'untrusted replacement bytes'})).toMatchObject({ok:false,error:'invalid_request'})
+  h.wrongPendingBase()
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect(h.getResumeCalls()).toBe(0);expect(h.getSaved()).toBe(revision)
+})
+test.each(['receipt','reloaded bytes'] as const)('resume rejects an incorrect %s digest without reloading unverified content',async(kind)=>{
+  const h=setup();await pendingSaveAfterRestart(h)
+  if(kind==='receipt')h.corruptReceipt();else h.corruptReload()
+  const opens=h.requests.filter(r=>r.command==='open').length
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_response',view:{revision,saving:true}})
+  expect(h.requests.filter(r=>r.command==='open')).toHaveLength(opens)
+  expect(h.getResumeCalls()).toBe(1);expect(h.getCommitCalls()).toBe(1)
+})
+
+
+test('a pending-save query refreshes explicit recovery capability without writing or exporting',async()=>{
+  const h=setup();h.interruptSave()
+  expect(await applyProposal(h)).toMatchObject({ok:false,error:'unknown',view:{dirty:true,saving:true}})
+  expect(h.controller.getView()?.recovery?.pending).toBeNull()
+  const engineCount=h.requests.length
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{dirty:true,saving:true,recovery:{pending:{changeId,canResume:true}}}})
+  expect(h.getSaved()).toBe(revision)
+  expect(h.getCommitCalls()).toBe(1);expect(h.getResumeCalls()).toBe(0);expect(h.getUndoCalls()).toBe(0)
+  expect(h.requests).toHaveLength(engineCount)
+  expect(await h.controller.request({action:'resumeChange',threadId,changeId,...h.target()})).toMatchObject({ok:true,view:{revision:hash(edited),dirty:false,saving:false}})
+  expect(h.getCommitCalls()).toBe(1);expect(h.getResumeCalls()).toBe(1)
+})
+test('querying an interrupted resume unlocks the same operation for a later explicit click only',async()=>{
+  const h=setup();await pendingSaveAfterRestart(h);h.interruptResume()
+  const resume={action:'resumeChange',threadId,changeId,...h.target()}
+  expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown'})
+  const engineCount=h.requests.length
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{saving:false,recovery:{pending:{canResume:true,saveOperationId}}}})
+  expect(h.getSaved()).toBe(revision);expect(h.getResumeCalls()).toBe(1)
+  expect(h.getCommitCalls()).toBe(1);expect(h.getUndoCalls()).toBe(0)
+  expect(h.requests).toHaveLength(engineCount)
+  expect(await h.controller.request(resume)).toMatchObject({ok:true,view:{revision:hash(edited),saving:false}})
+  expect(h.getResumeCalls()).toBe(2);expect(h.getCommitCalls()).toBe(1)
+})
+test('querying an interrupted undo exposes retry but never rolls back until the next explicit click',async()=>{
+  const h=setup();await applyProposal(h);h.interruptUndo()
+  const undo={action:'undoChange',threadId,...h.target()}
+  expect(await h.controller.request(undo)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  expect(await h.controller.request(undo)).toMatchObject({ok:false,error:'unknown'})
+  const engineCount=h.requests.length
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{saving:false,canUndo:true,recovery:{current:{canRetryUndo:true,undoOperationId}}}})
+  expect(h.getSaved()).toBe(hash(edited));expect(h.getUndoCalls()).toBe(1)
+  expect(h.getResumeCalls()).toBe(0);expect(h.getCommitCalls()).toBe(1)
+  expect(h.requests).toHaveLength(engineCount)
+  expect(await h.controller.request(undo)).toMatchObject({ok:true,view:{revision,saving:false,canUndo:false}})
+  expect(h.getUndoCalls()).toBe(2);expect(h.getCommitCalls()).toBe(1)
+})
+test.each(['resume','undo'] as const)('a query never unlocks a pending %s using another Core operation capability',async(kind)=>{
+  const h=setup()
+  if(kind==='resume'){await pendingSaveAfterRestart(h);h.interruptResume()}else{await applyProposal(h);h.interruptUndo()}
+  const request=kind==='resume'?{action:'resumeChange',threadId,changeId,...h.target()}:{action:'undoChange',threadId,...h.target()}
+  expect(await h.controller.request(request)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  h.mismatchRecoveryOperation()
+  const engineCount=h.requests.length, saved=h.getSaved()
+  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  expect(await h.controller.request(request)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+  expect(h.getSaved()).toBe(saved);expect(h.requests).toHaveLength(engineCount)
+  expect(h.getResumeCalls()).toBe(kind==='resume'?1:0);expect(h.getUndoCalls()).toBe(kind==='undo'?1:0)
+  expect(h.getCommitCalls()).toBe(1)
 })

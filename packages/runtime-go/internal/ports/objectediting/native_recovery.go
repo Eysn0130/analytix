@@ -36,6 +36,7 @@ type NativeChangeStatus struct {
 	CanUndo         bool   `json:"canUndo"`
 	CanCancel       bool   `json:"canCancel"`
 	CanRetryUndo    bool   `json:"canRetryUndo"`
+	CanResume       bool   `json:"canResume"`
 	CreatedAt       string `json:"createdAt"`
 	SavedAt         string `json:"savedAt"`
 }
@@ -71,4 +72,7 @@ type NativeRecoveryFiles interface {
 	// Cancel retires only a confirmed uncommitted pending change. BaseRevision
 	// binds the explicit cancellation to the current on-disk revision.
 	CancelNativeChange(context.Context, NativeUndoInput) (NativeRecovery, error)
+	// Resume is a fresh explicit authorization to try the same pending native
+	// save against its original base, using only Core's durable candidate bytes.
+	ResumeNativeChange(context.Context, NativeUndoInput) (Receipt, error)
 }

@@ -17,6 +17,7 @@ type NativeRecoveryService interface {
 	CommitNativeChange(context.Context, string, string, string, string, string, string) (fileport.Receipt, error)
 	UndoNativeChange(context.Context, string, string, string, string) (fileport.Receipt, error)
 	CancelNativeChange(context.Context, string, string, string, string) (fileport.NativeRecovery, error)
+	ResumeNativeChange(context.Context, string, string, string, string) (fileport.Receipt, error)
 }
 
 func (a *Adapter) validateRecoveryThread(ctx context.Context, call adapterport.Call, sessionID, thread, purpose string) error {
@@ -40,7 +41,7 @@ func (a *Adapter) invokeRecovery(ctx context.Context, call adapterport.Call, inp
 		return failure(fileport.ErrInvalidInput)
 	}
 	purpose := "discuss"
-	if call.Operation == "undo-change" || call.Operation == "cancel-change" {
+	if call.Operation == "undo-change" || call.Operation == "cancel-change" || call.Operation == "resume-change" {
 		purpose = "edit"
 	}
 	if err := a.validateRecoveryThread(ctx, call, id, thread, purpose); err != nil {
@@ -68,18 +69,27 @@ func (a *Adapter) invokeRecovery(ctx context.Context, call adapterport.Call, inp
 		}
 		a.invalidateSelection(id)
 		return output(map[string]any{"ok": true, "recovery": recovered})
-	case "undo-change":
+	case "undo-change", "resume-change":
 		change, _ := input["changeId"].(string)
 		revision, _ := input["baseRevision"].(string)
 		if !exactKeys(input, "sessionId", "threadId", "changeId", "baseRevision") || !revisionPattern.MatchString(change) || !revisionPattern.MatchString(revision) {
 			return failure(fileport.ErrInvalidInput)
 		}
-		release, err := a.captureNativeMutation(ctx, id, thread, change, revision, "undone")
+		replayStatus := "undone"
+		if call.Operation == "resume-change" {
+			replayStatus = "committed"
+		}
+		release, err := a.captureNativeMutation(ctx, id, thread, change, revision, replayStatus)
 		if err != nil {
 			return failure(err)
 		}
 		defer release()
-		receipt, err := service.UndoNativeChange(ctx, id, thread, change, revision)
+		var receipt fileport.Receipt
+		if call.Operation == "resume-change" {
+			receipt, err = service.ResumeNativeChange(ctx, id, thread, change, revision)
+		} else {
+			receipt, err = service.UndoNativeChange(ctx, id, thread, change, revision)
+		}
 		if err != nil {
 			return failureReceipt(err, receipt)
 		}

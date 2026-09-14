@@ -16,6 +16,7 @@ type nativeRecoveryTestFiles struct {
 	prepare  fileport.NativeChangeInput
 	commit   fileport.NativeCommitInput
 	undo     fileport.NativeUndoInput
+	resume   fileport.NativeUndoInput
 	query    []string
 	calls    int
 	onNative func()
@@ -45,6 +46,12 @@ func (f *nativeRecoveryTestFiles) CommitNativeChange(_ context.Context, in filep
 }
 func (f *nativeRecoveryTestFiles) UndoNativeChange(_ context.Context, in fileport.NativeUndoInput) (fileport.Receipt, error) {
 	f.undo = in
+	f.doc.Revision = f.receipt.Revision
+	f.observed()
+	return f.receipt, nil
+}
+func (f *nativeRecoveryTestFiles) ResumeNativeChange(_ context.Context, in fileport.NativeUndoInput) (fileport.Receipt, error) {
+	f.resume = in
 	f.doc.Revision = f.receipt.Revision
 	f.observed()
 	return f.receipt, nil
@@ -97,6 +104,12 @@ func TestNativeRecoveryServiceUsesSessionAuthorityAndReopens(t *testing.T) {
 	if files.undo.Path != opened.Path || files.undo.ObjectIdentity != opened.ObjectID || files.undo.ThreadID != "thread_main" || files.undo.ChangeID != draft.ChangeID {
 		t.Fatal("undo lost Core target", files.undo)
 	}
+	if _, err := s.ResumeNativeChange(ctx, opened.SessionID, "thread_main", draft.ChangeID, opened.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if files.resume.Path != opened.Path || files.resume.Workspace != "/workspace" || files.resume.ObjectIdentity != opened.ObjectID || files.resume.ThreadID != "thread_main" || files.resume.ChangeID != draft.ChangeID || files.resume.BaseRevision != opened.Revision {
+		t.Fatal("resume lost Core target authority", files.resume)
+	}
 	if files.commits != 0 {
 		t.Fatal("native operation used generic commit")
 	}
@@ -143,6 +156,9 @@ func TestNativeRecoveryServiceMissingOwnerAndRevokedSessionFailClosed(t *testing
 			if _, err := s.UndoNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision); !errors.Is(err, want) {
 				t.Fatal(err)
 			}
+			if _, err := s.ResumeNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision); !errors.Is(err, want) {
+				t.Fatal(err)
+			}
 			if _, err := s.CancelNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision); !errors.Is(err, want) {
 				t.Fatal(err)
 			}
@@ -154,7 +170,7 @@ func TestNativeRecoveryServiceMissingOwnerAndRevokedSessionFailClosed(t *testing
 }
 
 func TestNativeRecoveryServiceRevalidatesIdentityAfterStorage(t *testing.T) {
-	for _, operation := range []string{"prepare", "recovery", "commit", "undo", "cancel"} {
+	for _, operation := range []string{"prepare", "recovery", "commit", "undo", "cancel", "resume"} {
 		t.Run(operation, func(t *testing.T) {
 			s, identity, files, opened := nativeRecoveryServiceFixture(t)
 			ctx := context.Background()
@@ -179,6 +195,11 @@ func TestNativeRecoveryServiceRevalidatesIdentityAfterStorage(t *testing.T) {
 				out, err := s.CommitNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), "native_save_fixed", opened.Revision, "bytes")
 				if !errors.Is(err, fileport.ErrPersistence) || out.Status != fileport.StatusUnknown {
 					t.Fatal("commit confirmed after identity loss", out, err)
+				}
+			case "resume":
+				out, err := s.ResumeNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision)
+				if !errors.Is(err, fileport.ErrPersistence) || out.Status != fileport.StatusUnknown {
+					t.Fatal("resume confirmed after identity loss", out, err)
 				}
 			case "undo":
 				out, err := s.UndoNativeChange(ctx, opened.SessionID, "thread_main", strings.Repeat("e", 64), opened.Revision)

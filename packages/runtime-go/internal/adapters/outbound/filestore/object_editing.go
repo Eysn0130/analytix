@@ -442,6 +442,14 @@ func (s *ObjectEditingFiles) commitLocked(ctx context.Context, input objectediti
 	if err := ctx.Err(); err != nil {
 		return objectEditingReceipt(r), err
 	}
+	return s.replaceObjectLocked(target, input, state, encoded)
+}
+
+// replaceObjectLocked installs an already validated candidate after durable
+// intent exists. Callers hold objectEditingGate and have validated the target,
+// content, baseline and cancellation. Ordinary Commit still only reaches this
+// tail for a newly created journal; existing v1 operations remain query-only.
+func (s *ObjectEditingFiles) replaceObjectLocked(target objectEditingTarget, input objectediting.CommitInput, state atomicTextState, encoded []byte) (objectediting.Receipt, error) {
 	replace := s.replaceDocument
 	if replace == nil {
 		replace = atomicReplaceText
@@ -449,7 +457,7 @@ func (s *ObjectEditingFiles) commitLocked(ctx context.Context, input objectediti
 	writeErr := replace(atomicTextReplaceRequest{Path: target.path, Content: encoded, MaxBytes: s.maxObjectBytes(), ReadPolicy: atomicTextReadPolicy{RequireSingleLink: true}, ExpectedExists: true, ExpectedHash: input.BaseRevision, PreserveMode: true, DefaultMode: state.Mode})
 	// A replacement error may follow a successful rename/fsync. Resolve from
 	// durable intent + actual bytes; never project every error as "not saved".
-	r, recordHash, err = s.readRecord(input.ObjectIdentity, input.OperationID)
+	r, recordHash, err := s.readRecord(input.ObjectIdentity, input.OperationID)
 	if err != nil {
 		return objectediting.Receipt{OperationID: input.OperationID, Status: objectediting.StatusUnknown}, objectediting.ErrPersistence
 	}

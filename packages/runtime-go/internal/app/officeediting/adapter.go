@@ -88,7 +88,7 @@ func (a *Adapter) Readiness(ctx context.Context, binding adapterport.Binding) (a
 	}
 	operations := []string{"open-object", "object-status", "close-object"}
 	if _, ok := a.service.(NativeRecoveryService); ok && a.projector != nil {
-		operations = append(operations, "commit-object", "object-recovery", "undo-change", "cancel-change")
+		operations = append(operations, "commit-object", "object-recovery", "undo-change", "cancel-change", "resume-change")
 	}
 	if a.projector != nil && a.capture != nil {
 		operations = append(operations, "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose")
@@ -125,7 +125,7 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		return failure(fileport.ErrInvalidInput)
 	}
 	switch call.Operation {
-	case "object-recovery", "undo-change", "cancel-change":
+	case "object-recovery", "undo-change", "cancel-change", "resume-change":
 		return a.invokeRecovery(ctx, call, input)
 	case "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose":
 		return a.invokeSelection(ctx, call, input)

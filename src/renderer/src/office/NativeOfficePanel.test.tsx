@@ -412,7 +412,7 @@ it('disables proposal application when its protected-local raw review is missing
 
 
 it('shows only thread-owned durable recovery and routes cancellation and undo retry explicitly',async()=>{
-  const pending:NonNullable<NonNullable<NativeOfficeView['recovery']>['pending']>={changeId:'e'.repeat(64),threadId:'thread',proposalId:'f'.repeat(48),baseRevision:view.revision,revision:'',status:'prepared',beforeText:'原文私有字段',afterText:'修改后私有字段',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:false,canCancel:true,canRetryUndo:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
+  const pending:NonNullable<NonNullable<NativeOfficeView['recovery']>['pending']>={changeId:'e'.repeat(64),threadId:'thread',proposalId:'f'.repeat(48),baseRevision:view.revision,revision:'',status:'prepared',beforeText:'原文私有字段',afterText:'修改后私有字段',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
   await renderAnnotation({...annotationView,recovery:{current:null,pending}})
   expect(container.querySelector('[aria-label="已记录的修改前"]')?.textContent).toBe('原文私有字段')
   await clickNamed('取消未保存的修改')
@@ -435,4 +435,23 @@ it('never renders a proposal raw review carried by another thread scope',async()
   expect(container.textContent).not.toContain('foreign-thread-private-before')
   expect(container.textContent).not.toContain('foreign-thread-private-after')
   expect(namedButton('应用修改')?.disabled ?? true).toBe(true)
+})
+
+
+it('offers explicit resume only for the owning thread and capability, while queries never submit it',async()=>{
+  const pending:NonNullable<NonNullable<NativeOfficeView['recovery']>['pending']>={changeId:'e'.repeat(64),threadId:'thread',proposalId:'f'.repeat(48),baseRevision:view.revision,revision:'c'.repeat(64),status:'unknown',beforeText:'Before',afterText:'After',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:false,canCancel:false,canRetryUndo:false,canResume:true,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
+  const resumable={...annotationView,recovery:{current:null,pending}}
+  await renderAnnotation(resumable)
+  expect(namedButton('继续保存此修改').disabled).toBe(false)
+  expect(request.mock.calls.some(([input])=>input.action==='resumeChange')).toBe(false)
+  await act(async()=>useNativeOfficeStore.setState({view:resumable,error:'unknown'}))
+  await clickNamed('查询结果')
+  expect(request.mock.calls.some(([input])=>input.action==='saveStatus')).toBe(true)
+  expect(request.mock.calls.some(([input])=>input.action==='resumeChange')).toBe(false)
+  await clickNamed('继续保存此修改')
+  expect(request.mock.calls.filter(([input])=>input.action==='resumeChange')).toEqual([[{action:'resumeChange',threadId:'thread',changeId:pending.changeId,objectId:view.objectId,revision:view.revision,expectedChangeSequence:0}]])
+  await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,recovery:{current:null,pending:{...pending,canResume:false}}}}))
+  expect(namedButton('继续保存此修改')).toBeUndefined()
+  await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,recovery:{current:null,pending:{...pending,threadId:'other-thread'}}}}))
+  expect(namedButton('继续保存此修改')).toBeUndefined()
 })

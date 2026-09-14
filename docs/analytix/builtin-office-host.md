@@ -67,8 +67,12 @@ object and thread; undo obtains the original from Core, holds managed-file
 capture and checks the current binary revision. Main no longer supplies an
 in-memory original as undo authority. Local review text is reconstructed into a
 separate protected-local output; model proposal parts remain privacy-projected.
-Unknown save outcomes are not discarded or represented as saved. Full
-interrupted-save completion and installed recovery evidence remain required.
+Unknown save outcomes are not discarded or represented as saved. Core retains
+the exact approved save candidate for an explicit, thread-bound continuation
+against the original revision. Ordinary commit replay and result queries never
+retry that write. Old records without retained candidates remain queryable but
+cannot acquire continuation authority from caller bytes. Installed recovery
+evidence remains required.
 Numeric/formula/merged spreadsheet targets remain excluded from text replacement
 until their typed modification paths are complete. Persistent annotation,
 format-fidelity, native undo/restart and multi-object recovery acceptance remain

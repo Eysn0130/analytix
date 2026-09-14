@@ -50,6 +50,7 @@ export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('annotate'), ...editingTarget }).strict(),
   z.object({ action: z.literal('undoChange'), ...editingTarget, threadId }).strict(),
   z.object({ action: z.literal('cancelChange'), ...editingTarget, threadId, changeId: digest }).strict(),
+  z.object({ action: z.literal('resumeChange'), ...editingTarget, threadId, changeId: digest }).strict(),
   z.object({ action: z.literal('save'), ...editingTarget }).strict(),
   z.object({ action: z.literal('saveStatus'), objectId: digest }).strict(),
   z.object({ action: z.literal('reference'), ...editingTarget, selectionToken, threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/), editable: z.boolean() }).strict(),

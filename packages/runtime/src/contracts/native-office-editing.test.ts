@@ -75,7 +75,7 @@ describe('native selection proposal transport', () => {
 
 
 describe('durable protected-local recovery contracts',()=>{
-  const change=()=>({changeId:'e'.repeat(64),threadId:'thread_main',proposalId:'c'.repeat(48),baseRevision:'b'.repeat(64),revision:'d'.repeat(64),status:'committed',beforeText:'原始字段',afterText:'修改后字段',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:true,canCancel:false,canRetryUndo:false,createdAt:'2026-09-15T00:00:00Z',savedAt:'2026-09-15T00:01:00Z'})
+  const change=()=>({changeId:'e'.repeat(64),threadId:'thread_main',proposalId:'c'.repeat(48),baseRevision:'b'.repeat(64),revision:'d'.repeat(64),status:'committed',beforeText:'原始字段',afterText:'修改后字段',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:true,canCancel:false,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:'2026-09-15T00:01:00Z'})
   it('requires approval identity on commits and replacements',()=>{
     for(const field of ['changeId','threadId']){
       const request:Record<string,unknown>=input();delete request[field]
@@ -99,8 +99,10 @@ describe('durable protected-local recovery contracts',()=>{
   })
   it('accepts bounded lifecycle records and rejects omitted capabilities or unknown authority fields',()=>{
     expect(nativeOfficeRecoverySchema.safeParse({current:change(),pending:null}).success).toBe(true)
+    expect(nativeOfficeRecoverySchema.safeParse({current:null,pending:{...change(),status:'unknown',canUndo:false,canResume:true}}).success).toBe(true)
+    expect(nativeOfficeChangeSchema.safeParse({...change(),canResume:'true'}).success).toBe(false)
     expect(nativeOfficeSelectionResponseSchema.safeParse({ok:true,recovery:{current:change(),pending:null}}).success).toBe(true)
-    for(const field of ['threadId','saveOperationId','undoOperationId','canUndo','canCancel','canRetryUndo']){
+    for(const field of ['threadId','saveOperationId','undoOperationId','canUndo','canCancel','canRetryUndo','canResume']){
       const incomplete:Record<string,unknown>=change();delete incomplete[field]
       expect(nativeOfficeChangeSchema.safeParse(incomplete).success).toBe(false)
     }

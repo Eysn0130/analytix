@@ -99,6 +99,9 @@ func (f *fakeNativeEditing) UndoNativeChange(_ context.Context, id, thread, chan
 	f.document.Revision = f.draft.BaseRevision
 	return fileport.Receipt{OperationID: "native_undo_" + change, Revision: f.draft.BaseRevision, Status: fileport.StatusCommitted, SavedAt: "2026-09-15T01:00:00Z"}, nil
 }
+func (f *fakeNativeEditing) ResumeNativeChange(ctx context.Context, id, thread, change, revision string) (fileport.Receipt, error) {
+	return f.CommitNativeChange(ctx, id, thread, change, "native_save_"+change, revision, "stored-candidate")
+}
 func (f *fakeNativeEditing) CancelNativeChange(_ context.Context, id, thread, change, revision string) (fileport.NativeRecovery, error) {
 	f.calls = append(f.calls, "native-cancel")
 	f.args = []string{id, thread, change, revision}
@@ -163,6 +166,7 @@ func TestNativeMissingDurableOwnerCannotApproveOrCommit(t *testing.T) {
 		"commit-object":   nativeCommitFields("docx", []byte("a")),
 		"object-recovery": map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main"},
 		"undo-change":     map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "changeId": strings.Repeat("a", 64), "baseRevision": base.document.Revision},
+		"resume-change":   map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "changeId": strings.Repeat("a", 64), "baseRevision": base.document.Revision},
 		"cancel-change":   map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "changeId": strings.Repeat("a", 64), "baseRevision": base.document.Revision},
 	} {
 		if out := nativeInvoke(t, a, operation, input); out["code"] != "unavailable" {
@@ -290,54 +294,62 @@ func TestNativeReopenedUndoHoldsFreshCaptureAndReplaysWithoutNewBytes(t *testing
 }
 
 func TestNativeReopenedPreparedCommitHoldsCaptureAndReplays(t *testing.T) {
-	a, fake, _ := nativeRecoveryFixture(t, "docx")
-	fake.receipt = fileport.Receipt{Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-15T00:00:00Z"}
-	fields := approvedNativeCommit(t, a, fake, "docx", []byte("after"))
-	if out := nativeInvoke(t, a, "close-object", map[string]any{"sessionId": fake.document.SessionID}); out["ok"] != true {
-		t.Fatal(out)
-	}
-	a = New("docx", fake, func(context.Context) bool { return true })
-	active, captures := 0, 0
-	if err := a.BindSelectionHost(&nativeTestProjector{}, func(_ context.Context, _, _ string, read func() error) (func(), error) {
-		captures++
-		if err := read(); err != nil {
-			return nil, err
-		}
-		active++
-		return func() { active-- }, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if out := nativeInvoke(t, a, "open-object", map[string]any{"object": map[string]any{"workspace": "/workspace", "path": "report.docx"}}); out["ok"] != true {
-		t.Fatal(out)
-	}
-	fake.onCommit = func() {
-		if active != 1 {
-			t.Fatal("reopened commit did not hold managed capture")
-		}
-	}
-	for index := 0; index < 2; index++ {
-		if out := nativeInvoke(t, a, "commit-object", fields); out["ok"] != true {
-			t.Fatal("prepared commit/replay rejected", out)
-		}
-		if active != 0 || captures != index+1 {
-			t.Fatal("commit capture leaked", active, captures)
-		}
-	}
-	fake.document.Revision = strings.Repeat("f", 64)
-	fake.calls = nil
-	if out := nativeInvoke(t, a, "commit-object", fields); out["ok"] != false || active != 0 {
-		t.Fatal("replay accepted unrelated revision", out)
-	}
-	for _, call := range fake.calls {
-		if call == "native-commit" {
-			t.Fatal("stale replay reached commit owner")
-		}
-	}
-	a.capture = nil
-	fake.calls = nil
-	if out := nativeInvoke(t, a, "commit-object", fields); out["code"] != "projection_unavailable" || len(fake.calls) != 0 {
-		t.Fatal("missing capture owner reached commit", out)
+	for _, operation := range []string{"commit-object", "resume-change"} {
+		t.Run(operation, func(t *testing.T) {
+			a, fake, _ := nativeRecoveryFixture(t, "docx")
+			fake.receipt = fileport.Receipt{Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-15T00:00:00Z"}
+			fields := approvedNativeCommit(t, a, fake, "docx", []byte("after"))
+			if out := nativeInvoke(t, a, "close-object", map[string]any{"sessionId": fake.document.SessionID}); out["ok"] != true {
+				t.Fatal(out)
+			}
+			a = New("docx", fake, func(context.Context) bool { return true })
+			active, captures := 0, 0
+			if err := a.BindSelectionHost(&nativeTestProjector{}, func(_ context.Context, _, _ string, read func() error) (func(), error) {
+				captures++
+				if err := read(); err != nil {
+					return nil, err
+				}
+				active++
+				return func() { active-- }, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if out := nativeInvoke(t, a, "open-object", map[string]any{"object": map[string]any{"workspace": "/workspace", "path": "report.docx"}}); out["ok"] != true {
+				t.Fatal(out)
+			}
+			fake.onCommit = func() {
+				if active != 1 {
+					t.Fatal("reopened commit did not hold managed capture")
+				}
+			}
+			if operation == "resume-change" {
+				delete(fields, "content")
+				delete(fields, "operationId")
+			}
+			for index := 0; index < 2; index++ {
+				if out := nativeInvoke(t, a, operation, fields); out["ok"] != true {
+					t.Fatal("prepared commit/replay rejected", out)
+				}
+				if active != 0 || captures != index+1 {
+					t.Fatal("commit capture leaked", active, captures)
+				}
+			}
+			fake.document.Revision = strings.Repeat("f", 64)
+			fake.calls = nil
+			if out := nativeInvoke(t, a, operation, fields); out["ok"] != false || active != 0 {
+				t.Fatal("replay accepted unrelated revision", out)
+			}
+			for _, call := range fake.calls {
+				if call == "native-commit" {
+					t.Fatal("stale replay reached commit owner")
+				}
+			}
+			a.capture = nil
+			fake.calls = nil
+			if out := nativeInvoke(t, a, operation, fields); out["code"] != "projection_unavailable" || len(fake.calls) != 0 {
+				t.Fatal("missing capture owner reached commit", out)
+			}
+		})
 	}
 }
 

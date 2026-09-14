@@ -218,15 +218,20 @@ func (s *ObjectEditingFiles) retireNativeRecord(target objectEditingTarget, iden
 			return err
 		}
 	}
-	path := s.nativePath(identity, change, ".before")
-	body, blobHash, err := s.readNativePrivate(path, MaxOfficeObjectBytes)
-	if errors.Is(err, editing.ErrOperationNotFound) || err == nil && len(body) == 0 {
-		return nil
+	for _, blob := range []struct{ suffix, hash string }{{".before", r.Draft.BaseRevision}, {".after", r.AfterHash}} {
+		path := s.nativePath(identity, change, blob.suffix)
+		body, blobHash, err := s.readNativePrivate(path, MaxOfficeObjectBytes)
+		if errors.Is(err, editing.ErrOperationNotFound) || err == nil && len(body) == 0 {
+			continue
+		}
+		if err != nil || blobHash != blob.hash {
+			return editing.ErrPersistence
+		}
+		if err = s.writeNativePrivate(path, []byte{}, blobHash, MaxOfficeObjectBytes); err != nil {
+			return err
+		}
 	}
-	if err != nil || blobHash != r.Draft.BaseRevision {
-		return editing.ErrPersistence
-	}
-	return s.writeNativePrivate(path, []byte{}, blobHash, MaxOfficeObjectBytes)
+	return nil
 }
 
 func (s *ObjectEditingFiles) drainNativeRetiring(target objectEditingTarget, index *nativeRecoveryIndex, hash *string) error {
@@ -502,6 +507,15 @@ func (s *ObjectEditingFiles) nativeStatus(ctx context.Context, target objectEdit
 	if missingJournal && record.UndoStarted && revision == record.AfterHash {
 		status.CanRetryUndo, status.Revision = true, record.AfterHash
 	}
+	if !record.UndoStarted && record.AfterHash != "" && status.Status == "unknown" && revision == d.BaseRevision {
+		status.CanResume, err = s.nativeCanResume(record)
+		if err != nil {
+			return status, err
+		}
+		if status.CanResume {
+			status.Revision = record.AfterHash
+		}
+	}
 	status.CanCancel = canCancel
 	switch status.Status {
 	case "prepared":
@@ -556,6 +570,9 @@ func (s *ObjectEditingFiles) nativeRecoveryLocked(ctx context.Context, target ob
 		if err != nil {
 			return result, err
 		}
+		if status.CanResume && (index.Preparing != nil || s.nativeCurrentUndoSettled(target, index) != nil) {
+			status.CanResume = false
+		}
 		if status.Status == "committed" || status.Status == "undone" {
 			if err = s.nativeCurrentUndoSettled(target, index); err != nil {
 				return result, err
@@ -585,6 +602,7 @@ func (s *ObjectEditingFiles) nativeRecoveryLocked(ctx context.Context, target ob
 				return result, err
 			}
 			status.CanCancel = false
+			status.CanResume = false
 			if index.Pending != "" || index.Preparing != nil {
 				status.CanUndo, status.CanRetryUndo = false, false
 			}
@@ -650,26 +668,28 @@ func (s *ObjectEditingFiles) CommitNativeChange(ctx context.Context, input editi
 	if record.AfterHash != "" && record.AfterHash != afterHash {
 		return editing.Receipt{}, editing.ErrOperationMismatch
 	}
-	if record.AfterHash == "" {
+	firstAttempt := record.AfterHash == ""
+	if !firstAttempt {
+		// AfterHash is the durable boundary between the initial save request
+		// and a replay. Even without a v1 journal, a replay cannot recreate
+		// candidate bytes or implicitly authorize the interrupted save.
+		if _, _, journalErr := s.readRecord(input.ObjectIdentity, input.OperationID); errors.Is(journalErr, editing.ErrOperationNotFound) {
+			return editing.Receipt{OperationID: input.OperationID, Status: editing.StatusUnknown}, nil
+		} else if journalErr != nil {
+			return editing.Receipt{}, journalErr
+		}
+	}
+	if firstAttempt {
 		record.AfterHash = afterHash
 		if err = s.writeNativeRecord(record, recordHash); err != nil {
 			return editing.Receipt{}, err
 		}
+		if err = s.storeNativeCandidate(record, encoded); err != nil {
+			return editing.Receipt{}, err
+		}
 	}
 	receipt, commitErr := s.commitLocked(ctx, input.CommitInput)
-	if receipt.Status == editing.StatusCommitted && index.Pending == input.ChangeID {
-		if index.Current != "" {
-			index.Retiring = append(index.Retiring, index.Current)
-		}
-		index.Current, index.Pending = input.ChangeID, ""
-		if err = s.storeNativeIndex(index, &indexHash); err != nil {
-			return receipt, editing.ErrPersistence
-		}
-		if err = s.drainNativeRetiring(target, &index, &indexHash); err != nil {
-			return receipt, err
-		}
-	}
-	return receipt, commitErr
+	return s.finishNativeSave(target, index, indexHash, input.ChangeID, receipt, commitErr)
 }
 
 func (s *ObjectEditingFiles) UndoNativeChange(ctx context.Context, input editing.NativeUndoInput) (editing.Receipt, error) {
