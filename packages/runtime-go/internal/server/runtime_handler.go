@@ -18,9 +18,12 @@ import (
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	loopapp "analytix.local/runtime-go/internal/app/loop"
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	mediaexecutionapp "analytix.local/runtime-go/internal/app/mediaexecution"
 	nativecomponentapp "analytix.local/runtime-go/internal/app/nativecomponent"
+	objecteditingapp "analytix.local/runtime-go/internal/app/objectediting"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
+	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	sessionapp "analytix.local/runtime-go/internal/app/session"
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
@@ -43,6 +46,7 @@ import (
 const DefaultRuntimeToken = httpapi.DefaultRuntimeToken
 
 type runtimeServerHandler struct {
+	officePackageHost  *packagehostapp.Service
 	runtimeToken       string
 	insecure           bool
 	startedAt          string
@@ -64,6 +68,8 @@ type runtimeServerHandler struct {
 	pendingWork        *pendingworkapp.Service
 	checkpoints        checkpointapp.SnapshotAuthority
 	workspaceMutations *workspacemutationapp.Coordinator
+	managedEditing     *managededitingapp.Registry
+	objectEditing      *objecteditingapp.Service
 	publicProjector    threadapp.PublicProjector
 	control            *controlapp.Controller
 	sessions           *sessionapp.Service

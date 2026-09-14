@@ -1,3 +1,4 @@
+import type { ProviderEndpointKind } from './provider-display'
 import type {
   AppSettingsPatch,
   AppSettingsV1,
@@ -451,7 +452,10 @@ export type UpstreamModelsResult =
 export type ModelProviderModelGroup = {
   providerId: string
   label: string
+  endpointKind?: ProviderEndpointKind
   modelIds: string[]
+  /** Display-only labels projected from the committed provider endpoint. */
+  modelLabels?: Record<string, string>
   modelProfiles?: Record<string, ModelProviderModelProfileV1>
 }
 export type ModelCapabilityProbeRequest = {
@@ -1251,6 +1255,18 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  office: {
+    onWorkspaceCommand: (handler: (command: import('./native-office').NativeWorkspaceCommand) => void) => () => void
+    pickFile: (request: import('zod').infer<typeof import('./native-office').nativeOfficePickerRequestSchema>) => Promise<import('zod').infer<typeof import('./native-office').nativeOfficePickerResponseSchema>>
+    request: (request: import('./native-office').NativeOfficeRequest) => Promise<import('./native-office').NativeOfficeResponse>
+    onChange: (handler: (view: import('./native-office').NativeOfficeView | null) => void) => () => void
+  }
+  packageHost: {
+    request: (request: import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostRequest) => Promise<import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostResponse>
+  }
+  objects: {
+    request: (request: import('../../packages/runtime/src/contracts/object-editing').ObjectEditingRequest) => Promise<import('../../packages/runtime/src/contracts/object-editing').ObjectEditingResponse>
+  }
   settings: AnalytixSettingsApi
   account: AnalytixAccountApi
   providerRegistry: AnalytixProviderRegistryApi

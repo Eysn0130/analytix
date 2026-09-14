@@ -14,15 +14,12 @@ describe('WriteWorkspaceToolbar', () => {
       createElement(WriteWorkspaceToolbar, {
         activeFileIsImage: false,
         activeFileIsText: true,
-        activeFileLabel: 'Markdown',
-        activeFileName: 'notes.md',
         activeFilePath: '/workspace/notes.md',
         documentStatsLabel: null,
         assistantOpen: false,
         exportInFlight: false,
         exportMenuOpen: false,
         exportMenuRef: createRef<HTMLDivElement>(),
-        leftSidebarCollapsed: true,
         liveModeActive: true,
         modeMenuItems: [],
         modeMenuOpen: false,
@@ -44,16 +41,9 @@ describe('WriteWorkspaceToolbar', () => {
       })
     )
 
-    expect(html).toContain('ds-shell-controls-safe-inset')
-    expect(html).toContain('ds-chat-shell-header')
-    expect(html).toContain('chat-topbar-drag-region')
-    expect(html).toContain('chat-topbar-session ds-shell-controls-safe-motion flex min-w-0 items-center gap-2.5')
-    expect(html).toContain('session-header-compact flex min-h-0 min-w-0 flex-1 items-center gap-2 text-left')
-    expect(html).toContain('flex min-w-0 items-center gap-1.5')
-    expect(html).toContain('ds-session-actions-anchor invisible pointer-events-none')
-    expect(html).toContain('ds-session-actions-trigger')
-    expect(html).toContain('text-[13px] font-semibold leading-[17px] tracking-[-0.01em]')
-    expect(html).toContain('session-header-compact-meta')
+    expect(html).not.toContain('chat-topbar-drag-region')
+    expect(html).not.toContain('session-header-compact')
+    expect(html).toContain('aria-label="Typography tools"')
     expect(html).toContain('ds-toolbar-icon-svg')
     expect(html).toContain('write-workspace-toolbar-modes relative flex min-w-0 items-center justify-start')
     expect(html).toContain('write-mode-split-control')
@@ -81,7 +71,7 @@ describe('WriteWorkspaceToolbar', () => {
     expect(html).toContain('aria-label="Alignment"')
     expect(html).toContain('aria-haspopup="menu"')
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('write-workspace-toolbar-actions chat-workbench-topbar ds-no-drag flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-3')
+    expect(html).toContain('write-workspace-toolbar-actions ds-no-drag flex w-full min-w-0 flex-wrap items-center gap-2')
     expect(html).toContain('write-toolbar-action-icons')
     expect(html).toContain('write-save-icon-saved')
     expect(html).toContain('ds-toolbar-tooltip-anchor')

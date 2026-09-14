@@ -1,3 +1,4 @@
+import { nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
@@ -572,6 +573,38 @@ const api = {
     onThreadHandoffEvent: flatApi.onThreadHandoffEvent,
     listEditors: flatApi.listEditors,
     openEditorPath: flatApi.openEditorPath
+  },
+  office: {
+    onWorkspaceCommand: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeWorkspaceCommandSchema.safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:workspace-command', listener)
+      return () => ipcRenderer.removeListener('office:workspace-command', listener)
+    },
+    pickFile: async (request) => {
+      const parsed = nativeOfficePickerResponseSchema.safeParse(await ipcRenderer.invoke('office:pick-file', request))
+      return parsed.success ? parsed.data : { ok: false, error: 'unavailable' }
+    },
+    request: async (request) => {
+      const parsed = nativeOfficeResponseSchema.safeParse(await ipcRenderer.invoke('office:request', request))
+      return parsed.success ? parsed.data : { ok: false, view: null, error: 'unavailable' }
+    },
+    onChange: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeOfficeViewSchema.nullable().safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:changed', listener)
+      return () => ipcRenderer.removeListener('office:changed', listener)
+    }
+  },
+  packageHost: {
+    request: (request) => ipcRenderer.invoke('plugin:package-host', request)
+  },
+  objects: {
+    request: (request) => ipcRenderer.invoke('object:editing', request)
   },
   files: {
     listDirectory: flatApi.listWorkspaceDirectory,

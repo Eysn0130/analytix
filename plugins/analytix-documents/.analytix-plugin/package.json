@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "packageId": "analytix-documents",
+  "packageVersion": "0.1.0",
+  "contributions": {
+    "skills": [],
+    "mcpServers": [],
+    "hooks": [],
+    "assets": [
+      {
+        "id": "editor-adapter",
+        "path": "assets/adapter.json"
+      }
+    ],
+    "publicUi": [
+      {
+        "id": "workspace-editor",
+        "path": "ui/editor.json"
+      }
+    ]
+  },
+  "requestedCapabilities": [
+    {
+      "id": "office.local-preview",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "user-selected-object",
+        "read-only"
+      ]
+    }
+  ],
+  "lifecycle": {
+    "protocolVersion": 1,
+    "entryPolicy": "host-static-first-party"
+  }
+}

@@ -433,6 +433,8 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 		darwinKeychain = *cli.DarwinSecretStoreKeychainV1
 	}
 	return runtimeapp.Config{
+		DevelopmentOfficeAssetRoot:              os.Getenv("ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT"),
+		DevelopmentPluginSourceRoot:             os.Getenv("ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT"),
 		RuntimeToken:                            runtimeToken,
 		Insecure:                                cli.Insecure,
 		DurableTempDir:                          firstNonEmpty(cli.RuntimeDurableRoot, cli.DurableTempDir),

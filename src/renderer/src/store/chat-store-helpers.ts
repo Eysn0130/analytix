@@ -49,6 +49,12 @@ export function persistComposerModel(model: string): void {
   writeBrowserStorageItem(COMPOSER_MODEL_STORAGE_KEY, model)
 }
 
+export function readStoredComposerSelection(): ThreadComposerSelection | null {
+  const model = readBrowserStorageItem(COMPOSER_MODEL_STORAGE_KEY)?.trim() ?? ''
+  const providerId = readBrowserStorageItem(COMPOSER_PROVIDER_STORAGE_KEY)?.trim() ?? ''
+  return model && providerId ? { model, providerId } : null
+}
+
 export function readStoredComposerProviderId(
   modelGroups: readonly ModelProviderModelGroup[],
   modelId: string
@@ -234,27 +240,11 @@ export function reconcileCodeWorkspaceRoots(options: {
   writeWorkspaceRoots: readonly (string | undefined | null)[]
   preservedWorkspaceRoots?: readonly (string | undefined | null)[]
 }): string[] {
-  const writeKeys = workspaceIdentityKeySet(options.writeWorkspaceRoots)
-  if (writeKeys.size === 0) {
-    return compactCodeWorkspaceRoots([
-      ...options.codeThreadWorkspaceRoots,
-      ...options.currentRoots,
-      ...(options.preservedWorkspaceRoots ?? [])
-    ])
-  }
-
-  const codeThreadKeys = workspaceIdentityKeySet(options.codeThreadWorkspaceRoots)
-  const preservedKeys = workspaceIdentityKeySet(options.preservedWorkspaceRoots ?? [])
-  const retainedCurrentRoots = options.currentRoots.filter((workspaceRoot) => {
-    const key = workspaceRootIdentityKey(normalizeWorkspaceRoot(workspaceRoot ?? ''))
-    if (!key) return false
-    if (!writeKeys.has(key)) return true
-    return codeThreadKeys.has(key) || preservedKeys.has(key)
-  })
-
+  // Historical writing workspaces remain ordinary project navigation entries.
   return compactCodeWorkspaceRoots([
     ...options.codeThreadWorkspaceRoots,
-    ...retainedCurrentRoots,
+    ...options.currentRoots,
+    ...options.writeWorkspaceRoots,
     ...(options.preservedWorkspaceRoots ?? [])
   ])
 }

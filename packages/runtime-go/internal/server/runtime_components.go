@@ -22,9 +22,13 @@ import (
 	executionpolicy "analytix.local/runtime-go/internal/app/executionpolicy"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	loopapp "analytix.local/runtime-go/internal/app/loop"
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	mediaexecutionapp "analytix.local/runtime-go/internal/app/mediaexecution"
 	nativecomponentapp "analytix.local/runtime-go/internal/app/nativecomponent"
+	objecteditingapp "analytix.local/runtime-go/internal/app/objectediting"
+	officeeditingapp "analytix.local/runtime-go/internal/app/officeediting"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
+	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	publicationauthorityapp "analytix.local/runtime-go/internal/app/publicationauthority"
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	sessionapp "analytix.local/runtime-go/internal/app/session"
@@ -40,6 +44,8 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	managededitingport "analytix.local/runtime-go/internal/ports/managedediting"
+	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -59,7 +65,12 @@ type ProviderExecutionCurrentnessValidator interface {
 }
 
 type RuntimeServerComponents struct {
-	AsyncTurnObserverV1 func(AsyncTurnObservationV1)
+	ManagedEditingFiles      managededitingport.Files
+	OfficeAdapters           map[string]adapterport.Adapter
+	OfficePackageHost        *packagehostapp.Service
+	ObjectEditing            *objecteditingapp.Service
+	UncontainedMCPConfigured bool
+	AsyncTurnObserverV1      func(AsyncTurnObservationV1)
 	// AsyncTurnPhaseObserverV1 is an optional in-process regression barrier.
 	// It receives fixed phase labels only, never public or persisted data.
 	AsyncTurnPhaseObserverV1 func(string)
@@ -252,6 +263,27 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	}
 	handler.control = controlapp.NewController(runtimeControlDriver{handler: handler})
 	handler.sessions = sessionapp.NewService(sessionapp.Dependencies{Repository: handler.store})
+	handler.managedEditing = managededitingapp.New(handler.workspaceMutations, components.ManagedEditingFiles)
+	handler.shellRunner = managedEditingShellRunner{next: handler.shellRunner, registry: handler.managedEditing}
+	handler.objectEditing = components.ObjectEditing
+	handler.officePackageHost = components.OfficePackageHost
+	for _, adapter := range components.OfficeAdapters {
+		if office, ok := adapter.(*officeeditingapp.Adapter); ok {
+			if err := office.BindSelectionHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if components.UncontainedMCPConfigured {
+		if err := handler.managedEditing.BeginOpaque(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	if handler.objectEditing != nil {
+		if err := handler.objectEditing.BindHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+			return nil, err
+		}
+	}
 	handler.threads = threadapp.NewService(threadapp.Dependencies{
 		Repository:               handler.store,
 		DataDir:                  handler.dataDir,

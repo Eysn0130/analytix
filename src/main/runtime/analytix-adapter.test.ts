@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
   defaultKeyboardShortcuts,
@@ -62,6 +62,10 @@ import {
 import type {
   MainOwnedRuntimeAuthorityEnvelopeV1
 } from './main-owned-authority-envelope-v1'
+
+const electronApp = vi.hoisted(() => ({ isPackaged: false, getAppPath: () => process.cwd() }))
+vi.mock('electron', () => ({ app: electronApp }))
+afterEach(() => { electronApp.isPackaged = false })
 
 function mainOwnedAuthorityFixtureV1(): MainOwnedRuntimeAuthorityEnvelopeV1 {
   const publicKey = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1))
@@ -3003,6 +3007,19 @@ exit 1
 	      })
 	      expect(reused).toEqual(target)
 
+          const manifestDir = join(runtimeGoDir, 'internal', 'adapters', 'outbound', 'officeengineassets')
+          mkdirSync(manifestDir, { recursive: true })
+          writeFileSync(join(manifestDir, 'manifest.json'), '{"buildId":"first"}', 'utf8')
+          const withManifest = resolveGoRuntimeLaunchTarget({ runtimeServer: true, appIsPackaged: false,
+            runtimeGoDir, goBinaryCandidates: [], env: { PATH: root, ANALYTIX_GO_RUNTIME_SERVER_CACHE_DIR: cacheDir } })
+          expect(withManifest.command).not.toBe(target.command)
+          writeFileSync(join(manifestDir, 'manifest.json'), '{"buildId":"other"}', 'utf8')
+          const changedManifest = resolveGoRuntimeLaunchTarget({ runtimeServer: true, appIsPackaged: false,
+            runtimeGoDir, goBinaryCandidates: [], env: { PATH: root, ANALYTIX_GO_RUNTIME_SERVER_CACHE_DIR: cacheDir } })
+          expect(changedManifest.command).not.toBe(withManifest.command)
+          // Restore the original source state for the binary-tamper assertion.
+          rmSync(join(manifestDir, 'manifest.json'))
+
 	      writeFileSync(target.command, '#!/bin/sh\nexit 99\n', 'utf8')
 	      expect(() => resolveGoRuntimeLaunchTarget({
 	        runtimeServer: true,
@@ -3298,6 +3315,7 @@ exit 1
       },
       'development-runtime-token'
     )
+    electronApp.isPackaged = true
     const packaged = buildGoRuntimeSidecarEnv(
       settings,
       runtime,
@@ -3305,6 +3323,9 @@ exit 1
       {
         PATH: '/usr/bin',
         NODE_ENV: 'production',
+        ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: '/untrusted/plugin-source',
+        ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT: '/untrusted/office-assets',
+        analytix_development_office_asset_root: '/untrusted/lowercase-assets',
         ANALYTIX_API_KEY: syntheticCredential,
         ANALYTIX_MODEL_PROVIDERS: JSON.stringify({ apiKey: syntheticCredential }),
         ANALYTIX_RUNTIME_DEEPSEEK_API_KEY: syntheticCredential,
@@ -3318,6 +3339,10 @@ exit 1
 
     expect(development.ANALYTIX_MCP_CONFIG_PATH).toBe('/tmp/analytix-k4-shared-profile/config.json')
     expect(packaged.ANALYTIX_MCP_CONFIG_PATH).toBe(development.ANALYTIX_MCP_CONFIG_PATH)
+    expect(development.ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT).toBe(process.cwd())
+    expect(packaged.ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT).toBeUndefined()
+    expect(packaged.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT).toBeUndefined()
+    expect(packaged.analytix_development_office_asset_root).toBeUndefined()
     for (const environment of [development, packaged]) {
       expect(environment.ANALYTIX_API_KEY).toBeUndefined()
       expect(environment.ANALYTIX_MODEL_PROVIDERS).toBeUndefined()

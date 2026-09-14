@@ -48,6 +48,13 @@ function renderManager(target: ModelProviderProfileV1): string {
 }
 
 describe('ProviderModelsManager', () => {
+  it.each(['https://api.deepseek.com', 'http://127.0.0.1:5500', 'https://gateway.test'])('shows a stable model name and editable API ID at %s', (baseUrl) => {
+    const html = renderManager(provider({
+      baseUrl, models: ['deepseek-v4-flash']
+    }))
+    expect(html).toContain('>V4.1 Flash</span>')
+    expect(html).toContain('>deepseek-v4-flash</span>')
+  })
   it('renders the empty state with an add button', () => {
     const html = renderManager(provider())
     expect(html).toContain('No models yet')

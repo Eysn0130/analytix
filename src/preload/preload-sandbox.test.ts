@@ -127,10 +127,13 @@ describe('preload sandbox guard', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/shared/analytix-api.ts'), 'utf8')
     const facade = source.match(/export type AnalytixDomainFacade = \{([\s\S]*?)^\}/m)
     const domains = Array.from(
-      facade?.[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm) ?? []
+      facade?.[1].matchAll(/^  ([A-Za-z_$][\w$]*)\s*:/gm) ?? []
     ).map((match) => match[1])
 
     expect(domains).toEqual([
+      'office',
+      'packageHost',
+      'objects',
       'settings',
       'account',
       'providerRegistry',

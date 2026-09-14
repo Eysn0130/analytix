@@ -57,6 +57,7 @@ const writeExportServiceMock = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => tmpdir()),
+    on: vi.fn(),
     quit: vi.fn()
   },
   BrowserWindow: {

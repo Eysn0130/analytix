@@ -24,17 +24,18 @@ type MutationOperationPath = checkpointapp.OperationPathRequest
 type MutationOperationDraft = checkpointapp.OperationDraft
 
 type MutationToolInput struct {
-	Context           context.Context
-	Workspace         string
-	Args              map[string]any
-	ArgumentsJSON     []byte
-	ToolName          string
-	SandboxMode       string
-	AllowWriteRoots   []string
-	ProtectedReadDirs []string
-	MutationAuthority ConditionalMutationAuthority
-	Checkpoint        MutationCheckpointHooks
-	AcquireMutation   func(context.Context) (func(), error)
+	Context             context.Context
+	Workspace           string
+	Args                map[string]any
+	ArgumentsJSON       []byte
+	ToolName            string
+	SandboxMode         string
+	AllowWriteRoots     []string
+	ProtectedReadDirs   []string
+	MutationAuthority   ConditionalMutationAuthority
+	Checkpoint          MutationCheckpointHooks
+	AcquireMutation     func(context.Context) (func(), error)
+	CheckManagedTargets func(...string) error
 }
 
 type PreparedNotebookEditTool struct {
@@ -628,6 +629,9 @@ func sandboxBlockedMutationOutput(input MutationToolInput) (map[string]any, bool
 }
 
 func mandatoryProtectedMutationOutput(input MutationToolInput, paths ...string) (map[string]any, bool) {
+	if input.CheckManagedTargets != nil && input.CheckManagedTargets(paths...) != nil {
+		return map[string]any{"code": "managed_editing_mutation_blocked", "error": "This object has a controlled editing session. Submit a proposal for review."}, true
+	}
 	for _, path := range paths {
 		if output := MandatoryProtectedPathOutput(input.Workspace, path, input.ProtectedReadDirs); output != nil {
 			return output, true

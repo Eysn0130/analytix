@@ -8,6 +8,7 @@ import (
 )
 
 type BuiltinToolSchemaInput struct {
+	NativeSelections    bool
 	AllowBackgroundBash bool
 	WebFetch            bool
 }
@@ -103,6 +104,12 @@ func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
 			Description: "Delete a named Go symbol from a .go file using AST parsing. Relative paths resolve inside the active workspace; explicit external paths are allowed with danger-full-access or a configured allow_write root. Supports func, method, type, interface, const, and var; use kind and parent to disambiguate methods. Requires a fresh read of the file and approval unless policy is auto.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Go source file path"},"name":{"type":"string","description":"Symbol name to delete"},"kind":{"type":"string","description":"Optional kind filter: func, method, type, interface, const, var"},"parent":{"type":"string","description":"Optional receiver/parent type for method disambiguation"}},"required":["path","name"],"additionalProperties":false}`),
 		},
+	}
+	if input.NativeSelections {
+		tools = append(tools, []domainmodel.ToolSchema{
+			{Name: "native_selection_read", Description: "Read the model-safe projection of a native Office selection explicitly attached to this conversation. Use only its opaque scopeId. Protected parts are immutable references. This does not read a file path or expose raw document bytes.", Parameters: json.RawMessage(`{"type":"object","properties":{"scopeId":{"type":"string","pattern":"^[a-f0-9]{48}$"}},"required":["scopeId"],"additionalProperties":false}`)},
+			{Name: "native_selection_propose", Description: "Propose replacement text for an editable native Office selection in this conversation. Return typed literal/protected parts; include every protected reference exactly once in original order, never substitute or disclose protected text. This creates a proposal for user approval; it does not apply, save or overwrite the document. Use a stable operationId for retries.", Parameters: json.RawMessage(`{"type":"object","properties":{"scopeId":{"type":"string","pattern":"^[a-f0-9]{48}$"},"operationId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},"parts":{"type":"array","maxItems":256,"items":{"oneOf":[{"type":"object","properties":{"kind":{"type":"string","enum":["literal"]},"text":{"type":"string","maxLength":65536}},"required":["kind","text"],"additionalProperties":false},{"type":"object","properties":{"kind":{"type":"string","enum":["protected"]},"protectedRef":{"type":"string","pattern":"^protected_[a-f0-9]{48}$"}},"required":["kind","protectedRef"],"additionalProperties":false}]}}},"required":["scopeId","operationId","parts"],"additionalProperties":false}`)},
+		}...)
 	}
 	if input.WebFetch {
 		tools = append(tools, domainmodel.ToolSchema{

@@ -18,22 +18,25 @@ const (
 )
 
 type JournalV1 struct {
-	SchemaVersion       int            `json:"schemaVersion"`
-	Purpose             string         `json:"purpose"`
-	RecordDigest        string         `json:"recordDigest"`
-	TransactionID       string         `json:"transactionId"`
-	Sequence            uint64         `json:"sequence"`
-	Phase               JournalPhaseV1 `json:"phase"`
-	IntentID            string         `json:"intentId"`
-	GenerationID        string         `json:"generationId"`
-	StagingRelativePath string         `json:"stagingRelativePath"`
-	ActiveRelativePath  string         `json:"activeRelativePath"`
-	RecordedAt          string         `json:"recordedAt"`
+	SchemaVersion            int            `json:"schemaVersion"`
+	Purpose                  string         `json:"purpose"`
+	RecordDigest             string         `json:"recordDigest"`
+	TransactionID            string         `json:"transactionId"`
+	Sequence                 uint64         `json:"sequence"`
+	Phase                    JournalPhaseV1 `json:"phase"`
+	IntentID                 string         `json:"intentId"`
+	GenerationID             string         `json:"generationId"`
+	StagingRelativePath      string         `json:"stagingRelativePath"`
+	ActiveRelativePath       string         `json:"activeRelativePath"`
+	RecordedAt               string         `json:"recordedAt"`
+	Origin                   string         `json:"origin,omitempty"`
+	SourceRegistrationSHA256 string         `json:"sourceRegistrationSha256,omitempty"`
 }
 
 func NewJournalV1(intent IntentV1, generationID, stagingRelativePath, activeRelativePath string, sequence uint64, phase JournalPhaseV1, recordedAt time.Time) (JournalV1, error) {
 	record := JournalV1{
 		SchemaVersion: SchemaVersionV1, Purpose: JournalPurposeV1,
+		Origin: intent.Origin, SourceRegistrationSHA256: intent.SourceRegistrationSHA256,
 		TransactionID: intent.IntentID, Sequence: sequence, Phase: phase, IntentID: intent.IntentID,
 		GenerationID: generationID, StagingRelativePath: stagingRelativePath, ActiveRelativePath: activeRelativePath,
 		RecordedAt: recordedAt.UTC().Format(time.RFC3339Nano),
@@ -50,6 +53,7 @@ func ValidateJournalV1(record JournalV1) error {
 		!canonicalDigest(record.RecordDigest) || record.RecordDigest != deriveJournalDigest(record) ||
 		!canonicalDigest(record.TransactionID) || record.TransactionID != record.IntentID ||
 		record.Sequence == 0 || !validJournalPhase(record.Sequence, record.Phase) ||
+		!validOriginProjectionV1(record.Origin, record.SourceRegistrationSHA256) ||
 		!canonicalDigest(record.IntentID) || !canonicalDigest(record.GenerationID) ||
 		!canonicalRelativePath(record.StagingRelativePath) || !canonicalRelativePath(record.ActiveRelativePath) ||
 		!canonicalTime(record.RecordedAt) {

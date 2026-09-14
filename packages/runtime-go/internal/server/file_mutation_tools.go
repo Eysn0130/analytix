@@ -62,10 +62,11 @@ func (h *runtimeServerHandler) mutationToolInput(ctx context.Context, pending ru
 		Args:          args,
 		ArgumentsJSON: append([]byte(nil), pending.Call.Arguments...),
 		ToolName:      pending.Call.Name, ProtectedReadDirs: h.protectedReadDirs,
-		SandboxMode:       pending.SandboxMode,
-		AllowWriteRoots:   h.allowWriteRoots,
-		MutationAuthority: h.mutationAuthority,
-		AcquireMutation:   h.workspaceMutations.Acquire,
+		SandboxMode:         pending.SandboxMode,
+		AllowWriteRoots:     h.allowWriteRoots,
+		MutationAuthority:   h.mutationAuthority,
+		AcquireMutation:     h.workspaceMutations.Acquire,
+		CheckManagedTargets: h.checkManagedMutation,
 		Checkpoint: filestore.MutationCheckpointHooks{
 			BeginOperation: func(paths []filestore.MutationOperationPath) (filestore.MutationOperationDraft, error) {
 				return operationService.Begin(ctx, checkpointapp.BeginOperationInput{

@@ -1,3 +1,4 @@
+import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from '@shared/provider-display'
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type {
   AppSettingsPatch,
@@ -1752,7 +1753,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       >
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 truncate text-[13.5px] font-semibold text-ds-ink">
-            {item.name.trim() || item.id}
+            {providerDisplayName(item.id, item.name)}
           </span>
           {isDraft ? <ProviderBadge tone="warning">{t('modelProviderDraftBadge')}</ProviderBadge> : null}
           {inUse ? <ProviderBadge tone="accent">{t('modelProviderInUse')}</ProviderBadge> : null}
@@ -1833,49 +1834,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   return (
     <SettingsCard title={t('providers')}>
       <SettingRow
-        title="Portable manifest / protected credential recovery"
-        description="Complete ordinary portable manifest import first. Recovery files and confirmations stay in the Main process; only bounded status is shown here."
-        wideControl
-        control={
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ds-border bg-ds-card p-3 text-[13px] text-ds-muted">
-            <Lock size={15} aria-hidden="true" />
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('createDestinationRequest')}
-            >
-              Prepare destination request
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('createSourceBundle')}
-            >
-              Create source bundle
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('applyDestinationBundle')}
-            >
-              Apply destination bundle
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('finalizeSourceReceipt')}
-            >
-              Finalize source receipt
-            </button>
-            {protectedRecoveryStatus ? <span role="status">{protectedRecoveryStatus}</span> : null}
-          </div>
-        }
-      />
-      <SettingRow
         title={t('proxyUrl')}
         description={t('proxyUrlDesc')}
         control={
@@ -1902,7 +1860,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         description={t('providersDesc')}
         wideControl
         control={
-          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
             <div className="flex flex-col gap-3">
               {grouped ? (
                 <>
@@ -1963,9 +1921,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate text-[14px] font-semibold text-ds-ink">
-                      {activeProvider.name.trim() || activeProvider.id}
+                      {providerDisplayName(activeProvider.id, activeProvider.name)}
                     </span>
-                    <span className="font-mono text-[12px] text-ds-faint">{activeProvider.id}</span>
+                    <span className="text-[11px] font-normal text-ds-faint">
+                      {t(`providerConnection_${providerEndpointKind(activeProvider.baseUrl)}`)}
+                    </span>
                     {!canEditActiveProviderId ? (
                       <span title={t('modelProviderIdLocked')} className="text-ds-faint">
                         <Lock className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -2024,7 +1984,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       {t('modelProviderName')}
                       <input
                         className={textInputClass}
-                        value={activeProvider.name}
+                        value={isDraftActive ? activeProvider.name : providerDisplayName(activeProvider.id, activeProvider.name)}
                         readOnly={!isDraftActive}
                         onChange={(e) => updateModelProvider(activeProvider.id, { name: e.target.value })}
                       />
@@ -2068,12 +2028,19 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         }}
                         visible={showApiKey}
                         onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
-                        placeholder={t('modelProviderApiKeyPlaceholder')}
+                        placeholder={t(activeRegistryProvider?.credentialConfigured === true
+                          ? 'modelProviderApiKeySavedPlaceholder'
+                          : 'modelProviderApiKeyPlaceholder')}
                         autoComplete="off"
                         showLabel={t('showSecret')}
                         hideLabel={t('hideSecret')}
                       />
                     </div>
+                    {activeRegistryProvider?.credentialConfigured === true ? (
+                      <span className="text-[12px] font-normal text-ds-muted">
+                        {t('modelProviderApiKeySavedHint')}
+                      </span>
+                    ) : null}
                   </label>
                   <label className={fieldLabelClass}>
                     {t('modelProviderBaseUrl')}
@@ -2221,7 +2188,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeProvider.models.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2234,7 +2201,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeMediaModelIds.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2268,7 +2235,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                             onChange={() => toggleActiveRouteProvider(providerId)}
                           />
                           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ds-ink">
-                            {profile?.name.trim() || providerId}
+                            {profile ? providerDisplayName(profile.id, profile.name) : providerId}
                           </span>
                           <span className="font-mono text-[11.5px] text-ds-faint">{providerId}</span>
                           {selected ? (
@@ -2671,6 +2638,54 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
           </div>
         }
       />
+      <details className="border-t border-ds-border-muted px-4 py-3">
+        <summary className="cursor-pointer text-[13px] font-medium text-ds-muted focus-visible:outline-accent">
+          {t('modelProviderRecoveryTools')}
+        </summary>
+        <SettingRow
+          title="Portable manifest / protected credential recovery"
+          description="Complete ordinary portable manifest import first. Recovery files and confirmations stay in the Main process; only bounded status is shown here."
+          wideControl
+          control={
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ds-border bg-ds-card p-3 text-[13px] text-ds-muted">
+              <Lock size={15} aria-hidden="true" />
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('createDestinationRequest')}
+              >
+                Prepare destination request
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('createSourceBundle')}
+              >
+                Create source bundle
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('applyDestinationBundle')}
+              >
+                Apply destination bundle
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('finalizeSourceReceipt')}
+              >
+                Finalize source receipt
+              </button>
+              {protectedRecoveryStatus ? <span role="status">{protectedRecoveryStatus}</span> : null}
+            </div>
+          }
+        />
+      </details>
     </SettingsCard>
   )
 }

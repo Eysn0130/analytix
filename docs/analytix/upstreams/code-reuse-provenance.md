@@ -262,3 +262,51 @@ the actual source/destination diff before adding a notice or declaring closure.
 - Destination: Analytix-authored RC Owner orchestration, monitoring and lifecycle guidance, plus accepted agent-handoff-review governance requirements. No new hook, daemon, dependency, external tool schema or installed Superpowers workflow.
 - Decision/reviewer: coordinating agent, 2026-09-07. Adopt actionable status, bounded follow-up and safe context transfer; reject continuous polling, fixed model limits, automatic scheduling/retired-task reuse and inferred publication authority.
 - Validation: scoped skill/schema/link checks, independent behavioral scenarios and one read-only native wait snapshot; see the delivery record for results. Live scheduling and product restart are outside this maintenance evidence.
+
+## 2026-09-14 — local native Office adapter
+
+- Source: `https://github.com/allotropia/zetajs`, release 1.2.0, commit
+  `57360bcb0e7726ffa0e66567c8041261b959f8dd`. Public API/example references:
+  `examples/standalone/office_thread.js` (Git blob `415317d507fb84ad0d71628ddf14d2e2f85fe099`),
+  `docs/start.md` (`0b78375805ff8a2fe04eaf342283d6a3b7a13814`),
+  `LICENSE` (`d76b2f3a46f96e8a5d587c5c47361964f1432ab3`).
+- Destination: `src/main/office/surface/office-worker.js`, `office-surface.js`,
+  `office-surface.html`. Mode: `port-and-adapt` for the UNO/bootstrap patterns;
+  first-party bounded read-only message protocol, selection projection and
+  compact preview controls. Reviewer: canonical
+  coordinating agent, 2026-09-14. Disposition: `approved` for this MIT-covered
+  source adaptation; native binary distribution remains separately blocked.
+- License: MIT, Copyright (c) 2024 allotropia software GmbH and contributors.
+  The complete notice is retained at `src/main/office/surface/NOTICE.txt`.
+  No upstream binary, font, Qt module or LibreOffice source is copied here.
+- Historical experiment: isolated real DOCX/XLSX/PPTX roundtrips and 21
+  structure/shortcut checks passed for the earlier editable adapter, whose
+  source and evidence are retained outside the product tree. The owner's later
+  preview-only decision supersedes that design: current source removes mutation,
+  export and save acknowledgements, and rejects Office writes in Main and Core.
+  Current bounded development GUI evidence is recorded in
+  `docs/analytix/builtin-office-host.md`; it does not establish packaged admission.
+- External runtime pin: LibreOffice build `efaf0670b4d055f838a2849becb10f08aa06a257`;
+  exact engine and font dependency hashes live in
+  `packages/runtime-go/internal/adapters/outbound/officeengineassets/manifest.json`.
+  This is a non-distributable source experiment. Complete binary, linked Qt and
+  font redistribution obligations are unresolved; the bridge's MIT grant does
+  not relicense those assets. Packaged use remains denied.
+
+- Native CJK font: Noto Sans CJK SC Regular, official `notofonts/noto-cjk`
+  commit `f8d157532fbfaeda587e826d4cd5b21a49186f7c`,
+  `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`, SHA-256
+  `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`.
+  SIL Open Font License 1.1; the unmodified font, OFL text and font notice are
+  retained together in the external experiment asset directory. Source admission
+  approves only the fixed loader/manifest: no font bytes enter this repository.
+  The WASM fontconfig loader uses `/usr/share/fonts/analytix` before startup.
+  Independent native Writer rendering and export/reopen passed; this does not
+  establish emoji coverage or waive the engine distribution gap above.
+
+### 2026-09-14 — Office preview design-method intake
+
+- Scope: research/tooling-only; no third-party CSS, JS, font or asset enters the product.
+- Taste `ccbc15639c97057cbfcf32ecebc38ef716e4bb37`: selected redesign/minimalist prompts loaded unchanged in task-local tooling; MIT copyright/license retained with the selected files. Exact source paths/blobs, tool destinations and dispositions are recorded in [the scoped research record](office-preview-ui-research-2026-09-14.md).
+- transitions.dev `598d3d6ad89dabb4bdf742fd2e887ca53914a888`: public behavior/method study only. Tool MIT and transition usage terms are distinct; prompt redistribution is unverified, so no Skill or recipe is copied into Analytix.
+- Reuse mode: clean-room-reference for product changes; original Analytix implementation of observed UI requirements. Reviewer: current primary integrator. Verification: pinned remote/tree and file-level source review; runtime acceptance remains in the separate candidate QA record. Disposition: approved for this bounded research use, not distribution admission.

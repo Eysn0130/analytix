@@ -166,6 +166,7 @@ type Props = {
   hideThreadContextPanels?: boolean
   queuedMessages: QueuedUserMessage[]
   onRemoveQueuedMessage: (id: string) => void
+  documentReferenceCount?: number
   attachments?: AttachmentReference[]
   attachmentUploadEnabled?: boolean
   attachmentUploadBusy?: boolean
@@ -692,6 +693,7 @@ export function FloatingComposer({
   hideThreadContextPanels = false,
   queuedMessages,
   onRemoveQueuedMessage,
+  documentReferenceCount = 0,
   attachments = EMPTY_ATTACHMENTS,
   attachmentUploadEnabled = false,
   attachmentUploadBusy = false,
@@ -825,6 +827,7 @@ export function FloatingComposer({
   const canChangeModel = canCompose && !busy
   const canSend = canCompose && (
     input.trim().length > 0 ||
+    documentReferenceCount > 0 ||
     (attachmentUploadEnabled && attachments.length > 0) ||
     (fileReferenceEnabled && fileReferences.length > 0)
   )

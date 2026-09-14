@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { emptyComposerDraft } from './composer-drafts'
 import type { NormalizedThread } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -55,6 +56,7 @@ import {
   persistComposerModel,
   readCodeWorkspaceRoots,
   readStoredComposerModel,
+  readStoredComposerSelection,
   rememberCodeWorkspaceRoots,
   rememberTurnModel
 } from './chat-store-helpers'
@@ -121,6 +123,9 @@ const sseAbortRef = {
   }
 }
 let composerModelLoadPromise: Promise<void> | null = null
+// A saved display preference is available before the Core catalog is ready.
+// It does not assert Provider readiness or authorize a request.
+const initialComposerSelection = readStoredComposerSelection()
 
 export const useChatStore = create<ChatState>((set, get) => ({
   route: 'chat',
@@ -160,8 +165,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   turnStartedAtByUserId: {},
   turnDurationByUserId: {},
   inspectorSelectedId: null,
-  composerModel: DEFAULT_ANALYTIX_MODEL,
-  composerProviderId: '',
+  composerModel: initialComposerSelection?.model ?? DEFAULT_ANALYTIX_MODEL,
+  composerDrafts: {},
+  updateComposerDraft: (key, update) => set((state) => {
+    const current = state.composerDrafts[key] ?? emptyComposerDraft
+    const next = update(current)
+    return current === next ? state : { composerDrafts: { ...state.composerDrafts, [key]: next } }
+  }),
+  composerProviderId: initialComposerSelection?.providerId ?? '',
   composerPickList: mergeComposerPickList(false, []),
   composerModelGroups: [],
   disabledSkillIds: [],

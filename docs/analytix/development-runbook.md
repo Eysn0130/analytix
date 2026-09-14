@@ -237,6 +237,23 @@ not yet a general development bootstrap and has not replaced the default entry.
 See [development baseline](development-baseline.md) for the full development
 loop, platform limits and remaining CI/package work.
 
+### Identify a GUI candidate before comparing it
+
+Keep development instance, profile, source commit and build fingerprints in
+private acceptance records. They do not belong in the product top bar or the
+composer's always-visible controls. Model display names describe the configured
+model selection; they do not attest the implementation behind a custom endpoint.
+Keep technical IDs and connection details available in Settings and tooltips.
+
+For GUI acceptance across tasks, retain the source commit plus task-owned dirty
+blob manifest, frozen Main/preload/Renderer build, profile ID and connection
+kind alongside screenshots. Use one integrator for canonical source changes.
+Do not keep acceptance attached to a shared HMR build while another task edits
+that source. A Mock screenshot and an official-Provider screenshot exercise
+different configurations; neither substitutes for the other. Investigate a
+suspected regression by comparing those identities before reverting code or
+reinitializing any protected profile.
+
 ## Validation Matrix
 
 Choose the smallest evidence that can fail on the changed behavior.

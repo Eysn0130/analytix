@@ -10,6 +10,7 @@ import (
 )
 
 type MaterializeInput struct {
+	NativeSelections           bool
 	Prompt                     string
 	PromptRoute                string
 	ToolScope                  []string
@@ -82,6 +83,7 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 		return nil
 	}
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{
+		NativeSelections:    input.NativeSelections && !input.Subagent,
 		AllowBackgroundBash: input.AllowBackgroundBash,
 		WebFetch:            input.WebFetch,
 	})
@@ -159,7 +161,7 @@ func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) 
 func HostAuthorizesReadOnly(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
 	case "read", "read_file", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
-		"wait", "list_jobs", "bash_output":
+		"wait", "list_jobs", "bash_output", "native_selection_read":
 		return true
 	default:
 		return MCPToolServerID(toolName) != "" && mcpAvailable && mcpToolReadOnly

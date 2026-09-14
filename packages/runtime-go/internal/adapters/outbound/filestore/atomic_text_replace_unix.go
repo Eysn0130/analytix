@@ -5,7 +5,6 @@ package filestore
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +23,7 @@ type atomicUnixState struct {
 	identity atomicUnixIdentity
 }
 
-func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) (atomicTextState, error) {
+func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, maxBytes int64) (atomicTextState, error) {
 	parent, base, missing, err := openAtomicUnixParent(path, false)
 	if err != nil {
 		return atomicTextState{}, err
@@ -36,7 +35,7 @@ func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) 
 		return atomicTextState{}, os.ErrNotExist
 	}
 	defer unix.Close(parent)
-	state, err := inspectAtomicUnixTarget(parent, base)
+	state, err := inspectAtomicUnixTarget(parent, base, maxBytes)
 	return state.state, err
 }
 
@@ -50,7 +49,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	}
 	defer unix.Close(parent)
 
-	initial, err := inspectAtomicUnixTarget(parent, base)
+	initial, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -89,7 +88,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return fmt.Errorf("sync atomic text temporary file: %w", err)
 	}
 
-	current, err := inspectAtomicUnixTarget(parent, base)
+	current, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return fmt.Errorf("replace atomic text target: %w", err)
 	}
 	if request.ExpectedExists {
-		displaced, displacedErr := inspectAtomicUnixTarget(parent, tempName)
+		displaced, displacedErr := inspectAtomicUnixTarget(parent, tempName, request.MaxBytes)
 		if displacedErr != nil || validateAtomicTextBefore(request, displaced.state) != nil || !sameAtomicUnixState(initial, displaced) {
 			rollbackErr := rollbackAtomicUnixTextSwap(parent, tempName, base)
 			if rollbackErr != nil {
@@ -126,7 +125,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	}
 	tempOpen = false
 
-	replaced, err := inspectAtomicUnixTarget(parent, base)
+	replaced, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes)
 	if err != nil {
 		return fmt.Errorf("verify atomic text replacement: %w", err)
 	}
@@ -222,7 +221,7 @@ func canonicalAtomicUnixSystemAlias(path string) (string, error) {
 	return clean, nil
 }
 
-func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
+func inspectAtomicUnixTarget(parent int, base string, maxBytes int64) (atomicUnixState, error) {
 	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return atomicUnixState{}, nil
@@ -243,7 +242,10 @@ func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
 	if before.Mode&unix.S_IFMT != unix.S_IFREG {
 		return atomicUnixState{}, fmt.Errorf("%w: target is not a regular file", ErrAtomicTextUnsafePath)
 	}
-	content, readErr := io.ReadAll(file)
+	if maxBytes > 0 && before.Size > maxBytes {
+		return atomicUnixState{}, ErrAtomicTextTooLarge
+	}
+	content, readErr := readAtomicTextContent(file, maxBytes)
 	if readErr != nil {
 		return atomicUnixState{}, readErr
 	}

@@ -1,5 +1,7 @@
+import { useNativeOfficeStore } from '../office/native-office-store'
 import i18n from '../i18n'
-import { isWriteImageFilePath, isWritePdfFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
+import { openTextObject } from './object-editing-client'
+import { isNativeOfficeFilePath, isWriteImageFilePath, isWritePdfFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
 import { writePathToFileUrl } from '@shared/write-markdown-resource'
 import type { WriteWorkspaceGet, WriteWorkspaceSet, WriteWorkspaceState } from './write-workspace-store-types'
 import {
@@ -57,9 +59,14 @@ export function createWriteFileActions({
   cancelExternalSyncAnimation,
   setLastSavedContent
 }: WriteFileActionContext): WriteFileActions {
+  let navigationRevision = 0
   return {
     initializeWorkspace: async (workspaceRoot) => {
+      const revision = ++navigationRevision
       const normalized = normalizePath(workspaceRoot.trim())
+      const previous = get()
+      if (previous.workspaceRoot !== normalized && !(await previous.flushSave(previous.workspaceRoot))) return
+      if (revision !== navigationRevision) return
       if (!normalized) {
         cancelExternalSyncAnimation()
         setLastSavedContent('')
@@ -73,7 +80,7 @@ export function createWriteFileActions({
       cancelExternalSyncAnimation()
       set({ ...initialState(), workspaceRoot: normalized })
       const root = await get().loadDirectory(normalized)
-      if (!root) return
+      if (!root || revision !== navigationRevision) return
       set((state) => ({ rootDirectory: root, expandedDirs: new Set([...state.expandedDirs, root]) }))
       const remembered = readRememberedActiveFile(normalized)
       if (remembered.trim() && isWriteWorkspaceFilePath(remembered)) {
@@ -84,6 +91,7 @@ export function createWriteFileActions({
     },
 
     loadDirectory: async (workspaceRoot, path) => {
+      const ownerRoot = get().workspaceRoot
       const requestedRoot = normalizePath(path || workspaceRoot)
       const targetKey = path ? requestedRoot : '__root__'
       set((state) => ({ loadingDirs: { ...state.loadingDirs, [targetKey]: true } }))
@@ -91,12 +99,14 @@ export function createWriteFileActions({
       try {
         result = await window.analytix.files.listDirectory({ workspaceRoot, path })
       } catch (error) {
+        if (get().workspaceRoot !== ownerRoot) return null
         set((state) => ({
           loadingDirs: withoutLoadingDirs(state.loadingDirs, [targetKey, requestedRoot]),
           treeError: formatActionError(error)
         }))
         return null
       }
+      if (get().workspaceRoot !== ownerRoot) return null
       set((state) => {
         const loadingDirs = withoutLoadingDirs(state.loadingDirs, [
           targetKey,
@@ -156,15 +166,22 @@ export function createWriteFileActions({
     },
 
     openWorkspaceHome: async (workspaceRoot) => {
+      const revision = ++navigationRevision
       const root = normalizePath(workspaceRoot || get().workspaceRoot)
-      const saved = await get().flushSave(root)
-      if (!saved) return false
+      const saved = await get().flushSave(get().workspaceRoot || root)
+      if (!saved || revision !== navigationRevision) return false
+      const session = get().objectSession
+      if (session) await window.analytix.objects.request({ action: 'close', sessionId: session.sessionId }).catch(() => undefined)
+      if (revision !== navigationRevision) return false
       cancelExternalSyncAnimation()
       setLastSavedContent('')
       rememberActiveFile(root, null)
       set({
         activeFilePath: null,
         activeFileKind: null,
+        objectSession: null,
+        legacyObjectEditing: false,
+        pendingSave: null,
         fileContent: '',
         imageDataUrl: '',
         imageMimeType: '',
@@ -186,9 +203,18 @@ export function createWriteFileActions({
     },
 
     openFile: async (workspaceRoot, path) => {
+      const revision = ++navigationRevision
       cancelExternalSyncAnimation()
-      const saved = await get().flushSave(workspaceRoot)
-      if (!saved) return
+      const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
+      if (!saved || revision !== navigationRevision) return
+      if (isNativeOfficeFilePath(path)) {
+        await useNativeOfficeStore.getState().select(workspaceRoot, path)
+        return
+      }
+      // Switching adapters hides the native view; its protected draft stays owned by Core.
+      await window.analytix?.office?.request({ action: 'hide' }).catch(() => undefined)
+      if (revision !== navigationRevision) return
+      useNativeOfficeStore.setState({target:null,view:null,error:null})
       if (!isWriteWorkspaceFilePath(path)) {
         set({
           fileLoading: false,
@@ -198,8 +224,14 @@ export function createWriteFileActions({
       }
       set({ fileLoading: true, fileError: null })
       try {
+        const previous = get()
+        if (previous.objectSession && (previous.activeFilePath !== path || previous.workspaceRoot !== workspaceRoot)) {
+          await window.analytix.objects.request({ action: 'close', sessionId: previous.objectSession.sessionId }).catch(() => undefined)
+          if (revision !== navigationRevision) return
+        }
         if (isWriteImageFilePath(path)) {
           const result = await window.analytix.files.readImage({ path, workspaceRoot })
+          if (revision !== navigationRevision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -209,6 +241,9 @@ export function createWriteFileActions({
           set({
             activeFilePath: result.path,
             activeFileKind: 'image',
+            objectSession: null,
+            legacyObjectEditing: false,
+            pendingSave: null,
             fileContent: '',
             imageDataUrl: result.dataUrl,
             imageMimeType: result.mimeType,
@@ -228,6 +263,7 @@ export function createWriteFileActions({
 
         if (isWritePdfFilePath(path)) {
           const result = await window.analytix.files.readPdf({ path, workspaceRoot })
+          if (revision !== navigationRevision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -237,6 +273,9 @@ export function createWriteFileActions({
           set({
             activeFilePath: result.path,
             activeFileKind: 'pdf',
+            objectSession: null,
+            legacyObjectEditing: false,
+            pendingSave: null,
             fileContent: '',
             imageDataUrl: '',
             imageMimeType: '',
@@ -254,9 +293,11 @@ export function createWriteFileActions({
           return
         }
 
-        const result = await window.analytix.files.read({ path, workspaceRoot })
-        if (!result.ok) {
-          set({ fileLoading: false, fileError: result.message })
+        const result = await openTextObject(workspaceRoot, path)
+        if (revision !== navigationRevision) {
+          if (!result.legacy && get().objectSession?.sessionId !== result.sessionId) {
+            await window.analytix.objects.request({ action: 'close', sessionId: result.sessionId }).catch(() => undefined)
+          }
           return
         }
         setLastSavedContent(result.content)
@@ -265,12 +306,15 @@ export function createWriteFileActions({
           activeFilePath: result.path,
           activeFileKind: 'text',
           fileContent: result.content,
+          objectSession: result.legacy ? null : { sessionId: result.sessionId, objectId: result.objectId, revision: result.revision },
+          legacyObjectEditing: result.legacy,
+          pendingSave: null,
           imageDataUrl: '',
           imageMimeType: '',
           pdfDataBase64: '',
           pdfMimeType: '',
           pdfMtimeMs: 0,
-          fileSize: result.size,
+          fileSize: new TextEncoder().encode(result.content).length,
           fileTruncated: result.truncated,
           fileLoading: false,
           fileError: null,
@@ -279,6 +323,7 @@ export function createWriteFileActions({
           quotedSelections: []
         })
       } catch (error) {
+        if (revision !== navigationRevision) return
         if (isWriteImageFilePath(path) && isMissingImageIpc(error)) {
           setLastSavedContent('')
           rememberActiveFile(workspaceRoot, path)
