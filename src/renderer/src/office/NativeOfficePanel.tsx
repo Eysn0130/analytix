@@ -15,12 +15,32 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   const target = useNativeOfficeStore((s) => s.target)
   const view = useNativeOfficeStore((s) => s.view)
   const error = useNativeOfficeStore((s) => s.error)
+  const annotationInputFrozen = useNativeOfficeStore(s => s.annotationInputFrozen)
   const targetMatches = !target || view?.path === target.path || view?.path === `${target.workspace.replace(/\/$/, '')}/${target.path}`
   const loading = !error && (!view || view.status === 'loading' || !targetMatches)
   const draftKey = JSON.stringify([threadId, target?.workspace, target?.path])
   const draft = useNativeReferenceStore(state => state.drafts[draftKey])
   const note = draft?.note ?? ''
-  const setNote = (value: string) => useNativeReferenceStore.getState().setDraft(draftKey, {note:value,selection:draft?.selection})
+  const setNote = (value: string) => {
+    if (useNativeOfficeStore.getState().annotationInputFrozen) return
+    const state = useNativeReferenceStore.getState(), previous = state.drafts[draftKey]
+    const sourceRevision = selectionMatches ? view?.revision : previous?.sourceRevision ?? view?.revision
+    state.setDraft(draftKey, {...previous,note:value,dirty:true,sourceRevision})
+    if (!view || !threadId || !sourceRevision) return
+    const ownerId = view.objectId
+    // Send every keystroke to Main immediately. Main coalesces pending input
+    // and owns the close barrier; an unmount cleanup is not persistence.
+    void window.analytix.office.request({action:'annotationSave',objectId:ownerId,threadId,note:value,sourceRevision}).then(result => {
+      const saved = result.view?.annotation, latest = useNativeReferenceStore.getState().drafts[draftKey]
+      if (result.ok && saved?.objectId === ownerId && saved.threadId === threadId && saved.note === value && latest?.note === value && latest.sourceRevision === sourceRevision) {
+        useNativeReferenceStore.getState().setDraft(draftKey,{...latest,dirty:false})
+      }
+      // An older response can arrive after a newer edit was acknowledged. It
+      // must not republish its old annotation into the hydration effect.
+      if (saved && latest && (saved.note !== latest.note || saved.sourceRevision !== latest.sourceRevision)) return
+      if (currentThread.current === threadId && currentTarget.current === target) useNativeOfficeStore.getState().receive(result.view,result.ok ? null : result.error ?? 'unavailable')
+    }).catch(() => { if (currentThread.current === threadId && currentTarget.current === target) useNativeOfficeStore.setState({error:'unavailable'}) })
+  }
   const [added, setAdded] = useState(false)
   const frozenSelection = useRef<{ owner: string; selection: NativeOfficeSelection } | null>(null)
   const annotationThread = useRef(threadId)
@@ -36,6 +56,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   const menuContext = useRef('')
   useEffect(() => { shown.current = visible; return () => { generation.current++; shown.current = false } }, [])
   useEffect(() => window.analytix.office.onMenuRequested?.(target => { void menuHandler.current(target) }), [])
+  useEffect(() => window.analytix.office.onAnnotationInputFreeze?.(frozen => useNativeOfficeStore.setState({annotationInputFrozen:frozen})), [])
   const bounds = () => {
     const rect = surface.current?.getBoundingClientRect()
     return { x: Math.max(0, Math.round(rect?.x ?? 0)), y: Math.max(0, Math.round(rect?.y ?? 0)),
@@ -65,6 +86,15 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     finally { if (epoch === generation.current) setBusy(false) }
   }, [])
   useEffect(() => window.analytix.office.onChange((next) => useNativeOfficeStore.getState().receive(next, next?.error ?? null)), [])
+  const savedAnnotation = targetMatches && view?.annotation?.threadId === threadId ? view.annotation : undefined
+  useEffect(() => {
+    if (!savedAnnotation) return
+    const state = useNativeReferenceStore.getState(), current = state.drafts[draftKey]
+    if (current?.dirty) return
+    if (current?.note === savedAnnotation.note && current.sourceRevision === savedAnnotation.sourceRevision) return
+    // Disk drafts restore text only, never a native selection token or scope.
+    state.setDraft(draftKey,{...current,note:savedAnnotation.note,sourceRevision:savedAnnotation.sourceRevision})
+  }, [draftKey,savedAnnotation])
   useEffect(() => {
     generation.current++
     setAdded(false)
@@ -159,7 +189,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     setAdded(false)
     if (selectionMatches && selection) {
       const state = useNativeReferenceStore.getState()
-      state.setDraft(draftKey, {note:state.drafts[draftKey]?.note ?? '',selection:structuredClone(selection)})
+      state.setDraft(draftKey, {...state.drafts[draftKey],note:state.drafts[draftKey]?.note ?? '',selection:structuredClone(selection)})
     }
   }, [draftKey, annotationIdentity, selectionMatches])
   const quote = async (allowEdit = editable, actionPrompt?: string) => {
@@ -234,9 +264,10 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
         <p className="truncate text-xs">{hasSelection && selection ? nativeSelectionLabel(view, selection) : '选区已过期，请重新选择；备注已保留。'}</p>
         <p className="text-[11px] text-ds-muted">{editable ? '可让 AI 提出局部修改，接受后应用。' : '仅供讨论，此选区不支持直接应用修改。'}</p>
         <div className="flex items-center gap-2">
-          <input aria-label="标注备注" placeholder="备注（可选）" maxLength={4096} className="min-w-0 flex-1 bg-transparent text-xs" value={note} onChange={event => { setNote(event.target.value); setAdded(false) }} />
+          <input aria-label="标注备注" placeholder="备注（可选）" disabled={annotationInputFrozen} maxLength={4096} className="min-w-0 flex-1 bg-transparent text-xs" value={note} onChange={event => { setNote(event.target.value); setAdded(false) }} />
           <button className="inline-flex shrink-0 items-center gap-1 text-xs" disabled={busy || !hasSelection} onClick={() => void actions.find(action => action.id === 'quote')?.run()}><Quote className="h-3.5 w-3.5" />加入对话</button>
         </div>
+        {view.annotationSaving ? <p role="status" className="text-[11px] text-ds-muted">正在保存备注…</p> : view.annotationError || draft?.dirty ? <p role="status" className="text-[11px] text-ds-muted">备注尚未保存 <button onClick={() => setNote(note)}>重试</button></p> : savedAnnotation?.note ? <p role="status" className="text-[11px] text-ds-muted">备注已保存{savedAnnotation.sourceRevision !== view.revision ? '；文件版本已变化，请重新选择。' : ''}</p> : null}
         <div className="flex flex-wrap gap-2">{actions.filter(action => action.id !== 'quote').slice(0,4).map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={!action.enabled} onClick={() => void action.run()}>{action.label}</button>)}<button className="text-xs text-ds-muted" disabled={busy || !hasSelection} onClick={() => void menuHandler.current()}>{t('nativeActionMore')}</button></div>
         {added ? <p role="status" className="text-[11px] text-ds-muted">标注已加入对话，尚未发送。</p> : null}
       </> : <p className="text-xs text-ds-muted">{view.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'}</p>}

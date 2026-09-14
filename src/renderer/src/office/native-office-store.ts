@@ -11,6 +11,7 @@ export const useNativeOfficeStore = create<{
   error: string | null
   receiveSequence: number
   proposalInFlight: boolean
+  annotationInputFrozen: boolean
   beginProposalPoll: () => boolean
   endProposalPoll: () => void
   select: (workspace: string, path: string, isCurrent?: () => boolean) => Promise<boolean>
@@ -18,7 +19,7 @@ export const useNativeOfficeStore = create<{
   close: (workspace: string, path: string) => Promise<boolean>
 }>((set, get) => ({
   target: null, view: null, views: {}, error: null, receiveSequence: 0,
-  proposalInFlight: false,
+  proposalInFlight: false, annotationInputFrozen: false,
   beginProposalPoll: () => {
     if (get().proposalInFlight) return false
     set({proposalInFlight:true})

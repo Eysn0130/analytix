@@ -1,4 +1,4 @@
-import { nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema } from '../../packages/runtime/src/contracts/native-office-editing'
 import { z } from 'zod'
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -29,6 +29,7 @@ export const nativeOfficePickerResponseSchema = z.union([
 const selectionToken = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/)
 const editingTarget = { objectId: digest, revision: digest, expectedChangeSequence: index }
 const threadId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
+export const nativeOfficeInputFreezeSchema = z.object({requestId:z.string().uuid(),frozen:z.boolean()}).strict()
 export const nativeOfficeMenuTargetSchema = z.object(editingTarget).strict()
 const actionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
 export const nativeOfficeActionMenuSchema = z.object({
@@ -53,6 +54,8 @@ export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('resumeChange'), ...editingTarget, threadId, changeId: digest }).strict(),
   z.object({ action: z.literal('save'), ...editingTarget }).strict(),
   z.object({ action: z.literal('saveStatus'), objectId: digest }).strict(),
+  z.object({ action: z.literal('annotationSave'), objectId: digest, threadId, note: nativeOfficeAnnotationNoteSchema, sourceRevision: digest }).strict(),
+  z.object({ action: z.literal('annotationRetry'), objectId: digest, threadId }).strict(),
   z.object({ action: z.literal('reference'), ...editingTarget, selectionToken, threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/), editable: z.boolean() }).strict(),
   z.object({ action: z.literal('proposals'), objectId: digest, scopeId:z.string().regex(/^[a-f0-9]{48}$/) }).strict(),
   z.object({ action: z.literal('acceptProposal'), ...editingTarget, scopeId:z.string().regex(/^[a-f0-9]{48}$/), proposalId:z.string().regex(/^[a-f0-9]{48}$/) }).strict(),
@@ -79,6 +82,7 @@ export const nativeOfficeViewSchema = z.object({
   dirty: z.boolean(), status: z.enum(['ready', 'error', 'loading']),
   scope: nativeOfficeSelectionScopeSchema.omit({sessionId:true}).optional(), proposals:z.array(nativeOfficeProposalSchema).max(16).optional(), appliedProposals:z.array(z.string()).max(16).optional(),
   recovery: nativeOfficeRecoverySchema.optional(), localReviews: z.array(nativeOfficeLocalReviewSchema).max(16).optional(),
+  annotation: nativeOfficeAnnotationSchema.optional(), annotationSaving: z.boolean().optional(), annotationError: z.boolean().optional(),
   editing: z.boolean().optional(), canUndo: z.boolean().optional(), changeSequence: index.optional(), acknowledgedSequence: index.optional(), saving: z.boolean().optional(),
   selection: nativeOfficeSelectionSchema.optional(), error: nativeOfficeErrorSchema.optional()
 }).strict()

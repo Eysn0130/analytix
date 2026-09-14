@@ -45,8 +45,8 @@ export function nativeActionReferencesCurrent(references: readonly NativeReferen
 /** Frozen local snapshots. A quote remains a discussion reference after switching tabs. */
 export const useNativeReferenceStore = create<{
   references: NativeReference[]
-  drafts: Record<string, { note: string; selection?: NativeOfficeSelection }>
-  setDraft: (key: string, draft: { note: string; selection?: NativeOfficeSelection }) => void
+  drafts: Record<string, { note: string; selection?: NativeOfficeSelection; dirty?: boolean; sourceRevision?: string }>
+  setDraft: (key: string, draft: { note: string; selection?: NativeOfficeSelection; dirty?: boolean; sourceRevision?: string }) => void
   revokeScopes: (objectId: string) => void
   add: (reference: Omit<NativeReference, 'id'>) => NativeReference
   remove: (id: string) => void

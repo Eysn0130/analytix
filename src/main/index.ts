@@ -12,6 +12,7 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { existsSync } from 'node:fs'
+import { prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './office/native-office-ipc'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -399,6 +400,7 @@ let trayMenu: Menu | null = null
 let trayMenuOpenPromise: Promise<void> | null = null
 let loadTrayProviderObservation: (() => Promise<TrayProviderObservation | null>) | null = null
 let isQuitting = false
+let nativeOfficeQuitPending = false
 let closeWindowPromptOpen = false
 let pendingDeepLinkThreadId = ''
 let desktopStartupBarrierComplete = false
@@ -2411,7 +2413,8 @@ app.whenReady().then(async () => {
       ]
     },
     isTrustedSender: isTrustedDesktopRenderer,
-    registerBeforeQuit: (listener) => app.on('before-quit', listener),
+    // The confirmed quit path disposes PTYs in stopManagedRuntimes. A raw
+    // before-quit listener would destroy them even when Office cancels exit.
     logError
   })
   registerBackgroundTaskIpc({ ipcMain })
@@ -2489,15 +2492,26 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
-  stopRuntimeWatchdog()
   if (managedRuntimesStoppedForQuit) return
   event.preventDefault()
-  void stopManagedRuntimesForQuit()
-    .catch((error) => {
+  if (nativeOfficeQuitPending) return
+  nativeOfficeQuitPending = true
+  void (async () => {
+    if (!await prepareNativeOfficeQuit()) {
+      isQuitting = false
+      return
+    }
+    // Native drafts and unresolved file outcomes use the existing Core session.
+    // Confirm and drain them before stopping that runtime, not at window close.
+    stopRuntimeWatchdog()
+    try { await stopManagedRuntimesForQuit() } catch (error) {
       publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
       managedRuntimesStoppedForQuit = true
-    })
-    .finally(() => {
-      app.quit()
-    })
+    }
+    app.quit()
+  })().catch(async () => {
+    await cancelNativeOfficeQuit().catch(() => undefined)
+    isQuitting = false
+    if (desktopStartupBarrierComplete) startRuntimeWatchdog()
+  }).finally(() => { nativeOfficeQuitPending = false })
 })

@@ -2,9 +2,36 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { MaxNativeOfficeBytes, nativeOfficeCommitInputSchema, nativeOfficeStatusInputSchema, nativeOfficeSelectionCaptureInputSchema, nativeOfficeProposalRejectInputSchema, nativeOfficeProposalDecisionInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeProposalSchema, nativeOfficeReplacementSchema, nativeOfficeChangeSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from './native-office-editing'
 import { objectEditingRequestSchema, objectEditingResponseSchema } from './object-editing'
+import { nativeOfficeAnnotationSchema } from './native-office-editing'
+import { nativeOfficeRequestSchema } from '../../../../src/shared/native-office'
+import { pluginPackageViewSchema } from './plugin-package-host'
 
 const input = () => ({ sessionId: 'a'.repeat(48), operationId: 'save_0001', threadId:'thread_main', changeId:'c'.repeat(64), baseRevision: 'b'.repeat(64),
   content: { encoding: 'base64', kind: 'docx', byteLength: 1, sha256: createHash('sha256').update('a').digest('hex'), data: 'YQ==' } })
+
+describe('protected-local annotation drafts', () => {
+  const annotation = {objectId:'a'.repeat(64),threadId:'thread_main',draftRevision:'',note:'',sourceRevision:'',updatedAt:''}
+  it('restores bounded notes without restoring selection authority', () => {
+    expect(nativeOfficeAnnotationSchema.safeParse(annotation).success).toBe(true)
+    for (const note of ['中'.repeat(4096),'😀'.repeat(2048)]) {
+      expect(nativeOfficeAnnotationSchema.safeParse({...annotation,note}).success).toBe(true)
+      expect(nativeOfficeAnnotationSchema.safeParse({...annotation,note:note+'x'}).success).toBe(false)
+    }
+    expect(nativeOfficeAnnotationSchema.safeParse({...annotation,note:'\ud800'}).success).toBe(false)
+    for (const authority of [{selectionToken:'selection_01'},{editable:true},{scopeId:'c'.repeat(48)},{path:'/private'}]) {
+      expect(nativeOfficeAnnotationSchema.safeParse({...annotation,...authority}).success).toBe(false)
+    }
+    const request = {action:'annotationSave',objectId:annotation.objectId,threadId:annotation.threadId,note:'备注',sourceRevision:'b'.repeat(64)}
+    expect(nativeOfficeRequestSchema.safeParse(request).success).toBe(true)
+    expect(nativeOfficeRequestSchema.safeParse({...request,expectedDraftRevision:'c'.repeat(64)}).success).toBe(false)
+    expect(nativeOfficeSelectionResponseSchema.safeParse({ok:true,annotation}).success).toBe(true)
+  })
+  it('bounds the expanded operation catalog for two finite annotation operations', () => {
+    const operations = pluginPackageViewSchema.shape.operations
+    expect(operations.safeParse(Array.from({length:18},(_,i)=>'operation-'+i)).success).toBe(true)
+    expect(operations.safeParse(Array.from({length:19},(_,i)=>'operation-'+i)).success).toBe(false)
+  })
+})
 
 describe('protected-local native Office input', () => {
   it('supports three explicit kinds without widening the text contract', () => {

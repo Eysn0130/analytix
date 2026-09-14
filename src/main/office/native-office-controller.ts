@@ -20,7 +20,7 @@ export const MAX_NATIVE_OFFICE_BYTES = 16 * 1024 * 1024
 const MAX_BASE64_LENGTH = Math.ceil(MAX_NATIVE_OFFICE_BYTES / 3) * 4
 const packageIds = { docx: 'analytix-documents', xlsx: 'analytix-spreadsheets', pptx: 'analytix-presentations' } as const
 const operations = ['open-object', 'close-object'] as const
-type HostOperation = typeof operations[number] | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change'
+type HostOperation = typeof operations[number] | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change' | 'annotation-read' | 'annotation-write'
 const token = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const sequence = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -49,6 +49,7 @@ export interface NativeOfficeControllerOptions {
   createSurface(onEvent: (event: unknown) => void): NativeOfficeSurface | Promise<NativeOfficeSurface>
   onChange(view: NativeOfficeView | null): void
   newOperationId?: () => string
+  freezeAnnotationInput?: (frozen: boolean) => Promise<boolean>
 }
 
 type Active = {
@@ -63,7 +64,8 @@ type Active = {
   threadId?: string
   approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string }
   pendingRecovery?: { operationId: string; revision: string; committed: boolean }
-
+  annotationDesired?: { note: string; sourceRevision: string }
+  annotationAttempt?: { expectedDraftRevision: string; note: string; sourceRevision: string }
 }
 type PreviewEngineRequest = NativeOfficeEngineRequest
 class OfficeFailure extends Error {
@@ -93,6 +95,50 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
   let tail = Promise.resolve()
   let disposed = false
   let shutdown: Promise<void> | undefined
+  let annotationInputFrozen: boolean | undefined = false
+  const annotationFreezeHolds = new Set<symbol>()
+  let freezeTail = Promise.resolve()
+  let quitFreeze: Promise<() => Promise<void>> | undefined
+  const syncAnnotationFreeze = () => {
+    const result = freezeTail.then(async () => {
+      while (annotationInputFrozen !== (annotationFreezeHolds.size > 0)) {
+        const frozen = annotationFreezeHolds.size > 0
+        let acknowledged = true
+        try { if (options.freezeAnnotationInput) acknowledged = await options.freezeAnnotationInput(frozen) }
+        catch { acknowledged = false }
+        if (!acknowledged) {
+          // A missing acknowledgement is not evidence of the renderer state.
+          annotationInputFrozen = undefined
+          fail('unavailable')
+        }
+        annotationInputFrozen = frozen
+      }
+    })
+    freezeTail = result.catch(() => undefined)
+    return result
+  }
+  async function holdAnnotationFreeze() {
+    const hold = Symbol('annotation-close')
+    annotationFreezeHolds.add(hold)
+    try { await syncAnnotationFreeze() } catch (error) {
+      annotationFreezeHolds.delete(hold)
+      await syncAnnotationFreeze().catch(() => undefined)
+      throw error
+    }
+    return async () => { annotationFreezeHolds.delete(hold); await syncAnnotationFreeze() }
+  }
+  async function freezeAnnotationInput(frozen: boolean) {
+    if (frozen) {
+      const pending = quitFreeze ??= holdAnnotationFreeze()
+      try { await pending } catch (error) { if (quitFreeze === pending) quitFreeze = undefined; throw error }
+    }
+    else {
+      const pending = quitFreeze; quitFreeze = undefined
+      const release = await pending?.catch(() => undefined)
+      if (release) await release()
+      else await syncAnnotationFreeze()
+    }
+  }
   const newOperationId = () => {
     const id = (options.newOperationId ?? randomUUID)()
     if (!token.safeParse(id).success) fail('unavailable')
@@ -319,22 +365,26 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
 
   async function close(document = active, discard = false) {
     if (!document) return
-    if (document.pendingSave || document.pendingRecovery) fail('unknown')
-    if (document.view.dirty && !discard) fail('unsaved_changes')
-    if (document.ready && !document.failed) {
-      try { await engine(document, { command: 'close', documentId: document.view.objectId, version: document.view.revision,
-        operationId: newOperationId(), expectedChangeSequence: document.view.changeSequence ?? 0, discard }) } catch (error) { if (document.view.dirty && !discard) throw error }
-    }
-    document.ready = false
+    const releaseFreeze = await holdAnnotationFreeze()
     try {
-      const result = await invoke(document, 'close-object', { sessionId: document.sessionId })
-      if (!result.ok || !('closed' in result)) fail('unavailable')
-    } finally {
-      await destroySurface(document)
-      documents.delete(document.view.objectId)
-      if (active === document) active = undefined
-      publish()
-    }
+      await flushAnnotation(document)
+      if (document.pendingSave || document.pendingRecovery) fail('unknown')
+      if (document.view.dirty && !discard) fail('unsaved_changes')
+      if (document.ready && !document.failed) {
+        try { await engine(document, { command: 'close', documentId: document.view.objectId, version: document.view.revision,
+          operationId: newOperationId(), expectedChangeSequence: document.view.changeSequence ?? 0, discard }) } catch (error) { if (document.view.dirty && !discard) throw error }
+      }
+      document.ready = false
+      try {
+        const result = await invoke(document, 'close-object', { sessionId: document.sessionId })
+        if (!result.ok || !('closed' in result)) fail('unavailable')
+      } finally {
+        await destroySurface(document)
+        documents.delete(document.view.objectId)
+        if (active === document) active = undefined
+        publish()
+      }
+    } finally { await releaseFreeze() }
   }
   async function settleSave(document: Active, result: ObjectEditingResponse) {
     const pending = document.pendingSave
@@ -479,10 +529,13 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
   }
   async function recover(document: Active, threadId?: string) {
     if (document.threadId !== threadId) {
+      await flushAnnotation(document)
       if (document.view.dirty || document.pendingSave || document.pendingRecovery) fail('unsaved_changes')
       delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
+      delete document.view.annotation; delete document.view.annotationError
       document.threadId = threadId
     }
+    if (threadId && !document.view.annotation && document.binding.operations.includes('annotation-read')) await loadAnnotation(document)
     delete document.view.recovery; document.view.canUndo = false
     if (!threadId || !document.binding.operations.includes('object-recovery')) return
     const result = await invokeSelection(document, 'object-recovery', {sessionId:document.sessionId,threadId})
@@ -492,6 +545,42 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const current = result.recovery.current
     document.view.canUndo = !!(current?.canUndo || current?.canRetryUndo) && current.revision === document.view.revision && !document.view.dirty
     publish()
+  }
+  async function loadAnnotation(document: Active) {
+    if (!document.threadId) fail('invalid_request')
+    const result = await invokeSelection(document, 'annotation-read', {sessionId:document.sessionId,threadId:document.threadId})
+    if (!('annotation' in result) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId) fail('invalid_response')
+    document.view.annotation = result.annotation
+    publish()
+  }
+  async function flushAnnotation(document: Active) {
+    if (!document.annotationDesired && !document.annotationAttempt) return
+    document.view.annotationSaving = true; document.view.annotationError = false; publish()
+    try {
+      if (!document.view.annotation) await loadAnnotation(document)
+      while (document.annotationDesired || document.annotationAttempt) {
+        const saved = document.view.annotation!
+        const desired = document.annotationDesired
+        if (!document.annotationAttempt && desired?.note === saved.note && desired.sourceRevision === saved.sourceRevision) {
+          delete document.annotationDesired
+          break
+        }
+        // Keep the exact failed attempt until Core confirms its CAS. New input
+        // can replace the desired note, but cannot change an uncertain request.
+        const attempt = document.annotationAttempt ??= {expectedDraftRevision:saved.draftRevision,...desired!}
+        const result = await invokeSelection(document, 'annotation-write', {sessionId:document.sessionId,threadId:document.threadId,...attempt})
+        if (!('annotation' in result) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId ||
+          result.annotation.note !== attempt.note || result.annotation.sourceRevision !== attempt.sourceRevision || !result.annotation.draftRevision) fail('invalid_response')
+        document.view.annotation = result.annotation
+        delete document.annotationAttempt
+        if (document.annotationDesired?.note === attempt.note && document.annotationDesired.sourceRevision === attempt.sourceRevision) delete document.annotationDesired
+        publish()
+      }
+      document.view.annotationSaving = false; publish()
+    } catch (error) {
+      document.view.annotationSaving = false; document.view.annotationError = true; publish()
+      throw error
+    }
   }
   async function cancelChange(document: Active, threadId: string, changeId: string) {
     if (threadId !== document.threadId || document.pendingRecovery) fail('invalid_request')
@@ -600,6 +689,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     getView,
     restoreVisibility: async () => { visible = true; if (active?.ready && !active.pendingRecovery) await active.surface.attach(active.bounds, active.appearance) },
     getViews: () => [...documents.values()].map(d => structuredClone(d.view)),
+    freezeAnnotationInput,
+    hasPendingAnnotations: () => [...documents.values()].some(d => !!d.annotationDesired || !!d.annotationAttempt),
+    flushAnnotations: () => serialize(async () => { for (const document of documents.values()) await flushAnnotation(document) }),
     saveAll: () => serialize(async () => { for (const document of documents.values()) if (document.view.dirty || document.pendingSave || document.pendingRecovery) await save(document) }),
     /** Owner teardown releases read-only resources. */
     destroy(): Promise<void> {
@@ -627,6 +719,15 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       if (disposed) return Promise.resolve(response('unavailable'))
       const parsed = nativeOfficeRequestSchema.safeParse(payload)
       if (!parsed.success) return Promise.resolve(response('invalid_request'))
+      if (parsed.data.action === 'annotationSave') {
+        const request = parsed.data, document = documents.get(request.objectId)
+        if (annotationInputFrozen || !document || document.threadId !== request.threadId) return Promise.resolve(response('unavailable'))
+        // Record synchronously before queueing so a close event cannot miss the
+        // most recent keystroke while another native operation is in flight.
+        document.annotationDesired = {note:request.note,sourceRevision:request.sourceRevision}
+        document.view.annotationSaving = true; document.view.annotationError = false; publish()
+        return serialize(async () => { await flushAnnotation(document) })
+      }
       const changesVisibility = ['hide', 'open'].includes(parsed.data.action)
       const epoch = changesVisibility ? ++visibilityEpoch : visibilityEpoch
       if (parsed.data.action === 'hide') { visible = false; void active?.surface.hide(); return Promise.resolve(response()) }
@@ -649,8 +750,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
           return
         }
         if (request.action === 'hide') { await active?.surface.hide(); return }
-        const document = ['save','saveStatus','proposals','rejectProposal'].includes(request.action) && 'objectId' in request ? documents.get(request.objectId) : requireActive()
+        const document = ['save','saveStatus','proposals','rejectProposal','annotationRetry'].includes(request.action) && 'objectId' in request ? documents.get(request.objectId) : requireActive()
         if (!document) fail('unavailable')
+        if (request.action === 'annotationRetry') {
+          if (document.threadId !== request.threadId) fail('invalid_request')
+          await flushAnnotation(document); return
+        }
         if (request.action === 'bounds') { if (visible && epoch === visibilityEpoch) { document.bounds = request.bounds; document.appearance = request.appearance; if (!document.pendingRecovery) await document.surface.attach(request.bounds, request.appearance) } return }
         try {
           document.binding = await listBinding(document.view.kind, document.binding)

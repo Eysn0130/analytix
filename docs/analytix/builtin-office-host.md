@@ -74,9 +74,13 @@ retry that write. Old records without retained candidates remain queryable but
 cannot acquire continuation authority from caller bytes. Installed recovery
 evidence remains required.
 Numeric/formula/merged spreadsheet targets remain excluded from text replacement
-until their typed modification paths are complete. Persistent annotation,
-format-fidelity, native undo/restart and multi-object recovery acceptance remain
-required; focused source tests do not establish those product outcomes.
+until their typed modification paths are complete. Per-object/thread note drafts
+now use protected Core CAS storage and exact retry. Main retains the latest input,
+and normal close/quit requires an acknowledged input freeze and a successful
+flush before stopping Core. Restoring note text and its source revision does not
+restore old selection authority. Multiple location-aware annotations, format
+fidelity, native undo/restart and multi-object recovery acceptance remain required;
+focused source tests do not establish those product outcomes.
 
 The native surface remains protected from direct manual edits. A finite worker
 operation authorized through Core may nevertheless change an isolated document

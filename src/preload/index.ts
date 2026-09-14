@@ -1,4 +1,4 @@
-import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema } from '../shared/native-office'
+import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
@@ -8,6 +8,20 @@ import {
   isStrictPublicRuntimeSseIpcPayload
 } from '../shared/public-runtime-sse'
 import { parseRuntimeStatusPublicV1 } from '../shared/analytix-runtime-status'
+
+let officeAnnotationInputFrozen = false
+const officeAnnotationFreezeListeners = new Set<(frozen: boolean) => void>()
+ipcRenderer.on('office:annotation-input-freeze', (_event, value: unknown) => {
+  const request = nativeOfficeInputFreezeSchema.safeParse(value)
+  if (!request.success) return
+  officeAnnotationInputFrozen = request.data.frozen
+  try {
+    for (const listener of officeAnnotationFreezeListeners) listener(officeAnnotationInputFrozen)
+  } catch { return } // A failed UI freeze cannot acknowledge safe shutdown.
+  // Earlier annotationSave invokes have already been sent on this renderer's
+  // IPC stream. Main drains them only after receiving this acknowledgement.
+  void ipcRenderer.invoke('office:annotation-input-frozen',request.data).catch(() => undefined)
+})
 
 // Internal IPC adapter. The renderer receives only the domain facade below.
 const flatApi = {
@@ -575,6 +589,10 @@ const api = {
     openEditorPath: flatApi.openEditorPath
   },
   office: {
+    onAnnotationInputFreeze: (handler) => {
+      officeAnnotationFreezeListeners.add(handler); handler(officeAnnotationInputFrozen)
+      return () => { officeAnnotationFreezeListeners.delete(handler) }
+    },
     onMenuRequested: (handler) => {
       const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
         const parsed = nativeOfficeMenuTargetSchema.safeParse(value)
@@ -600,6 +618,7 @@ const api = {
       return parsed.success ? parsed.data : { ok: false, error: 'unavailable' }
     },
     request: async (request) => {
+      if (officeAnnotationInputFrozen && request.action === 'annotationSave') return {ok:false,view:null,error:'unsaved_changes'}
       const parsed = nativeOfficeResponseSchema.safeParse(await ipcRenderer.invoke('office:request', request))
       return parsed.success ? parsed.data : { ok: false, view: null, error: 'unavailable' }
     },

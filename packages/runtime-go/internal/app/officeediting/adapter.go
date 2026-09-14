@@ -87,6 +87,9 @@ func (a *Adapter) Readiness(ctx context.Context, binding adapterport.Binding) (a
 		return adapterport.Readiness{}, err
 	}
 	operations := []string{"open-object", "object-status", "close-object"}
+	if _, ok := a.service.(AnnotationDraftService); ok && a.projector != nil {
+		operations = append(operations, "annotation-read", "annotation-write")
+	}
 	if _, ok := a.service.(NativeRecoveryService); ok && a.projector != nil {
 		operations = append(operations, "commit-object", "object-recovery", "undo-change", "cancel-change", "resume-change")
 	}
@@ -111,6 +114,9 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	limit, stringLimit, depth := 16<<10, 4096, 2
+	if call.Operation == "annotation-write" {
+		limit, stringLimit = fileport.MaxAnnotationRecordBytes, fileport.MaxAnnotationNoteBytes
+	}
 	if call.Operation == "capture-selection" || call.Operation == "model-selection-propose" {
 		limit, stringLimit = (512 << 10), editingapp.MaxSelectionBytes
 	}
@@ -125,6 +131,8 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		return failure(fileport.ErrInvalidInput)
 	}
 	switch call.Operation {
+	case "annotation-read", "annotation-write":
+		return a.invokeAnnotation(ctx, call, input)
 	case "object-recovery", "undo-change", "cancel-change", "resume-change":
 		return a.invokeRecovery(ctx, call, input)
 	case "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose":

@@ -41,7 +41,7 @@ beforeEach(() => {
   request = vi.fn(async (_input: NativeOfficeRequest) => ({ ok: true, view }))
   unsubscribe = vi.fn()
   Object.defineProperty(window, 'analytix', { configurable: true, value: { office: { request, onChange: () => unsubscribe } } })
-  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false })
+  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false, annotationInputFrozen:false })
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
@@ -454,4 +454,82 @@ it('offers explicit resume only for the owning thread and capability, while quer
   expect(namedButton('继续保存此修改')).toBeUndefined()
   await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,recovery:{current:null,pending:{...pending,threadId:'other-thread'}}}}))
   expect(namedButton('继续保存此修改')).toBeUndefined()
+})
+
+function persistedAnnotation(note:string, threadId='thread'): NonNullable<NativeOfficeView['annotation']> {
+  return {objectId:view.objectId,threadId,note,draftRevision:'c'.repeat(64),sourceRevision:view.revision,updatedAt:'2026-09-15T00:00:00Z'}
+}
+function noteInput() { return container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')! }
+const annotationDraftKey=JSON.stringify(['thread','/synthetic',view.path])
+describe('persisted native annotation races',()=>{
+  it('restores only note text without selection, token, editable scope or automatic save',async()=>{
+    await renderAnnotation({...view,annotation:persistedAnnotation('恢复的备注')})
+    expect(noteInput().value).toBe('恢复的备注')
+    expect(namedButton('加入对话').disabled).toBe(true)
+    expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].selection).toBeUndefined()
+    expect(useNativeOfficeStore.getState().view?.scope).toBeUndefined()
+    expect(useNativeOfficeStore.getState().view?.editing).not.toBe(true)
+    expect(request.mock.calls.some(([input])=>['annotationSave','annotate','reference'].includes(input.action))).toBe(false)
+  })
+  it('keeps newer input when a delayed annotation load arrives while a save is pending',async()=>{
+    await renderAnnotation(annotationView)
+    request.mockImplementation((input:NativeOfficeRequest)=>input.action==='annotationSave'?new Promise(()=>{}):Promise.resolve({ok:true,view:annotationView}))
+    await fillNote('刚输入的新备注')
+    await act(async()=>useNativeOfficeStore.getState().receive({...annotationView,annotation:persistedAnnotation('较早读取的备注')},null))
+    expect(noteInput().value).toBe('刚输入的新备注')
+    expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].dirty).toBe(true)
+    expect(request.mock.calls.filter(([input])=>input.action==='annotationSave').map(([input])=>input)).toEqual([{action:'annotationSave',objectId:view.objectId,threadId:'thread',note:'刚输入的新备注',sourceRevision:view.revision}])
+  })
+  it('does not replace newer acknowledged input with an older save acknowledgement',async()=>{
+    await renderAnnotation(annotationView)
+    const replies=new Map<string,(value:unknown)=>void>()
+    request.mockImplementation((input:NativeOfficeRequest)=>input.action==='annotationSave'?new Promise(resolve=>replies.set(input.note,resolve)):Promise.resolve({ok:true,view:annotationView}))
+    await fillNote('first');await fillNote('latest')
+    await act(async()=>replies.get('latest')!({ok:true,view:{...annotationView,annotation:persistedAnnotation('latest')}}))
+    expect(noteInput().value).toBe('latest')
+    expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].dirty).toBe(false)
+    await act(async()=>replies.get('first')!({ok:true,view:{...annotationView,annotation:persistedAnnotation('first')}}))
+    expect(noteInput().value).toBe('latest')
+    expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].note).toBe('latest')
+    expect(request.mock.calls.filter(([input])=>input.action==='annotationSave')).toHaveLength(2)
+  })
+  it('isolates a switched thread from old saves and foreign annotation loads',async()=>{
+    await renderAnnotation(annotationView)
+    let finish!:(value:unknown)=>void
+    request.mockImplementation((input:NativeOfficeRequest)=>input.action==='annotationSave'?new Promise(resolve=>{finish=resolve}):Promise.resolve({ok:true,view:annotationView}))
+    await fillNote('thread-one-private-note')
+    const next={...annotationView,annotation:persistedAnnotation('thread-two-note','thread-two')}
+    request.mockImplementation(async()=>({ok:true,view:next}))
+    await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread-two'})))
+    expect(noteInput().value).toBe('thread-two-note')
+    await act(async()=>finish({ok:true,view:{...annotationView,annotation:persistedAnnotation('thread-one-private-note')}}))
+    expect(noteInput().value).toBe('thread-two-note')
+    await act(async()=>useNativeOfficeStore.getState().receive({...annotationView,annotation:persistedAnnotation('foreign private load')},null))
+    expect(noteInput().value).toBe('thread-two-note')
+    expect(container.textContent).not.toContain('thread-one-private-note')
+    expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].note).toBe('thread-one-private-note')
+    expect(request.mock.calls.filter(([input])=>input.action==='annotationSave')).toHaveLength(1)
+  })
+})
+
+
+it('freeze notification disables notes synchronously and thaw restores note input without native edit authority',async()=>{
+  let freeze!:(frozen:boolean)=>void
+  const unsubscribeFreeze=vi.fn()
+  window.analytix.office.onAnnotationInputFreeze=handler=>{freeze=handler;handler(false);return unsubscribeFreeze}
+  await renderAnnotation({...view,annotation:persistedAnnotation('readonly note')})
+  await act(async()=>freeze(true))
+  expect(noteInput().disabled).toBe(true)
+  await fillNote('blocked keystroke')
+  expect(request.mock.calls.filter(([input])=>input.action==='annotationSave')).toHaveLength(0)
+  expect(useNativeReferenceStore.getState().drafts[annotationDraftKey].note).toBe('readonly note')
+  await act(async()=>freeze(false))
+  expect(noteInput().disabled).toBe(false)
+  await fillNote('after thaw')
+  expect(request.mock.calls.filter(([input])=>input.action==='annotationSave').map(([input])=>input.note)).toEqual(['after thaw'])
+  expect(useNativeOfficeStore.getState().view?.editing).not.toBe(true)
+  expect(useNativeOfficeStore.getState().view?.scope).toBeUndefined()
+  expect(request.mock.calls.some(([input])=>['annotate','reference','acceptProposal'].includes(input.action))).toBe(false)
+  await act(async()=>{root!.unmount();root=null})
+  expect(unsubscribeFreeze).toHaveBeenCalledOnce()
 })

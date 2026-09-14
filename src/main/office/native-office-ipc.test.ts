@@ -1,9 +1,9 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 const state = vi.hoisted(() => ({
   packaged: false, handlers: new Map<string, (...args: any[]) => any>(),
   lifecycle: new Map<string, (...args: any[]) => void>(),
-  request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn(), menu: vi.fn(), popup: vi.fn()
+  freezeAnnotationInput: vi.fn(), hasPendingAnnotations: vi.fn(), flushAnnotations: vi.fn(), request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn(), menu: vi.fn(), popup: vi.fn()
 }))
 vi.mock('electron', () => ({
   app: { get isPackaged() { return state.packaged }, getAppPath: () => '/source', getLocale: () => 'en',
@@ -13,15 +13,17 @@ vi.mock('electron', () => ({
 }))
 vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (...args: unknown[]) => {
   state.create(...args)
-  return { request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
+  return { freezeAnnotationInput:state.freezeAnnotationInput, hasPendingAnnotations:state.hasPendingAnnotations, flushAnnotations:state.flushAnnotations, request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
 } }))
-import { registerNativeOfficeIpc } from './native-office-ipc'
+import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './native-office-ipc'
 beforeEach(() => {
   vi.clearAllMocks(); state.packaged = false; state.handlers.clear(); state.lifecycle.clear()
   state.request.mockResolvedValue({ ok: true, view: null }); state.getView.mockReturnValue(null)
-  state.destroy.mockResolvedValue(undefined)
+  state.destroy.mockResolvedValue(undefined);state.freezeAnnotationInput.mockResolvedValue(undefined)
+  state.hasPendingAnnotations.mockReturnValue(false);state.flushAnnotations.mockResolvedValue({ok:true,view:null})
   state.menu.mockReturnValue({ popup: state.popup })
 })
+afterEach(()=>vi.useRealTimers())
 function setup() {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
     webContents: { mainFrame: {}, send: vi.fn() } })
@@ -94,12 +96,15 @@ it('drops a protected local reply when the owner frame changes during the reques
   finish({ ok: true, view: { path: '/private/example.docx' } })
   expect(await pending).toEqual({ ok: false, view: null, error: 'unavailable' })
 })
-it('closing a readonly preview releases its controller without a save prompt', async () => {
+it('closing a readonly preview freezes and flushes before releasing without a save prompt', async () => {
   const h = setup(); await h.invoke()
   state.getView.mockReturnValue({ dirty: false, status: 'ready' })
   const event = { preventDefault: vi.fn() }
   h.main.emit('close', event)
-  expect(event.preventDefault).not.toHaveBeenCalled()
+  expect(event.preventDefault).toHaveBeenCalledOnce()
+  await vi.waitFor(()=>expect(h.main.close).toHaveBeenCalledOnce())
+  expect(state.freezeAnnotationInput).toHaveBeenCalledWith(true)
+  expect(state.flushAnnotations).toHaveBeenCalledOnce()
   expect(state.dialog).not.toHaveBeenCalled()
   h.main.emit('closed')
   expect(state.destroy).toHaveBeenCalledOnce()
@@ -140,4 +145,91 @@ it('an unknown update cannot be discarded by the window close dialog', async () 
   expect(state.dialog).toHaveBeenCalledWith(h.main,expect.objectContaining({buttons:['查询后退出','取消'],cancelId:1}))
   expect(h.main.close).not.toHaveBeenCalled()
   expect(state.destroy).not.toHaveBeenCalled()
+})
+
+
+it('a readonly window with pending annotations waits for a single flush before closing',async()=>{
+  const h=setup();await h.invoke();state.getView.mockReturnValue({dirty:false,status:'ready'})
+  state.hasPendingAnnotations.mockReturnValue(true)
+  let finish!:(value:unknown)=>void
+  state.flushAnnotations.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  const event={preventDefault:vi.fn()};h.main.emit('close',event);h.main.emit('close',event)
+  expect(event.preventDefault).toHaveBeenCalledTimes(2);await vi.waitFor(()=>expect(state.flushAnnotations).toHaveBeenCalledOnce())
+  expect(h.main.close).not.toHaveBeenCalled();expect(state.dialog).not.toHaveBeenCalled()
+  state.hasPendingAnnotations.mockReturnValue(false);finish({ok:true,view:null})
+  await vi.waitFor(()=>expect(h.main.close).toHaveBeenCalledOnce())
+  expect(state.request.mock.calls.some(([input])=>input.action==='save')).toBe(false)
+})
+it('a failed annotation flush blocks window close without offering discard or losing the controller',async()=>{
+  const h=setup();await h.invoke();state.getView.mockReturnValue({dirty:false,status:'ready'})
+  state.hasPendingAnnotations.mockReturnValue(true);state.flushAnnotations.mockResolvedValue({ok:false,error:'unavailable'})
+  state.dialog.mockResolvedValue({response:0})
+  h.main.emit('close',{preventDefault:vi.fn()})
+  await vi.waitFor(()=>expect(state.dialog).toHaveBeenCalledWith(h.main,expect.objectContaining({message:'标注备注尚未保存',buttons:['返回文档']})))
+  expect(h.main.close).not.toHaveBeenCalled();expect(state.destroy).not.toHaveBeenCalled()
+  expect(state.hasPendingAnnotations()).toBe(true)
+})
+
+it('freeze ACK requires the exact owner frame, request id and frozen value',async()=>{
+  const h=setup();await h.invoke()
+  const freeze=state.create.mock.calls.at(-1)![0].freezeAnnotationInput
+  let completed=false
+  const pending=freeze(true).then((ok:boolean)=>{completed=true;return ok})
+  const payload=h.main.webContents.send.mock.calls.at(-1)![1]
+  const acknowledge=(event=h.event,body:unknown=payload)=>state.handlers.get('office:annotation-input-frozen')!(event,body)
+  expect(h.main.webContents.send).toHaveBeenLastCalledWith('office:annotation-input-freeze',expect.objectContaining({frozen:true}))
+  for(const [event,body] of [[{sender:{},senderFrame:h.event.senderFrame},payload],[{sender:h.event.sender,senderFrame:{}},payload],[h.event,{...payload,requestId:'00000000-0000-4000-8000-000000000000'}],[h.event,{...payload,frozen:false}],[h.event,{...payload,extra:true}]]){
+    expect(await acknowledge(event as typeof h.event,body)).toEqual({ok:false});expect(completed).toBe(false)
+  }
+  expect(await acknowledge()).toEqual({ok:true});expect(await pending).toBe(true)
+  expect(await acknowledge()).toEqual({ok:false})
+})
+it.each(['foreign-frame','navigated-frame','timeout'] as const)('%s cannot confirm a safe close or trigger flush',async(reason)=>{
+  vi.useFakeTimers();const h=setup();await h.invoke();state.getView.mockReturnValue({dirty:false,status:'ready'})
+  const freeze=state.create.mock.calls.at(-1)![0].freezeAnnotationInput
+  state.freezeAnnotationInput.mockImplementation(async(frozen:boolean)=>{if(frozen&&!await freeze(true))throw Error('freeze failed')})
+  h.main.emit('close',{preventDefault:vi.fn()})
+  const payload=h.main.webContents.send.mock.calls.at(-1)![1]
+  if(reason!=='timeout'){
+    if(reason==='navigated-frame')h.main.webContents.mainFrame={}
+    expect(await state.handlers.get('office:annotation-input-frozen')!(reason==='foreign-frame'?{sender:h.event.sender,senderFrame:{}}:h.event,payload)).toEqual({ok:false})
+  }
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(state.flushAnnotations).not.toHaveBeenCalled();expect(h.main.close).not.toHaveBeenCalled();expect(state.destroy).not.toHaveBeenCalled()
+  expect(state.freezeAnnotationInput).toHaveBeenLastCalledWith(false)
+})
+it('quit preparation shares the active flush and stays frozen until completion or explicit cancellation',async()=>{
+  const h=setup();await h.invoke();state.hasPendingAnnotations.mockReturnValue(true)
+  let complete!:(value:unknown)=>void
+  state.flushAnnotations.mockImplementation(()=>new Promise(resolve=>{complete=resolve}))
+  const first=prepareNativeOfficeQuit(),second=prepareNativeOfficeQuit()
+  await vi.waitFor(()=>expect(state.flushAnnotations).toHaveBeenCalledOnce())
+  expect(state.freezeAnnotationInput).toHaveBeenCalledOnce();expect(state.freezeAnnotationInput).toHaveBeenCalledWith(true)
+  state.hasPendingAnnotations.mockReturnValue(false);complete({ok:true,view:null})
+  expect(await first).toBe(true);expect(await second).toBe(true)
+  expect(state.freezeAnnotationInput).toHaveBeenCalledOnce();expect(state.destroy).not.toHaveBeenCalled()
+  await cancelNativeOfficeQuit();expect(state.freezeAnnotationInput).toHaveBeenLastCalledWith(false)
+  expect(h.main.close).not.toHaveBeenCalled()
+})
+it('an earlier window close policy cancellation does not initiate a freeze, flush or close',async()=>{
+  const h=setup();await h.invoke();state.getView.mockReturnValue({dirty:false,status:'ready'})
+  const event={defaultPrevented:true,preventDefault:vi.fn()}
+  h.main.emit('close',event)
+  await Promise.resolve()
+  expect(state.freezeAnnotationInput).not.toHaveBeenCalled();expect(state.flushAnnotations).not.toHaveBeenCalled()
+  expect(h.main.close).not.toHaveBeenCalled();expect(state.destroy).not.toHaveBeenCalled()
+})
+it.each(['flush-failure','user-cancel'] as const)('quit %s releases the freeze and preserves the controller',async(reason)=>{
+  const h=setup();await h.invoke()
+  if(reason==='flush-failure'){
+    state.hasPendingAnnotations.mockReturnValue(true)
+    state.flushAnnotations.mockResolvedValue({ok:false,error:'unavailable'})
+    state.dialog.mockResolvedValue({response:0})
+  }else{
+    state.getView.mockReturnValue({dirty:true,status:'ready'})
+    state.dialog.mockResolvedValue({response:2})
+  }
+  expect(await prepareNativeOfficeQuit()).toBe(false)
+  expect(state.freezeAnnotationInput.mock.calls).toEqual([[true],[false]])
+  expect(state.destroy).not.toHaveBeenCalled();expect(h.main.close).not.toHaveBeenCalled();expect(state.quit).not.toHaveBeenCalled()
 })

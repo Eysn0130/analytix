@@ -88,11 +88,20 @@ export const nativeOfficeChangeSchema = z.object({
   createdAt: z.string().max(64), savedAt: z.string().max(64)
 }).strict()
 export const nativeOfficeRecoverySchema = z.object({current:nativeOfficeChangeSchema.nullable(),pending:nativeOfficeChangeSchema.nullable()}).strict()
+// Annotation drafts are protected-local notes, never persisted selection authority.
+export const nativeOfficeAnnotationNoteSchema = selectionText.refine(value => value.length <= 4096)
+export const nativeOfficeAnnotationSchema = z.object({
+  objectId: nativeRevision, threadId: selectionCapture.shape.threadId,
+  draftRevision: z.union([nativeRevision, z.literal('')]), note: nativeOfficeAnnotationNoteSchema,
+  sourceRevision: z.union([nativeRevision, z.literal('')]), updatedAt: z.string().max(64)
+}).strict()
+export type NativeOfficeAnnotation = z.infer<typeof nativeOfficeAnnotationSchema>
 export const nativeOfficeSelectionResponseSchema = z.union([
   objectEditingResponseSchema,
   z.object({ ok: z.literal(true), scope: nativeOfficeSelectionScopeSchema }).strict(),
   z.object({ ok: z.literal(true), proposals: z.array(nativeOfficeProposalSchema).max(16), localReviews: z.array(nativeOfficeLocalReviewSchema).max(16) }).strict(),
   z.object({ ok: z.literal(true), recovery: nativeOfficeRecoverySchema }).strict(),
+  z.object({ ok: z.literal(true), annotation: nativeOfficeAnnotationSchema }).strict(),
   z.object({ ok: z.literal(true), proposal: nativeOfficeProposalSchema }).strict(),
   z.object({ ok: z.literal(true), replacement: nativeOfficeReplacementSchema }).strict()
 ])

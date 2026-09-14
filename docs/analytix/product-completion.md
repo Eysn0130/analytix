@@ -26,7 +26,7 @@ below are not yet installed-application evidence.
 | Unified workspace | Main conversation, object/tool tabs and separate terminal layout exist | Full keyboard, IME, narrow/wide, theme, scale and native geometry journey |
 | Explicit native quick task | Same-thread callback carries its own frozen reference; shared action strip and owner-native context/keyboard menu, with preview-to-proposal dispatch | Real Provider/GUI journey and selection-positioned surface interaction |
 | Quote-only send | Native references count toward composer send eligibility; quoting does not dispatch | Real Enter/button/IME journey and full action-entry integration |
-| Annotation lifecycle | Per-thread/object in-memory draft survives collapse; stale revision keeps note and requires selection | Protected persistent storage, normal restart, capacity and closed-tab recovery |
+| Annotation lifecycle | Per-object/thread notes persist through Core CAS; Main retains pending input and uses a renderer freeze acknowledgement before close/quit flush | Complete display anchors and multiple annotations; real normal-restart, capacity and closed-tab GUI journey |
 | Native proposal refresh | Single-flight polling with failure backoff; new events supersede pending reads | Tool-completion refresh integration and installed behavior |
 | DOCX | Core absent-only generation calls a data-only `docx` codec; checkpoint binds the created bytes and installation principal; opaque artifacts resolve into the current native workspace | Full headers/fields/links coverage, installed repeated-text positive case and representative rendering |
 | XLSX | Go data-only generation writes typed cells, bounded checked formulas, formatting and native charts; sheet/chart IDs persist in OOXML; unsafe numeric/formula-to-text mutation remains rejected | Native recalculation/rendering, typed modification/range operations and summaries/pivots |
@@ -36,12 +36,12 @@ below are not yet installed-application evidence.
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core-owned originals, exact save candidates and approved changes; thread-bound discovery, protected-local Diff, explicit interrupted-save continuation, restart undo and cancellation of proven unsubmitted changes | Native format fidelity and actual third-object/restart GUI journey |
-| Installation | Native assets remain `source-experiment`; packaged rejection retained | Exact engine/Qt/font/source obligations, admitted packaged resolution, local installer and installed end-to-end journey |
+| Installation | Independent private-local payload qualification/staging binds 35 files, fixed engine hashes and retained notices; source-experiment and packaged rejection remain | Package identity/seal integration, packaged plugin/codec resolution, local installer and installed end-to-end journey; separate public redistribution obligations |
 | Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
 The numeric/formula text-path restriction is interim damage prevention. It is not
-acceptance of a text-only spreadsheet product. In-memory note retention is not
-a claim of durable restart recovery. Source tests are not native engine fidelity,
+acceptance of a text-only spreadsheet product. Persisted note text alone is not
+a complete position-aware annotation system. Source tests are not native engine fidelity,
 live media generation, or installed GUI evidence.
 
 The initial selection repair was checked with six focused Vitest files (86 tests)
@@ -201,8 +201,8 @@ query refreshes the Core recovery capabilities without writing; a new explicit
 click is required to continue. After a lost reply, fixed-operation result checking
 and exact current-byte validation precede native reload. This preserves uncertainty
 without permanently locking the Main controller after a pre-journal interruption.
-Native GUI/format fidelity, persistent annotation drafts and installed recovery
-remain unverified by these source/fixture checks.
+Native GUI/format fidelity and installed recovery remain unverified by these
+source/fixture checks. Note persistence is covered separately below.
 
 The explicit-continuation candidate passes the two Go application suites and
 the focused filestore native recovery/resume and object-editing tests (8.900s).
@@ -212,6 +212,31 @@ TypeScript configurations pass. Independent review caught and verified the fix
 for ordinary replay with a missing journal; that path now returns unknown without
 creating a journal or candidate. These checks use synthetic files on the configured
 macOS host and do not establish installed recovery or native formatting quality.
+
+## Annotation note persistence and safe exit
+
+Core stores one note draft per object identity and conversation with a revision
+CAS, protected file permissions and exact failed-request replay. Main retains
+new input synchronously while an earlier save is pending; a stale acknowledgement
+cannot replace later text. Normal object close, capacity eviction, thread change
+and application exit flush pending notes. A failed save keeps the note and offers
+retry. Restored text and its historical source revision do not recreate an old
+selection token or grant modification authority.
+
+A renderer/preload acknowledgement freezes note input before the final close or
+quit flush. Independent holds prevent concurrent file close and application quit
+from unfreezing each other. A missing acknowledgement leaves input state unknown:
+legal notes remain receivable, while the next close must obtain a fresh freeze
+acknowledgement. Core and PTYs stop only after exit is accepted; cancelling exit
+or hiding to the tray preserves the running session.
+
+Focused Main, IPC, actual before-quit callback, preload and renderer tests pass
+75/75. Core annotation/recovery filestore and the three relevant application
+packages pass. The old-acknowledgement overwrite regression failed before repair.
+Independent read-only review accepted the bounded close/quit corrections. These
+checks establish note persistence and shutdown ordering in source/fixtures;
+multiple location-aware annotations, installed IME behavior and normal-restart
+GUI acceptance remain required.
 
 ## Completion evidence
 

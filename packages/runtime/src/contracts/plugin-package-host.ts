@@ -14,7 +14,7 @@ export const pluginPackageViewSchema = z.object({
   activationState: z.enum(['unset', 'recorded', 'unavailable']),
   desiredState: z.enum(['enabled', 'disabled']).optional(), activationRevision: revision,
   activationId: digest.optional(), available: z.boolean(), unavailableReason: z.string().optional(),
-  operations: z.array(operation).max(16)
+  operations: z.array(operation).max(18)
 }).strict().superRefine((value, ctx) => {
   if ((value.materialized && !digest.safeParse(value.generationId).success) ||
       (value.activationState === 'recorded' && (!value.desiredState || !value.activationId || value.activationRevision === 0)) ||

@@ -1300,6 +1300,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       openEditorPath: async () => ({ ok: false, message: browserPreviewUnavailable('Open editor') })
     },
     office: {
+      onAnnotationInputFreeze: () => () => undefined,
       onMenuRequested: () => () => undefined,
       showActionMenu: async () => ({actionId:null}),
       onWorkspaceCommand: () => () => undefined,

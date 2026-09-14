@@ -26,7 +26,7 @@ import (
 const (
 	MaxInputBytes                 = 24 << 20
 	MaxOutputBytes                = 24 << 20
-	MaxOperations                 = 16
+	MaxOperations                 = 18
 	WorkspaceEditorContributionID = "workspace-editor"
 )
 

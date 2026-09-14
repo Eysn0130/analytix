@@ -1256,6 +1256,7 @@ export type AnalytixDiagnosticsApi = {
 
 export type AnalytixDomainFacade = {
   office: {
+    onAnnotationInputFreeze: (handler: (frozen: boolean) => void) => () => void
     onMenuRequested: (handler: (target: import('./native-office').NativeOfficeMenuTarget) => void) => () => void
     showActionMenu: (request: import('./native-office').NativeOfficeActionMenu) => Promise<{actionId:string | null}>
     onWorkspaceCommand: (handler: (command: import('./native-office').NativeWorkspaceCommand) => void) => () => void
