@@ -1718,6 +1718,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
+			ObjectEditing:     newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs),
 			FundsCSVAdmission: fundsCSVAdmission,
 			FundsCleaning:     fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(

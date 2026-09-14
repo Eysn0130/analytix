@@ -4,7 +4,7 @@ package filestore
 
 import "fmt"
 
-func inspectAtomicTextTargetPlatform(string, bool) (atomicTextState, error) {
+func inspectAtomicTextTargetPlatform(string, bool, int64) (atomicTextState, error) {
 	return atomicTextState{}, fmt.Errorf("%w: secure no-follow replacement is unavailable", ErrAtomicTextUnsupportedPlatform)
 }
 

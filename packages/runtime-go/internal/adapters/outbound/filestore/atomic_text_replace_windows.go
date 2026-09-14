@@ -5,7 +5,6 @@ package filestore
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +39,7 @@ type atomicWindowsRenameInformation struct {
 	FileName        [1]uint16
 }
 
-func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) (atomicTextState, error) {
+func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, maxBytes int64) (atomicTextState, error) {
 	parent, base, missing, err := openAtomicWindowsParent(path, false, false)
 	if err != nil {
 		return atomicTextState{}, err
@@ -52,7 +51,7 @@ func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) 
 		return atomicTextState{}, os.ErrNotExist
 	}
 	defer windows.CloseHandle(parent)
-	state, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ)
+	state, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, maxBytes)
 	return state.state, err
 }
 
@@ -65,7 +64,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return os.ErrNotExist
 	}
 	defer windows.CloseHandle(parent)
-	initial, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ)
+	initial, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -114,7 +113,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return err
 	}
 
-	current, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ)
+	current, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
 	if err != nil {
 		return err
 	}
@@ -134,7 +133,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	if err := windows.FlushFileBuffers(temp); err != nil {
 		return fmt.Errorf("sync atomic text replacement: %w", err)
 	}
-	replaced, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ)
+	replaced, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
 	if err != nil {
 		return fmt.Errorf("verify atomic text replacement: %w", err)
 	}
@@ -221,7 +220,7 @@ func openAtomicWindowsParent(path string, createParents bool, mutate bool) (wind
 	return current, base, false, nil
 }
 
-func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint32) (atomicWindowsState, error) {
+func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint32, maxBytes int64) (atomicWindowsState, error) {
 	handle, err := atomicWindowsOpenRelative(parent, name, access, windows.FILE_OPEN, false, false)
 	if atomicWindowsNotFound(err) {
 		return atomicWindowsState{}, nil
@@ -239,7 +238,10 @@ func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint3
 	if err != nil {
 		return atomicWindowsState{}, err
 	}
-	content, readErr := io.ReadAll(file)
+	if maxBytes > 0 && before.size > uint64(maxBytes) {
+		return atomicWindowsState{}, ErrAtomicTextTooLarge
+	}
+	content, readErr := readAtomicTextContent(file, maxBytes)
 	if readErr != nil {
 		return atomicWindowsState{}, readErr
 	}

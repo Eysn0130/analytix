@@ -83,6 +83,7 @@ func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
 }
 
 type LocalDisplayHandlerV1 struct {
+	ObjectEditing     http.Handler
 	Service           *localdisplayapp.Service
 	FundsCSVAdmission *fundscsvadmissionapp.ServiceV1
 	FundsCleaning     *fundscleaningapp.ServiceV1
@@ -143,6 +144,14 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == ObjectEditingPath {
+		if handler.ObjectEditing == nil {
+			ObjectEditingHandler{}.ServeHTTP(w, r)
+			return
+		}
+		handler.ObjectEditing.ServeHTTP(w, r)
+		return
+	}
 	if r != nil && r.URL != nil && r.URL.Path == HostFundsImportStagePathV1 && handler.FundsCSVAdmission == nil {
 		writeFundsImportCapabilityUnavailableV1(w)
 		return

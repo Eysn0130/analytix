@@ -1,4 +1,5 @@
 import i18n from '../i18n'
+import { openTextObject } from './object-editing-client'
 import { isWriteImageFilePath, isWritePdfFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
 import { writePathToFileUrl } from '@shared/write-markdown-resource'
 import type { WriteWorkspaceGet, WriteWorkspaceSet, WriteWorkspaceState } from './write-workspace-store-types'
@@ -168,12 +169,18 @@ export function createWriteFileActions({
       const root = normalizePath(workspaceRoot || get().workspaceRoot)
       const saved = await get().flushSave(get().workspaceRoot || root)
       if (!saved || revision !== navigationRevision) return false
+      const session = get().objectSession
+      if (session) await window.analytix.objects.request({ action: 'close', sessionId: session.sessionId }).catch(() => undefined)
+      if (revision !== navigationRevision) return false
       cancelExternalSyncAnimation()
       setLastSavedContent('')
       rememberActiveFile(root, null)
       set({
         activeFilePath: null,
         activeFileKind: null,
+        objectSession: null,
+        legacyObjectEditing: false,
+        pendingSave: null,
         fileContent: '',
         imageDataUrl: '',
         imageMimeType: '',
@@ -208,6 +215,11 @@ export function createWriteFileActions({
       }
       set({ fileLoading: true, fileError: null })
       try {
+        const previous = get()
+        if (previous.objectSession && (previous.activeFilePath !== path || previous.workspaceRoot !== workspaceRoot)) {
+          await window.analytix.objects.request({ action: 'close', sessionId: previous.objectSession.sessionId }).catch(() => undefined)
+          if (revision !== navigationRevision) return
+        }
         if (isWriteImageFilePath(path)) {
           const result = await window.analytix.files.readImage({ path, workspaceRoot })
           if (revision !== navigationRevision) return
@@ -220,6 +232,9 @@ export function createWriteFileActions({
           set({
             activeFilePath: result.path,
             activeFileKind: 'image',
+            objectSession: null,
+            legacyObjectEditing: false,
+            pendingSave: null,
             fileContent: '',
             imageDataUrl: result.dataUrl,
             imageMimeType: result.mimeType,
@@ -249,6 +264,9 @@ export function createWriteFileActions({
           set({
             activeFilePath: result.path,
             activeFileKind: 'pdf',
+            objectSession: null,
+            legacyObjectEditing: false,
+            pendingSave: null,
             fileContent: '',
             imageDataUrl: '',
             imageMimeType: '',
@@ -266,10 +284,11 @@ export function createWriteFileActions({
           return
         }
 
-        const result = await window.analytix.files.read({ path, workspaceRoot })
-        if (revision !== navigationRevision) return
-        if (!result.ok) {
-          set({ fileLoading: false, fileError: result.message })
+        const result = await openTextObject(workspaceRoot, path)
+        if (revision !== navigationRevision) {
+          if (!result.legacy && get().objectSession?.sessionId !== result.sessionId) {
+            await window.analytix.objects.request({ action: 'close', sessionId: result.sessionId }).catch(() => undefined)
+          }
           return
         }
         setLastSavedContent(result.content)
@@ -278,12 +297,15 @@ export function createWriteFileActions({
           activeFilePath: result.path,
           activeFileKind: 'text',
           fileContent: result.content,
+          objectSession: result.legacy ? null : { sessionId: result.sessionId, objectId: result.objectId, revision: result.revision },
+          legacyObjectEditing: result.legacy,
+          pendingSave: null,
           imageDataUrl: '',
           imageMimeType: '',
           pdfDataBase64: '',
           pdfMimeType: '',
           pdfMtimeMs: 0,
-          fileSize: result.size,
+          fileSize: new TextEncoder().encode(result.content).length,
           fileTruncated: result.truncated,
           fileLoading: false,
           fileError: null,

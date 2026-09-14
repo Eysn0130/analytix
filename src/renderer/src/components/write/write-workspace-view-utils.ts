@@ -57,6 +57,8 @@ export function isMarkdownFile(filePath: string): boolean {
 export function formatSaveLabel(status: WriteSaveStatus, t: (key: string) => string): string {
   if (status === 'saving') return t('writeSaving')
   if (status === 'dirty') return t('writeUnsaved')
+  if (status === 'unknown') return t('writeSaveUnknown')
+  if (status === 'conflict') return t('writeSaveConflict')
   if (status === 'error') return t('writeSaveError')
   return t('writeSaved')
 }

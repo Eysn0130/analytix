@@ -48,6 +48,7 @@ import type { WriteRichEditorHandle } from '../../write/tiptap/WriteRichEditor'
 import { useWriteSplitScrollSync } from './use-write-split-scroll-sync'
 import { WriteWorkspaceEmptyState } from './WriteWorkspaceEmptyState'
 import { WriteWorkspaceToolbar } from './WriteWorkspaceToolbar'
+import { WriteConflictReview } from './WriteConflictReview'
 import { WriteInlineAgent } from './WriteInlineAgent'
 import { WriteWorkspaceDocumentPane } from './WriteWorkspaceDocumentPane'
 import { resolveWriteAgentPreset } from '../../write/agent-presets'
@@ -108,6 +109,7 @@ export function WriteWorkspaceView({
     fileError,
     fileLoading,
     saveStatus,
+    legacyObjectEditing,
     previewMode,
     assistantOpen,
     selection,
@@ -165,6 +167,7 @@ export function WriteWorkspaceView({
       fileError: s.fileError,
       fileLoading: s.fileLoading,
       saveStatus: s.saveStatus,
+      legacyObjectEditing: s.legacyObjectEditing,
       previewMode: s.previewMode,
       assistantOpen: s.assistantOpen,
       selection: s.selection,
@@ -217,7 +220,8 @@ export function WriteWorkspaceView({
   const saveLabel = activeFileIsImage
     ? t('writeImagePreview')
     : activeFileIsPdf ? t('writePdfPreview')
-    : renderSafety.readOnly ? t('writeReadOnly') : formatSaveLabel(saveStatus, t)
+    : renderSafety.readOnly ? t('writeReadOnly')
+    : legacyObjectEditing ? t('writeObjectLegacySave', { status: formatSaveLabel(saveStatus, t) }) : formatSaveLabel(saveStatus, t)
   // Only surface the toolbar once the selection gesture settles: while the
   // pointer is down (dragging to select) it stays hidden to avoid flicker.
   const selectionAction =
@@ -1034,6 +1038,7 @@ export function WriteWorkspaceView({
         onResetOfficialDocumentFormat={resetOfficialDocumentFormat}
         onTypographyChange={setCurrentTypography}
       />
+      <WriteConflictReview />
       <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden pb-3 pt-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-ds-border-muted bg-ds-card/92 shadow-[0_12px_32px_rgba(20,47,95,0.04)] backdrop-blur-xl">
           <WriteWorkspaceDocumentPane

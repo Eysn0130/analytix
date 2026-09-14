@@ -252,6 +252,7 @@ func captureStrictOnce(
 		targets = append(targets, managedTarget{path: filepath.Join(roots.DataDir, "private"), label: "data/private"})
 	}
 	targets = append(targets,
+		managedTarget{path: filepath.Join(roots.DataDir, "object-editing"), label: "data/object-editing"},
 		managedTarget{path: filepath.Join(roots.DataDir, "memory"), label: "data/memory"},
 		managedTarget{path: filepath.Join(roots.DataDir, "child-runs"), label: "data/child-runs"},
 		managedTarget{path: filepath.Join(roots.DataDir, "attachments"), label: "data/attachments"},

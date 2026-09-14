@@ -36,6 +36,7 @@ function makeBaseState(): WriteWorkspaceState {
     syncActiveFileFromDisk: async () => false,
     syncActiveImageFromDisk: async () => false,
     flushSave: async () => true,
+    resolveFileConflict: async () => false,
     createFile: async () => null,
     createDirectory: async () => null,
     renameEntry: async () => null,
@@ -91,6 +92,7 @@ type FileBridgeTestOverrides = Partial<{
 function installDsGui(overrides: FileBridgeTestOverrides): void {
   vi.stubGlobal('window', {
     analytix: {
+      objects: { request: async () => ({ ok: false, code: 'unsupported_platform', message: 'Synthetic legacy platform' }) },
       files: {
         listDirectory: overrides.listWorkspaceDirectory,
         createFile: overrides.createWorkspaceFile,

@@ -573,6 +573,9 @@ const api = {
     listEditors: flatApi.listEditors,
     openEditorPath: flatApi.openEditorPath
   },
+  objects: {
+    request: (request) => ipcRenderer.invoke('object:editing', request)
+  },
   files: {
     listDirectory: flatApi.listWorkspaceDirectory,
     resolve: flatApi.resolveWorkspaceFile,

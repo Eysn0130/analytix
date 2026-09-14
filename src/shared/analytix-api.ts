@@ -1253,6 +1253,9 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  objects: {
+    request: (request: import('../../packages/runtime/src/contracts/object-editing').ObjectEditingRequest) => Promise<import('../../packages/runtime/src/contracts/object-editing').ObjectEditingResponse>
+  }
   settings: AnalytixSettingsApi
   account: AnalytixAccountApi
   providerRegistry: AnalytixProviderRegistryApi

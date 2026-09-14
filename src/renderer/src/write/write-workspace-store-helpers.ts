@@ -275,6 +275,9 @@ export function initialState(): Pick<
   | 'activeFilePath'
   | 'activeFileKind'
   | 'fileContent'
+  | 'objectSession'
+  | 'legacyObjectEditing'
+  | 'pendingSave'
   | 'imageDataUrl'
   | 'imageMimeType'
   | 'pdfDataBase64'
@@ -301,6 +304,9 @@ export function initialState(): Pick<
     activeFilePath: null,
     activeFileKind: null,
     fileContent: '',
+    objectSession: null,
+    legacyObjectEditing: false,
+    pendingSave: null,
     imageDataUrl: '',
     imageMimeType: '',
     pdfDataBase64: '',

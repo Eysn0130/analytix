@@ -1,4 +1,5 @@
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
+import { createObjectEditingHandler } from './object-editing-ipc'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -2714,6 +2715,15 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     openEditorPath(parseIpcPayload('editor:open-path', openEditorPathPayloadSchema, payload))
   )
 
+  const objectEditing = createObjectEditingHandler(localDisplayRequest)
+  ipcMain.handle('object:editing', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
+        event.senderFrame !== main.webContents.mainFrame) {
+      return { ok: false, code: 'forbidden', message: 'The protected editor is available only in the main workspace.' }
+    }
+    return objectEditing(payload)
+  })
   ipcMain.handle('file:resolve-workspace', async (_, payload: unknown) =>
     resolveWorkspaceFile(
       parseIpcPayload('file:resolve-workspace', workspaceFileTargetPayloadSchema, payload)

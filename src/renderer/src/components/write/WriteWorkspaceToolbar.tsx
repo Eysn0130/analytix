@@ -96,9 +96,9 @@ export function WriteWorkspaceToolbar({
       ? 'text-accent'
       : readOnly
         ? ''
-        : saveStatus === 'error'
+        : (saveStatus === 'error' || saveStatus === 'conflict')
           ? 'text-red-500'
-          : saveStatus === 'dirty'
+          : (saveStatus === 'dirty' || saveStatus === 'unknown')
             ? 'text-amber-500'
             : saveStatus === 'saving'
               ? 'text-sky-500'

@@ -8,6 +8,7 @@ type FileBridgeTestOverrides = Partial<{
 function installDsGui(overrides: FileBridgeTestOverrides): void {
   vi.stubGlobal('window', {
     analytix: {
+      objects: { request: async () => ({ ok: false, code: 'unsupported_platform', message: 'Synthetic legacy platform' }) },
       files: {
         read: overrides.readWorkspaceFile
       }
@@ -19,6 +20,7 @@ function activateTextFile(path = '/tmp/write/draft.md'): void {
   useWriteWorkspaceStore.setState({
     activeFilePath: path,
     activeFileKind: 'text',
+    legacyObjectEditing: true,
     fileContent: 'old content',
     fileError: null,
     fileLoading: false,
@@ -84,7 +86,7 @@ describe('write workspace store', () => {
     })
     activateTextFile()
 
-    const result = await useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write')
+    const result = await useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write', { force: true })
 
     expect(result).toBe(false)
     expect(useWriteWorkspaceStore.getState()).toMatchObject({
@@ -102,7 +104,7 @@ describe('write workspace store', () => {
     })
     activateTextFile()
 
-    const result = await useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write')
+    const result = await useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write', { force: true })
 
     expect(result).toBe(false)
     expect(useWriteWorkspaceStore.getState()).toMatchObject({
