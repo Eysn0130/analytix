@@ -30,6 +30,7 @@ type atomicWindowsState struct {
 	identity   atomicWindowsFileID
 	attributes uint32
 	size       uint64
+	links      uint32
 }
 
 type atomicWindowsRenameInformation struct {
@@ -39,7 +40,7 @@ type atomicWindowsRenameInformation struct {
 	FileName        [1]uint16
 }
 
-func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, maxBytes int64) (atomicTextState, error) {
+func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, maxBytes int64, policy atomicTextReadPolicy) (atomicTextState, error) {
 	parent, base, missing, err := openAtomicWindowsParent(path, false, false)
 	if err != nil {
 		return atomicTextState{}, err
@@ -51,7 +52,7 @@ func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, 
 		return atomicTextState{}, os.ErrNotExist
 	}
 	defer windows.CloseHandle(parent)
-	state, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, maxBytes)
+	state, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, maxBytes, policy)
 	return state.state, err
 }
 
@@ -64,7 +65,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return os.ErrNotExist
 	}
 	defer windows.CloseHandle(parent)
-	initial, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
+	initial, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return err
 	}
 
-	current, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
+	current, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return err
 	}
@@ -133,7 +134,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	if err := windows.FlushFileBuffers(temp); err != nil {
 		return fmt.Errorf("sync atomic text replacement: %w", err)
 	}
-	replaced, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes)
+	replaced, err := inspectAtomicWindowsTarget(parent, base, windows.FILE_GENERIC_READ, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return fmt.Errorf("verify atomic text replacement: %w", err)
 	}
@@ -220,7 +221,7 @@ func openAtomicWindowsParent(path string, createParents bool, mutate bool) (wind
 	return current, base, false, nil
 }
 
-func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint32, maxBytes int64) (atomicWindowsState, error) {
+func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint32, maxBytes int64, policy atomicTextReadPolicy) (atomicWindowsState, error) {
 	handle, err := atomicWindowsOpenRelative(parent, name, access, windows.FILE_OPEN, false, false)
 	if atomicWindowsNotFound(err) {
 		return atomicWindowsState{}, nil
@@ -238,6 +239,9 @@ func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint3
 	if err != nil {
 		return atomicWindowsState{}, err
 	}
+	if policy.RequireSingleLink && before.links != 1 {
+		return atomicWindowsState{}, fmt.Errorf("%w: target must have exactly one link", ErrAtomicTextUnsafePath)
+	}
 	if maxBytes > 0 && before.size > uint64(maxBytes) {
 		return atomicWindowsState{}, ErrAtomicTextTooLarge
 	}
@@ -248,6 +252,23 @@ func inspectAtomicWindowsTarget(parent windows.Handle, name string, access uint3
 	after, err := atomicWindowsObjectState(handle, false)
 	if err != nil {
 		return atomicWindowsState{}, err
+	}
+	if policy.RequireSingleLink {
+		if after.links != 1 {
+			return atomicWindowsState{}, fmt.Errorf("%w: target link count changed while being read", ErrAtomicTextUnsafePath)
+		}
+		linkedHandle, err := atomicWindowsOpenRelative(parent, name, windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, windows.FILE_OPEN, false, false)
+		if err != nil {
+			return atomicWindowsState{}, fmt.Errorf("%w: Windows target changed while being read: %v", ErrAtomicTextBeforeDrift, err)
+		}
+		defer windows.CloseHandle(linkedHandle)
+		linked, err := atomicWindowsObjectState(linkedHandle, false)
+		if err != nil || linked.identity != after.identity || linked.attributes != after.attributes || linked.size != after.size {
+			return atomicWindowsState{}, fmt.Errorf("%w: Windows target changed while being read", ErrAtomicTextBeforeDrift)
+		}
+		if linked.links != 1 {
+			return atomicWindowsState{}, fmt.Errorf("%w: target link count changed while being read", ErrAtomicTextUnsafePath)
+		}
 	}
 	if before.identity != after.identity || before.attributes != after.attributes || uint64(len(content)) != after.size {
 		return atomicWindowsState{}, fmt.Errorf("%w: Windows target changed while being read", ErrAtomicTextBeforeDrift)
@@ -278,6 +299,7 @@ func atomicWindowsObjectState(handle windows.Handle, directory bool) (atomicWind
 		identity:   identity,
 		attributes: info.FileAttributes,
 		size:       size,
+		links:      info.NumberOfLinks,
 	}, nil
 }
 

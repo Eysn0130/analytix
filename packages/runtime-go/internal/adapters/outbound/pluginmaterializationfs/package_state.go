@@ -179,7 +179,7 @@ func (store *Store) SetDesiredState(ctx context.Context, request pluginport.SetD
 	if err := ctx.Err(); err != nil {
 		return domainplugin.ActivationV1{}, err
 	}
-	path := store.activationPathV1(request.GenerationID)
+	path := store.activationPathV1(current.Receipt.GenerationID)
 	temporary := path + ".tmp-" + sha256HexLocal(body)
 	if err := store.putExact(temporary, body); err != nil {
 		return domainplugin.ActivationV1{}, err

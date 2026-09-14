@@ -180,7 +180,7 @@ func objectEditingInspectBounded(path string, maxBytes int64) (atomicTextState, 
 	if info.Size() > maxBytes {
 		return atomicTextState{}, objectediting.ErrTooLarge
 	}
-	state, err := inspectAtomicTextTargetBounded(path, false, maxBytes)
+	state, err := inspectAtomicTextTargetWithPolicy(path, false, maxBytes, atomicTextReadPolicy{RequireSingleLink: true})
 	if err != nil {
 		return atomicTextState{}, objectEditingError(err)
 	}
@@ -441,7 +441,7 @@ func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.Com
 	if replace == nil {
 		replace = atomicReplaceText
 	}
-	writeErr := replace(atomicTextReplaceRequest{Path: target.path, Content: encoded, MaxBytes: s.maxObjectBytes(), ExpectedExists: true, ExpectedHash: input.BaseRevision, PreserveMode: true, DefaultMode: state.Mode})
+	writeErr := replace(atomicTextReplaceRequest{Path: target.path, Content: encoded, MaxBytes: s.maxObjectBytes(), ReadPolicy: atomicTextReadPolicy{RequireSingleLink: true}, ExpectedExists: true, ExpectedHash: input.BaseRevision, PreserveMode: true, DefaultMode: state.Mode})
 	// A replacement error may follow a successful rename/fsync. Resolve from
 	// durable intent + actual bytes; never project every error as "not saved".
 	r, recordHash, err = s.readRecord(input.ObjectIdentity, input.OperationID)

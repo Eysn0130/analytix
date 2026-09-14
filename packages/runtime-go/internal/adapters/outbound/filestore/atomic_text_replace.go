@@ -26,11 +26,17 @@ type atomicTextState struct {
 	Mode    os.FileMode
 }
 
+type atomicTextReadPolicy struct {
+	// Object reads must not expose bytes through aliases into protected roots.
+	RequireSingleLink bool
+}
+
 type atomicTextReplaceRequest struct {
 	Path    string
 	Content []byte
 	// MaxBytes bounds every target read and the replacement; zero preserves the unbounded contract.
 	MaxBytes          int64
+	ReadPolicy        atomicTextReadPolicy
 	ExpectedExists    bool
 	ExpectedHash      string
 	CreateParents     bool
@@ -52,6 +58,10 @@ func inspectAtomicTextTarget(path string, missingParentsAreAbsent bool) (atomicT
 }
 
 func inspectAtomicTextTargetBounded(path string, missingParentsAreAbsent bool, maxBytes int64) (atomicTextState, error) {
+	return inspectAtomicTextTargetWithPolicy(path, missingParentsAreAbsent, maxBytes, atomicTextReadPolicy{})
+}
+
+func inspectAtomicTextTargetWithPolicy(path string, missingParentsAreAbsent bool, maxBytes int64, policy atomicTextReadPolicy) (atomicTextState, error) {
 	if maxBytes < 0 || maxBytes == math.MaxInt64 {
 		return atomicTextState{}, errors.New("atomic text byte limit is invalid")
 	}
@@ -59,7 +69,7 @@ func inspectAtomicTextTargetBounded(path string, missingParentsAreAbsent bool, m
 	if path == "" || path == "." || !filepath.IsAbs(path) {
 		return atomicTextState{}, fmt.Errorf("%w: target path must be absolute", ErrAtomicTextUnsafePath)
 	}
-	return inspectAtomicTextTargetPlatform(path, missingParentsAreAbsent, maxBytes)
+	return inspectAtomicTextTargetPlatform(path, missingParentsAreAbsent, maxBytes, policy)
 }
 
 func atomicReplaceText(request atomicTextReplaceRequest) error {

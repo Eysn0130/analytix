@@ -431,6 +431,16 @@ func TestObjectEditingRejectsUnsafePathsAndProtectedMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("protected hard link", func(t *testing.T) {
+		alias := filepath.Join(w, "alias.txt")
+		if err := os.Link(secret, alias); err != nil {
+			t.Fatal(err)
+		}
+		doc, err := s.Read(context.Background(), w, alias)
+		if !errors.Is(err, objectediting.ErrForbidden) || doc.Content != "" {
+			t.Fatalf("protected hard link: content bytes=%d err=%v", len(doc.Content), err)
+		}
+	})
 	for _, dir := range []string{".git", ".analytix"} {
 		if err := os.Mkdir(filepath.Join(w, dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -458,6 +468,51 @@ func TestObjectEditingRejectsUnsafePathsAndProtectedMetadata(t *testing.T) {
 	}
 	if _, err := s.Read(context.Background(), w, filepath.Join(parentLink, "secret.txt")); !errors.Is(err, objectediting.ErrForbidden) {
 		t.Fatalf("parent symlink: %v", err)
+	}
+}
+
+func TestAtomicTextDefaultPolicyPreservesHardLinkSupport(t *testing.T) {
+	_, w, p := objectEditingFixture(t, []byte("before"))
+	alias := filepath.Join(w, "alias.txt")
+	if err := os.Link(p, alias); err != nil {
+		t.Fatal(err)
+	}
+	state, err := inspectAtomicTextTargetBounded(alias, false, objectediting.MaxTextBytes)
+	if err != nil || !state.Exists || string(state.Content) != "before" {
+		t.Fatalf("ordinary hard link read: exists=%v content bytes=%d err=%v", state.Exists, len(state.Content), err)
+	}
+	if err := atomicReplaceText(atomicTextReplaceRequest{Path: p, Content: []byte("after"), ExpectedExists: true, ExpectedHash: digestAtomicText(state.Content)}); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{p: "after", alias: "before"} {
+		if content, err := os.ReadFile(path); err != nil || string(content) != want {
+			t.Fatalf("ordinary replacement content bytes=%d err=%v", len(content), err)
+		}
+	}
+}
+
+func TestObjectEditingCommitRejectsHardLinkCreatedAfterInspection(t *testing.T) {
+	s, w, p := objectEditingFixture(t, []byte("before"))
+	protected := filepath.Join(filepath.Dir(w), "protected")
+	if err := os.Mkdir(protected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewObjectEditingFiles(s.receiptRoot, []string{protected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := objectEditingInput(t, s, w, p, "after")
+	s.replaceDocument = func(request atomicTextReplaceRequest) error {
+		if err := os.Link(p, filepath.Join(protected, "secret.txt")); err != nil {
+			t.Fatal(err)
+		}
+		return atomicReplaceText(request)
+	}
+	if _, err := s.Commit(context.Background(), input); !errors.Is(err, objectediting.ErrForbidden) {
+		t.Fatalf("hard link added before replacement: %v", err)
+	}
+	if content, err := os.ReadFile(p); err != nil || string(content) != "before" {
+		t.Fatalf("target changed: content bytes=%d err=%v", len(content), err)
 	}
 }
 
