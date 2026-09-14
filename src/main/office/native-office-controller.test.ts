@@ -33,7 +33,7 @@ function harness() {
         operationId: request.operationId, documentId: request.documentId, version: request.version, ok: true }
       if (request.command === 'open') openOperationId = request.operationId
       if (request.command !== 'close') reply.state = state()
-      if (request.command === 'captureSelection') reply.selection = selection()
+      if (request.command !== 'close') reply.selection = selection()
       return transform(request, reply)
     }
   }
@@ -170,7 +170,7 @@ describe('Main-owned read-only native Office preview', () => {
     const [opened, closed] = await Promise.all([h.controller.request(open), h.controller.request({ action: 'close' })])
     expect(opened.ok).toBe(true); expect(closed).toEqual({ ok: true, view: null })
     expect(h.order).toEqual(['core:open-object', 'engine:open', 'engine:close', 'core:close-object', 'destroy'])
-    expect(h.calls.at(-1)).toMatchObject({ command: 'close', discard: true })
+    expect(h.calls.at(-1)).toMatchObject({ command: 'close', discard: false })
     expectReadOnly(h)
   })
 

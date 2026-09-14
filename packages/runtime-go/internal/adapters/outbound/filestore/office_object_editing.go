@@ -9,9 +9,9 @@ import (
 
 const MaxOfficeObjectBytes = 16 << 20
 
-// Native Office previews reuse principal-bound object sessions for reads.
-// Base64 is only the protected-local transport representation. Office writes
-// are forbidden by the codec even when callers bypass the preview adapter.
+// Native Office editing reuses the existing principal-bound object authority.
+// Base64 is only the protected-local transport representation; the Office codec
+// validates every package before the existing CAS journal and atomic replacement.
 func NewOfficeObjectEditingFiles(receiptRoot string, protectedRoots []string, kind string) (*ObjectEditingFiles, error) {
 	if kind != "docx" && kind != "xlsx" && kind != "pptx" {
 		return nil, objectediting.ErrInvalidInput
@@ -59,5 +59,21 @@ func (s *ObjectEditingFiles) encodeObject(content, encoding string) ([]byte, err
 	if s.officeKind == "" {
 		return filetoolsapp.EncodeTextBytes(content, encoding), nil
 	}
-	return nil, objectediting.ErrForbidden
+	if encoding != "office-base64" {
+		return nil, objectediting.ErrInvalidInput
+	}
+	if len(content) > base64.StdEncoding.EncodedLen(MaxOfficeObjectBytes) {
+		return nil, objectediting.ErrTooLarge
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(content)
+	if err != nil || base64.StdEncoding.EncodeToString(raw) != content {
+		return nil, objectediting.ErrInvalidInput
+	}
+	if len(raw) > MaxOfficeObjectBytes {
+		return nil, objectediting.ErrTooLarge
+	}
+	if InspectOfficePackage(raw, s.officeKind) != nil {
+		return nil, objectediting.ErrNotText
+	}
+	return raw, nil
 }

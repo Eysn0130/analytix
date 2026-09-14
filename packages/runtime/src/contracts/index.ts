@@ -24,3 +24,5 @@ export * from './model-execution-ref.js'
 export * from './typed-local-data-surface.js'
 export * from './provider-registry.js'
 export * from './object-editing.js'
+
+export * from './native-office-editing'

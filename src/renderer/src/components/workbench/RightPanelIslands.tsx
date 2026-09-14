@@ -48,6 +48,7 @@ export const SubagentInspectorPanelIsland = lazy(loadSubagentInspectorPanel)
 
 export type RightPanelIslandPreloadTarget =
   | 'documents'
+  | 'files'
   | 'todo'
   | 'changes'
   | 'browser'

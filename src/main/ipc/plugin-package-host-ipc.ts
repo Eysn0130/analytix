@@ -5,11 +5,16 @@ import {
 
 type Transport = (path: string, body: string) => Promise<{ ok: boolean; status: number; body: string }>
 
-export function createPluginPackageHostHandler(transport: Transport) {
+export function createPluginPackageHostHandler(transport: Transport, source: 'main' | 'renderer' = 'main') {
   return async (payload: unknown): Promise<PluginPackageHostResponse> => {
     const parsed = pluginPackageHostRequestSchema.safeParse(payload)
     if (!parsed.success) return { ok: false, code: 'invalid_request', message: 'Invalid plugin request.' }
     const request = parsed.data
+    // Native object payloads and selection attestations belong to the Main
+    // controller. Renderer keeps only the package management surface.
+    if (source === 'renderer' && request.action === 'invoke') {
+      return { ok: false, code: 'identity_invalid', message: 'Object operations require the protected workspace controller.' }
+    }
     try {
       const body = JSON.stringify(request)
       if (Buffer.byteLength(body) > 25_169_920) throw new Error('Oversized request')

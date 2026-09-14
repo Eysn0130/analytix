@@ -6,7 +6,7 @@ const identity = r => r && token(r.channel) && token(r.operationId) && token(r.d
 const key = r => r.command + ':' + r.operationId;
 const matches = (a, b) => a.channel === b.channel && a.operationId === b.operationId && a.documentId === b.documentId && a.version === b.version && a.command === b.command;
 const kinds = ['docx', 'xlsx', 'pptx'];
-const previewCommands = ['open', 'captureSelection', 'close'];
+const previewCommands = ['open', 'edit', 'replace', 'export', 'ack', 'captureSelection', 'close'];
 function validRequest(r) {
   if (!identity(r) || Object.getPrototypeOf(r) !== Object.prototype) return false;
   let extra = [];
@@ -16,7 +16,14 @@ function validRequest(r) {
   } else if (r.command === 'close') {
     if (!Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0 || typeof r.discard !== 'boolean') return false;
     extra = ['expectedChangeSequence', 'discard'];
-  } else if (r.command !== 'captureSelection') return false;
+  } else if (r.command === 'replace') {
+    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) return false;
+    if (typeof r.text !== 'string' || r.text.length > 4096 || r.valueType !== 'text') return false;
+    extra = ['selectionToken', 'expectedChangeSequence', 'text', 'valueType'];
+  } else if (r.command === 'ack') {
+    if (!token(r.exportOperationId) || !Number.isSafeInteger(r.exportedSequence) || r.exportedSequence < 0 || !['committed','conflict','failed'].includes(r.status) || (r.status === 'committed' && !token(r.persistedVersion))) return false;
+    extra = ['exportOperationId','exportedSequence','status', ...(r.status === 'committed' ? ['persistedVersion'] : [])];
+  } else if (!['captureSelection','edit','export'].includes(r.command)) return false;
   return Object.keys(r).every(k => ['channel', 'operationId', 'documentId', 'version', 'command', ...extra].includes(k));
 }
 
@@ -24,16 +31,22 @@ function validRequest(r) {
 export class OfficeEngineSurface {
   constructor(canvas, onEvent, onView = () => {}) {
     this.canvas = canvas; this.onEvent = onEvent; this.onView = onView; this.view = null; this.pending = new Map(); this.state = null;
-    this.openOperationId = null; this.busy = false; this.started = false;
-    // UX guard registered before Qt's handlers, including hidden native inputs.
-    // Worker/Main read-only enforcement remains the actual mutation boundary.
+    this.openOperationId = null; this.editing = false; this.busy = false; this.started = false;
+    // Native models remain read-only, including during controlled AI mutations.
+    // This guard also blocks text input before Qt's hidden input handlers.
     const block = event => { event.preventDefault(); event.stopImmediatePropagation(); };
     const navigation = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Tab','Escape']);
     const modifiers = new Set(['Shift','Control','Meta','Alt','CapsLock']);
     const intercept = event => {
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && key === 's') {
+        block(event);
+        if (event.type === 'keydown' && this.editing && this.state?.dirty) this.onEvent({type:'save-requested', channel:this.channel, operationId:this.openOperationId, documentId:this.state.documentId, version:this.state.version});
+        return;
+      }
       if (event.target?.closest?.('[data-view]') && ['Enter',' '].includes(event.key)) return;
       if (modifiers.has(event.key) || navigation.has(event.key)) return;
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && ['a','c','q'].includes(event.key.toLowerCase())) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && ['a','c'].includes(event.key.toLowerCase())) return;
       block(event);
     };
     for (const type of ['keydown','keypress','keyup']) window.addEventListener(type, intercept, true);
@@ -101,7 +114,7 @@ export class OfficeEngineSurface {
       const result = await this.worker({command:'local-view', channel:this.channel, operationId:crypto.randomUUID(), documentId, version, action});
       if (!this.state || this.state.documentId !== documentId || this.state.version !== version || this.openOperationId !== opened) throw Error('stale-document-version');
       const view = result.view;
-      if (!view || !Number.isFinite(view.zoom) || view.zoom <= 0 || view.zoom > 1000 || !Number.isSafeInteger(view.zoomType) || typeof view.fit !== 'boolean' || view.readOnly !== true || view.modified !== false || (this.state.kind === 'pptx' && (!Number.isSafeInteger(view.page) || !Number.isSafeInteger(view.pages) || view.page < 1 || view.page > view.pages || view.pages > 512))) throw Error('view-unavailable');
+      if (!view || !Number.isFinite(view.zoom) || view.zoom <= 0 || view.zoom > 1000 || !Number.isSafeInteger(view.zoomType) || typeof view.fit !== 'boolean' || view.readOnly !== true || (!this.editing && view.modified !== false) || (this.state.kind === 'pptx' && (!Number.isSafeInteger(view.page) || !Number.isSafeInteger(view.pages) || view.page < 1 || view.page > view.pages || view.pages > 512))) throw Error('view-unavailable');
       this.view = view; this.onView(this.view);
       return result;
     } finally { this.busy = false; }
@@ -109,6 +122,7 @@ export class OfficeEngineSurface {
   async request(r) {
     if (!identity(r) || r.channel !== this.channel) throw Error('invalid-request');
     if (!previewCommands.includes(r.command)) throw Error('unsupported-command');
+    if (!this.editing && !['open','edit','captureSelection','close'].includes(r.command)) throw Error('unsupported-command');
     if (!validRequest(r)) throw Error('invalid-request');
     if (this.failed) throw Error('surface-state-unknown-recreate-required');
     if (this.busy) throw Error('operation-in-progress');
@@ -122,11 +136,19 @@ export class OfficeEngineSurface {
         delete request.bytes;
       }
       const result = await this.worker(request);
+      if (r.command === 'export') {
+        const path = '/tmp/analytix-office/output.' + this.state.kind;
+        const size = FS.stat(path).size;
+        if (!Number.isSafeInteger(size) || size < 1 || size > MAX_BYTES) throw Error('export-too-large');
+        result.bytes = new Uint8Array(FS.readFile(path));
+        FS.unlink(path);
+      }
       if (result.state) this.state = result.state;
+      if (r.command === 'edit') this.editing = true;
       if (r.command === 'open') { this.openOperationId = r.operationId; dispatchEvent(new Event('resize')); }
       if (r.command === 'close') {
         for (const kind of kinds) try { FS.unlink('/tmp/analytix-office/input.' + kind); } catch { /* A missing temporary in-memory file needs no cleanup. */ }
-        this.state = this.openOperationId = this.view = null; this.onView(null);
+        this.state = this.openOperationId = this.view = null; this.editing = false; this.onView(null);
       }
       return result;
     } finally { this.busy = false; }
@@ -224,7 +246,7 @@ function installSurface() {
     }
     if (!engine?.state) { status.textContent = '等待打开文档'; selectionText.textContent = ''; return; }
     document.getElementById('kind').textContent = {docx:'文档',xlsx:'表格',pptx:'演示文稿'}[engine.state.kind] || '预览';
-    status.textContent = '只读预览';
+    status.textContent = engine.state.dirty ? 'AI 修改待保存' : '只读预览';
     if (result?.selection) {
       const selection = result.selection;
       if (selection.kind === 'text') selectionText.textContent = selection.text ? '已选择 ' + Array.from(selection.text).length + ' 个字符' : '';
@@ -253,7 +275,7 @@ function installSurface() {
       if (!bound || !identity(r) || r.channel !== channel) return;
       try { if (r.command === 'open') loading('正在打开文档…'); const result = await engine.request(r); render(result); bridge.send(result); }
       catch (error) {
-        const known = ['invalid-request','already-bound','engine-operation-failed','engine-load-failed',
+        const known = ['stale-selection','unsupported-selection','invalid-control-value','invalid-request','already-bound','engine-operation-failed','engine-load-failed',
           'document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch',
           'unsaved-changes','command-unavailable','unsupported-command','native-controls-hide-failed',
           'operation-in-progress','export-too-large','engine-timeout-state-unknown','surface-state-unknown-recreate-required'];

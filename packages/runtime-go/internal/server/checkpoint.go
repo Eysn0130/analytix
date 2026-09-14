@@ -142,6 +142,9 @@ func (h *runtimeServerHandler) checkpointApply(ctx context.Context, threadID, ch
 		return legacyBlocked("checkpoint mutation coordinator is unavailable")
 	}
 	defer releaseMutation()
+	if h.managedEditing != nil && h.managedEditing.HasCaptures() {
+		return legacyBlocked("Close controlled editing sessions before restoring a checkpoint")
+	}
 	authoritativePlan := h.checkpointPlan(threadID, checkpointID, workspace, scope)
 	if mismatch := filestore.CheckpointApplyRouteMismatch(threadID, checkpointID, workspace, authoritativePlan); mismatch != "" {
 		return legacyBlocked("host checkpoint plan is not bound to the current route")

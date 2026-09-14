@@ -25,12 +25,21 @@ test('only a matching Main IPC transfers the port; page facade is typed and sing
   port.onmessage({ data: { channel: 'channel', command: 'open', operationId: 'open', documentId: 'doc', version: 'v1', kind: 'docx', bytes: new Uint8Array([1]) } })
   expect(events.at(-1).command).toBe('open')
   const count = events.length
-  for (const command of ['eval', 'export', 'ack', 'bold', 'undo', 'redo', 'local-ui']) {
+  for (const command of ['eval', 'ack', 'bold', 'format', 'undo', 'redo', 'local-ui']) {
     port.onmessage({ data: { channel: 'channel', command, operationId: command, documentId: 'doc', version: 'v1', ...(command === 'ack' ? { status: 'committed', persistedVersion: 'v2' } : {}) } })
     expect(events.length).toBe(count)
   }
-  expect(() => mocked.facade.send({ type: 'save-requested', channel: 'channel', operationId: 'save', documentId: 'doc', version: 'v1' })).toThrow('office-invalid-message')
-  expect(() => mocked.facade.send({ type: 'result', command: 'export', channel: 'channel', operationId: 'export', documentId: 'doc', version: 'v1', ok: false, error: 'unsupported-command' })).toThrow('office-invalid-message')
+  mocked.facade.send({ type: 'save-requested', channel: 'channel', operationId: 'save', documentId: 'doc', version: 'v1' })
+  expect(port.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({type:'save-requested'}))
+  mocked.facade.send({ type: 'result', command: 'export', channel: 'channel', operationId: 'export', documentId: 'doc', version: 'v1', ok: false, error: 'unsupported-command' })
+  for (const command of ['edit','export']) {
+    port.onmessage({data:{channel:'channel',command,operationId:command,documentId:'doc',version:'v1'}})
+    expect(events.at(-1).command).toBe(command)
+  }
+  const replace={channel:'channel',command:'replace',operationId:'replace',documentId:'doc',version:'v1',selectionToken:'selection',expectedChangeSequence:0,text:'AI text',valueType:'text'}
+  port.onmessage({data:replace});expect(events.at(-1).command).toBe('replace')
+  const acceptedCount=events.length
+  for(const valueType of ['number','formula']) { port.onmessage({data:{...replace,valueType}});expect(events.length).toBe(acceptedCount) }
   port.onmessage({ data: { channel: 'channel', command: 'captureSelection', operationId: 'capture', documentId: 'doc', version: 'v1' } })
   expect(events.at(-1).command).toBe('captureSelection')
   port.onmessage({ data: { channel: 'channel', command: 'close', operationId: 'close', documentId: 'doc', version: 'v1', expectedChangeSequence: 0, discard: false } })

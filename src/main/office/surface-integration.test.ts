@@ -81,7 +81,7 @@ test('Main facade starts engine and sends typed correlated replies without expos
   expect(JSON.stringify(bridge.send.mock.calls)).not.toContain('/private/document')
 })
 
-test('preview input guard blocks mutation and preserves navigation, selection and copy', async () => {
+test.each([false,true])('input guard blocks manual mutation even during AI preparation: %s', async (prepared) => {
   const listeners = new Map<string, (event: any) => void>()
   const context: any = { document: { getElementById: () => null }, window: { addEventListener: (type: string, handler: any) => listeners.set(type, handler) } }
   vm.createContext(context)
@@ -93,23 +93,24 @@ test('preview input guard blocks mutation and preserves navigation, selection an
     await expect(context.engine.request(envelope(command))).rejects.toThrow('unsupported-command')
   }
   expect(context.engine.worker).not.toHaveBeenCalled()
+  context.engine.editing = prepared
   for (const key of ['a', '中', 'Backspace', 'Delete', 'Enter', 'F2']) {
     const e = { key, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() }
     listeners.get('keydown')!(e)
     expect(e.preventDefault).toHaveBeenCalledOnce()
     expect(e.stopImmediatePropagation).toHaveBeenCalledOnce()
   }
-  for (const key of ['s', 'b', 'z', 'v', 'x']) {
+  for (const key of ['s', 'b', 'i', 'u', 'z', 'y', 'v', 'x', 'o', 'p', 'n']) {
     const e = { key, ctrlKey: true, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() }
     listeners.get('keydown')!(e)
     expect(e.preventDefault).toHaveBeenCalledOnce()
   }
-  for (const type of ['beforeinput', 'paste', 'drop', 'cut']) {
+  for (const type of ['beforeinput', 'paste', 'drop', 'cut', 'compositionstart', 'compositionupdate', 'compositionend']) {
     const e = { preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() }
     listeners.get(type)!(e)
     expect(e.stopImmediatePropagation).toHaveBeenCalledOnce()
   }
-  for (const input of [{ key: 'ArrowDown' }, { key: 'PageDown' }, { key: 'c', metaKey: true }, { key: 'q', metaKey: true }]) {
+  for (const input of [{ key: 'ArrowDown' }, { key: 'PageDown' }, { key: 'c', metaKey: true }]) {
     const e = { ...input, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() }
     listeners.get('keydown')!(e)
     expect(e.preventDefault).not.toHaveBeenCalled()
@@ -135,4 +136,26 @@ test.each(['readonly-lost', 'readonly-failed', 'modified-failed'])('unknown nati
   w.change()
   expect(w.send('captureSelection').state).toMatchObject({ changeSequence: 1, dirty: true })
   expect(w.model.setModified).not.toHaveBeenCalled()
+})
+
+// LibreOffice MacroExecMode IDL: NEVER_EXECUTE=0; ALWAYS_EXECUTE_NO_WARN=4.
+// Capture the real adapter call, independent of its policy constant.
+test('every native open and reopen explicitly forbids macros and external updates', () => {
+  const w = worker()
+  for (const kind of ['docx', 'xlsx', 'pptx']) {
+    expect(w.send('close', { expectedChangeSequence: 0, discard: false }).ok).toBe(true)
+    expect(w.send('open', { kind }).ok).toBe(true)
+    const properties = w.load.mock.calls.at(-1)![3] as { Name: string; Value: unknown }[]
+    expect(properties.filter(p => p.Name === 'MacroExecutionMode')).toEqual([{ Name: 'MacroExecutionMode', Value: 0 }])
+    expect(properties.filter(p => p.Name === 'UpdateDocMode')).toEqual([{ Name: 'UpdateDocMode', Value: 0 }])
+  }
+})
+
+test('typed private protocol admits only exact AI text replacement and denies manual editing commands',()=>{
+  for(const command of ['format','bold','undo','redo']) expect(isOfficeRequest(envelope(command))).toBe(false)
+  const request=envelope('replace',{selectionToken:'selection',expectedChangeSequence:0,text:'AI replacement',valueType:'text'})
+  expect(isOfficeRequest(request)).toBe(true)
+  for(const valueType of ['number','formula']) expect(isOfficeRequest({...request,valueType})).toBe(false)
+  expect(isOfficeRequest({...request,text:'x'.repeat(4097)})).toBe(false)
+  expect(isOfficeRequest({...request,format:{operation:'bold',value:true}})).toBe(false)
 })

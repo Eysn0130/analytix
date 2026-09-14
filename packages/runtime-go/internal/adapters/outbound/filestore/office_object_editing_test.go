@@ -6,13 +6,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	editingapp "analytix.local/runtime-go/internal/app/objectediting"
+	officeapp "analytix.local/runtime-go/internal/app/officeediting"
+	identitydomain "analytix.local/runtime-go/internal/domain/identity"
+	identityport "analytix.local/runtime-go/internal/ports/identity"
 	objectediting "analytix.local/runtime-go/internal/ports/objectediting"
+	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
 // Build native OOXML entirely in the test. These are structural fixtures, not
@@ -69,72 +76,89 @@ func officeEditingAssertBytes(t *testing.T, path string, want []byte) {
 	}
 }
 
-func TestOfficeObjectEditingPreviewAndDirectCommitForbidden(t *testing.T) {
+func TestOfficeObjectEditingSaveReopenReplayAndConflict(t *testing.T) {
 	ctx := context.Background()
 	for _, kind := range []string{"docx", "xlsx", "pptx"} {
 		t.Run(kind, func(t *testing.T) {
 			before := officeEditingNativeBytes(t, kind, "Original-office-marker")
-			after := officeEditingNativeBytes(t, kind, "Requested-write")
+			after := officeEditingNativeBytes(t, kind, "Saved-office-marker")
 			store, workspace, path := officeEditingNativeFixture(t, kind, before)
 			input := objectEditingInput(t, store, workspace, path, base64.StdEncoding.EncodeToString(after))
 			infoBefore, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
 			}
+			receipt, err := store.Commit(ctx, input)
+			if err != nil || receipt.Status != objectediting.StatusCommitted || receipt.Revision != digestAtomicText(after) || receipt.OperationID != input.OperationID || receipt.SavedAt == "" {
+				t.Fatalf("save: %#v %v", receipt, err)
+			}
+			officeEditingAssertBytes(t, path, after)
+			infoAfter, err := os.Stat(path)
+			if err != nil || infoBefore.Mode() != infoAfter.Mode() {
+				t.Fatalf("mode changed: %v", err)
+			}
 			restarted, err := NewOfficeObjectEditingFiles(store.receiptRoot, nil, kind)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, current := range []*ObjectEditingFiles{store, restarted} {
-				current.replaceDocument = func(atomicTextReplaceRequest) error { t.Fatal("preview wrote the document"); return nil }
-				current.replaceJournal = func(atomicTextReplaceRequest) error { t.Fatal("preview created a save journal"); return nil }
-				document, err := current.Read(ctx, workspace, path)
-				if err != nil || document.Content != base64.StdEncoding.EncodeToString(before) || document.Encoding != "office-base64" || document.Revision != digestAtomicText(before) {
-					t.Fatalf("open native preview: %#v %v", document, err)
+				doc, err := current.Read(ctx, workspace, path)
+				if err != nil || doc.Content != base64.StdEncoding.EncodeToString(after) || doc.Encoding != "office-base64" || doc.Revision != receipt.Revision {
+					t.Fatalf("reopen: %#v %v", doc, err)
 				}
-				for attempt := 0; attempt < 2; attempt++ {
-					if receipt, err := current.Commit(ctx, input); !errors.Is(err, objectediting.ErrForbidden) || receipt != (objectediting.Receipt{}) {
-						t.Fatalf("direct commit: %#v %v", receipt, err)
-					}
+				replay, err := current.Commit(ctx, input)
+				if err != nil || replay != receipt {
+					t.Fatalf("replay: %#v %v", replay, err)
 				}
-				officeEditingAssertBytes(t, path, before)
+				status, err := current.Status(ctx, input.ObjectIdentity, input.OperationID, workspace, path)
+				if err != nil || status != receipt {
+					t.Fatalf("status: %#v %v", status, err)
+				}
 			}
-			infoAfter, err := os.Stat(path)
-			if err != nil || !os.SameFile(infoBefore, infoAfter) || infoBefore.Mode() != infoAfter.Mode() || !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
-				t.Fatalf("preview changed file identity, mode or modification time: %v", err)
+			changed := input
+			changed.Content = base64.StdEncoding.EncodeToString(before)
+			if _, err := restarted.Commit(ctx, changed); !errors.Is(err, objectediting.ErrOperationMismatch) {
+				t.Fatalf("changed replay: %v", err)
 			}
-			entries, err := os.ReadDir(store.receiptRoot)
-			if err != nil || len(entries) != 0 {
-				t.Fatalf("preview journal entries: %v %v", entries, err)
-			}
-
-			// An external change is visible on the next read; stale preview input
-			// remains unable to overwrite it or create a conflict/save receipt.
+			officeEditingAssertBytes(t, path, after)
 			external := officeEditingNativeBytes(t, kind, "External-change")
 			if err := os.WriteFile(path, external, 0o640); err != nil {
 				t.Fatal(err)
 			}
-			document, err := restarted.Read(ctx, workspace, path)
-			if err != nil || document.Content != base64.StdEncoding.EncodeToString(external) || document.Revision != digestAtomicText(external) {
-				t.Fatalf("external change preview: %#v %v", document, err)
-			}
-			if receipt, err := restarted.Commit(ctx, input); !errors.Is(err, objectediting.ErrForbidden) || receipt != (objectediting.Receipt{}) {
-				t.Fatalf("stale direct commit: %#v %v", receipt, err)
+			conflict := input
+			conflict.OperationID = "conflict_02"
+			conflict.BaseRevision = receipt.Revision
+			result, err := restarted.Commit(ctx, conflict)
+			if !errors.Is(err, objectediting.ErrConflict) || result.Status != objectediting.StatusConflict {
+				t.Fatalf("CAS: %#v %v", result, err)
 			}
 			officeEditingAssertBytes(t, path, external)
+			status, err := restarted.Status(ctx, input.ObjectIdentity, conflict.OperationID, workspace, path)
+			if err != nil || status.Status != objectediting.StatusConflict {
+				t.Fatalf("conflict status: %#v %v", status, err)
+			}
 		})
 	}
 }
 
-func TestOfficeObjectEditingEncodeAlwaysForbidden(t *testing.T) {
+func TestOfficeObjectEditingCodecBoundsAndEncoding(t *testing.T) {
 	for _, kind := range []string{"docx", "xlsx", "pptx"} {
 		store := &ObjectEditingFiles{officeKind: kind}
-		for _, content := range []string{"", "invalid!", base64.StdEncoding.EncodeToString(officeEditingNativeBytes(t, kind, "Preview"))} {
-			for _, encoding := range []string{"office-base64", "utf-8", "unknown"} {
-				if raw, err := store.encodeObject(content, encoding); !errors.Is(err, objectediting.ErrForbidden) || raw != nil {
-					t.Fatalf("Office codec allowed encoding: %v", err)
-				}
+		content := base64.StdEncoding.EncodeToString(officeEditingNativeBytes(t, kind, "Saved"))
+		for _, encoding := range []string{"utf-8", "unknown", ""} {
+			if raw, err := store.encodeObject(content, encoding); !errors.Is(err, objectediting.ErrInvalidInput) || raw != nil {
+				t.Fatalf("encoding admitted: %v", err)
 			}
+		}
+		oversized := strings.Repeat("A", base64.StdEncoding.EncodedLen(MaxOfficeObjectBytes)+4)
+		if _, err := store.encodeObject(oversized, "office-base64"); !errors.Is(err, objectediting.ErrTooLarge) {
+			t.Fatalf("encoded limit: %v", err)
+		}
+		// Equal encoded lengths can represent either the last allowed byte count or
+		// two bytes beyond it: decoding needs its independent raw-byte bound.
+		oversized = base64.StdEncoding.EncodeToString(make([]byte, MaxOfficeObjectBytes+1))
+		if _, err := store.encodeObject(oversized, "office-base64"); !errors.Is(err, objectediting.ErrTooLarge) {
+			t.Fatalf("decoded limit: %v", err)
 		}
 	}
 }
@@ -150,11 +174,12 @@ func TestOfficeObjectEditingRejectsInvalidPackagesWithoutMutation(t *testing.T) 
 				name, content string
 				want          error
 			}{
-				{"not_zip", base64.StdEncoding.EncodeToString([]byte("not a ZIP archive")), objectediting.ErrForbidden},
-				{"truncated_zip", base64.StdEncoding.EncodeToString(before[:len(before)-1]), objectediting.ErrForbidden},
-				{"wrong_kind", base64.StdEncoding.EncodeToString(wrong), objectediting.ErrForbidden},
-				{"bad_base64", "invalid!", objectediting.ErrForbidden},
-				{"noncanonical_base64", base64.StdEncoding.EncodeToString(before) + "\n", objectediting.ErrForbidden},
+				{"not_zip", base64.StdEncoding.EncodeToString([]byte("not a ZIP archive")), objectediting.ErrNotText},
+				{"truncated_zip", base64.StdEncoding.EncodeToString(before[:len(before)-1]), objectediting.ErrNotText},
+				{"wrong_kind", base64.StdEncoding.EncodeToString(wrong), objectediting.ErrNotText},
+				{"bad_base64", "invalid!", objectediting.ErrInvalidInput},
+				{"noncanonical_base64", base64.StdEncoding.EncodeToString(before) + "\n", objectediting.ErrInvalidInput},
+				{"oversized", strings.Repeat("A", base64.StdEncoding.EncodedLen(MaxOfficeObjectBytes)+4), objectediting.ErrTooLarge},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					store, workspace, path := officeEditingNativeFixture(t, kind, before)
@@ -223,6 +248,99 @@ func TestOfficeObjectEditingDoesNotChangeDefaultTextCodec(t *testing.T) {
 			if _, err := store.Read(ctx, workspace, path); !errors.Is(err, objectediting.ErrNotText) {
 				t.Fatalf("default text codec accepted native ZIP: %v", err)
 			}
+		})
+	}
+}
+
+// This crosses the actual adapter -> principal session -> Office codec -> CAS
+// journal path. It does not invoke an Office engine or a real user profile.
+type officeTestIdentity struct{ principal identitydomain.PrincipalV1 }
+
+func (i *officeTestIdentity) ResolveCurrent(context.Context) (identitydomain.PrincipalV1, error) {
+	return i.principal, nil
+}
+func (i *officeTestIdentity) ValidateCurrent(_ context.Context, principal identitydomain.PrincipalV1) error {
+	if !identitydomain.SamePrincipalV1(i.principal, principal) {
+		return identityport.ErrMismatch
+	}
+	return nil
+}
+
+func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
+	for kind, packageID := range map[string]string{"docx": "analytix-documents", "xlsx": "analytix-spreadsheets", "pptx": "analytix-presentations"} {
+		t.Run(kind, func(t *testing.T) {
+			before := officeEditingNativeBytes(t, kind, "Before")
+			after := officeEditingNativeBytes(t, kind, "Actual-Core-save")
+			files, workspace, path := officeEditingNativeFixture(t, kind, before)
+			principal, err := identitydomain.NewPrincipalV1(strings.Repeat("a", 64), "local", "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity := &officeTestIdentity{principal: principal}
+			adapter := officeapp.New(kind, editingapp.New(identity, files), func(context.Context) bool { return true })
+			call := func(operation string, input map[string]any) map[string]any {
+				t.Helper()
+				body, err := json.Marshal(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := adapter.Invoke(context.Background(), adapterport.Call{Binding: adapterport.Binding{PackageID: packageID}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: operation, Input: body})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out map[string]any
+				if err := json.Unmarshal(result.Output, &out); err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			opened := call("open-object", map[string]any{"object": map[string]any{"workspace": workspace, "path": path}})
+			if opened["ok"] != true {
+				t.Fatalf("open: %v", opened)
+			}
+			doc := opened["document"].(map[string]any)
+			input := map[string]any{"sessionId": doc["sessionId"], "operationId": "native_save_01", "baseRevision": doc["revision"], "content": map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(after), "sha256": digestAtomicText(after), "data": base64.StdEncoding.EncodeToString(after)}}
+			saved := call("commit-object", input)
+			if saved["ok"] != true || saved["receipt"].(map[string]any)["revision"] != digestAtomicText(after) {
+				t.Fatalf("save: %v", saved)
+			}
+			officeEditingAssertBytes(t, path, after)
+			// Closing the session revokes writes; the durable receipt survives a new
+			// service and only becomes available after the same principal reopens.
+			closed := call("close-object", map[string]any{"sessionId": doc["sessionId"]})
+			if closed["ok"] != true {
+				t.Fatal(closed)
+			}
+			if out := call("commit-object", input); out["code"] != "session_invalid" {
+				t.Fatalf("closed commit: %v", out)
+			}
+			adapter = officeapp.New(kind, editingapp.New(identity, files), func(context.Context) bool { return true })
+			if out := call("object-status", map[string]any{"sessionId": doc["sessionId"], "operationId": "native_save_01"}); out["code"] != "session_invalid" {
+				t.Fatalf("restart old session: %v", out)
+			}
+			reopened := call("open-object", map[string]any{"object": map[string]any{"workspace": workspace, "path": path}})
+			if reopened["ok"] != true {
+				t.Fatal(reopened)
+			}
+			next := reopened["document"].(map[string]any)
+			if next["content"] != base64.StdEncoding.EncodeToString(after) || next["objectId"] != doc["objectId"] || next["sessionId"] == doc["sessionId"] {
+				t.Fatal("reopen binding/content changed")
+			}
+			input["sessionId"] = next["sessionId"]
+			if out := call("commit-object", input); out["ok"] != true {
+				t.Fatalf("replay: %v", out)
+			}
+			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": "native_save_01"}); out["ok"] != true {
+				t.Fatalf("status: %v", out)
+			}
+			external := officeEditingNativeBytes(t, kind, "External")
+			if err := os.WriteFile(path, external, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": "native_save_01"}); out["code"] != "conflict" {
+				t.Fatalf("stale saved status: %v", out)
+			}
+			officeEditingAssertBytes(t, path, external)
 		})
 	}
 }

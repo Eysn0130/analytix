@@ -38,14 +38,34 @@ type session struct {
 }
 
 type Service struct {
-	identity identityport.Authority
-	files    fileport.Files
-	mu       sync.Mutex
-	sessions map[string]session
+	identity            identityport.Authority
+	files               fileport.Files
+	mu                  sync.Mutex
+	sessions            map[string]session
+	edits               map[string]*editingState
+	projector           TrustedSelectionProjector
+	beginManagedCapture func(context.Context, string, string, func() error) (func(), error)
+	managedReleases     map[string]func()
+}
+
+// BindHost is trusted startup composition, never a transport operation.
+// Binding after an editing session has been opened is rejected.
+func (s *Service) BindHost(projector TrustedSelectionProjector, capture func(context.Context, string, string, func() error) (func(), error)) error {
+	if s == nil || projector == nil || capture == nil {
+		return ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions) != 0 || s.projector != nil || s.beginManagedCapture != nil {
+		return ErrUnavailable
+	}
+	s.projector, s.beginManagedCapture = projector, capture
+	s.managedReleases = make(map[string]func())
+	return nil
 }
 
 func New(identity identityport.Authority, files fileport.Files) *Service {
-	return &Service{identity: identity, files: files, sessions: make(map[string]session)}
+	return NewWithProjector(identity, files, nil)
 }
 
 func (s *Service) principal(ctx context.Context) (identitydomain.PrincipalV1, error) {
@@ -163,6 +183,7 @@ func (s *Service) verifyCurrentReceipt(ctx context.Context, current session, rec
 		receipt.Status = fileport.StatusConflict
 		return receipt, fileport.ErrConflict
 	}
+	s.observeEditingCommitLocked(current.id, receipt, doc.Content)
 	return receipt, nil
 }
 
@@ -177,5 +198,10 @@ func (s *Service) Close(ctx context.Context, id string) error {
 		return err
 	}
 	delete(s.sessions, id)
+	delete(s.edits, id)
+	if release := s.managedReleases[id]; release != nil {
+		release()
+		delete(s.managedReleases, id)
+	}
 	return nil
 }

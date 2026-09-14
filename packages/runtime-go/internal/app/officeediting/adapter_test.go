@@ -2,6 +2,9 @@ package officeediting
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -138,7 +141,7 @@ func TestReadinessAndFixedPackageBinding(t *testing.T) {
 			adapter := New(kind, fake, func(context.Context) bool { calls++; return ready })
 			binding := adapterport.Binding{PackageID: id}
 			state, err := adapter.Readiness(context.Background(), binding)
-			if err != nil || !state.Available || !reflect.DeepEqual(state.Operations, []string{"open-object", "close-object"}) || calls != 1 {
+			if err != nil || !state.Available || !reflect.DeepEqual(state.Operations, []string{"open-object", "commit-object", "object-status", "close-object"}) || calls != 1 {
 				t.Fatalf("readiness %v %v", state, err)
 			}
 			state.Operations[0] = "shell"
@@ -311,21 +314,108 @@ func TestContextCancellationAndReadinessRecheck(t *testing.T) {
 	}
 }
 
-func TestWriteOperationsForbiddenWithoutDelegation(t *testing.T) {
+func nativeCommitFields(kind string, raw []byte) map[string]any {
+	fields := commitFields()
+	hash := sha256.Sum256(raw)
+	fields["content"] = map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(raw), "sha256": hex.EncodeToString(hash[:]), "data": base64.StdEncoding.EncodeToString(raw)}
+	return fields
+}
+
+func TestNativeCommitAndStatusDelegateToExistingAuthority(t *testing.T) {
 	for kind, id := range map[string]string{"docx": "analytix-documents", "xlsx": "analytix-spreadsheets", "pptx": "analytix-presentations"} {
 		for _, operation := range []string{"commit-object", "object-status"} {
 			t.Run(kind+"_"+operation, func(t *testing.T) {
-				fake := &fakeEditing{}
-				adapter := New(kind, fake, func(context.Context) bool { return true })
-				for _, input := range []string{goodInput(t, operation), `{}`, `not-json`} {
-					call := validCall(t, operation, input)
-					call.Binding.PackageID = id
-					out := invoke(t, adapter, call)
-					if out["ok"] != false || out["code"] != "forbidden" || len(out) != 3 || len(fake.calls) != 0 {
-						t.Fatalf("preview delegated a write operation: %v %v", out, fake.calls)
-					}
+				fields := nativeCommitFields(kind, []byte("transport fixture: package inspected by file codec"))
+				data := fields["content"].(map[string]any)["data"].(string)
+				if operation == "object-status" {
+					delete(fields, "baseRevision")
+					delete(fields, "content")
+				}
+				fake := &fakeEditing{receipt: fileport.Receipt{OperationID: "operation_01", Revision: strings.Repeat("c", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-14T00:00:00Z"}}
+				call := validCall(t, operation, requestBody(t, fields))
+				call.Binding.PackageID = id
+				out := invoke(t, New(kind, fake, func(context.Context) bool { return true }), call)
+				if out["ok"] != true || len(fake.calls) != 1 || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) {
+					t.Fatalf("bad receipt %v %v", out, fake.calls)
+				}
+				want := []string{fields["sessionId"].(string), fields["operationId"].(string)}
+				if operation == "commit-object" {
+					want = append(want, fields["baseRevision"].(string), data)
+				}
+				if !reflect.DeepEqual(fake.args, want) {
+					t.Fatalf("arguments changed: %v", fake.args)
 				}
 			})
+		}
+	}
+}
+
+func TestNativeTransportRejectsBeforeAuthority(t *testing.T) {
+	mutations := map[string]func(map[string]any){
+		"kind":      func(c map[string]any) { c["kind"] = "xlsx" },
+		"encoding":  func(c map[string]any) { c["encoding"] = "utf-8" },
+		"length":    func(c map[string]any) { c["byteLength"] = 2 },
+		"fraction":  func(c map[string]any) { c["byteLength"] = 1.5 },
+		"zero":      func(c map[string]any) { c["byteLength"] = 0 },
+		"oversize":  func(c map[string]any) { c["byteLength"] = MaxOfficeBytes + 1 },
+		"hash":      func(c map[string]any) { c["sha256"] = strings.Repeat("a", 64) },
+		"base64":    func(c map[string]any) { c["data"] = "YR==" },
+		"newline":   func(c map[string]any) { c["data"] = "YQ==\n" },
+		"missing":   func(c map[string]any) { delete(c, "sha256") },
+		"authority": func(c map[string]any) { c["path"] = "/private" },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			fields := nativeCommitFields("docx", []byte("a"))
+			mutate(fields["content"].(map[string]any))
+			fake := &fakeEditing{}
+			out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, "commit-object", requestBody(t, fields)))
+			want := "invalid_request"
+			if name == "oversize" {
+				want = "too_large"
+			}
+			if out["code"] != want || len(fake.calls) != 0 {
+				t.Fatalf("invalid content delegated: %v", out)
+			}
+		})
+	}
+	for _, operation := range []string{"commit-object", "object-status"} {
+		for _, body := range []string{`{}`, `not-json`, `{"sessionId":"` + strings.Repeat("b", 48) + `","operationId":"bad"}`} {
+			fake := &fakeEditing{}
+			out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, operation, body))
+			if out["code"] != "invalid_request" || len(fake.calls) != 0 {
+				t.Fatalf("invalid envelope delegated: %v", out)
+			}
+		}
+	}
+}
+
+func TestNativeTransportExactLimit(t *testing.T) {
+	raw := []byte(strings.Repeat("a", MaxOfficeBytes))
+	fields := nativeCommitFields("docx", raw)
+	fake := &fakeEditing{receipt: fileport.Receipt{OperationID: "operation_01", Status: fileport.StatusUnknown}}
+	out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, "commit-object", requestBody(t, fields)))
+	if out["ok"] != true || len(fake.calls) != 1 {
+		t.Fatalf("exact 16MiB transport rejected: %v", out)
+	}
+}
+
+func TestNativeFailurePreservesUnknownAndConflictReceipt(t *testing.T) {
+	for _, test := range []struct {
+		err          error
+		code, status string
+	}{{fileport.ErrConflict, "conflict", fileport.StatusConflict}, {fileport.ErrPersistence, "persistence_failure", fileport.StatusUnknown}} {
+		for _, operation := range []string{"commit-object", "object-status"} {
+			fields := nativeCommitFields("docx", []byte("a"))
+			if operation == "object-status" {
+				delete(fields, "baseRevision")
+				delete(fields, "content")
+			}
+			fake := &fakeEditing{err: fmt.Errorf("private failure: %w", test.err), receipt: fileport.Receipt{OperationID: "operation_01", Status: test.status}}
+			out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, operation, requestBody(t, fields)))
+			if out["ok"] != false || out["code"] != test.code || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) || strings.Contains(requestBody(t, out), "private failure") {
+				t.Fatalf("lost receipt: %v", out)
+			}
 		}
 	}
 }

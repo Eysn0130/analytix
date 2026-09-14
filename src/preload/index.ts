@@ -1,4 +1,4 @@
-import { nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema } from '../shared/native-office'
+import { nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
@@ -575,6 +575,14 @@ const api = {
     openEditorPath: flatApi.openEditorPath
   },
   office: {
+    onWorkspaceCommand: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeWorkspaceCommandSchema.safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:workspace-command', listener)
+      return () => ipcRenderer.removeListener('office:workspace-command', listener)
+    },
     pickFile: async (request) => {
       const parsed = nativeOfficePickerResponseSchema.safeParse(await ipcRenderer.invoke('office:pick-file', request))
       return parsed.success ? parsed.data : { ok: false, error: 'unavailable' }

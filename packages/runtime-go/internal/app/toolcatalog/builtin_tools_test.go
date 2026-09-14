@@ -10,7 +10,7 @@ import (
 
 func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T) {
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: true, WebFetch: true})
-	if len(tools) != 18 {
+	if len(tools) != 20 {
 		t.Fatalf("builtin schema count drifted: %d", len(tools))
 	}
 	seen := map[string]bool{}
@@ -20,7 +20,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		}
 		seen[tool.Name] = true
 	}
-	for _, name := range []string{"read", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
+	for _, name := range []string{"native_selection_read", "native_selection_propose", "read", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
 		if !seen[name] {
 			t.Fatalf("missing builtin tool schema %s", name)
 		}
@@ -29,7 +29,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		t.Fatalf("foreground bash schema should allow background when configured")
 	}
 	foregroundOnly := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: false, WebFetch: false})
-	if len(foregroundOnly) != 17 {
+	if len(foregroundOnly) != 19 {
 		t.Fatalf("foreground-only schema count drifted: %d", len(foregroundOnly))
 	}
 	if schemaHasProperty(t, schemaByName(t, foregroundOnly, "bash"), "run_in_background") {
@@ -116,4 +116,36 @@ func schemaPropertyDescription(t *testing.T, tool domainmodel.ToolSchema, proper
 		t.Fatalf("decode schema for %s: %v", tool.Name, err)
 	}
 	return decoded.Properties[property].Description
+}
+
+func TestNativeSelectionSchemasExposeOnlyScopedProposalAuthority(t *testing.T) {
+	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{})
+	for _, name := range []string{"native_selection_read", "native_selection_propose"} {
+		tool := schemaByName(t, tools, name)
+		if !schemaHasProperty(t, tool, "scopeId") {
+			t.Fatal("missing opaque scope")
+		}
+		for _, field := range []string{"path", "sessionId", "threadId", "selectionToken", "command", "bytes", "replacement", "provider"} {
+			if schemaHasProperty(t, tool, field) {
+				t.Fatalf("model controls %s", field)
+			}
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(tool.Parameters, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if schema["additionalProperties"] != false {
+			t.Fatal("open input schema")
+		}
+		if HostAuthorizesReadOnly(name, false, false) != (name == "native_selection_read") {
+			t.Fatal("incorrect effect classification")
+		}
+		if CanRunInParallel(name, false, false) {
+			t.Fatal("native scopes must remain serialized")
+		}
+	}
+	proposal := schemaByName(t, tools, "native_selection_propose")
+	if !schemaHasProperty(t, proposal, "parts") || !schemaHasProperty(t, proposal, "operationId") {
+		t.Fatal("proposal identity/typed parts missing")
+	}
 }

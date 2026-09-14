@@ -117,6 +117,8 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return map[string]any{"code": "invalid_arguments", "error": "tool arguments failed strict host decoding", "executed": false}, true
 	}
 	switch pending.Call.Name {
+	case "native_selection_read", "native_selection_propose":
+		return h.executeNativeSelectionTool(ctx, pending, args)
 	case "read":
 		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
 		h.recordRuntimeRead(pending, output, readContent, isError)
@@ -187,6 +189,9 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return h.executeWriteRuntimeTool(ctx, pending, args)
 	default:
 		if mcpapp.IsToolName(pending.Call.Name) {
+			if h.beginOpaqueEditingExecution(ctx) != nil {
+				return map[string]any{"code": "managed_editing_mutation_blocked", "error": "Uncontained MCP execution is unavailable while a controlled editing session is active.", "executed": false}, true
+			}
 			exactArgs, err := mcpapp.DecodeArguments(pending.Call.Arguments)
 			if err != nil {
 				return map[string]any{"code": "invalid_arguments", "error": err.Error(), "executed": false}, true

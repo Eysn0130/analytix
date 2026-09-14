@@ -10,6 +10,17 @@ const set = { action: 'setDesiredState', packageId: pkg.packageId, generationId:
   expectedRevision: 0, desiredState: 'enabled' }
 
 describe('protected package host IPC', () => {
+  it('rejects renderer-forged native attestations before Core transport', async () => {
+    const transport = vi.fn()
+    const handler = createPluginPackageHostHandler(transport, 'renderer')
+    for (const operation of ['capture-selection', 'proposal-accept', 'commit-object', 'model-selection-propose']) {
+      const result = await handler({ action: 'invoke', packageId: pkg.packageId,
+        generationId: pkg.generationId, expectedRevision: 1, contributionId: 'workspace-editor',
+        operation, input: {} })
+      expect(result).toMatchObject({ ok: false, code: 'identity_invalid' })
+    }
+    expect(transport).not.toHaveBeenCalled()
+  })
   it('keeps a persisted enabled package distinct from an available adapter', async () => {
     const transport = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, package: pkg }) }))
     expect(await createPluginPackageHostHandler(transport)(set)).toEqual({ ok: true, package: pkg })

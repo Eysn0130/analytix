@@ -43,7 +43,7 @@ afterEach(async () => { for (const s of live.splice(0)) s.destroy(); for (const 
 const bounds = { x: 0, y: 0, width: 800, height: 600 }
 async function setup() {
   const f = await fixture(); cleanup.push(f.cleanup)
-  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { getZoomFactor: (): number => 1 }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
+  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { getZoomFactor: (): number => 1, send: vi.fn() }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
   const events: any[] = [], surface = new NativeOfficeSurface({ ...f, owner: owner as any, onEvent: e => events.push(e) }); live.push(surface)
   await surface.attach(bounds)
   return { surface, owner, events, view: mock.views.at(-1), session: mock.sessions.at(-1), peer: mock.peers.at(-1) }
@@ -147,7 +147,7 @@ test('conditional close refusal preserves the session for a subsequent authorize
 })
 test('hide while startup is pending cannot be undone by a late attach', async () => {
   const f = await fixture(); cleanup.push(f.cleanup)
-  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { getZoomFactor: (): number => 1 }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
+  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { getZoomFactor: (): number => 1, send: vi.fn() }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
   const surface = new NativeOfficeSurface({ ...f, owner: owner as any, onEvent() {} }); live.push(surface)
   const attaching = surface.attach(bounds); surface.hide(); await attaching
   expect(owner.contentView.addChildView).not.toHaveBeenCalled()
@@ -167,17 +167,19 @@ test('preview bounds follow the main window zoom without scaling native input co
   expect(s.view.setBounds).toHaveBeenLastCalledWith({ x: 125, y: 50, width: 500, height: 750 })
 })
 
-test('read-only protocol retains exact fields and bounded selection and input bytes', () => {
+test('typed native protocol retains exact fields and bounded selection and input bytes', () => {
   const base = { ...input('captureSelection'), channel: 'channel' }
   expect(isOfficeRequest(base)).toBe(true)
   expect(isOfficeRequest({ ...base, value: 'unexpected' })).toBe(false)
   for (const bytes of [new Uint8Array(), new Uint8Array(OFFICE_MAX_BYTES + 1), new Uint8Array(new SharedArrayBuffer(1))]) expect(isOfficeRequest({ ...base, command: 'open', kind: 'docx', bytes })).toBe(false)
   expect(isOfficeRequest({ ...base, command: 'open', kind: 'xlsx', bytes: new Uint8Array([1]) })).toBe(true)
-  for (const command of ['export', 'ack', 'bold', 'undo', 'redo']) {
-    expect(isOfficeRequest({ ...base, command })).toBe(false)
-    expect(isOfficeResult({ ...base, command, type: 'result', ok: false, error: 'unsupported-command' })).toBe(false)
+  for (const command of ['ack', 'bold', 'format', 'replace', 'undo', 'redo']) expect(isOfficeRequest({ ...base, command })).toBe(false)
+  for (const command of ['edit','export']) {
+    expect(isOfficeRequest({ ...base, command })).toBe(true)
+    expect(isOfficeRequest({ ...base, command, script:'unsafe' })).toBe(false)
+    expect(isOfficeResult({ ...base, command, type:'result', ok:false, error:'unsupported-command' })).toBe(true)
   }
-  expect(isOfficeEvent({ channel: 'channel', operationId: 'save', documentId: 'document', version: 'version-1', type: 'save-requested' })).toBe(false)
+  expect(isOfficeEvent({ channel: 'channel', operationId: 'save', documentId: 'document', version: 'version-1', type: 'save-requested' })).toBe(true)
   const reply = { ...base, type: 'result', ok: true, state: state(), selection: selection() }
   expect(isOfficeResult(reply)).toBe(true)
   expect(isOfficeResult({ ...reply, bytes: new Uint8Array([1]) })).toBe(false)
@@ -196,4 +198,18 @@ test('synchronizes shell appearance once per change without changing document pi
   expect(s.view.webContents.insertCSS).toHaveBeenCalledTimes(1)
   await s.surface.attach(bounds, { theme: 'light', reducedMotion: false })
   expect(s.view.webContents.removeInsertedCSS).toHaveBeenCalledWith('css-key')
+})
+
+test('native focus routes only fixed workspace shortcuts and leaves content input and save keys to the isolated input guard', async () => {
+  const s = await setup(); await openSurface(s)
+  const preventDefault = vi.fn()
+  for (const [key,shift,command] of [['w',false,'close-tab'],['b',true,'toggle-workspace'],['`',false,'toggle-terminal']] as const) {
+    s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key,meta:true,shift,isAutoRepeat:false,isComposing:false})
+    expect(s.owner.webContents.send).toHaveBeenLastCalledWith('office:workspace-command',{objectId:'document',command})
+  }
+  expect(preventDefault).toHaveBeenCalledTimes(3)
+  for (const input of [{key:'w',isComposing:true},{key:'w',isAutoRepeat:true},{key:'s'},{key:'z'},{key:'Escape'}]) {
+    s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',meta:true,...input})
+  }
+  expect(preventDefault).toHaveBeenCalledTimes(3)
 })

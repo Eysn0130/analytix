@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
+import type { ComposerFileReference } from '../../lib/composer-file-references'
+import { composerFileReferenceFromPath } from '../../lib/composer-file-references'
 import { confirmDialog } from '../../lib/confirm-dialog'
 import { formatWorkspacePickerError } from '../../lib/format-workspace-picker-error'
 import {
@@ -42,7 +44,12 @@ type EntryDialog =
 type Translate = (key: string, opts?: Record<string, unknown>) => string
 
 // The former Write navigation is now a file surface inside the right workspace.
-export function WriteSidebar(): ReactElement {
+export function WriteSidebar({ initialWorkspaceRoot, selectedPath, onOpenFile, onAddReference }: {
+  initialWorkspaceRoot?: string
+  selectedPath?: string | null
+  onOpenFile?: (workspaceRoot: string, path: string) => void
+  onAddReference?: (reference: ComposerFileReference & { type: 'file' | 'directory' }) => void
+} = {}): ReactElement {
   const { t } = useTranslation('common')
   const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null)
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
@@ -99,10 +106,14 @@ export function WriteSidebar(): ReactElement {
   )
 
   useEffect(() => {
-    void loadWriteSettings()
-  }, [loadWriteSettings])
+    void (async () => {
+      if (initialWorkspaceRoot) await useWriteWorkspaceStore.getState().initializeWorkspace(initialWorkspaceRoot)
+      await loadWriteSettings()
+    })()
+  }, [initialWorkspaceRoot, loadWriteSettings])
 
   const root = rootDirectory || workspaceRoot
+  const visibleWorkspaceRoots = [...new Set([workspaceRoot, ...workspaceRoots].filter(Boolean))]
   const entryDialogPortalTarget = typeof document === 'undefined' ? null : document.body
   const rootLoading = Boolean(
     loadingDirs.__root__
@@ -188,7 +199,10 @@ export function WriteSidebar(): ReactElement {
     const created = entryDialog.kind === 'create-file'
       ? await createFile(workspaceRoot, writeJoinPath(parent, value))
       : await createDirectory(workspaceRoot, writeJoinPath(parent, value))
-    if (created) setEntryDialog(null)
+    if (created) {
+      setEntryDialog(null)
+      if (entryDialog.kind === 'create-file') onOpenFile?.(workspaceRoot, writeJoinPath(parent, value))
+    }
   }
 
   const pickWriteWorkspace = async (): Promise<void> => {
@@ -269,7 +283,7 @@ export function WriteSidebar(): ReactElement {
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          {workspaceRoots.length === 0 ? (
+          {visibleWorkspaceRoots.length === 0 ? (
             <button
               type="button"
               onClick={() => void pickWriteWorkspace()}
@@ -282,7 +296,7 @@ export function WriteSidebar(): ReactElement {
             </button>
           ) : null}
 
-          {workspaceRoots.map((workspacePath) => {
+          {visibleWorkspaceRoots.map((workspacePath) => {
             const active = workspacePath === workspaceRoot
             const collapsed = active ? collapsedWorkspaces[workspacePath] === true : true
             const removable = workspaceRoots.length > 1 && workspacePath !== defaultWorkspaceRoot
@@ -371,11 +385,12 @@ export function WriteSidebar(): ReactElement {
                       entriesByDir={entriesByDir}
                       expandedDirs={expandedDirs}
                       loadingDirs={loadingDirs}
-                      selectedFilePath={activeFilePath}
+                      selectedFilePath={selectedPath ?? activeFilePath}
                       error={treeError}
                       rootLoading={rootLoading}
                       onToggleDir={(path) => void toggleDirectory(workspaceRoot, path)}
-                      onSelectFile={(path) => void openFile(workspaceRoot, path)}
+                      onSelectFile={(path) => onOpenFile ? onOpenFile(workspaceRoot, path) : void openFile(workspaceRoot, path)}
+                      onAddReference={onAddReference ? (entry) => onAddReference({ ...composerFileReferenceFromPath(entry.path, workspaceRoot), type: entry.type }) : undefined}
                       onCreateFile={(directoryPath) => void openCreateFileDialog(directoryPath)}
                       onCreateDirectory={(directoryPath) => void openCreateDirectoryDialog(directoryPath)}
                       onRenameEntry={openRenameEntryDialog}

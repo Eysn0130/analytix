@@ -256,6 +256,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 	}
+	uncontainedMCPConfigured := len(mcpSpecs) > 0
 	mcpSpecs = mcp.BindHostScheduleMCPServerV1(mcpSpecs, config.HostScheduleMCPServer)
 	mcpSearch := loadRuntimeMCPSearchSettings(document, hasRuntimeConfig)
 	skillCatalog, err := loadRuntimeSkillCatalog(config, document, hasRuntimeConfig)
@@ -1611,7 +1612,14 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
 	phaseObserver, _ := ctx.Value(asyncTurnPhaseObservationContextKeyV1{}).(func(string))
+	officeAdapters := newOfficeEditingAdapters(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	officePackageHost := newDevelopmentPackageHost(ctx, config, identityAuthority, officeAdapters)
+	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		ObjectEditing:  objectEditingHandler.Service,
+		OfficeAdapters: officeAdapters, OfficePackageHost: officePackageHost,
+		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
 		AsyncTurnPhaseObserverV1: phaseObserver,
 
@@ -1718,8 +1726,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
-			ObjectEditing:     newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs),
-			PackageHost:       httpapi.PluginPackageHostHandler{Service: newDevelopmentPackageHost(ctx, config, identityAuthority, newOfficeEditingAdapters(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs))},
+			ObjectEditing:     objectEditingHTTP,
+			PackageHost:       httpapi.PluginPackageHostHandler{Service: officePackageHost},
 			FundsCSVAdmission: fundsCSVAdmission,
 			FundsCleaning:     fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(

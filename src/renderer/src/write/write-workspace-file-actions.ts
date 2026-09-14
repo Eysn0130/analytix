@@ -208,17 +208,13 @@ export function createWriteFileActions({
       const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
       if (!saved || revision !== navigationRevision) return
       if (isNativeOfficeFilePath(path)) {
-        useNativeOfficeStore.getState().select(workspaceRoot, path)
+        await useNativeOfficeStore.getState().select(workspaceRoot, path)
         return
       }
-      if (useNativeOfficeStore.getState().view) {
-        const closed = await window.analytix.office.request({ action: 'close' })
-        if (!closed.ok) {
-          useNativeOfficeStore.setState({ error: closed.error ?? 'unavailable', view: closed.view })
-          return
-        }
-      }
-      useNativeOfficeStore.setState({ target: null, view: null, error: null })
+      // Switching adapters hides the native view; its protected draft stays owned by Core.
+      await window.analytix?.office?.request({ action: 'hide' }).catch(() => undefined)
+      if (revision !== navigationRevision) return
+      useNativeOfficeStore.setState({target:null,view:null,error:null})
       if (!isWriteWorkspaceFilePath(path)) {
         set({
           fileLoading: false,

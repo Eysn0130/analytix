@@ -1,5 +1,6 @@
 import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type MessagePortMain, type Rectangle, type Session } from 'electron'
 import type { NativeOfficeAppearance } from '../../shared/native-office'
+import { nativeWorkspaceCommandFromInput } from '../../shared/native-office'
 import { randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
@@ -18,7 +19,7 @@ type Pending = { request: OfficeRequest; resolve: (result: OfficeResult) => void
 const failure = (code: string) => new Error(code)
 const validBounds = (bounds: Rectangle) => ['x', 'y', 'width', 'height'].every(k => Number.isSafeInteger(bounds[k as keyof Rectangle]) && bounds[k as keyof Rectangle] >= 0 && bounds[k as keyof Rectangle] <= 16384) && bounds.width > 0 && bounds.height > 0
 
-// Main-owned read-only source-experiment surface. The caller retains Core document authority.
+// Main-owned source-experiment surface. The caller retains Core document authority.
 export class NativeOfficeSurface {
   private readonly channel = randomUUID()
   private view?: WebContentsView
@@ -35,6 +36,7 @@ export class NativeOfficeSurface {
   private terminalCode = 'office-surface-destroyed'
   private current?: OfficeState
   private openOperationId?: string
+  private editing = false
   private pending?: Pending
   private seen = new Set<string>()
   private readyResolve?: () => void
@@ -83,6 +85,7 @@ export class NativeOfficeSurface {
     if (!officeRecord(input) || Object.hasOwn(input, 'channel')) throw failure('office-invalid-request')
     const request = { ...input, channel: this.channel }
     if (!isOfficeRequest(request)) throw failure('office-invalid-request')
+    if (!this.editing && !['open','edit','captureSelection','close'].includes(request.command)) throw failure('office-invalid-request')
     // Snapshot caller-owned bytes before any await or structured-clone dispatch.
     if (request.bytes) request.bytes = new Uint8Array(request.bytes)
     await this.start()
@@ -134,6 +137,13 @@ export class NativeOfficeSurface {
       } })
       this.view.setVisible(false)
       const contents = this.view.webContents
+      contents.on('before-input-event', (event, input) => {
+        if (input.type !== 'keyDown' || input.isAutoRepeat || !this.current) return
+        const command = nativeWorkspaceCommandFromInput(input)
+        if (!command) return
+        event.preventDefault()
+        this.options.owner.webContents.send('office:workspace-command', {objectId:this.current.documentId,command})
+      })
       contents.setWindowOpenHandler(() => ({ action: 'deny' }))
       contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
       contents.on('will-navigate', event => event.preventDefault())
@@ -188,20 +198,22 @@ export class NativeOfficeSurface {
         if (['engine-timeout-state-unknown', 'surface-state-unknown-recreate-required'].includes(value.error!)) this.fail('office-engine-closed-unknown')
         return
       }
-      // A preview cannot advance either a native edit sequence or persistence state.
-      if (value.state && (value.state.version !== pending.request.version || value.state.changeSequence !== 0 || value.state.acknowledgedSequence !== 0 || value.state.dirty || (this.current && value.state.kind !== this.current.kind))) { this.fail('office-protocol-invalid'); return }
+      // Only a correlated persistence acknowledgement can change base revision.
+      const expectedVersion = pending.request.command === 'ack' && pending.request.status === 'committed' ? pending.request.persistedVersion : pending.request.version
+      if (value.state && (value.state.version !== expectedVersion || (!this.editing && pending.request.command !== 'edit' && (value.state.changeSequence !== 0 || value.state.acknowledgedSequence !== 0 || value.state.dirty)) || (this.current && (value.state.kind !== this.current.kind || value.state.changeSequence < this.current.changeSequence)))) { this.fail('office-protocol-invalid'); return }
       if (pending.request.command === 'open' && value.state!.kind !== pending.request.kind) { this.fail('office-protocol-invalid'); return }
       clearTimeout(pending.timer); this.pending = undefined
+      if (value.command === 'edit') this.editing = true
       if (value.state) this.current = { ...value.state }
       if (value.command === 'open') this.openOperationId = value.operationId
-      if (value.command === 'close') { this.current = undefined; this.openOperationId = undefined }
+      if (value.command === 'close') { this.current = undefined; this.openOperationId = undefined; this.editing = false }
       pending.resolve(value)
       return
     }
     if (!isOfficeEvent(value)) { this.fail('office-protocol-invalid'); return }
     if (!this.current || value.documentId !== this.current.documentId || value.version !== this.current.version || value.operationId !== this.openOperationId) return
     if (value.state) {
-      if (value.state.kind !== this.current.kind || value.state.changeSequence !== 0 || value.state.acknowledgedSequence !== 0 || value.state.dirty) { this.fail('office-protocol-invalid'); return }
+      if (value.state.kind !== this.current.kind || (!this.editing && (value.state.changeSequence !== 0 || value.state.acknowledgedSequence !== 0 || value.state.dirty)) || value.state.changeSequence < this.current.changeSequence) { this.fail('office-protocol-invalid'); return }
       this.current = { ...value.state }
     }
     if (value.selection && value.selection.changeSequence !== this.current.changeSequence) return

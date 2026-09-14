@@ -6,6 +6,7 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WriteMarkdownEditor, type WriteMarkdownEditorHandle } from './WriteMarkdownEditor'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
+import { objectEditingRequestSchema, objectEditingResponseSchema, type ObjectEditingRequest, type ObjectEditingResponse } from '../../../../../packages/runtime/src/contracts/object-editing'
 
 vi.mock('../../write/inline-completion', () => ({
   buildInlineCompletionExtension: () => [], buildInlineCompletionPayload: () => ({})
@@ -20,6 +21,10 @@ let root: Root | null
 let container: HTMLDivElement
 let handle: { current: WriteMarkdownEditorHandle | null }
 let write: ReturnType<typeof vi.fn>
+let commit: (request: Extract<ObjectEditingRequest, {action:'commit'}>) => Promise<ObjectEditingResponse>
+let baselineRevision: string
+const sessionId = 'a'.repeat(48)
+const objectId = 'b'.repeat(64)
 
 function Harness() {
   const state = useWriteWorkspaceStore()
@@ -52,13 +57,36 @@ function editor(): EditorView {
   return view
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  write = vi.fn(async () => ({ ok: true, path: filePath, savedAt: 'synthetic' }))
-  Object.defineProperty(window, 'analytix', { configurable: true, value: { files: { write } } })
+  const { createHash } = await vi.importActual<{ createHash: (algorithm: string) => { update: (value: string) => { digest: (encoding: 'hex') => string } } }>('node:crypto')
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+  let content = original
+  baselineRevision = hash(content)
+  let revision = baselineRevision
+  write = vi.fn()
+  commit = vi.fn(async (request: Extract<ObjectEditingRequest, {action:'commit'}>) => {
+    expect(request.sessionId).toBe(sessionId)
+    expect(request.baseRevision).toBe(revision)
+    content = request.content
+    revision = hash(content)
+    return objectEditingResponseSchema.parse({ok:true,receipt:{operationId:request.operationId,revision,status:'committed',savedAt:'2026-09-14T00:00:00Z'}})
+  })
+  const request = vi.fn(async (input: ObjectEditingRequest) => {
+    const parsed = objectEditingRequestSchema.parse(input)
+    if (parsed.action === 'commit') return commit(parsed)
+    expect(parsed).toEqual({action:'open',workspace:workspaceRoot,path:filePath})
+    return objectEditingResponseSchema.parse({ok:true,document:{sessionId,objectId,revision,path:filePath,content}})
+  })
+  Object.defineProperty(window, 'analytix', { configurable: true, value: { objects:{request},files: { write } } })
   useWriteWorkspaceStore.getState().resetWorkspace()
-  useWriteWorkspaceStore.setState({ workspaceRoot, activeFilePath: filePath,
-    activeFileKind: 'text', fileContent: original, saveStatus: 'saved' })
+  useWriteWorkspaceStore.setState({ workspaceRoot })
+  await useWriteWorkspaceStore.getState().openFile(workspaceRoot, filePath)
+  expect(useWriteWorkspaceStore.getState().objectSession).toEqual({sessionId,objectId,revision})
+  const createRange = document.createRange.bind(document)
+  vi.spyOn(document, 'createRange').mockImplementation(() => Object.assign(createRange(), {
+    getClientRects: () => [], getBoundingClientRect: () => new DOMRect()
+  }))
   container = document.createElement('div')
   document.body.append(container)
 })
@@ -67,6 +95,7 @@ afterEach(async () => {
   container.remove()
   useWriteWorkspaceStore.getState().resetWorkspace()
   Reflect.deleteProperty(window, 'analytix')
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -87,6 +116,7 @@ describe('document review across editor unmounts', () => {
     })
     expect(await useWriteWorkspaceStore.getState().flushSave(workspaceRoot)).toBe(false)
     expect(write).not.toHaveBeenCalled()
+    expect(commit).not.toHaveBeenCalled()
     await mount()
     expect(getOriginalDoc(editor().state).toString()).toBe(resolvedOriginal)
     expect(editor().state.doc.toString()).toBe(resolvedNext)
@@ -100,8 +130,9 @@ describe('document review across editor unmounts', () => {
       fileContent: resolution === 'accept' ? resolvedNext : resolvedOriginal
     })
     await act(async () => { expect(await useWriteWorkspaceStore.getState().flushSave(workspaceRoot)).toBe(true) })
-    expect(write).toHaveBeenCalledExactlyOnceWith({ workspaceRoot, path: filePath,
+    expect(commit).toHaveBeenCalledExactlyOnceWith({ action:'commit',sessionId,operationId:expect.any(String),baseRevision:baselineRevision,
       content: resolution === 'accept' ? resolvedNext : resolvedOriginal })
+    expect(write).not.toHaveBeenCalled()
   })
 
   it('does not suspend or restore a review into another document or working copy', async () => {

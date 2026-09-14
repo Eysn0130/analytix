@@ -6,21 +6,43 @@ Module.zetajs.then(zeta => {
   const context = zeta.getUnoComponentContext();
   const desktop = css.frame.Desktop.create(context);
   const filters = {docx:'Office Open XML Text', xlsx:'Calc MS Excel 2007 XML', pptx:'Impress MS PowerPoint 2007 XML'};
+  // com.sun.star.document.MacroExecMode IDL: NEVER_EXECUTE = 0.
+  // Keep this explicit even in builds without a macro runtime.
+  const NEVER_EXECUTE = 0;
   const prop = (Name, Value) => new css.beans.PropertyValue({Name, Value});
   const emit = data => zeta.mainPort.postMessage(data);
   let channel, model, controller, active, modifyListener, selectionListener;
+  let handleSequence = 0, suppressChanges = false;
+  const handles = new Map();
   const state = () => ({documentId:active.documentId, version:active.version, kind:active.kind,
     changeSequence:active.sequence, acknowledgedSequence:active.acknowledged, dirty:active.sequence !== active.acknowledged});
   const event = (type, payload) => emit({type, channel, documentId:active.documentId, version:active.version,
     operationId:active.openOperationId, ...payload});
-  const boundedText = value => String(value ?? '').slice(0, 4096);
+  const boundedText = value => {
+    const text = String(value ?? '');
+    let end = Math.min(text.length, 4096);
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+    return text.slice(0, end);
+  };
+  function captured(value, complete = true) {
+    const text = String(value ?? '');
+    return {capturedCharacters:boundedText(text).length, totalCharacters:text.length, truncated:text.length > 4096 || !complete, unit:'utf-16', complete:complete && text.length <= 4096};
+  }
+  function remember(target, text, kind) {
+    // Session-local opaque references: never pointers or guessed text offsets.
+    const token = 'selection_' + active.openOperationId.replace(/[^A-Za-z0-9_-]/g, '_') + '_' + (++handleSequence);
+    handles.set(token, {target, text, kind, version:active.version, sequence:active.sequence});
+    while (handles.size > 32) handles.delete(handles.keys().next().value);
+    return token;
+  }
   function selection() {
     const base = {documentId:active.documentId, version:active.version, changeSequence:active.sequence};
     try {
       const selected = controller.getSelection();
       if (active.kind === 'docx') {
         const text = selected.getCount ? Array.from({length:Math.min(selected.getCount(), 16)}, (_, i) => selected.getByIndex(i).getString()).join('\n') : selected.getString();
-        return {...base, kind:'text', scope:'current-view-text-only; no verified structural offset or durable anchor', text:boundedText(text)};
+        const target = selected.getCount ? (selected.getCount() === 1 ? selected.getByIndex(0) : null) : selected;
+        return {...base, kind:'text', scope:'session-text-range-at-version-and-change-sequence', text:boundedText(text), capture:captured(text, !selected.getCount || selected.getCount() <= 16), ...(target ? {token:remember(target, text, 'text')} : {})};
       }
       if (active.kind === 'xlsx') {
         let addresses;
@@ -28,22 +50,44 @@ Module.zetajs.then(zeta => {
         else if (selected.getRangeAddress) addresses = [selected.getRangeAddress()];
         else { const a = selected.getCellAddress(); addresses = [{Sheet:a.Sheet, StartColumn:a.Column, EndColumn:a.Column, StartRow:a.Row, EndRow:a.Row}]; }
         const ranges = addresses.slice(0, 64).map(a => ({sheet:a.Sheet, sheetName:model.getSheets().getByIndex(a.Sheet).getName(), startColumn:a.StartColumn, startRow:a.StartRow, endColumn:a.EndColumn, endRow:a.EndRow}));
-        let text = ''; try { text = boundedText(selected.getString()); } catch { /* This selection type does not expose the optional text/name interface. */ }
-        return {...base, kind:'cells', scope:'sheet-range-address-at-version-and-change-sequence', ranges, text};
+        const cells = [], rawTexts = []; let complete = addresses.length <= 64, totalCells = 0;
+        for (const a of addresses) totalCells += (a.EndColumn-a.StartColumn+1)*(a.EndRow-a.StartRow+1);
+        for (const a of addresses.slice(0, 64)) {
+          const sheet = model.getSheets().getByIndex(a.Sheet);
+          for (let row = a.StartRow; row <= a.EndRow && cells.length < 256; row++) {
+            for (let column = a.StartColumn; column <= a.EndColumn && cells.length < 256; column++) {
+              const cell = sheet.getCellByPosition(column, row);
+              const nativeType = cell.getType();
+              const type = typeof nativeType === 'number' ? nativeType : nativeType.value;
+              if (![0,1,2,3].includes(type)) throw Error('unsupported-selection');
+              rawTexts.push(cell.getString());
+              if (cell.getFormula().length > 4096) complete = false;
+              cells.push({sheet:a.Sheet, column, row, text:boundedText(cell.getString()), formula:boundedText(cell.getFormula()), value:cell.getValue(), valueType:['empty','number','text','formula'][type], numberFormat:Number(cell.getPropertyValue('NumberFormat')), rowVisible:sheet.getRows().getByIndex(row).getPropertyValue('IsVisible'), columnVisible:sheet.getColumns().getByIndex(column).getPropertyValue('IsVisible'), merged:cell.getIsMerged()});
+            }
+          }
+        }
+        complete = complete && cells.length === totalCells;
+        const text = rawTexts.join('\t');
+        const one = addresses.length === 1 && totalCells === 1;
+        const a = addresses[0];
+        const target = one ? model.getSheets().getByIndex(a.Sheet).getCellByPosition(a.StartColumn, a.StartRow) : selected;
+        return {...base, kind:'cells', scope:'sheet-range-address-at-version-and-change-sequence', ranges, cells, text:boundedText(text), capture:captured(text, complete), token:remember(target, one ? target.getString() : null, one ? 'cell' : 'range')};
       }
       const page = controller.getCurrentPage(), pages = model.getDrawPages();
       let pageIndex = -1;
       for (let i = 0; i < Math.min(pages.getCount(), 512); ++i) if (zeta.sameUnoObject(pages.getByIndex(i), page)) { pageIndex = i; break; }
-      const shapes = [];
+      const shapes = [], rawTexts = [];
       const count = selected.getCount ? Math.min(selected.getCount(), 64) : 0;
       for (let i = 0; i < count; ++i) {
         const shape = selected.getByIndex(i); let shapeIndex = -1, text = '', name = '';
         for (let j = 0; j < Math.min(page.getCount(), 2048); ++j) if (zeta.sameUnoObject(page.getByIndex(j), shape)) { shapeIndex = j; break; }
-        try { text = boundedText(shape.getString()); } catch { /* This selection type does not expose the optional text/name interface. */ }
+        try { const raw = shape.getString(); rawTexts.push(raw); text = boundedText(raw); } catch { /* This selection type does not expose the optional text/name interface. */ }
         try { name = boundedText(shape.getName()); } catch { /* This selection type does not expose the optional text/name interface. */ }
         if (pageIndex >= 0 && shapeIndex >= 0) shapes.push({pageIndex, shapeIndex, name, type:shape.getShapeType(), text});
       }
-      return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes};
+      const text = rawTexts.join('\n');
+      const target = count === 1 && shapes.length === 1 ? selected.getByIndex(0) : null;
+      return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes, capture:captured(text, !selected.getCount || selected.getCount() <= 64), ...(target && text.length > 0 ? {token:remember(target, text, 'shape')} : {})};
     } catch {
       return {...base, kind:'unavailable', scope:'engine selection interface unavailable in this view'};
     }
@@ -112,21 +156,32 @@ Module.zetajs.then(zeta => {
       model.close(true);
     }
     model = controller = active = modifyListener = selectionListener = null;
+    handles.clear();
   }
-  zeta.mainPort.onmessage = ({data:r}) => {
-    if (!r || typeof r !== 'object') return;
-    if (r.command === 'bind' && !channel && typeof r.channel === 'string') { channel = r.channel; emit({type:'ready', channel}); return; }
-    if (r.channel !== channel || !channel) return;
-    const reply = payload => emit({type:'result', command:r.command, channel, operationId:r.operationId, documentId:r.documentId, version:r.version, ...payload});
-    try {
-      if (r.command === 'open') {
+  function requireEditing() { if (!active.editing || model.isReadonly() !== true) throw Error('unsupported-command'); }
+  function targetFor(r) {
+    requireEditing();
+    const handle = handles.get(r.selectionToken);
+    if (!handle || handle.version !== active.version || handle.sequence !== active.sequence || r.expectedChangeSequence !== active.sequence) throw Error('stale-selection');
+    if (handle.text !== null && handle.target.getString() !== handle.text) throw Error('stale-selection');
+    return handle;
+  }
+  function mutate(operation) {
+    requireEditing();
+    const before = active.sequence;
+    try { operation(); } finally {
+      if (active.sequence === before) { active.sequence++; event('changed', {state:state()}); }
+      handles.clear();
+    }
+  }
+  function openModel(r) {
         if (active || !filters[r.kind]) throw Error('document-already-open');
         // Configuration lives in this isolated browser engine's virtual FS only.
         try { configurePreviewStage(); } catch { /* Optional stage styling must not block read-only preview. */ }
         model = desktop.loadComponentFromURL('file:///tmp/analytix-office/input.' + r.kind, '_default', 0,
-          [prop('MacroExecutionMode', 4), prop('UpdateDocMode', 0), prop('ReadOnly', true), prop('LockEditDoc', true), prop('LockSave', true), prop('LockExport', true), prop('PickListEntry', false)]);
+          [prop('MacroExecutionMode', NEVER_EXECUTE), prop('UpdateDocMode', 0), prop('ReadOnly', true), prop('LockEditDoc', true), prop('LockSave', true), prop('LockExport', true), prop('PickListEntry', false)]);
         if (!model) throw Error('open-failed');
-        if (!model.isReadonly()) { close(); throw Error('open-failed'); }
+        if (model.isReadonly() !== true) { close(); throw Error('open-failed'); }
         controller = model.getCurrentController();
         if (r.kind === 'docx') {
           try {
@@ -141,15 +196,15 @@ Module.zetajs.then(zeta => {
         const layout = controller.getFrame().LayoutManager;
         layout.setVisible(false);
         if (layout.isVisible()) throw Error('native-controls-hide-failed');
-        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, viewFit:r.kind !== 'xlsx'};
+        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx'};
         modifyListener = zeta.unoObject([css.util.XModifyListener], {disposing() {}, modified() {
-          if (!active) return;
+          if (!active || suppressChanges) return;
           // Writer view/layout notifications also use XModifyListener. Only a
           // confirmed read-only, unmodified model is a non-edit notification.
           // Failed reads and every other state still reach Main's fail-closed gate.
           try { if (model.isReadonly() === true && model.isModified() === false) return; }
           catch { /* Unknown native state must not be classified as an unmodified view. */ }
-          active.sequence++;
+          active.sequence++; handles.clear();
           event('changed', {state:state()});
         }});
         selectionListener = zeta.unoObject([css.view.XSelectionChangeListener], {disposing() {}, selectionChanged() {
@@ -157,6 +212,15 @@ Module.zetajs.then(zeta => {
         }});
         model.addModifyListener(modifyListener);
         controller.addSelectionChangeListener(selectionListener);
+  }
+  zeta.mainPort.onmessage = ({data:r}) => {
+    if (!r || typeof r !== 'object') return;
+    if (r.command === 'bind' && !channel && typeof r.channel === 'string') { channel = r.channel; emit({type:'ready', channel}); return; }
+    if (r.channel !== channel || !channel) return;
+    const reply = payload => emit({type:'result', command:r.command, channel, operationId:r.operationId, documentId:r.documentId, version:r.version, ...payload});
+    try {
+      if (r.command === 'open') {
+        openModel(r);
         reply({ok:true, state:state(), selection:selection()});
         return;
       }
@@ -164,6 +228,40 @@ Module.zetajs.then(zeta => {
       if (r.command === 'local-view') {
         if (Object.keys(r).sort().join(',') !== 'action,channel,command,documentId,operationId,version') throw Error('invalid-request');
         reply({ok:true, view:localView(r.action)});
+      } else if (r.command === 'edit') {
+        if (active.sequence !== active.acknowledged) throw Error('unsaved-changes');
+        if (model.isReadonly() !== true) throw Error('unsupported-command');
+        // Internal AI mutation authority; the native view stays read-only.
+        active.editing = true;
+        reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'replace') {
+        const handle = targetFor(r);
+        if (!['text','cell','shape'].includes(handle.kind) || typeof r.text !== 'string' || r.text.length > 4096) throw Error('unsupported-selection');
+        if (r.valueType !== 'text') throw Error('invalid-control-value');
+        mutate(() => handle.target.setString(r.text));
+        reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'export') {
+        requireEditing();
+        if (active.pendingExport) throw Error('export-awaiting-ack');
+        const sequence = active.sequence;
+        // Native UI is readonly and worker commands are serialized. Synchronous
+        // filter/layout notifications during export are not another AI edit.
+        suppressChanges = true;
+        try { model.storeToURL('file:///tmp/analytix-office/output.' + active.kind, [prop('FilterName', filters[active.kind]), prop('Overwrite', true)]); }
+        finally { suppressChanges = false; }
+        active.pendingExport = {operationId:r.operationId, sequence};
+        reply({ok:true, state:state(), exportedSequence:sequence});
+      } else if (r.command === 'ack') {
+        requireEditing();
+        const pending = active.pendingExport;
+        if (!pending || pending.operationId !== r.exportOperationId || pending.sequence !== r.exportedSequence || !['committed','conflict','failed'].includes(r.status)) throw Error('ack-mismatch');
+        if (r.status === 'committed') {
+          if (typeof r.persistedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(r.persistedVersion)) throw Error('ack-mismatch');
+          active.version = r.persistedVersion; active.acknowledged = pending.sequence; handles.clear();
+          if (active.sequence === active.acknowledged) { suppressChanges = true; try { model.setModified(false); } finally { suppressChanges = false; } }
+        }
+        delete active.pendingExport;
+        reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'captureSelection') {
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'close') {
@@ -173,7 +271,7 @@ Module.zetajs.then(zeta => {
         close(); reply({ok:true});
       } else throw Error('unsupported-command');
     } catch (error) {
-      const known = ['view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
+      const known = ['stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
       const code = known.includes(error.message) ? error.message : 'engine-operation-failed';
       reply({ok:false, error:code});
     }

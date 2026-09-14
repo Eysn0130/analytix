@@ -12,7 +12,7 @@ vi.mock('electron', () => ({
 }))
 vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (...args: unknown[]) => {
   state.create(...args)
-  return { request: state.request, getView: state.getView, destroy: state.destroy }
+  return { request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
 } }))
 import { registerNativeOfficeIpc } from './native-office-ipc'
 beforeEach(() => {
@@ -88,4 +88,40 @@ it('closing a readonly preview releases its controller without a save prompt', a
   h.main.emit('closed')
   expect(state.destroy).toHaveBeenCalledOnce()
   expect(state.request.mock.calls.some(([request]) => request.action === 'save')).toBe(false)
+})
+
+it('dirty native close is cancelled by default and preserves the working copy', async () => {
+  const h = setup(); await h.invoke()
+  state.getView.mockReturnValue({dirty:true,status:'ready'})
+  state.dialog.mockResolvedValue({response:2})
+  const event = {preventDefault:vi.fn()}
+  h.main.emit('close',event)
+  await vi.waitFor(() => expect(state.dialog).toHaveBeenCalledOnce())
+  expect(event.preventDefault).toHaveBeenCalledOnce()
+  expect(h.main.close).not.toHaveBeenCalled()
+  expect(state.destroy).not.toHaveBeenCalled()
+})
+it('closing an unsaved native tab requires an explicit save or discard decision', async () => {
+  const h = setup()
+  const view = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), changeSequence: 2, dirty: true, status: 'ready' }
+  state.getView.mockReturnValue(view)
+  state.request.mockImplementation(async request => request.action === 'close' && !request.discard
+    ? {ok:false,view,error:'unsaved_changes'} : {ok:true,view})
+  state.dialog.mockResolvedValue({response:2})
+  expect(await h.invoke(h.event,{action:'close',objectId:view.objectId})).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(state.request.mock.calls.some(([request]) => request.discard)).toBe(false)
+  state.dialog.mockResolvedValue({response:1})
+  expect(await h.invoke(h.event,{action:'close',objectId:view.objectId})).toMatchObject({ok:true})
+  expect(state.request).toHaveBeenLastCalledWith({action:'close',objectId:view.objectId,discard:true})
+})
+
+it('an unknown update cannot be discarded by the window close dialog', async () => {
+  const h = setup(); await h.invoke()
+  state.getView.mockReturnValue({dirty:false,saving:true,status:'error'})
+  state.dialog.mockResolvedValue({response:1})
+  h.main.emit('close',{preventDefault:vi.fn()})
+  await vi.waitFor(() => expect(state.dialog).toHaveBeenCalledOnce())
+  expect(state.dialog).toHaveBeenCalledWith(h.main,expect.objectContaining({buttons:['查询后退出','取消'],cancelId:1}))
+  expect(h.main.close).not.toHaveBeenCalled()
+  expect(state.destroy).not.toHaveBeenCalled()
 })

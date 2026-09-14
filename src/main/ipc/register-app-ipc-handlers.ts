@@ -2719,13 +2719,14 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
 
   const packageHost = createPluginPackageHostHandler(localDisplayRequest)
   registerNativeOfficeIpc(getMainWindow, packageHost)
+  const rendererPackageHost = createPluginPackageHostHandler(localDisplayRequest, 'renderer')
   ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
     const main = getMainWindow()
     if (!main || main.isDestroyed() || event.sender !== main.webContents ||
         event.senderFrame !== main.webContents.mainFrame) {
       return { ok: false, code: 'identity_invalid', message: 'Plugin control requires the main workspace.' }
     }
-    return packageHost(payload)
+    return rendererPackageHost(payload)
   })
 
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
