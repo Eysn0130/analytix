@@ -1,5 +1,4 @@
 import { registerNativeOfficeIpc } from '../office/native-office-ipc'
-import { desktopEnvironment } from '../desktop-environment'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { createObjectEditingHandler } from './object-editing-ipc'
 import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
@@ -296,7 +295,6 @@ type RegisterAppIpcHandlersOptions = {
   ) => Promise<SystemNotificationResult>
   openThreadInNewWindow: (threadId: string) => void
   getAppVersion: () => string
-  desktopIsolated?: boolean
   readGuiUpdateState: () => Promise<GuiUpdateState>
   loadGuiUpdaterModule: () => Promise<GuiUpdaterModule>
   resolveLogDirectory: () => string
@@ -3034,16 +3032,6 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     openThreadInNewWindow(request.threadId)
   })
   ipcMain.handle('app:version', async () => getAppVersion())
-  // Capture at handler registration, not after a later HMR build replaces disk output.
-  const environment = desktopEnvironment({
-    isPackaged: app.isPackaged,
-    isolated: options.desktopIsolated === true,
-    userData: app.getPath('userData'),
-    version: getAppVersion(),
-    mainBundlePath: join(__dirname, 'index.js'),
-    env: process.env
-  })
-  ipcMain.handle('app:environment', async () => environment)
   ipcMain.handle('gui:update-state', async () => readGuiUpdateState())
   ipcMain.handle('gui:update-check', async (_, channel: unknown): Promise<GuiUpdateInfo> => {
     const module = await loadGuiUpdaterModule()

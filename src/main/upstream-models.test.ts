@@ -39,8 +39,8 @@ function snapshot(providers = [publicProvider()], selectedProviderId: string | u
 describe('Core Registry composer model catalog', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('projects official display labels while preserving every committed request ID', async () => {
-    const registry = snapshot([publicProvider({ endpoint: 'https://api.deepseek.com' })])
+  it.each([['https://api.deepseek.com', 'official-deepseek'], ['http://127.0.0.1:5500', 'local'], ['https://gateway.test', 'remote']])('projects stable display labels without changing request IDs at %s', async (endpoint, endpointKind) => {
+    const registry = snapshot([publicProvider({ endpoint })])
     const before = structuredClone(registry)
     const result = await fetchUpstreamModelIds(registry)
     expect(result).toEqual({
@@ -48,7 +48,7 @@ describe('Core Registry composer model catalog', () => {
       modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       defaultModelId: 'deepseek-v4-pro',
       modelGroups: [{
-        providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'official-deepseek',
+        providerId: 'deepseek', label: 'DeepSeek', endpointKind,
         modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
         modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash', 'deepseek-v4-pro': 'V4 Pro' }
       }]
@@ -68,7 +68,8 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       defaultModelId: 'deepseek-v4-pro',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'remote', modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash', 'deepseek-v4-pro': 'V4 Pro' } }]
     })
     expect(JSON.stringify(result)).not.toMatch(/credential|"endpoint":|incarnation|https?:\/\//)
   })
@@ -138,7 +139,7 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['custom-model'],
       defaultModelId: 'custom-model',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['custom-model'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'remote', modelIds: ['custom-model'] }]
     })
     expect(registry).toEqual(before)
     expect(fetch).not.toHaveBeenCalled()
@@ -155,7 +156,7 @@ describe('Core Registry composer model catalog', () => {
       ok: true,
       modelIds: ['custom-chat'],
       defaultModelId: 'custom-chat',
-      modelGroups: [{ providerId: 'deepseek', label: 'deepseek', endpointKind: 'remote', modelIds: ['custom-chat'] }]
+      modelGroups: [{ providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'remote', modelIds: ['custom-chat'] }]
     })
   })
 

@@ -147,6 +147,8 @@ describe('chat-store app actions composer model loading', () => {
     expect(state.composerModelGroups).toEqual(modelGroups)
     expect(state.composerModel).toBe('deepseek-v4-pro')
     expect(state.composerProviderId).toBe('deepseek')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('deepseek-v4-pro')
+    expect(localStorage.getItem(COMPOSER_PROVIDER_STORAGE_KEY)).toBe('deepseek')
     expect(state.composerModelGroups[0].modelProfiles).toBeUndefined()
   })
 

@@ -21,10 +21,9 @@ import {
   type ModelReasoningEffort,
   type ModelProviderModelProfileV1
 } from '@shared/app-settings'
-import { DEFAULT_COMPOSER_MODEL_IDS } from '@shared/default-composer-models'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import { projectModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
-import { modelLabelFromCatalog, type ProviderEndpointKind } from '@shared/provider-display'
+import { modelLabelFromCatalog, providerModelDisplayName, type ProviderEndpointKind } from '@shared/provider-display'
 import './model-picker.css'
 
 export type ComposerReasoningEffort = ModelReasoningEffort
@@ -120,9 +119,6 @@ const COMPOSER_MODEL_FAMILIES: ComposerModelFamily[] = [
   QWEN_MODEL_FAMILY
 ]
 const HIDDEN_COMPOSER_REASONING_EFFORTS = new Set<ComposerReasoningEffort>(['off'])
-const DEFAULT_COMPOSER_MODEL_KEYS = new Set(
-  DEFAULT_COMPOSER_MODEL_IDS.map((id) => normalizeModelCapabilityKey(id))
-)
 
 export function FloatingComposerModelPicker({
   compact,
@@ -522,7 +518,6 @@ export function FloatingComposerModelPicker({
           <span className="min-w-0 truncate text-right">
             {modelLabel}
           </span>
-          {sourceLabel ? <span className="shrink-0 rounded bg-ds-hover px-1.5 text-[11px] font-normal text-ds-muted">{sourceLabel}</span> : null}
           {reasoningEnabled ? (
             <span className="shrink-0 text-[12px] font-semibold text-ds-faint">
               {currentReasoningLabel}
@@ -561,7 +556,6 @@ export function FloatingComposerModelPicker({
         title={controlsTitle}
       >
         <span className="min-w-0 truncate">{modelLabel}</span>
-        {sourceLabel ? <span className="shrink-0 rounded bg-ds-hover px-1.5 text-[11px] font-normal text-ds-muted">{sourceLabel}</span> : null}
         {reasoningEnabled ? (
           <span className="shrink-0 border-l border-ds-border pl-1.5 text-[12px] font-normal text-ds-faint">
             {t(reasoningLabelKey(currentReasoning))}
@@ -643,16 +637,7 @@ export function filterComposerModelIds(
 }
 
 function shouldShowProviderSetupPrompt(groups: readonly ComposerModelMenuGroup[]): boolean {
-  const hasConfiguredProviderModels = groups.some((group) =>
-    group.providerId !== UNGROUPED_MODEL_PROVIDER_ID
-  )
-  if (hasConfiguredProviderModels) return false
-  const ungroupedModels = groups.flatMap((group) =>
-    group.providerId === UNGROUPED_MODEL_PROVIDER_ID ? group.modelIds : []
-  )
-  return ungroupedModels.every((id) =>
-    DEFAULT_COMPOSER_MODEL_KEYS.has(normalizeModelCapabilityKey(id))
-  )
+  return !groups.some((group) => group.providerId !== UNGROUPED_MODEL_PROVIDER_ID)
 }
 
 export function normalizeComposerReasoningEffort(
@@ -815,7 +800,8 @@ export function composerModelDisplayLabel(
 ): string {
   const trimmed = model.trim()
   if (!trimmed || trimmed.toLowerCase() === 'auto') return autoLabel
-  return modelLabelFromCatalog(groups.find((group) => group.providerId === providerId)?.modelLabels, trimmed)
+  const label = modelLabelFromCatalog(groups.find((group) => group.providerId === providerId)?.modelLabels, trimmed)
+  return label === trimmed ? providerModelDisplayName(trimmed) : label
 }
 
 function estimatedModelSubmenuHeight(modelCount: number): number {

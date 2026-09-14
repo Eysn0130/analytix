@@ -192,7 +192,6 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
             model = canonicalModel
             shouldPersist = !activeThread
           }
-          if (shouldPersist) persistComposerModel(model)
           const threadProviderId =
             threadSelection && providerIdMatchesComposerModel(groups, threadSelection.providerId, model)
               ? threadSelection.providerId
@@ -201,6 +200,9 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
           const currentProviderId = explicitSelection && providerIdMatchesComposerModel(groups, explicitSelection.providerId, model)
             ? explicitSelection.providerId : ''
           const providerId = currentProviderId || threadProviderId || storedProviderId || providerIdForComposerModel(groups, model)
+          if (!activeThread && (shouldPersist || (res.ok && providerIdMatchesComposerModel(groups, providerId, model)))) {
+            persistComposerModel(model)
+          }
           if (!activeThread && providerId !== state.composerProviderId) persistComposerProviderId(providerId)
           if (
             activeThread &&

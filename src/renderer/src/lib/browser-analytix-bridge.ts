@@ -1392,7 +1392,6 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       openDir: async () => ({ ok: false, message: browserPreviewUnavailable('Open log directory') })
     },
     app: {
-      getEnvironment: async () => ({ mode: 'browser' }),
       platform: navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'browser',
       startupSurfaceReady: () => undefined,
       confirmDialog: async (options) => window.confirm([options.message, options.detail].filter(Boolean).join('\n\n')),

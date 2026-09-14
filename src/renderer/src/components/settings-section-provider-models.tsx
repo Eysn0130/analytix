@@ -217,8 +217,8 @@ function ModelBadge({
   )
 }
 
-function ModelName({ modelId, endpoint }: { modelId: string; endpoint: string }): ReactElement {
-  const label = providerModelDisplayName(modelId, endpoint)
+function ModelName({ modelId }: { modelId: string }): ReactElement {
+  const label = providerModelDisplayName(modelId)
   return (
     <span className="group/model-name relative min-w-0" title={modelId} tabIndex={0}>
       <span className="block truncate text-[13px] font-medium text-ds-ink">{label}</span>
@@ -315,7 +315,7 @@ export function ProviderModelsManager({
   const showListTools = modelEntries.length > MODEL_LIST_PAGE_SIZE
   const normalizedQuery = query.trim().toLowerCase()
   const filteredEntries = showListTools && normalizedQuery
-    ? modelEntries.filter(({ modelId }) => [modelId, providerModelDisplayName(modelId, provider.baseUrl)].some((label) => label.toLowerCase().includes(normalizedQuery)))
+    ? modelEntries.filter(({ modelId }) => [modelId, providerModelDisplayName(modelId)].some((label) => label.toLowerCase().includes(normalizedQuery)))
     : modelEntries
   const pageCount = Math.max(1, Math.ceil(filteredEntries.length / MODEL_LIST_PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)
@@ -377,7 +377,7 @@ export function ProviderModelsManager({
                     }`}
                   >
                     <span className="grid min-w-0 flex-1 gap-1.5">
-                      <ModelName modelId={modelId} endpoint={provider.baseUrl} />
+                      <ModelName modelId={modelId} />
                       <span className="flex min-w-0 flex-wrap items-center gap-1">
                         <ModelBadge tone={kind === 'chat' ? 'faint' : 'muted'}>
                           {t(modelKindLabelKey(kind))}

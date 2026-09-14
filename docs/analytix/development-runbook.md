@@ -239,19 +239,11 @@ loop, platform limits and remaining CI/package work.
 
 ### Identify a GUI candidate before comparing it
 
-The development shell shows a compact instance label on both the workbench and
-settings routes. Its disclosure contains an opaque profile ID, application
-version and startup Main-bundle fingerprint. The fingerprint identifies only
-that Main output, not the whole source candidate or the Renderer. Packaged
-applications do not display this development control. No profile paths or
-credential values are exposed by the identity API.
-
-An isolated Mock fixture can use `--label-mock` with `dev:isolated`, or pass
-`mockLabel: true` to `prepareDevelopmentProfile`. This labels a declared test
-instance only: it does not start a Mock, configure a Provider, change endpoints,
-read credentials or authorize requests. Ambient shell flags are not inherited.
-Production packages ignore this marker. A loopback endpoint is labeled **local
-service**, never automatically **Mock**; local real models remain legitimate.
+Keep development instance, profile, source commit and build fingerprints in
+private acceptance records. They do not belong in the product top bar or the
+composer's always-visible controls. Model display names describe the configured
+model selection; they do not attest the implementation behind a custom endpoint.
+Keep technical IDs and connection details available in Settings and tooltips.
 
 For GUI acceptance across tasks, retain the source commit plus task-owned dirty
 blob manifest, frozen Main/preload/Renderer build, profile ID and connection

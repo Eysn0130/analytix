@@ -1753,7 +1753,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       >
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 truncate text-[13.5px] font-semibold text-ds-ink">
-            {providerDisplayName(item.id, item.name, item.baseUrl)}
+            {providerDisplayName(item.id, item.name)}
           </span>
           {isDraft ? <ProviderBadge tone="warning">{t('modelProviderDraftBadge')}</ProviderBadge> : null}
           {inUse ? <ProviderBadge tone="accent">{t('modelProviderInUse')}</ProviderBadge> : null}
@@ -1921,7 +1921,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate text-[14px] font-semibold text-ds-ink">
-                      {providerDisplayName(activeProvider.id, activeProvider.name, activeProvider.baseUrl)}
+                      {providerDisplayName(activeProvider.id, activeProvider.name)}
                     </span>
                     <span className="text-[11px] font-normal text-ds-faint">
                       {t(`providerConnection_${providerEndpointKind(activeProvider.baseUrl)}`)}
@@ -1984,7 +1984,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       {t('modelProviderName')}
                       <input
                         className={textInputClass}
-                        value={isDraftActive ? activeProvider.name : providerDisplayName(activeProvider.id, activeProvider.name, activeProvider.baseUrl)}
+                        value={isDraftActive ? activeProvider.name : providerDisplayName(activeProvider.id, activeProvider.name)}
                         readOnly={!isDraftActive}
                         onChange={(e) => updateModelProvider(activeProvider.id, { name: e.target.value })}
                       />
@@ -2188,7 +2188,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeProvider.models.map((model) => (
-                          <option key={model} value={model}>{providerModelDisplayName(model, activeProvider.baseUrl)}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2201,7 +2201,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeMediaModelIds.map((model) => (
-                          <option key={model} value={model}>{providerModelDisplayName(model, activeProvider.baseUrl)}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2235,7 +2235,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                             onChange={() => toggleActiveRouteProvider(providerId)}
                           />
                           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ds-ink">
-                            {profile ? providerDisplayName(profile.id, profile.name, profile.baseUrl) : providerId}
+                            {profile ? providerDisplayName(profile.id, profile.name) : providerId}
                           </span>
                           <span className="font-mono text-[11.5px] text-ds-faint">{providerId}</span>
                           {selected ? (

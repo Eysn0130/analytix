@@ -3,31 +3,28 @@ import { providerDisplayName, providerEndpointKind, providerModelDisplayName } f
 
 describe('provider presentation', () => {
   it.each(['http://localhost:5500/v1', 'http://127.0.0.1:5500', 'http://[::1]:5500', 'http://127.1:5500'])(
-    'identifies %s as local without asserting that it is a mock or an official model', (endpoint) => {
+    'identifies %s as local without asserting that it is a mock or official service', (endpoint) => {
       expect(providerEndpointKind(endpoint)).toBe('local')
-      expect(providerModelDisplayName('deepseek-v4-flash', endpoint)).toBe('deepseek-v4-flash')
     }
   )
-  it('does not confuse official-looking hosts, remote gateways, and unsupported URLs', () => {
+  it('keeps connection classification separate from presentation aliases', () => {
     expect(providerEndpointKind('https://api.deepseek.com')).toBe('official-deepseek')
+    expect(providerEndpointKind('https://api.deepseek.com.evil.test')).toBe('remote')
     expect(providerEndpointKind('https://localhost.evil.test')).toBe('remote')
     expect(providerEndpointKind('https://gateway.test')).toBe('remote')
     expect(providerEndpointKind('file:///private/anything')).toBe('unknown')
   })
-  it.each(['https://api.deepseek.com', 'https://api.deepseek.com/v1/'])(
-    'labels official aliases without rewriting the request ID at %s', (endpoint) => {
-      expect(providerModelDisplayName('deepseek-v4-flash', endpoint)).toBe('V4.1 Flash')
-      expect(providerModelDisplayName('deepseek-flash', endpoint)).toBe('V4.1 Flash')
-      expect(providerModelDisplayName('deepseek-v4-pro', endpoint)).toBe('V4 Pro')
-      expect(providerDisplayName('deepseek', 'deepseek', endpoint)).toBe('DeepSeek')
-      expect(providerDisplayName('team', '团队专用', endpoint)).toBe('团队专用')
-      expect(providerModelDisplayName('future-model', endpoint)).toBe('future-model')
+  it.each(['deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-flash-vision-exp'])(
+    'uses the concise catalog name for %s without needing a service address', (modelId) => {
+      expect(providerModelDisplayName(modelId)).toBe('V4.1 Flash')
     }
   )
-  it.each(['', 'http://api.deepseek.com', 'https://api.deepseek.com.evil.test',
-    'https://gateway.test', 'https://api.deepseek.com/custom', 'https://api.deepseek.com?route=custom'])(
-    'does not infer an official version from a model ID at %s', (endpoint) => {
-      expect(providerModelDisplayName('deepseek-v4-flash', endpoint)).toBe('deepseek-v4-flash')
-    }
-  )
+  it('preserves custom names, unknown IDs and distinct model versions', () => {
+    expect(providerModelDisplayName('deepseek-v4-pro')).toBe('V4 Pro')
+    expect(providerDisplayName('deepseek', 'deepseek')).toBe('DeepSeek')
+    expect(providerDisplayName('team', '团队专用')).toBe('团队专用')
+    expect(providerModelDisplayName('future-model')).toBe('future-model')
+    expect(providerModelDisplayName('constructor')).toBe('constructor')
+    expect(providerModelDisplayName('__proto__')).toBe('__proto__')
+  })
 })

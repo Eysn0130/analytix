@@ -40,8 +40,7 @@ function entryExists(path) {
 }
 
 export function prepareDevelopmentProfile({ root = repo, env = process.env, profile = 'default', fresh = false,
-  stateRoot = join(homedir(), '.analytix-development'), mockLabel = false } = {}) {
-  if (typeof mockLabel !== 'boolean') throw new Error('Invalid development Mock label.')
+  stateRoot = join(homedir(), '.analytix-development') } = {}) {
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(profile)) throw new Error('Invalid development profile name.')
   const cache = env.ANALYTIX_DEV_CACHE_ROOT
   if (!cache || !/^\/[A-Za-z0-9._/-]+$/.test(cache) || resolve(cache) !== cache) {
@@ -91,8 +90,6 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
     ANALYTIX_UPDATE_CHANNEL: 'beta',
     ANALYTIX_UPDATE_FEED_URL: 'https://example.invalid/analytix/development/'
   })
-  // UI provenance only: does not create, configure, intercept or authorize a Provider.
-  if (mockLabel) childEnv.ANALYTIX_DEV_PROVIDER_MODE = 'mock'
   const needsKeychain = created
   return { taskRoot, userData, homeRoot, created, needsKeychain, env: childEnv }
 }
@@ -121,9 +118,8 @@ export function parseDevelopmentArgs(args) {
     if (args[index] === '--fast') result.fast = true
     else if (args[index] === '--fresh') result.fresh = true
     else if (args[index] === '--unlock-keychain') result.unlockKeychain = true
-    else if (args[index] === '--label-mock') result.mockLabel = true
     else if (args[index] === '--profile' && args[index + 1]) result.profile = args[++index]
-    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --unlock-keychain | --label-mock]')
+    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --unlock-keychain]')
   }
   if (result.fresh && result.profile !== 'default') throw new Error('Choose --fresh or --profile, not both.')
   return result

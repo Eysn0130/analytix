@@ -715,7 +715,7 @@ describe('FloatingComposer model controls', () => {
       { providerId: 'custom' }
     ]
     expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'official', 'Auto')).toBe('V4.1 Flash')
-    expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'custom', 'Auto')).toBe('deepseek-v4-flash')
+    expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'custom', 'Auto')).toBe('V4.1 Flash')
     expect(composerModelDisplayLabel(groups, 'future-model', 'official', 'Auto')).toBe('future-model')
     expect(composerModelDisplayLabel(groups, 'constructor', 'official', 'Auto')).toBe('constructor')
     expect(composerModelDisplayLabel(groups, '__proto__', 'official', 'Auto')).toBe('__proto__')
@@ -730,8 +730,9 @@ describe('FloatingComposer model controls', () => {
       canChangeModel: true, onComposerModelChange: () => undefined
     }))
     expect(html).toContain('deepseek-v4-flash')
-    expect(html).not.toContain('V4.1 Flash')
+    expect(html).toContain('V4.1 Flash')
     expect(html).toContain('missing-local')
+    expect(html).not.toContain('DeepSeek · V4.1 Flash')
   })
 
   it.each(['select', 'combobox'] as const)('renders a concise %s label with the API identity accessible', (mode) => {
@@ -744,6 +745,18 @@ describe('FloatingComposer model controls', () => {
     }))
     expect(html).toContain('>V4.1 Flash</span>')
     expect(html).toContain('DeepSeek · V4.1 Flash · deepseek-v4-flash')
+  })
+
+  it.each(['select', 'combobox'] as const)('shows only the selected model and reasoning in the %s control', (mode) => {
+    const html = renderToStaticMarkup(createElement(FloatingComposerModelPicker, {
+      compact: true, mode, composerModel: 'deepseek-v4-flash', composerProviderId: 'deepseek',
+      composerPickList: ['deepseek-v4-flash'], composerModelGroups: [{
+        providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'local', modelIds: ['deepseek-v4-flash']
+      }], canChangeModel: true, onComposerModelChange: () => undefined
+    }))
+    expect(html).toContain('V4.1 Flash</span>')
+    expect(html).not.toMatch(/>Local service<|>本地服务</)
+    expect(html).toContain('deepseek-v4-flash')
   })
 
   it('keeps provider setup reachable when no chat providers are available', () => {
@@ -760,7 +773,7 @@ describe('FloatingComposer model controls', () => {
       })
     )
 
-    expect(html).toContain('Set up provider')
+    expect(html).toContain('Unconfigured')
     expect(html).toContain('aria-haspopup="menu"')
     expect(html).not.toContain('disabled=""')
   })
@@ -789,16 +802,16 @@ describe('FloatingComposer model controls', () => {
 
     expect(html).toContain('deepseek-v4-flash')
     expect(html).toContain('aria-haspopup="menu"')
-    expect(html).not.toContain('Set up provider')
+    expect(html).not.toContain('Unconfigured')
   })
 
-  it('does not treat default fallback models as configured providers', () => {
+  it.each([{ models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }, { models: ['orphan-custom-model'] }])('does not treat fallback catalog $models as configured providers', ({ models }) => {
     const html = renderToStaticMarkup(
       createElement(FloatingComposerModelPicker, {
         compact: false,
         mode: 'select',
-        composerModel: 'deepseek-v4-pro',
-        composerPickList: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+        composerModel: models[0],
+        composerPickList: models,
         composerModelGroups: [],
         canChangeModel: true,
         onComposerModelChange: () => undefined,
@@ -806,7 +819,7 @@ describe('FloatingComposer model controls', () => {
       })
     )
 
-    expect(html).toContain('Set up provider')
+    expect(html).toContain('Unconfigured')
     expect(html).not.toContain('deepseek-v4-pro')
   })
 })

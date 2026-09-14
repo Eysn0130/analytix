@@ -48,9 +48,9 @@ function renderManager(target: ModelProviderProfileV1): string {
 }
 
 describe('ProviderModelsManager', () => {
-  it('shows the official model name with its editable API ID still visible', () => {
+  it.each(['https://api.deepseek.com', 'http://127.0.0.1:5500', 'https://gateway.test'])('shows a stable model name and editable API ID at %s', (baseUrl) => {
     const html = renderManager(provider({
-      baseUrl: 'https://api.deepseek.com', models: ['deepseek-v4-flash']
+      baseUrl, models: ['deepseek-v4-flash']
     }))
     expect(html).toContain('>V4.1 Flash</span>')
     expect(html).toContain('>deepseek-v4-flash</span>')

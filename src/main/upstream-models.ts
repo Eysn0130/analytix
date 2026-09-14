@@ -24,12 +24,12 @@ export async function fetchUpstreamModelIds(registry: ProviderRegistryResultV1):
       .sort((left, right) => left.localeCompare(right))
     if (modelIds.length === 0) continue
     const modelLabels = Object.fromEntries(modelIds.flatMap((id) => {
-      const label = providerModelDisplayName(id, provider.endpoint)
+      const label = providerModelDisplayName(id)
       return label === id ? [] : [[id, label]]
     }))
     modelGroups.push({
       providerId: provider.id,
-      label: providerDisplayName(provider.id, provider.id, provider.endpoint),
+      label: providerDisplayName(provider.id, provider.id),
       endpointKind: providerEndpointKind(provider.endpoint),
       modelIds,
       ...(Object.keys(modelLabels).length > 0 ? { modelLabels } : {})

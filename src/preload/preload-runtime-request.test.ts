@@ -52,16 +52,6 @@ describe('preload runtime request bridge', () => {
     electronMock.getPathForFile.mockReset()
   })
 
-  it('validates non-secret instance identity through the dedicated app channel', async () => {
-    const api = await loadPreloadApi()
-    const identity = { mode: 'development', profileId: 'abcdef123456', isolated: true, mock: true, version: '1.0.6' }
-    electronMock.invoke.mockResolvedValue(identity)
-    await expect(api.app.getEnvironment()).resolves.toEqual(identity)
-    expect(electronMock.invoke).toHaveBeenCalledWith('app:environment')
-    electronMock.invoke.mockResolvedValue({ ...identity, userData: '/private/canary' })
-    await expect(api.app.getEnvironment()).rejects.toThrow()
-  })
-
   it('passes runtime request paths through the analytix runtime facade unchanged', async () => {
     const response = { ok: true, status: 200, body: '{"ok":true}' }
     electronMock.invoke.mockResolvedValue(response)

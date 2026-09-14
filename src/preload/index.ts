@@ -8,7 +8,6 @@ import {
   isStrictPublicRuntimeSseIpcPayload
 } from '../shared/public-runtime-sse'
 import { parseRuntimeStatusPublicV1 } from '../shared/analytix-runtime-status'
-import { desktopEnvironmentSchema } from '../shared/desktop-environment'
 
 // Internal IPC adapter. The renderer receives only the domain facade below.
 const flatApi = {
@@ -390,7 +389,6 @@ const flatApi = {
     ipcRenderer.invoke('computer-use:request-permission', kind),
   showTurnCompleteNotification: (payload) => ipcRenderer.invoke('notification:turn-complete', payload),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
-  getDesktopEnvironment: async () => desktopEnvironmentSchema.parse(await ipcRenderer.invoke('app:environment')),
   getGuiUpdateState: () => ipcRenderer.invoke('gui:update-state'),
   checkGuiUpdate: (channel) =>
     ipcRenderer.invoke('gui:update-check', channel),
@@ -679,7 +677,6 @@ const api = {
     onQueryCacheInvalidated: flatApi.onQueryCacheInvalidated,
     showTurnCompleteNotification: flatApi.showTurnCompleteNotification,
     getVersion: flatApi.getAppVersion,
-    getEnvironment: flatApi.getDesktopEnvironment,
     listSkills: flatApi.listSkills,
     listSkillRoots: flatApi.listSkillRoots,
     saveSkillFile: flatApi.saveSkillFile,
