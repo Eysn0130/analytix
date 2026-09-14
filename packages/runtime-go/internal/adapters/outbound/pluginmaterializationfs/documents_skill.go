@@ -13,17 +13,17 @@ import (
 	hostport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
-// DocumentsSkillReader is composed only from the inspected source registration
+// OfficeSkillReader is composed only from the inspected source registration
 // and the host's installation authority. Neither value comes from a tool call.
-type DocumentsSkillReader struct {
+type OfficeSkillReader struct {
 	Store     *Store
 	Authority pluginport.InstallationAuthority
 	SHA256    string
 }
 
-func (reader DocumentsSkillReader) ReadSkill(ctx context.Context, expected hostport.Binding) (domainskill.PackageSnapshot, error) {
+func (reader OfficeSkillReader) ReadSkill(ctx context.Context, expected hostport.Binding) (domainskill.PackageSnapshot, error) {
 	store := reader.Store
-	if store == nil || ctx == nil || ctx.Err() != nil || expected.PackageID != "analytix-documents" || !domainplugin.IsCanonicalSHA256V1(reader.SHA256) {
+	if store == nil || ctx == nil || ctx.Err() != nil || !domainpackage.ValidDevelopmentSourcePackageIDV1(expected.PackageID) || !domainplugin.IsCanonicalSHA256V1(reader.SHA256) {
 		return domainskill.PackageSnapshot{}, pluginport.ErrUnavailable
 	}
 	keyID, key, err := validateAuthority(reader.Authority)
@@ -37,7 +37,11 @@ func (reader DocumentsSkillReader) ReadSkill(ctx context.Context, expected hostp
 		current.Receipt.GenerationID != expected.GenerationID || current.Receipt.SourceRegistrationSHA256 != expected.SourceRegistrationSHA256 {
 		return domainskill.PackageSnapshot{}, pluginport.ErrConflict
 	}
-	body, err := stableReadFile(filepath.Join(store.absolute(current.Receipt.ActiveRelativePath), filepath.FromSlash(domainpackage.DocumentsSkillRelativePathV1)), 128<<10)
+	contribution, _, ok := domainpackage.OfficeSkillContributionV1(expected.PackageID)
+	if !ok {
+		return domainskill.PackageSnapshot{}, pluginport.ErrUnavailable
+	}
+	body, err := stableReadFile(filepath.Join(store.absolute(current.Receipt.ActiveRelativePath), filepath.FromSlash(contribution.Path)), 128<<10)
 	if err != nil || len(body) == 0 {
 		return domainskill.PackageSnapshot{}, pluginport.ErrCorrupt
 	}

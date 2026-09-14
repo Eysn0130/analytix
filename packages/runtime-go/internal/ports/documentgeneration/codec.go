@@ -5,6 +5,7 @@ package documentgeneration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -19,13 +20,26 @@ type Image struct {
 }
 
 type Input struct {
-	SchemaVersion int     `json:"schemaVersion"`
-	Kind          string  `json:"kind"`
-	Markdown      string  `json:"markdown"`
-	Title         string  `json:"title,omitempty"`
-	Images        []Image `json:"images,omitempty"`
+	SchemaVersion int             `json:"schemaVersion"`
+	Kind          string          `json:"kind"`
+	Markdown      string          `json:"markdown,omitempty"`
+	Title         string          `json:"title,omitempty"`
+	Images        []Image         `json:"images,omitempty"`
+	Workbook      json.RawMessage `json:"workbook,omitempty"`
+	Presentation  json.RawMessage `json:"presentation,omitempty"`
 }
 
 type Codec interface {
 	Encode(context.Context, Input) ([]byte, error)
+}
+
+// Supports preserves the original DOCX-only contract for injected legacy codecs.
+func Supports(codec Codec, kind string) bool {
+	if codec == nil {
+		return false
+	}
+	if typed, ok := codec.(interface{ Supports(string) bool }); ok {
+		return typed.Supports(kind)
+	}
+	return kind == "docx"
 }

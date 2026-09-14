@@ -1,6 +1,7 @@
 package server
 
 import (
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	"context"
 
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
@@ -29,7 +30,7 @@ func (h *runtimeServerHandler) executeGenerateDocumentRuntimeTool(ctx context.Co
 	input := h.mutationToolInput(ctx, pending, args, principal.PrincipalDigest)
 	input.ValidateCreationIdentity = validate
 	loaded, ok := ctx.Value(preparedHostedSkillKey{}).(hostapp.HostedSkill)
-	if !ok || h.officePackageHost == nil {
+	if !ok || h.officePackageHost == nil || loaded.Binding.PackageID != toolcatalogapp.OfficeSkillForKind(stringField(args, "kind")) {
 		return unavailable, true
 	}
 	var output any

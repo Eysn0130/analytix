@@ -5,10 +5,15 @@ import (
 	"path/filepath"
 
 	"analytix.local/runtime-go/internal/adapters/outbound/documentcodec"
+	"analytix.local/runtime-go/internal/adapters/outbound/officecodec"
 	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 )
 
 func newDocumentCodec(config Config) codecport.Codec {
+	return officecodec.New(newDocumentNodeCodec(config))
+}
+
+func newDocumentNodeCodec(config Config) codecport.Codec {
 	if !filepath.IsAbs(config.DocumentCodecExecutable) || !filepath.IsAbs(config.DocumentCodecEntry) || filepath.Base(config.DocumentCodecEntry) != "office-generation-codec-entry.js" {
 		return nil
 	}

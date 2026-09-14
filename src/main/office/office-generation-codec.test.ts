@@ -12,6 +12,18 @@ const image = { id: 'image-1', type: 'png', dataBase64: PNG }
 const input = { schemaVersion: 1, kind: 'docx', markdown: '# 中文标题\n\n| 项目 | 金额 |\n| --- | --- |\n| 收入 | 100 |\n\n![示意图](image-1)', title: '中文文档', images: [image] }
 
 describe('office-generation-codec', () => {
+  it.each([undefined, '中文演示'])('dispatches structured PPTX through the public codec with optional title %s', async (title) => {
+    const buffer = await encodeOfficeGenerationV1({ schemaVersion: 1, kind: 'pptx',
+      ...(title === undefined ? {} : { title }),
+      presentation: { slides: [{ id: 'slide_one', objects: [{ id: 'title_one', kind: 'text', x: 1, y: 1, w: 5, h: 1, text: '中文内容' }] }] }
+    })
+    const zip = await JSZip.loadAsync(buffer)
+    const slide = await zip.file('ppt/slides/slide1.xml')!.async('string')
+    expect(slide).toContain('name="slide_one"')
+    expect(slide).toContain('name="title_one"')
+    expect(slide).toContain('中文内容')
+  })
+
   it('produces a real inspected package with Chinese, a table and the supplied image bytes', async () => {
     const buffer = await encodeOfficeGenerationV1(input)
     const inspection = await inspectWriteDocxPackageV1(buffer)

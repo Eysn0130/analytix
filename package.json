@@ -140,6 +140,7 @@
     "node-pty": "^1.1.0",
     "openclaw": "file:vendor/openclaw-shim",
     "pdfjs-dist": "^5.4.394",
+    "pptxgenjs": "4.0.1",
     "proxy-agent": "^6.5.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",

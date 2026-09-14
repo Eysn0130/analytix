@@ -122,8 +122,8 @@ func (h *runtimeServerHandler) executeRuntimeParallelSubagents(ctx context.Conte
 
 func (h *runtimeServerHandler) executeRuntimeRunSkill(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	name := subagentapp.SkillNameFromArgs(args)
-	if isDocumentsSkillName(name) {
-		return h.executeDocumentsSkill(ctx, args)
+	if packageID := toolcatalogapp.OfficeSkillIdentity(name); packageID != "" {
+		return h.executeOfficeSkill(ctx, args, packageID)
 	}
 	skill, ok := h.runtimeSkillByName(name)
 	if !ok {

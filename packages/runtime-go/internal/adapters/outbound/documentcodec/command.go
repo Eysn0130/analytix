@@ -61,3 +61,5 @@ func (c *Command) Encode(ctx context.Context, input codecport.Input) ([]byte, er
 	}
 	return output.Bytes(), nil
 }
+
+func (c *Command) Supports(kind string) bool { return c != nil && (kind == "docx" || kind == "pptx") }

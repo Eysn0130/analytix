@@ -16,7 +16,6 @@ import (
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
-	domainskill "analytix.local/runtime-go/internal/domain/skill"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	provider "analytix.local/runtime-go/internal/provider"
 )
@@ -236,19 +235,25 @@ func (h *runtimeServerHandler) acquireRuntimePendingToolEffect(
 
 func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pending runtimePendingToolCall, issuedAt time.Time) (apploop.PreparedSideEffect, error) {
 	children := &runtimeChildProducerPlanV1{owner: h}
-	var snapshot domainskill.PackageSnapshot
 	var hostBinding any
-	loaded, hosted := h.currentDocumentsSkill(ctx)
-	if hosted {
-		snapshot = loaded.Snapshot
-	}
-	catalog := toolcatalogapp.WithDocumentsSkill(h.skills, snapshot)
 	args, _ := domainsecurity.DecodeCanonicalJSONObject(pending.Call.Arguments)
-	requiresHost := pending.ExecutionGrant.ToolName == "generate_office_document" ||
-		(pending.ExecutionGrant.ToolName == "run_skill" && isDocumentsSkillName(subagentapp.SkillNameFromArgs(args)))
+	var packageID string
+	switch pending.ExecutionGrant.ToolName {
+	case "generate_office_document":
+		packageID = toolcatalogapp.OfficeSkillForKind(stringField(args, "kind"))
+	case "run_skill":
+		packageID = toolcatalogapp.OfficeSkillIdentity(subagentapp.SkillNameFromArgs(args))
+	}
+	requiresHost := packageID != "" || pending.ExecutionGrant.ToolName == "generate_office_document"
+	loaded, hosted := h.currentOfficeSkill(ctx, packageID)
+	var sources []toolcatalogapp.HostedOfficeSkill
+	if hosted {
+		sources = append(sources, toolcatalogapp.HostedOfficeSkill{PackageID: packageID, Snapshot: loaded.Snapshot})
+	}
+	catalog := toolcatalogapp.WithOfficeSkills(h.skills, sources)
 	if requiresHost {
 		if !hosted {
-			return apploop.PreparedSideEffect{Rejection: &apploop.ToolDispatchOverride{Output: map[string]any{"code": "plugin_host_unavailable", "error": "Documents is unavailable."}, IsError: true}}, nil
+			return apploop.PreparedSideEffect{Rejection: &apploop.ToolDispatchOverride{Output: map[string]any{"code": "plugin_host_unavailable", "error": "The Office plugin is unavailable."}, IsError: true}}, nil
 		}
 		hostBinding = hostedSkillProjection(loaded)
 	}

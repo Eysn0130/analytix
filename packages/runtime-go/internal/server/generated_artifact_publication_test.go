@@ -22,9 +22,14 @@ import (
 )
 
 func TestGeneratedArtifactTypedReceiptSettlesDurablyAndReplaysSSE(t *testing.T) {
+	for _, kind := range []string{"docx", "xlsx", "pptx"} {
+		t.Run(kind, func(t *testing.T) { testGeneratedArtifactPublication(t, kind) })
+	}
+}
+func testGeneratedArtifactPublication(t *testing.T, kind string) {
 	const decimalHash = "93887a2fccaf8b3b1b51350c0abfc65390966231128774816dce99bc362505e4"
 	receipt := generationapp.CreatedReceipt{
-		ArtifactID: decimalHash, Kind: "docx", ContentHash: decimalHash, ByteSize: 1200,
+		ArtifactID: decimalHash, Kind: kind, ContentHash: decimalHash, ByteSize: 1200,
 		SavedAt: "2026-09-12T12:35:15.123456789Z",
 	}
 	durableRoot, workspace := t.TempDir(), t.TempDir()
@@ -48,9 +53,18 @@ func TestGeneratedArtifactTypedReceiptSettlesDurablyAndReplaysSSE(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	generationArgs := map[string]any{"kind": kind, "path": "report." + kind}
+	switch kind {
+	case "docx":
+		generationArgs["markdown"] = "# Report"
+	case "xlsx":
+		generationArgs["workbook"] = map[string]any{"sheets": []any{map[string]any{"id": "s", "name": "数据", "cells": []any{map[string]any{"address": "A1", "type": "number", "value": 42}}}}}
+	case "pptx":
+		generationArgs["presentation"] = map[string]any{"slides": []any{map[string]any{"id": "s", "objects": []any{map[string]any{"id": "t", "kind": "text", "x": 0, "y": 0, "w": 1, "h": 1, "text": "Report"}}}}}
+	}
 	call := provider.ToolCall{
 		ID: serverTestHostToolCallID("generated-artifact-publication"), Name: "generate_office_document",
-		Arguments: json.RawMessage(`{"kind":"docx","path":"report.docx","title":"Report","markdown":"# Report"}`),
+		Arguments: json.RawMessage(mustHostedJSON(t, generationArgs)),
 	}
 	args, err := domainsecurity.DecodeCanonicalJSONObject(call.Arguments)
 	if err != nil {

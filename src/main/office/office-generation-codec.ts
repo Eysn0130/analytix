@@ -1,3 +1,4 @@
+import { buildPresentationPptxBytes } from './presentation-generation-codec'
 import {
   buildDocumentDocxBytes,
   DOCUMENT_DOCX_IMAGE_ID,
@@ -11,8 +12,9 @@ const MAX_IMAGE_BASE64_LENGTH = Math.ceil(DOCUMENT_DOCX_IMAGE_LIMITS.maxBytes / 
 
 export type OfficeGenerationInputV1 = {
   schemaVersion: 1
-  kind: 'docx'
-  markdown: string
+  kind: 'docx' | 'pptx'
+  markdown?: string
+  presentation?: unknown
   title?: string
   images?: Array<{ id: string; type: DocumentDocxImage['type']; dataBase64: string }>
 }
@@ -54,8 +56,10 @@ function imageArray(input: unknown): unknown[] {
 /** Data-only format adapter. The caller owns authorization, projection and persistence. */
 export async function encodeOfficeGenerationV1(input: unknown): Promise<Buffer> {
   try {
-    const value = dataRecord(input, ['schemaVersion', 'kind', 'markdown', 'title', 'images'], ['schemaVersion', 'kind', 'markdown'])
-    if (value.schemaVersion !== 1 || value.kind !== 'docx' || typeof value.markdown !== 'string' || Buffer.byteLength(value.markdown, 'utf8') > MAX_MARKDOWN_BYTES) throw invalidInput()
+    const value = dataRecord(input, ['schemaVersion', 'kind', 'markdown', 'presentation', 'title', 'images'], ['schemaVersion', 'kind'])
+    if (value.schemaVersion !== 1 || (value.kind !== 'docx' && value.kind !== 'pptx')) throw invalidInput()
+    if (value.kind === 'docx' && (Object.hasOwn(value, 'presentation') || typeof value.markdown !== 'string' || Buffer.byteLength(value.markdown, 'utf8') > MAX_MARKDOWN_BYTES)) throw invalidInput()
+    if (value.kind === 'pptx' && (Object.hasOwn(value, 'markdown') || !Object.hasOwn(value, 'presentation'))) throw invalidInput()
     if (Object.hasOwn(value, 'title') && (typeof value.title !== 'string' || value.title.length > MAX_TITLE_LENGTH)) throw invalidInput()
     const images = new Map<string, DocumentDocxImage>()
     let totalBytes = 0
@@ -72,7 +76,8 @@ export async function encodeOfficeGenerationV1(input: unknown): Promise<Buffer> 
         images.set(image.id, { type: image.type, data })
       }
     }
-    return await buildDocumentDocxBytes({ publicContent: value.markdown, title: value.title as string | undefined, images })
+    if (value.kind === 'pptx') return await buildPresentationPptxBytes(value.presentation, { ...(Object.hasOwn(value, 'title') ? { title: value.title as string } : {}), images })
+    return await buildDocumentDocxBytes({ publicContent: value.markdown as string, title: value.title as string | undefined, images })
   } catch {
     // Parser, image and packer diagnostics must not return caller content.
     throw invalidInput()

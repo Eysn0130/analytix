@@ -257,7 +257,18 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 			PublicUISHA256: recordSHA256["ui/editor.json"], AdapterSHA256: recordSHA256["assets/adapter.json"],
 		}
 		if len(declaration.Contributions.Skills) != 0 {
-			observed.DocumentsSkillSHA256 = recordSHA256[domainpluginpackage.DocumentsSkillRelativePathV1]
+			skill, _, ok := domainpluginpackage.OfficeSkillContributionV1(declaration.PackageID)
+			if !ok {
+				return SourceTreeIdentityV1{}, errors.New("unrecognized Office skill")
+			}
+			switch declaration.PackageID {
+			case "analytix-documents":
+				observed.DocumentsSkillSHA256 = recordSHA256[skill.Path]
+			case "analytix-spreadsheets":
+				observed.SpreadsheetsSkillSHA256 = recordSHA256[skill.Path]
+			case "analytix-presentations":
+				observed.PresentationsSkillSHA256 = recordSHA256[skill.Path]
+			}
 		}
 		if excludeHostMarker {
 			// Installed bytes may predate preview-only admission. Reconstruct

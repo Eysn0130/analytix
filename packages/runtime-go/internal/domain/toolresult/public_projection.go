@@ -239,7 +239,7 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 
 func validateArtifactStatus(artifact ArtifactStatusV1) error {
 	if !domainsecurity.IsSHA256Hex(artifact.ArtifactID) || !domainsecurity.IsSHA256Hex(artifact.ContentHash) ||
-		artifact.Kind != "docx" || artifact.ByteSize <= 0 || artifact.ByteSize > 16<<20 {
+		!oneOf(artifact.Kind, "docx", "xlsx", "pptx") || artifact.ByteSize <= 0 || artifact.ByteSize > 16<<20 {
 		return errors.New("artifact metadata is invalid")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, artifact.SavedAt); err != nil {

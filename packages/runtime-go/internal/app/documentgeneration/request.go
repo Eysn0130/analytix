@@ -12,6 +12,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	officedomain "analytix.local/runtime-go/internal/domain/officegeneration"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 )
@@ -20,15 +21,23 @@ var ErrInvalidRequest = errors.New("invalid document generation request")
 var imageID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 
 type Request struct {
-	Path     string            `json:"path"`
-	Kind     string            `json:"kind"`
-	Markdown string            `json:"markdown"`
-	Title    string            `json:"title,omitempty"`
-	Images   []codecport.Image `json:"images,omitempty"`
+	Path         string            `json:"path"`
+	Kind         string            `json:"kind"`
+	Markdown     string            `json:"markdown,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Images       []codecport.Image `json:"images,omitempty"`
+	Workbook     json.RawMessage   `json:"workbook,omitempty"`
+	Presentation json.RawMessage   `json:"presentation,omitempty"`
 }
 
 func ParseRequest(args map[string]any) (Request, error) {
-	for _, key := range []string{"title", "images"} {
+	allowed := map[string]bool{"path": true, "kind": true, "markdown": true, "title": true, "images": true, "workbook": true, "presentation": true}
+	for key := range args {
+		if !allowed[key] {
+			return Request{}, ErrInvalidRequest
+		}
+	}
+	for _, key := range []string{"title", "images", "workbook", "presentation"} {
 		if value, present := args[key]; present && value == nil {
 			return Request{}, ErrInvalidRequest
 		}
@@ -47,12 +56,40 @@ func ParseRequest(args map[string]any) (Request, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&request) != nil || request.Path == "" || request.Path != strings.TrimSpace(request.Path) ||
-		len(request.Path) > 4096 || strings.ContainsRune(request.Path, 0) || strings.ToLower(filepath.Ext(request.Path)) != ".docx" ||
-		request.Kind != "docx" || !utf8.ValidString(request.Markdown) || len(request.Markdown) > 1<<20 ||
-		strings.TrimSpace(request.Markdown) == "" || !utf8.ValidString(request.Title) || len(utf16.Encode([]rune(request.Title))) > 256 || len(request.Images) > 24 {
+		len(request.Path) > 4096 || strings.ContainsRune(request.Path, 0) || strings.ToLower(filepath.Ext(request.Path)) != "."+request.Kind ||
+		!utf8.ValidString(request.Title) || len(utf16.Encode([]rune(request.Title))) > 256 || len(request.Images) > 24 {
+		return Request{}, ErrInvalidRequest
+	}
+	switch request.Kind {
+	case "docx":
+		if !utf8.ValidString(request.Markdown) || len(request.Markdown) > 1<<20 || strings.TrimSpace(request.Markdown) == "" || request.Workbook != nil || request.Presentation != nil {
+			return Request{}, ErrInvalidRequest
+		}
+	case "xlsx":
+		if _, present := args["markdown"]; present {
+			return Request{}, ErrInvalidRequest
+		}
+		if _, present := args["images"]; present {
+			return Request{}, ErrInvalidRequest
+		}
+		if request.Presentation != nil {
+			return Request{}, ErrInvalidRequest
+		}
+		if _, err := officedomain.ParseWorkbook(request.Workbook); err != nil {
+			return Request{}, ErrInvalidRequest
+		}
+	case "pptx":
+		if _, present := args["markdown"]; present {
+			return Request{}, ErrInvalidRequest
+		}
+		if request.Workbook != nil {
+			return Request{}, ErrInvalidRequest
+		}
+	default:
 		return Request{}, ErrInvalidRequest
 	}
 	seen, total := map[string]bool{}, 0
+	imageSizes := map[string]int{}
 	for _, image := range request.Images {
 		if !imageID.MatchString(image.ID) || seen[image.ID] || len(image.DataBase64) > base64.StdEncoding.EncodedLen(8<<20) {
 			return Request{}, ErrInvalidRequest
@@ -71,10 +108,28 @@ func ParseRequest(args map[string]any) (Request, error) {
 			return Request{}, ErrInvalidRequest
 		}
 		seen[image.ID] = true
+		imageSizes[image.ID] = len(data)
+	}
+	if request.Kind == "pptx" {
+		presentation, err := officedomain.ParsePresentation(request.Presentation)
+		if err != nil || presentation.Validate(seen, request.Title) != nil {
+			return Request{}, ErrInvalidRequest
+		}
+		embeddedBytes := 0
+		for _, slide := range presentation.Slides {
+			for _, object := range slide.Objects {
+				if object.ImageID != nil {
+					embeddedBytes += imageSizes[*object.ImageID]
+					if embeddedBytes > 24<<20 {
+						return Request{}, ErrInvalidRequest
+					}
+				}
+			}
+		}
 	}
 	return request, nil
 }
 
 func (r Request) CodecInput() codecport.Input {
-	return codecport.Input{SchemaVersion: 1, Kind: r.Kind, Markdown: r.Markdown, Title: r.Title, Images: r.Images}
+	return codecport.Input{SchemaVersion: 1, Kind: r.Kind, Markdown: r.Markdown, Title: r.Title, Images: r.Images, Workbook: r.Workbook, Presentation: r.Presentation}
 }

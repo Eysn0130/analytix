@@ -29,10 +29,10 @@ below are not yet installed-application evidence.
 | Annotation lifecycle | Per-thread/object in-memory draft survives collapse; stale revision keeps note and requires selection | Protected persistent storage, normal restart, capacity and closed-tab recovery |
 | Native proposal refresh | Single-flight polling with failure backoff; new events supersede pending reads | Tool-completion refresh integration and installed behavior |
 | DOCX | Core absent-only generation calls a data-only `docx` codec; checkpoint binds the created bytes and installation principal; opaque artifacts resolve into the current native workspace | Full headers/fields/links coverage, installed repeated-text positive case and representative rendering |
-| XLSX | Native cells expose type/formula/value/format; unsafe numeric/formula-to-text mutation rejected in Main and worker | Real typed numeric/formula/range operations, calculation validation, charts and summaries/pivots |
-| PPTX | Native preview and bounded shape selection | Object-based generation, targeted style/chart edits, per-slide quality checks |
+| XLSX | Go data-only generation writes typed cells, bounded checked formulas, formatting and native charts; sheet/chart IDs persist in OOXML; unsafe numeric/formula-to-text mutation remains rejected | Native recalculation/rendering, typed modification/range operations and summaries/pivots |
+| PPTX | Structured generation writes text, shapes, native charts and validated images; stable slide/object IDs; native preview and bounded shape selection | Targeted style/chart edits, native ID roundtrip and per-slide visual quality |
 | Canvas / images | AtlasFlow and existing local media assets remain reusable | Stable scene identity, fact/layout separation, selection/notes/local edits, versioned exports; real media Provider integration |
-| Plugin Skills | Documents 0.2.0 declares an original workflow, fixed generation capability and installed snapshot; discovery and generation follow signed activation | XLSX/PPTX/Canvas contributions, full dependency handlers and installed end-to-end evidence |
+| Plugin Skills | All three Office 0.2.0 packages declare original workflows, fixed generation capabilities and installed snapshots; discovery and generation follow their signed activation | Canvas contribution, remaining dependency handlers and installed end-to-end evidence |
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core scopes, protected parts, CAS and status queries exist | Real local original-value Diff, third-object eviction, pending-operation and undo restart recovery |
@@ -67,7 +67,8 @@ entry, bounded stdin/stdout and no inherited credential environment. The codec
 receives content and explicit image bytes, never the target workspace path.
 Core validates the OOXML package, creates only an absent target and settles the
 checkpoint before issuing typed artifact metadata. A configured bundle is still
-required; this is not a claim of packaged admission or plugin lifecycle closure.
+required; this is not a claim of packaged admission. Hosted lifecycle source checks
+are recorded separately below.
 
 Generation tool arguments retain the existing execution-grant limit of 4 MiB
 JSON and 1 MiB per UTF-8 string. Generation-specific operation records now support
@@ -114,6 +115,51 @@ and Host restart with the same snapshot. Host, catalog and side-effect preparati
 packages pass their tests; independent source review found no blocker in this
 bounded integration. The Skill validator and diff check pass. These are real
 materialization fixtures, not an installed desktop GUI journey.
+
+## Three-format generation integration
+
+The shared `generate_office_document` request now discriminates DOCX Markdown,
+XLSX typed workbook data and PPTX structured slides. The model-facing schema only
+advertises a kind while its exact installed Skill is enabled and its format
+writer is available. A project Skill cannot impersonate any of the three fixed
+Office namespaces. Host activation, source identity and Skill digest remain part
+of the prepared operation; all formats use the same Core create/checkpoint,
+opaque receipt and protected-local opening authority.
+
+XLSX uses pinned Excelize in Go without an additional Python or Node dependency.
+It keeps literal `=` strings as text, finite numbers and booleans typed, and
+formula expressions intact. The finite formula subset has bounded references,
+dependency depth, cycle checks and real calculator checks. SUMIF requires static,
+equally shaped ranges to prevent unvalidated implicit expansion. Sheet identity
+uses Unicode simple folding consistently with the writer. Charts reference an
+existing text-label cell and bounded category/value vectors on that sheet.
+Formulas request native recalculation; persisted typed caches are not fabricated.
+
+PPTX uses pinned PptxGenJS through the same fixed data-only process entry as DOCX.
+Coordinates are bounded to a 16:9 page; IDs are globally unique. Object names use
+the writer's public API; each validated slide ID is written into its standard
+`p:cSld/@name` attribute in newly generated bytes. Images are decoded and checked,
+including repeated-embedding budgets. No URL, template path or file API is
+available in the admitted input. A missing optional title remains valid.
+
+Current integration checks pass for three-format current discovery, inline
+instruction loading, prepared generation and disable/re-enable behavior, and
+for artifact settlement, durable append and SSE replay before/after store reopen.
+The emitted Electron Main entry and Go composite produce actual DOCX, XLSX and
+PPTX from the same synthetic 100/200/300 data and pass Core OOXML inspection;
+this also verifies XLSX generation without Node. Format/builder tests pass
+101/101, artifact IPC/opening tests 16/16, both TypeScript configurations pass,
+and both new Skill validators pass. The production-tag Go runtime builds.
+These are bounded source/runtime checks, not installed GUI evidence.
+
+The format dependencies and exact notice texts are recorded in
+[office-generation-dependencies.md](office-generation-dependencies.md). They do
+not establish native engine/font admission, packaged dependency presence or GUI
+acceptance. Independent review found and fixed the missing-title wrapper,
+noncanonical PPTX field names, SUMIF range expansion and Unicode sheet collision.
+The SUMIF regression was observed failing before the fix. The corresponding
+formula/alias calculator checks and format tests pass; visual/native roundtrip
+and complete installed product acceptance remain required.
 
 ## Completion evidence
 

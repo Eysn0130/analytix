@@ -12,22 +12,17 @@ import (
 
 type preparedHostedSkillKey struct{}
 
-func (h *runtimeServerHandler) currentDocumentsSkill(ctx context.Context) (hostapp.HostedSkill, bool) {
+func (h *runtimeServerHandler) currentOfficeSkill(ctx context.Context, packageID string) (hostapp.HostedSkill, bool) {
 	if h.officePackageHost == nil {
 		return hostapp.HostedSkill{}, false
 	}
 	skills := h.officePackageHost.Skills(ctx)
-	if len(skills) != 1 {
-		return hostapp.HostedSkill{}, false
+	for _, skill := range skills {
+		if skill.Binding.PackageID == packageID {
+			return skill, true
+		}
 	}
-	return skills[0], true
-}
-
-func isDocumentsSkillName(name string) bool {
-	// Reuse the public skill name normalization, including $ and @ prefixes.
-	catalog := toolcatalogapp.SkillCatalog{Skills: []map[string]any{{"id": toolcatalogapp.DocumentsSkillID, "name": "Analytix Documents"}}}
-	_, ok := toolcatalogapp.SkillByName(catalog, name)
-	return ok
+	return hostapp.HostedSkill{}, false
 }
 
 func hostedSkillProjection(skill hostapp.HostedSkill) map[string]any {
@@ -37,22 +32,22 @@ func hostedSkillProjection(skill hostapp.HostedSkill) map[string]any {
 		"sourceRegistrationSha256": b.SourceRegistrationSHA256, "skillDigest": skill.Snapshot.Digest()}
 }
 
-func (h *runtimeServerHandler) executeDocumentsSkill(ctx context.Context, args map[string]any) (any, bool) {
-	failure := map[string]any{"code": "skill_snapshot_invalid", "error": "The Documents plugin is unavailable or changed. Reload its skill before continuing."}
+func (h *runtimeServerHandler) executeOfficeSkill(ctx context.Context, args map[string]any, packageID string) (any, bool) {
+	failure := map[string]any{"code": "skill_snapshot_invalid", "error": "The Office plugin is unavailable or changed. Reload its skill before continuing."}
 	if subagentapp.SkillContinueOrForkRequested(args) {
 		return failure, true
 	}
 	loaded, ok := ctx.Value(preparedHostedSkillKey{}).(hostapp.HostedSkill)
 	if !ok {
-		loaded, ok = h.currentDocumentsSkill(ctx)
+		loaded, ok = h.currentOfficeSkill(ctx, packageID)
 	}
-	if !ok {
+	if !ok || loaded.Binding.PackageID != packageID {
 		return failure, true
 	}
 	var output any
 	err := h.officePackageHost.WithSkill(ctx, loaded.Binding, loaded.Snapshot.Digest(), func(snapshot domainskill.PackageSnapshot) error {
-		catalog := toolcatalogapp.WithDocumentsSkill(toolcatalogapp.SkillCatalog{}, snapshot)
-		record, exists := toolcatalogapp.SkillByName(catalog, toolcatalogapp.DocumentsSkillID)
+		catalog := toolcatalogapp.WithOfficeSkills(toolcatalogapp.SkillCatalog{}, []toolcatalogapp.HostedOfficeSkill{{PackageID: packageID, Snapshot: snapshot}})
+		record, exists := toolcatalogapp.SkillByName(catalog, packageID)
 		if !exists {
 			return errors.New("hosted skill unavailable")
 		}

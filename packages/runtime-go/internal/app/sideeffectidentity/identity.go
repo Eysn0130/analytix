@@ -156,7 +156,16 @@ func hostProjection(toolName string, record map[string]any, input Input) (any, e
 		for _, image := range request.Images {
 			images = append(images, map[string]any{"id": image.ID, "type": image.Type, "encodedContentHash": domainsecurity.SHA256Hex([]byte(image.DataBase64))})
 		}
-		return map[string]any{"path": path, "kind": request.Kind, "markdown": request.Markdown, "title": request.Title, "images": images}, nil
+		projection := map[string]any{"path": path, "kind": request.Kind, "title": request.Title}
+		switch request.Kind {
+		case "docx":
+			projection["markdown"], projection["images"] = request.Markdown, images
+		case "xlsx":
+			projection["workbook"] = request.Workbook
+		case "pptx":
+			projection["presentation"], projection["images"] = request.Presentation, images
+		}
+		return projection, nil
 	case "write_file":
 		request, err := filetoolsapp.ParseWriteToolRequest(record)
 		if err != nil {

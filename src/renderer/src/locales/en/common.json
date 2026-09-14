@@ -2033,6 +2033,8 @@
   "toolAttachments": "Attachments",
   "generatedFilesTitle": "Generated files",
   "generatedOfficeDocument": "Generated document",
+  "generatedOfficeWorkbook": "Generated workbook",
+  "generatedOfficePresentation": "Generated presentation",
   "generatedOfficeUnavailable": "Unable to open this document. Check the current workspace and file, then try again.",
   "generatedFilePreviewUnavailable": "Preview unavailable",
   "generatedFileDownload": "Download",

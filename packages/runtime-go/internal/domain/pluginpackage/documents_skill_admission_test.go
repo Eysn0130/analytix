@@ -166,3 +166,52 @@ func TestDocumentsSkillRegistrationCanonicalBindingV1(t *testing.T) {
 		}
 	}
 }
+
+func TestOfficeSkillRegistrationCannotMixPackageAuthorities(t *testing.T) {
+	for _, id := range []string{"analytix-spreadsheets", "analytix-presentations"} {
+		t.Run(id, func(t *testing.T) {
+			d := developmentDeclarationFixtureV1(id)
+			skill, capability, _ := OfficeSkillContributionV1(id)
+			d.Contributions.Skills = []PathContributionV1{skill}
+			d.RequestedCapabilities = append(d.RequestedCapabilities, capability)
+			canonical, err := CanonicalDeclarationV1Bytes(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := developmentRegistrationFixtureV1(t, id)
+			r.DeclarationCanonicalJSON = string(canonical)
+			r.DeclarationRawSHA256 = developmentSHA256V1(canonical)
+			r.DeclarationCanonicalSHA256 = developmentSHA256V1(canonical)
+			r.SourceTreeFileCount = 5
+			if id == "analytix-spreadsheets" {
+				r.SpreadsheetsSkillSHA256 = strings.Repeat("e", 64)
+			} else {
+				r.PresentationsSkillSHA256 = strings.Repeat("e", 64)
+			}
+			r, err = NewDevelopmentSourceRegistrationV1(r)
+			if err != nil {
+				t.Fatal("exact package contribution rejected", err)
+			}
+			body, err := DevelopmentSourceRegistrationV1Bytes(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := ParseDevelopmentSourceRegistrationV1(body)
+			if err != nil || parsed != r {
+				t.Fatal("exact registration changed", err)
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(body, &fields) != nil || len(fields) != 16 {
+				t.Fatal("nonminimal registration shape")
+			}
+			r.DocumentsSkillSHA256 = strings.Repeat("e", 64)
+			if _, err := NewDevelopmentSourceRegistrationV1(r); err == nil {
+				t.Fatal("another package skill hash admitted")
+			}
+			d.RequestedCapabilities[len(d.RequestedCapabilities)-1].ID = "office.document-generation"
+			if ValidateDevelopmentSourceDeclarationV1(d) == nil {
+				t.Fatal("another package generation capability admitted")
+			}
+		})
+	}
+}

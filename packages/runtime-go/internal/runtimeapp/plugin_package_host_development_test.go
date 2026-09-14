@@ -57,8 +57,17 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		}
 	}
 	skills := host.Skills(ctx)
-	if len(skills) != 1 || skills[0].Binding.PackageID != "analytix-documents" {
-		t.Fatal("actual enabled Documents skill was not admitted")
+	if len(skills) != 3 {
+		t.Fatal("actual three enabled Office skills were not admitted")
+	}
+	for _, skill := range skills {
+		if skill.Binding.PackageID != "analytix-documents" && skill.Binding.PackageID != "analytix-spreadsheets" && skill.Binding.PackageID != "analytix-presentations" {
+			t.Fatal("unexpected skill contribution")
+		}
+		instructions, ok := skill.Snapshot.File("SKILL.md")
+		if !ok || !strings.Contains(string(instructions), "generate_office_document") {
+			t.Fatal("installed skill has no generation workflow")
+		}
 	}
 	instructions, ok := skills[0].Snapshot.File("SKILL.md")
 	if !ok || !strings.Contains(string(instructions), "generate_office_document") {
@@ -78,8 +87,13 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		}
 	}
 	restoredSkills := reopened.Skills(ctx)
-	if len(restoredSkills) != 1 || restoredSkills[0].Binding != skills[0].Binding || restoredSkills[0].Snapshot.Digest() != skills[0].Snapshot.Digest() {
-		t.Fatal("restart changed the admitted skill snapshot")
+	if len(restoredSkills) != 3 {
+		t.Fatal("restart lost Office skills")
+	}
+	for i, skill := range restoredSkills {
+		if skill.Binding != skills[i].Binding || skill.Snapshot.Digest() != skills[i].Snapshot.Digest() {
+			t.Fatal("restart changed the admitted skill snapshot")
+		}
 	}
 	mux := httpapi.LocalDisplayMuxV1{RuntimeToken: "synthetic-token", LocalDisplay: httpapi.LocalDisplayHandlerV1{PackageHost: httpapi.PluginPackageHostHandler{Service: reopened}}}
 	for _, tc := range []struct {

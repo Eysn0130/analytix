@@ -27,11 +27,13 @@ describe('open generated document in the main workspace', () => {
     expect(await openGeneratedArtifact(id, { threadId: 'old-thread', workspace: '/workspace' })).toBe(false)
     expect(mocks.resolveArtifact).not.toHaveBeenCalled()
   })
-  it('resolves the receipt and preserves pending text before opening the native object', async () => {
+  it.each(['docx', 'xlsx', 'pptx'])('resolves %s and preserves pending text before opening the native object', async (kind) => {
+    const path = `/workspace/report.${kind}`
+    mocks.resolveArtifact.mockResolvedValue({ ...response, artifact: { ...response.artifact, kind, path } })
     expect(await openGeneratedArtifact(id)).toBe(true)
     expect(mocks.resolveArtifact).toHaveBeenCalledWith({ threadId: 'thread-1', artifactId: id })
     expect(mocks.flushSave).toHaveBeenCalledWith('/workspace')
-    expect(mocks.select).toHaveBeenCalledWith('/workspace', '/workspace/report.docx', expect.any(Function))
+    expect(mocks.select).toHaveBeenCalledWith('/workspace', path, expect.any(Function))
     expect(mocks.state.openWrite).toHaveBeenCalledOnce()
   })
   it('does not switch documents when the existing document cannot be saved', async () => {

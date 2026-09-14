@@ -11,6 +11,7 @@ import (
 
 type MaterializeInput struct {
 	DocumentGeneration         bool
+	DocumentGenerationKinds    []string
 	NativeSelections           bool
 	Prompt                     string
 	PromptRoute                string
@@ -84,10 +85,11 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 		return nil
 	}
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{
-		NativeSelections:    input.NativeSelections && !input.Subagent,
-		DocumentGeneration:  input.DocumentGeneration && !input.Subagent,
-		AllowBackgroundBash: input.AllowBackgroundBash,
-		WebFetch:            input.WebFetch,
+		NativeSelections:        input.NativeSelections && !input.Subagent,
+		DocumentGeneration:      input.DocumentGeneration && !input.Subagent,
+		DocumentGenerationKinds: input.DocumentGenerationKinds,
+		AllowBackgroundBash:     input.AllowBackgroundBash,
+		WebFetch:                input.WebFetch,
 	})
 	if input.Subagent && IsForegroundSubmitOnlyScope(input.ToolScope) {
 		tools = append(tools, ForegroundSubmitToolSchema())

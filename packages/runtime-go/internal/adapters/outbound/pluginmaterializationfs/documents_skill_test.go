@@ -13,7 +13,7 @@ import (
 	hostport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
-func TestDocumentsSkillReaderAuthenticatesInstalledBytesAndGeneration(t *testing.T) {
+func TestOfficeSkillReaderAuthenticatesInstalledBytesAndGeneration(t *testing.T) {
 	ctx := context.Background()
 	source := writeDevelopmentSourceV1(t, "analytix-documents")
 	declarationPath := filepath.Join(source, domainpackage.DeclarationRelativePathV1)
@@ -70,7 +70,7 @@ func TestDocumentsSkillReaderAuthenticatesInstalledBytesAndGeneration(t *testing
 		t.Fatal(err)
 	}
 	expected := hostport.Binding{PackageID: registration.Identity.PackageID, PackageVersion: registration.Identity.PackageVersion, GenerationID: result.Receipt.GenerationID, ActivationRevision: 1, SourceRegistrationSHA256: observed.SourceRegistrationSHA256}
-	reader := DocumentsSkillReader{Store: store, Authority: authority, SHA256: registration.DocumentsSkillSHA256}
+	reader := OfficeSkillReader{Store: store, Authority: authority, SHA256: registration.DocumentsSkillSHA256}
 	snapshot, err := reader.ReadSkill(ctx, expected)
 	if err != nil {
 		t.Fatal(err)

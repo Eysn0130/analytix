@@ -8,10 +8,11 @@ import (
 )
 
 type BuiltinToolSchemaInput struct {
-	DocumentGeneration  bool
-	NativeSelections    bool
-	AllowBackgroundBash bool
-	WebFetch            bool
+	DocumentGeneration      bool
+	DocumentGenerationKinds []string
+	NativeSelections        bool
+	AllowBackgroundBash     bool
+	WebFetch                bool
 }
 
 func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
@@ -109,8 +110,8 @@ func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
 	if input.DocumentGeneration {
 		tools = append(tools, domainmodel.ToolSchema{
 			Name:        "generate_office_document",
-			Description: "Create a new native DOCX document from Markdown with headings, lists, tables and explicitly supplied images. Never overwrites an existing file. Use image identifiers in Markdown, not URLs or local image paths. The complete request is limited to 4 MiB of JSON and each string to 1 MiB of UTF-8. Core validates the file and confirms saving before returning an artifact. Follow the Documents skill; normal file permission and approval policy apply.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"kind":{"type":"string","enum":["docx"]},"markdown":{"type":"string","minLength":1,"maxLength":1048576},"title":{"type":"string","maxLength":256},"images":{"type":"array","maxItems":24,"items":{"type":"object","properties":{"id":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_-]{0,63}$"},"type":{"type":"string","enum":["png","jpg","gif","bmp"]},"dataBase64":{"type":"string","maxLength":1048576}},"required":["id","type","dataBase64"],"additionalProperties":false}}},"required":["path","kind","markdown"],"additionalProperties":false}`),
+			Description: "Create a new native Office file: DOCX from Markdown, XLSX from typed sheets and checked formulas, or PPTX from structured slides. Only currently activated plugin kinds are available. Never overwrites an existing file. Use image identifiers in Markdown, not URLs or local image paths. The complete request is limited to 4 MiB of JSON and each string to 1 MiB of UTF-8. Core validates the file and confirms saving before returning an artifact. Follow the matching Office plugin skill; normal file permission and approval policy apply.",
+			Parameters:  GenerationToolParameters(input.DocumentGenerationKinds),
 		})
 	}
 	if input.NativeSelections {

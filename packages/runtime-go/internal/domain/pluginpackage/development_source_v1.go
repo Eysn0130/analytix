@@ -33,6 +33,8 @@ type DevelopmentSourceRegistrationV1 struct {
 	PublicUISHA256             string            `json:"publicUiSha256"`
 	AdapterSHA256              string            `json:"adapterSha256"`
 	DocumentsSkillSHA256       string            `json:"documentsSkillSha256,omitempty"`
+	SpreadsheetsSkillSHA256    string            `json:"spreadsheetsSkillSha256,omitempty"`
+	PresentationsSkillSHA256   string            `json:"presentationsSkillSha256,omitempty"`
 	ContributionsSHA256        string            `json:"contributionsSha256"`
 	Publishable                bool              `json:"publishable"`
 	FactToolsEnabled           bool              `json:"factToolsEnabled"`
@@ -78,11 +80,11 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 		declaration.Contributions.Assets[0] != (PathContributionV1{ID: "editor-adapter", Path: "assets/adapter.json"}) {
 		return invalid
 	}
-	hasDocumentsSkill := len(declaration.Contributions.Skills) != 0
+	hasOfficeSkill := len(declaration.Contributions.Skills) != 0
 	expectedCapabilities := 1
-	if hasDocumentsSkill {
-		if declaration.PackageID != "analytix-documents" || len(declaration.Contributions.Skills) != 1 ||
-			declaration.Contributions.Skills[0] != (PathContributionV1{ID: DocumentsSkillContributionIDV1, Path: DocumentsSkillRelativePathV1}) {
+	if hasOfficeSkill {
+		expectedSkill, _, ok := OfficeSkillContributionV1(declaration.PackageID)
+		if !ok || len(declaration.Contributions.Skills) != 1 || declaration.Contributions.Skills[0] != expectedSkill {
 			return invalid
 		}
 		expectedCapabilities++
@@ -90,10 +92,11 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 	if len(declaration.RequestedCapabilities) != expectedCapabilities {
 		return invalid
 	}
+	_, generationCapability, _ := OfficeSkillContributionV1(declaration.PackageID)
 	var capability CapabilityRequestV1
 	for _, requested := range declaration.RequestedCapabilities {
-		if requested.ID == "office.document-generation" {
-			if !hasDocumentsSkill || requested.ProtocolVersion != 1 || len(requested.ScopeConstraints) != 2 ||
+		if requested.ID == generationCapability.ID {
+			if !hasOfficeSkill || requested.ProtocolVersion != 1 || len(requested.ScopeConstraints) != 2 ||
 				!developmentCapabilityScopesV1(requested, "new-file", "current-conversation") {
 				return invalid
 			}
@@ -105,7 +108,7 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 		}
 	}
 	requiredScope := "read-only"
-	if historical && !hasDocumentsSkill && capability.ID == "office.local-edit" {
+	if historical && !hasOfficeSkill && capability.ID == "office.local-edit" {
 		requiredScope = "explicit-save"
 	} else if capability.ID != "office.local-preview" {
 		return invalid
@@ -143,11 +146,17 @@ func validateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegis
 	if err != nil || validateDevelopmentSourceDeclarationV1(declaration, historical) != nil || declaration.IdentityV1() != registration.Identity {
 		return invalid
 	}
-	if len(declaration.Contributions.Skills) == 0 {
-		if registration.DocumentsSkillSHA256 != "" {
+	skillHash := registration.OfficeSkillSHA256V1()
+	for id, hash := range map[string]string{"analytix-documents": registration.DocumentsSkillSHA256, "analytix-spreadsheets": registration.SpreadsheetsSkillSHA256, "analytix-presentations": registration.PresentationsSkillSHA256} {
+		if id != registration.Identity.PackageID && hash != "" {
 			return invalid
 		}
-	} else if !canonicalSHA256V1(registration.DocumentsSkillSHA256) {
+	}
+	if len(declaration.Contributions.Skills) == 0 {
+		if skillHash != "" {
+			return invalid
+		}
+	} else if !canonicalSHA256V1(skillHash) {
 		return invalid
 	}
 	canonical, err := CanonicalDeclarationV1Bytes(declaration)
@@ -199,8 +208,9 @@ func developmentContributionsSHA256V1(registration DevelopmentSourceRegistration
 		{"publicUi", "workspace-editor", "ui/editor.json", registration.PublicUISHA256},
 		{"assets", "editor-adapter", "assets/adapter.json", registration.AdapterSHA256},
 	}
-	if registration.DocumentsSkillSHA256 != "" {
-		contributions = append(contributions, contribution{"skills", DocumentsSkillContributionIDV1, DocumentsSkillRelativePathV1, registration.DocumentsSkillSHA256})
+	if hash := registration.OfficeSkillSHA256V1(); hash != "" {
+		skill, _, _ := OfficeSkillContributionV1(registration.Identity.PackageID)
+		contributions = append(contributions, contribution{"skills", skill.ID, skill.Path, hash})
 	}
 	body, _ := json.Marshal(contributions)
 	return developmentSHA256V1(append([]byte("analytix.development-source-contributions/v1\x00"), body...))
@@ -228,4 +238,33 @@ func ReconstructHistoricalDevelopmentSourceRegistrationV1(observed DevelopmentSo
 		return nil, "", err
 	}
 	return body, developmentSHA256V1(append([]byte("analytix.development-source-registration/v1\x00"), body...)), nil
+}
+
+// OfficeSkillContributionV1 is the closed first-party generation contribution
+// inventory, not a general script or capability registration mechanism.
+func OfficeSkillContributionV1(packageID string) (PathContributionV1, CapabilityRequestV1, bool) {
+	var id, capability string
+	switch packageID {
+	case "analytix-documents":
+		id, capability = "documents", "office.document-generation"
+	case "analytix-spreadsheets":
+		id, capability = "spreadsheets", "office.workbook-generation"
+	case "analytix-presentations":
+		id, capability = "presentations", "office.presentation-generation"
+	default:
+		return PathContributionV1{}, CapabilityRequestV1{}, false
+	}
+	return PathContributionV1{ID: id, Path: "skills/" + id + "/SKILL.md"}, CapabilityRequestV1{ID: capability, ProtocolVersion: 1, ScopeConstraints: []string{"new-file", "current-conversation"}}, true
+}
+
+func (registration DevelopmentSourceRegistrationV1) OfficeSkillSHA256V1() string {
+	switch registration.Identity.PackageID {
+	case "analytix-documents":
+		return registration.DocumentsSkillSHA256
+	case "analytix-spreadsheets":
+		return registration.SpreadsheetsSkillSHA256
+	case "analytix-presentations":
+		return registration.PresentationsSkillSHA256
+	}
+	return ""
 }

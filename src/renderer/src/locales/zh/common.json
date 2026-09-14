@@ -2033,6 +2033,8 @@
   "toolAttachments": "附件",
   "generatedFilesTitle": "生成文件",
   "generatedOfficeDocument": "已生成文档",
+  "generatedOfficeWorkbook": "已生成工作簿",
+  "generatedOfficePresentation": "已生成演示文稿",
   "generatedOfficeUnavailable": "暂时无法打开文档，请确认当前工作区与文件状态后重试。",
   "generatedFilePreviewUnavailable": "无法预览",
   "generatedFileDownload": "下载",

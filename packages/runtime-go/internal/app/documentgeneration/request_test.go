@@ -35,3 +35,37 @@ func TestGenerationRequestAcceptsContentWithinExecutionGrantBudget(t *testing.T)
 		t.Fatal("valid content within canonical authority budget was rejected")
 	}
 }
+
+func TestGenerationRequestDiscriminatesOfficeTypes(t *testing.T) {
+	for _, kind := range []string{"xlsx", "pptx"} {
+		t.Run(kind, func(t *testing.T) {
+			var content any
+			field := "workbook"
+			if kind == "xlsx" {
+				content = map[string]any{"sheets": []any{map[string]any{"id": "data", "name": "数据", "cells": []any{map[string]any{"address": "A1", "type": "number", "value": 42}}}}}
+			} else {
+				field = "presentation"
+				content = map[string]any{"slides": []any{map[string]any{"id": "slide", "objects": []any{map[string]any{"id": "title", "kind": "text", "x": 0, "y": 0, "w": 1, "h": 1, "text": "中文"}}}}}
+			}
+			args := map[string]any{"path": "产物." + kind, "kind": kind, field: content}
+			request, err := ParseRequest(args)
+			if err != nil || request.CodecInput().Kind != kind {
+				t.Fatal("valid office request", err)
+			}
+			args["markdown"] = "unexpected"
+			if _, err := ParseRequest(args); err == nil {
+				t.Fatal("cross-kind field accepted")
+			}
+			delete(args, "markdown")
+			args["Kind"] = kind
+			if _, err := ParseRequest(args); err == nil {
+				t.Fatal("noncanonical field accepted")
+			}
+			delete(args, "Kind")
+			delete(args, field)
+			if _, err := ParseRequest(args); err == nil {
+				t.Fatal("missing specification accepted")
+			}
+		})
+	}
+}

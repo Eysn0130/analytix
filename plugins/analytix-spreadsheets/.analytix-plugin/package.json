@@ -1,9 +1,14 @@
 {
   "schemaVersion": 1,
   "packageId": "analytix-spreadsheets",
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "contributions": {
-    "skills": [],
+    "skills": [
+      {
+        "id": "spreadsheets",
+        "path": "skills/spreadsheets/SKILL.md"
+      }
+    ],
     "mcpServers": [],
     "hooks": [],
     "assets": [
@@ -26,6 +31,14 @@
       "scopeConstraints": [
         "user-selected-object",
         "read-only"
+      ]
+    },
+    {
+      "id": "office.workbook-generation",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "new-file",
+        "current-conversation"
       ]
     }
   ],

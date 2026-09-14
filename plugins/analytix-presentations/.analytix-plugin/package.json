@@ -1,9 +1,14 @@
 {
   "schemaVersion": 1,
   "packageId": "analytix-presentations",
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "contributions": {
-    "skills": [],
+    "skills": [
+      {
+        "id": "presentations",
+        "path": "skills/presentations/SKILL.md"
+      }
+    ],
     "mcpServers": [],
     "hooks": [],
     "assets": [
@@ -26,6 +31,14 @@
       "scopeConstraints": [
         "user-selected-object",
         "read-only"
+      ]
+    },
+    {
+      "id": "office.presentation-generation",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "new-file",
+        "current-conversation"
       ]
     }
   ],

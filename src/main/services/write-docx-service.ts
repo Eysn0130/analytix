@@ -681,20 +681,26 @@ export async function buildWriteDocxDocument(options: BuildWriteDocxDocumentOpti
   return renderDocumentDocx(tree, options, (source) => readWorkspaceImage(source, imageContext))
 }
 
+/** Snapshots and validates supplied image bytes without resolving external sources. */
+export async function validateDocumentImageBytes(images: ReadonlyMap<string, DocumentDocxImage> = new Map()): Promise<ReadonlyMap<string, ImageInfo>> {
+  const supplied = new Map<string, ImageInfo>()
+  const inputBudget = { imageCount: 0, imageBytes: 0 }
+  for (const [id, image] of images) {
+    if (typeof id !== 'string' || !DOCUMENT_DOCX_IMAGE_ID.test(id)) throw new Error('DOCX image identifier is invalid.')
+    const validated = admitImageBytes(image.data, image.type, inputBudget)
+    supplied.set(id, { ...validated, data: Buffer.from(validated.data) })
+  }
+  for (const image of supplied.values()) await validateDecodedImage(image)
+  return supplied
+}
+
 /** Builds only from caller-supplied bytes; image identifiers never resolve to paths or URLs. */
 export async function buildDocumentDocxBytes(options: BuildDocumentDocxBytesOptions): Promise<Buffer> {
   if (!options || typeof options.publicContent !== 'string') throw new Error('DOCX public content is required.')
   const publicContent = options.publicContent
   const renderOptions = { title: options.title, typography: options.typography ? { ...options.typography } : undefined }
   if (containsPrivateReasoningContent(publicContent)) throw new Error('DOCX public content contains private reasoning.')
-  const supplied = new Map<string, ImageInfo>()
-  const inputBudget = { imageCount: 0, imageBytes: 0 }
-  for (const [id, image] of options.images ?? []) {
-    if (typeof id !== 'string' || !DOCUMENT_DOCX_IMAGE_ID.test(id)) throw new Error('DOCX image identifier is invalid.')
-    const validated = admitImageBytes(image.data, image.type, inputBudget)
-    supplied.set(id, { ...validated, data: Buffer.from(validated.data) })
-  }
-  for (const image of supplied.values()) await validateDecodedImage(image)
+  const supplied = await validateDocumentImageBytes(options.images ?? undefined)
   const tree = parseContent(false, publicContent)
   const validateImages = (node: MarkdownNode): void => {
     if (node.type === 'imageReference') throw new Error('DOCX images require explicit inline identifiers.')

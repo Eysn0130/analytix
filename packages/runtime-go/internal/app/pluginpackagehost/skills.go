@@ -21,7 +21,7 @@ func (s *Service) loadSkillLocked(ctx context.Context, expected adapterport.Bind
 		return HostedSkill{}, err
 	}
 	registration, ok := s.registrations[expected.PackageID]
-	if !ok || registration.Identity.PackageID != "analytix-documents" || registration.SkillReader == nil {
+	if !ok || registration.SkillReader == nil {
 		return HostedSkill{}, ErrNotFound
 	}
 	current, err := s.resolve(ctx, registration)

@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const generatedArtifactPath = '/v1/local-display/generated-artifact'
 export const generatedArtifactMetadataSchema = z.object({
   artifactId: z.string().regex(/^[a-f0-9]{64}$/),
-  kind: z.literal('docx'),
+  kind: z.enum(['docx', 'xlsx', 'pptx']),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   byteSize: z.number().int().positive().max(16 * 1024 * 1024),
   savedAt: z.string().datetime({ offset: true })
@@ -21,7 +21,7 @@ export const generatedArtifactResponseSchema = z.discriminatedUnion('ok', [
       ...generatedArtifactRequestSchema.shape,
       path: localPath,
       workspace: localPath,
-      kind: z.literal('docx'),
+      kind: z.enum(['docx', 'xlsx', 'pptx']),
       revision: z.string().regex(/^[a-f0-9]{64}$/),
       byteSize: z.number().int().positive().max(16 * 1024 * 1024),
       changed: z.boolean()

@@ -5,6 +5,7 @@ import (
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	provider "analytix.local/runtime-go/internal/provider"
 )
 
@@ -22,8 +23,15 @@ func (h *runtimeServerHandler) runtimeToolCatalog() toolcatalogapp.RuntimeCatalo
 	// baseline. Scope/thread/version validation remains required at execution.
 	catalog.NativeSelections = h.officePackageHost != nil && h.managedEditing != nil && h.managedEditing.HasCaptures()
 	catalog.Skills = h.currentSkillCatalog()
-	_, documentsAvailable := toolcatalogapp.SkillByName(catalog.Skills, toolcatalogapp.DocumentsSkillID)
-	catalog.DocumentGeneration = h.documentCodec != nil && h.turnSecurity.Identity != nil && documentsAvailable
+	if h.turnSecurity.Identity != nil {
+		for _, kind := range []string{"docx", "xlsx", "pptx"} {
+			_, available := toolcatalogapp.SkillByName(catalog.Skills, toolcatalogapp.OfficeSkillForKind(kind))
+			if available && codecport.Supports(h.documentCodec, kind) {
+				catalog.DocumentGenerationKinds = append(catalog.DocumentGenerationKinds, kind)
+			}
+		}
+	}
+	catalog.DocumentGeneration = len(catalog.DocumentGenerationKinds) > 0
 	catalog.GoalTodos = h.store
 	catalog.MCP = h.mcp
 	catalog.MCPSearchResultLimit = runtimeinfoapp.MCPSearchResultLimit(h.mcpSearch)

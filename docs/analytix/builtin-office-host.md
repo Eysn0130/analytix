@@ -11,13 +11,13 @@ Documents, Spreadsheets and Presentations are first-party sources under
 is not a complete manual Office editor. That restriction does not prohibit
 Core-owned generation, reviewed proposals or explicit application of a proposal.
 
-Documents 0.2.0 declares one fixed `documents` Skill and the paired
-`office.document-generation` capability, restricted to a new file in the current
-conversation. Its existing `office.local-preview` contribution retains the
-`user-selected-object` and `read-only` constraints. Spreadsheets and Presentations
-still declare preview contributions; their generation Skills and typed writers
-remain required work. No package contains another Agent, credentials, an ambient
-shell entrypoint, MCP server or Hub login dependency.
+Each Office 0.2.0 package declares one original fixed Skill and a paired
+capability: `documents` / `office.document-generation`, `spreadsheets` /
+`office.workbook-generation`, and `presentations` / `office.presentation-generation`.
+All are restricted to a new file in the current conversation. Existing
+`office.local-preview` contributions retain `user-selected-object` and
+`read-only` constraints. No package contains another Agent, credentials, an
+ambient shell entrypoint, MCP server or Hub login dependency.
 
 The materialization owner authenticates the full source tree, canonical package
 identity, declaration, UI/adapter descriptors and declared Skill bytes. A fixed
@@ -31,7 +31,8 @@ revision. Missing activation is `unset`. Disable withdraws hosted discovery and
 new generation calls; re-enabling does not revive a prepared task from an older
 activation revision. Upgrades require new activation. Public discovery contains
 bounded summary metadata; full instructions are supplied only by `run_skill`.
-The fixed `analytix-documents` namespace cannot be replaced by a project Skill.
+The three fixed `analytix-documents`, `analytix-spreadsheets` and
+`analytix-presentations` namespaces cannot be replaced by project Skills.
 
 Core still owns thread/workspace authorization, Provider policy, privacy
 projection and persistence. Declaring a Skill or installing a plugin grants none
@@ -72,9 +73,10 @@ modification flags to fabricate a successful save.
 
 ## Generation, opening and lifecycle
 
-The DOCX codec receives bounded content and explicit image bytes through a fixed
-host-built process entry. It receives no target path, filesystem authority or
-Provider credentials. Core validates the resulting OOXML, creates only an absent
+DOCX and PPTX codecs receive bounded content and explicit image bytes through a
+fixed host-built process entry. XLSX uses a data-only Go writer. They receive no
+target path, filesystem authority or Provider credentials. The tool directory
+advertises only the intersection of activated packages and available writers. Core validates the resulting OOXML, creates only an absent
 target, settles the checkpoint and emits a typed artifact receipt. Local opening
 resolves that receipt through the current installation principal and conversation;
 public metadata contains no private file path. Live results open the native

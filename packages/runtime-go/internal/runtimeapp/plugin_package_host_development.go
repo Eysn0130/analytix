@@ -101,8 +101,8 @@ func newDevelopmentPackageHost(ctx context.Context, config Config, identity iden
 		}
 		registration := registrations[id]
 		var skillReader adapterport.SkillReader
-		if id == "analytix-documents" && registration.DocumentsSkillSHA256 != "" {
-			skillReader = pluginstore.DocumentsSkillReader{Store: store, Authority: authority, SHA256: registration.DocumentsSkillSHA256}
+		if registration.OfficeSkillSHA256V1() != "" {
+			skillReader = pluginstore.OfficeSkillReader{Store: store, Authority: authority, SHA256: registration.OfficeSkillSHA256V1()}
 		}
 		hosted = append(hosted, hostapp.Registration{Identity: registration.Identity,
 			SourceRegistrationSHA256: domainpackage.DevelopmentSourceRegistrationSHA256V1(registration),

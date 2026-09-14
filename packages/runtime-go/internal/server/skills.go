@@ -7,7 +7,6 @@ import (
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
-	domainskill "analytix.local/runtime-go/internal/domain/skill"
 )
 
 func (h *runtimeServerHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
@@ -47,13 +46,13 @@ func (h *runtimeServerHandler) runtimeSkillEntryBody(skill map[string]any) (stri
 }
 
 func (h *runtimeServerHandler) currentSkillCatalog() toolcatalogapp.SkillCatalog {
-	var snapshot domainskill.PackageSnapshot
+	var hosted []toolcatalogapp.HostedOfficeSkill
 	if h.officePackageHost != nil {
-		if skills := h.officePackageHost.Skills(context.Background()); len(skills) == 1 {
-			snapshot = skills[0].Snapshot
+		for _, skill := range h.officePackageHost.Skills(context.Background()) {
+			hosted = append(hosted, toolcatalogapp.HostedOfficeSkill{PackageID: skill.Binding.PackageID, Snapshot: skill.Snapshot})
 		}
 	}
-	return toolcatalogapp.WithDocumentsSkill(h.skills, snapshot)
+	return toolcatalogapp.WithOfficeSkills(h.skills, hosted)
 }
 
 func (h *runtimeServerHandler) runtimeSkillSubagentPrompt(skill map[string]any, task string) (string, error) {

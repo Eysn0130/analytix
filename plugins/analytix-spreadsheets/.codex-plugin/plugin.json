@@ -1,5 +1,5 @@
 {
   "name": "analytix-spreadsheets",
-  "version": "0.1.0",
-  "description": "Spreadsheets editor for user-selected local files."
+  "version": "0.2.0",
+  "description": "Create typed workbooks with formulas and charts; inspect user-selected local content."
 }
