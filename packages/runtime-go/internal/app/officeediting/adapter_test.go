@@ -141,7 +141,7 @@ func TestReadinessAndFixedPackageBinding(t *testing.T) {
 			adapter := New(kind, fake, func(context.Context) bool { calls++; return ready })
 			binding := adapterport.Binding{PackageID: id}
 			state, err := adapter.Readiness(context.Background(), binding)
-			if err != nil || !state.Available || !reflect.DeepEqual(state.Operations, []string{"open-object", "commit-object", "object-status", "close-object"}) || calls != 1 {
+			if err != nil || !state.Available || !reflect.DeepEqual(state.Operations, []string{"open-object", "object-status", "close-object"}) || calls != 1 {
 				t.Fatalf("readiness %v %v", state, err)
 			}
 			state.Operations[0] = "shell"
@@ -316,31 +316,34 @@ func TestContextCancellationAndReadinessRecheck(t *testing.T) {
 
 func nativeCommitFields(kind string, raw []byte) map[string]any {
 	fields := commitFields()
+	fields["threadId"] = "thread_main"
+	fields["changeId"] = strings.Repeat("a", 64)
 	hash := sha256.Sum256(raw)
 	fields["content"] = map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(raw), "sha256": hex.EncodeToString(hash[:]), "data": base64.StdEncoding.EncodeToString(raw)}
 	return fields
 }
 
 func TestNativeCommitAndStatusDelegateToExistingAuthority(t *testing.T) {
-	for kind, id := range map[string]string{"docx": "analytix-documents", "xlsx": "analytix-spreadsheets", "pptx": "analytix-presentations"} {
+	for _, kind := range []string{"docx", "xlsx", "pptx"} {
 		for _, operation := range []string{"commit-object", "object-status"} {
 			t.Run(kind+"_"+operation, func(t *testing.T) {
-				fields := nativeCommitFields(kind, []byte("transport fixture: package inspected by file codec"))
+				a, fake, _ := nativeRecoveryFixture(t, kind)
+				fake.receipt = fileport.Receipt{Revision: strings.Repeat("c", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-14T00:00:00Z"}
+				fields := approvedNativeCommit(t, a, fake, kind, []byte("transport fixture: package inspected by file codec"))
 				data := fields["content"].(map[string]any)["data"].(string)
+				want := []string{fields["sessionId"].(string), fields["threadId"].(string), fields["changeId"].(string), fields["operationId"].(string), fields["baseRevision"].(string), data}
+				wantCall := "native-commit"
 				if operation == "object-status" {
+					want = []string{fields["sessionId"].(string), fields["operationId"].(string)}
+					wantCall = "status"
 					delete(fields, "baseRevision")
 					delete(fields, "content")
+					delete(fields, "threadId")
+					delete(fields, "changeId")
 				}
-				fake := &fakeEditing{receipt: fileport.Receipt{OperationID: "operation_01", Revision: strings.Repeat("c", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-14T00:00:00Z"}}
-				call := validCall(t, operation, requestBody(t, fields))
-				call.Binding.PackageID = id
-				out := invoke(t, New(kind, fake, func(context.Context) bool { return true }), call)
-				if out["ok"] != true || len(fake.calls) != 1 || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) {
-					t.Fatalf("bad receipt %v %v", out, fake.calls)
-				}
-				want := []string{fields["sessionId"].(string), fields["operationId"].(string)}
-				if operation == "commit-object" {
-					want = append(want, fields["baseRevision"].(string), data)
+				out := nativeInvoke(t, a, operation, fields)
+				if out["ok"] != true || !reflect.DeepEqual(fake.calls, []string{wantCall}) || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) {
+					t.Fatalf("bad receipt/delegation %v %v", out, fake.calls)
 				}
 				if !reflect.DeepEqual(fake.args, want) {
 					t.Fatalf("arguments changed: %v", fake.args)
@@ -392,10 +395,11 @@ func TestNativeTransportRejectsBeforeAuthority(t *testing.T) {
 
 func TestNativeTransportExactLimit(t *testing.T) {
 	raw := []byte(strings.Repeat("a", MaxOfficeBytes))
-	fields := nativeCommitFields("docx", raw)
-	fake := &fakeEditing{receipt: fileport.Receipt{OperationID: "operation_01", Status: fileport.StatusUnknown}}
-	out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, "commit-object", requestBody(t, fields)))
-	if out["ok"] != true || len(fake.calls) != 1 {
+	a, fake, _ := nativeRecoveryFixture(t, "docx")
+	fake.receipt = fileport.Receipt{Status: fileport.StatusUnknown}
+	fields := approvedNativeCommit(t, a, fake, "docx", raw)
+	out := nativeInvoke(t, a, "commit-object", fields)
+	if out["ok"] != true || !reflect.DeepEqual(fake.calls, []string{"native-commit"}) {
 		t.Fatalf("exact 16MiB transport rejected: %v", out)
 	}
 }
@@ -406,13 +410,17 @@ func TestNativeFailurePreservesUnknownAndConflictReceipt(t *testing.T) {
 		code, status string
 	}{{fileport.ErrConflict, "conflict", fileport.StatusConflict}, {fileport.ErrPersistence, "persistence_failure", fileport.StatusUnknown}} {
 		for _, operation := range []string{"commit-object", "object-status"} {
-			fields := nativeCommitFields("docx", []byte("a"))
+			a, fake, _ := nativeRecoveryFixture(t, "docx")
+			fake.receipt = fileport.Receipt{Status: test.status}
+			fields := approvedNativeCommit(t, a, fake, "docx", []byte("a"))
+			fake.err = fmt.Errorf("private failure: %w", test.err)
 			if operation == "object-status" {
 				delete(fields, "baseRevision")
 				delete(fields, "content")
+				delete(fields, "threadId")
+				delete(fields, "changeId")
 			}
-			fake := &fakeEditing{err: fmt.Errorf("private failure: %w", test.err), receipt: fileport.Receipt{OperationID: "operation_01", Status: test.status}}
-			out := invoke(t, New("docx", fake, func(context.Context) bool { return true }), validCall(t, operation, requestBody(t, fields)))
+			out := nativeInvoke(t, a, operation, fields)
 			if out["ok"] != false || out["code"] != test.code || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) || strings.Contains(requestBody(t, out), "private failure") {
 				t.Fatalf("lost receipt: %v", out)
 			}

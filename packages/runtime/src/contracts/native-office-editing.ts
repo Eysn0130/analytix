@@ -27,6 +27,8 @@ export const nativeOfficeContentSchema = z.object({
 export const nativeOfficeCommitInputSchema = z.object({
   sessionId: z.string().regex(/^[a-f0-9]{48}$/),
   operationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/),
+  threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+  changeId: z.string().regex(/^[a-f0-9]{64}$/),
   baseRevision: z.string().regex(/^[a-f0-9]{64}$/),
   content: nativeOfficeContentSchema
 }).strict()
@@ -70,12 +72,27 @@ const replacementParts = selectionParts.refine(parts => parts.reduce((units, par
 export const nativeOfficeProposalSchema = z.object({ proposalId: scopeId, status: z.enum(['proposed', 'approved', 'rejected']), parts: replacementParts }).strict()
 export const nativeOfficeReplacementSchema = z.object({
   proposalId: scopeId, operationId: nativeOperation, text: selectionText.refine(value => value.length <= MaxNativeOfficeSelectionUTF16),
+  changeId: nativeRevision, saveOperationId: nativeOperation,
   selectionToken: nativeToken, changeSequence: nativeSequence, baseRevision: nativeRevision
 }).strict()
+// Raw review text is protected-local display data. Never include this in a
+// model tool result, reference card, or persisted conversation message.
+export const nativeOfficeLocalReviewSchema = z.object({ proposalId: scopeId, beforeText: selectionText, afterText: selectionText }).strict()
+export const nativeOfficeChangeSchema = z.object({
+  changeId: nativeRevision, threadId: selectionCapture.shape.threadId, proposalId: scopeId,
+  baseRevision: nativeRevision, revision: z.union([nativeRevision, z.literal('')]),
+  status: z.enum(['prepared', 'unknown', 'committed', 'conflict', 'undone', 'cancelled', 'superseded']),
+  beforeText: selectionText, afterText: selectionText,
+  saveOperationId: nativeOperation, undoOperationId: nativeOperation, canUndo: z.boolean(),
+  canCancel: z.boolean(), canRetryUndo: z.boolean(),
+  createdAt: z.string().max(64), savedAt: z.string().max(64)
+}).strict()
+export const nativeOfficeRecoverySchema = z.object({current:nativeOfficeChangeSchema.nullable(),pending:nativeOfficeChangeSchema.nullable()}).strict()
 export const nativeOfficeSelectionResponseSchema = z.union([
   objectEditingResponseSchema,
   z.object({ ok: z.literal(true), scope: nativeOfficeSelectionScopeSchema }).strict(),
-  z.object({ ok: z.literal(true), proposals: z.array(nativeOfficeProposalSchema).max(16) }).strict(),
+  z.object({ ok: z.literal(true), proposals: z.array(nativeOfficeProposalSchema).max(16), localReviews: z.array(nativeOfficeLocalReviewSchema).max(16) }).strict(),
+  z.object({ ok: z.literal(true), recovery: nativeOfficeRecoverySchema }).strict(),
   z.object({ ok: z.literal(true), proposal: nativeOfficeProposalSchema }).strict(),
   z.object({ ok: z.literal(true), replacement: nativeOfficeReplacementSchema }).strict()
 ])

@@ -46,6 +46,7 @@ type nativeScope struct {
 	ID, SessionID, ThreadID, SelectionToken, BaseRevision string
 	Sequence                                              int64
 	Editable                                              bool
+	originalText                                          string
 	revoked                                               bool
 	proposalOrder                                         []string
 	Binding                                               adapterport.Binding
@@ -196,7 +197,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if editable && nativeUTF16Length(text) > MaxNativeSelectionUTF16 {
 			return failure(editingapp.ErrProposal)
 		}
-		scope := &nativeScope{SessionID: sessionID, ThreadID: thread, SelectionToken: token, BaseRevision: revision, Sequence: sequence, Editable: editable, Binding: call.Binding, proposals: map[string]*nativeProposal{}, operations: map[string]string{}}
+		scope := &nativeScope{SessionID: sessionID, ThreadID: thread, SelectionToken: token, BaseRevision: revision, Sequence: sequence, Editable: editable, originalText: strings.Clone(text), Binding: call.Binding, proposals: map[string]*nativeProposal{}, operations: map[string]string{}}
 		if err := a.validateScope(ctx, scope, call.Principal); err != nil {
 			return failure(err)
 		}
@@ -296,10 +297,18 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			return failure(fileport.ErrInvalidInput)
 		}
 		proposals := []any{}
+		reviews := []any{}
 		for _, id := range scope.proposalOrder {
-			proposals = append(proposals, proposalOutput(scope.proposals[id]))
+			proposal := scope.proposals[id]
+			proposals = append(proposals, proposalOutput(proposal))
+			// The model-facing proposal output stays redacted. Local review is
+			// reconstructed from the exact protected selection owned by Core.
+			after, err := renderNativeProposal(scope, proposal.Parts)
+			if err == nil {
+				reviews = append(reviews, map[string]any{"proposalId": id, "beforeText": scope.originalText, "afterText": after})
+			}
 		}
-		return output(map[string]any{"ok": true, "proposals": proposals})
+		return output(map[string]any{"ok": true, "proposals": proposals, "localReviews": reviews})
 	case "proposal-accept", "proposal-reject":
 		id, _ := input["proposalId"].(string)
 		op, _ := input["operationId"].(string)
@@ -353,11 +362,21 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if err != nil {
 			return failure(err)
 		}
+		recovery, ok := a.service.(NativeRecoveryService)
+		if !ok {
+			return failure(ErrUnavailable)
+		}
+		changeHash := sha256.Sum256([]byte("analytix.native-change/v1\x00" + session.document.ObjectID + "\x00" + scope.ThreadID + "\x00" + id + "\x00" + op))
+		changeID := hex.EncodeToString(changeHash[:])
+		prepared, err := recovery.PrepareNativeChange(ctx, sessionID, fileport.NativeChangeDraft{ChangeID: changeID, ThreadID: scope.ThreadID, ProposalID: id, BaseRevision: revision, BeforeText: scope.originalText, AfterText: replacement})
+		if err != nil {
+			return failure(err)
+		}
 		proposal.Status = "approved"
 		proposal.decisionDigest = digest
 		proposal.decisionOperation = op
 		scope.operations[op] = digest
-		return output(map[string]any{"ok": true, "replacement": map[string]any{"proposalId": id, "operationId": op, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}})
+		return output(map[string]any{"ok": true, "replacement": map[string]any{"proposalId": id, "operationId": op, "changeId": prepared.ChangeID, "saveOperationId": prepared.SaveOperationID, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}})
 	}
 	return failure(fileport.ErrInvalidInput)
 }

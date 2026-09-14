@@ -35,7 +35,7 @@ below are not yet installed-application evidence.
 | Plugin Skills | All three Office 0.2.0 packages declare original workflows, fixed generation capabilities and installed snapshots; discovery and generation follow their signed activation | Canvas contribution, remaining dependency handlers and installed end-to-end evidence |
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
-| Apply / recovery / Diff | Core scopes, protected parts, CAS and status queries exist | Real local original-value Diff, third-object eviction, pending-operation and undo restart recovery |
+| Apply / recovery / Diff | Candidate adds Core-owned originals and approved changes, thread-bound discovery, protected-local original-value Diff, restart undo and explicit cancellation of proven unsubmitted changes | Complete interrupted-save recovery, native format fidelity and actual third-object/restart GUI journey |
 | Installation | Native assets remain `source-experiment`; packaged rejection retained | Exact engine/Qt/font/source obligations, admitted packaged resolution, local installer and installed end-to-end journey |
 | Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
@@ -160,6 +160,39 @@ noncanonical PPTX field names, SUMIF range expansion and Unicode sheet collision
 The SUMIF regression was observed failing before the fix. The corresponding
 formula/alias calculator checks and format tests pass; visual/native roundtrip
 and complete installed product acceptance remain required.
+
+## Native review and recovery integration
+
+Core captures original bytes before releasing an approved replacement. Private
+records bind the installation principal's object identity, conversation, proposal,
+revision and fixed save/undo operations. Fresh sessions can discover the current
+change without Main remembering an operation ID. Both a reopened commit and undo
+participate in the shared managed-file capture and binary CAS. Local review shows
+restored original values separately from model-facing protected parts.
+
+Prepare reservations and a bounded retiring list make interrupted metadata/large
+blob cleanup discoverable. Superseded/cancelled changes retain compact replay
+records; large originals are emptied through precise CAS after retirement.
+Unresolved undo originals are retained. Cancellation applies only to confirmed
+unsubmitted changes; existing save journals, including ambiguous conflicts, are
+not treated as proof that no write occurred. A durable undo intent with no undo
+journal can be explicitly continued after restart.
+
+Fresh verification passes for both Go application packages and the focused
+filestore Office/object-editing/recovery suite. A real three-format file fixture
+passes approval, save, fresh Store/Service/Adapter discovery, undo, replay and
+external-version rejection, with managed capture asserted during each CAS.
+Main/controller/IPC/contracts pass 64 tests; the renderer's 30 tests cover local
+Diff, missing-review refusal and thread isolation. Both TypeScript checks pass;
+focused ESLint has zero errors and three existing effect-dependency warnings.
+Independent storage review found no additional concrete defect in that candidate.
+
+Remaining: if a save journal is pending while the file still equals its original
+revision and Main's candidate bytes were lost, the current path keeps the outcome
+unknown. Persisting the exact candidate and providing an explicit Core continuation
+is still required; generic v1 replay must not silently rewrite the file. Native
+GUI/format fidelity, persistent annotation drafts and installed recovery remain
+unverified by these source/fixture checks.
 
 ## Completion evidence
 

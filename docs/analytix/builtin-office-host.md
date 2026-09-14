@@ -60,6 +60,15 @@ Core accepts bounded proposals, and explicit apply uses the managed editing
 owner and compare-and-swap file commit. The adapter therefore has controlled
 capture, proposal, commit and status operations in addition to open/close.
 The earlier assertion that it rejects every write operation is obsolete.
+The current recovery candidate persists an approved change and its Core-read
+original before the native engine replaces content. Commits carry the bound
+thread, change and fixed save operation. Fresh sessions discover recovery by
+object and thread; undo obtains the original from Core, holds managed-file
+capture and checks the current binary revision. Main no longer supplies an
+in-memory original as undo authority. Local review text is reconstructed into a
+separate protected-local output; model proposal parts remain privacy-projected.
+Unknown save outcomes are not discarded or represented as saved. Full
+interrupted-save completion and installed recovery evidence remain required.
 Numeric/formula/merged spreadsheet targets remain excluded from text replacement
 until their typed modification paths are complete. Persistent annotation,
 format-fidelity, native undo/restart and multi-object recovery acceptance remain

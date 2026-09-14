@@ -9,3 +9,5 @@ import objectediting "analytix.local/runtime-go/internal/ports/objectediting"
 func objectEditingPrivateRootIdentity(string) (string, error) { return "", objectediting.ErrForbidden }
 func objectEditingPrivateReceipt(string) error                { return objectediting.ErrForbidden }
 func objectEditingSyncTarget(string) error                    { return objectediting.ErrForbidden }
+
+func objectEditingPrivateFile(string, int64) error { return objectediting.ErrForbidden }

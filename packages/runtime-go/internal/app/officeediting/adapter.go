@@ -86,7 +86,10 @@ func (a *Adapter) Readiness(ctx context.Context, binding adapterport.Binding) (a
 	if err := a.checkBinding(binding); err != nil {
 		return adapterport.Readiness{}, err
 	}
-	operations := []string{"open-object", "commit-object", "object-status", "close-object"}
+	operations := []string{"open-object", "object-status", "close-object"}
+	if _, ok := a.service.(NativeRecoveryService); ok && a.projector != nil {
+		operations = append(operations, "commit-object", "object-recovery", "undo-change", "cancel-change")
+	}
 	if a.projector != nil && a.capture != nil {
 		operations = append(operations, "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose")
 	}
@@ -122,6 +125,8 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		return failure(fileport.ErrInvalidInput)
 	}
 	switch call.Operation {
+	case "object-recovery", "undo-change", "cancel-change":
+		return a.invokeRecovery(ctx, call, input)
 	case "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose":
 		return a.invokeSelection(ctx, call, input)
 	case "open-object":
@@ -154,7 +159,7 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	case "commit-object", "object-status":
 		keys := []string{"sessionId", "operationId"}
 		if call.Operation == "commit-object" {
-			keys = append(keys, "baseRevision", "content")
+			keys = append(keys, "threadId", "changeId", "baseRevision", "content")
 		}
 		id, _ := input["sessionId"].(string)
 		operation, _ := input["operationId"].(string)
@@ -171,7 +176,24 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 			if validationErr != nil {
 				return failure(validationErr)
 			}
-			receipt, err = a.service.Commit(ctx, id, operation, revision, content)
+			thread, _ := input["threadId"].(string)
+			change, _ := input["changeId"].(string)
+			if !revisionPattern.MatchString(change) {
+				return failure(fileport.ErrInvalidInput)
+			}
+			if err := a.validateRecoveryThread(ctx, call, id, thread, "edit"); err != nil {
+				return failure(err)
+			}
+			recovery, ok := a.service.(NativeRecoveryService)
+			if !ok {
+				return failure(ErrUnavailable)
+			}
+			release, captureErr := a.captureNativeMutation(ctx, id, thread, change, revision, "committed")
+			if captureErr != nil {
+				return failure(captureErr)
+			}
+			defer release()
+			receipt, err = recovery.CommitNativeChange(ctx, id, thread, change, operation, revision, content)
 		} else {
 			receipt, err = a.service.Status(ctx, id, operation)
 		}

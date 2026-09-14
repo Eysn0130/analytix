@@ -377,6 +377,15 @@ func (s *ObjectEditingFiles) Status(ctx context.Context, identity, operation, wo
 }
 
 func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.CommitInput) (objectediting.Receipt, error) {
+	if err := objectEditingLock(ctx); err != nil {
+		return objectediting.Receipt{}, err
+	}
+	defer func() { <-objectEditingGate }()
+	return s.commitLocked(ctx, input)
+}
+
+// commitLocked is shared with native recovery while holding objectEditingGate.
+func (s *ObjectEditingFiles) commitLocked(ctx context.Context, input objectediting.CommitInput) (objectediting.Receipt, error) {
 	if !objectEditingIDs(input.ObjectIdentity, input.OperationID) || !objectEditingHash(input.BaseRevision) {
 		return objectediting.Receipt{}, objectediting.ErrInvalidInput
 	}
@@ -386,10 +395,6 @@ func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.Com
 	if !objectEditingText(input.Content) {
 		return objectediting.Receipt{}, objectediting.ErrNotText
 	}
-	if err := objectEditingLock(ctx); err != nil {
-		return objectediting.Receipt{}, err
-	}
-	defer func() { <-objectEditingGate }()
 	target, err := s.target(input.Workspace, input.Path)
 	if err != nil {
 		return objectediting.Receipt{}, err

@@ -20,7 +20,7 @@ export const MAX_NATIVE_OFFICE_BYTES = 16 * 1024 * 1024
 const MAX_BASE64_LENGTH = Math.ceil(MAX_NATIVE_OFFICE_BYTES / 3) * 4
 const packageIds = { docx: 'analytix-documents', xlsx: 'analytix-spreadsheets', pptx: 'analytix-presentations' } as const
 const operations = ['open-object', 'close-object'] as const
-type HostOperation = typeof operations[number] | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke'
+type HostOperation = typeof operations[number] | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change'
 const token = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const sequence = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -60,10 +60,10 @@ type Active = {
   revokedScopes: Set<string>
   decisionOperations: Map<string, string>
   pendingSave?: { operationId: string; sequence: number; revision: string; digest: string }
-  // One bounded, Main-only checkpoint for the last accepted AI change.
-  beforeChange?: { bytes: Uint8Array; revision: string }
-  undo?: { bytes: Uint8Array; revision: string }
-  pendingUndo?: { bytes: Uint8Array; operationId: string; revision: string; committed: boolean }
+  threadId?: string
+  approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string }
+  pendingUndo?: { operationId: string; revision: string; committed: boolean }
+
 }
 type PreviewEngineRequest = NativeOfficeEngineRequest
 class OfficeFailure extends Error {
@@ -259,6 +259,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         active.binding = await listBinding(active.view.kind, active.binding)
         active.bounds = request.bounds; active.appearance = request.appearance
         if (active.pendingUndo) fail('unknown')
+        await recover(active, request.threadId ?? undefined)
         if (visible && epoch === visibilityEpoch) await active.surface.attach(request.bounds, request.appearance)
         active.view.status = 'ready'
         delete active.view.error
@@ -300,6 +301,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       await surface.attach(request.bounds, request.appearance)
       await engine(document, { command: 'open', documentId: opened.objectId, version: opened.revision, operationId: document.openOperationId, kind, bytes })
       document.ready = true
+      await recover(document, request.threadId ?? undefined)
       document.view.status = 'ready'
       publish()
     } catch (error) {
@@ -342,7 +344,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (receipt.status === 'unknown' || receipt.status === 'pending') fail('unknown')
     if (receipt.status === 'committed' && receipt.revision !== pending.digest) fail('invalid_response')
     if (receipt.status === 'committed') {
-      delete document.view.scope; delete document.view.proposals; document.selections.clear()
+      delete document.view.scope; delete document.view.proposals; delete document.view.localReviews; document.selections.clear()
     }
     await engine(document, {command:'ack', documentId:document.view.objectId, version:pending.revision,
       operationId:newOperationId(), exportOperationId:pending.operationId, exportedSequence:pending.sequence,
@@ -350,11 +352,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       ...(receipt.status === 'committed' ? {persistedVersion:receipt.revision} : {})})
     document.pendingSave = undefined; document.view.saving = false
     if (receipt.status === 'conflict') { setError(document, 'conflict'); fail('conflict') }
-    if (document.beforeChange && document.beforeChange.revision === pending.revision && !document.view.dirty) {
-      document.undo = {bytes:document.beforeChange.bytes, revision:receipt.revision!}
-      delete document.beforeChange
-      document.view.canUndo = true
-    }
+    delete document.approvedChange
+    await recover(document, document.threadId)
     document.view.status = 'ready'; delete document.view.error; publish()
   }
   async function save(document: Active) {
@@ -367,11 +366,13 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (!document.view.dirty) return
     document.binding = await listBinding(document.view.kind, document.binding)
     if (!document.binding.operations.includes('commit-object') || !document.binding.operations.includes('object-status')) fail('package_unavailable')
-    const operationId = newOperationId(), revision = document.view.revision
+    const approved = document.approvedChange
+    if (!approved || approved.baseRevision !== document.view.revision) fail('invalid_request')
+    const operationId = approved.saveOperationId, revision = document.view.revision
     const exported = await engine(document, {command:'export', operationId, documentId:document.view.objectId, version:revision})
     if (!exported?.bytes || exported.exportedSequence === undefined) fail('invalid_response')
     const bytes = exported.bytes, digest = hash(bytes)
-    const input = nativeOfficeCommitInputSchema.parse({sessionId:document.sessionId, operationId, baseRevision:revision,
+    const input = nativeOfficeCommitInputSchema.parse({sessionId:document.sessionId, operationId, threadId:approved.threadId, changeId:approved.changeId, baseRevision:revision,
       content:{encoding:'base64', kind:document.view.kind, byteLength:bytes.byteLength, sha256:digest, data:Buffer.from(bytes).toString('base64')}})
     document.pendingSave = {operationId, sequence:exported.exportedSequence, revision, digest}
     document.view.saving = true; publish()
@@ -400,8 +401,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (!reopened.ok || !('document' in reopened)) fail('unknown')
     const current = reopened.document, currentBytes = decodeContent(current.content)
     if (current.objectId !== document.view.objectId || current.sessionId !== document.sessionId || current.path !== document.view.path || current.revision !== hash(currentBytes)) fail('invalid_response')
-    if (current.revision !== hash(pending.bytes)) {
-      delete document.pendingUndo; delete document.undo; delete document.beforeChange
+    if (current.revision !== pending.revision) {
+      delete document.pendingUndo; delete document.approvedChange
       document.view.saving = false; document.view.canUndo = false; document.view.editing = false
       invalidatePreview(document, 'conflict'); fail('conflict')
     }
@@ -414,17 +415,18 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       delete document.destroyed
       const surface = await options.createSurface(event => { if (document.surface === surface) onEvent(document, event) })
       document.surface = surface; document.failed = false
-      document.view = {...document.view, revision:hash(pending.bytes), changeSequence:0, acknowledgedSequence:0,
-        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined, scope:undefined, proposals:undefined}
+      document.view = {...document.view, revision:pending.revision, changeSequence:0, acknowledgedSequence:0,
+        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined, scope:undefined, proposals:undefined, localReviews:undefined}
       document.openOperationId = newOperationId()
       await engine(document, {command:'open', documentId:document.view.objectId, version:document.view.revision,
-        operationId:document.openOperationId, kind:document.view.kind, bytes:pending.bytes})
+        operationId:document.openOperationId, kind:document.view.kind, bytes:currentBytes})
       document.ready = true
       if (active === document && visible) await surface.attach(document.bounds, document.appearance)
     } catch { setError(document, 'unknown'); fail('unknown') }
-    delete document.pendingUndo; delete document.undo; delete document.beforeChange
+    delete document.pendingUndo; delete document.approvedChange
     document.selections.clear(); document.decisionOperations.clear()
-    document.view.saving = false; document.view.status = 'ready'; delete document.view.error; publish()
+    document.view.saving = false; document.view.status = 'ready'; delete document.view.error
+    await recover(document, document.threadId); publish()
   }
   async function acceptUndoReceipt(document: Active, result: ObjectEditingResponse, committing = false) {
     const pending = document.pendingUndo!
@@ -446,26 +448,61 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (receipt.operationId !== pending.operationId) fail('invalid_response')
     if (receipt.status === 'conflict') await conflict()
     if (receipt.status !== 'committed') fail('unknown')
-    if (receipt.revision !== hash(pending.bytes)) fail('invalid_response')
+    if (receipt.revision !== pending.revision) fail('invalid_response')
     pending.committed = true
   }
-  async function undoChange(document: Active) {
+  async function recover(document: Active, threadId?: string) {
+    if (document.threadId !== threadId) {
+      if (document.view.dirty || document.pendingSave || document.pendingUndo) fail('unsaved_changes')
+      delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
+      document.threadId = threadId
+    }
+    delete document.view.recovery; document.view.canUndo = false
+    if (!threadId || !document.binding.operations.includes('object-recovery')) return
+    const result = await invokeSelection(document, 'object-recovery', {sessionId:document.sessionId,threadId})
+    if (!result.ok || !('recovery' in result)) fail('invalid_response')
+    if ([result.recovery.current,result.recovery.pending].some(change => change && change.threadId !== threadId)) fail('invalid_response')
+    document.view.recovery = result.recovery
+    const current = result.recovery.current
+    document.view.canUndo = !!(current?.canUndo || current?.canRetryUndo) && current.revision === document.view.revision && !document.view.dirty
+    publish()
+  }
+  async function cancelChange(document: Active, threadId: string, changeId: string) {
+    if (threadId !== document.threadId || document.pendingUndo) fail('invalid_request')
+    await recover(document, threadId)
+    const pending = document.view.recovery?.pending
+    if (!pending || pending.changeId !== changeId || !pending.canCancel) fail('unknown')
+    // Cancellation discards only a proven uncommitted working copy. Read the
+    // actual Core revision for metadata CAS; no caller supplies original bytes.
+    const opened = await invoke(document, 'open-object', {object:{workspace:document.workspace,path:document.requestedPath}})
+    if (!opened.ok || !('document' in opened)) fail('unavailable')
+    const current = opened.document
+    if (current.objectId !== document.view.objectId || current.sessionId !== document.sessionId || current.path !== document.view.path || current.revision !== hash(decodeContent(current.content))) fail('invalid_response')
+    const result = await invokeSelection(document, 'cancel-change', {sessionId:document.sessionId,threadId,changeId,baseRevision:current.revision})
+    if (!result.ok || !('recovery' in result) || result.recovery.pending?.changeId === changeId) fail('invalid_response')
+    delete document.pendingSave; delete document.approvedChange
+    document.view.saving = false
+    const request = {action:'open' as const,workspace:document.workspace,path:document.requestedPath,bounds:document.bounds,appearance:document.appearance,threadId}
+    await close(document, true)
+    if (visible) await open(request, visibilityEpoch)
+  }
+  async function undoChange(document: Active, threadId: string) {
+    if (threadId !== document.threadId) fail('invalid_request')
     if (document.pendingUndo) { await finishUndo(document); return }
-    if (!document.undo || !document.view.canUndo || document.view.dirty || document.pendingSave) fail('invalid_request')
-    if (document.undo.revision !== document.view.revision) fail('conflict')
-    const {bytes, revision} = document.undo, operationId = newOperationId()
-    document.pendingUndo = {bytes, revision, operationId, committed:false}
+    await recover(document, threadId)
+    const change = document.view.recovery?.current
+    if (!change || !document.view.canUndo || document.view.dirty || document.pendingSave) fail('invalid_request')
+    document.pendingUndo = {revision:change.baseRevision,operationId:change.undoOperationId,committed:false}
     document.view.saving = true; publish()
     await document.surface.hide()
-    const input = nativeOfficeCommitInputSchema.parse({sessionId:document.sessionId, operationId, baseRevision:revision,
-      content:{encoding:'base64',kind:document.view.kind,byteLength:bytes.byteLength,sha256:hash(bytes),data:Buffer.from(bytes).toString('base64')}})
     let result: ObjectEditingResponse
-    try { result = await invoke(document, 'commit-object', input) } catch { fail('unknown') }
+    try { result = await invoke(document, 'undo-change', {sessionId:document.sessionId,threadId,changeId:change.changeId,baseRevision:document.view.revision}) } catch { fail('unknown') }
     await acceptUndoReceipt(document, result, true)
     await finishUndo(document)
   }
 
   async function reference(document: Active, request: Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>, {action:'reference'}>) {
+    if (document.threadId !== request.threadId) await recover(document, request.threadId)
     const selection = document.selections.get(request.selectionToken)
     if (!selection || selection.version !== document.view.revision || selection.changeSequence !== document.view.changeSequence) fail('stale_selection')
     const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.text
@@ -484,22 +521,14 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (scopeId !== document.view.scope?.scopeId) fail('stale_selection')
     const result = await invokeSelection(document, 'proposal-read', {sessionId:document.sessionId,scopeId})
     if (!result.ok || !('proposals' in result)) fail('invalid_response')
-    document.view.proposals = result.proposals; publish()
+    document.view.proposals = result.proposals; document.view.localReviews = result.localReviews; publish()
   }
   async function decideProposal(document: Active, scopeId: string, proposalId: string, accept: boolean) {
     const scope = document.view.scope
     if (!scope || scopeId !== scope.scopeId) fail('stale_selection')
     if (document.appliedProposals.has(proposalId)) return
     if (accept && (!document.view.editing || scope.baseRevision !== document.view.revision || scope.changeSequence !== document.view.changeSequence)) fail('stale_selection')
-    if (accept) {
-      if (document.view.dirty || document.pendingSave || document.pendingUndo) fail('unsaved_changes')
-      const result = await invoke(document, 'open-object', {object:{workspace:document.workspace,path:document.requestedPath}})
-      if (!result.ok || !('document' in result)) fail('unavailable')
-      const before = result.document, bytes = decodeContent(before.content)
-      if (before.objectId !== document.view.objectId || before.sessionId !== document.sessionId || before.path !== document.view.path || before.revision !== hash(bytes)) fail('invalid_response')
-      if (before.revision !== document.view.revision) fail('conflict')
-      document.beforeChange = {bytes, revision:before.revision}
-    }
+    if (accept && (document.view.dirty || document.pendingSave || document.pendingUndo)) fail('unsaved_changes')
     const decisionKey = `${scopeId}:${proposalId}:${accept}`
     let operationId = document.decisionOperations.get(decisionKey)
     if (!operationId) {
@@ -513,7 +542,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       const replacement = result.replacement
       if (replacement.operationId !== operationId || replacement.proposalId !== proposalId || replacement.selectionToken !== scope.selectionToken || replacement.changeSequence !== scope.changeSequence || replacement.baseRevision !== scope.baseRevision) fail('invalid_response')
       if (replacement.text.length > 4096) fail('unsupported_selection')
-      document.view.canUndo = false; delete document.undo
+      document.approvedChange = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
+      document.view.canUndo = false
       await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})
       document.appliedProposals.add(proposalId)
       document.view.appliedProposals = [...document.appliedProposals].slice(-16)
@@ -583,12 +613,13 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
           document.binding = await listBinding(document.view.kind, document.binding)
           if (request.action === 'proposals') { await proposals(document,request.scopeId); return }
           if (request.action === 'rejectProposal') { await decideProposal(document,request.scopeId,request.proposalId,false); return }
-          if (request.action === 'saveStatus') { if (!document.pendingSave && !document.pendingUndo) return; await save(document); return }
+          if (request.action === 'saveStatus') { if (!document.pendingSave && !document.pendingUndo) { await recover(document, document.threadId); return } await save(document); return }
           if (document.pendingUndo && request.action !== 'save') fail('unknown')
           if ('objectId' in request && (request.objectId !== document.view.objectId || !('revision' in request) || request.revision !== document.view.revision || request.expectedChangeSequence !== (document.view.changeSequence ?? 0))) fail('stale_selection')
           if (request.action === 'reference') { await reference(document,request); return }
           if (request.action === 'acceptProposal') { await decideProposal(document,request.scopeId,request.proposalId,true); return }
-          if (request.action === 'undoChange') { await undoChange(document); return }
+          if (request.action === 'cancelChange') { await cancelChange(document, request.threadId, request.changeId); return }
+          if (request.action === 'undoChange') { await undoChange(document, request.threadId); return }
           if (request.action === 'save') { await save(document); return }
           if (request.action === 'annotate' && (!document.binding.operations.includes('commit-object') || !document.binding.operations.includes('object-status'))) fail('package_unavailable')
           if (!['captureSelection','annotate'].includes(request.action)) fail('invalid_request')

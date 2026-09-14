@@ -70,8 +70,8 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     setAdded(false)
     setBusy(false)
     if (!target || !visible) return
-    void invoke({ action: 'open', ...target, bounds: bounds() })
-  }, [target, visible, invoke]) // Main restores the retained object session; hidden tabs never open a surface.
+    void invoke({ action: 'open', ...target, threadId, bounds: bounds() })
+  }, [target, visible, threadId, invoke]) // Main restores the retained object session; hidden tabs never open a surface.
   useEffect(() => {
     const element = surface.current
     if (!element) return
@@ -211,7 +211,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     const epoch = generation.current
     menuOpen.current = true
     try {
-      const choice = await window.analytix.office.showActionMenu({...targetRequest,actions:actions.map(({id,label,enabled}) => ({id,label:label.replace(/[\x00-\x1f]/g,' ').trim(),enabled}))})
+      const choice = await window.analytix.office.showActionMenu({...targetRequest,actions:actions.map(({id,label,enabled}) => ({id,label:label.replace(/\p{Cc}/gu,' ').trim(),enabled}))})
       if (epoch !== generation.current || !shown.current || menuContext.current !== contextIdentity) return
       const action = actions.find(action => action.id === choice.actionId)
       if (action?.enabled) await action.run()
@@ -225,7 +225,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   }}>
     {view?.status === 'ready' || view?.editing || view?.saving ? <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-ds-border-muted px-2 py-1" role="toolbar" aria-label="文档操作">
       <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" disabled={busy || view.editing} aria-label="标注文档" aria-pressed={!!view.editing} title="标注" onClick={() => targetRequest && void invoke({action:'annotate', ...targetRequest})}><Pencil className="h-3.5 w-3.5" />标注</button>
-      {view.canUndo ? <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" disabled={busy || view.saving || view.dirty} aria-label="撤销修改" onClick={() => targetRequest && void invoke({action:'undoChange', ...targetRequest})}><Undo2 className="h-3.5 w-3.5" />撤销</button> : null}
+      {view.canUndo ? <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" disabled={busy || view.saving || view.dirty} aria-label="撤销修改" onClick={() => targetRequest && threadId && void invoke({action:'undoChange', ...targetRequest, threadId})}><Undo2 className="h-3.5 w-3.5" />{view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销'}</button> : null}
       <span className="ml-auto text-xs text-ds-muted" role="status">{view.saving ? '更新结果待确认' : view.dirty ? '更新待完成' : view.canUndo ? '已更新' : view.editing ? '标注中' : '预览'}</span>
       {fileActions}
     </div> : null}
@@ -244,25 +244,32 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     {selection?.capture?.truncated ? <p className="shrink-0 px-2 text-xs text-ds-muted">已捕获 {selection.capture.capturedCharacters} / {selection.capture.totalCharacters} UTF-16 单元；引用不包含完整选区。</p> : null}
     {error && (view?.editing || view?.saving) ? <div role="alert" className="flex shrink-0 items-center gap-2 px-2 text-xs">
       <p>{errors[error] ?? t('nativeOfficeOperationFailed')}</p>
-      {error === 'save_failed' || error === 'unknown' ? <button disabled={busy} className="shrink-0 text-xs" onClick={() => targetRequest && void invoke(error === 'unknown' || view.saving ? {action:'saveStatus',objectId:view.objectId} : {action:view.canUndo ? 'undoChange' : 'save',...targetRequest})}>{error === 'unknown' || view.saving ? '查询结果' : '重试'}</button> : null}
+      {error === 'save_failed' || error === 'unknown' ? <button disabled={busy} className="shrink-0 text-xs" onClick={() => targetRequest && void invoke(error === 'unknown' || view.saving ? {action:'saveStatus',objectId:view.objectId} : view.canUndo && threadId ? {action:'undoChange',...targetRequest,threadId} : {action:'save',...targetRequest})}>{error === 'unknown' || view.saving ? '查询结果' : '重试'}</button> : null}
     </div> : null}
-    {view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
-      {view.proposals.map(proposal => <div key={proposal.proposalId} className="py-1 text-xs">
+    {view?.scope?.threadId === threadId && view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
+      {view.proposals.map(proposal => { const review = view.localReviews?.find(item => item.proposalId === proposal.proposalId); return <div key={proposal.proposalId} className="py-1 text-xs">
         <div className="my-1 overflow-hidden rounded border border-ds-border-muted font-mono text-xs">
-          <del aria-label="修改前" className="block whitespace-pre-wrap bg-red-50 px-2 py-1 text-red-800 no-underline dark:bg-red-950/30 dark:text-red-200">{view.scope?.parts.map(part => part.kind === 'literal' ? part.text : '[保留原始字段]').join('')}</del>
-          <ins aria-label="修改后" className="block whitespace-pre-wrap bg-emerald-50 px-2 py-1 text-emerald-800 no-underline dark:bg-emerald-950/30 dark:text-emerald-200">{proposal.parts.map(part => part.kind === 'literal' ? part.text : '[保留原始字段]').join('')}</ins>
+          <del aria-label="修改前" className="block whitespace-pre-wrap bg-red-50 px-2 py-1 text-red-800 no-underline dark:bg-red-950/30 dark:text-red-200">{review?.beforeText ?? '原文暂不可核实，请重新选择。'}</del>
+          <ins aria-label="修改后" className="block whitespace-pre-wrap bg-emerald-50 px-2 py-1 text-emerald-800 no-underline dark:bg-emerald-950/30 dark:text-emerald-200">{review?.afterText ?? '修改内容暂不可核实。'}</ins>
         </div>
         {view.appliedProposals?.includes(proposal.proposalId) ? <span>{view.saving || view.dirty ? '正在更新，结果待确认' : view.canUndo ? '已更新' : '修改已处理'}</span> : proposal.status === 'rejected' ? <span>已拒绝</span> : <div className="flex gap-3">
-          <button disabled={busy || !targetRequest || view.scope?.changeSequence !== view.changeSequence} onClick={() => targetRequest && view.scope && void invoke({action:'acceptProposal',...targetRequest,scopeId:view.scope.scopeId,proposalId:proposal.proposalId})}>应用修改</button>
+          <button disabled={busy || !review || !targetRequest || view.scope?.changeSequence !== view.changeSequence} onClick={() => targetRequest && view.scope && void invoke({action:'acceptProposal',...targetRequest,scopeId:view.scope.scopeId,proposalId:proposal.proposalId})}>应用修改</button>
           <button disabled={busy} onClick={() => view.scope && void invoke({action:'rejectProposal',objectId:view.objectId,scopeId:view.scope.scopeId,proposalId:proposal.proposalId})}>拒绝</button>
         </div>}
-      </div>)}
+      </div>})}
     </div> : null}
+    {view?.recovery && [view.recovery.pending, view.recovery.current].filter(change => change?.threadId === threadId).map(change => change && <details key={change.changeId} className="max-h-40 shrink-0 overflow-auto border-b border-ds-border-muted px-2 py-1 text-xs">
+      <summary>{change.status === 'committed' ? '已保存的修改' : change.status === 'undone' ? '已撤销的修改' : change.status === 'prepared' ? '已批准，尚未确认保存' : change.status === 'conflict' ? '文件已变化，保留修改记录' : '保存结果待确认'}</summary>
+      {change.canCancel ? <button disabled={busy} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
+      {change.status === 'unknown' ? <button disabled={busy} className="my-1" onClick={() => void invoke({action:'saveStatus',objectId:view.objectId})}>核实结果</button> : null}
+      <del aria-label="已记录的修改前" className="block whitespace-pre-wrap no-underline">{change.beforeText}</del>
+      <ins aria-label="已记录的修改后" className="block whitespace-pre-wrap no-underline">{change.afterText}</ins>
+    </details>)}
     <div ref={surface} className="min-h-0 flex-1" aria-label={t('nativeOfficeEditor')} />
     {loading || (error && !view?.editing && !view?.saving) ? <div className="office-preview-state" role={error ? 'alert' : 'status'}>
       <FileText className="office-preview-state-icon" aria-hidden="true" />
       <p>{error ? errors[error] ?? t('nativeOfficeOperationFailed') : t('nativeOfficeStatus_loading')}</p>
-      {error && target ? <button type="button" className="ds-toolbar-icon-button" aria-label={t('nativeOfficeRetry')} title={t('nativeOfficeRetry')} onClick={() => void invoke({ action: 'open', ...target, bounds: bounds() })}><RotateCcw className="h-4 w-4" /></button> : null}
+      {error && target ? <button type="button" className="ds-toolbar-icon-button" aria-label={t('nativeOfficeRetry')} title={t('nativeOfficeRetry')} onClick={() => void invoke({ action: 'open', ...target, threadId, bounds: bounds() })}><RotateCcw className="h-4 w-4" /></button> : null}
     </div> : null}
   </div>
 }

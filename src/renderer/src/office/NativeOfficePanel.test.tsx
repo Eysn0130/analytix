@@ -361,15 +361,17 @@ describe('compact native review toolbar', () => {
     await act(async () => useNativeOfficeStore.setState({view:{...annotationView,canUndo:true}}))
     expect(container.querySelectorAll('[role="toolbar"] button')).toHaveLength(2)
     await clickNamed('撤销修改')
-    expect(request.mock.calls.some(([input]) => input.action === 'undoChange')).toBe(true)
+    expect(request.mock.calls.some(([input]) => input.action === 'undoChange' && input.threadId === 'thread')).toBe(true)
     expect(request.mock.calls.some(([input]) => input.action === 'save')).toBe(false)
   })
-  it('renders protected before/after parts and applies a proposal without a separate Save command', async () => {
+  it('renders protected-local raw before/after text and applies a proposal without a separate Save command', async () => {
     const scope: NonNullable<NativeOfficeView['scope']> = {scopeId:'a'.repeat(48),threadId:'thread',selectionToken:'selection-token',baseRevision:view.revision,changeSequence:0,editable:true,parts:[{kind:'literal',text:'Before'},{kind:'protected',protectedRef:`protected_${'c'.repeat(48)}`}]}
     const proposal: NonNullable<NativeOfficeView['proposals']>[number] = {proposalId:'b'.repeat(48),status:'proposed',parts:[{kind:'literal',text:'After'},{kind:'protected',protectedRef:`protected_${'c'.repeat(48)}`}]}
-    await renderAnnotation({...annotationView,scope,proposals:[proposal]})
-    expect(container.querySelector('del[aria-label="修改前"]')?.textContent).toBe('Before[保留原始字段]')
-    expect(container.querySelector('ins[aria-label="修改后"]')?.textContent).toBe('After[保留原始字段]')
+    const localReviews=[{proposalId:proposal.proposalId,beforeText:'Before 原始字段',afterText:'After 原始字段'}]
+    await renderAnnotation({...annotationView,scope,proposals:[proposal],localReviews})
+    expect(container.querySelector('del[aria-label="修改前"]')?.textContent).toBe('Before 原始字段')
+    expect(container.querySelector('ins[aria-label="修改后"]')?.textContent).toBe('After 原始字段')
+    expect(container.textContent).not.toContain('[保留原始字段]')
     await clickNamed('应用修改')
     expect(request.mock.calls.find(([input]) => input.action === 'acceptProposal')?.[0]).toMatchObject({scopeId:scope.scopeId,proposalId:proposal.proposalId})
     expect(request.mock.calls.some(([input]) => input.action === 'save')).toBe(false)
@@ -391,4 +393,46 @@ describe('compact native review toolbar', () => {
     await clickNamed('查询结果')
     expect(request.mock.calls.some(([input]) => input.action === 'saveStatus')).toBe(true)
   })
+})
+
+
+it('disables proposal application when its protected-local raw review is missing',async()=>{
+  const scope:NonNullable<NativeOfficeView['scope']>={scopeId:'a'.repeat(48),threadId:'thread',selectionToken:'selection-token',baseRevision:view.revision,changeSequence:0,editable:true,parts:[{kind:'literal',text:'Projected before'}]}
+  const proposal:NonNullable<NativeOfficeView['proposals']>[number]={proposalId:'b'.repeat(48),status:'proposed',parts:[{kind:'protected',protectedRef:`protected_${'c'.repeat(48)}`}]}
+  await renderAnnotation({...annotationView,scope,proposals:[proposal],localReviews:[]})
+  expect(namedButton('应用修改').disabled).toBe(true)
+  expect(container.textContent).toContain('原文暂不可核实')
+  expect(container.textContent).not.toContain('[保留原始字段]')
+  await clickNamed('应用修改')
+  expect(request.mock.calls.some(([input])=>input.action==='acceptProposal')).toBe(false)
+  await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,scope,proposals:[proposal],localReviews:[{proposalId:'d'.repeat(48),beforeText:'Unrelated raw text',afterText:'Other proposal'}]}}))
+  expect(namedButton('应用修改').disabled).toBe(true)
+  expect(container.textContent).not.toContain('Unrelated raw text')
+})
+
+
+it('shows only thread-owned durable recovery and routes cancellation and undo retry explicitly',async()=>{
+  const pending:NonNullable<NonNullable<NativeOfficeView['recovery']>['pending']>={changeId:'e'.repeat(64),threadId:'thread',proposalId:'f'.repeat(48),baseRevision:view.revision,revision:'',status:'prepared',beforeText:'原文私有字段',afterText:'修改后私有字段',saveOperationId:'save_core_0001',undoOperationId:'undo_core_0001',canUndo:false,canCancel:true,canRetryUndo:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
+  await renderAnnotation({...annotationView,recovery:{current:null,pending}})
+  expect(container.querySelector('[aria-label="已记录的修改前"]')?.textContent).toBe('原文私有字段')
+  await clickNamed('取消未保存的修改')
+  expect(request.mock.calls.find(([input])=>input.action==='cancelChange')?.[0]).toMatchObject({threadId:'thread',changeId:pending.changeId,objectId:view.objectId,revision:view.revision})
+  await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,recovery:{current:null,pending:{...pending,threadId:'other-thread'}}}}))
+  expect(container.textContent).not.toContain('原文私有字段')
+  expect(namedButton('取消未保存的修改')).toBeUndefined()
+  const current={...pending,status:'unknown' as const,revision:view.revision,canCancel:false,canRetryUndo:true}
+  await act(async()=>useNativeOfficeStore.setState({view:{...annotationView,canUndo:true,recovery:{current,pending:null}}}))
+  expect(container.textContent).toContain('完成撤销')
+  await clickNamed('撤销修改')
+  expect(request.mock.calls.find(([input])=>input.action==='undoChange')?.[0]).toMatchObject({threadId:'thread',objectId:view.objectId,revision:view.revision})
+})
+
+
+it('never renders a proposal raw review carried by another thread scope',async()=>{
+  const scope:NonNullable<NativeOfficeView['scope']>={scopeId:'a'.repeat(48),threadId:'other-thread',selectionToken:'selection-token',baseRevision:view.revision,changeSequence:0,editable:true,parts:[{kind:'literal',text:'Projected before'}]}
+  const proposal:NonNullable<NativeOfficeView['proposals']>[number]={proposalId:'b'.repeat(48),status:'proposed',parts:[{kind:'literal',text:'Projected after'}]}
+  await renderAnnotation({...annotationView,scope,proposals:[proposal],localReviews:[{proposalId:proposal.proposalId,beforeText:'foreign-thread-private-before',afterText:'foreign-thread-private-after'}]})
+  expect(container.textContent).not.toContain('foreign-thread-private-before')
+  expect(container.textContent).not.toContain('foreign-thread-private-after')
+  expect(namedButton('应用修改')?.disabled ?? true).toBe(true)
 })

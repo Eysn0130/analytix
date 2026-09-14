@@ -266,6 +266,18 @@ func (i *officeTestIdentity) ValidateCurrent(_ context.Context, principal identi
 	return nil
 }
 
+type officeRecoveryTestProjector struct{ identity *officeTestIdentity }
+
+func (p officeRecoveryTestProjector) ValidateCurrent(ctx context.Context, in editingapp.ScopeAuthority) error {
+	if in.ThreadID != "thread_main" || p.identity.ValidateCurrent(ctx, in.Principal) != nil {
+		return editingapp.ErrProjection
+	}
+	return nil
+}
+func (p officeRecoveryTestProjector) AuthorizeAndProject(ctx context.Context, in editingapp.ProjectionInput) ([]editingapp.ProtectedRange, error) {
+	return nil, p.ValidateCurrent(ctx, in.ScopeAuthority)
+}
+
 func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 	for kind, packageID := range map[string]string{"docx": "analytix-documents", "xlsx": "analytix-spreadsheets", "pptx": "analytix-presentations"} {
 		t.Run(kind, func(t *testing.T) {
@@ -277,7 +289,34 @@ func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			identity := &officeTestIdentity{principal: principal}
-			adapter := officeapp.New(kind, editingapp.New(identity, files), func(context.Context) bool { return true })
+			captures, leases, writes := 0, 0, 0
+			bind := func() *officeapp.Adapter {
+				t.Helper()
+				files.replaceDocument = func(request atomicTextReplaceRequest) error {
+					if leases != 1 {
+						t.Fatal("native mutation reached CAS without managed capture", leases)
+					}
+					writes++
+					return atomicReplaceText(request)
+				}
+				adapter := officeapp.New(kind, editingapp.New(identity, files), func(context.Context) bool { return true })
+				err := adapter.BindSelectionHost(officeRecoveryTestProjector{identity}, func(_ context.Context, _ string, capturedPath string, read func() error) (func(), error) {
+					if capturedPath != path {
+						t.Fatal("capture target changed")
+					}
+					captures++
+					if err := read(); err != nil {
+						return nil, err
+					}
+					leases++
+					return func() { leases-- }, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return adapter
+			}
+			adapter := bind()
 			call := func(operation string, input map[string]any) map[string]any {
 				t.Helper()
 				body, err := json.Marshal(input)
@@ -294,31 +333,62 @@ func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 				}
 				return out
 			}
-			opened := call("open-object", map[string]any{"object": map[string]any{"workspace": workspace, "path": path}})
+			openInput := map[string]any{"object": map[string]any{"workspace": workspace, "path": path}}
+			opened := call("open-object", openInput)
 			if opened["ok"] != true {
-				t.Fatalf("open: %v", opened)
+				t.Fatal(opened)
 			}
 			doc := opened["document"].(map[string]any)
-			input := map[string]any{"sessionId": doc["sessionId"], "operationId": "native_save_01", "baseRevision": doc["revision"], "content": map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(after), "sha256": digestAtomicText(after), "data": base64.StdEncoding.EncodeToString(after)}}
+			unknownChange := strings.Repeat("e", 64)
+			input := map[string]any{"sessionId": doc["sessionId"], "threadId": "thread_main", "changeId": unknownChange, "operationId": nativeSaveID(unknownChange), "baseRevision": doc["revision"], "content": map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(after), "sha256": digestAtomicText(after), "data": base64.StdEncoding.EncodeToString(after)}}
+			if out := call("commit-object", input); out["code"] != "operation_not_found" || writes != 0 {
+				t.Fatal("unapproved native commit reached CAS", out, writes)
+			}
+			capture := call("capture-selection", map[string]any{"sessionId": doc["sessionId"], "threadId": "thread_main", "selectionToken": "native_selection_01", "changeSequence": 0, "baseRevision": doc["revision"], "text": "Before", "editable": true})
+			if capture["ok"] != true {
+				t.Fatal(capture)
+			}
+			scope := capture["scope"].(map[string]any)
+			proposed := call("model-selection-propose", map[string]any{"scopeId": scope["scopeId"], "threadId": "thread_main", "operationId": "native_propose_01", "parts": []editingapp.PatchPart{{Kind: "literal", Text: "Actual-Core-save"}}})
+			if proposed["ok"] != true {
+				t.Fatal(proposed)
+			}
+			proposal := proposed["result"].(map[string]any)
+			approved := call("proposal-accept", map[string]any{"sessionId": doc["sessionId"], "scopeId": scope["scopeId"], "proposalId": proposal["proposalId"], "operationId": "native_approve_01", "selectionToken": scope["selectionToken"], "changeSequence": scope["changeSequence"], "baseRevision": scope["baseRevision"]})
+			if approved["ok"] != true {
+				t.Fatal(approved)
+			}
+			replacement := approved["replacement"].(map[string]any)
+			input["changeId"], input["operationId"] = replacement["changeId"], replacement["saveOperationId"]
+			if input["operationId"] != nativeSaveID(input["changeId"].(string)) || writes != 0 || leases != 1 {
+				t.Fatal("approval did not prepare a fixed operation without changing document", approved)
+			}
+			input["threadId"] = "other_thread"
+			if out := call("commit-object", input); out["code"] != "projection_unavailable" || writes != 0 {
+				t.Fatal("cross-thread commit", out)
+			}
+			input["threadId"] = "thread_main"
 			saved := call("commit-object", input)
-			if saved["ok"] != true || saved["receipt"].(map[string]any)["revision"] != digestAtomicText(after) {
-				t.Fatalf("save: %v", saved)
+			if saved["ok"] != true || saved["receipt"].(map[string]any)["revision"] != digestAtomicText(after) || writes != 1 {
+				t.Fatal("native save", saved, writes)
 			}
 			officeEditingAssertBytes(t, path, after)
-			// Closing the session revokes writes; the durable receipt survives a new
-			// service and only becomes available after the same principal reopens.
-			closed := call("close-object", map[string]any{"sessionId": doc["sessionId"]})
-			if closed["ok"] != true {
-				t.Fatal(closed)
+			if out := call("close-object", map[string]any{"sessionId": doc["sessionId"]}); out["ok"] != true || leases != 0 {
+				t.Fatal("close did not revoke capture", out)
 			}
 			if out := call("commit-object", input); out["code"] != "session_invalid" {
-				t.Fatalf("closed commit: %v", out)
+				t.Fatal("closed commit", out)
 			}
-			adapter = officeapp.New(kind, editingapp.New(identity, files), func(context.Context) bool { return true })
-			if out := call("object-status", map[string]any{"sessionId": doc["sessionId"], "operationId": "native_save_01"}); out["code"] != "session_invalid" {
-				t.Fatalf("restart old session: %v", out)
+			// Fresh file owner, Service and Adapter simulate reopening after process loss.
+			files, err = NewOfficeObjectEditingFiles(files.receiptRoot, nil, kind)
+			if err != nil {
+				t.Fatal(err)
 			}
-			reopened := call("open-object", map[string]any{"object": map[string]any{"workspace": workspace, "path": path}})
+			adapter = bind()
+			if out := call("object-status", map[string]any{"sessionId": doc["sessionId"], "operationId": input["operationId"]}); out["code"] != "session_invalid" {
+				t.Fatal("old session after restart", out)
+			}
+			reopened := call("open-object", openInput)
 			if reopened["ok"] != true {
 				t.Fatal(reopened)
 			}
@@ -327,18 +397,45 @@ func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 				t.Fatal("reopen binding/content changed")
 			}
 			input["sessionId"] = next["sessionId"]
-			if out := call("commit-object", input); out["ok"] != true {
-				t.Fatalf("replay: %v", out)
+			query := map[string]any{"sessionId": next["sessionId"], "threadId": "thread_main"}
+			recovered := call("object-recovery", query)
+			if recovered["ok"] != true {
+				t.Fatal(recovered)
 			}
-			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": "native_save_01"}); out["ok"] != true {
-				t.Fatalf("status: %v", out)
+			current := recovered["recovery"].(map[string]any)["current"].(map[string]any)
+			if current["changeId"] != input["changeId"] || current["saveOperationId"] != input["operationId"] || current["canUndo"] != true || current["beforeText"] != "Before" || current["afterText"] != "Actual-Core-save" {
+				t.Fatal("restart did not discover private recovery without operation ID", current)
+			}
+			identity.principal, _ = identitydomain.NewPrincipalV1(strings.Repeat("f", 64), "local", "local")
+			if out := call("object-recovery", query); out["code"] != "session_invalid" {
+				t.Fatal("previous principal recovered private change", out)
+			}
+			identity.principal = principal
+			if out := call("commit-object", input); out["ok"] != true || writes != 1 {
+				t.Fatal("native save replay wrote twice", out, writes)
+			}
+			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": input["operationId"]}); out["ok"] != true {
+				t.Fatal(out)
+			}
+			undo := map[string]any{"sessionId": next["sessionId"], "threadId": "thread_main", "changeId": input["changeId"], "baseRevision": digestAtomicText(after)}
+			capturesBefore := captures
+			undone := call("undo-change", undo)
+			if undone["ok"] != true || undone["receipt"].(map[string]any)["revision"] != digestAtomicText(before) || undone["receipt"].(map[string]any)["operationId"] != nativeUndoID(input["changeId"].(string)) || writes != 2 || captures != capturesBefore+1 || leases != 0 {
+				t.Fatal("reopened undo lost Core bytes/capture", undone, writes, captures, leases)
+			}
+			officeEditingAssertBytes(t, path, before)
+			if replay := call("undo-change", undo); replay["ok"] != true || writes != 2 || leases != 0 {
+				t.Fatal("historical undo was rejected or rewritten", replay, writes)
 			}
 			external := officeEditingNativeBytes(t, kind, "External")
-			if err := os.WriteFile(path, external, 0o640); err != nil {
+			if err := os.WriteFile(path, external, 0640); err != nil {
 				t.Fatal(err)
 			}
-			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": "native_save_01"}); out["code"] != "conflict" {
-				t.Fatalf("stale saved status: %v", out)
+			if out := call("object-status", map[string]any{"sessionId": next["sessionId"], "operationId": input["operationId"]}); out["code"] != "conflict" {
+				t.Fatal("stale save status", out)
+			}
+			if out := call("undo-change", undo); out["ok"] != false || writes != 2 {
+				t.Fatal("undo overwrote external revision", out)
 			}
 			officeEditingAssertBytes(t, path, external)
 		})

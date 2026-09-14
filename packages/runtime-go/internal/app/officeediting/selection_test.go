@@ -41,7 +41,7 @@ func selectionFixture(t *testing.T) (*Adapter, *fakeEditing, *nativeTestProjecto
 	fake := &fakeEditing{document: editingapp.Opened{SessionID: strings.Repeat("b", 48), ObjectID: strings.Repeat("d", 64), Path: "/workspace/report.docx", Revision: strings.Repeat("c", 64), Content: "private-base64"}}
 	projector := &nativeTestProjector{}
 	leases := new(int)
-	adapter := New("docx", fake, func(context.Context) bool { return true })
+	adapter := New("docx", &fakeNativeEditing{fakeEditing: fake}, func(context.Context) bool { return true })
 	if err := adapter.BindSelectionHost(projector, func(_ context.Context, id, path string, read func() error) (func(), error) {
 		if id != fake.document.SessionID || path != fake.document.Path {
 			t.Fatal("lease binding")
@@ -64,7 +64,9 @@ func captureFields(fake *fakeEditing, editable bool) map[string]any {
 }
 func nativeInvoke(t *testing.T, a *Adapter, operation string, input any) map[string]any {
 	t.Helper()
-	return invoke(t, a, validCall(t, operation, requestBody(t, input)))
+	call := validCall(t, operation, requestBody(t, input))
+	call.Binding.PackageID = a.packageID
+	return invoke(t, a, call)
 }
 func captured(t *testing.T, a *Adapter, fake *fakeEditing, editable bool) map[string]any {
 	t.Helper()
@@ -189,7 +191,7 @@ func TestNativeSelectionProposalProtectedReplacementAndReplay(t *testing.T) {
 		t.Fatal(out)
 	}
 	for _, call := range fake.calls {
-		if call == "commit" {
+		if call == "commit" || call == "native-commit" {
 			t.Fatal("proposal persisted native file")
 		}
 	}

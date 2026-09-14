@@ -25,7 +25,9 @@ func objectEditingPrivateRootIdentity(root string) (string, error) {
 	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), nil
 }
 
-func objectEditingPrivateReceipt(path string) error {
+func objectEditingPrivateReceipt(path string) error { return objectEditingPrivateFile(path, 16384) }
+
+func objectEditingPrivateFile(path string, maxBytes int64) error {
 	parent, base, missing, err := openAtomicUnixParent(path, false)
 	if err != nil || missing {
 		return objectediting.ErrForbidden
@@ -37,7 +39,7 @@ func objectEditingPrivateReceipt(path string) error {
 	}
 	defer unix.Close(fd)
 	var stat unix.Stat_t
-	if unix.Fstat(fd, &stat) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0o777 != 0o600 || stat.Nlink != 1 || stat.Size > 16384 {
+	if unix.Fstat(fd, &stat) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0o777 != 0o600 || stat.Nlink != 1 || stat.Size < 0 || stat.Size > maxBytes {
 		return objectediting.ErrPersistence
 	}
 	return nil

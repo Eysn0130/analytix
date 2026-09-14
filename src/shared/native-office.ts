@@ -1,4 +1,4 @@
-import { nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from '../../packages/runtime/src/contracts/native-office-editing'
 import { z } from 'zod'
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -28,11 +28,12 @@ export const nativeOfficePickerResponseSchema = z.union([
 
 const selectionToken = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/)
 const editingTarget = { objectId: digest, revision: digest, expectedChangeSequence: index }
+const threadId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
 export const nativeOfficeMenuTargetSchema = z.object(editingTarget).strict()
 const actionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
 export const nativeOfficeActionMenuSchema = z.object({
   ...editingTarget,
-  actions: z.array(z.object({id:actionId,label:z.string().min(1).max(120).regex(/^[^\x00-\x1f]+$/),enabled:z.boolean()}).strict()).min(1).max(32)
+  actions: z.array(z.object({id:actionId,label:z.string().min(1).max(120).refine(value => !/\p{Cc}/u.test(value)),enabled:z.boolean()}).strict()).min(1).max(32)
 }).strict().refine(value => new Set(value.actions.map(action => action.id)).size === value.actions.length)
 export const nativeOfficeActionChoiceSchema = z.object({actionId:actionId.nullable()}).strict()
 export type NativeOfficeMenuTarget = z.infer<typeof nativeOfficeMenuTargetSchema>
@@ -40,14 +41,15 @@ export type NativeOfficeActionMenu = z.infer<typeof nativeOfficeActionMenuSchema
 
 /** Renderer commands contain no native bytes, URLs, engine envelopes or UNO. */
 export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('open'), workspace: localPath, path: localPath, bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional() }).strict(),
+  z.object({ action: z.literal('open'), workspace: localPath, path: localPath, bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional(), threadId: threadId.nullable().optional() }).strict(),
   z.object({ action: z.literal('bounds'), bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional() }).strict(),
   z.object({ action: z.literal('hide') }).strict(),
   z.object({ action: z.literal('status') }).strict(),
   z.object({ action: z.literal('captureSelection') }).strict(),
   z.object({ action: z.literal('close'), objectId: digest.optional(), discard: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('annotate'), ...editingTarget }).strict(),
-  z.object({ action: z.literal('undoChange'), ...editingTarget }).strict(),
+  z.object({ action: z.literal('undoChange'), ...editingTarget, threadId }).strict(),
+  z.object({ action: z.literal('cancelChange'), ...editingTarget, threadId, changeId: digest }).strict(),
   z.object({ action: z.literal('save'), ...editingTarget }).strict(),
   z.object({ action: z.literal('saveStatus'), objectId: digest }).strict(),
   z.object({ action: z.literal('reference'), ...editingTarget, selectionToken, threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/), editable: z.boolean() }).strict(),
@@ -75,6 +77,7 @@ export const nativeOfficeViewSchema = z.object({
   objectId: digest, path: localPath, kind: nativeOfficeKindSchema, revision: digest,
   dirty: z.boolean(), status: z.enum(['ready', 'error', 'loading']),
   scope: nativeOfficeSelectionScopeSchema.omit({sessionId:true}).optional(), proposals:z.array(nativeOfficeProposalSchema).max(16).optional(), appliedProposals:z.array(z.string()).max(16).optional(),
+  recovery: nativeOfficeRecoverySchema.optional(), localReviews: z.array(nativeOfficeLocalReviewSchema).max(16).optional(),
   editing: z.boolean().optional(), canUndo: z.boolean().optional(), changeSequence: index.optional(), acknowledgedSequence: index.optional(), saving: z.boolean().optional(),
   selection: nativeOfficeSelectionSchema.optional(), error: nativeOfficeErrorSchema.optional()
 }).strict()
