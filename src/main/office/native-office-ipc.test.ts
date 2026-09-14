@@ -15,6 +15,7 @@ vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (..
   state.create(...args)
   return { freezeAnnotationInput:state.freezeAnnotationInput, hasPendingAnnotations:state.hasPendingAnnotations, flushAnnotations:state.flushAnnotations, request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
 } }))
+import { createWriteShutdownCoordinator } from '../write-shutdown'
 import { createOfficePrivateAdmissionProvider, type OfficePrivateAdmission } from './office-private-admission'
 import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './native-office-ipc'
 beforeEach(() => {
@@ -27,10 +28,18 @@ beforeEach(() => {
 afterEach(()=>vi.useRealTimers())
 function setup(privateAdmission?:()=>Promise<OfficePrivateAdmission>) {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
-    webContents: { mainFrame: {}, send: vi.fn() } })
+    webContents: Object.assign(new EventEmitter(), { mainFrame: {}, send: vi.fn(), isLoadingMainFrame: () => false, setWindowOpenHandler: vi.fn() }) })
   let current: typeof main | null = main
   registerNativeOfficeIpc(() => current as any, vi.fn(), privateAdmission)
   const event = { sender: main.webContents, senderFrame: main.webContents.mainFrame }
+  const shutdown = createWriteShutdownCoordinator({
+    ipc: { handle: (name: string, handler: (...args: any[]) => any) => { state.handlers.set(name, handler) } } as any,
+    prepareNative: prepareNativeOfficeQuit, cancelNative: cancelNativeOfficeQuit, notifyBlocked: async () => undefined
+  })
+  shutdown.trackWindow(main as any)
+  main.webContents.send.mockImplementation((channel, request) => {
+    if (channel === 'write:shutdown-request') state.handlers.get('write:shutdown-ack')!(event, { ...request, outcome: { result: 'ready' } })
+  })
   return { main, event, invoke: (e: unknown = event, payload: unknown = { action: 'status' }) => state.handlers.get('office:request')!(e, payload),
     pick: (payload: unknown = { kind: 'docx', workspace: '/workspace' }, e: unknown = event) => state.handlers.get('office:pick-file')!(e, payload),
     replace: () => { current = null } }
@@ -190,6 +199,7 @@ it.each(['foreign-frame','navigated-frame','timeout'] as const)('%s cannot confi
   const freeze=state.create.mock.calls.at(-1)![0].freezeAnnotationInput
   state.freezeAnnotationInput.mockImplementation(async(frozen:boolean)=>{if(frozen&&!await freeze(true))throw Error('freeze failed')})
   h.main.emit('close',{preventDefault:vi.fn()})
+  await vi.waitFor(() => expect(h.main.webContents.send).toHaveBeenCalledWith('office:annotation-input-freeze',expect.anything()))
   const payload=h.main.webContents.send.mock.calls.at(-1)![1]
   if(reason!=='timeout'){
     if(reason==='navigated-frame')h.main.webContents.mainFrame={}
@@ -271,6 +281,7 @@ it('an admitted controller records the last annotation synchronously before free
   const order:string[]=[]
   state.request.mockImplementation(async request=>{if(request.action==='annotationSave'){order.push('note');state.hasPendingAnnotations.mockReturnValue(true)}return {ok:true,view:null}})
   state.freezeAnnotationInput.mockImplementation(async()=>{order.push('freeze')})
+  state.flushAnnotations.mockImplementation(async()=>{state.hasPendingAnnotations.mockReturnValue(false);return {ok:true,view:null}})
   // A new admission query would never finish. Earlier note IPC must still be
   // delivered to Main before the independently delivered freeze ACK.
   transport.mockImplementation(()=>new Promise(()=>{}))
@@ -278,7 +289,7 @@ it('an admitted controller records the last annotation synchronously before free
   const saving=h.invoke(h.event,request)
   expect(state.request).toHaveBeenLastCalledWith(request);expect(state.hasPendingAnnotations()).toBe(true)
   h.main.emit('close',{preventDefault:vi.fn()})
-  expect(order.slice(0,2)).toEqual(['note','freeze']);expect(transport).toHaveBeenCalledOnce()
+  await vi.waitFor(() => expect(order.slice(0,2)).toEqual(['note','freeze']));expect(transport).toHaveBeenCalledOnce()
   state.hasPendingAnnotations.mockReturnValue(false);await saving
   await vi.waitFor(()=>expect(h.main.close).toHaveBeenCalledOnce())
   h.replace();expect(await h.invoke(h.event,request)).toMatchObject({ok:false,error:'unavailable'})

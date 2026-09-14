@@ -229,6 +229,7 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
     store: { load: vi.fn(async () => settings()) } as never,
     loadHubAccountService: vi.fn(async () => hubAccountService as never),
     getMainWindow: () => null,
+    canNavigateWindow: () => true,
     applySettingsPatch,
     saveSettingsPatch,
     runtimeRequest: vi.fn() as never,
@@ -3393,4 +3394,21 @@ describe('registerAppIpcHandlers', () => {
     expect(mainWindow.setFullScreen).toHaveBeenCalledWith(true)
     expect(mainWindow.close).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it('desktop reload consults the live window navigation gate while other commands retain their behavior', async () => {
+  const contents = { reload: vi.fn(), copy: vi.fn() }
+  const main = { isDestroyed: () => false, webContents: contents }
+  const canNavigateWindow = vi.fn(() => false)
+  registerAppIpcHandlers(registerOptions({ getMainWindow: () => main as never, canNavigateWindow }))
+  const command = handlers.get('desktop:command')!
+  await command({ sender: {} }, 'reload')
+  expect(canNavigateWindow).toHaveBeenCalledExactlyOnceWith(contents)
+  expect(contents.reload).not.toHaveBeenCalled()
+  await command({ sender: {} }, 'copy')
+  expect(contents.copy).toHaveBeenCalledOnce()
+  canNavigateWindow.mockReturnValue(true)
+  await command({ sender: {} }, 'reload')
+  expect(contents.reload).toHaveBeenCalledOnce()
 })

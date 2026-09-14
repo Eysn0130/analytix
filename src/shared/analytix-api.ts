@@ -1,3 +1,4 @@
+import type { WriteShutdownHandler } from './write-shutdown'
 import type { ProviderEndpointKind } from './provider-display'
 import type {
   AppSettingsPatch,
@@ -1173,7 +1174,7 @@ export type AnalytixWriteApi = Pick<
   | 'clearWriteInlineCompletionDebugEntries'
   | 'exportWriteDocument'
   | 'copyWriteDocumentAsRichText'
->
+> & { onShutdown: (handler: WriteShutdownHandler) => () => void }
 
 export type AnalytixSpeechApi = {
   transcribe: AnalytixFlatApi['transcribeSpeech']

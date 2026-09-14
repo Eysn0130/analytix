@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events'
+import { createWriteShutdownCoordinator } from '../write-shutdown'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
@@ -23,6 +25,7 @@ function setup(){
     stopManagedRuntimesForQuit:vi.fn(async()=>{trace.push('core-stop');context.managedRuntimesStoppedForQuit=true}),
     publicConsoleWarn:vi.fn(),app:{quit:vi.fn(()=>trace.push('app-quit'))},
     beforeQuit:undefined as undefined|((event:{preventDefault:()=>void})=>void)}
+  Object.assign(context, { writeShutdown: { prepareQuit: (...args: []) => context.prepareNativeOfficeQuit(...args), cancel: (...args: []) => context.cancelNativeOfficeQuit(...args) } })
   const javascript=ts.transpileModule(`globalThis.beforeQuit = ${callbacks[0].getText(source)}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
   runInNewContext(javascript,context,{timeout:1000})
   const invoke=()=>{const event={preventDefault:vi.fn()};context.beforeQuit!(event);return event}
@@ -55,4 +58,29 @@ test('unexpected preparation rejection thaws Office and restores startup watchdo
   h.invoke();await vi.waitFor(()=>expect(h.context.nativeOfficeQuitPending).toBe(false))
   expect(h.context.cancelNativeOfficeQuit).toHaveBeenCalledOnce();expect(h.context.startRuntimeWatchdog).toHaveBeenCalledOnce()
   expect(h.context.isQuitting).toBe(false);expect(h.context.stopManagedRuntimesForQuit).not.toHaveBeenCalled();expect(h.context.app.quit).not.toHaveBeenCalled()
+})
+
+
+test('actual createWindow and openThread entry points refuse new renderers while the prepared quit awaits Core stop',async()=>{
+  const h=setup(),handlers=new Map<string,(...args:any[])=>any>()
+  const main=Object.assign(new EventEmitter(),{isDestroyed:()=>false,close:vi.fn(),
+    webContents:Object.assign(new EventEmitter(),{mainFrame:{},send:vi.fn(),isLoadingMainFrame:()=>false,setWindowOpenHandler:vi.fn()})})
+  const coordinator=createWriteShutdownCoordinator({ipc:{handle:(name:string,handler:(...args:any[])=>any)=>{handlers.set(name,handler)}} as any,
+    prepareNative:async()=>true,cancelNative:async()=>undefined,notifyBlocked:async()=>undefined})
+  coordinator.trackWindow(main as any)
+  main.webContents.send.mockImplementation((_channel,request)=>handlers.get('write:shutdown-ack')!({sender:main.webContents,senderFrame:main.webContents.mainFrame},{...request,outcome:{result:'ready'}}))
+  const constructor=vi.fn(), context=Object.assign(h.context,{writeShutdown:coordinator,BrowserWindow:constructor,create:undefined as undefined|((options?:unknown)=>unknown),open:undefined as undefined|((threadId:string)=>void)})
+  const declarations=['createWindow','openThreadInNewWindow'].map(name=>{
+    const node=source.statements.find(statement=>ts.isFunctionDeclaration(statement)&&statement.name?.text===name)
+    if(!node)throw Error('Missing production window entry point')
+    return node.getText(source)
+  }).join('\n')
+  runInNewContext(ts.transpileModule(declarations+'\nglobalThis.create=createWindow;globalThis.open=openThreadInNewWindow',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context,{timeout:1000})
+  let stopped!:()=>void
+  h.context.stopManagedRuntimesForQuit.mockImplementation(()=>new Promise(resolve=>{stopped=()=>{h.context.managedRuntimesStoppedForQuit=true;resolve()}}))
+  h.invoke();await vi.waitFor(()=>expect(h.context.stopManagedRuntimesForQuit).toHaveBeenCalledOnce())
+  expect(context.create!({primary:false})).toBeNull()
+  expect(()=>context.open!('late-thread')).not.toThrow()
+  expect(constructor).not.toHaveBeenCalled();expect(main.webContents.send).toHaveBeenCalledOnce()
+  stopped();await vi.waitFor(()=>expect(h.context.app.quit).toHaveBeenCalledOnce())
 })

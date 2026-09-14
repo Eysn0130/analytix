@@ -1,3 +1,4 @@
+import type { WriteShutdownResult } from '@shared/write-shutdown'
 import type { WriteAgentPresetV1, WriteInlineCompletionSettingsV1, WriteSelectionAssistSettingsV1 } from '@shared/app-settings'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import type { WriteEditorSelectionState } from '../components/write/WriteMarkdownEditor'
@@ -100,6 +101,8 @@ export type WriteWorkspaceState = {
     }
   ) => Promise<boolean>
   syncActiveImageFromDisk: (workspaceRoot: string, path?: string) => Promise<boolean>
+  shutdownFrozen: boolean
+  beginShutdown: () => { save: () => Promise<WriteShutdownResult>; release: () => void }
   exportInProgress: boolean
   beginExport: () => { settled: Promise<void>; release: () => void }
   flushSave: (workspaceRoot: string) => Promise<boolean>

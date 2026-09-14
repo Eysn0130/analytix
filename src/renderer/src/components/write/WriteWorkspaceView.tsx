@@ -85,6 +85,7 @@ export function WriteWorkspaceView({
   onFocusConversation
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const shutdownFrozen = useWriteWorkspaceStore((s) => s.shutdownFrozen)
   const exportPaused = useWriteWorkspaceStore((s) => s.exportInProgress)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
@@ -218,6 +219,7 @@ export function WriteWorkspaceView({
     fileSize,
     truncated: fileTruncated
   })
+  if (shutdownFrozen) renderSafety.readOnly = true
   const debouncedPreviewContent = useDebouncedValue(fileContent, writePreviewDebounceMs(fileContent.length))
   const saveLabel = activeFileIsImage
     ? t('writeImagePreview')

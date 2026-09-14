@@ -43,6 +43,8 @@ export { writeBasenameFromPath, writeDirnameFromPath, writeJoinPath, writeRelati
 
 const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
+let fileActionsInFlight = 0
+let shutdownGeneration = 0
 let saveInFlight: Promise<boolean> | null = null
 let lastSavedContent = ''
 let externalSyncTimer: number | null = null
@@ -56,6 +58,19 @@ function cancelExternalSyncAnimation(): void {
   }
 }
 
+
+function shutdownAwareFileActions(actions: ReturnType<typeof createWriteFileActions>, get: () => WriteWorkspaceState): typeof actions {
+  return Object.fromEntries(Object.entries(actions).map(([name, action]) => [name, async (...args: unknown[]) => {
+    if (get().shutdownFrozen) {
+      if (name === 'openWorkspaceHome' || name === 'deleteEntry') return false
+      if (['loadDirectory', 'createFile', 'createDirectory', 'renameEntry'].includes(name)) return null
+      return undefined
+    }
+    fileActionsInFlight += 1
+    try { return await (action as (...args: unknown[]) => Promise<unknown>)(...args) }
+    finally { fileActionsInFlight -= 1 }
+  }])) as typeof actions
+}
 
 export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => ({
   defaultWorkspaceRoot: '',
@@ -86,6 +101,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   ...initialState(),
   reviewRecovery: null,
   exportInProgress: false,
+  shutdownFrozen: false,
   previewMode: readStoredPreviewMode(),
   assistantOpen: readStoredAssistantOpen(),
   assistantModel: readStoredAssistantModel(),
@@ -93,16 +109,17 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   assistantAgentPresetId: '',
 
   ...createWriteSettingsActions({ set, get }),
-  ...createWriteFileActions({
+  ...shutdownAwareFileActions(createWriteFileActions({
     set,
     get,
     cancelExternalSyncAnimation,
     setLastSavedContent: (content) => {
       lastSavedContent = content
     }
-  }),
+  }), get),
 
   setFileContent: (content) => {
+    if (get().shutdownFrozen) return
     cancelExternalSyncAnimation()
     set((state) => ({
       fileContent: content,
@@ -128,7 +145,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   syncActiveFileFromDisk: async (workspaceRoot, options = {}) => {
     const snapshot = get()
     const force = options.force === true
-    if (!snapshot.activeFilePath) return false
+    if (snapshot.shutdownFrozen || !snapshot.activeFilePath) return false
     if (snapshot.activeFileKind !== 'text') return false
     if (snapshot.pendingSave || (!force && snapshot.fileContent !== lastSavedContent)) return false
     if (options.path && !pathsEqual(options.path, snapshot.activeFilePath)) return false
@@ -157,7 +174,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     const nextTruncated = truncated === true
 
     const latest = get()
-    if (!latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
+    if (latest.shutdownFrozen || !latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
     if (latest.pendingSave || (!force && latest.fileContent !== lastSavedContent)) return false
     set({ objectSession: document.legacy ? null : { sessionId: document.sessionId, objectId: document.objectId, revision: document.revision }, legacyObjectEditing: document.legacy })
     if (
@@ -293,7 +310,44 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     }
   },
 
+  beginShutdown: () => {
+    if (get().shutdownFrozen) throw new Error('Document shutdown is already pending.')
+    const generation = ++shutdownGeneration
+    set({ shutdownFrozen: true })
+    let released = false
+    const current = () => !released && generation === shutdownGeneration && get().shutdownFrozen
+    return {
+      release: () => {
+        if (released) return
+        released = true
+        if (generation === shutdownGeneration) set({ shutdownFrozen: false })
+      },
+      save: async () => {
+        const snapshot = get()
+        if (snapshot.exportInProgress) return { result: 'blocked', reason: 'exporting' }
+        if (fileActionsInFlight || snapshot.fileLoading || externalSyncTimer !== null) return { result: 'blocked', reason: 'unavailable' }
+        if (snapshot.reviewActive || snapshot.pendingAgentReview || snapshot.saveStatus === 'conflict') return { result: 'blocked', reason: 'conflict' }
+        // An earlier receipt can be successful while returning false because
+        // the user typed a newer draft. Save that frozen draft after settlement.
+        await (saveInFlight ?? Promise.resolve(true)).catch(() => false)
+        if (!current()) return { result: 'blocked', reason: 'unavailable' }
+        const sameDocument = () => get().workspaceRoot === snapshot.workspaceRoot &&
+          get().activeFilePath === snapshot.activeFilePath && get().activeFileKind === snapshot.activeFileKind &&
+          get().fileContent === snapshot.fileContent && !get().fileLoading && !get().reviewActive &&
+          !get().pendingAgentReview && !get().exportInProgress && !fileActionsInFlight
+        if (!sameDocument()) return { result: 'blocked', reason: 'unavailable' }
+        const saved = await get().flushSave(snapshot.workspaceRoot).catch(() => false)
+        if (!current() || !sameDocument()) return { result: 'blocked', reason: 'unavailable' }
+        if (!saved || get().pendingSave || (snapshot.activeFileKind === 'text' && get().saveStatus !== 'saved')) {
+          return { result: 'blocked', reason: get().saveStatus === 'conflict' ? 'conflict' : 'save_unconfirmed' }
+        }
+        return { result: 'ready' }
+      }
+    }
+  },
+
   beginExport: () => {
+    if (get().shutdownFrozen) throw new Error('Document shutdown is pending.')
     if (get().exportInProgress) throw new Error('A document export is already pending.')
     set({ exportInProgress: true })
     let released = false
@@ -472,6 +526,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   clearQuotedSelections: () => set({ quotedSelections: [] }),
 
   resetWorkspace: () => {
+    if (get().shutdownFrozen) return
     cancelExternalSyncAnimation()
     lastSavedContent = ''
     set({ ...initialState(), reviewRecovery: null })

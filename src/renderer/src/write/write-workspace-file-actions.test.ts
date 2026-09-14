@@ -36,6 +36,8 @@ function makeBaseState(): WriteWorkspaceState {
     setFileContent: () => undefined,
     syncActiveFileFromDisk: async () => false,
     syncActiveImageFromDisk: async () => false,
+    shutdownFrozen: false,
+    beginShutdown: () => ({ save: async () => ({ result: 'ready' }), release: () => undefined }),
     exportInProgress: false,
     beginExport: () => ({ settled: Promise.resolve(), release: () => undefined }),
     flushSave: async () => true,

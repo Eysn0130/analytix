@@ -1337,6 +1337,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       getPathForFile: () => ''
     },
     write: {
+      onShutdown: () => () => undefined,
       requestWriteInlineCompletion: async () => ({ ok: false, message: browserPreviewUnavailable('Write inline completion') }),
       retrieveWriteContext: async () => ({ ok: false, message: browserPreviewUnavailable('Write retrieval') }),
       generateWriteInfographic: async () => ({ ok: false, message: browserPreviewUnavailable('Write infographic generation') }),

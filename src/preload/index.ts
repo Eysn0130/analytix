@@ -1,3 +1,4 @@
+import { WRITE_SHUTDOWN_REQUEST, WRITE_SHUTDOWN_ACK, writeShutdownRequestSchema, writeShutdownResultSchema, type WriteShutdownHandler } from '../shared/write-shutdown'
 import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
@@ -21,6 +22,25 @@ ipcRenderer.on('office:annotation-input-freeze', (_event, value: unknown) => {
   // Earlier annotationSave invokes have already been sent on this renderer's
   // IPC stream. Main drains them only after receiving this acknowledgement.
   void ipcRenderer.invoke('office:annotation-input-frozen',request.data).catch(() => undefined)
+})
+
+let writeShutdownHandler: WriteShutdownHandler | undefined
+ipcRenderer.on(WRITE_SHUTDOWN_REQUEST, (_event, value: unknown) => {
+  const parsed = writeShutdownRequestSchema.safeParse(value)
+  if (!parsed.success) return
+  const request = parsed.data
+  // Do not serialize cancel behind a slow prepare/save. The renderer fences
+  // stale completions by request ID while the existing save remains in flight.
+  void (async () => {
+    let outcome: import('../shared/write-shutdown').WriteShutdownResult = { result: 'blocked', reason: 'unavailable' }
+    try {
+      if (writeShutdownHandler) {
+        const result = writeShutdownResultSchema.safeParse(await writeShutdownHandler(request))
+        if (result.success) outcome = result.data
+      }
+    } catch { /* Fail closed without exposing draft contents. */ }
+    await ipcRenderer.invoke(WRITE_SHUTDOWN_ACK, { ...request, outcome }).catch(() => undefined)
+  })()
 })
 
 // Internal IPC adapter. The renderer receives only the domain facade below.
@@ -660,6 +680,11 @@ const api = {
     getPathForFile: flatApi.getPathForFile
   },
   write: {
+    onShutdown: handler => {
+      if (writeShutdownHandler) throw new Error('Write shutdown handler already installed.')
+      writeShutdownHandler = handler
+      return () => { if (writeShutdownHandler === handler) writeShutdownHandler = undefined }
+    },
     requestWriteInlineCompletion: flatApi.requestWriteInlineCompletion,
     retrieveWriteContext: flatApi.retrieveWriteContext,
     generateWriteInfographic: flatApi.generateWriteInfographic,

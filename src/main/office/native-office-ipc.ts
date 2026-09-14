@@ -8,9 +8,10 @@ import { isOfficePrivateAdmission, type OfficePrivateAdmission } from './office-
 import { NativeOfficeSurface } from './native-office-surface'
 import type { PluginPackageHostRequest, PluginPackageHostResponse } from '../../../packages/runtime/src/contracts/plugin-package-host'
 
-let quitGuard: {prepare:() => Promise<boolean>; cancel:() => Promise<void>} | undefined
+let quitGuard: {window: BrowserWindow; prepare:() => Promise<boolean>; cancel:() => Promise<void>} | undefined
 /** Must run while the existing Core and its native sessions are still alive. */
-export async function prepareNativeOfficeQuit(): Promise<boolean> {
+export async function prepareNativeOfficeQuit(window?: BrowserWindow): Promise<boolean> {
+  if (window && quitGuard?.window !== window) return true
   try { return await quitGuard?.prepare() ?? true } catch { await cancelNativeOfficeQuit(); return false }
 }
 export async function cancelNativeOfficeQuit(): Promise<void> { await quitGuard?.cancel() }
@@ -111,9 +112,8 @@ export function registerNativeOfficeIpc(
         onChange: (view) => { if (!main.isDestroyed()) main.webContents.send('office:changed', view) }
       })
       const current = controller
-      let closing: Promise<boolean> | undefined, allowClose = false
+      let closing: Promise<boolean> | undefined
       const cancel = async () => {
-        allowClose = false
         await current.freezeAnnotationInput(false)
         await current.restoreVisibility()
       }
@@ -135,21 +135,12 @@ export function registerNativeOfficeIpc(
             if (!saved.ok || current.getViews().some(view => view.dirty || view.saving)) return false
           } else if (pending || decision.response !== 1) return false
         }
-        allowClose = true
         return true
       })().catch(() => false).then(async accepted => {
         if (!accepted) await cancel()
         return accepted
       }).finally(() => { closing = undefined })
-      const guard = {prepare,cancel}; quitGuard = guard
-      main.on('close', (event) => {
-        // The window's earlier tray/ask policy may have cancelled destruction.
-        if (event.defaultPrevented) return
-        if (allowClose || current.getViews().length === 0 && !current.hasPendingAnnotations()) return
-        event.preventDefault()
-        if (closing) return
-        void prepare().then(accepted => { if (accepted) main.close() }).catch(() => undefined)
-      })
+      const guard = {window: main, prepare, cancel}; quitGuard = guard
       main.once('closed', () => {
         if (quitGuard === guard) quitGuard = undefined
         for (const pending of freezes.values()) if (pending.main === main) pending.finish(false)

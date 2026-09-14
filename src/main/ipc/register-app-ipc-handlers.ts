@@ -263,6 +263,7 @@ type RegisterAppIpcHandlersOptions = {
   store: JsonSettingsStore
   loadHubAccountService: LoadHubAccountService
   getMainWindow: () => BrowserWindow | null
+  canNavigateWindow: (contents: WebContents) => boolean
   isTrustedProviderRegistrySender?: (event: IpcMainInvokeEvent) => boolean
   applySettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
   saveSettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
@@ -1301,7 +1302,8 @@ function validateMcpConfigContent(content: string): void {
 function runDesktopCommand(
   command: DesktopCommand,
   sender: WebContents,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  canNavigateWindow: (contents: WebContents) => boolean
 ): void {
   const mainWindow = getMainWindow()
   const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : sender
@@ -1326,6 +1328,7 @@ function runDesktopCommand(
       contents.selectAll()
       return
     case 'reload':
+      if (!canNavigateWindow(contents)) return
       contents.reload()
       return
     case 'zoomIn':
@@ -2970,7 +2973,8 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     runDesktopCommand(
       parseIpcPayload('desktop:command', desktopCommandSchema, command),
       event.sender,
-      getMainWindow
+      getMainWindow,
+      options.canNavigateWindow
     )
   })
   ipcMain.handle('shell:open-external', async (_, url: unknown) => {
