@@ -1,3 +1,4 @@
+import { createWriteExportSnapshotResolver } from './write-export-ipc'
 import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
 import { registerNativeOfficeIpc } from '../office/native-office-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
@@ -2731,6 +2732,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return rendererPackageHost(payload)
   })
 
+  const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
   const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
   ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {
@@ -2891,32 +2893,12 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        canceled: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return exportWriteDocument(request, {
-      parentWindow: getMainWindow(),
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, canceled: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return exportWriteDocument({ path: resolved.snapshot.path, content: resolved.snapshot.content,
+      format: request.format, typography: request.typography }, {
+      parentWindow: getMainWindow(), workspaceRoot: resolved.snapshot.workspace,
+      authorityCurrent: resolved.authorityCurrent
     })
   })
   ipcMain.handle('write:copy-rich-text', async (event, payload: unknown) => {
@@ -2928,32 +2910,13 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return copyWriteDocumentAsRichText(request, {
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return copyWriteDocumentAsRichText({ path: resolved.snapshot.path, content: resolved.snapshot.content }, {
+      workspaceRoot: resolved.snapshot.workspace, authorityCurrent: resolved.authorityCurrent
     })
   })
+
   ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>
     requestWriteInlineCompletion(
       await store.load(),

@@ -20,9 +20,9 @@ import { assertOrdinaryWriteExportContentV1, projectOrdinaryWriteExportContentV1
 export { projectOrdinaryWriteExportContentV1 } from './write-export-content'
 import type {
   WriteExportFormat,
-  WriteExportPayload,
+  WriteExportDocument,
   WriteExportResult,
-  WriteRichClipboardPayload,
+  WriteClipboardDocument,
   WriteRichClipboardResult
 } from '../../shared/write-export'
 import { resolveWriteMarkdownResource } from '../../shared/write-markdown-resource'
@@ -42,7 +42,7 @@ function applyWriteExportTextProjection() {
   return (tree: Parameters<typeof projectWriteExportMarkdownTreeV1>[0]) => projectWriteExportMarkdownTreeV1(tree)
 }
 
-function normalizeExportTypography(typography?: WriteExportPayload['typography']): WriteTypographySettingsV1 {
+function normalizeExportTypography(typography?: WriteExportDocument['typography']): WriteTypographySettingsV1 {
   return normalizeWriteTypography(typography as Partial<WriteTypographySettingsV1> | undefined)
 }
 
@@ -87,7 +87,7 @@ function resolveOfficialFontFile(fileName: string): string {
 }
 
 async function buildWriteExportCss(
-  typography?: WriteExportPayload['typography'],
+  typography?: WriteExportDocument['typography'],
   embedOfficialFonts = false
 ): Promise<string> {
   const normalized = normalizeExportTypography(typography)
@@ -555,7 +555,7 @@ export async function buildWriteExportHtmlDocument(options: {
   workspaceRoot: string
   content: string
   title?: string
-  typography?: WriteExportPayload['typography']
+  typography?: WriteExportDocument['typography']
   wordCompatible?: boolean
   includeSourceBaseHref?: boolean
   resolveRelativeLinks?: boolean
@@ -595,7 +595,7 @@ export async function buildWriteExportHtmlDocument(options: {
 }
 
 export async function copyWriteDocumentAsRichText(
-  payload: WriteRichClipboardPayload,
+  payload: WriteClipboardDocument,
   options: {
     workspaceRoot: string
     authorityCurrent?: () => boolean | Promise<boolean>
@@ -708,7 +708,7 @@ async function showExportSaveDialog(
 }
 
 export async function exportWriteDocument(
-  payload: WriteExportPayload,
+  payload: WriteExportDocument,
   options: {
     workspaceRoot: string
     parentWindow?: BrowserWindow | null

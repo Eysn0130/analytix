@@ -117,6 +117,21 @@ func (h ObjectEditingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "receipt": objectEditingReceipt(receipt)})
 
+	case "export-snapshot":
+		var request struct {
+			Action string `json:"action"`
+			editingapp.ExportSnapshotInput
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		value, err := h.Service.ReadExportSnapshot(r.Context(), request.ExportSnapshotInput)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "snapshot": value})
 	case "draft-update":
 		var request struct {
 			Action string `json:"action"`
@@ -302,9 +317,10 @@ func objectEditingExactFields(raw json.RawMessage, keys string) (map[string]json
 }
 
 var objectEditingKeys = map[string]string{
-	"open":   "action workspace path",
-	"commit": "action sessionId operationId baseRevision content",
-	"status": "action sessionId operationId", "close": "action sessionId",
+	"open":            "action workspace path",
+	"export-snapshot": "action sessionId objectId threadId baseRevision draftVersion",
+	"commit":          "action sessionId operationId baseRevision content",
+	"status":          "action sessionId operationId", "close": "action sessionId",
 	"draft-update": "action sessionId baseRevision expectedVersion content", "draft-read": "action sessionId",
 	"scope-capture":   "action sessionId draftVersion threadId purpose range",
 	"scope-read":      "action sessionId scopeId threadId purpose draftVersion",
@@ -382,7 +398,7 @@ func validObjectEditingRequest(body []byte, action string) bool {
 			if value != "" && !objectEditingToken.MatchString(value) {
 				return false
 			}
-		case "baseRevision":
+		case "baseRevision", "objectId":
 			if !objectEditingHash.MatchString(value) {
 				return false
 			}

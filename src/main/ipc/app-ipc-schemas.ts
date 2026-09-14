@@ -1,3 +1,4 @@
+import { objectExportBindingSchema } from '../../../packages/runtime/src/contracts/object-editing'
 import { z } from 'zod'
 import {
   ANALYTIX_APPROVAL_TEMPLATE,
@@ -1363,22 +1364,12 @@ export const writeRetrievalPayloadSchema = z
   })
   .strict()
 
-export const writeExportPayloadSchema = z
-  .object({
-    path: trimmedString(MAX_PATH_LENGTH),
-    format: z.enum(WRITE_EXPORT_FORMATS),
-    content: z.string().max(MAX_BODY_BYTES),
-    typography: writeTypographyPatchSchema.optional()
-  })
-  .strict()
+export const writeExportPayloadSchema = objectExportBindingSchema.extend({
+  format: z.enum(WRITE_EXPORT_FORMATS),
+  typography: writeTypographyPatchSchema.optional()
+}).strict()
 
-export const writeRichClipboardPayloadSchema = z
-  .object({
-    path: trimmedString(MAX_PATH_LENGTH),
-    workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
-    content: z.string().max(MAX_BODY_BYTES)
-  })
-  .strict()
+export const writeRichClipboardPayloadSchema = objectExportBindingSchema
 
 const writeInlineEditRecentEditSchema = z
   .object({

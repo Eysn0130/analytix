@@ -100,6 +100,8 @@ export type WriteWorkspaceState = {
     }
   ) => Promise<boolean>
   syncActiveImageFromDisk: (workspaceRoot: string, path?: string) => Promise<boolean>
+  exportInProgress: boolean
+  beginExport: () => { settled: Promise<void>; release: () => void }
   flushSave: (workspaceRoot: string) => Promise<boolean>
   resolveFileConflict: (comparison: WriteConflictComparison, choice: 'keep-draft' | 'use-disk') => Promise<boolean>
   createFile: (workspaceRoot: string, path: string, content?: string) => Promise<string | null>

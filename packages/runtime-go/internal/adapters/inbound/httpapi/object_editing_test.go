@@ -152,3 +152,102 @@ func TestObjectEditingRejectsMalformedRequestsBeforeAuthorityRead(t *testing.T) 
 		}
 	}
 }
+
+type exportThreadAuthority struct{ workspace string }
+
+func (p exportThreadAuthority) ValidateCurrent(_ context.Context, value editingapp.ScopeAuthority) error {
+	if value.Workspace != p.workspace || value.ThreadID != "current-main" || value.Purpose != "discuss" {
+		return editingapp.ErrProjection
+	}
+	return nil
+}
+func (p exportThreadAuthority) AuthorizeAndProject(context.Context, editingapp.ProjectionInput) ([]editingapp.ProtectedRange, error) {
+	return nil, errors.New("export must not create a scope")
+}
+
+func TestObjectEditingExportSnapshotUsesTypedLaneAndCurrentFileDraft(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("versioned replacement unavailable")
+	}
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(workspace, "note.md")
+	if err := os.WriteFile(path, []byte("disk original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filestore.NewObjectEditingFiles(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := identitydomain.NewPrincipalV1(strings.Repeat("a", 64), "local", "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityWorkspace, ok := filestore.ResolveMutationIdentityPath(workspace, workspace)
+	if !ok {
+		t.Fatal("workspace identity unavailable")
+	}
+	observation, err := (filestore.CaseBindingReader{}).Observe(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("thread workspace spelling equals object workspace identity: %v", observation.WorkspaceRealPath == identityWorkspace)
+	service := editingapp.NewWithProjector(objectTestIdentity{principal}, files, exportThreadAuthority{identityWorkspace})
+	handler := LocalDisplayMuxV1{RuntimeToken: "synthetic-export-token", LocalDisplay: LocalDisplayHandlerV1{ObjectEditing: ObjectEditingHandler{Service: service}}}
+	call := func(body any, authorized bool) *httptest.ResponseRecorder {
+		data, _ := json.Marshal(body)
+		r := httptest.NewRequest(http.MethodPost, ObjectEditingPath, bytes.NewReader(data))
+		if authorized {
+			r.Header.Set("Authorization", "Bearer synthetic-export-token")
+			r.Header.Set(LocalDisplayHeaderV1, LocalDisplayHeaderValueV1)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	opened, err := service.Open(context.Background(), workspace, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := service.UpdateDraft(context.Background(), editingapp.UpdateDraftInput{SessionID: opened.SessionID, BaseRevision: opened.Revision, Content: "UNSAVED_EXPORT_SENTINEL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"action": "export-snapshot", "sessionId": opened.SessionID, "objectId": opened.ObjectID, "threadId": "current-main", "baseRevision": opened.Revision, "draftVersion": draft.Version}
+	if w := call(input, false); w.Code == http.StatusOK || strings.Contains(w.Body.String(), draft.Content) {
+		t.Fatal("untyped export leaked")
+	}
+	w := call(input, true)
+	var value struct {
+		OK       bool                      `json:"ok"`
+		Snapshot editingapp.ExportSnapshot `json:"snapshot"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &value) != nil || w.Code != http.StatusOK || !value.OK || value.Snapshot.Content != draft.Content || value.Snapshot.Workspace != identityWorkspace {
+		t.Fatalf("snapshot: %d %s", w.Code, w.Body.String())
+	}
+	original, _ := os.ReadFile(path)
+	if string(original) != "disk original" {
+		t.Fatal("export saved the original")
+	}
+	for key, bad := range map[string]any{"threadId": "foreign-thread", "draftVersion": strings.Repeat("f", 48), "objectId": strings.Repeat("f", 64)} {
+		previous := input[key]
+		input[key] = bad
+		if w := call(input, true); w.Code == http.StatusOK || strings.Contains(w.Body.String(), draft.Content) {
+			t.Fatal("stale export leaked")
+		}
+		input[key] = previous
+	}
+	input["content"] = "forged"
+	if w := call(input, true); w.Code != http.StatusBadRequest {
+		t.Fatal("extra input accepted")
+	}
+	delete(input, "content")
+	if err := os.WriteFile(path, []byte("external changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(input, true); w.Code != http.StatusConflict || strings.Contains(w.Body.String(), draft.Content) {
+		t.Fatal("external change not rejected")
+	}
+}

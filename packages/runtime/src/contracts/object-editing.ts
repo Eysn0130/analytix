@@ -85,3 +85,16 @@ export const objectEditingResponseSchema = z.union([
 
 export type ObjectEditingRequest = z.infer<typeof objectEditingRequestSchema>
 export type ObjectEditingResponse = z.infer<typeof objectEditingResponseSchema>
+
+// Main-only export lane. Deliberately excluded from ObjectEditingRequest so the
+// Renderer cannot retrieve export snapshots through the generic object bridge.
+export const objectExportBindingSchema = z.object({ sessionId, objectId: revision, threadId, baseRevision: revision, draftVersion: sessionId }).strict()
+export const objectExportSnapshotRequestSchema = objectExportBindingSchema.extend({ action: z.literal('export-snapshot') }).strict()
+export const objectExportSnapshotSchema = objectExportBindingSchema.extend({
+  workspace: text(1_572_864).refine(value => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value) && !value.includes('\0')),
+  path: text(1_572_864).refine(value => value.length > 0 && !value.includes('\0')),
+  content, contentDigest: revision
+}).strict()
+export const objectExportSnapshotResponseSchema = z.object({ ok: z.literal(true), snapshot: objectExportSnapshotSchema }).strict()
+export type ObjectExportBinding = z.infer<typeof objectExportBindingSchema>
+export type ObjectExportSnapshot = z.infer<typeof objectExportSnapshotSchema>

@@ -205,23 +205,23 @@ func (s *Service) UpdateDraft(ctx context.Context, input UpdateDraftInput) (Draf
 		return Draft{}, fileport.ErrInvalidInput
 	}
 	state := s.edits[input.SessionID]
-	if state == nil {
-		if input.ExpectedVersion != "" {
-			return Draft{}, ErrDraftStale
-		}
-		doc, err := s.files.Read(ctx, current.workspace, current.path)
-		if err != nil {
-			return Draft{}, ErrUnavailable
-		}
-		if doc.Encoding == "office-base64" || !validDraftText(doc.Content) {
-			return Draft{}, fileport.ErrNotText
-		}
-		if doc.Revision != input.BaseRevision {
-			return Draft{}, ErrDraftStale
-		}
-		state = &editingState{scopes: make(map[string]*capturedScope), proposals: make(map[string]*Proposal), operations: make(map[string]proposalOperationRecord)}
-	} else if input.ExpectedVersion != state.draft.Version || input.BaseRevision != state.draft.BaseRevision {
+	// Check draft CAS before reading or rebasing. Failed capture retains the old
+	// working copy and every scope; only a successful replacement invalidates it.
+	if (state == nil && input.ExpectedVersion != "") || (state != nil && input.ExpectedVersion != state.draft.Version) {
 		return Draft{}, ErrDraftStale
+	}
+	doc, err := s.files.Read(ctx, current.workspace, current.path)
+	if err != nil {
+		return Draft{}, ErrUnavailable
+	}
+	if doc.Encoding == "office-base64" || !validDraftText(doc.Content) {
+		return Draft{}, fileport.ErrNotText
+	}
+	if doc.Revision != input.BaseRevision {
+		return Draft{}, ErrDraftStale
+	}
+	if state == nil {
+		state = &editingState{scopes: make(map[string]*capturedScope), proposals: make(map[string]*Proposal), operations: make(map[string]proposalOperationRecord)}
 	}
 	version, err := opaqueProposalID()
 	if err != nil {

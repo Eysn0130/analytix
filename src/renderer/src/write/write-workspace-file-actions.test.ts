@@ -36,6 +36,8 @@ function makeBaseState(): WriteWorkspaceState {
     setFileContent: () => undefined,
     syncActiveFileFromDisk: async () => false,
     syncActiveImageFromDisk: async () => false,
+    exportInProgress: false,
+    beginExport: () => ({ settled: Promise.resolve(), release: () => undefined }),
     flushSave: async () => true,
     resolveFileConflict: async () => false,
     createFile: async () => null,

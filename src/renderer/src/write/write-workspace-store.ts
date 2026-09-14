@@ -85,6 +85,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   settingsError: null,
   ...initialState(),
   reviewRecovery: null,
+  exportInProgress: false,
   previewMode: readStoredPreviewMode(),
   assistantOpen: readStoredAssistantOpen(),
   assistantModel: readStoredAssistantModel(),
@@ -292,7 +293,19 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     }
   },
 
+  beginExport: () => {
+    if (get().exportInProgress) throw new Error('A document export is already pending.')
+    set({ exportInProgress: true })
+    let released = false
+    return {
+      // Await only the write already underway; exporting never initiates a save.
+      settled: (saveInFlight ?? Promise.resolve(true)).then(() => undefined),
+      release: () => { if (!released) { released = true; set({ exportInProgress: false }) } }
+    }
+  },
+
   flushSave: async (workspaceRoot) => {
+    if (get().exportInProgress) return false
     // One write at a time. A caller switching documents must also persist edits
     // made while an earlier save was awaiting its receipt.
     if (saveInFlight) {

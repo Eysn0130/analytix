@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -496,7 +496,7 @@ describe('registerAppIpcHandlers', () => {
     currentSettings.write = {
       ...currentSettings.write,
       defaultWorkspaceRoot: workspace,
-      activeWorkspaceRoot: workspace,
+      activeWorkspaceRoot: '/tmp/legacy-unrelated-write',
       workspaces: [workspace]
     }
     const store = { load: vi.fn(async () => currentSettings) }
@@ -507,16 +507,13 @@ describe('registerAppIpcHandlers', () => {
       ok: false,
       canceled: true
     })
-    registerAppIpcHandlers(registerOptions({
-      store: store as never,
-      getMainWindow: () => mainWindow as never
-    }))
-
-    const payload = {
-      path: join(workspace, 'draft.md'),
-      format: 'docx',
-      content: '# Draft'
-    }
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'current-main',
+      baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const snapshot = { ...binding, workspace, path: join(workspace, 'draft.md'), content: '# Draft',
+      contentDigest: createHash('sha256').update('# Draft').digest('hex') }
+    const localDisplayRequest = vi.fn(async (_path: string, _body: string) => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }))
+    registerAppIpcHandlers(registerOptions({ store: store as never, getMainWindow: () => mainWindow as never, localDisplayRequest }))
+    const payload = { ...binding, format: 'docx' }
     await expect(handlers.get('write:export')?.({ sender, senderFrame: {} }, payload)).resolves.toEqual({
       ok: false,
       canceled: false,
@@ -529,7 +526,7 @@ describe('registerAppIpcHandlers', () => {
       canceled: true
     })
     expect(writeExportServiceMock.exportWriteDocument).toHaveBeenCalledWith(
-      payload,
+      { path: snapshot.path, content: snapshot.content, format: 'docx', typography: undefined },
       expect.objectContaining({
         parentWindow: mainWindow,
         workspaceRoot: workspace,
@@ -540,6 +537,10 @@ describe('registerAppIpcHandlers', () => {
       authorityCurrent: () => Promise<boolean>
     }
     await expect(options.authorityCurrent()).resolves.toBe(true)
+    expect(localDisplayRequest.mock.calls.at(-1)?.[0]).toBe('/v1/local-display/object-editing')
+    expect(JSON.parse(localDisplayRequest.mock.calls.at(-1)![1])).toEqual({ action: 'export-snapshot', ...binding })
+    localDisplayRequest.mockResolvedValueOnce({ ok: false, status: 409, body: '{"ok":false}' })
+    await expect(options.authorityCurrent()).resolves.toBe(false)
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -566,7 +567,7 @@ describe('registerAppIpcHandlers', () => {
     currentSettings.write = {
       ...currentSettings.write,
       defaultWorkspaceRoot: workspace,
-      activeWorkspaceRoot: workspace,
+      activeWorkspaceRoot: '/tmp/legacy-unrelated-write',
       workspaces: [workspace]
     }
     const store = { load: vi.fn(async () => currentSettings) }
@@ -577,16 +578,13 @@ describe('registerAppIpcHandlers', () => {
       ok: true,
       copiedAt: '2026-08-26T04:00:00.000Z'
     })
-    registerAppIpcHandlers(registerOptions({
-      store: store as never,
-      getMainWindow: () => mainWindow as never
-    }))
-
-    const payload = {
-      path: join(workspace, 'draft.md'),
-      workspaceRoot: '/tmp/renderer-forged-workspace',
-      content: '# Draft'
-    }
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'current-main',
+      baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const snapshot = { ...binding, workspace, path: join(workspace, 'draft.md'), content: '# Draft',
+      contentDigest: createHash('sha256').update('# Draft').digest('hex') }
+    const localDisplayRequest = vi.fn(async (_path: string, _body: string) => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }))
+    registerAppIpcHandlers(registerOptions({ store: store as never, getMainWindow: () => mainWindow as never, localDisplayRequest }))
+    const payload = binding
     await expect(handlers.get('write:copy-rich-text')?.({ sender, senderFrame: {} }, payload)).resolves.toEqual({
       ok: false,
       message: 'Write export requires the current main window.'
@@ -598,7 +596,7 @@ describe('registerAppIpcHandlers', () => {
       copiedAt: '2026-08-26T04:00:00.000Z'
     })
     expect(writeExportServiceMock.copyWriteDocumentAsRichText).toHaveBeenCalledWith(
-      payload,
+      { path: snapshot.path, content: snapshot.content },
       expect.objectContaining({
         workspaceRoot: workspace,
         authorityCurrent: expect.any(Function)
@@ -608,6 +606,10 @@ describe('registerAppIpcHandlers', () => {
       authorityCurrent: () => Promise<boolean>
     }
     await expect(options.authorityCurrent()).resolves.toBe(true)
+    expect(localDisplayRequest.mock.calls.at(-1)?.[0]).toBe('/v1/local-display/object-editing')
+    expect(JSON.parse(localDisplayRequest.mock.calls.at(-1)![1])).toEqual({ action: 'export-snapshot', ...binding })
+    localDisplayRequest.mockResolvedValueOnce({ ok: false, status: 409, body: '{"ok":false}' })
+    await expect(options.authorityCurrent()).resolves.toBe(false)
     rmSync(workspace, { recursive: true, force: true })
   })
 

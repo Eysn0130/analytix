@@ -8,7 +8,7 @@ import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
 
 vi.mock('react-i18next', async importOriginal => ({ ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t: (key:string) => key }) }))
 vi.mock('../../office/NativeOfficePanel', () => ({ NativeOfficePanel: ({fileActions}: {fileActions:ReactNode}) => createElement('div',{'data-testid':'native-panel',role:'toolbar'},fileActions) }))
-vi.mock('../write/WriteWorkspaceView', () => ({ WriteWorkspaceView: () => createElement('div',{'data-testid':'write-panel'}) }))
+vi.mock('../write/WriteWorkspaceView', () => ({ WriteWorkspaceView: ({ threadId }: { threadId?: string }) => createElement('div',{'data-testid':'write-panel','data-thread':threadId}) }))
 let root:Root, container:HTMLDivElement
 const openEditorPath = vi.fn(async () => ({ok:true}))
 const path = '/synthetic/report.docx'
@@ -27,7 +27,7 @@ afterEach(async () => {
 })
 async function render() {
   await act(async () => root.render(createElement(DocumentWorkspacePanel,{
-    visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt:vi.fn(),focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
+    threadId:'current-main',visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt:vi.fn(),focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
   })))
 }
 async function select(action:string) {
@@ -57,4 +57,11 @@ it('preserves the existing nonnative Write header and file controls', async () =
   expect(container.querySelector('.document-workspace-header')).not.toBeNull()
   expect(container.querySelector('[data-testid="write-panel"]')).not.toBeNull()
   expect(container.querySelector('[aria-label="rightPanelFiles"]')).not.toBeNull()
+})
+
+it('passes the same main thread into the text document export surface', async () => {
+  useNativeOfficeStore.setState({target:null})
+  useWriteWorkspaceStore.setState({activeFilePath:'/synthetic/note.md',activeFileKind:'text'})
+  await render()
+  expect(container.querySelector('[data-testid="write-panel"]')?.getAttribute('data-thread')).toBe('current-main')
 })

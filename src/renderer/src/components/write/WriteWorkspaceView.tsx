@@ -1,3 +1,4 @@
+import { captureWriteExport } from '../../write/write-export-snapshot'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
@@ -67,6 +68,7 @@ import {
 } from './write-workspace-view-utils'
 
 type Props = {
+  threadId?: string | null
   leftSidebarCollapsed: boolean
   input: string; setInput: (value: string) => void
   onSubmitPrompt?: (value: string) => void
@@ -75,6 +77,7 @@ type Props = {
 }
 
 export function WriteWorkspaceView({
+  threadId,
   input,
   setInput,
   onSubmitPrompt,
@@ -82,6 +85,7 @@ export function WriteWorkspaceView({
   onFocusConversation
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const exportPaused = useWriteWorkspaceStore((s) => s.exportInProgress)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   // Field-level subscription: this view must follow fileContent, but it should
@@ -675,7 +679,7 @@ export function WriteWorkspaceView({
 
   const exportCurrentFile = async (format: WriteExportFormat): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.exportWriteDocument !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeExportUnavailable') })
       return
@@ -683,11 +687,13 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(format)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.exportWriteDocument({
-        path: activeFilePath,
+        ...prepared.binding,
         format,
-        content: fileContent,
         typography: currentTypography
       })
       if (!result.ok) {
@@ -715,13 +721,14 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
 
   const copyCurrentFileAsRichText = async (): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.copyWriteDocumentAsRichText !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeCopyRichTextUnavailable') })
       return
@@ -729,11 +736,12 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(WRITE_RICH_CLIPBOARD_ACTION)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.copyWriteDocumentAsRichText({
-        path: activeFilePath,
-        workspaceRoot,
-        content: fileContent
+        ...prepared.binding
       })
       if (!result.ok) {
         showExportNotice({
@@ -756,6 +764,7 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
@@ -863,7 +872,7 @@ export function WriteWorkspaceView({
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
+    if (exportPaused || saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null
       void flushSave(workspaceRoot)
@@ -874,7 +883,7 @@ export function WriteWorkspaceView({
         saveTimerRef.current = null
       }
     }
-  }, [flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
+  }, [exportPaused, flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)

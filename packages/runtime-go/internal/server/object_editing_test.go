@@ -1,8 +1,11 @@
 package server
 
 import (
+	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -140,5 +143,128 @@ func TestNativeSelectionFreshThreadRejectsIdentityWorkspaceAndAuthorityMismatch(
 	p.handler.turnSecurity.RiskAuthority = nil
 	if err := p.ValidateCurrent(context.Background(), scope); err == nil {
 		t.Fatal("missing risk authority inferred a general selection")
+	}
+}
+
+func TestObjectExportRealFileMixedCaseWorkspaceAndAuthorityDrift(t *testing.T) {
+	p, _, base := newSelectionProjectorFixture(t)
+	workspace := filepath.Join(base.Workspace, "MixedCaseWorkspace")
+	if err := os.Mkdir(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := p.handler.store.CreateThread(map[string]any{"workspace": workspace}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err = p.handler.store.GetThread(stringField(thread, "id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(workspace, "Draft.md")
+	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filestore.NewObjectEditingFiles(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := editingapp.NewWithProjector(p.handler.turnSecurity.Identity, files, p)
+	ctx := context.Background()
+	opened, err := service.Open(ctx, workspace, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := service.UpdateDraft(ctx, editingapp.UpdateDraftInput{SessionID: opened.SessionID, BaseRevision: opened.Revision, Content: "unsaved local text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := editingapp.ExportSnapshotInput{SessionID: opened.SessionID, ObjectID: opened.ObjectID, ThreadID: stringField(thread, "id"), BaseRevision: opened.Revision, DraftVersion: draft.Version}
+	snapshot, err := service.ReadExportSnapshot(ctx, input)
+	if err != nil || snapshot.Content != draft.Content {
+		t.Fatalf("real file export did not match thread workspace: %v", err)
+	}
+	after, err := p.handler.store.GetThread(input.ThreadID)
+	if err != nil || !reflect.DeepEqual(thread, after) {
+		t.Fatal("export changed thread history")
+	}
+	// The same real object must also use an existing turn security record,
+	// without rewriting its workspace spelling or creating another turn.
+	frozen, err := turnsecurityapp.FreezeWorkspace(turnsecurityapp.WorkspaceFreezeInput{
+		Context: ctx, Authority: p.handler.turnSecurity, Thread: after, ThreadID: input.ThreadID,
+		TurnID: "export-existing-turn", Workspace: workspace, Principal: testIdentityPrincipal(), IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := turnsecurityapp.PublicRecord(frozen)
+	if err := p.handler.store.AppendTurnToThread(input.ThreadID, map[string]any{
+		"id": frozen.TurnID, "threadId": input.ThreadID, "status": "completed", "items": []any{}, "securityContext": record,
+	}, "", map[string]any{"securityState": record}); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := service.ReadExportSnapshot(ctx, input); err != nil || value.Content != draft.Content {
+		t.Fatalf("existing security context rejected export: %v", err)
+	}
+	input.ThreadID = base.ThreadID
+	if value, err := service.ReadExportSnapshot(ctx, input); err == nil || value.Content != "" {
+		t.Fatal("foreign workspace thread received export")
+	}
+	input.ThreadID = stringField(thread, "id")
+	observer := p.handler.turnSecurity.Observer
+	foreign := workspacetest.New(t)
+	p.handler.turnSecurity.Observer = selectionObserver(func(string) (domainsecurity.CaseBindingObservationV1, error) { return observer.Observe(foreign) })
+	if value, err := service.ReadExportSnapshot(ctx, input); err == nil || value.Content != "" {
+		t.Fatal("injected observer mismatch received export")
+	}
+	calls := 0
+	p.handler.turnSecurity.Observer = selectionObserver(func(path string) (domainsecurity.CaseBindingObservationV1, error) {
+		calls++
+		if calls >= 3 {
+			return observer.Observe(foreign)
+		}
+		return observer.Observe(path)
+	})
+	if value, err := service.ReadExportSnapshot(ctx, input); err == nil || value.Content != "" {
+		t.Fatal("workspace drift during gate acquisition received export")
+	}
+	p.handler.turnSecurity.Observer = observer
+	moved := workspace + "-moved"
+	if err := os.Rename(workspace, moved); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(workspace); _ = os.Rename(moved, workspace) }()
+	if err := os.Symlink(foreign, workspace); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := service.ReadExportSnapshot(ctx, input); err == nil || value.Content != "" {
+		t.Fatal("rebound symlink alias received export")
+	}
+	original, err := os.ReadFile(filepath.Join(moved, "Draft.md"))
+	if err != nil || string(original) != "original" {
+		t.Fatal("export altered original")
+	}
+}
+
+func TestNativeSelectionDoesNotFoldDistinctCaseSensitiveWorkspaces(t *testing.T) {
+	p, _, scope := newSelectionProjectorFixture(t)
+	upper := filepath.Join(scope.Workspace, "CaseDirectory")
+	lower := filepath.Join(scope.Workspace, "casedirectory")
+	if err := os.Mkdir(upper, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(lower, 0700); err != nil {
+		if os.IsExist(err) {
+			t.Skip("host fixture filesystem is case-insensitive")
+		}
+		t.Fatal(err)
+	}
+	thread, err := p.handler.store.CreateThread(map[string]any{"workspace": upper}, upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope.ThreadID = stringField(thread, "id")
+	scope.Workspace = lower
+	if err := p.ValidateCurrent(context.Background(), scope); err == nil {
+		t.Fatal("distinct case-sensitive directory received authority")
 	}
 }

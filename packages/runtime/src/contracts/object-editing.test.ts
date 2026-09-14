@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { objectEditingRequestSchema, objectEditingResponseSchema } from './object-editing'
+import { objectEditingRequestSchema, objectEditingResponseSchema, objectExportSnapshotRequestSchema, objectExportSnapshotResponseSchema } from './object-editing'
 
 const token = 'a'.repeat(48)
 const revision = 'b'.repeat(64)
@@ -67,5 +67,29 @@ describe('protected-local object editing contract', () => {
     expect(objectEditingResponseSchema.safeParse({ ok: false, code: 'persistence_failure', message: 'Unknown.', receipt }).success).toBe(true)
     expect(objectEditingResponseSchema.safeParse({ ok: true, receipt: { ...receipt, status: 'committed' } }).success).toBe(false)
     expect(objectEditingResponseSchema.safeParse({ ok: true, receipt: { ...receipt, status: 'committed', revision, savedAt: '2026-09-14T01:00:00Z' } }).success).toBe(true)
+  })
+})
+
+
+describe('Main-only export snapshot contract', () => {
+  const request = { action: 'export-snapshot', sessionId: token, objectId: revision, threadId: 'thread-1', baseRevision: revision, draftVersion: token }
+  it('is not admitted by the generic Renderer object lane and requires exact identity', () => {
+    expect(objectExportSnapshotRequestSchema.safeParse(request).success).toBe(true)
+    expect(objectEditingRequestSchema.safeParse(request).success).toBe(false)
+    for (const key of Object.keys(request)) {
+      const incomplete = { ...request } as Record<string, unknown>
+      delete incomplete[key]
+      expect(objectExportSnapshotRequestSchema.safeParse(incomplete).success).toBe(false)
+    }
+    for (const extra of ['content', 'workspace', 'path', 'scopeId', 'purpose']) {
+      expect(objectExportSnapshotRequestSchema.safeParse({ ...request, [extra]: 'forged' }).success).toBe(false)
+    }
+  })
+  it('bounds protected text and requires complete snapshot identity', () => {
+    const { action: _, ...binding } = request
+    const snapshot = { ...binding, contentDigest: revision, workspace: '/workspace', path: '/workspace/note.md', content: '草稿' }
+    expect(objectExportSnapshotResponseSchema.safeParse({ ok: true, snapshot }).success).toBe(true)
+    for (const content of ['\ud800', 'x'.repeat(1_572_865)]) expect(objectExportSnapshotResponseSchema.safeParse({ ok: true, snapshot: { ...snapshot, content } }).success).toBe(false)
+    expect(objectEditingResponseSchema.safeParse({ ok: true, snapshot }).success).toBe(false)
   })
 })

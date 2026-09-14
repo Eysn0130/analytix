@@ -98,7 +98,7 @@ export function DocumentWorkspacePanel({ threadId, activeTab, visible, input, se
       </header> : null}
       <div className="relative flex min-h-0 flex-1">
         {filesOpen && visible ? <div className="document-workspace-files relative w-52 shrink-0 border-r border-ds-border bg-ds-card">{fileBrowser}</div> : null}
-        {nativeActive ? <NativeOfficePanel fileActions={fileActions} quickActions={quickActions} threadId={threadId} visible={visible} onFocusConversation={onFocusConversation} onSubmitPrompt={onSubmitPrompt} /> : <WriteWorkspaceView leftSidebarCollapsed={false} input={input} setInput={setInput} onSubmitPrompt={onSubmitPrompt} onOpenAgentSettings={onOpenSettings} onFocusConversation={onFocusConversation} />}
+        {nativeActive ? <NativeOfficePanel fileActions={fileActions} quickActions={quickActions} threadId={threadId} visible={visible} onFocusConversation={onFocusConversation} onSubmitPrompt={onSubmitPrompt} /> : <WriteWorkspaceView threadId={threadId} leftSidebarCollapsed={false} input={input} setInput={setInput} onSubmitPrompt={onSubmitPrompt} onOpenAgentSettings={onOpenSettings} onFocusConversation={onFocusConversation} />}
       </div>
     </section>
   )

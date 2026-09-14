@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
@@ -28,24 +29,50 @@ func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editi
 		h.turnSecurity.Identity.ValidateCurrent(ctx, scope.Principal) != nil {
 		return editingapp.ErrProjection
 	}
+	// Object sessions retain filesystem-semantic identities; thread security
+	// records retain their original canonical spelling. Compare through the real
+	// filesystem without changing either identity or persisted security context.
+	sameWorkspace := func(left, right string) bool {
+		leftID, leftOK := filestore.ResolveMutationIdentityPath(left, left)
+		rightID, rightOK := filestore.ResolveMutationIdentityPath(right, right)
+		return leftOK && rightOK && leftID == rightID
+	}
 	observation, err := h.turnSecurity.Observer.Observe(scope.Workspace)
-	workspace := observation.WorkspaceRealPath
-	if err != nil || workspace != scope.Workspace {
+	if err != nil || !sameWorkspace(scope.Workspace, observation.WorkspaceRealPath) {
 		return editingapp.ErrProjection
 	}
-	release, err := h.runtimeSubagentState().AcquireSecurityScopeRead(ctx, scope.ThreadID, workspace, scope.Principal.TenantID, scope.Principal.UserID)
-	if err != nil {
-		return editingapp.ErrProjection
-	}
-	defer release()
 	thread, err := h.store.GetThread(scope.ThreadID)
 	if err != nil || stringField(thread, "id") != scope.ThreadID {
 		return editingapp.ErrProjection
 	}
 	threadObservation, err := h.turnSecurity.Observer.Observe(stringField(thread, "workspace"))
-	if err != nil || threadObservation.WorkspaceRealPath != workspace {
+	if err != nil || !sameWorkspace(stringField(thread, "workspace"), threadObservation.WorkspaceRealPath) ||
+		!sameWorkspace(observation.WorkspaceRealPath, threadObservation.WorkspaceRealPath) {
 		return editingapp.ErrProjection
 	}
+	workspace := threadObservation.WorkspaceRealPath
+	release, err := h.runtimeSubagentState().AcquireSecurityScopeRead(ctx, scope.ThreadID, workspace, scope.Principal.TenantID, scope.Principal.UserID)
+	if err != nil {
+		return editingapp.ErrProjection
+	}
+	defer release()
+	// A transition may have completed before the gate was acquired. Re-read both
+	// observations and identities under it; never switch to another workspace.
+	thread, err = h.store.GetThread(scope.ThreadID)
+	if err != nil || stringField(thread, "id") != scope.ThreadID {
+		return editingapp.ErrProjection
+	}
+	threadObservation, err = h.turnSecurity.Observer.Observe(stringField(thread, "workspace"))
+	if err != nil || threadObservation.WorkspaceRealPath != workspace ||
+		!sameWorkspace(stringField(thread, "workspace"), threadObservation.WorkspaceRealPath) {
+		return editingapp.ErrProjection
+	}
+	observation, err = h.turnSecurity.Observer.Observe(scope.Workspace)
+	if err != nil || !sameWorkspace(scope.Workspace, observation.WorkspaceRealPath) ||
+		!sameWorkspace(observation.WorkspaceRealPath, threadObservation.WorkspaceRealPath) {
+		return editingapp.ErrProjection
+	}
+	scope.Workspace = workspace
 	securityContext, err := p.selectionSecurityContext(ctx, thread, scope)
 	if err != nil || securityContext.ThreadID != scope.ThreadID || securityContext.WorkspaceRealPath != workspace ||
 		securityContext.TenantID != scope.Principal.TenantID || securityContext.UserID != scope.Principal.UserID {
