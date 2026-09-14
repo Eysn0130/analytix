@@ -189,7 +189,7 @@ func nativeSaveID(change string) string { return "native_save_" + change }
 func nativeUndoID(change string) string { return "native_undo_" + change }
 func (s *ObjectEditingFiles) nativeOriginal(record nativeRecoveryRecord) ([]byte, error) {
 	body, _, err := s.readNativePrivate(s.nativePath(record.ObjectIdentity, record.Draft.ChangeID, ".before"), MaxOfficeObjectBytes)
-	if err != nil || digestAtomicText(body) != record.Draft.BaseRevision || InspectOfficePackage(body, s.officeKind) != nil {
+	if err != nil || digestAtomicText(body) != record.Draft.BaseRevision || s.validateNativeObject(body) != nil {
 		return nil, editing.ErrPersistence
 	}
 	return body, nil
@@ -389,7 +389,7 @@ func (s *ObjectEditingFiles) PrepareNativeChange(ctx context.Context, input edit
 	if digestAtomicText(state.Content) != input.Draft.BaseRevision {
 		return editing.NativeChangeStatus{}, editing.ErrConflict
 	}
-	if InspectOfficePackage(state.Content, s.officeKind) != nil {
+	if s.validateNativeObject(state.Content) != nil {
 		return editing.NativeChangeStatus{}, editing.ErrNotText
 	}
 	if index.Preparing == nil {

@@ -17,7 +17,7 @@ func (s *ObjectEditingFiles) nativeCandidate(record nativeRecoveryRecord) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	if !objectEditingHash(record.AfterHash) || hash != record.AfterHash || InspectOfficePackage(body, record.Kind) != nil {
+	if !objectEditingHash(record.AfterHash) || hash != record.AfterHash || record.Kind != s.officeKind || s.validateNativeObject(body) != nil {
 		return nil, editing.ErrPersistence
 	}
 	return body, nil

@@ -223,6 +223,16 @@ func decodeImage(raw []byte) (*image.NRGBA, error) {
 	return result, nil
 }
 func dimensions(i *image.NRGBA) Dimensions { return Dimensions{i.Bounds().Dx(), i.Bounds().Dy()} }
+
+// InspectImage validates the actual bounded pixels without transforming them.
+// Dimensions are local display metadata, never source or egress authority.
+func InspectImage(raw []byte) (Dimensions, error) {
+	decoded, err := decodeImage(raw)
+	if err != nil {
+		return Dimensions{}, err
+	}
+	return dimensions(decoded), nil
+}
 func rotateImage(src *image.NRGBA, degrees int) *image.NRGBA {
 	w, h := src.Bounds().Dx(), src.Bounds().Dy()
 	nw, nh := w, h

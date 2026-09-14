@@ -49,7 +49,7 @@ func (s *ObjectEditingFiles) decodeObject(raw []byte) (string, string, error) {
 	if len(raw) > MaxOfficeObjectBytes {
 		return "", "", objectediting.ErrTooLarge
 	}
-	if InspectOfficePackage(raw, s.officeKind) != nil {
+	if s.validateNativeObject(raw) != nil {
 		return "", "", objectediting.ErrNotText
 	}
 	return base64.StdEncoding.EncodeToString(raw), "office-base64", nil
@@ -72,7 +72,7 @@ func (s *ObjectEditingFiles) encodeObject(content, encoding string) ([]byte, err
 	if len(raw) > MaxOfficeObjectBytes {
 		return nil, objectediting.ErrTooLarge
 	}
-	if InspectOfficePackage(raw, s.officeKind) != nil {
+	if s.validateNativeObject(raw) != nil {
 		return nil, objectediting.ErrNotText
 	}
 	return raw, nil
