@@ -6,7 +6,9 @@ import (
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
+	hostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
+	domainskill "analytix.local/runtime-go/internal/domain/skill"
 )
 
 func (h *runtimeServerHandler) executeGenerateDocumentRuntimeTool(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
@@ -26,7 +28,22 @@ func (h *runtimeServerHandler) executeGenerateDocumentRuntimeTool(ctx context.Co
 	}
 	input := h.mutationToolInput(ctx, pending, args, principal.PrincipalDigest)
 	input.ValidateCreationIdentity = validate
-	return filestore.ExecuteGenerateDocumentTool(input, h.documentCodec)
+	loaded, ok := ctx.Value(preparedHostedSkillKey{}).(hostapp.HostedSkill)
+	if !ok || h.officePackageHost == nil {
+		return unavailable, true
+	}
+	var output any
+	var failed bool
+	// Preserve the established Host -> workspace lock order. The callback's
+	// identity checks do not re-enter the Host while the workspace is locked.
+	err = h.officePackageHost.WithSkill(ctx, loaded.Binding, loaded.Snapshot.Digest(), func(domainskill.PackageSnapshot) error {
+		output, failed = filestore.ExecuteGenerateDocumentTool(input, h.documentCodec)
+		return nil
+	})
+	if err != nil {
+		return unavailable, true
+	}
+	return output, failed
 }
 
 func (h *runtimeServerHandler) ResolveGeneratedArtifact(ctx context.Context, threadID, artifactID string) (generationapp.Resolved, error) {

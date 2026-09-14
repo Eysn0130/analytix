@@ -16,6 +16,7 @@ import (
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainskill "analytix.local/runtime-go/internal/domain/skill"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	provider "analytix.local/runtime-go/internal/provider"
 )
@@ -235,8 +236,26 @@ func (h *runtimeServerHandler) acquireRuntimePendingToolEffect(
 
 func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pending runtimePendingToolCall, issuedAt time.Time) (apploop.PreparedSideEffect, error) {
 	children := &runtimeChildProducerPlanV1{owner: h}
+	var snapshot domainskill.PackageSnapshot
+	var hostBinding any
+	loaded, hosted := h.currentDocumentsSkill(ctx)
+	if hosted {
+		snapshot = loaded.Snapshot
+	}
+	catalog := toolcatalogapp.WithDocumentsSkill(h.skills, snapshot)
+	args, _ := domainsecurity.DecodeCanonicalJSONObject(pending.Call.Arguments)
+	requiresHost := pending.ExecutionGrant.ToolName == "generate_office_document" ||
+		(pending.ExecutionGrant.ToolName == "run_skill" && isDocumentsSkillName(subagentapp.SkillNameFromArgs(args)))
+	if requiresHost {
+		if !hosted {
+			return apploop.PreparedSideEffect{Rejection: &apploop.ToolDispatchOverride{Output: map[string]any{"code": "plugin_host_unavailable", "error": "Documents is unavailable."}, IsError: true}}, nil
+		}
+		hostBinding = hostedSkillProjection(loaded)
+	}
 	prepared, err := toolsideeffect.Prepare(ctx, pending, issuedAt, toolsideeffect.Dependencies{
-		GoalService: h.runtimeGoalToolService(), ResolveSkill: h.runtimeSkillByName, ResolveSkillBody: h.runtimeSkillEntryBody,
+		GoalService: h.runtimeGoalToolService(), HostBinding: hostBinding,
+		ResolveSkill:     func(name string) (map[string]any, bool) { return toolcatalogapp.SkillByName(catalog, name) },
+		ResolveSkillBody: func(skill map[string]any) (string, error) { return toolcatalogapp.SkillEntryBody(catalog, skill) },
 		ResolveTask: func(request subagentapp.TaskRequest) (any, error) {
 			return children.reserveChildV1(ctx, pending, request)
 		},
@@ -246,6 +265,15 @@ func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pen
 	})
 	if err != nil {
 		return apploop.PreparedSideEffect{}, err
+	}
+	if requiresHost && prepared.Rejection == nil {
+		bind := prepared.Bind
+		prepared.Bind = func(bound context.Context) context.Context {
+			if bind != nil {
+				bound = bind(bound)
+			}
+			return context.WithValue(bound, preparedHostedSkillKey{}, loaded)
+		}
 	}
 	return children.bindPreparedSideEffectV1(pending, prepared)
 }

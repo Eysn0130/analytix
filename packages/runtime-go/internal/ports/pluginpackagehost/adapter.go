@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	domainidentity "analytix.local/runtime-go/internal/domain/identity"
+	domainskill "analytix.local/runtime-go/internal/domain/skill"
 )
 
 // Binding is derived from current trusted materialization and activation, never
@@ -43,4 +44,10 @@ type Result struct{ Output json.RawMessage }
 type Adapter interface {
 	Readiness(context.Context, Binding) (Readiness, error)
 	Invoke(context.Context, Call) (Result, error)
+}
+
+// SkillReader reads only the fixed, admitted contribution from the verified
+// installed generation. It must not resolve caller-supplied filesystem roots.
+type SkillReader interface {
+	ReadSkill(context.Context, Binding) (domainskill.PackageSnapshot, error)
 }

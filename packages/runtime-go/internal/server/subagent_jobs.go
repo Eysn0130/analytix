@@ -122,6 +122,9 @@ func (h *runtimeServerHandler) executeRuntimeParallelSubagents(ctx context.Conte
 
 func (h *runtimeServerHandler) executeRuntimeRunSkill(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	name := subagentapp.SkillNameFromArgs(args)
+	if isDocumentsSkillName(name) {
+		return h.executeDocumentsSkill(ctx, args)
+	}
 	skill, ok := h.runtimeSkillByName(name)
 	if !ok {
 		return map[string]any{"code": "unknown_skill", "error": "unknown skill: " + strings.TrimSpace(name), "available": h.runtimeSkillIDs()}, true

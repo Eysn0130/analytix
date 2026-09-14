@@ -53,6 +53,7 @@ type Registration struct {
 	Materialization          ActiveResolver
 	State                    materializationport.PackageStateStore
 	Adapter                  adapterport.Adapter
+	SkillReader              adapterport.SkillReader
 }
 
 type PackageView struct {

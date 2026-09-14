@@ -1,95 +1,101 @@
 # Built-in Office package host
 
-Status: Reference. Describes source-development integration, not native preview
-acceptance, packaged admission or release readiness.
+Status: Reference. Current source integration under the continuous product target
+in [product-completion.md](product-completion.md). Source capability, installed
+local acceptance and permission to redistribute remain separate claims.
 
-Documents, Spreadsheets and Presentations are real first-party package sources
-under `plugins/analytix-*`. Their static declarations request only local read-only preview of a
-user-selected object. This supersedes the earlier editing experiment following
-the owner’s 2026-09-14 product decision. They install through the
-existing plugin materialization owner and installation signing authority. They
-contain no alternate Agent, credentials, shell entrypoint, MCP server or Hub
-login dependency.
+## Package contribution and Core authority
 
-Unpackaged Electron supplies its own source root to the Go runtime. Ambient
-copies of that configuration are removed before child launch. Packaged-executable inspection denies this source path even when a caller
-supplies the source environment. The normal development launcher also builds
-with `analytix_prod`; that Go tag is not evidence of a packaged application.
-Inspection binds the source tree, canonical declaration and adapter descriptor
-to an explicit `development-source` receipt. It never becomes formal package
-authority or a publishable artifact. Interrupted materialization keeps its first
-durable intent rather than selecting a new transaction on restart.
+Documents, Spreadsheets and Presentations are first-party sources under
+`plugins/analytix-*`. The native canvas remains a read-only user interface; it
+is not a complete manual Office editor. That restriction does not prohibit
+Core-owned generation, reviewed proposals or explicit application of a proposal.
 
-The protected `/v1/local-display/plugin-package-host` endpoint lists packages,
-changes desired state and invokes a finite static adapter operation. It uses the
-existing runtime bearer and typed local-display header. Electron accepts this
-IPC only from its own main frame. Browser previews and third-party frames cannot
-manage the host. The renderer cannot register roots, executables or principals.
+Documents 0.2.0 declares one fixed `documents` Skill and the paired
+`office.document-generation` capability, restricted to a new file in the current
+conversation. Its existing `office.local-preview` contribution retains the
+`user-selected-object` and `read-only` constraints. Spreadsheets and Presentations
+still declare preview contributions; their generation Skills and typed writers
+remain required work. No package contains another Agent, credentials, an ambient
+shell entrypoint, MCP server or Hub login dependency.
 
-Signed activation is scoped to the exact installed generation and uses revision
-compare-and-swap. Missing activation is `unset`, not a fabricated disabled
-record. The plugin page reads and persists state through Core; it does not use
-marketplace localStorage flags as installation or execution authority. After
-either a successful or uncertain mutation it reads the current signed state.
-Upgrading an authentic historical local-edit installation reconstructs its old
-registration only for signed installed-tree comparison. New source admission
-remains preview-only, and the new generation requires its own activation.
-Enabled and available are distinct: without a ready adapter, an enabled package
-is displayed as an unavailable preview.
+The materialization owner authenticates the full source tree, canonical package
+identity, declaration, UI/adapter descriptors and declared Skill bytes. A fixed
+Skill hash extends the source registration; historical registrations without
+Skills retain their exact old bytes and digest. Undeclared files do not become
+executable contributions. The runtime reads instructions from the verified
+installed generation, not a source path added to the ordinary Skill search roots.
 
-One Host orders activation changes and complete invocations. Disable waits for
-an invocation already executing; after its commit, the previous enabled state
-cannot start another call. An adapter must not re-enter the Host. Current
-source registrations can attach the fixed local Zeta adapter when all pinned
-engine resources pass verification. Loading a plugin page does not establish
-that an Office engine has been admitted for distribution or executed.
+The existing installation authority signs activation for an exact generation and
+revision. Missing activation is `unset`. Disable withdraws hosted discovery and
+new generation calls; re-enabling does not revive a prepared task from an older
+activation revision. Upgrades require new activation. Public discovery contains
+bounded summary metadata; full instructions are supplied only by `run_skill`.
+The fixed `analytix-documents` namespace cannot be replaced by a project Skill.
 
-In the source experiment, opening DOCX/XLSX/PPTX creates a sandboxed, isolated
-Electron work surface with a finite Main-owned message bridge. The page has no
-generic desktop bridge, filesystem paths, Provider or unrestricted network
-access. The fixed resource server sets COOP/COEP and serves verified held bytes;
-navigation, downloads, permissions and native save/open shortcuts are blocked.
-The product has one file header, the native content area and a compact preview
-status bar. It exposes no formatting, formula input, insertion, undo or Save.
-DOCX defaults to page-width fit; XLSX defaults to 100% with native sheet
-navigation; PPTX defaults to whole-page fit with bounded previous/next controls.
-The compact footer reports actual native zoom. Manual zoom exits automatic fit.
-These view controls stay inside the isolated surface and cannot dispatch model
-edits or arbitrary UNO commands. A light reading background is configured only
-inside the engine's isolated virtual configuration, never the host Office profile.
-Close, collapse and focus remain independent actions in the containing workspace.
+Core still owns thread/workspace authorization, Provider policy, privacy
+projection and persistence. Declaring a Skill or installing a plugin grants none
+of those rights. Native selection proposals use current Core capture authority;
+their explicit apply path checks the object, version and operation identity.
+The complete typed-edit capability inventory remains part of product completion.
 
-Core reads at most 16 MiB of native OOXML per object, checks bounded ZIP/XML
-structure and rejects active content and external relationships. The protected
-local transport uses strict base64, never a Markdown conversion. Office adapters
-advertise only open and close operations. They reject commit/status calls, and
-the Office-specific file encoder rejects writes even through a direct session.
-Existing text editing remains separate and unchanged by this preview policy.
+## Native selection and controlled modification
 
-The native loader requires ReadOnly and verifies XStorable.isReadonly before
-publishing the object; LockEditDoc, LockSave and LockExport close native UI
-alternatives. Native read-only mode alone is not an API write barrier, so the
-worker removes mutation and export dispatch entirely. The surface blocks input,
-paste, drop and editing shortcuts. Main also rejects legacy editing requests and
-never exports, commits or acknowledges a save. Writer also emits modify notifications for view changes. Only a confirmed
-read-only, unmodified model is treated as a view notification; true or unknown
-mutation still invalidates the preview. The worker never clears modification
-flags to conceal a change. Closing a preview releases its
-resources without a Save/Discard dialogue.
+Opening a supported OOXML object creates a sandboxed Electron native work
+surface. Its finite bridge exposes no generic desktop API, filesystem path,
+Provider or unrestricted network. The fixed resource server serves verified
+held bytes with COOP/COEP. Navigation, downloads, permissions and native editing
+or save shortcuts remain blocked. A compact file header and native status/footer
+provide bounded view controls; closing, collapsing and focusing are independent.
 
-The current surface supports one active native object per window. Selection is
-local viewing metadata, not authority for AI patches. Pinned Noto CJK fonts load
-inside the native virtual filesystem; full glyph and layout coverage still
-requires actual-file checks. Packaged execution remains denied: source preview
-availability does not establish binary, Qt or font redistribution permission.
-The earlier editable-engine outputs and evidence are retained as historical
-experiments and are not preview acceptance evidence.
+The source implementation now captures native selections and exposes a shared
+selection action catalog through the surface, host context menu and keyboard.
+Opening a menu does not send a task. Reference adds a composer card; an explicit
+quick action starts a task in the same main conversation while preserving the
+composer draft. Selection authority includes current object/version/capture
+identity. Visual line numbers and screenshots alone cannot authorize a patch.
 
-Focused evidence includes all three actual repository package trees materialized
-into an isolated installation, persisted activation across a fresh Host, exact
-protected-route checks, interrupted-intent reuse, Host race tests, and Main
-response/generation/revision checks. It does not replace the mandatory aggregate
-gate or GUI/native file acceptance of the final candidate.
+Core accepts bounded proposals, and explicit apply uses the managed editing
+owner and compare-and-swap file commit. The adapter therefore has controlled
+capture, proposal, commit and status operations in addition to open/close.
+The earlier assertion that it rejects every write operation is obsolete.
+Numeric/formula/merged spreadsheet targets remain excluded from text replacement
+until their typed modification paths are complete. Persistent annotation,
+format-fidelity, native undo/restart and multi-object recovery acceptance remain
+required; focused source tests do not establish those product outcomes.
+
+The native surface remains protected from direct manual edits. A finite worker
+operation authorized through Core may nevertheless change an isolated document
+model for a proposal. Such a proposal is not a saved source file. The product
+must show apply/unknown outcome/conflict truthfully and must not clear native
+modification flags to fabricate a successful save.
+
+## Generation, opening and lifecycle
+
+The DOCX codec receives bounded content and explicit image bytes through a fixed
+host-built process entry. It receives no target path, filesystem authority or
+Provider credentials. Core validates the resulting OOXML, creates only an absent
+target, settles the checkpoint and emits a typed artifact receipt. Local opening
+resolves that receipt through the current installation principal and conversation;
+public metadata contains no private file path. Live results open the native
+object; replaying an existing receipt does not reopen it automatically.
+
+One Host serializes activation with complete contribution consumption. The lock
+order is Host then workspace mutation; code holding the workspace lease must not
+re-enter the Host. Generation binds its prepared identity to the installed
+package, activation and Skill digest before entering the file mutation owner.
+An adapter or hosted instruction consumer must not recursively enter the Host.
+
+Unpackaged Electron supplies its own source root to Go. Packaged-executable
+inspection still denies this source route; `analytix_prod` by itself is not
+packaged admission. The development receipt remains `development-source`,
+`source-experiment`, non-publishable. A lawful qualified local packaged route is
+still required by the current target; removing the denial is not that route.
+
+Core checks native files with bounded ZIP/XML inspection and rejects active
+content and external relationships. Pinned engine resources/fonts and their
+notices require actual installed-file and rendering evidence. The historical
+check below applies only to its recorded candidate, not subsequent code.
 
 ## Read-only preview visual check — 2026-09-14
 

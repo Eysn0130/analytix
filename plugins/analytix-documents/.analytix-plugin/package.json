@@ -1,9 +1,14 @@
 {
   "schemaVersion": 1,
   "packageId": "analytix-documents",
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "contributions": {
-    "skills": [],
+    "skills": [
+      {
+        "id": "documents",
+        "path": "skills/documents/SKILL.md"
+      }
+    ],
     "mcpServers": [],
     "hooks": [],
     "assets": [
@@ -26,6 +31,14 @@
       "scopeConstraints": [
         "user-selected-object",
         "read-only"
+      ]
+    },
+    {
+      "id": "office.document-generation",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "new-file",
+        "current-conversation"
       ]
     }
   ],

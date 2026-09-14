@@ -256,6 +256,9 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 			SourceTreeSHA256: identity.TreeSHA256, SourceTreeFileCount: identity.FileCount, ManifestSHA256: identity.ManifestSHA256,
 			PublicUISHA256: recordSHA256["ui/editor.json"], AdapterSHA256: recordSHA256["assets/adapter.json"],
 		}
+		if len(declaration.Contributions.Skills) != 0 {
+			observed.DocumentsSkillSHA256 = recordSHA256[domainpluginpackage.DocumentsSkillRelativePathV1]
+		}
 		if excludeHostMarker {
 			// Installed bytes may predate preview-only admission. Reconstruct
 			// their historical digest; Store still verifies the signed receipt,

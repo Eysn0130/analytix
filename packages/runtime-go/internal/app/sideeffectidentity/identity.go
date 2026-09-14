@@ -54,6 +54,9 @@ type Input struct {
 	ResolveDeleteSymbol OwnerProjectionResolver
 	ResolveMCP          MCPProjectionResolver
 	ResolveTask         TaskProjectionResolver
+	// HostBinding is supplied by trusted composition for installed plugin tools.
+	// It is never read from model arguments or a filesystem skill manifest.
+	HostBinding any
 }
 
 // ResolveV1 derives a versioned semantic identity from the owner parser used
@@ -94,7 +97,8 @@ func ResolveV1(input Input) (IdentityV1, error) {
 		SchemaVersion int    `json:"schemaVersion"`
 		ToolName      string `json:"toolName"`
 		Arguments     any    `json:"arguments"`
-	}{SchemaVersionV1, toolName, projection}
+		HostBinding   any    `json:"hostBinding,omitempty"`
+	}{SchemaVersionV1, toolName, projection, input.HostBinding}
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		return IdentityV1{}, err

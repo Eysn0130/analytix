@@ -10,7 +10,11 @@ import (
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 )
 
-const DevelopmentSourceOriginV1 = "development-source"
+const (
+	DevelopmentSourceOriginV1      = "development-source"
+	DocumentsSkillContributionIDV1 = "documents"
+	DocumentsSkillRelativePathV1   = "skills/documents/SKILL.md"
+)
 
 // DevelopmentSourceRegistrationV1 describes inspected source bytes, not a
 // release admission, resource seal, runtime grant, or proof of adapter readiness.
@@ -28,6 +32,7 @@ type DevelopmentSourceRegistrationV1 struct {
 	ManifestSHA256             string            `json:"manifestSha256"`
 	PublicUISHA256             string            `json:"publicUiSha256"`
 	AdapterSHA256              string            `json:"adapterSha256"`
+	DocumentsSkillSHA256       string            `json:"documentsSkillSha256,omitempty"`
 	ContributionsSHA256        string            `json:"contributionsSha256"`
 	Publishable                bool              `json:"publishable"`
 	FactToolsEnabled           bool              `json:"factToolsEnabled"`
@@ -67,16 +72,40 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 	invalid := errors.New("development source declaration is not an admitted first-party static editor")
 	if ValidateDeclarationV1(declaration) != nil || !ValidDevelopmentSourcePackageIDV1(declaration.PackageID) ||
 		declaration.Lifecycle.ProtocolVersion != 1 || declaration.Lifecycle.EntryPolicy != "host-static-first-party" ||
-		len(declaration.Contributions.Skills) != 0 || len(declaration.Contributions.MCPServers) != 0 || len(declaration.Contributions.Hooks) != 0 ||
+		len(declaration.Contributions.MCPServers) != 0 || len(declaration.Contributions.Hooks) != 0 ||
 		len(declaration.Contributions.PublicUI) != 1 || len(declaration.Contributions.Assets) != 1 ||
 		declaration.Contributions.PublicUI[0] != (PathContributionV1{ID: "workspace-editor", Path: "ui/editor.json"}) ||
-		declaration.Contributions.Assets[0] != (PathContributionV1{ID: "editor-adapter", Path: "assets/adapter.json"}) ||
-		len(declaration.RequestedCapabilities) != 1 {
+		declaration.Contributions.Assets[0] != (PathContributionV1{ID: "editor-adapter", Path: "assets/adapter.json"}) {
 		return invalid
 	}
-	capability := declaration.RequestedCapabilities[0]
+	hasDocumentsSkill := len(declaration.Contributions.Skills) != 0
+	expectedCapabilities := 1
+	if hasDocumentsSkill {
+		if declaration.PackageID != "analytix-documents" || len(declaration.Contributions.Skills) != 1 ||
+			declaration.Contributions.Skills[0] != (PathContributionV1{ID: DocumentsSkillContributionIDV1, Path: DocumentsSkillRelativePathV1}) {
+			return invalid
+		}
+		expectedCapabilities++
+	}
+	if len(declaration.RequestedCapabilities) != expectedCapabilities {
+		return invalid
+	}
+	var capability CapabilityRequestV1
+	for _, requested := range declaration.RequestedCapabilities {
+		if requested.ID == "office.document-generation" {
+			if !hasDocumentsSkill || requested.ProtocolVersion != 1 || len(requested.ScopeConstraints) != 2 ||
+				!developmentCapabilityScopesV1(requested, "new-file", "current-conversation") {
+				return invalid
+			}
+		} else {
+			if capability.ID != "" {
+				return invalid
+			}
+			capability = requested
+		}
+	}
 	requiredScope := "read-only"
-	if historical && capability.ID == "office.local-edit" {
+	if historical && !hasDocumentsSkill && capability.ID == "office.local-edit" {
 		requiredScope = "explicit-save"
 	} else if capability.ID != "office.local-preview" {
 		return invalid
@@ -84,14 +113,16 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 	if capability.ProtocolVersion != 1 || len(capability.ScopeConstraints) != 2 {
 		return invalid
 	}
-	scopes := map[string]bool{}
-	for _, scope := range capability.ScopeConstraints {
-		scopes[scope] = true
-	}
-	if !scopes["user-selected-object"] || !scopes[requiredScope] {
+	if !developmentCapabilityScopesV1(capability, "user-selected-object", requiredScope) {
 		return invalid
 	}
 	return nil
+}
+
+func developmentCapabilityScopesV1(capability CapabilityRequestV1, first, second string) bool {
+	return len(capability.ScopeConstraints) == 2 &&
+		((capability.ScopeConstraints[0] == first && capability.ScopeConstraints[1] == second) ||
+			(capability.ScopeConstraints[0] == second && capability.ScopeConstraints[1] == first))
 }
 
 func ValidateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegistrationV1) error {
@@ -112,6 +143,13 @@ func validateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegis
 	if err != nil || validateDevelopmentSourceDeclarationV1(declaration, historical) != nil || declaration.IdentityV1() != registration.Identity {
 		return invalid
 	}
+	if len(declaration.Contributions.Skills) == 0 {
+		if registration.DocumentsSkillSHA256 != "" {
+			return invalid
+		}
+	} else if !canonicalSHA256V1(registration.DocumentsSkillSHA256) {
+		return invalid
+	}
 	canonical, err := CanonicalDeclarationV1Bytes(declaration)
 	if err != nil || !bytes.Equal(canonical, []byte(registration.DeclarationCanonicalJSON)) || developmentSHA256V1(canonical) != registration.DeclarationCanonicalSHA256 {
 		return invalid
@@ -129,7 +167,7 @@ func DevelopmentSourceRegistrationV1Bytes(registration DevelopmentSourceRegistra
 func ParseDevelopmentSourceRegistrationV1(body []byte) (DevelopmentSourceRegistrationV1, error) {
 	var registration DevelopmentSourceRegistrationV1
 	fields, err := domainjsonstrict.DecodeRawObject(body, domainjsonstrict.Options{MaxBytes: 512 << 10, MaxDepth: 8, MaxTokens: 4096, MaxStringBytes: MaxDeclarationBytesV1})
-	if err != nil || len(fields) != 15 {
+	if err != nil || (len(fields) != 15 && len(fields) != 16) {
 		return registration, errors.New("development source registration JSON is invalid")
 	}
 	if err := json.Unmarshal(body, &registration); err != nil {
@@ -157,10 +195,14 @@ func developmentContributionsSHA256V1(registration DevelopmentSourceRegistration
 		Path   string `json:"path"`
 		SHA256 string `json:"sha256"`
 	}
-	body, _ := json.Marshal([]contribution{
+	contributions := []contribution{
 		{"publicUi", "workspace-editor", "ui/editor.json", registration.PublicUISHA256},
 		{"assets", "editor-adapter", "assets/adapter.json", registration.AdapterSHA256},
-	})
+	}
+	if registration.DocumentsSkillSHA256 != "" {
+		contributions = append(contributions, contribution{"skills", DocumentsSkillContributionIDV1, DocumentsSkillRelativePathV1, registration.DocumentsSkillSHA256})
+	}
+	body, _ := json.Marshal(contributions)
 	return developmentSHA256V1(append([]byte("analytix.development-source-contributions/v1\x00"), body...))
 }
 
@@ -174,7 +216,8 @@ func developmentSHA256V1(body []byte) string {
 // declaration. This is comparison evidence only, never admission or permission
 // to execute. The caller must authenticate the installed receipt and compare
 // this digest plus the tree/identity/marker fields to that receipt. New source
-// registration, parsing and service binding continue to accept preview only.
+// registration, parsing and service binding reject the retired local-edit
+// declaration; Documents may pair its fixed Skill with bounded generation.
 func ReconstructHistoricalDevelopmentSourceRegistrationV1(observed DevelopmentSourceRegistrationV1) ([]byte, string, error) {
 	registration, err := newDevelopmentSourceRegistrationV1(observed, true)
 	if err != nil {

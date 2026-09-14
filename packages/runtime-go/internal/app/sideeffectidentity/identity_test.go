@@ -51,6 +51,29 @@ func TestGenerationIdentityBindsContentAndRejectsUnownedOptions(t *testing.T) {
 	}
 }
 
+func TestGenerationIdentityBindsPluginActivationAndSource(t *testing.T) {
+	input := Input{ToolName: "generate_office_document", Arguments: json.RawMessage(`{"path":"report.docx","kind":"docx","markdown":"Synthetic"}`), WorkspaceRealPath: "/workspace", ResolvePath: testPathResolver}
+	baseline, err := ResolveV1(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.HostBinding = map[string]any{"generationId": "first", "activationRevision": 1, "sourceRegistrationSha256": strings.Repeat("a", 64)}
+	bound, err := ResolveV1(input)
+	if err != nil || bound.ArgsHash == baseline.ArgsHash {
+		t.Fatal("plugin authority absent from identity", err)
+	}
+	input.HostBinding = map[string]any{"generationId": "first", "activationRevision": 2, "sourceRegistrationSha256": strings.Repeat("a", 64)}
+	reenabled, err := ResolveV1(input)
+	if err != nil || bound.ArgsHash == reenabled.ArgsHash {
+		t.Fatal("reenable inherited an old identity", err)
+	}
+	input.HostBinding = map[string]any{"generationId": "second", "activationRevision": 1, "sourceRegistrationSha256": strings.Repeat("b", 64)}
+	upgraded, err := ResolveV1(input)
+	if err != nil || bound.ArgsHash == upgraded.ArgsHash {
+		t.Fatal("upgrade inherited an old identity", err)
+	}
+}
+
 func TestResolveV1CanonicalizesOwnerParserSemantics(t *testing.T) {
 	tests := []struct {
 		name       string

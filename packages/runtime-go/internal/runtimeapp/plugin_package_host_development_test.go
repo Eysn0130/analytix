@@ -56,6 +56,14 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 			t.Fatal("activation was not committed or fabricated an engine", err)
 		}
 	}
+	skills := host.Skills(ctx)
+	if len(skills) != 1 || skills[0].Binding.PackageID != "analytix-documents" {
+		t.Fatal("actual enabled Documents skill was not admitted")
+	}
+	instructions, ok := skills[0].Snapshot.File("SKILL.md")
+	if !ok || !strings.Contains(string(instructions), "generate_office_document") {
+		t.Fatal("installed skill did not contain its real generation workflow")
+	}
 	reopened := newDevelopmentPackageHost(ctx, config, identity, nil)
 	if reopened == nil {
 		t.Fatal("source host did not reopen")
@@ -68,6 +76,10 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		if view.GenerationID != views[index].GenerationID || view.ActivationRevision != 1 || view.DesiredState != domainplugin.DesiredEnabledV1 {
 			t.Fatal("restart replaced generation or activation")
 		}
+	}
+	restoredSkills := reopened.Skills(ctx)
+	if len(restoredSkills) != 1 || restoredSkills[0].Binding != skills[0].Binding || restoredSkills[0].Snapshot.Digest() != skills[0].Snapshot.Digest() {
+		t.Fatal("restart changed the admitted skill snapshot")
 	}
 	mux := httpapi.LocalDisplayMuxV1{RuntimeToken: "synthetic-token", LocalDisplay: httpapi.LocalDisplayHandlerV1{PackageHost: httpapi.PluginPackageHostHandler{Service: reopened}}}
 	for _, tc := range []struct {

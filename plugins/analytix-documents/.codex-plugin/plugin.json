@@ -1,5 +1,5 @@
 {
   "name": "analytix-documents",
-  "version": "0.1.0",
-  "description": "Documents editor for user-selected local files."
+  "version": "0.2.0",
+  "description": "Create documents and revise user-selected content through reviewed Core operations."
 }

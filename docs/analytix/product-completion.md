@@ -28,11 +28,11 @@ below are not yet installed-application evidence.
 | Quote-only send | Native references count toward composer send eligibility; quoting does not dispatch | Real Enter/button/IME journey and full action-entry integration |
 | Annotation lifecycle | Per-thread/object in-memory draft survives collapse; stale revision keeps note and requires selection | Protected persistent storage, normal restart, capacity and closed-tab recovery |
 | Native proposal refresh | Single-flight polling with failure backoff; new events supersede pending reads | Tool-completion refresh integration and installed behavior |
-| DOCX | Core absent-only generation calls a data-only `docx` codec; checkpoint binds the created bytes and installation principal; opaque artifacts resolve into the current native workspace | Plugin-bound discovery, full headers/fields/links coverage, installed repeated-text positive case and representative rendering |
+| DOCX | Core absent-only generation calls a data-only `docx` codec; checkpoint binds the created bytes and installation principal; opaque artifacts resolve into the current native workspace | Full headers/fields/links coverage, installed repeated-text positive case and representative rendering |
 | XLSX | Native cells expose type/formula/value/format; unsafe numeric/formula-to-text mutation rejected in Main and worker | Real typed numeric/formula/range operations, calculation validation, charts and summaries/pivots |
 | PPTX | Native preview and bounded shape selection | Object-based generation, targeted style/chart edits, per-slide quality checks |
 | Canvas / images | AtlasFlow and existing local media assets remain reusable | Stable scene identity, fact/layout separation, selection/notes/local edits, versioned exports; real media Provider integration |
-| Plugin Skills | Three Office packages materialize; Documents workflow source is being added, but static admission still requires empty Skills | Manifest/admission propagation, dependency handlers, generation-bound discovery/disable/upgrade, Canvas contribution |
+| Plugin Skills | Documents 0.2.0 declares an original workflow, fixed generation capability and installed snapshot; discovery and generation follow signed activation | XLSX/PPTX/Canvas contributions, full dependency handlers and installed end-to-end evidence |
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core scopes, protected parts, CAS and status queries exist | Real local original-value Diff, third-object eviction, pending-operation and undo restart recovery |
@@ -105,6 +105,15 @@ checkpoint deletion/restore. The existing generic checkpoint rescue is text-only
 generated Office creation therefore reports `manual_review`, not a false
 `ready/delete_created_file`. This does not disable native modification proposals
 or native undo. Native edit/undo persistence remains an active required outcome.
+
+Documents lifecycle checks use the actual repository package, a task-isolated
+installation authority and installed copy. They pass for fixed-byte reading,
+source/installed separation, installed tampering rejection, current discovery,
+inline instruction loading, generation preparation, disable/re-enable rejection
+and Host restart with the same snapshot. Host, catalog and side-effect preparation
+packages pass their tests; independent source review found no blocker in this
+bounded integration. The Skill validator and diff check pass. These are real
+materialization fixtures, not an installed desktop GUI journey.
 
 ## Completion evidence
 
