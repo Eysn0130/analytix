@@ -13,15 +13,18 @@ import (
 	hostport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
-// OfficeSkillReader is composed only from the inspected source registration
+// StaticEditorSkillReader is composed only from the inspected source registration
 // and the host's installation authority. Neither value comes from a tool call.
-type OfficeSkillReader struct {
+type StaticEditorSkillReader struct {
 	Store     *Store
 	Authority pluginport.InstallationAuthority
 	SHA256    string
 }
 
-func (reader OfficeSkillReader) ReadSkill(ctx context.Context, expected hostport.Binding) (domainskill.PackageSnapshot, error) {
+// OfficeSkillReader preserves the existing Office composition API.
+type OfficeSkillReader = StaticEditorSkillReader
+
+func (reader StaticEditorSkillReader) ReadSkill(ctx context.Context, expected hostport.Binding) (domainskill.PackageSnapshot, error) {
 	store := reader.Store
 	if store == nil || ctx == nil || ctx.Err() != nil || !domainpackage.ValidDevelopmentSourcePackageIDV1(expected.PackageID) || !domainplugin.IsCanonicalSHA256V1(reader.SHA256) {
 		return domainskill.PackageSnapshot{}, pluginport.ErrUnavailable
@@ -37,7 +40,7 @@ func (reader OfficeSkillReader) ReadSkill(ctx context.Context, expected hostport
 		current.Receipt.GenerationID != expected.GenerationID || current.Receipt.SourceRegistrationSHA256 != expected.SourceRegistrationSHA256 {
 		return domainskill.PackageSnapshot{}, pluginport.ErrConflict
 	}
-	contribution, _, ok := domainpackage.OfficeSkillContributionV1(expected.PackageID)
+	contribution, ok := domainpackage.StaticEditorSkillContributionV1(expected.PackageID)
 	if !ok {
 		return domainskill.PackageSnapshot{}, pluginport.ErrUnavailable
 	}

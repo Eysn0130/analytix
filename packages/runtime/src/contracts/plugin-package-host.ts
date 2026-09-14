@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 /** Main-owned local transport; neither plugin frames nor model tools receive it. */
 export const pluginPackageHostPath = '/v1/local-display/plugin-package-host'
-const packageId = z.enum(['analytix-documents', 'analytix-spreadsheets', 'analytix-presentations'])
+const packageId = z.enum(['analytix-documents', 'analytix-spreadsheets', 'analytix-presentations', 'analytix-canvas'])
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const operation = z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/)
@@ -35,7 +35,7 @@ export const pluginPackageHostRequestSchema = z.discriminatedUnion('action', [
 ])
 
 export const pluginPackageHostResponseSchema = z.union([
-  z.object({ ok: z.literal(true), packages: z.array(pluginPackageViewSchema).max(3) }).strict(),
+  z.object({ ok: z.literal(true), packages: z.array(pluginPackageViewSchema).max(4) }).strict(),
   z.object({ ok: z.literal(true), package: pluginPackageViewSchema }).strict(),
   z.object({ ok: z.literal(true), output: z.unknown() }).strict(),
   z.object({ ok: z.literal(false), code: z.enum([

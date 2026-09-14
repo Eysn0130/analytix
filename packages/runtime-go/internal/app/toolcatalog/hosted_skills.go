@@ -6,6 +6,7 @@ import (
 )
 
 const DocumentsSkillID = "analytix-documents"
+const CanvasSkillID = "analytix-canvas"
 
 type HostedOfficeSkill struct {
 	PackageID string
@@ -24,8 +25,7 @@ func OfficeSkillForKind(kind string) string {
 	return ""
 }
 func OfficeSkillIdentity(name string) string {
-	for _, kind := range []string{"docx", "xlsx", "pptx"} {
-		id := OfficeSkillForKind(kind)
+	for _, id := range []string{DocumentsSkillID, "analytix-spreadsheets", "analytix-presentations", CanvasSkillID} {
 		if _, ok := SkillByName(SkillCatalog{Skills: []map[string]any{{"id": id, "name": SkillDisplayName(id)}}}, name); ok {
 			return id
 		}
@@ -55,6 +55,7 @@ func WithOfficeSkills(base SkillCatalog, hosted []HostedOfficeSkill) SkillCatalo
 		counts[item.PackageID]++
 	}
 	descriptions := map[string]string{
+		CanvasSkillID:            "Create Canvas scenes and review scoped scene or PNG changes through controlled Core operations; keep source facts separate from visual layout.",
 		"analytix-documents":     "Create DOCX reports and revise selected document content with reviewed proposals in the current conversation.",
 		"analytix-spreadsheets":  "Create typed XLSX workbooks with checked formulas, formatting and charts; analyze data and review selected cell changes.",
 		"analytix-presentations": "Create structured PPTX presentations with stable objects, charts and images; review targeted slide changes.",

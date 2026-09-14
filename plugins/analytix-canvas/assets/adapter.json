@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "adapter": "canvas-core",
+  "documentKind": "canvas",
+  "openFormats": [
+    "canvas",
+    "png"
+  ],
+  "readOnly": true,
+  "protocolVersion": 1
+}

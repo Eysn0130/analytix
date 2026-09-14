@@ -31,7 +31,7 @@ func developmentRegistrationFixtureV1(t *testing.T, id string) DevelopmentSource
 	return registration
 }
 
-func TestDevelopmentSourceRegistrationFreezesOnlyThreeStaticEditors(t *testing.T) {
+func TestDevelopmentSourceRegistrationPreservesThreeOfficeEditors(t *testing.T) {
 	for _, id := range []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations"} {
 		registration := developmentRegistrationFixtureV1(t, id)
 		body, err := DevelopmentSourceRegistrationV1Bytes(registration)

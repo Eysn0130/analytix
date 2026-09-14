@@ -106,7 +106,7 @@ type Service struct {
 }
 
 func New(identity identityport.Authority, authority materializationport.InstallationAuthority, registrations []Registration, now func() time.Time) (*Service, error) {
-	if identity == nil || authority == nil || now == nil || len(registrations) > 3 {
+	if identity == nil || authority == nil || now == nil || len(registrations) > 4 {
 		return nil, ErrUnavailable
 	}
 	s := &Service{identity: identity, authority: authority, registrations: make(map[string]Registration, len(registrations)), now: now}
@@ -193,7 +193,7 @@ func readiness(ctx context.Context, registration Registration, binding adapterpo
 }
 
 func baseView(registration Registration) PackageView {
-	names := map[string]string{"analytix-documents": "Documents", "analytix-spreadsheets": "Spreadsheets", "analytix-presentations": "Presentations"}
+	names := map[string]string{"analytix-documents": "Documents", "analytix-spreadsheets": "Spreadsheets", "analytix-presentations": "Presentations", "analytix-canvas": "Canvas"}
 	return PackageView{PackageID: registration.Identity.PackageID, PackageVersion: registration.Identity.PackageVersion, DisplayName: names[registration.Identity.PackageID], Origin: domainplugin.DevelopmentSourceOriginV1, ActivationState: "unavailable", UnavailableReason: "materialization_unavailable", Operations: []string{}}
 }
 

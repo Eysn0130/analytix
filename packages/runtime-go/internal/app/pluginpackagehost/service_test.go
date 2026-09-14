@@ -138,6 +138,11 @@ type hostFixture struct {
 
 func fixture(t *testing.T) hostFixture {
 	t.Helper()
+	return fixtureForPackage(t, "analytix-documents")
+}
+
+func fixtureForPackage(t *testing.T, packageID string) hostFixture {
+	t.Helper()
 	now := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
 	seed := sha256.Sum256([]byte("plugin-host-synthetic-authority"))
 	authority := fakeAuthority{ed25519.NewKeyFromSeed(seed[:])}
@@ -146,12 +151,12 @@ func fixture(t *testing.T) hostFixture {
 		t.Fatal(err)
 	}
 	identity := &fakeIdentity{current: principal}
-	input := domainplugin.IntentInputV1{Origin: domainplugin.DevelopmentSourceOriginV1, SourceRegistrationSHA256: strings.Repeat("a", 64), Target: domainplugin.TargetV1{Platform: "darwin", Arch: "arm64"}, PluginName: "analytix-documents", PluginVersion: "1.0.0", SourceRoot: "/private/synthetic/source", SourceTreeSHA256: strings.Repeat("b", 64), SourceTreeFileCount: 4, ManifestSHA256: strings.Repeat("c", 64), RequestedAt: now}
+	input := domainplugin.IntentInputV1{Origin: domainplugin.DevelopmentSourceOriginV1, SourceRegistrationSHA256: strings.Repeat("a", 64), Target: domainplugin.TargetV1{Platform: "darwin", Arch: "arm64"}, PluginName: packageID, PluginVersion: "1.0.0", SourceRoot: "/private/synthetic/source", SourceTreeSHA256: strings.Repeat("b", 64), SourceTreeFileCount: 4, ManifestSHA256: strings.Repeat("c", 64), RequestedAt: now}
 	intent, err := domainplugin.NewIntentV1(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := domainplugin.NewReceiptV1(intent, strings.Repeat("d", 64), "plugins/cache/analytix-hub/analytix-documents/1.0.0", now, authority.KeyID(), authority.PublicKey(), func(body []byte) ([]byte, error) { return authority.Sign(context.Background(), body) })
+	receipt, err := domainplugin.NewReceiptV1(intent, strings.Repeat("d", 64), "plugins/cache/analytix-hub/"+packageID+"/1.0.0", now, authority.KeyID(), authority.PublicKey(), func(body []byte) ([]byte, error) { return authority.Sign(context.Background(), body) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,5 +480,58 @@ func TestHostObjectSelectorIsLimitedToNamedOperation(t *testing.T) {
 		if validInput(json.RawMessage(body), "open-object") {
 			t.Fatal("unsafe selector accepted")
 		}
+	}
+}
+
+func TestHostAdmitsExactlyFourFixedPackages(t *testing.T) {
+	ctx := context.Background()
+	first := fixture(t)
+	registrations := []Registration{}
+	for _, id := range []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas"} {
+		f := fixtureForPackage(t, id)
+		registrations = append(registrations, f.registration)
+	}
+	host, err := New(first.identity, first.authority, registrations, func() time.Time { return first.now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err := host.List(ctx)
+	if err != nil || len(views) != 4 {
+		t.Fatal("four packages not materialized", err)
+	}
+	for _, view := range views {
+		if !view.Materialized || view.Available || view.DesiredState != "" {
+			t.Fatal("unactivated package acquired execution", view)
+		}
+		if view.PackageID == "analytix-canvas" && view.DisplayName != "Canvas" {
+			t.Fatal("Canvas display identity lost")
+		}
+	}
+	canvas := registrations[3].State.(*fakeState)
+	view, err := host.SetDesiredState(ctx, SetDesiredStateRequest{PackageID: "analytix-canvas", GenerationID: canvas.current.Receipt.GenerationID, DesiredState: domainplugin.DesiredEnabledV1})
+	if err != nil || !view.Available {
+		t.Fatal("Canvas activation failed", err)
+	}
+	views, err = host.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range views {
+		if view.Available != (view.PackageID == "analytix-canvas") {
+			t.Fatal("Canvas activation affected another package")
+		}
+	}
+	if _, err := New(first.identity, first.authority, append(registrations, registrations[0]), func() time.Time { return first.now }); err == nil {
+		t.Fatal("fifth registration admitted")
+	}
+	foreign := append([]Registration(nil), registrations...)
+	foreign[3].Identity.PackageID = "analytix-other"
+	if _, err := New(first.identity, first.authority, foreign, func() time.Time { return first.now }); err != ErrInvalid {
+		t.Fatal("arbitrary fourth package admitted", err)
+	}
+	duplicate := append([]Registration(nil), registrations...)
+	duplicate[3] = duplicate[0]
+	if _, err := New(first.identity, first.authority, duplicate, func() time.Time { return first.now }); err != ErrInvalid {
+		t.Fatal("duplicate fourth package admitted", err)
 	}
 }

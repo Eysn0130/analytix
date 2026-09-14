@@ -11,66 +11,71 @@ import (
 )
 
 func TestDevelopmentSourceOriginIsSignedAndCannotBecomeFormalV1(t *testing.T) {
-	now := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
-	input := IntentInputV1{Origin: DevelopmentSourceOriginV1, SourceRegistrationSHA256: strings.Repeat("a", 64), Target: TargetV1{Platform: "darwin", Arch: "arm64"}, PluginName: "analytix-documents", PluginVersion: "1.0.0", SourceRoot: "/source/documents", SourceTreeSHA256: strings.Repeat("b", 64), SourceTreeFileCount: 4, ManifestSHA256: strings.Repeat("c", 64), RequestedAt: now}
-	intent, err := NewIntentV1(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seed := sha256.Sum256([]byte("development-source-test"))
-	private := ed25519.NewKeyFromSeed(seed[:])
-	public := private.Public().(ed25519.PublicKey)
-	receipt, err := NewReceiptV1(intent, strings.Repeat("d", 64), "plugins/cache/analytix-hub/analytix-documents/1.0.0", now, sha256Hex(public), public, func(b []byte) ([]byte, error) { return ed25519.Sign(private, b), nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := ReceiptV1Bytes(receipt)
-	if bytes.Contains(body, []byte(`"packageAuthoritySha256"`)) || !bytes.Contains(body, []byte(`"origin":"development-source"`)) {
-		t.Fatal("source receipt masquerades as packaged authority")
-	}
-	parsed, err := ParseReceiptV1(body)
-	if err != nil || parsed != receipt {
-		t.Fatal("source receipt round trip failed", err)
-	}
-	index, err := NewIndexV1(receipt, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	journal, err := NewJournalV1(intent, receipt.GenerationID, "plugins/.staging-test", receipt.ActiveRelativePath, 1, JournalPreparedV1, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if index.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 || journal.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 {
-		t.Fatal("origin lost in persisted projections")
-	}
-	changed := receipt
-	changed.SourceRegistrationSHA256 = strings.Repeat("e", 64)
-	changed.ReceiptID = deriveReceiptID(changed)
-	if ValidateReceiptV1(changed) == nil {
-		t.Fatal("changing source binding preserved signature")
-	}
-	changed = receipt
-	changed.Origin = ""
-	changed.PackageAuthoritySHA256 = changed.SourceRegistrationSHA256
-	changed.SourceRegistrationSHA256 = ""
-	changed.EntrypointSHA256 = strings.Repeat("e", 64)
-	changed.ReceiptID = deriveReceiptID(changed)
-	if ValidateReceiptV1(changed) == nil {
-		t.Fatal("source receipt relabeled formal retained signature")
-	}
-	for _, mutate := range []func(*IntentInputV1){func(i *IntentInputV1) { i.PackageAuthoritySHA256 = strings.Repeat("e", 64) }, func(i *IntentInputV1) { i.Origin = "" }, func(i *IntentInputV1) { i.PluginName = "analytix-fund-analysis" }, func(i *IntentInputV1) { i.EntrypointSHA256 = strings.Repeat("e", 64) }} {
-		bad := input
-		mutate(&bad)
-		if _, err := NewIntentV1(bad); err == nil {
-			t.Fatal("origin ambiguity accepted")
-		}
-	}
-	activation, err := NewActivationV1(receipt, 1, DesiredDisabledV1, now, sha256Hex(public), public, func(b []byte) ([]byte, error) { return ed25519.Sign(private, b), nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ValidateTrustedActivationForReceiptV1(activation, receipt, sha256Hex(public), public) != nil {
-		t.Fatal("activation rejected source receipt")
+	for _, packageID := range []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas"} {
+		t.Run(packageID, func(t *testing.T) {
+			now := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
+			input := IntentInputV1{Origin: DevelopmentSourceOriginV1, SourceRegistrationSHA256: strings.Repeat("a", 64), Target: TargetV1{Platform: "darwin", Arch: "arm64"}, PluginName: packageID, PluginVersion: "1.0.0", SourceRoot: "/source/documents", SourceTreeSHA256: strings.Repeat("b", 64), SourceTreeFileCount: 4, ManifestSHA256: strings.Repeat("c", 64), RequestedAt: now}
+			intent, err := NewIntentV1(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seed := sha256.Sum256([]byte("development-source-test"))
+			private := ed25519.NewKeyFromSeed(seed[:])
+			public := private.Public().(ed25519.PublicKey)
+			receipt, err := NewReceiptV1(intent, strings.Repeat("d", 64), "plugins/cache/analytix-hub/"+packageID+"/1.0.0", now, sha256Hex(public), public, func(b []byte) ([]byte, error) { return ed25519.Sign(private, b), nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := ReceiptV1Bytes(receipt)
+			if bytes.Contains(body, []byte(`"packageAuthoritySha256"`)) || !bytes.Contains(body, []byte(`"origin":"development-source"`)) {
+				t.Fatal("source receipt masquerades as packaged authority")
+			}
+			parsed, err := ParseReceiptV1(body)
+			if err != nil || parsed != receipt {
+				t.Fatal("source receipt round trip failed", err)
+			}
+			index, err := NewIndexV1(receipt, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal, err := NewJournalV1(intent, receipt.GenerationID, "plugins/.staging-test", receipt.ActiveRelativePath, 1, JournalPreparedV1, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if index.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 || journal.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 {
+				t.Fatal("origin lost in persisted projections")
+			}
+			changed := receipt
+			changed.SourceRegistrationSHA256 = strings.Repeat("e", 64)
+			changed.ReceiptID = deriveReceiptID(changed)
+			if ValidateReceiptV1(changed) == nil {
+				t.Fatal("changing source binding preserved signature")
+			}
+			changed = receipt
+			changed.Origin = ""
+			changed.PackageAuthoritySHA256 = changed.SourceRegistrationSHA256
+			changed.SourceRegistrationSHA256 = ""
+			changed.EntrypointSHA256 = strings.Repeat("e", 64)
+			changed.ReceiptID = deriveReceiptID(changed)
+			if ValidateReceiptV1(changed) == nil {
+				t.Fatal("source receipt relabeled formal retained signature")
+			}
+			for _, mutate := range []func(*IntentInputV1){func(i *IntentInputV1) { i.PackageAuthoritySHA256 = strings.Repeat("e", 64) }, func(i *IntentInputV1) { i.Origin = "" }, func(i *IntentInputV1) { i.PluginName = "analytix-fund-analysis" }, func(i *IntentInputV1) { i.PluginName = "analytix-other" }, func(i *IntentInputV1) { i.EntrypointSHA256 = strings.Repeat("e", 64) }} {
+				bad := input
+				mutate(&bad)
+				if _, err := NewIntentV1(bad); err == nil {
+					t.Fatal("origin ambiguity accepted")
+				}
+			}
+			activation, err := NewActivationV1(receipt, 1, DesiredDisabledV1, now, sha256Hex(public), public, func(b []byte) ([]byte, error) { return ed25519.Sign(private, b), nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ValidateTrustedActivationForReceiptV1(activation, receipt, sha256Hex(public), public) != nil {
+				t.Fatal("activation rejected source receipt")
+			}
+
+		})
 	}
 }
 

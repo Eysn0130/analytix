@@ -14,6 +14,8 @@ const (
 	DevelopmentSourceOriginV1      = "development-source"
 	DocumentsSkillContributionIDV1 = "documents"
 	DocumentsSkillRelativePathV1   = "skills/documents/SKILL.md"
+	CanvasSkillContributionIDV1    = "canvas"
+	CanvasSkillRelativePathV1      = "skills/canvas/SKILL.md"
 )
 
 // DevelopmentSourceRegistrationV1 describes inspected source bytes, not a
@@ -35,6 +37,7 @@ type DevelopmentSourceRegistrationV1 struct {
 	DocumentsSkillSHA256       string            `json:"documentsSkillSha256,omitempty"`
 	SpreadsheetsSkillSHA256    string            `json:"spreadsheetsSkillSha256,omitempty"`
 	PresentationsSkillSHA256   string            `json:"presentationsSkillSha256,omitempty"`
+	CanvasSkillSHA256          string            `json:"canvasSkillSha256,omitempty"`
 	ContributionsSHA256        string            `json:"contributionsSha256"`
 	Publishable                bool              `json:"publishable"`
 	FactToolsEnabled           bool              `json:"factToolsEnabled"`
@@ -60,7 +63,7 @@ func newDevelopmentSourceRegistrationV1(observed DevelopmentSourceRegistrationV1
 
 func ValidDevelopmentSourcePackageIDV1(id string) bool {
 	switch id {
-	case "analytix-documents", "analytix-spreadsheets", "analytix-presentations":
+	case "analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas":
 		return true
 	}
 	return false
@@ -79,6 +82,9 @@ func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historica
 		declaration.Contributions.PublicUI[0] != (PathContributionV1{ID: "workspace-editor", Path: "ui/editor.json"}) ||
 		declaration.Contributions.Assets[0] != (PathContributionV1{ID: "editor-adapter", Path: "assets/adapter.json"}) {
 		return invalid
+	}
+	if declaration.PackageID == "analytix-canvas" {
+		return validateCanvasSourceDeclarationV1(declaration)
 	}
 	hasOfficeSkill := len(declaration.Contributions.Skills) != 0
 	expectedCapabilities := 1
@@ -146,8 +152,8 @@ func validateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegis
 	if err != nil || validateDevelopmentSourceDeclarationV1(declaration, historical) != nil || declaration.IdentityV1() != registration.Identity {
 		return invalid
 	}
-	skillHash := registration.OfficeSkillSHA256V1()
-	for id, hash := range map[string]string{"analytix-documents": registration.DocumentsSkillSHA256, "analytix-spreadsheets": registration.SpreadsheetsSkillSHA256, "analytix-presentations": registration.PresentationsSkillSHA256} {
+	skillHash := registration.StaticEditorSkillSHA256V1()
+	for id, hash := range map[string]string{"analytix-documents": registration.DocumentsSkillSHA256, "analytix-spreadsheets": registration.SpreadsheetsSkillSHA256, "analytix-presentations": registration.PresentationsSkillSHA256, "analytix-canvas": registration.CanvasSkillSHA256} {
 		if id != registration.Identity.PackageID && hash != "" {
 			return invalid
 		}
@@ -208,8 +214,8 @@ func developmentContributionsSHA256V1(registration DevelopmentSourceRegistration
 		{"publicUi", "workspace-editor", "ui/editor.json", registration.PublicUISHA256},
 		{"assets", "editor-adapter", "assets/adapter.json", registration.AdapterSHA256},
 	}
-	if hash := registration.OfficeSkillSHA256V1(); hash != "" {
-		skill, _, _ := OfficeSkillContributionV1(registration.Identity.PackageID)
+	if hash := registration.StaticEditorSkillSHA256V1(); hash != "" {
+		skill, _ := StaticEditorSkillContributionV1(registration.Identity.PackageID)
 		contributions = append(contributions, contribution{"skills", skill.ID, skill.Path, hash})
 	}
 	body, _ := json.Marshal(contributions)
@@ -267,4 +273,51 @@ func (registration DevelopmentSourceRegistrationV1) OfficeSkillSHA256V1() string
 		return registration.PresentationsSkillSHA256
 	}
 	return ""
+}
+
+// StaticEditorSkillContributionV1 is a closed inventory. It does not admit
+// arbitrary paths, scripts or additional capabilities.
+func StaticEditorSkillContributionV1(packageID string) (PathContributionV1, bool) {
+	if packageID == "analytix-canvas" {
+		return PathContributionV1{ID: CanvasSkillContributionIDV1, Path: CanvasSkillRelativePathV1}, true
+	}
+	skill, _, ok := OfficeSkillContributionV1(packageID)
+	return skill, ok
+}
+
+func (registration DevelopmentSourceRegistrationV1) StaticEditorSkillSHA256V1() string {
+	if registration.Identity.PackageID == "analytix-canvas" {
+		return registration.CanvasSkillSHA256
+	}
+	return registration.OfficeSkillSHA256V1()
+}
+
+func validateCanvasSourceDeclarationV1(declaration DeclarationV1) error {
+	invalid := errors.New("development source Canvas declaration is not the admitted static editor")
+	skill, _ := StaticEditorSkillContributionV1("analytix-canvas")
+	if len(declaration.Contributions.Skills) != 1 || declaration.Contributions.Skills[0] != skill || len(declaration.RequestedCapabilities) != 3 {
+		return invalid
+	}
+	seen := make(map[string]bool, 3)
+	for _, capability := range declaration.RequestedCapabilities {
+		if seen[capability.ID] || capability.ProtocolVersion != 1 {
+			return invalid
+		}
+		seen[capability.ID] = true
+		var first, second string
+		switch capability.ID {
+		case "canvas.local-preview":
+			first, second = "user-selected-object", "read-only"
+		case "canvas.local-edit":
+			first, second = "user-selected-object", "reviewed-commit"
+		case "canvas.generation":
+			first, second = "new-file", "current-conversation"
+		default:
+			return invalid
+		}
+		if !developmentCapabilityScopesV1(capability, first, second) {
+			return invalid
+		}
+	}
+	return nil
 }

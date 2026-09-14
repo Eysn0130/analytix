@@ -193,7 +193,7 @@ const DevelopmentSourceOriginV1 = "development-source"
 
 func validDevelopmentPackageIDV1(id string) bool {
 	switch id {
-	case "analytix-documents", "analytix-spreadsheets", "analytix-presentations":
+	case "analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas":
 		return true
 	}
 	return false

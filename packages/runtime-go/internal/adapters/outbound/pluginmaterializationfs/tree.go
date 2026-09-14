@@ -69,7 +69,7 @@ func inspectInstalledTreeV1(ctx context.Context, root string) (SourceTreeIdentit
 	return inspectTreeV1(ctx, root, true, true)
 }
 
-// InspectDevelopmentSourceTreeV1 inspects only the three static first-party
+// InspectDevelopmentSourceTreeV1 inspects only the closed static first-party
 // editor declarations. It does not establish packaged admission or execution.
 func InspectDevelopmentSourceTreeV1(ctx context.Context, root string) (SourceTreeIdentityV1, error) {
 	return inspectTreeForOriginV1(ctx, root, false, false, domainplugin.DevelopmentSourceOriginV1)
@@ -257,9 +257,9 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 			PublicUISHA256: recordSHA256["ui/editor.json"], AdapterSHA256: recordSHA256["assets/adapter.json"],
 		}
 		if len(declaration.Contributions.Skills) != 0 {
-			skill, _, ok := domainpluginpackage.OfficeSkillContributionV1(declaration.PackageID)
+			skill, ok := domainpluginpackage.StaticEditorSkillContributionV1(declaration.PackageID)
 			if !ok {
-				return SourceTreeIdentityV1{}, errors.New("unrecognized Office skill")
+				return SourceTreeIdentityV1{}, errors.New("unrecognized static editor skill")
 			}
 			switch declaration.PackageID {
 			case "analytix-documents":
@@ -268,6 +268,8 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 				observed.SpreadsheetsSkillSHA256 = recordSHA256[skill.Path]
 			case "analytix-presentations":
 				observed.PresentationsSkillSHA256 = recordSHA256[skill.Path]
+			case "analytix-canvas":
+				observed.CanvasSkillSHA256 = recordSHA256[skill.Path]
 			}
 		}
 		if excludeHostMarker {
