@@ -959,6 +959,21 @@ describe('FloatingComposer capability controls', () => {
     expect(floatingComposerSource).not.toContain('speechToText: speechToTextSettings')
   })
 
+  it('enables quote-only sending while preserving the runtime readiness gate', () => {
+    useChatStore.setState({ activeThreadId: 'thr_quote', activeThreadGoal: null, route: 'chat', workspaceRoot: '/workspace/analytix' })
+    const render = (count: number, ready = true): string => renderToStaticMarkup(createElement(FloatingComposer, {
+      input: '', setInput: () => undefined, mode: 'agent', setMode: () => undefined,
+      busy: false, runtimeReady: ready, hasActiveThread: true,
+      composerModel: '', composerPickList: [], onComposerModelChange: () => undefined,
+      queuedMessages: [], onRemoveQueuedMessage: () => undefined, onSend: () => undefined,
+      onInterrupt: () => undefined, documentReferenceCount: count
+    })).match(/<button[^>]*ds-composer-primary-action-button[^>]*>/)?.[0] ?? ''
+    expect(render(1)).toContain('ds-composer-primary-action-button')
+    expect(render(1)).not.toContain('disabled=""')
+    expect(render(0)).toContain('disabled=""')
+    expect(render(1, false)).toContain('disabled=""')
+  })
+
   it('renders the ProseMirror composer host instead of the legacy overlay textarea', () => {
     useChatStore.setState({
       activeThreadId: 'thr_mention',

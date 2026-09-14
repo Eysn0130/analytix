@@ -23,7 +23,6 @@ import {
   type KeyboardShortcutCommandId
 } from '@shared/keyboard-shortcuts'
 import type { DesktopCommand, ModelProviderModelGroup, SkillListItem } from '@shared/analytix-api'
-import type { WriteRetrievalContext } from '@shared/write-retrieval'
 import type { ClipboardImageReadResult, WorkspaceFileTarget } from '@shared/workspace-file'
 import type { AttachmentReference, ChatBlock, NormalizedThread, UserFileReference } from '../agent/types'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
@@ -59,7 +58,7 @@ import {
 import { SideConversationPanel } from './chat/SideConversationPanel'
 import { SessionHeader } from './SessionHeader'
 import { ShellNavigationControls } from './shell/ShellNavigationControls'
-import { composeWritePrompt } from '../write/quoted-selection'
+import { prepareWorkbenchDocumentMessage, workbenchEmptyMessageKeys } from '../write/workbench-document-message'
 import { resolveWriteAgentPreset } from '../write/agent-presets'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { buildSddDraftId, createSddDraft, forgetRememberedSddDraft, useSddDraftStore } from '../sdd/sdd-draft-store'
@@ -2596,8 +2595,7 @@ export function Workbench(): ReactElement {
     const v = (overrideInput ?? input).trim()
     const documentState = useWriteWorkspaceStore.getState()
     const frozenQuotes = [...documentState.quotedSelections]
-    const documentContext = frozenQuotes.length > 0 || overrideInput !== undefined ||
-      (rightPanelMode === 'documents' && documentState.activeFilePath !== null)
+    const documentContext = frozenQuotes.length > 0 || overrideInput !== undefined
     const currentReferenceSnapshot = () => {
       const chat = useChatStore.getState()
       const doc = useWriteWorkspaceStore.getState()
@@ -2634,46 +2632,26 @@ export function Workbench(): ReactElement {
       setAttachmentUploadError(t('composerAttachmentModelUnsupported'))
       return
     }
-    const contextAttachmentCount = fileReferences.length + documentAttachments.length
-    const emptyPrompt =
-      contextAttachmentCount > 0 && attachmentIds.length > 0
-        ? t('composerFileAndImageOnlyPrompt')
-        : contextAttachmentCount > 0
-          ? t('composerFileOnlyPrompt')
-          : t('composerImageOnlyPrompt')
-    const emptyDisplayText = v
-      ? undefined
-      : contextAttachmentCount > 0 && attachmentIds.length > 0
-        ? t('composerFileAndImageOnlyDisplay', { count: contextAttachmentCount })
-        : contextAttachmentCount > 0
-          ? t('composerFileOnlyDisplay', { count: contextAttachmentCount })
-          : t('composerImageOnlyDisplay')
-    const rawMessageText = v || (frozenQuotes.length ? t('composerFileOnlyPrompt') : emptyPrompt)
-    const activePreset = documentState.agentPresets.find((preset) => preset.id === documentState.assistantAgentPresetId)
+    const emptyMessage = workbenchEmptyMessageKeys(
+      fileReferences.length + documentAttachments.length, frozenQuotes.length, imageAttachments.length
+    )
+    const emptyDisplayText = v ? undefined : t(emptyMessage.display, { count: emptyMessage.count })
+    const rawMessageText = v || t(emptyMessage.prompt)
+    const editorPreset = overrideInput === undefined ? undefined : documentState.agentPresets.find(
+      (preset) => preset.id === documentState.assistantAgentPresetId
+    )
     const prepareChatMessage = async (): Promise<{
       text: string
       displayText?: string
       fileReferences?: UserFileReference[]
     } | null> => {
-      let retrieval: WriteRetrievalContext | null = null
-      if (documentContext && typeof window.analytix?.write?.retrieveWriteContext === 'function') {
-        try {
-          const result = await window.analytix.write.retrieveWriteContext({
-            workspaceRoot: documentState.workspaceRoot,
-            currentFilePath: documentState.activeFilePath ?? undefined,
-            query: [...frozenQuotes.map((quote) => quote.text), rawMessageText].join('\n\n'),
-            maxSnippets: 4,
-            includeCurrentFile: true
-          })
-          if (result.ok) retrieval = result.context
-        } catch {
-          // Retrieval is optional; the frozen selection remains available.
-        }
-      }
-      const messageText = documentContext ? composeWritePrompt(rawMessageText, frozenQuotes, {
-        workspaceRoot: documentState.workspaceRoot, activeFilePath: documentState.activeFilePath, retrieval,
-        ...(activePreset ? { agentPersona: resolveWriteAgentPreset(activePreset).persona } : {})
-      }) : rawMessageText
+      const messageText = await prepareWorkbenchDocumentMessage({
+        input: rawMessageText, quotes: frozenQuotes, editorRequest: overrideInput !== undefined,
+        workspaceRoot: documentState.workspaceRoot, activeFilePath: documentState.activeFilePath,
+        requestUserInputAvailable: typeof getProvider().submitUserInputResponse === 'function',
+        editorPersona: editorPreset ? resolveWriteAgentPreset(editorPreset).persona : undefined,
+        retrieveContext: window.analytix?.write?.retrieveWriteContext
+      })
       if (fileReferences.length === 0) {
         return {
           text: messageText,
@@ -3670,6 +3648,7 @@ export function Workbench(): ReactElement {
                             onConfigureProviders={() => openSettings('providers')}
                             onOpenPermissionSettings={() => openSettings('permissions')}
                             onSend={composerController.send}
+                            documentReferenceCount={documentQuotes.length}
                             attachments={composerAttachments}
                             attachmentUploadEnabled={attachmentUploadEnabled}
                             attachmentUploadBusy={attachmentUploadBusy}

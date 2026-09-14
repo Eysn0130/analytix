@@ -252,7 +252,7 @@ function UserMessageBubble({
   const [writeMetaOpen, setWriteMetaOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const parsedWritePrompt = useMemo(() => {
-    if (route !== 'write') return null
+    if (route !== 'write' && route !== 'chat') return null
     const parsed = parseWritePromptForDisplay(publicBlockText)
     return parsed?.userInput.trim() ? parsed : null
   }, [publicBlockText, route])
