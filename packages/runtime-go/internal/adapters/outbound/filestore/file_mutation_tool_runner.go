@@ -24,18 +24,19 @@ type MutationOperationPath = checkpointapp.OperationPathRequest
 type MutationOperationDraft = checkpointapp.OperationDraft
 
 type MutationToolInput struct {
-	Context             context.Context
-	Workspace           string
-	Args                map[string]any
-	ArgumentsJSON       []byte
-	ToolName            string
-	SandboxMode         string
-	AllowWriteRoots     []string
-	ProtectedReadDirs   []string
-	MutationAuthority   ConditionalMutationAuthority
-	Checkpoint          MutationCheckpointHooks
-	AcquireMutation     func(context.Context) (func(), error)
-	CheckManagedTargets func(...string) error
+	ValidateCreationIdentity func() error
+	Context                  context.Context
+	Workspace                string
+	Args                     map[string]any
+	ArgumentsJSON            []byte
+	ToolName                 string
+	SandboxMode              string
+	AllowWriteRoots          []string
+	ProtectedReadDirs        []string
+	MutationAuthority        ConditionalMutationAuthority
+	Checkpoint               MutationCheckpointHooks
+	AcquireMutation          func(context.Context) (func(), error)
+	CheckManagedTargets      func(...string) error
 }
 
 type PreparedNotebookEditTool struct {

@@ -14,6 +14,8 @@ import (
 type runtimeReadinessStatus = readiness.RuntimeReadinessProjection
 
 type RuntimeServerConfig struct {
+	DocumentCodecExecutable                   string
+	DocumentCodecEntry                        string
 	DevelopmentPluginSourceRoot               string
 	DevelopmentOfficeAssetRoot                string
 	RuntimeToken                              string

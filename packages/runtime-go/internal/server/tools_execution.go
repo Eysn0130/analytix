@@ -187,6 +187,8 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return h.executeRuntimeTaskJobRestart(pending, args)
 	case "write", "write_file":
 		return h.executeWriteRuntimeTool(ctx, pending, args)
+	case "generate_office_document":
+		return h.executeGenerateDocumentRuntimeTool(ctx, pending, args)
 	default:
 		if mcpapp.IsToolName(pending.Call.Name) {
 			if h.beginOpaqueEditingExecution(ctx) != nil {

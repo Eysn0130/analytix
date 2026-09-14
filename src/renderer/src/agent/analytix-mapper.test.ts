@@ -876,6 +876,29 @@ describe('review mapping', () => {
   })
 })
 
+describe('generated Office artifact mapping', () => {
+  const artifact = { artifactId: 'a'.repeat(64), kind: 'docx' as const, contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
+  const item: CoreTurnItemJson = {
+    id: 'generated-1', turnId: 'turn-1', threadId: 'thread-1', role: 'tool', status: 'completed',
+    createdAt: artifact.savedAt, kind: 'tool_result', toolName: 'generate_office_document', callId: 'call-1', isError: false,
+    output: { ...hostToolProjection(), projectionKind: 'artifact_status', messageKey: 'artifact_created', code: 'artifact_created', artifact }
+  }
+  it('maps an opaque host receipt without inventing file paths', () => {
+    const block = chatBlockFromItem(item)
+    expect(block?.kind).toBe('tool')
+    if (block?.kind !== 'tool') throw new Error('expected generated object')
+    expect(block.meta?.generatedArtifact).toEqual(artifact)
+    expect(block.filePath).toBeUndefined()
+  })
+  it('does not promote arbitrary output or another tool into generated object authority', () => {
+    for (const value of [ { ...item, output: { artifact } }, { ...item, toolName: 'remote_generator' }, { ...item, isError: true } ]) {
+      const block = chatBlockFromItem(value)
+      if (block?.kind !== 'tool') throw new Error('expected tool status')
+      expect(block.meta?.generatedArtifact).toBeUndefined()
+    }
+  })
+})
+
 describe('create_plan tool mapping', () => {
   it('surfaces turn failure messages from Analytix lifecycle events', async () => {
     let capturedError: string | null = null

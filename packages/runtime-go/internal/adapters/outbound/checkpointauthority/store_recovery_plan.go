@@ -22,7 +22,7 @@ var checkpointRecoveryLeafNamesV1 = []finalauthority.SecurePrivateCASOwnerLeafV1
 	{Name: "snapshot-intents", MaxBytes: maxCheckpointAuthorityCASBytes},
 	{Name: "snapshot-completions", MaxBytes: maxCheckpointAuthorityCASBytes},
 	{Name: "snapshot-dispositions", MaxBytes: maxCheckpointAuthorityCASBytes},
-	{Name: "operation-group-intents-v2", MaxBytes: maxCheckpointAuthorityCASBytes},
+	{Name: "operation-group-intents-v2", MaxBytes: domaincheckpoint.MaxOperationGroupIntentRecordBytes},
 	{Name: "operation-group-terminals-v2", MaxBytes: maxCheckpointAuthorityCASBytes},
 }
 

@@ -1,6 +1,7 @@
 package event
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -67,8 +68,8 @@ func ValidatePublicRecord(value any) error {
 	return nil
 }
 
-// publicPrivacyValidationViewV1 keeps a host-bound, closed plan digest and
-// timestamp, or closed tool-failure diagnostic hashes, out of prose PII
+// publicPrivacyValidationViewV1 keeps host-bound, closed plan/artifact digests
+// and timestamps, or closed tool-failure diagnostic hashes, out of prose PII
 // classification without weakening display fields.
 // These are structural metadata: the canonical tool-result projection has
 // already validated their syntax, lifecycle, and host tool-call identity.
@@ -142,26 +143,26 @@ func stageClosedPlanDigestsV1(
 			staged["details"] = metadata
 			return staged
 		}
-		if _, ok := canonicalClosedPlanToolResultDigestV1(typed); ok {
+		if container, fields, ok := ClosedToolResultPrivacyMetadataV1(typed); ok {
 			staged := clonePublicRecordMapV1(typed)
 			output := clonePublicRecordMapV1(staged["output"].(map[string]any))
-			plan := clonePublicRecordMapV1(output["plan"].(map[string]any))
-			for _, field := range []string{"contentHash", "savedAt"} {
+			metadata := clonePublicRecordMapV1(output[container].(map[string]any))
+			for _, field := range fields {
 				placeholder := map[string]any{
 					"kind": "closed_plan_digest_placeholder_v1", "ordinal": float64(len(*entries)),
 				}
 				stagedPlaceholder := clonePublicRecordMapV1(placeholder)
 				metadataPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...),
 					closedPlanDigestProjectionPathV1{kind: "key", key: "output"},
-					closedPlanDigestProjectionPathV1{kind: "key", key: "plan"},
+					closedPlanDigestProjectionPathV1{kind: "key", key: container},
 					closedPlanDigestProjectionPathV1{kind: "key", key: field},
 				)
 				*entries = append(*entries, closedPlanDigestProjectionEntryV1{
-					path: metadataPath, digest: plan[field].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
+					path: metadataPath, digest: metadata[field].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
 				})
-				plan[field] = stagedPlaceholder
+				metadata[field] = stagedPlaceholder
 			}
-			output["plan"] = plan
+			output[container] = metadata
 			staged["output"] = output
 			return staged
 		}
@@ -255,7 +256,7 @@ func projectClosedPlanDigestForPrivacyValidationV1(value any) (any, bool) {
 			projected["details"] = metadata
 			return projected, true
 		}
-		if projected, ok := closedPlanToolResultPrivacyValidationViewV1(typed); ok {
+		if projected, ok := closedToolResultPrivacyValidationViewV1(typed); ok {
 			return projected, true
 		}
 		var out map[string]any
@@ -338,8 +339,9 @@ func closedToolFailureDetailsForPrivacyV1(record map[string]any) (map[string]any
 	return details, true
 }
 
-func closedPlanToolResultPrivacyValidationViewV1(item map[string]any) (map[string]any, bool) {
-	if _, ok := canonicalClosedPlanToolResultDigestV1(item); !ok {
+func closedToolResultPrivacyValidationViewV1(item map[string]any) (map[string]any, bool) {
+	container, fields, ok := ClosedToolResultPrivacyMetadataV1(item)
+	if !ok {
 		return nil, false
 	}
 	canonical, _ := domaintoolresult.PrivateDurableToolResultItemRecordV1(item)
@@ -349,20 +351,61 @@ func closedPlanToolResultPrivacyValidationViewV1(item map[string]any) (map[strin
 		return nil, false
 	}
 	output = clonePublicRecordMapV1(output)
-	plan, _ := output["plan"].(map[string]any)
-	if plan == nil {
+	metadata, _ := output[container].(map[string]any)
+	if metadata == nil {
 		return nil, false
 	}
-	plan = clonePublicRecordMapV1(plan)
-	plan["contentHash"] = "sha256-digest"
-	plan["savedAt"] = "rfc3339-timestamp"
-	output["plan"] = plan
+	metadata = clonePublicRecordMapV1(metadata)
+	for _, field := range fields {
+		metadata[field] = "closed-tool-metadata"
+	}
+	output[container] = metadata
 	out["output"] = output
 	return out, true
 }
 
 func canonicalClosedPlanToolResultDigestV1(item map[string]any) (string, bool) {
 	return domaintoolresult.ClosedPlanToolResultDigestV1(item)
+}
+
+// ClosedToolResultPrivacyMetadataV1 identifies validated metadata fields under
+// output that public projectors must preserve byte-for-byte. It grants no
+// execution or artifact-open authority and accepts only canonical host items.
+func ClosedToolResultPrivacyMetadataV1(item map[string]any) (string, []string, bool) {
+	if _, ok := canonicalClosedPlanToolResultDigestV1(item); ok {
+		return "plan", []string{"contentHash", "savedAt"}, true
+	}
+	if canonicalClosedGeneratedArtifactToolResultV1(item) {
+		return "artifact", []string{"artifactId", "contentHash", "savedAt"}, true
+	}
+	return "", nil, false
+}
+
+// This is structural privacy classification, not artifact-open authority. Only
+// the exact generation result may protect its validated metadata; bare output
+// maps, other tools, unknown fields and inconsistent lifecycle stay on the
+// ordinary scanner. Artifact opening still resolves current host authority.
+func canonicalClosedGeneratedArtifactToolResultV1(item map[string]any) bool {
+	threadID, _ := item["threadId"].(string)
+	turnID, _ := item["turnId"].(string)
+	callID, _ := item["callId"].(string)
+	output, outputOK := item["output"].(map[string]any)
+	artifact, artifactOK := output["artifact"].(map[string]any)
+	if threadID == "" || strings.TrimSpace(threadID) != threadID || turnID == "" || strings.TrimSpace(turnID) != turnID ||
+		!domainmodel.IsHostToolCallIDV1(callID) || item["id"] != domaintoolresult.ToolResultItemIDV1(turnID, callID) ||
+		item["toolName"] != "generate_office_document" || item["toolKind"] != "file_change" ||
+		item["kind"] != "tool_result" || item["role"] != "tool" || item["status"] != "completed" || item["isError"] != false ||
+		!outputOK || output == nil || !artifactOK || artifact == nil {
+		return false
+	}
+	projection, err := domaintoolresult.ParsePublicToolResultProjectionV1(item["output"])
+	if err != nil || projection.ProjectionKind != domaintoolresult.ProjectionArtifactStatus || projection.Artifact == nil {
+		return false
+	}
+	canonical, ok := domaintoolresult.PrivateDurableToolResultItemRecordV1(item)
+	canonicalBody, canonicalErr := json.Marshal(canonical)
+	itemBody, itemErr := json.Marshal(item)
+	return ok && canonicalErr == nil && itemErr == nil && bytes.Equal(canonicalBody, itemBody)
 }
 
 func clonePublicRecordMapV1(value map[string]any) map[string]any {

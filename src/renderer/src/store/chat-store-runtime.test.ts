@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+const generatedPreview = vi.hoisted(() => ({ open: vi.fn(async () => true) }))
+vi.mock('../office/open-generated-artifact', () => ({ openGeneratedArtifact: generatedPreview.open }))
 import type { AcceptedFinalProjectionBatch, ChatBlock, GeneralTerminalProjectionBatch } from '../agent/types'
 import { dispatchAnalytixRuntimeEvent, dispatchAnalytixRuntimeEvents } from '../agent/analytix-mapper'
 import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
@@ -94,6 +96,31 @@ function makeSinkHarness(overrides: Partial<ChatState> = {}): {
     setSnapshots: () => snapshots
   }
 }
+
+describe('live generated artifact preview', () => {
+  const artifact = { artifactId: 'a'.repeat(64), kind: 'docx', contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
+  const event = { itemId: 'artifact-tool', turnId: 'turn-current', summary: 'generate_office_document', status: 'success' as const, meta: { toolName: 'generate_office_document', generatedArtifact: artifact } }
+
+  it('opens a fresh live result once through its original main conversation', async () => {
+    generatedPreview.open.mockClear()
+    const { set, get } = makeSinkHarness({ workspaceRoot: '/workspace' })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    sink.onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).toHaveBeenCalledWith(artifact.artifactId, { threadId: 'thread-current', workspace: '/workspace' })
+    sink.onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).toHaveBeenCalledOnce()
+  })
+
+  it('does not reopen an artifact already restored from conversation history', async () => {
+    generatedPreview.open.mockClear()
+    const { set, get } = makeSinkHarness({ workspaceRoot: '/workspace', blocks: [{ kind: 'tool', id: 'artifact-tool', summary: event.summary, status: 'success', meta: event.meta }] })
+    buildThreadEventSink(set, get, { threadId: 'thread-current' }).onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).not.toHaveBeenCalled()
+  })
+})
 
 function acceptedFinalProjectionBatch(
   overrides: Partial<AcceptedFinalProjectionBatch> = {}

@@ -215,6 +215,12 @@ func operationGroupsToRecords(groups []domaincheckpoint.MaterializedOperationGro
 	for _, group := range groups {
 		intent := group.Intent
 		terminal := group.Terminal
+		generatedCreation := intent.ToolName == "generate_office_document"
+		if generatedCreation && (domaincheckpoint.ValidateOperationGroupIntentV2(intent) != nil ||
+			domaincheckpoint.ValidateOperationGroupTerminalForIntentV2(terminal, intent) != nil ||
+			terminal.Status != "completed" || len(intent.Paths) != 1 || intent.Paths[0].BeforeExisted) {
+			return nil, errors.New("generated checkpoint creation authority is invalid")
+		}
 		if contextDigest == "" {
 			contextDigest = intent.SecurityContext.ContextDigest
 			sourceCheckpointID = intent.SourceWorkspaceCheckpointID
@@ -276,6 +282,11 @@ func operationGroupsToRecords(groups []domaincheckpoint.MaterializedOperationGro
 				state.finalExisted = final.Existed
 				state.finalHash = final.Hash
 				states[pathKey] = state
+			}
+			if generatedCreation {
+				// Retain the operation's provenance, not a filename inference. The
+				// native editor undo lane is independent of checkpoint file deletion.
+				record["generatedOfficeCreation"] = true
 			}
 			record["updatedAt"] = terminal.SettledAt
 		}

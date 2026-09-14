@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  buildDocumentDocxBytes,
   buildWriteDocxDocument,
   inspectWriteDocxPackageV1,
   WRITE_DOCX_PAGE_BREAK_MARKER
@@ -29,6 +30,28 @@ afterEach(async () => {
 })
 
 describe('write-docx-service', () => {
+  it('renders supplied image bytes without source or workspace paths and snapshots the input', async () => {
+    const bytes = Buffer.from(ONE_BY_ONE_PNG)
+    const pending = buildDocumentDocxBytes({
+      publicContent: '# 纯数据文档\n\n![图片](image-1)',
+      typography: WRITE_OFFICIAL_DOCUMENT_TYPOGRAPHY,
+      images: new Map([['image-1', { type: 'png', data: bytes }]])
+    })
+    bytes.fill(0)
+    const inspection = await inspectWriteDocxPackageV1(await pending)
+    expect(inspection.documentXml).toContain('纯数据文档')
+    expect(inspection.documentXml).toContain('eastAsia="FangSong"')
+    expect(inspection.mediaParts).toHaveLength(1)
+    expect(inspection.externalRelationships).toEqual([])
+  })
+
+  it('limits rendered image references even when one supplied image is reused', async () => {
+    await expect(buildDocumentDocxBytes({
+      publicContent: Array.from({ length: 25 }, () => '![image](image-1)').join('\n\n'),
+      images: new Map([['image-1', { type: 'png', data: ONE_BY_ONE_PNG }]])
+    })).rejects.toThrow('count exceeds the safe limit')
+  })
+
   it('builds a real OOXML package directly from GFM AST', async () => {
     const workspaceRoot = await fixtureWorkspace()
     const sourcePath = join(workspaceRoot, 'notice.md')

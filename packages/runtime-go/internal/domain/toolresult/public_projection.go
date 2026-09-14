@@ -28,6 +28,7 @@ const (
 	ProjectionWithheld         PublicProjectionKind = "withheld"
 	ProjectionHostStatus       PublicProjectionKind = "host_status"
 	ProjectionPlanStatus       PublicProjectionKind = "plan_status"
+	ProjectionArtifactStatus   PublicProjectionKind = "artifact_status"
 	ProjectionCaseSourceStatus PublicProjectionKind = "case_source_status"
 	ProjectionMCPDiagnostic    PublicProjectionKind = "mcp_diagnostic"
 )
@@ -44,6 +45,15 @@ type PublicToolResultProjectionV1 struct {
 	EvidenceAuthority      bool                   `json:"evidenceAuthority"`
 	Plan                   *PlanStatusV1          `json:"plan,omitempty"`
 	RPCError               *MCPRPCErrorDiagnostic `json:"rpcError,omitempty"`
+	Artifact               *ArtifactStatusV1      `json:"artifact,omitempty"`
+}
+
+type ArtifactStatusV1 struct {
+	ArtifactID  string `json:"artifactId"`
+	Kind        string `json:"kind"`
+	ContentHash string `json:"contentHash"`
+	ByteSize    int64  `json:"byteSize"`
+	SavedAt     string `json:"savedAt"`
 }
 
 // ForegroundHandoffInvalidPublicOutputV1 is the single closed failure shape
@@ -177,6 +187,9 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 	if projection.Code != "" && (!publicCodePattern.MatchString(projection.Code) || !validPublicProjectionCode(projection.ProjectionKind, projection.Code)) {
 		return errors.New("public tool result projection code is invalid")
 	}
+	if projection.ProjectionKind != ProjectionArtifactStatus && projection.Artifact != nil {
+		return errors.New("tool result contains an incompatible artifact payload")
+	}
 	switch projection.ProjectionKind {
 	case ProjectionWithheld:
 		if projection.MessageKey != "tool_output_withheld" && projection.MessageKey != "legacy_output_withheld" {
@@ -198,6 +211,11 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 		if projection.Plan != nil || projection.RPCError != nil {
 			return errors.New("host tool result contains an incompatible payload")
 		}
+	case ProjectionArtifactStatus:
+		if projection.MessageKey != "artifact_created" || projection.Code != "artifact_created" || projection.Status != "completed" ||
+			projection.Artifact == nil || projection.Plan != nil || projection.RPCError != nil || validateArtifactStatus(*projection.Artifact) != nil {
+			return errors.New("artifact tool result projection is invalid")
+		}
 	case ProjectionPlanStatus:
 		if !oneOf(projection.MessageKey, "plan_updated", "plan_failed") || projection.Plan == nil ||
 			projection.RPCError != nil || validatePlanStatus(*projection.Plan) != nil {
@@ -215,6 +233,17 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 		}
 	default:
 		return errors.New("public tool result projection kind is invalid")
+	}
+	return nil
+}
+
+func validateArtifactStatus(artifact ArtifactStatusV1) error {
+	if !domainsecurity.IsSHA256Hex(artifact.ArtifactID) || !domainsecurity.IsSHA256Hex(artifact.ContentHash) ||
+		artifact.Kind != "docx" || artifact.ByteSize <= 0 || artifact.ByteSize > 16<<20 {
+		return errors.New("artifact metadata is invalid")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, artifact.SavedAt); err != nil {
+		return errors.New("artifact confirmation time is invalid")
 	}
 	return nil
 }
@@ -601,6 +630,8 @@ func normalizeCode(code string) string {
 
 func validPublicProjectionCode(kind PublicProjectionKind, code string) bool {
 	switch kind {
+	case ProjectionArtifactStatus:
+		return code == "artifact_created"
 	case ProjectionWithheld:
 		return oneOf(code, "tool_output_private", "legacy_output_withheld", "tool_projection_invalid")
 	case ProjectionHostStatus:

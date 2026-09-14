@@ -21,6 +21,7 @@ func (h *runtimeServerHandler) runtimeToolCatalog() toolcatalogapp.RuntimeCatalo
 	// Advertise the native family only while Core holds a captured editing
 	// baseline. Scope/thread/version validation remains required at execution.
 	catalog.NativeSelections = h.officePackageHost != nil && h.managedEditing != nil && h.managedEditing.HasCaptures()
+	catalog.DocumentGeneration = h.documentCodec != nil && h.turnSecurity.Identity != nil
 	catalog.GoalTodos = h.store
 	catalog.MCP = h.mcp
 	catalog.MCPSearchResultLimit = runtimeinfoapp.MCPSearchResultLimit(h.mcpSearch)

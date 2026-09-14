@@ -27,6 +27,7 @@ import { unified } from 'unified'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import JSZip from 'jszip'
+import { defaultFormats } from 'jimp'
 
 import {
   normalizeWriteTypography,
@@ -44,6 +45,8 @@ export const WRITE_DOCX_PAGE_BREAK_MARKER = '<!-- analytix:page-break -->'
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 24 * 1024 * 1024
 const MAX_IMAGE_COUNT = 24
+export const DOCUMENT_DOCX_IMAGE_LIMITS = { maxBytes: MAX_IMAGE_BYTES, maxTotalBytes: MAX_TOTAL_IMAGE_BYTES, maxCount: MAX_IMAGE_COUNT } as const
+export const DOCUMENT_DOCX_IMAGE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const MAX_IMAGE_DIMENSION = 10_000
 const MAX_IMAGE_PIXELS = 40_000_000
 const DOCX_CONTENT_WIDTH_TWIPS = 9_744
@@ -80,6 +83,15 @@ export type BuildWriteDocxDocumentOptions = {
   typography?: Partial<WriteTypographySettingsV1>
 }
 
+export type DocumentDocxImage = { type: 'png' | 'jpg' | 'gif' | 'bmp'; data: Buffer }
+
+export type BuildDocumentDocxBytesOptions = {
+  publicContent: string
+  title?: string
+  typography?: Partial<WriteTypographySettingsV1>
+  images?: ReadonlyMap<string, DocumentDocxImage>
+}
+
 export type WriteDocxPackageInspectionV1 = {
   parts: string[]
   mediaParts: string[]
@@ -96,16 +108,15 @@ type ImageInfo = {
   data: Buffer
 }
 
+type ImageReadBudget = { imageCount: number; imageBytes: number }
+
 type RenderContext = {
-  workspaceRoot: string
-  sourcePath: string
+  readImage: (source: string) => Promise<ImageInfo>
   font: IFontAttributesProperties
   fontSize: number
   lineHeight: number
   defaultAlignment?: (typeof AlignmentType)[keyof typeof AlignmentType]
   officialTypography: boolean
-  imageCount: number
-  imageBytes: number
 }
 
 type RenderOptions = {
@@ -280,7 +291,7 @@ function parseImageDimensions(buffer: Buffer, type: ImageInfo['type']): { width:
   return parseBmp(buffer)
 }
 
-async function readWorkspaceImage(source: string, context: RenderContext): Promise<ImageInfo> {
+async function readWorkspaceImage(source: string, context: ImageReadBudget & { workspaceRoot: string; sourcePath: string }): Promise<ImageInfo> {
   if (/^[a-z][a-z0-9+.-]*:/i.test(source)) throw new Error('DOCX images must be local workspace files.')
   if (source.trim() !== source || source.includes('\0')) throw new Error('DOCX image path is invalid.')
   const candidate = resolve(context.sourcePath ? dirname(context.sourcePath) : context.workspaceRoot, source)
@@ -315,12 +326,38 @@ async function readWorkspaceImage(source: string, context: RenderContext): Promi
   if (currentCanonical !== canonical || data.length !== expectedSize) {
     throw new Error('DOCX image authority changed while reading.')
   }
+  return admitImageBytes(data, type, context)
+}
+
+function admitImageBytes(data: Buffer, type: ImageInfo['type'], context: ImageReadBudget): ImageInfo {
+  if (!Buffer.isBuffer(data) || data.length > MAX_IMAGE_BYTES) throw new Error('DOCX image exceeds the safe size limit.')
+  if (!['png', 'jpg', 'gif', 'bmp'].includes(type)) throw new Error('DOCX image format is not supported.')
+  if (context.imageCount >= MAX_IMAGE_COUNT) throw new Error('DOCX image count exceeds the safe limit.')
+  if (context.imageBytes + data.length > MAX_TOTAL_IMAGE_BYTES) throw new Error('DOCX image total size exceeds the safe limit.')
   const dimensions = parseImageDimensions(data, type)
   if (!dimensions) throw new Error('DOCX image signature does not match its extension.')
   validateDimensions(dimensions.width, dimensions.height)
   context.imageCount += 1
   context.imageBytes += data.length
   return { ...dimensions, type, data }
+}
+
+const imageMimeTypes = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp' } as const
+const imageByteDecoders = defaultFormats.map((format) => format())
+
+async function validateDecodedImage(image: ImageInfo): Promise<void> {
+  try {
+    const decoder = imageByteDecoders.find((format) => format.mime === imageMimeTypes[image.type])
+    if (!decoder) throw new Error('Unsupported image decoder.')
+    // Decode bytes directly; Jimp.read also accepts paths and URLs, and
+    // Jimp.fromBuffer applies EXIF rotation instead of preserving header dimensions.
+    const bitmap = await decoder.decode(Buffer.from(image.data))
+    if (bitmap.width !== image.width || bitmap.height !== image.height || bitmap.data.length !== image.width * image.height * 4) {
+      throw new Error('Decoded image dimensions differ.')
+    }
+  } catch {
+    throw new Error('DOCX image bytes cannot be decoded safely.')
+  }
 }
 
 function imageTransformation(image: ImageInfo): { width: number; height: number } {
@@ -355,7 +392,7 @@ async function inlineChildren(node: MarkdownNode, context: RenderContext, allowL
     }
     case 'image': {
       const url = asText((node as MarkdownNode & { url?: unknown }).url)
-      const image = await readWorkspaceImage(url, context)
+      const image = await context.readImage(url)
       output.push(new ImageRun({
         type: image.type,
         data: image.data,
@@ -574,9 +611,8 @@ function parsePlainText(content: string): MarkdownNode {
   return { type: 'root', children }
 }
 
-function parseContent(sourcePath: string, content: string, projectProse?: (content: string) => string): MarkdownNode {
-  const extension = extname(sourcePath).toLowerCase()
-  const tree = extension === '.txt' || extension === '.text'
+function parseContent(plainText: boolean, content: string, projectProse?: (content: string) => string): MarkdownNode {
+  const tree = plainText
     ? parsePlainText(content)
     : unified().use(remarkParse).use(remarkGfm).parse(content) as unknown as MarkdownNode
   applyWriteMarkdownAlignmentDirectivesToTree(tree)
@@ -639,10 +675,52 @@ export async function buildWriteDocxDocument(options: BuildWriteDocxDocumentOpti
   let sourcePath = sourceCandidate
   try { sourcePath = await realpath(sourceCandidate) } catch { /* unsaved source: lexical containment remains required */ }
   if (!isWithin(workspaceRoot, sourcePath)) throw new Error('DOCX source escaped the canonical workspace.')
+  const imageContext = { workspaceRoot, sourcePath, imageCount: 0, imageBytes: 0 }
+  const extension = extname(sourcePath).toLowerCase()
+  const tree = parseContent(extension === '.txt' || extension === '.text', options.publicContent, options.projectProse)
+  return renderDocumentDocx(tree, options, (source) => readWorkspaceImage(source, imageContext))
+}
+
+/** Builds only from caller-supplied bytes; image identifiers never resolve to paths or URLs. */
+export async function buildDocumentDocxBytes(options: BuildDocumentDocxBytesOptions): Promise<Buffer> {
+  if (!options || typeof options.publicContent !== 'string') throw new Error('DOCX public content is required.')
+  const publicContent = options.publicContent
+  const renderOptions = { title: options.title, typography: options.typography ? { ...options.typography } : undefined }
+  if (containsPrivateReasoningContent(publicContent)) throw new Error('DOCX public content contains private reasoning.')
+  const supplied = new Map<string, ImageInfo>()
+  const inputBudget = { imageCount: 0, imageBytes: 0 }
+  for (const [id, image] of options.images ?? []) {
+    if (typeof id !== 'string' || !DOCUMENT_DOCX_IMAGE_ID.test(id)) throw new Error('DOCX image identifier is invalid.')
+    const validated = admitImageBytes(image.data, image.type, inputBudget)
+    supplied.set(id, { ...validated, data: Buffer.from(validated.data) })
+  }
+  for (const image of supplied.values()) await validateDecodedImage(image)
+  const tree = parseContent(false, publicContent)
+  const validateImages = (node: MarkdownNode): void => {
+    if (node.type === 'imageReference') throw new Error('DOCX images require explicit inline identifiers.')
+    if (node.type === 'image') {
+      const id = asText(node.url)
+      if (!DOCUMENT_DOCX_IMAGE_ID.test(id) || !supplied.has(id)) throw new Error('DOCX image identifier is not supplied.')
+    }
+    for (const child of node.children ?? []) validateImages(child)
+  }
+  validateImages(tree)
+  const renderBudget = { imageCount: 0, imageBytes: 0 }
+  return renderDocumentDocx(tree, renderOptions, async (id) => {
+    const image = supplied.get(id)
+    if (!image) throw new Error('DOCX image identifier is not supplied.')
+    return admitImageBytes(image.data, image.type, renderBudget)
+  })
+}
+
+async function renderDocumentDocx(
+  tree: MarkdownNode,
+  options: Pick<BuildDocumentDocxBytesOptions, 'title' | 'typography'>,
+  readImage: RenderContext['readImage']
+): Promise<Buffer> {
   const normalized = normalizeWriteTypography(options.typography)
   const context: RenderContext = {
-    workspaceRoot,
-    sourcePath,
+    readImage,
     font: docxFont(options.typography),
     fontSize: docxFontSize(options.typography),
     lineHeight: normalizeLineHeight(options.typography),
@@ -653,11 +731,8 @@ export async function buildWriteDocxDocument(options: BuildWriteDocxDocumentOpti
         : normalizeWriteTypography(options.typography).textAlign === 'justify'
           ? AlignmentType.JUSTIFIED
           : AlignmentType.LEFT,
-    officialTypography: isWriteOfficialDocumentTypography(normalized),
-    imageCount: 0,
-    imageBytes: 0
+    officialTypography: isWriteOfficialDocumentTypography(normalized)
   }
-  const tree = parseContent(sourcePath, options.publicContent, options.projectProse)
   const children = await renderBlocks(tree.children ?? [], context)
   const document = new Document({
     title: options.title,

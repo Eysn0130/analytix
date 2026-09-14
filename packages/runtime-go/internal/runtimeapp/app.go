@@ -46,6 +46,7 @@ import (
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
 	continuationapp "analytix.local/runtime-go/internal/app/continuation"
 	controlapp "analytix.local/runtime-go/internal/app/control"
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	executionpolicy "analytix.local/runtime-go/internal/app/executionpolicy"
 	fundscleaningapp "analytix.local/runtime-go/internal/app/fundscleaning"
@@ -1618,6 +1619,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		DocumentCodec:       newDocumentCodec(config),
 		ManagedEditingFiles: managededitingfiles.New(),
 		ObjectEditing:       objectEditingHandler.Service,
 		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
@@ -1697,6 +1699,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
+	artifactResolver, ok := handler.(interface {
+		ResolveGeneratedArtifact(context.Context, string, string) (generationapp.Resolved, error)
+	})
+	if !ok {
+		return nil, errors.Join(errors.New("generated artifact resolver is unavailable"), nativeAuthority.Close())
+	}
 	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
@@ -1728,10 +1736,11 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
-			ObjectEditing:     objectEditingHTTP,
-			PackageHost:       httpapi.PluginPackageHostHandler{Service: officePackageHost},
-			FundsCSVAdmission: fundsCSVAdmission,
-			FundsCleaning:     fundsCleaning,
+			GeneratedArtifacts: httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
+			ObjectEditing:      objectEditingHTTP,
+			PackageHost:        httpapi.PluginPackageHostHandler{Service: officePackageHost},
+			FundsCSVAdmission:  fundsCSVAdmission,
+			FundsCleaning:      fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(
 				fundsAccountFlow.caseEntities,
 				privateFinalStore,

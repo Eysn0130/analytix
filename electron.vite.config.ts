@@ -299,6 +299,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/main/index.ts'),
+          'office-generation-codec-entry': resolve('src/main/office/office-generation-codec-entry.ts'),
           'claw-schedule-mcp-node-entry': resolve('src/main/claw-schedule-mcp-node-entry.ts')
         }
       }

@@ -1311,6 +1311,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       request: async () => ({ ok: false, code: 'identity_invalid', message: 'Plugin control requires the desktop workspace.' })
     },
     objects: {
+      resolveArtifact: async () => ({ok:false,code:'unavailable'}),
       request: async () => ({ ok: false, code: 'forbidden', message: 'Protected object editing requires the desktop workspace.' })
     },
     files: {

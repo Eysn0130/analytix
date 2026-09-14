@@ -616,6 +616,7 @@ const api = {
     request: (request) => ipcRenderer.invoke('plugin:package-host', request)
   },
   objects: {
+    resolveArtifact: (request) => ipcRenderer.invoke('object:resolve-artifact', request),
     request: (request) => ipcRenderer.invoke('object:editing', request)
   },
   files: {

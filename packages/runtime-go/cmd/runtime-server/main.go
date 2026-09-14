@@ -434,6 +434,8 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 	}
 	return runtimeapp.Config{
 		DevelopmentOfficeAssetRoot:              os.Getenv("ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT"),
+		DocumentCodecExecutable:                 os.Getenv("ANALYTIX_DOCUMENT_CODEC_EXECUTABLE"),
+		DocumentCodecEntry:                      os.Getenv("ANALYTIX_DOCUMENT_CODEC_ENTRY"),
 		DevelopmentPluginSourceRoot:             os.Getenv("ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT"),
 		RuntimeToken:                            runtimeToken,
 		Insecure:                                cli.Insecure,

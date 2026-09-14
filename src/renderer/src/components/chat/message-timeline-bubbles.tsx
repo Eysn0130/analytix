@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, Plug, RotateCcw, Sparkles, Terminal, Video, Wrench } from 'lucide-react'
 import type { HubAgentPluginListItem } from '@shared/analytix-api'
+import { generatedArtifactMetadataSchema } from '../../../../../packages/runtime/src/contracts/generated-artifact'
+import { GeneratedOfficeArtifact } from './GeneratedOfficeArtifact'
 import type { AttachmentReference, ChatBlock, GeneratedFileReference, RuntimeDisclosureMetadata, ToolBlock, UserInputAnswer, UserInputQuestion } from '../../agent/types'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'
 import {
@@ -954,6 +956,15 @@ function MediaAttachmentGallery({
 
 export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactElement | null {
   const { t } = useTranslation('common')
+  const artifacts = useMemo(() => {
+    const seen = new Set<string>()
+    return blocks.flatMap(block => {
+      const parsed = generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact)
+      if (block.status !== 'success' || !parsed.success || seen.has(parsed.data.artifactId)) return []
+      seen.add(parsed.data.artifactId)
+      return [parsed.data]
+    })
+  }, [blocks])
   const media = useMemo(
     () =>
       blocks.flatMap((block) =>
@@ -965,11 +976,12 @@ export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactE
     [blocks]
   )
 
-  if (media.length === 0) return null
+  if (media.length === 0 && artifacts.length === 0) return null
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="text-[12px] font-semibold text-ds-faint">{t('generatedFilesTitle')}</div>
+      {artifacts.map(artifact => <GeneratedOfficeArtifact key={artifact.artifactId} artifact={artifact} />)}
       <MediaAttachmentGallery media={media} variant="conversation" />
     </div>
   )

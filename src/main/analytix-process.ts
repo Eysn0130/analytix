@@ -410,6 +410,8 @@ async function startAnalytixChildOnce(
     ANALYTIX_RUNTIME_TOKEN: runtime.runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveMainPrivateMcpConfigPath(),
     ANALYTIX_APP_ROOT: appRoot(),
+    ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: resolveNodeScriptCommand(process.execPath),
+    ANALYTIX_DOCUMENT_CODEC_ENTRY: join(appRoot(), 'out', 'main', 'office-generation-codec-entry.js'),
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }
   for (const name of [

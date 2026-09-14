@@ -28,6 +28,15 @@ function processingSections(input: {
 }
 
 describe('deriveTurnSections', () => {
+  it('shows only successful strictly typed generated Office objects', () => {
+    const artifact = { artifactId: 'a'.repeat(64), kind: 'docx', contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
+    const blocks: ChatBlock[] = [
+      { kind: 'tool', id: 'created', summary: 'generate_office_document', status: 'success', meta: { generatedArtifact: artifact } },
+      { kind: 'tool', id: 'failed', summary: 'generate_office_document', status: 'error', meta: { generatedArtifact: artifact } },
+      { kind: 'tool', id: 'untyped', summary: 'generate_office_document', status: 'success', meta: { generatedArtifact: { ...artifact, path: '/private/path' } } }
+    ]
+    expect(sections(blocks).generatedFileBlocks.map(block => block.id)).toEqual(['created'])
+  })
 	it('renders the final assistant answer and drops persisted reasoning', () => {
     const hostileLegacyReasoning = {
       kind: 'reasoning',

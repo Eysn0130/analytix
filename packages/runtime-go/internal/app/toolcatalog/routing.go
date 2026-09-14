@@ -107,7 +107,7 @@ func PromptRouteForAdvertisedTools(route string, tools []domainmodel.ToolSchema)
 			return RouteToolAgent
 		}
 		switch tool.Name {
-		case "bash", "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch":
+		case "bash", "generate_office_document", "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch":
 			return RouteToolAgent
 		}
 	}

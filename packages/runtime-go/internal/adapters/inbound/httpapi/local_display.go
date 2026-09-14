@@ -83,11 +83,12 @@ func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
 }
 
 type LocalDisplayHandlerV1 struct {
-	PackageHost       http.Handler
-	ObjectEditing     http.Handler
-	Service           *localdisplayapp.Service
-	FundsCSVAdmission *fundscsvadmissionapp.ServiceV1
-	FundsCleaning     *fundscleaningapp.ServiceV1
+	GeneratedArtifacts http.Handler
+	PackageHost        http.Handler
+	ObjectEditing      http.Handler
+	Service            *localdisplayapp.Service
+	FundsCSVAdmission  *fundscsvadmissionapp.ServiceV1
+	FundsCleaning      *fundscleaningapp.ServiceV1
 	// LoadFrozenSecurityContext is retained for source compatibility with the
 	// transitional composition. DirectSourcePreview never reads it.
 	LoadFrozenSecurityContext  FrozenSecurityContextLoaderV1
@@ -145,6 +146,14 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == GeneratedArtifactPath {
+		if handler.GeneratedArtifacts == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		handler.GeneratedArtifacts.ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path == PluginPackageHostPath {
 		if handler.PackageHost == nil {
 			PluginPackageHostHandler{}.ServeHTTP(w, r)

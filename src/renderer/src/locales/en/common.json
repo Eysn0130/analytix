@@ -2032,6 +2032,8 @@
   "toolInjectedMemories": "Memories",
   "toolAttachments": "Attachments",
   "generatedFilesTitle": "Generated files",
+  "generatedOfficeDocument": "Generated document",
+  "generatedOfficeUnavailable": "Unable to open this document. Check the current workspace and file, then try again.",
   "generatedFilePreviewUnavailable": "Preview unavailable",
   "generatedFileDownload": "Download",
   "generatedFileSaving": "Saving…",

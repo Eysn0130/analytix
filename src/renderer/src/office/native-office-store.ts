@@ -13,7 +13,7 @@ export const useNativeOfficeStore = create<{
   proposalInFlight: boolean
   beginProposalPoll: () => boolean
   endProposalPoll: () => void
-  select: (workspace: string, path: string) => Promise<boolean>
+  select: (workspace: string, path: string, isCurrent?: () => boolean) => Promise<boolean>
   receive: (view: NativeOfficeView | null, error?: string | null) => void
   close: (workspace: string, path: string) => Promise<boolean>
 }>((set, get) => ({
@@ -25,10 +25,12 @@ export const useNativeOfficeStore = create<{
     return true
   },
   endProposalPoll: () => set({proposalInFlight:false}),
-  select: async (workspace, path) => {
+  select: async (workspace, path, isCurrent = () => true) => {
+    if (!isCurrent()) return false
     const old = get().target
     if (old?.workspace === workspace && old.path === path) return true
     if (typeof window !== 'undefined') await window.analytix?.office?.request({ action: 'hide' }).catch(() => undefined)
+    if (!isCurrent()) return false
     set({ target: { workspace, path }, view: get().views[key(workspace, path)] ?? null, error: null })
     return true
   },

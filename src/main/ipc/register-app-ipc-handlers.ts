@@ -1,6 +1,7 @@
 import { registerNativeOfficeIpc } from '../office/native-office-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { createObjectEditingHandler } from './object-editing-ipc'
+import { createGeneratedArtifactHandler } from './generated-artifact-ipc'
 import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
@@ -2730,6 +2731,15 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
 
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
+  const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
+  ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return {ok:false,code:'unavailable'}
+    const frame=main.webContents.mainFrame
+    const result=await resolveArtifact(payload)
+    if (getMainWindow()!==main || main.isDestroyed() || main.webContents.mainFrame!==frame) return {ok:false,code:'unavailable'}
+    return result
+  })
   ipcMain.handle('object:editing', async (event, payload: unknown) => {
     const main = getMainWindow()
     if (!main || main.isDestroyed() || event.sender !== main.webContents ||

@@ -33,6 +33,24 @@ func identityForTest(toolName string, arguments string) (IdentityV1, error) {
 	return ResolveV1(input)
 }
 
+func TestGenerationIdentityBindsContentAndRejectsUnownedOptions(t *testing.T) {
+	first, err := identityForTest("generate_office_document", `{"path":"report.docx","kind":"docx","markdown":"Synthetic"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equivalent, err := identityForTest("generate_office_document", `{"path":"/workspace/report.docx","kind":"docx","markdown":"Synthetic","title":"","images":[]}`)
+	if err != nil || first.ArgsHash != equivalent.ArgsHash {
+		t.Fatal("canonical generation identity drift")
+	}
+	changed, err := identityForTest("generate_office_document", `{"path":"report.docx","kind":"docx","markdown":"Different"}`)
+	if err != nil || first.ArgsHash == changed.ArgsHash {
+		t.Fatal("generation identity omitted content")
+	}
+	if _, err := identityForTest("generate_office_document", `{"path":"report.docx","kind":"docx","markdown":"Synthetic","overwrite":true}`); err == nil {
+		t.Fatal("unowned overwrite option accepted")
+	}
+}
+
 func TestResolveV1CanonicalizesOwnerParserSemantics(t *testing.T) {
 	tests := []struct {
 		name       string

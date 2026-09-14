@@ -8,6 +8,7 @@ import (
 )
 
 type BuiltinToolSchemaInput struct {
+	DocumentGeneration  bool
 	NativeSelections    bool
 	AllowBackgroundBash bool
 	WebFetch            bool
@@ -104,6 +105,13 @@ func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
 			Description: "Delete a named Go symbol from a .go file using AST parsing. Relative paths resolve inside the active workspace; explicit external paths are allowed with danger-full-access or a configured allow_write root. Supports func, method, type, interface, const, and var; use kind and parent to disambiguate methods. Requires a fresh read of the file and approval unless policy is auto.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Go source file path"},"name":{"type":"string","description":"Symbol name to delete"},"kind":{"type":"string","description":"Optional kind filter: func, method, type, interface, const, var"},"parent":{"type":"string","description":"Optional receiver/parent type for method disambiguation"}},"required":["path","name"],"additionalProperties":false}`),
 		},
+	}
+	if input.DocumentGeneration {
+		tools = append(tools, domainmodel.ToolSchema{
+			Name:        "generate_office_document",
+			Description: "Create a new native DOCX document from Markdown with headings, lists, tables and explicitly supplied images. Never overwrites an existing file. Use image identifiers in Markdown, not URLs or local image paths. The complete request is limited to 4 MiB of JSON and each string to 1 MiB of UTF-8. Core validates the file and confirms saving before returning an artifact. Follow the Documents skill; normal file permission and approval policy apply.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"kind":{"type":"string","enum":["docx"]},"markdown":{"type":"string","minLength":1,"maxLength":1048576},"title":{"type":"string","maxLength":256},"images":{"type":"array","maxItems":24,"items":{"type":"object","properties":{"id":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_-]{0,63}$"},"type":{"type":"string","enum":["png","jpg","gif","bmp"]},"dataBase64":{"type":"string","maxLength":1048576}},"required":["id","type","dataBase64"],"additionalProperties":false}}},"required":["path","kind","markdown"],"additionalProperties":false}`),
+		})
 	}
 	if input.NativeSelections {
 		tools = append(tools, []domainmodel.ToolSchema{

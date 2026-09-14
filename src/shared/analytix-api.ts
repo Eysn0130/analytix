@@ -1267,6 +1267,7 @@ export type AnalytixDomainFacade = {
     request: (request: import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostRequest) => Promise<import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostResponse>
   }
   objects: {
+    resolveArtifact: (request: import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactRequest) => Promise<import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactResponse>
     request: (request: import('../../packages/runtime/src/contracts/object-editing').ObjectEditingRequest) => Promise<import('../../packages/runtime/src/contracts/object-editing').ObjectEditingResponse>
   }
   settings: AnalytixSettingsApi

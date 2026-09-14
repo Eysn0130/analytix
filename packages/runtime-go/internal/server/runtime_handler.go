@@ -39,6 +39,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -46,6 +47,7 @@ import (
 const DefaultRuntimeToken = httpapi.DefaultRuntimeToken
 
 type runtimeServerHandler struct {
+	documentCodec      codecport.Codec
 	officePackageHost  *packagehostapp.Service
 	runtimeToken       string
 	insecure           bool

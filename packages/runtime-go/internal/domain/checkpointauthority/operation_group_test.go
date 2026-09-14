@@ -91,6 +91,25 @@ func TestOperationGroupIntentBindsHostGrantArgumentsAndExpectedState(t *testing.
 	}
 }
 
+func TestGeneratedDocumentOperationRequiresAbsentTarget(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	arguments := []byte(`{"path":"report.docx","kind":"docx","markdown":"Synthetic"}`)
+	securityContext, grant := operationGroupSecurity(t, now, "generate_office_document", "call-generate", arguments)
+	for _, existed := range []bool{false, true} {
+		path := OperationPathInputV2{ArgumentKey: "path", RequestedPath: "report.docx", RelativePath: "report.docx", Role: "target", ExpectedAfterExisted: true, ExpectedAfterHash: domainsecurity.SHA256Hex([]byte("generated-zip"))}
+		if existed {
+			path.BeforeExisted = true
+			path.BeforeAvailable = true
+			path.BeforeContent = "before"
+			path.BeforeHash = domainsecurity.SHA256Hex([]byte("before"))
+		}
+		_, err := NewOperationGroupIntentV2(OperationGroupIntentInputV2{SecurityContext: securityContext, ExecutionGrant: grant, CheckpointID: domaincheckpointref.RuntimeID("workspace-generate"), SourceWorkspaceCheckpointID: "workspace-generate", GenerationPrincipalDigest: domainsecurity.SHA256Hex([]byte("synthetic-principal")), OperationOrdinal: 1, ToolName: "generate_office_document", ArgumentsJSON: arguments, CreatedAt: now.Add(time.Second), Paths: []OperationPathInputV2{operationPathInputWithWorkspaceAuthority(path, securityContext.WorkspaceRealPath)}})
+		if (err != nil) != existed {
+			t.Fatalf("unexpected generation authority result existing=%v: %v", existed, err)
+		}
+	}
+}
+
 func TestOperationGroupIntentAllowsOrdinaryMutationAtWitnessedCaseBoundary(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0).UTC()
 	arguments := []byte(`{"path":"a.txt","content":"after"}`)

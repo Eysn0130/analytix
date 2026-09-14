@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	goalapp "analytix.local/runtime-go/internal/app/goal"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
@@ -107,7 +108,7 @@ func ResolveV1(input Input) (IdentityV1, error) {
 
 func SupportsHostToolV1(toolName string) bool {
 	switch canonicalToolName(toolName) {
-	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol",
+	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "generate_office_document",
 		"task", "parallel_tasks", "run_skill", "kill_shell", "restart_job", "create_goal", "complete_step", "update_goal",
 		"todo_write", "todo_ops", toolcatalogapp.ToolCreatePlanName:
 		return true
@@ -138,6 +139,20 @@ func hostProjection(toolName string, record map[string]any, input Input) (any, e
 			"command": request.Command, "timeoutSeconds": request.TimeoutSeconds,
 			"runInBackground": boolAny(record["run_in_background"], record["runInBackground"]),
 		}, nil
+	case "generate_office_document":
+		request, err := generationapp.ParseRequest(record)
+		if err != nil {
+			return nil, err
+		}
+		path, err := resolvePath(input, request.Path)
+		if err != nil {
+			return nil, err
+		}
+		images := make([]map[string]any, 0, len(request.Images))
+		for _, image := range request.Images {
+			images = append(images, map[string]any{"id": image.ID, "type": image.Type, "encodedContentHash": domainsecurity.SHA256Hex([]byte(image.DataBase64))})
+		}
+		return map[string]any{"path": path, "kind": request.Kind, "markdown": request.Markdown, "title": request.Title, "images": images}, nil
 	case "write_file":
 		request, err := filetoolsapp.ParseWriteToolRequest(record)
 		if err != nil {

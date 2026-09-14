@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
@@ -13,6 +14,15 @@ import (
 // binary data, remote authority claims, and arbitrary nested structures stay
 // inside the current effect/provider attempt.
 func BuildPublicToolResultProjectionV1(toolName string, output any, isError bool) domaintoolresult.PublicToolResultProjectionV1 {
+	if receipt, ok := output.(generationapp.CreatedReceipt); ok && toolName == "generate_office_document" && !isError {
+		projection := publicHostStatusProjection("completed", "artifact_created", "artifact_created")
+		projection.ProjectionKind = domaintoolresult.ProjectionArtifactStatus
+		projection.Artifact = &domaintoolresult.ArtifactStatusV1{ArtifactID: receipt.ArtifactID, Kind: receipt.Kind, ContentHash: receipt.ContentHash, ByteSize: receipt.ByteSize, SavedAt: receipt.SavedAt}
+		if domaintoolresult.ValidatePublicToolResultProjectionV1(projection) == nil {
+			return projection
+		}
+		return publicHostStatusProjection("failed", "tool_failed", "validation_error")
+	}
 	if duplicate, ok := output.(HostSideEffectDuplicateOutputV1); ok && isError && validHostSideEffectDuplicateOutputV1(duplicate) {
 		return publicHostStatusProjection("blocked", "tool_blocked", duplicate.Code)
 	}

@@ -44,6 +44,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	managededitingport "analytix.local/runtime-go/internal/ports/managedediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 	provider "analytix.local/runtime-go/internal/provider"
@@ -65,6 +66,7 @@ type ProviderExecutionCurrentnessValidator interface {
 }
 
 type RuntimeServerComponents struct {
+	DocumentCodec            codecport.Codec
 	ManagedEditingFiles      managededitingport.Files
 	OfficeAdapters           map[string]adapterport.Adapter
 	OfficePackageHost        *packagehostapp.Service
@@ -267,6 +269,7 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	handler.shellRunner = managedEditingShellRunner{next: handler.shellRunner, registry: handler.managedEditing}
 	handler.objectEditing = components.ObjectEditing
 	handler.officePackageHost = components.OfficePackageHost
+	handler.documentCodec = components.DocumentCodec
 	for _, adapter := range components.OfficeAdapters {
 		if office, ok := adapter.(*officeeditingapp.Adapter); ok {
 			if err := office.BindSelectionHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {

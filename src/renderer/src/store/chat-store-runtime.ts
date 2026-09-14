@@ -28,6 +28,7 @@ import {
 } from '../agent/accepted-final-projection-receipt'
 import { getProvider } from '../agent/registry'
 import { projectToolEventForRenderer } from '../agent/analytix-mapper'
+import { generatedArtifactMetadataSchema } from '../../../../packages/runtime/src/contracts/generated-artifact'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
@@ -1623,6 +1624,13 @@ export function buildThreadEventSink(
       const projectedEvent = projectToolEventForRenderer(ev)
       if (!projectedEvent) return
       ev = projectedEvent
+      const artifact = ev.status === 'success' && ev.meta?.toolName === 'generate_office_document'
+        ? generatedArtifactMetadataSchema.safeParse(ev.meta.generatedArtifact)
+        : null
+      const artifactScope = { threadId: get().activeThreadId ?? '', workspace: get().workspaceRoot }
+      const shouldOpenArtifact = artifact?.success && artifactScope.threadId && artifactScope.workspace &&
+        !get().blocks.some(block => block.kind === 'tool' && block.status === 'success' &&
+          generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact).data?.artifactId === artifact.data.artifactId)
       invalidateBoundThreadDetail()
       flushPendingStreamingDeltas()
       notifyWriteWorkspaceFileRefresh(get, ev)
@@ -1686,6 +1694,14 @@ export function buildThreadEventSink(
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       })
+      if (shouldOpenArtifact && artifact?.success) {
+        // History hydration already contains the receipt and does not reopen
+        // objects. A newly completed live result opens through the same Core
+        // resolver as its card, with the original conversation scope retained.
+        void import('../office/open-generated-artifact').then(({ openGeneratedArtifact }) => {
+          if (isCurrentStream()) void openGeneratedArtifact(artifact.data.artifactId, artifactScope)
+        })
+      }
     },
     onCompaction: (ev) => {
       if (!isCurrentStream()) return

@@ -28,11 +28,11 @@ below are not yet installed-application evidence.
 | Quote-only send | Native references count toward composer send eligibility; quoting does not dispatch | Real Enter/button/IME journey and full action-entry integration |
 | Annotation lifecycle | Per-thread/object in-memory draft survives collapse; stale revision keeps note and requires selection | Protected persistent storage, normal restart, capacity and closed-tab recovery |
 | Native proposal refresh | Single-flight polling with failure backoff; new events supersede pending reads | Tool-completion refresh integration and installed behavior |
-| DOCX | Existing `docx` builder and native preview/edit seams | Agent-callable generation, styles/fields/links preservation, native repeated-text positive case |
+| DOCX | Core absent-only generation calls a data-only `docx` codec; checkpoint binds the created bytes and installation principal; opaque artifacts resolve into the current native workspace | Plugin-bound discovery, full headers/fields/links coverage, installed repeated-text positive case and representative rendering |
 | XLSX | Native cells expose type/formula/value/format; unsafe numeric/formula-to-text mutation rejected in Main and worker | Real typed numeric/formula/range operations, calculation validation, charts and summaries/pivots |
 | PPTX | Native preview and bounded shape selection | Object-based generation, targeted style/chart edits, per-slide quality checks |
 | Canvas / images | AtlasFlow and existing local media assets remain reusable | Stable scene identity, fact/layout separation, selection/notes/local edits, versioned exports; real media Provider integration |
-| Plugin Skills | Three Office packages materialize; current static admission requires empty Skills | Real first-party Skills, dependency handlers, generation-bound discovery/disable/upgrade, Canvas contribution |
+| Plugin Skills | Three Office packages materialize; Documents workflow source is being added, but static admission still requires empty Skills | Manifest/admission propagation, dependency handlers, generation-bound discovery/disable/upgrade, Canvas contribution |
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core scopes, protected parts, CAS and status queries exist | Real local original-value Diff, third-object eviction, pending-operation and undo restart recovery |
@@ -61,6 +61,50 @@ Hard-link regressions failed before the repair and passed after integration;
 ordinary text-tool hard-link compatibility remains covered. Independent review
 accepted these bounded source changes. Cross-compilation is not Windows runtime
 evidence, and no CodeQL closure is claimed from the local filesystem tests.
+
+The DOCX generation candidate uses a fixed host-supplied codec executable and
+entry, bounded stdin/stdout and no inherited credential environment. The codec
+receives content and explicit image bytes, never the target workspace path.
+Core validates the OOXML package, creates only an absent target and settles the
+checkpoint before issuing typed artifact metadata. A configured bundle is still
+required; this is not a claim of packaged admission or plugin lifecycle closure.
+
+Generation tool arguments retain the existing execution-grant limit of 4 MiB
+JSON and 1 MiB per UTF-8 string. Generation-specific operation records now support
+that limit through protected CAS writes, readback and restart validation. Ordinary
+text snapshot and mutation limits remain unchanged. The codec's larger private
+asset limit does not expand the model tool argument limit. Large source images
+still need a Core-authorized asset-reference path.
+
+Artifact opening validates the current installation principal, conversation,
+workspace, root identity, file links, content hash and package structure. New
+live receipts open the native object through the same resolver as the artifact
+card; replaying an existing receipt does not automatically reopen it. Switching
+conversation/workspace or a failed pending text save cancels the open. The public
+receipt contains no file path, raw document content or evidence authority.
+
+Current checks include 245 tests across eight focused Vitest files (including
+51 DOCX codec/builder tests), both TypeScript configurations, a real
+Go-to-bundled-codec integration producing and inspecting Chinese headings/lists/
+tables, and focused Go generation/checkpoint/authority tests.
+Independent review found two artifact timestamp/digest privacy seams, at durable
+append and subsequent public projection. Both now reuse one strict closed-host
+metadata predicate. The regression exercises real settlement, durable append,
+HTTP SSE replay and replay after reopening the store; ordinary PII, malformed
+lookalikes and other tools retain their existing rejection/projection behavior.
+The production-tag Go runtime also compiles, and the repository's Electron Main
+build emits the fixed codec entry and its chunks into a task-owned cache layout.
+The Go integration also passes against that emitted JavaScript entry, producing
+and inspecting a real DOCX through the production codec process boundary.
+That layout uses the current checkout's dependency tree and is not an independent
+installation or a distribution artifact.
+No native GUI rendering or installed journey has been established by these checks.
+
+Binary generation settlement and startup reconciliation are distinct from
+checkpoint deletion/restore. The existing generic checkpoint rescue is text-only;
+generated Office creation therefore reports `manual_review`, not a false
+`ready/delete_created_file`. This does not disable native modification proposals
+or native undo. Native edit/undo persistence remains an active required outcome.
 
 ## Completion evidence
 

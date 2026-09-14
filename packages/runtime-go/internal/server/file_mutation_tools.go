@@ -46,7 +46,11 @@ func (h *runtimeServerHandler) executeDeleteSymbolRuntimeTool(ctx context.Contex
 	return filestore.ExecutePreparedDeleteSymbolTool(h.mutationToolInput(ctx, pending, args), prepared)
 }
 
-func (h *runtimeServerHandler) mutationToolInput(ctx context.Context, pending runtimePendingToolCall, args map[string]any) filestore.MutationToolInput {
+func (h *runtimeServerHandler) mutationToolInput(ctx context.Context, pending runtimePendingToolCall, args map[string]any, generationPrincipal ...string) filestore.MutationToolInput {
+	principalDigest := ""
+	if len(generationPrincipal) == 1 && pending.Call.Name == "generate_office_document" {
+		principalDigest = generationPrincipal[0]
+	}
 	operationService := checkpointapp.OperationService{
 		Authority: h.checkpoints,
 		Observer:  filestore.CheckpointOperationObserver{AllowWriteRoots: h.allowWriteRoots},
@@ -70,7 +74,8 @@ func (h *runtimeServerHandler) mutationToolInput(ctx context.Context, pending ru
 		Checkpoint: filestore.MutationCheckpointHooks{
 			BeginOperation: func(paths []filestore.MutationOperationPath) (filestore.MutationOperationDraft, error) {
 				return operationService.Begin(ctx, checkpointapp.BeginOperationInput{
-					SecurityContext: pending.SecurityContext, ExecutionGrant: pending.ExecutionGrant,
+					GenerationPrincipalDigest: principalDigest,
+					SecurityContext:           pending.SecurityContext, ExecutionGrant: pending.ExecutionGrant,
 					CheckpointID: checkpointID, SourceWorkspaceCheckpointID: sourceCheckpointID,
 					Workspace: pending.Workspace, ToolName: pending.Call.Name,
 					ArgumentsJSON: pending.Call.Arguments, Paths: paths, CreatedAt: time.Now().UTC(),
