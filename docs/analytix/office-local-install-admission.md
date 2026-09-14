@@ -12,11 +12,14 @@ Status: Reference。研究日期：2026-09-15；记录落笔基线为
 用户当前任务及附件已明确授权合法的本机私用封包、安装和验收；无需再次索取
 相同授权。此授权不替代第三方许可，也没有授权公开发布或向第三方分发引擎。
 
-- `as-built`：manifest 为 `executionMode: source-experiment`、
-  `publishable: false`，既有 packaged 拒绝仍保持。
-- `target`：主线程实现并验收明确限定于本机私用的资源准入及安装路径。
-- `gap`：本机私用准入尚未实现、尚未进行安装验收；本记录不改变 manifest、
-  loader 或发布门禁，也不构成完整许可证明、packaged PASS 或 Product RC。
+- `as-built`：manifest 保持 `executionMode: source-experiment`、
+  `publishable: false`；独立本机私用准入已实现，`8365b16ce` 的 DMG 及隔离
+  安装签名检查通过，普通 packaged 拒绝和公开门禁保持。
+- `target`：完成本机私用安装后的完整产品旅程。
+- `gap`：首次安装启动在应用初始化前等待 Chromium 默认 Keychain 授权，
+  尚无 installed GUI 或完整产品验收。精确构建与启动证据见
+  [产品能力矩阵](product-completion.md#private-installation-probe-2026-09-15)；
+  本记录不构成完整许可证明或 Product RC。
 
 ## 固定资源与来源
 
@@ -152,7 +155,8 @@ Main 通过受保护的专用 local-display 请求获取一次性关联的资格
 与签名封印前复制完整资源和 notices。普通构建拒绝未授权的私有 payload，正式
 发行意图不能采用该路径。生成 codec 另行打成仅依赖 Node builtins 的独立目录，
 精确解包，并由实际文件集合纳入原有包权威。上述代码仍需真实安装验收；不以
-候选实现或单元测试宣称安装后的完整性、正常功能、回滚或原生渲染已通过。
+候选实现或单元测试宣称正常功能、回滚或原生渲染已通过。后续已取得精确
+`8365b16ce` 的实际 DMG 与安装签名证据，首次启动的系统授权缺口仍未闭合。
 
 ## Host-scope 证据位置
 
@@ -169,5 +173,6 @@ name 表，以及 `fonts/font-assets.json`、`fonts/FONT-NOTICE.txt`、`fonts/OF
 
 完成：本机六资源 hash、上述固定许可原文 hash、字体元数据分类、官方当前文本
 范围核对及独立本机准入候选代码。未完成：完整对外发行构建对应关系、全部
-内置字体精确许可闭合、安装与 packaged GUI 验收。实现验证记录见产品能力矩阵；
+内置字体精确许可闭合、完整安装旅程与 packaged GUI 验收。实现及精确安装
+签名验证记录见产品能力矩阵；
 许可材料不替代运行验收，源码与合成数据检查也不替代完整产品验收。

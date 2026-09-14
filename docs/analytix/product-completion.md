@@ -36,7 +36,7 @@ below are not yet installed-application evidence.
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core-owned originals, exact save candidates and approved changes; thread-bound discovery, protected-local Diff, explicit interrupted-save continuation, restart undo and cancellation of proven unsubmitted changes | Native format fidelity and actual third-object/restart GUI journey |
-| Installation | Private-local candidate verifies the actual package seal, 35 fixed-layout files and notices; Core/Main consume the qualified resources; independent codec bundle includes its JS dependencies | Real local installer, installed package inspection and end-to-end journey; separate public redistribution obligations |
+| Installation | Source `8365b16ce` produced a private macOS ARM64 DMG; container/layout/signature checks and isolated installation signature checks passed | First launch blocked before application initialization by Chromium default-Keychain authorization; installed end-to-end journey and separate public redistribution obligations remain |
 | Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
 The numeric/formula text-path restriction is interim damage prevention. It is not
@@ -270,8 +270,47 @@ caught and corrected a missing transport allowlist, insecure authorization,
 post-operation qualification and a concrete-adapter binding regression. Main's
 qualification metadata also cross-checks the production JavaScript contract.
 The original source gate, signed activation and file/privacy authority remain.
-Real package staging, signed executable inspection, native GUI and installation
-acceptance are still required; no public-release permission is established.
+The installation probe below supplies package staging and signed-payload evidence
+for its exact source. Native GUI and complete installation acceptance remain;
+no public-release permission is established.
+
+## Private installation probe, 2026-09-15
+
+Source `8365b16ce42b143e4163931fd944222d6d71995d` built with
+`scripts/package-office-private-local.mjs`, using the fixed host Office assets
+and a fresh output directory. All four development native components, desktop
+bundles, packaged Go runtime, private Office qualification, staged payload seal,
+application signing and DMG creation completed. The resulting
+`analytix-1.0.6-mac-arm64.dmg` is 469609175 bytes, SHA-256
+`a25295033de0527a50d48f8e6d9862ef73bb45b54aed2f87508e885e5344e508`.
+Its classification is `development_clean_non_publishable`; `publishable` and
+`releaseEligible` remain false. No artifact was published.
+
+`node scripts/package-candidate-smoke.mjs <fresh-output-directory>` passed DMG
+verification, read-only mounting, product layout, bundle identity and strict deep
+signature verification. The app was then copied from that read-only DMG to an
+exclusive task installation directory. Its signature passed again, and the
+installed qualification and package authority reference the same source commit.
+This does not establish notarization, upgrade, native rendering or product RC.
+
+A new named synthetic-only profile was created on the managed local filesystem,
+with separate application/runtime state, an explicit task Keychain and a retained
+controller whose reconnect endpoint was checked before provisioning. No prior
+profile or credential was copied. Previously generated synthetic Office files
+were copied only as opening fixtures; they are not installed-UI generation
+evidence. The separate loopback-only synthetic Provider passed metadata health
+checks but was not configured through the app or used for a model task.
+
+The first installed launch stalled before application initialization. A bounded
+sample showed `SecItemAdd → defaultKeychainUI → AuthorizationCopyRights` in
+Electron/Chromium. The Go task-Keychain binding does not bind that cookie-encryption
+path. Computer Use refused access to `com.apple.SecurityAgent`. The task-owned
+launch was stopped; the installation, profile, original task Keychain and evidence
+were retained. No default-Keychain policy or encryption setting was changed.
+An independent usable macOS acceptance session is requested for this dependent
+GUI path. Real text/media Provider authority also remains unavailable. Other
+implementation and review continue; none of these gaps reduces the completion
+contract below.
 
 ## Completion evidence
 
