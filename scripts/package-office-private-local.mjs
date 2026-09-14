@@ -14,7 +14,7 @@ export function privateOfficePackagePlan({assetRoot,output,repoRoot=repositoryRo
   return {env:{...env,ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE:'isolated-local-v1',ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD:'1',ANALYTIX_OFFICE_PRIVATE_LOCAL_ASSET_ROOT:assetRoot,CSC_IDENTITY_AUTO_DISCOVERY:'false'},commands:[
     ['npm',['run','build:data-native:development','--','--platform','darwin','--arch','arm64']],
     ['npm',['run','build']],
-    ['npx',['--no-install','electron-builder','--config','electron-builder.config.cjs','--publish','never','--mac','dmg','--arm64',`--config.directories.output=${output}`]]
+    ['npx',['--yes','electron-builder@26.15.3','--config','electron-builder.config.cjs','--publish','never','--mac','dmg','--arm64',`--config.directories.output=${output}`]]
   ]}
 }
 async function execute(args) {
