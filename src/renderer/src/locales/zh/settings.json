@@ -400,6 +400,7 @@
   "modelProviderUpdatePresetDetail": "该预设已存在。更新会刷新接口地址和模型列表，已填写的 API Key 和已有模型会保留。",
   "modelProviderUpdatePresetAction": "更新",
   "modelProviderCancel": "取消",
+  "modelProviderRecoveryTools": "迁移与恢复",
   "modelProviderSectionBasics": "基本信息",
   "modelProviderSectionConnection": "连接",
   "modelProviderSectionDanger": "危险操作",

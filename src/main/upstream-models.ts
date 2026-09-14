@@ -4,6 +4,7 @@ import {
 } from '../../packages/runtime/src/contracts/provider-registry'
 import { isComposerChatModelId } from '../shared/app-settings'
 import type { ModelProviderModelGroup, UpstreamModelsResult } from '../shared/analytix-api'
+import { providerDisplayName, providerModelDisplayName } from '../shared/provider-display'
 
 /**
  * Projects the Core Registry's committed, non-secret catalog for every composer.
@@ -22,7 +23,16 @@ export async function fetchUpstreamModelIds(registry: ProviderRegistryResultV1):
     const modelIds = provider.models.filter((model) => isComposerChatModelId(model, provider.mediaModels))
       .sort((left, right) => left.localeCompare(right))
     if (modelIds.length === 0) continue
-    modelGroups.push({ providerId: provider.id, label: provider.id, modelIds })
+    const modelLabels = Object.fromEntries(modelIds.flatMap((id) => {
+      const label = providerModelDisplayName(id, provider.endpoint)
+      return label === id ? [] : [[id, label]]
+    }))
+    modelGroups.push({
+      providerId: provider.id,
+      label: providerDisplayName(provider.id, provider.id, provider.endpoint),
+      modelIds,
+      ...(Object.keys(modelLabels).length > 0 ? { modelLabels } : {})
+    })
   }
 
   // Existing consumers resolve an otherwise unbound model to its first group.

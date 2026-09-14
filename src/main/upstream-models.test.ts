@@ -39,6 +39,24 @@ function snapshot(providers = [publicProvider()], selectedProviderId: string | u
 describe('Core Registry composer model catalog', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('projects official display labels while preserving every committed request ID', async () => {
+    const registry = snapshot([publicProvider({ endpoint: 'https://api.deepseek.com' })])
+    const before = structuredClone(registry)
+    const result = await fetchUpstreamModelIds(registry)
+    expect(result).toEqual({
+      ok: true,
+      modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+      defaultModelId: 'deepseek-v4-pro',
+      modelGroups: [{
+        providerId: 'deepseek', label: 'DeepSeek',
+        modelIds: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash', 'deepseek-v4-pro': 'V4 Pro' }
+      }]
+    })
+    expect(registry).toEqual(before)
+    expect(JSON.stringify(result)).not.toMatch(/credential|endpoint|incarnation/)
+  })
+
   it('accepts committed default model IDs through the existing non-secret Registry list transport', async () => {
     const registry = snapshot()
     const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(registry) }))

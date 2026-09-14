@@ -400,6 +400,7 @@
   "modelProviderUpdatePresetDetail": "This preset already exists. Updating refreshes the endpoint and model list while keeping your API key and existing models.",
   "modelProviderUpdatePresetAction": "Update",
   "modelProviderCancel": "Cancel",
+  "modelProviderRecoveryTools": "Migration and recovery",
   "modelProviderSectionBasics": "Basics",
   "modelProviderSectionConnection": "Connection",
   "modelProviderSectionDanger": "Danger zone",
