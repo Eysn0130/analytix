@@ -322,3 +322,10 @@ describe('Workbench route surface', () => {
     )
   })
 })
+
+// The unified composer is ProseMirror; referencing a document must focus its
+// actual editable surface, independently of the document editor implementation.
+it('targets the current composer after adding a document reference', () => {
+  expect(workbenchSource).toContain('.ds-chat-stage .composer-prompt-editor [contenteditable="true"]')
+  expect(workbenchSource).not.toContain('.composer-prompt-editor .cm-content')
+})

@@ -3251,7 +3251,7 @@ export function Workbench(): ReactElement {
                     onCollapse={closeRightPanel} onOpenSettings={() => openSettings('write')}
                     onFocusConversation={() => {
                       setDocumentFocused(false)
-                      requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor .cm-content')?.focus())
+                      requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor [contenteditable="true"]')?.focus())
                     }} />
                 </div>
               ) : null}
