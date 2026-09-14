@@ -84,6 +84,21 @@ metadata 中只有 license dialog UI 路径，没有完整安装 LICENSE/NOTICE 
 条目及旧字体的精确许可仍需补材料，不能把它们归入“全部许可已通过”。
 现有 Noto CJK 的 OFL 不覆盖 data 内其他字体。
 
+后续有界核验已补到同一固定 LO 提交的
+[license.xml](https://raw.githubusercontent.com/LibreOffice/core/efaf0670b4d055f838a2849becb10f08aa06a257/readlicense_oo/license/license.xml)：
+588864 bytes，SHA-256
+`0fc511d0cdf0b1098b2000f186840629f4a4740a0efe9a8cf60753d7de0f6af8`。
+主线程已下载并核对该正文，保留于上述 host 资源目录。它明确覆盖 Alef、Frank
+Ruhl Hofshi 的 OFL 1.1，旧 Liberation 专用 GPLv2 条款，以及 Libertine/Biolinum
+G 的 GPLv2 加字体例外和额外 **OFL 1.0** 文本；不擅自改变许可选择关系。
+
+选入的 18 个 CLM 字体来自 David、FrankRuehl、Miriam、MiriamMono、Nachlieli。
+这些家族对应的 XML 段落没有字体例外，不能套用同节其他家族的例外。
+Alef/Frank Ruhl 的四条缺字段记录因此已有明确许可正文；两个 OpenSymbol 实际
+条目的 hash 均与固定 `download.lst` 的 102.12 版本相符，但其专用许可证明仍未
+闭合。`OpenSymbol2.sfd` 是另一款 OpenSymbolMath，不能用其 OFL 1.1 为当前
+OpenSymbol 代作证明。完整许可选择及逐字体归档字节比对仍有剩余工作。
+
 ## 官方文本支持的使用范围
 
 [GNU FAQ](https://www.gnu.org/licenses/gpl-faq.html#GPLRequireSourcePostedPublic)
