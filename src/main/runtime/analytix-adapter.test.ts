@@ -20,6 +20,7 @@ import {
 } from '../../shared/app-settings'
 import { analytixThreadSteerPath } from '../../shared/analytix-endpoints'
 import { sanitizePublicRuntimeValue } from '../../shared/public-runtime-content'
+import { createProviderRegistryIpcHandler } from '../ipc/provider-registry-ipc'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../packages/runtime/src/contracts/runtime-info.js'
 import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../packages/runtime/src/contracts/runtime-tools.js'
 import {
@@ -2014,6 +2015,28 @@ describe('runtimeRequestViaHost', () => {
       expect(rejected.ok).toBe(false)
       expect(rejected.status).toBe(502)
       expect(rejected.body).not.toContain('must-not-pass')
+    }
+  })
+
+  it('preserves canonical Registry failures through the public projection and typed IPC', async () => {
+    const failure = { schemaVersion: 1, error: { code: 'persistence_failure', message: 'The provider registry is temporarily unavailable.' } }
+    const handler = createProviderRegistryIpcHandler(async (path, method) => sanitizeRuntimeResponse({
+      ok: false, status: 503, body: JSON.stringify(failure)
+    }, path, null, method))
+    expect(await handler({ schemaVersion: 1, operation: 'list' })).toEqual(failure)
+  })
+
+  it('rejects noncanonical Registry errors without exposing their content', async () => {
+    for (const body of [
+      { schemaVersion: 1, error: { code: 'persistence_failure', message: 'SYNTHETIC_PRIVATE_ERROR' } },
+      { schemaVersion: 1, error: { code: 'persistence_failure', message: 'The provider registry is temporarily unavailable.' }, secret: 'SYNTHETIC_PRIVATE_ERROR' }
+    ]) {
+      const handler = createProviderRegistryIpcHandler(async (path, method) => sanitizeRuntimeResponse({
+        ok: false, status: 503, body: JSON.stringify(body)
+      }, path, null, method))
+      const result = await handler({ schemaVersion: 1, operation: 'list' })
+      expect(result).toMatchObject({ error: { code: 'invalid_response' } })
+      expect(JSON.stringify(result)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
     }
   })
 
