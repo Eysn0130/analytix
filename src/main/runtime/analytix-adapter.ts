@@ -1501,13 +1501,14 @@ function appendRuntimeGoSourceFingerprintEntries(root: string, relativeDir: stri
       appendRuntimeGoSourceFingerprintEntries(root, relativePath, entries)
       continue
     }
-    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum') {
+    const canonicalPath = relativePath.replaceAll('\\', '/')
+    const embeddedOfficeManifest = canonicalPath === 'internal/adapters/outbound/officeengineassets/manifest.json'
+    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum' && !embeddedOfficeManifest) {
       continue
     }
     if (!stat.isFile()) {
       throw new Error(`Go runtime build input must be a regular file: ${relativePath}`)
     }
-    const canonicalPath = relativePath.replaceAll('\\', '/')
     entries.push(`${canonicalPath}:${stat.size}:${sha256File(fullPath)}`)
   }
 }
@@ -4474,6 +4475,7 @@ export function buildGoRuntimeSidecarEnv(
     'ANALYTIX_MCP_CONFIG_PATH',
     'ANALYTIX_APP_ROOT',
     'ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT',
+    'ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT',
     'ANALYTIX_RESOURCES_PATH'
   ])
   // Windows folds environment names when spawning. Remove every alias before
@@ -4485,7 +4487,10 @@ export function buildGoRuntimeSidecarEnv(
     ...childEnvironment,
     ANALYTIX_RUNTIME_TOKEN: runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveGoRuntimeMCPConfigPath(dataDir),
-    ...(app.isPackaged ? {} : { ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: appRoot() }),
+    ...(app.isPackaged ? {} : {
+      ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: appRoot(),
+      ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT: env.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT ?? ''
+    }),
     ANALYTIX_APP_ROOT: appRoot(),
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }

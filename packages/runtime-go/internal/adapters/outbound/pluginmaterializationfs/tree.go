@@ -238,8 +238,10 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 	}
 	identity.Declaration = declarationIdentity
 	if origin == domainplugin.DevelopmentSourceOriginV1 {
-		if err := domainpluginpackage.ValidateDevelopmentSourceDeclarationV1(declaration); err != nil {
-			return SourceTreeIdentityV1{}, err
+		if !excludeHostMarker {
+			if err := domainpluginpackage.ValidateDevelopmentSourceDeclarationV1(declaration); err != nil {
+				return SourceTreeIdentityV1{}, err
+			}
 		}
 		name, version, err := inspectManifestIdentityV1(realRoot, identity.ManifestSHA256)
 		if err != nil || name != declaration.PackageID || version != declaration.PackageVersion {
@@ -248,21 +250,34 @@ func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker,
 		if _, exists := recordPaths[".mcp.json"]; exists {
 			return SourceTreeIdentityV1{}, errors.New("static development source must not carry MCP configuration")
 		}
-		registration, err := domainpluginpackage.NewDevelopmentSourceRegistrationV1(domainpluginpackage.DevelopmentSourceRegistrationV1{
+		observed := domainpluginpackage.DevelopmentSourceRegistrationV1{
 			Identity: declaration.IdentityV1(), DeclarationRawSHA256: identity.Declaration.RawSHA256,
 			DeclarationCanonicalSHA256: identity.Declaration.CanonicalSHA256, DeclarationCanonicalJSON: identity.Declaration.CanonicalJSON,
 			SourceTreeSHA256: identity.TreeSHA256, SourceTreeFileCount: identity.FileCount, ManifestSHA256: identity.ManifestSHA256,
 			PublicUISHA256: recordSHA256["ui/editor.json"], AdapterSHA256: recordSHA256["assets/adapter.json"],
-		})
-		if err != nil {
-			return SourceTreeIdentityV1{}, err
 		}
-		canonical, err := domainpluginpackage.DevelopmentSourceRegistrationV1Bytes(registration)
-		if err != nil {
-			return SourceTreeIdentityV1{}, err
+		if excludeHostMarker {
+			// Installed bytes may predate preview-only admission. Reconstruct
+			// their historical digest; Store still verifies the signed receipt,
+			// full tree, identity and marker before resolving or upgrading it.
+			canonical, digest, err := domainpluginpackage.ReconstructHistoricalDevelopmentSourceRegistrationV1(observed)
+			if err != nil {
+				return SourceTreeIdentityV1{}, err
+			}
+			identity.SourceRegistrationJSON = string(canonical)
+			identity.SourceRegistrationSHA256 = digest
+		} else {
+			registration, err := domainpluginpackage.NewDevelopmentSourceRegistrationV1(observed)
+			if err != nil {
+				return SourceTreeIdentityV1{}, err
+			}
+			canonical, err := domainpluginpackage.DevelopmentSourceRegistrationV1Bytes(registration)
+			if err != nil {
+				return SourceTreeIdentityV1{}, err
+			}
+			identity.SourceRegistrationJSON = string(canonical)
+			identity.SourceRegistrationSHA256 = domainpluginpackage.DevelopmentSourceRegistrationSHA256V1(registration)
 		}
-		identity.SourceRegistrationJSON = string(canonical)
-		identity.SourceRegistrationSHA256 = domainpluginpackage.DevelopmentSourceRegistrationSHA256V1(registration)
 		return identity, nil
 	}
 	if err := validateManifestAndDisabledMCP(

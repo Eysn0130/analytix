@@ -1,6 +1,6 @@
 import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
 import { useThreadComposerDraft } from './chat/use-thread-composer-draft'
-import { isWriteTextFilePath } from '@shared/write-text-file'
+import { isNativeOfficeFilePath, isWriteTextFilePath } from '@shared/write-text-file'
 import type { CSSProperties, ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -923,7 +923,7 @@ export function Workbench(): ReactElement {
   }, [activeThread?.workspace, route, rightPanelMode, workspaceRoot, setRightPanelMode, setRightSidebarWidth])
 
   useEffect(() => {
-    if (rightPanelMode !== 'file' || !filePreviewTarget || !isWriteTextFilePath(filePreviewTarget.path)) return
+    if (rightPanelMode !== 'file' || !filePreviewTarget || !(isWriteTextFilePath(filePreviewTarget.path) || isNativeOfficeFilePath(filePreviewTarget.path))) return
     let cancelled = false
     const target = filePreviewTarget
     const root = target.workspaceRoot || workspaceRoot
@@ -3246,12 +3246,12 @@ export function Workbench(): ReactElement {
             <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
               {documentsMounted ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'documents'}>
-                  <DocumentWorkspacePanel input={input} setInput={setInput} onSubmitPrompt={sendWritePrompt}
+                  <DocumentWorkspacePanel visible={panelMode === 'documents' && rightPanelVisible} input={input} setInput={setInput} onSubmitPrompt={sendWritePrompt}
                     focused={documentFocused} onToggleFocus={() => setDocumentFocused((value) => !value)}
                     onCollapse={closeRightPanel} onOpenSettings={() => openSettings('write')}
                     onFocusConversation={() => {
                       setDocumentFocused(false)
-                      requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor .cm-content')?.focus())
+                      requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor [contenteditable="true"]')?.focus())
                     }} />
                 </div>
               ) : null}

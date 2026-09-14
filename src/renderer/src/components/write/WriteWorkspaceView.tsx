@@ -24,7 +24,6 @@ import {
   type WriteSaveStatus,
   writeBasenameFromPath,
   writeJoinPath,
-  writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
 import { getWriteRenderSafety } from '../../write/write-render-safety'
 import {
@@ -76,7 +75,6 @@ type Props = {
 }
 
 export function WriteWorkspaceView({
-  leftSidebarCollapsed,
   input,
   setInput,
   onSubmitPrompt,
@@ -226,10 +224,6 @@ export function WriteWorkspaceView({
   // pointer is down (dragging to select) it stays hidden to avoid flicker.
   const selectionAction =
     selection.charCount > 0 && !pointerSelecting ? inlineAgentPosition(selection, { compact: activeFileIsPdf }) : null
-  const activeFileLabel = activeFilePath
-    ? writeRelativeToWorkspace(workspaceRoot, activeFilePath)
-    : t('writeNoFileOpen')
-  const activeFileName = activeFilePath ? writeBasenameFromPath(activeFilePath) : t('writeStudio')
   const documentStats = useMemo(
     () => (activeFileIsText ? computeWriteDocumentStats(fileContent, isMarkdown) : null),
     [activeFileIsText, fileContent, isMarkdown],
@@ -1006,15 +1000,12 @@ export function WriteWorkspaceView({
         activeFileIsImage={activeFileIsImage}
         activeFileIsPdf={activeFileIsPdf}
         activeFileIsText={activeFileIsText}
-        activeFileLabel={activeFileLabel}
-        activeFileName={activeFileName}
         activeFilePath={activeFilePath ?? ''}
         documentStatsLabel={documentStatsLabel}
         assistantOpen={assistantOpen}
         exportInFlight={exportInFlight}
         exportMenuOpen={exportMenuOpen}
         exportMenuRef={exportMenuRef}
-        leftSidebarCollapsed={leftSidebarCollapsed}
         liveModeActive={liveModeActive}
         modeMenuItems={modeMenuItems}
         modeMenuOpen={modeMenuOpen}

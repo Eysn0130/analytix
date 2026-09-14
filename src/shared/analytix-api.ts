@@ -1253,6 +1253,11 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  office: {
+    pickFile: (request: import('zod').infer<typeof import('./native-office').nativeOfficePickerRequestSchema>) => Promise<import('zod').infer<typeof import('./native-office').nativeOfficePickerResponseSchema>>
+    request: (request: import('./native-office').NativeOfficeRequest) => Promise<import('./native-office').NativeOfficeResponse>
+    onChange: (handler: (view: import('./native-office').NativeOfficeView | null) => void) => () => void
+  }
   packageHost: {
     request: (request: import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostRequest) => Promise<import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostResponse>
   }

@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	MaxInputBytes                 = 256 << 10
-	MaxOutputBytes                = 2 << 20
+	MaxInputBytes                 = 24 << 20
+	MaxOutputBytes                = 24 << 20
 	MaxOperations                 = 16
 	WorkspaceEditorContributionID = "workspace-editor"
 )
@@ -314,7 +314,7 @@ func (s *Service) Invoke(ctx context.Context, request InvokeRequest) (InvokeResu
 	if err != nil {
 		return InvokeResult{}, err
 	}
-	if !domainplugin.IsCanonicalSHA256V1(request.GenerationID) || request.ExpectedRevision == 0 || request.ContributionID != WorkspaceEditorContributionID || !validOperation(request.Operation) || !validInput(request.Input) {
+	if !domainplugin.IsCanonicalSHA256V1(request.GenerationID) || request.ExpectedRevision == 0 || request.ContributionID != WorkspaceEditorContributionID || !validOperation(request.Operation) || !validInput(request.Input, request.Operation) {
 		return InvokeResult{}, ErrInvalid
 	}
 	registration, exists := s.registrations[request.PackageID]
@@ -389,9 +389,27 @@ func validOperation(operation string) bool {
 	return true
 }
 
-func validInput(body json.RawMessage) bool {
+func validInput(body json.RawMessage, operation string) bool {
 	value, err := jsonstrict.DecodeObject(body, jsonstrict.Options{MaxBytes: MaxInputBytes, MaxDepth: 16, MaxTokens: 32768, MaxStringBytes: MaxInputBytes})
-	return err == nil && !hasExecutionSelector(value)
+	if err != nil {
+		return false
+	}
+	// Only this named adapter operation accepts a document selector. It cannot
+	// select plugin roots or an executable, and the Office adapter strictly
+	// validates this envelope before the existing Core file authority resolves it.
+	if operation == "open-object" {
+		selected, ok := value["object"].(map[string]any)
+		if !ok || len(selected) != 2 {
+			return false
+		}
+		workspace, workspaceOK := selected["workspace"].(string)
+		path, pathOK := selected["path"].(string)
+		if !workspaceOK || !pathOK || workspace == "" || path == "" {
+			return false
+		}
+		delete(value, "object")
+	}
+	return !hasExecutionSelector(value)
 }
 
 // Paths and executable selectors belong to trusted composition or separate Core

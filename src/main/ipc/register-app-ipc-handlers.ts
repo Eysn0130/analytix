@@ -1,3 +1,4 @@
+import { registerNativeOfficeIpc } from '../office/native-office-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { createObjectEditingHandler } from './object-editing-ipc'
 import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
@@ -2717,6 +2718,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   )
 
   const packageHost = createPluginPackageHostHandler(localDisplayRequest)
+  registerNativeOfficeIpc(getMainWindow, packageHost)
   ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
     const main = getMainWindow()
     if (!main || main.isDestroyed() || event.sender !== main.webContents ||

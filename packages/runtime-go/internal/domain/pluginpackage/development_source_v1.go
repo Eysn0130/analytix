@@ -36,12 +36,16 @@ type DevelopmentSourceRegistrationV1 struct {
 // NewDevelopmentSourceRegistrationV1 accepts observations from a bounded tree
 // inspector. Materialization independently re-inspects all bytes before signing.
 func NewDevelopmentSourceRegistrationV1(observed DevelopmentSourceRegistrationV1) (DevelopmentSourceRegistrationV1, error) {
+	return newDevelopmentSourceRegistrationV1(observed, false)
+}
+
+func newDevelopmentSourceRegistrationV1(observed DevelopmentSourceRegistrationV1, historical bool) (DevelopmentSourceRegistrationV1, error) {
 	observed.SchemaVersion = 1
 	observed.Origin = DevelopmentSourceOriginV1
 	observed.ExecutionMode = "source-experiment"
 	// Never turn caller-supplied publishable/fact-tools assertions into approval.
 	observed.ContributionsSHA256 = developmentContributionsSHA256V1(observed)
-	if err := ValidateDevelopmentSourceRegistrationV1(observed); err != nil {
+	if err := validateDevelopmentSourceRegistrationV1(observed, historical); err != nil {
 		return DevelopmentSourceRegistrationV1{}, err
 	}
 	return observed, nil
@@ -56,6 +60,10 @@ func ValidDevelopmentSourcePackageIDV1(id string) bool {
 }
 
 func ValidateDevelopmentSourceDeclarationV1(declaration DeclarationV1) error {
+	return validateDevelopmentSourceDeclarationV1(declaration, false)
+}
+
+func validateDevelopmentSourceDeclarationV1(declaration DeclarationV1, historical bool) error {
 	invalid := errors.New("development source declaration is not an admitted first-party static editor")
 	if ValidateDeclarationV1(declaration) != nil || !ValidDevelopmentSourcePackageIDV1(declaration.PackageID) ||
 		declaration.Lifecycle.ProtocolVersion != 1 || declaration.Lifecycle.EntryPolicy != "host-static-first-party" ||
@@ -67,20 +75,30 @@ func ValidateDevelopmentSourceDeclarationV1(declaration DeclarationV1) error {
 		return invalid
 	}
 	capability := declaration.RequestedCapabilities[0]
-	if capability.ID != "office.local-edit" || capability.ProtocolVersion != 1 || len(capability.ScopeConstraints) != 2 {
+	requiredScope := "read-only"
+	if historical && capability.ID == "office.local-edit" {
+		requiredScope = "explicit-save"
+	} else if capability.ID != "office.local-preview" {
+		return invalid
+	}
+	if capability.ProtocolVersion != 1 || len(capability.ScopeConstraints) != 2 {
 		return invalid
 	}
 	scopes := map[string]bool{}
 	for _, scope := range capability.ScopeConstraints {
 		scopes[scope] = true
 	}
-	if !scopes["user-selected-object"] || !scopes["explicit-save"] {
+	if !scopes["user-selected-object"] || !scopes[requiredScope] {
 		return invalid
 	}
 	return nil
 }
 
 func ValidateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegistrationV1) error {
+	return validateDevelopmentSourceRegistrationV1(registration, false)
+}
+
+func validateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegistrationV1, historical bool) error {
 	invalid := errors.New("development source registration is invalid")
 	if registration.SchemaVersion != 1 || registration.Origin != DevelopmentSourceOriginV1 || registration.ExecutionMode != "source-experiment" ||
 		registration.Publishable || registration.FactToolsEnabled || !ValidPackageIdentityV1(registration.Identity) ||
@@ -91,7 +109,7 @@ func ValidateDevelopmentSourceRegistrationV1(registration DevelopmentSourceRegis
 		return invalid
 	}
 	declaration, err := ParseDeclarationV1([]byte(registration.DeclarationCanonicalJSON))
-	if err != nil || ValidateDevelopmentSourceDeclarationV1(declaration) != nil || declaration.IdentityV1() != registration.Identity {
+	if err != nil || validateDevelopmentSourceDeclarationV1(declaration, historical) != nil || declaration.IdentityV1() != registration.Identity {
 		return invalid
 	}
 	canonical, err := CanonicalDeclarationV1Bytes(declaration)
@@ -149,4 +167,22 @@ func developmentContributionsSHA256V1(registration DevelopmentSourceRegistration
 func developmentSHA256V1(body []byte) string {
 	digest := sha256.Sum256(body)
 	return hex.EncodeToString(digest[:])
+}
+
+// ReconstructHistoricalDevelopmentSourceRegistrationV1 reconstructs the exact
+// v1 bytes/digest from an installed tree, including the retired local-edit
+// declaration. This is comparison evidence only, never admission or permission
+// to execute. The caller must authenticate the installed receipt and compare
+// this digest plus the tree/identity/marker fields to that receipt. New source
+// registration, parsing and service binding continue to accept preview only.
+func ReconstructHistoricalDevelopmentSourceRegistrationV1(observed DevelopmentSourceRegistrationV1) ([]byte, string, error) {
+	registration, err := newDevelopmentSourceRegistrationV1(observed, true)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := json.Marshal(registration)
+	if err != nil {
+		return nil, "", err
+	}
+	return body, developmentSHA256V1(append([]byte("analytix.development-source-registration/v1\x00"), body...)), nil
 }

@@ -12,9 +12,9 @@ export function createPluginPackageHostHandler(transport: Transport) {
     const request = parsed.data
     try {
       const body = JSON.stringify(request)
-      if (Buffer.byteLength(body) > 270_336) throw new Error('Oversized request')
+      if (Buffer.byteLength(body) > 25_169_920) throw new Error('Oversized request')
       const response = await transport(pluginPackageHostPath, body)
-      if (Buffer.byteLength(response.body) > 2_105_344) throw new Error('Oversized response')
+      if (Buffer.byteLength(response.body) > 25_169_920) throw new Error('Oversized response')
       const result = pluginPackageHostResponseSchema.safeParse(JSON.parse(response.body))
       if (result.success && result.data.ok === response.ok) {
         const value = result.data

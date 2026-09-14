@@ -1719,7 +1719,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
 			ObjectEditing:     newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs),
-			PackageHost:       httpapi.PluginPackageHostHandler{Service: newDevelopmentPackageHost(ctx, config, identityAuthority, nil)},
+			PackageHost:       httpapi.PluginPackageHostHandler{Service: newDevelopmentPackageHost(ctx, config, identityAuthority, newOfficeEditingAdapters(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs))},
 			FundsCSVAdmission: fundsCSVAdmission,
 			FundsCleaning:     fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(

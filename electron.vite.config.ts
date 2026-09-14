@@ -312,6 +312,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ['zod'] })],
     build: {
       rollupOptions: {
+        input: { index: resolve('src/preload/index.ts'), office: resolve('src/main/office/office-preload.ts') },
         output: {
           format: 'cjs',
           entryFileNames: '[name].cjs'

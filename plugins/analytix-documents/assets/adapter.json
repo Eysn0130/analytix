@@ -5,6 +5,6 @@
   "openFormats": [
     "docx"
   ],
-  "saveFormat": "docx",
+  "readOnly": true,
   "protocolVersion": 1
 }

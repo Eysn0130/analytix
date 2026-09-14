@@ -1,6 +1,7 @@
+import { useNativeOfficeStore } from '../office/native-office-store'
 import i18n from '../i18n'
 import { openTextObject } from './object-editing-client'
-import { isWriteImageFilePath, isWritePdfFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
+import { isNativeOfficeFilePath, isWriteImageFilePath, isWritePdfFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
 import { writePathToFileUrl } from '@shared/write-markdown-resource'
 import type { WriteWorkspaceGet, WriteWorkspaceSet, WriteWorkspaceState } from './write-workspace-store-types'
 import {
@@ -206,6 +207,18 @@ export function createWriteFileActions({
       cancelExternalSyncAnimation()
       const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
       if (!saved || revision !== navigationRevision) return
+      if (isNativeOfficeFilePath(path)) {
+        useNativeOfficeStore.getState().select(workspaceRoot, path)
+        return
+      }
+      if (useNativeOfficeStore.getState().view) {
+        const closed = await window.analytix.office.request({ action: 'close' })
+        if (!closed.ok) {
+          useNativeOfficeStore.setState({ error: closed.error ?? 'unavailable', view: closed.view })
+          return
+        }
+      }
+      useNativeOfficeStore.setState({ target: null, view: null, error: null })
       if (!isWriteWorkspaceFilePath(path)) {
         set({
           fileLoading: false,

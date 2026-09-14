@@ -5,6 +5,6 @@
   "openFormats": [
     "pptx"
   ],
-  "saveFormat": "pptx",
+  "readOnly": true,
   "protocolVersion": 1
 }

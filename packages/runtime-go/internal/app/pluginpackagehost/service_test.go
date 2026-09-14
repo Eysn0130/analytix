@@ -433,3 +433,20 @@ func TestHostBoundsInputAndAdapterProtocol(t *testing.T) {
 		t.Fatal("ambiguous adapter output accepted", err)
 	}
 }
+
+func TestHostObjectSelectorIsLimitedToNamedOperation(t *testing.T) {
+	valid := json.RawMessage(`{"object":{"workspace":"/selected/workspace","path":"report.docx"}}`)
+	if !validInput(valid, "open-object") || validInput(valid, "open") {
+		t.Fatal("object selector did not stay operation scoped")
+	}
+	for _, body := range []string{
+		`{"object":{"workspace":"/selected","path":"report.docx","root":"/private"}}`,
+		`{"object":{"workspace":"/selected","path":"report.docx"},"nested":{"args":[]}}`,
+		`{"object":{"workspace":"/selected","path":null}}`,
+		`{"object":{"workspace":"/selected","path":"report.docx","path":"other.docx"}}`,
+	} {
+		if validInput(json.RawMessage(body), "open-object") {
+			t.Fatal("unsafe selector accepted")
+		}
+	}
+}

@@ -1,6 +1,8 @@
 package pluginpackage
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -9,7 +11,7 @@ func developmentDeclarationFixtureV1(id string) DeclarationV1 {
 	return DeclarationV1{SchemaVersion: 1, PackageID: id, PackageVersion: "1.0.0", Contributions: ContributionsV1{
 		Skills: []PathContributionV1{}, MCPServers: []MCPServerContributionV1{}, Hooks: []PathContributionV1{},
 		PublicUI: []PathContributionV1{{ID: "workspace-editor", Path: "ui/editor.json"}}, Assets: []PathContributionV1{{ID: "editor-adapter", Path: "assets/adapter.json"}},
-	}, RequestedCapabilities: []CapabilityRequestV1{{ID: "office.local-edit", ProtocolVersion: 1, ScopeConstraints: []string{"user-selected-object", "explicit-save"}}}, Lifecycle: LifecycleV1{ProtocolVersion: 1, EntryPolicy: "host-static-first-party"}}
+	}, RequestedCapabilities: []CapabilityRequestV1{{ID: "office.local-preview", ProtocolVersion: 1, ScopeConstraints: []string{"user-selected-object", "read-only"}}}, Lifecycle: LifecycleV1{ProtocolVersion: 1, EntryPolicy: "host-static-first-party"}}
 }
 
 func developmentRegistrationFixtureV1(t *testing.T, id string) DevelopmentSourceRegistrationV1 {
@@ -73,6 +75,56 @@ func TestDevelopmentSourceRegistrationFreezesOnlyThreeStaticEditors(t *testing.T
 		mutate(&d)
 		if ValidateDevelopmentSourceDeclarationV1(d) == nil {
 			t.Fatal("widened static contribution admitted")
+		}
+	}
+}
+
+func TestHistoricalDevelopmentRegistrationIsNotNewAdmissionV1(t *testing.T) {
+	for _, id := range []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations"} {
+		registration := developmentRegistrationFixtureV1(t, id)
+		previewBytes, _ := DevelopmentSourceRegistrationV1Bytes(registration)
+		historicalBytes, historicalDigest, err := ReconstructHistoricalDevelopmentSourceRegistrationV1(registration)
+		if err != nil || !bytes.Equal(previewBytes, historicalBytes) || historicalDigest != DevelopmentSourceRegistrationSHA256V1(registration) {
+			t.Fatal("preview canonical identity changed", err)
+		}
+		declaration := developmentDeclarationFixtureV1(id)
+		declaration.RequestedCapabilities[0].ID = "office.local-edit"
+		declaration.RequestedCapabilities[0].ScopeConstraints = []string{"user-selected-object", "explicit-save"}
+		setDeclaration := func() {
+			canonical, err := CanonicalDeclarationV1Bytes(declaration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registration.DeclarationCanonicalJSON = string(canonical)
+			registration.DeclarationRawSHA256 = developmentSHA256V1(canonical)
+			registration.DeclarationCanonicalSHA256 = developmentSHA256V1(canonical)
+		}
+		setDeclaration()
+		// The old v1 encoder used these exact struct JSON bytes and domain.
+		oldBytes, _ := json.Marshal(registration)
+		oldDigest := developmentSHA256V1(append([]byte("analytix.development-source-registration/v1\x00"), oldBytes...))
+		body, digest, err := ReconstructHistoricalDevelopmentSourceRegistrationV1(registration)
+		if err != nil || !bytes.Equal(body, oldBytes) || digest != oldDigest {
+			t.Fatal("legacy canonical bytes changed", err)
+		}
+		if ValidateDevelopmentSourceDeclarationV1(declaration) == nil || ValidateDevelopmentSourceRegistrationV1(registration) == nil {
+			t.Fatal("legacy source newly admitted")
+		}
+		if _, err := NewDevelopmentSourceRegistrationV1(registration); err == nil {
+			t.Fatal("legacy registration created")
+		}
+		if _, err := ParseDevelopmentSourceRegistrationV1(body); err == nil {
+			t.Fatal("legacy registration parsed for new binding")
+		}
+		if DevelopmentSourceRegistrationSHA256V1(registration) != "" {
+			t.Fatal("legacy acquired a current registration digest")
+		}
+		for _, scope := range []string{"read-only", "arbitrary-shell", "external-network"} {
+			declaration.RequestedCapabilities[0].ScopeConstraints = []string{"user-selected-object", scope}
+			setDeclaration()
+			if _, _, err := ReconstructHistoricalDevelopmentSourceRegistrationV1(registration); err == nil {
+				t.Fatal("widened/mixed historical scope accepted")
+			}
 		}
 	}
 }

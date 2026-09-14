@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultWriteSettings } from '@shared/app-settings'
 import { createWriteFileActions } from './write-workspace-file-actions'
 import { initialState } from './write-workspace-store-helpers'
+import { useNativeOfficeStore } from '../office/native-office-store'
 import type { WriteWorkspaceGet, WriteWorkspaceSet, WriteWorkspaceState } from './write-workspace-store-types'
 
 function makeBaseState(): WriteWorkspaceState {
@@ -107,9 +108,29 @@ function installDsGui(overrides: FileBridgeTestOverrides): void {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  useNativeOfficeStore.setState({ target: null, view: null, error: null })
 })
 
 describe('write workspace file actions', () => {
+  it('routes native formats to the controlled Office surface after preserving the text draft', async () => {
+    const h = createHarness()
+    const flush = vi.fn(async () => true)
+    h.set({ flushSave: flush })
+    await h.actions.openFile('/workspace', '/workspace/report.docx')
+    expect(flush).toHaveBeenCalledOnce()
+    expect(useNativeOfficeStore.getState().target).toEqual({ workspace: '/workspace', path: '/workspace/report.docx' })
+    expect(h.get().activeFilePath).toBeNull()
+  })
+
+  it('clears a failed native target when returning to a text file', async () => {
+    const h = createHarness()
+    installDsGui({ readWorkspaceFile: async () => ({ ok: true, path: '/workspace/report.md', content: 'saved text', size: 10, truncated: false }) })
+    useNativeOfficeStore.setState({ target: { workspace: '/workspace', path: '/workspace/missing.docx' }, view: null, error: 'save_failed' })
+    await h.actions.openFile('/workspace', '/workspace/report.md')
+    expect(useNativeOfficeStore.getState()).toMatchObject({ target: null, view: null, error: null })
+    expect(h.get().fileContent).toBe('saved text')
+  })
+
   it('discards an older open receipt after another document was opened', async () => {
     let finishFirst!: (value: unknown) => void
     const read = vi.fn()

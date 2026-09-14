@@ -1,5 +1,3 @@
-//go:build !analytix_prod
-
 package runtimeapp
 
 import (

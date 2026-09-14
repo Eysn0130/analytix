@@ -1299,6 +1299,11 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       listEditors: async () => ({ editors: [], defaultEditorId: '' }),
       openEditorPath: async () => ({ ok: false, message: browserPreviewUnavailable('Open editor') })
     },
+    office: {
+      pickFile: async () => ({ ok: false, error: 'unavailable' }),
+      request: async () => ({ ok: false, view: null, error: 'unavailable' }),
+      onChange: () => () => undefined
+    },
     packageHost: {
       request: async () => ({ ok: false, code: 'identity_invalid', message: 'Plugin control requires the desktop workspace.' })
     },

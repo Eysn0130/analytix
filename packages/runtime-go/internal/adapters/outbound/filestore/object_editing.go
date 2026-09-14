@@ -28,6 +28,9 @@ type ObjectEditingFiles struct {
 	receiptRoot  string
 	rootIdentity string
 	protected    []string
+	// Set only by the native Office constructor; the default text path retains
+	// its original encoding and size limits.
+	officeKind string
 	// Narrow internal fault seams; production uses the existing atomic primitive.
 	replaceDocument func(atomicTextReplaceRequest) error
 	replaceJournal  func(atomicTextReplaceRequest) error
@@ -108,6 +111,9 @@ func (s *ObjectEditingFiles) target(workspace, path string) (objectEditingTarget
 	if err := s.checkRoot(); err != nil {
 		return objectEditingTarget{}, err
 	}
+	if s.officeKind != "" && strings.ToLower(filepath.Ext(path)) != "."+s.officeKind {
+		return objectEditingTarget{}, objectediting.ErrNotText
+	}
 	base, err := canonicalMutationIdentitySystemAlias(filepath.Clean(workspace))
 	if err != nil || mutationPathContainsSymlink(base) {
 		return objectEditingTarget{}, objectediting.ErrForbidden
@@ -157,6 +163,10 @@ func objectEditingText(content string) bool {
 }
 
 func objectEditingInspect(path string) (atomicTextState, error) {
+	return objectEditingInspectBounded(path, objectediting.MaxTextBytes)
+}
+
+func objectEditingInspectBounded(path string, maxBytes int64) (atomicTextState, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -167,17 +177,17 @@ func objectEditingInspect(path string) (atomicTextState, error) {
 	if !info.Mode().IsRegular() {
 		return atomicTextState{}, objectediting.ErrForbidden
 	}
-	if info.Size() > objectediting.MaxTextBytes {
+	if info.Size() > maxBytes {
 		return atomicTextState{}, objectediting.ErrTooLarge
 	}
-	state, err := inspectAtomicTextTargetBounded(path, false, objectediting.MaxTextBytes)
+	state, err := inspectAtomicTextTargetBounded(path, false, maxBytes)
 	if err != nil {
 		return atomicTextState{}, objectEditingError(err)
 	}
 	if !state.Exists {
 		return atomicTextState{}, os.ErrNotExist
 	}
-	if len(state.Content) > objectediting.MaxTextBytes {
+	if int64(len(state.Content)) > maxBytes {
 		return atomicTextState{}, objectediting.ErrTooLarge
 	}
 	return state, nil
@@ -203,11 +213,11 @@ func (s *ObjectEditingFiles) Read(ctx context.Context, workspace, path string) (
 	if err != nil {
 		return objectediting.Document{}, err
 	}
-	state, err := objectEditingInspect(target.path)
+	state, err := s.inspectObject(target.path)
 	if err != nil {
 		return objectediting.Document{}, err
 	}
-	content, encoding, err := objectEditingDecode(state.Content)
+	content, encoding, err := s.decodeObject(state.Content)
 	if err != nil {
 		return objectediting.Document{}, err
 	}
@@ -318,7 +328,7 @@ func (s *ObjectEditingFiles) reconcile(target objectEditingTarget, r objectEditi
 	if r.Status != objectediting.StatusPending {
 		return objectEditingReceipt(r), nil
 	}
-	state, err := objectEditingInspect(target.path)
+	state, err := s.inspectObject(target.path)
 	if err != nil {
 		return objectEditingReceipt(r), nil
 	}
@@ -327,7 +337,7 @@ func (s *ObjectEditingFiles) reconcile(target objectEditingTarget, r objectEditi
 		if err := objectEditingSyncTarget(target.path); err != nil {
 			return objectEditingReceipt(r), objectediting.ErrPersistence
 		}
-		confirmed, err := objectEditingInspect(target.path)
+		confirmed, err := s.inspectObject(target.path)
 		if err != nil || digestAtomicText(confirmed.Content) != r.AfterHash {
 			return objectEditingReceipt(r), objectediting.ErrPersistence
 		}
@@ -370,7 +380,7 @@ func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.Com
 	if !objectEditingIDs(input.ObjectIdentity, input.OperationID) || !objectEditingHash(input.BaseRevision) {
 		return objectediting.Receipt{}, objectediting.ErrInvalidInput
 	}
-	if len(input.Content) > objectediting.MaxTextBytes {
+	if len(input.Content) > s.maxContentBytes() {
 		return objectediting.Receipt{}, objectediting.ErrTooLarge
 	}
 	if !objectEditingText(input.Content) {
@@ -395,16 +405,19 @@ func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.Com
 	if !errors.Is(err, objectediting.ErrOperationNotFound) {
 		return objectediting.Receipt{}, err
 	}
-	state, err := objectEditingInspect(target.path)
+	state, err := s.inspectObject(target.path)
 	if err != nil {
 		return objectediting.Receipt{}, err
 	}
-	_, encoding, err := objectEditingDecode(state.Content)
+	_, encoding, err := s.decodeObject(state.Content)
 	if err != nil {
 		return objectediting.Receipt{}, err
 	}
-	encoded := filetoolsapp.EncodeTextBytes(input.Content, encoding)
-	if len(encoded) > objectediting.MaxTextBytes {
+	encoded, err := s.encodeObject(input.Content, encoding)
+	if err != nil {
+		return objectediting.Receipt{}, err
+	}
+	if int64(len(encoded)) > s.maxObjectBytes() {
 		return objectediting.Receipt{}, objectediting.ErrTooLarge
 	}
 	r := objectEditingRecord{Version: 1, ObjectIdentity: input.ObjectIdentity, OperationID: input.OperationID, PathBinding: target.binding, RequestHash: requestHash, BeforeHash: input.BaseRevision, AfterHash: digestAtomicText(encoded), Status: objectediting.StatusPending, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
@@ -428,7 +441,7 @@ func (s *ObjectEditingFiles) Commit(ctx context.Context, input objectediting.Com
 	if replace == nil {
 		replace = atomicReplaceText
 	}
-	writeErr := replace(atomicTextReplaceRequest{Path: target.path, Content: encoded, MaxBytes: objectediting.MaxTextBytes, ExpectedExists: true, ExpectedHash: input.BaseRevision, PreserveMode: true, DefaultMode: state.Mode})
+	writeErr := replace(atomicTextReplaceRequest{Path: target.path, Content: encoded, MaxBytes: s.maxObjectBytes(), ExpectedExists: true, ExpectedHash: input.BaseRevision, PreserveMode: true, DefaultMode: state.Mode})
 	// A replacement error may follow a successful rename/fsync. Resolve from
 	// durable intent + actual bytes; never project every error as "not saved".
 	r, recordHash, err = s.readRecord(input.ObjectIdentity, input.OperationID)

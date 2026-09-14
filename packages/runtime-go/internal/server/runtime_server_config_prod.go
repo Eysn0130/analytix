@@ -15,6 +15,7 @@ type runtimeReadinessStatus = readiness.RuntimeReadinessProjection
 
 type RuntimeServerConfig struct {
 	DevelopmentPluginSourceRoot               string
+	DevelopmentOfficeAssetRoot                string
 	RuntimeToken                              string
 	Insecure                                  bool
 	StartedAt                                 string

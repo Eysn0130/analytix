@@ -2181,12 +2181,18 @@
   "officePluginsTitle": "Built-in Office",
   "officePluginsRefresh": "Refresh built-in plugins",
   "officePluginsUnavailable": "Plugin state could not be confirmed. Refresh to retry.",
-  "officePluginsNotConfigured": "Office editors are not configured for this application.",
-  "officePluginsReady": "Ready to open files in the workspace",
+  "officePluginsNotConfigured": "Office previews are not configured for this application.",
+  "officePluginsReady": "Ready for read-only preview",
   "officePluginsOff": "Not enabled",
   "officePluginsDisabled": "Disabled",
-  "officePluginsEditorUnavailable": "Enabled; editor is currently unavailable",
+  "officePluginsEditorUnavailable": "Enabled; preview is currently unavailable",
   "officePluginsToggle": "Toggle {{name}}",
   "officePluginsDisable": "Disable",
-  "officePluginsEnable": "Enable"
+  "officePluginsEnable": "Enable",
+  "nativeOfficeOpen": "Preview file",
+  "nativeOfficeEditor": "Office file preview",
+  "nativeOfficeOperationFailed": "Preview is unavailable. Check the plugin status and reopen the file.",
+  "nativeOfficeStatus_loading": "Opening",
+  "nativeOfficeStatus_error": "Operation failed",
+  "nativeOfficeStatus_ready": "Read-only preview"
 }

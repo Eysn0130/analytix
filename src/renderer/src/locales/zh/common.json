@@ -2181,12 +2181,18 @@
   "officePluginsTitle": "内置办公",
   "officePluginsRefresh": "刷新内置插件状态",
   "officePluginsUnavailable": "无法确认插件状态，请刷新后重试。",
-  "officePluginsNotConfigured": "当前应用尚未配置办公编辑器。",
-  "officePluginsReady": "可在工作台打开文件",
+  "officePluginsNotConfigured": "当前应用尚未配置办公预览。",
+  "officePluginsReady": "在工作台只读预览",
   "officePluginsOff": "未启用",
   "officePluginsDisabled": "已停用",
-  "officePluginsEditorUnavailable": "已启用，编辑器暂不可用",
+  "officePluginsEditorUnavailable": "已启用，预览暂不可用",
   "officePluginsToggle": "切换 {{name}}",
   "officePluginsDisable": "停用",
-  "officePluginsEnable": "启用"
+  "officePluginsEnable": "启用",
+  "nativeOfficeOpen": "预览文件",
+  "nativeOfficeEditor": "办公文件预览",
+  "nativeOfficeOperationFailed": "预览暂时不可用。请检查插件状态后重新打开文件。",
+  "nativeOfficeStatus_loading": "正在打开",
+  "nativeOfficeStatus_error": "操作失败",
+  "nativeOfficeStatus_ready": "只读预览"
 }

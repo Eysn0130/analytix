@@ -1,3 +1,6 @@
+import { useNativeOfficeStore } from '../office/native-office-store'
+import { useChatStore } from '../store/chat-store'
+import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText, Presentation, RefreshCw, Sheet } from 'lucide-react'
@@ -50,6 +53,18 @@ export function BuiltinOfficePlugins({ query }: { query: string }) {
     await refresh()
     if (mounted.current && mutationFailed) setFailed(true)
   })
+  const openDocument = async (pkg: PluginPackageView) => {
+    const extension = pkg.packageId === 'analytix-documents' ? 'docx' : pkg.packageId === 'analytix-spreadsheets' ? 'xlsx' : 'pptx'
+    const root = useChatStore.getState().workspaceRoot
+    if (!root || !(await useWriteWorkspaceStore.getState().flushSave(root))) return
+    try {
+      const picked = await window.analytix.office.pickFile({ kind: extension, workspace: root })
+      if (!picked.ok) { if (mounted.current) setFailed(true); return }
+      if (!picked.path) return
+      useNativeOfficeStore.getState().select(root, picked.path)
+      await useChatStore.getState().openWrite()
+    } catch { if (mounted.current) setFailed(true) }
+  }
   const visible = packages.filter((pkg) => pkg.displayName.toLowerCase().includes(query.trim().toLowerCase()))
   return <section className="mt-8" aria-label={t('officePluginsTitle')} aria-busy={busy}>
     <div className="flex items-center justify-between gap-3 border-b border-ds-border pb-2">
@@ -65,14 +80,17 @@ export function BuiltinOfficePlugins({ query }: { query: string }) {
     <div className="divide-y divide-ds-border">
       {visible.map((pkg) => {
         const Icon = pkg.packageId === 'analytix-documents' ? FileText : pkg.packageId === 'analytix-spreadsheets' ? Sheet : Presentation
+        const accent = pkg.packageId === 'analytix-documents' ? 'text-blue-600 dark:text-blue-400' : pkg.packageId === 'analytix-spreadsheets' ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'
         const status = pkg.available ? 'officePluginsReady' : pkg.activationState === 'unset' ? 'officePluginsOff' :
           pkg.desiredState === 'disabled' ? 'officePluginsDisabled' : 'officePluginsEditorUnavailable'
         return <div key={pkg.packageId} className="flex items-center gap-3 py-4">
-          <Icon className="h-6 w-6 shrink-0 text-ds-muted" aria-hidden="true" />
+          <Icon className={`h-6 w-6 shrink-0 ${accent}`} aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-medium text-ds-ink">{pkg.displayName}</h3>
             <p className="mt-1 text-xs text-ds-muted">{t(status)}</p>
           </div>
+          {pkg.available ? <button type="button" disabled={busy} onClick={() => void run(() => openDocument(pkg))}
+            className="rounded-md border border-ds-border px-3 py-1.5 text-sm text-ds-ink hover:bg-ds-hover focus-visible:outline focus-visible:outline-2 disabled:opacity-50">{t('nativeOfficeOpen')}</button> : null}
           <button type="button" role="switch" aria-checked={pkg.desiredState === 'enabled'}
             aria-label={t('officePluginsToggle', { name: pkg.displayName })}
             disabled={busy || !pkg.materialized || pkg.activationState === 'unavailable'}

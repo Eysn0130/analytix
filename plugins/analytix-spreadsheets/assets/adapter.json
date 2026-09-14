@@ -5,6 +5,6 @@
   "openFormats": [
     "xlsx"
   ],
-  "saveFormat": "xlsx",
+  "readOnly": true,
   "protocolVersion": 1
 }
