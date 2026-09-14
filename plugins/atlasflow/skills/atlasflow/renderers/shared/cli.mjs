@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { applyTemplate, renderCards, esc } from './utils.mjs';
+import { applyTemplate, renderCards } from './utils.mjs';
 import { validateSchema } from './validator.mjs';
 
 // Common CLI head: node render-<type>.mjs [input.json] [output.html]
@@ -30,15 +30,4 @@ export function writeDiagram({ outPath, template, meta, footerLabel, svg, cards 
   console.log(outPath);
 }
 
-// Accessible name for the generated diagram SVG.
-export function svgRootAttrs(meta, kind) {
-  const name = meta.subtitle ? `${meta.title} — ${meta.subtitle}` : meta.title;
-  const animation = meta.animation === 'trace' ? ' data-animation="trace"' : '';
-  return `role="img" aria-label="${esc(`${name} (${kind})`)}"${animation}`;
-}
-
-export function animateAttr(meta, kind, step) {
-  if (meta.animation !== 'trace') return '';
-  const safeStep = Number.isFinite(step) && step >= 0 ? Math.floor(step) : 0;
-  return ` data-animate="${kind}" style="--step:${safeStep}"`;
-}
+export { svgRootAttrs, animateAttr } from './svg-attributes.mjs';

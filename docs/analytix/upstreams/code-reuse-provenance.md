@@ -310,3 +310,32 @@ the actual source/destination diff before adding a notice or declaring closure.
 - Taste `ccbc15639c97057cbfcf32ecebc38ef716e4bb37`: selected redesign/minimalist prompts loaded unchanged in task-local tooling; MIT copyright/license retained with the selected files. Exact source paths/blobs, tool destinations and dispositions are recorded in [the scoped research record](office-preview-ui-research-2026-09-14.md).
 - transitions.dev `598d3d6ad89dabb4bdf742fd2e887ca53914a888`: public behavior/method study only. Tool MIT and transition usage terms are distinct; prompt redistribution is unverified, so no Skill or recipe is copied into Analytix.
 - Reuse mode: clean-room-reference for product changes; original Analytix implementation of observed UI requirements. Reviewer: current primary integrator. Verification: pinned remote/tree and file-level source review; runtime acceptance remains in the separate candidate QA record. Disposition: approved for this bounded research use, not distribution admission.
+
+
+### 2026-09-15 — Existing AtlasFlow renderer extraction
+
+This is a bounded refactor of already tracked plugin code at Analytix commit
+`1a543a45c`, not a new download or a claim of a newly verified upstream commit.
+Source files under `plugins/atlasflow/skills/atlasflow/` are
+`renderers/architecture/render-architecture.mjs` (Git blob
+`c4d80940ea68214ae1aab9e71cb4ab13a5c579f6`) and
+`renderers/shared/cli.mjs` (blob
+`902768e3906f04c48f91a48147bb906a21067b25`). The existing MIT license is blob
+`c79eedb2f1bf2da044ab85cf4b5fc5d2ceabb806`; both 2026 tt-a1i and 2025 Cocoon AI
+copyright notices remain in place and accompany the extracted modules.
+
+Reuse mode: extract a common pure renderer into
+`renderers/architecture/render-plan.mjs` and
+`renderers/shared/svg-attributes.mjs`, with new bounded Canvas adaptation in
+`renderers/architecture/canvas-scene.mjs` and
+`renderers/shared/local-document.mjs`. The CLI retains file IO, schema validation
+and its original output. Canvas accepts validated data, retains every fact and
+source reference in escaped SVG metadata, and emits no executable script or
+external resource reference. These complete local outputs are private artifacts;
+this refactor grants no publication, source-reference or model-egress authority.
+
+Reviewer: primary product integrator, separate from the implementation agent.
+Canonical verification: `npm --prefix plugins/atlasflow/skills/atlasflow test`
+passed five existing byte-identical golden renders and 105 Node tests, including
+six new pure-import, layout, complete-ID and hostile-input checks. GUI, packaged
+Canvas admission and full provenance for external redistribution remain separate.
