@@ -26,16 +26,18 @@ const (
 )
 
 type SourceTreeIdentityV1 struct {
-	RootRealPath     string
-	TreeSHA256       string
-	FileCount        uint64
-	Declaration      PackageDeclarationIdentityV1
-	LegacyV0         bool
-	LegacyPackageID  string
-	LegacyVersion    string
-	ManifestSHA256   string
-	EntrypointSHA256 string
-	TotalBytes       int64
+	SourceRegistrationSHA256 string
+	SourceRegistrationJSON   string
+	RootRealPath             string
+	TreeSHA256               string
+	FileCount                uint64
+	Declaration              PackageDeclarationIdentityV1
+	LegacyV0                 bool
+	LegacyPackageID          string
+	LegacyVersion            string
+	ManifestSHA256           string
+	EntrypointSHA256         string
+	TotalBytes               int64
 }
 
 type PackageDeclarationIdentityV1 struct {
@@ -67,7 +69,37 @@ func inspectInstalledTreeV1(ctx context.Context, root string) (SourceTreeIdentit
 	return inspectTreeV1(ctx, root, true, true)
 }
 
+// InspectDevelopmentSourceTreeV1 inspects only the three static first-party
+// editor declarations. It does not establish packaged admission or execution.
+func InspectDevelopmentSourceTreeV1(ctx context.Context, root string) (SourceTreeIdentityV1, error) {
+	return inspectTreeForOriginV1(ctx, root, false, false, domainplugin.DevelopmentSourceOriginV1)
+}
+
+func inspectSourceForOriginV1(ctx context.Context, root, origin string) (SourceTreeIdentityV1, error) {
+	if origin == domainplugin.DevelopmentSourceOriginV1 {
+		return InspectDevelopmentSourceTreeV1(ctx, root)
+	}
+	if origin != "" {
+		return SourceTreeIdentityV1{}, errors.New("unknown plugin materialization origin")
+	}
+	return InspectSourceTreeV1(ctx, root)
+}
+
+func inspectInstalledForOriginV1(ctx context.Context, root, origin string) (SourceTreeIdentityV1, error) {
+	if origin == domainplugin.DevelopmentSourceOriginV1 {
+		return inspectTreeForOriginV1(ctx, root, true, false, origin)
+	}
+	if origin != "" {
+		return SourceTreeIdentityV1{}, errors.New("unknown plugin materialization origin")
+	}
+	return inspectInstalledTreeV1(ctx, root)
+}
+
 func inspectTreeV1(ctx context.Context, root string, excludeHostMarker, allowLegacyV0 bool) (SourceTreeIdentityV1, error) {
+	return inspectTreeForOriginV1(ctx, root, excludeHostMarker, allowLegacyV0, "")
+}
+
+func inspectTreeForOriginV1(ctx context.Context, root string, excludeHostMarker, allowLegacyV0 bool, origin string) (SourceTreeIdentityV1, error) {
 	if ctx == nil || ctx.Err() != nil {
 		return SourceTreeIdentityV1{}, context.Canceled
 	}
@@ -205,6 +237,34 @@ func inspectTreeV1(ctx context.Context, root string, excludeHostMarker, allowLeg
 		return SourceTreeIdentityV1{}, err
 	}
 	identity.Declaration = declarationIdentity
+	if origin == domainplugin.DevelopmentSourceOriginV1 {
+		if err := domainpluginpackage.ValidateDevelopmentSourceDeclarationV1(declaration); err != nil {
+			return SourceTreeIdentityV1{}, err
+		}
+		name, version, err := inspectManifestIdentityV1(realRoot, identity.ManifestSHA256)
+		if err != nil || name != declaration.PackageID || version != declaration.PackageVersion {
+			return SourceTreeIdentityV1{}, errors.New("development source manifest does not match the declaration")
+		}
+		if _, exists := recordPaths[".mcp.json"]; exists {
+			return SourceTreeIdentityV1{}, errors.New("static development source must not carry MCP configuration")
+		}
+		registration, err := domainpluginpackage.NewDevelopmentSourceRegistrationV1(domainpluginpackage.DevelopmentSourceRegistrationV1{
+			Identity: declaration.IdentityV1(), DeclarationRawSHA256: identity.Declaration.RawSHA256,
+			DeclarationCanonicalSHA256: identity.Declaration.CanonicalSHA256, DeclarationCanonicalJSON: identity.Declaration.CanonicalJSON,
+			SourceTreeSHA256: identity.TreeSHA256, SourceTreeFileCount: identity.FileCount, ManifestSHA256: identity.ManifestSHA256,
+			PublicUISHA256: recordSHA256["ui/editor.json"], AdapterSHA256: recordSHA256["assets/adapter.json"],
+		})
+		if err != nil {
+			return SourceTreeIdentityV1{}, err
+		}
+		canonical, err := domainpluginpackage.DevelopmentSourceRegistrationV1Bytes(registration)
+		if err != nil {
+			return SourceTreeIdentityV1{}, err
+		}
+		identity.SourceRegistrationJSON = string(canonical)
+		identity.SourceRegistrationSHA256 = domainpluginpackage.DevelopmentSourceRegistrationSHA256V1(registration)
+		return identity, nil
+	}
 	if err := validateManifestAndDisabledMCP(
 		realRoot,
 		declaration,
