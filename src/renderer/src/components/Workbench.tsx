@@ -3236,7 +3236,13 @@ export function Workbench(): ReactElement {
           <div
             ref={rightPaneContentRef}
             className="ds-right-sidebar-pane-content"
-            style={{ minWidth: documentFocused ? 0 : rightSidebarWidth, width: documentFocused ? '100%' : rightSidebarWidth }}
+            style={{
+              minWidth: documentFocused ? 0 : rightSidebarWidth,
+              width: documentFocused ? '100%' : rightSidebarWidth,
+              // Document selection menus use viewport coordinates. Layout/paint
+              // containment would rebase their fixed position onto this pane.
+              contain: panelMode === 'documents' ? 'none' : undefined
+            }}
           >
             <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
               {documentsMounted ? (
