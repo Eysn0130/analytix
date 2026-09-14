@@ -132,6 +132,8 @@ export function WriteWorkspaceView({
     pendingAgentReview,
     clearPendingAgentReview,
     reviewActive,
+    reviewRecovery,
+    suspendReview,
     setReviewActive
   } = useWriteWorkspaceStore(
     useShallow((s) => ({
@@ -148,6 +150,8 @@ export function WriteWorkspaceView({
       pendingAgentReview: s.pendingAgentReview,
       clearPendingAgentReview: s.clearPendingAgentReview,
       reviewActive: s.reviewActive,
+      reviewRecovery: s.reviewRecovery,
+      suspendReview: s.suspendReview,
       setReviewActive: s.setReviewActive,
       imageGenReady: s.imageGenReady,
       fileContent: s.fileContent,
@@ -1060,6 +1064,8 @@ export function WriteWorkspaceView({
             richHandleRef={richHandleRef}
             markdownHandleRef={markdownHandleRef}
             onMarkdownReviewStateChange={setReviewActive}
+            reviewRecovery={reviewActive ? reviewRecovery : null}
+            onMarkdownReviewSuspend={suspendReview}
             debouncedPreviewContent={debouncedPreviewContent}
             isMarkdown={isMarkdown}
             inlineCompletion={inlineCompletion}

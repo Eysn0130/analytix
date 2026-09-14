@@ -5,8 +5,9 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { bracketMatching, indentOnInput } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { drawSelection, EditorView, highlightActiveLine, keymap, showPanel, type Panel, type ViewUpdate } from '@codemirror/view'
-import { acceptChunk, getChunks, rejectChunk, unifiedMergeView } from '@codemirror/merge'
+import { acceptChunk, getChunks, getOriginalDoc, rejectChunk, unifiedMergeView } from '@codemirror/merge'
 import i18n from '../../i18n'
+import type { WriteDiffReviewRecovery } from '../../write/write-workspace-store-types'
 import type { WriteTextAlign } from '@shared/app-settings'
 import { applyWriteTextAlignToMarkdownLines } from '@shared/write-text-align'
 import {
@@ -132,6 +133,8 @@ type Props = {
   onImagePasteError?: (message: string) => void
   /** Notified when an inline diff review starts (true) or commits/cancels (false). */
   onReviewStateChange?: (active: boolean) => void
+  reviewRecovery?: WriteDiffReviewRecovery | null
+  onReviewSuspend?: (recovery: WriteDiffReviewRecovery) => void
   handleRef?: MutableRefObject<WriteMarkdownEditorHandle | null>
 }
 
@@ -412,6 +415,8 @@ export function WriteMarkdownEditor({
   onImagePasteSaved,
   onImagePasteError,
   onReviewStateChange,
+  reviewRecovery,
+  onReviewSuspend,
   handleRef
 }: Props): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -442,6 +447,8 @@ export function WriteMarkdownEditor({
   const onReviewStateChangeRef = useRef(onReviewStateChange)
   const mergeCompartmentRef = useRef<Compartment | null>(null)
   const reviewActiveRef = useRef(false)
+  const reviewOwnerRef = useRef<Pick<WriteDiffReviewRecovery, 'workspaceRoot' | 'filePath' | 'baseline'> | null>(null)
+  const onReviewSuspendRef = useRef(onReviewSuspend)
   const valueRef = useRef(value)
   const lastSelectionRef = useRef<WriteEditorSelectionState | null>(null)
   const lastEmittedValueRef = useRef<string | null>(null)
@@ -467,6 +474,7 @@ export function WriteMarkdownEditor({
   onImagePasteSavedRef.current = onImagePasteSaved
   onImagePasteErrorRef.current = onImagePasteError
   onReviewStateChangeRef.current = onReviewStateChange
+  onReviewSuspendRef.current = onReviewSuspend
   valueRef.current = value
 
   useEffect(() => {
@@ -491,6 +499,7 @@ export function WriteMarkdownEditor({
       if (!instance || !reviewActiveRef.current) return
       const finalDoc = instance.state.doc.toString()
       reviewActiveRef.current = false
+      reviewOwnerRef.current = null
       instance.dispatch({
         effects: [
           mergeCompartment.reconfigure([]),
@@ -547,6 +556,11 @@ export function WriteMarkdownEditor({
       if (!instance || readOnlyRef.current) return false
       if (nextDoc === original) return false
       reviewActiveRef.current = true
+      reviewOwnerRef.current = {
+        workspaceRoot: workspaceRootRef.current,
+        filePath: filePathRef.current,
+        baseline: valueRef.current
+      }
       instance.dispatch({
         changes: { from: 0, to: instance.state.doc.length, insert: nextDoc },
         annotations: externalValueSyncAnnotation.of(true),
@@ -833,7 +847,27 @@ export function WriteMarkdownEditor({
       }
     }
 
+    // The merge documents encode partial accept/reject progress. Restoring the
+    // initial proposal would re-open chunks the user has already resolved.
+    if (reviewRecovery && reviewRecovery.workspaceRoot === workspaceRootRef.current &&
+        reviewRecovery.filePath === filePathRef.current && reviewRecovery.baseline === valueRef.current) {
+      if (reviewRecovery.original === reviewRecovery.nextDoc) {
+        lastEmittedValueRef.current = reviewRecovery.nextDoc
+        onChangeRef.current(reviewRecovery.nextDoc)
+        onReviewStateChangeRef.current?.(false)
+      } else {
+        beginDiffReview(reviewRecovery.original, reviewRecovery.nextDoc)
+      }
+    }
+
     return () => {
+      if (reviewActiveRef.current && reviewOwnerRef.current) {
+        onReviewSuspendRef.current?.({
+          ...reviewOwnerRef.current,
+          original: getOriginalDoc(view.state).toString(),
+          nextDoc: view.state.doc.toString()
+        })
+      }
       if (handleRef) handleRef.current = null
       reviewActiveRef.current = false
       view.destroy()

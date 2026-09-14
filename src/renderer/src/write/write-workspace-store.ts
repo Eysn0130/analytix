@@ -82,6 +82,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   settingsLoading: false,
   settingsError: null,
   ...initialState(),
+  reviewRecovery: null,
   previewMode: readStoredPreviewMode(),
   assistantOpen: readStoredAssistantOpen(),
   assistantModel: readStoredAssistantModel(),
@@ -106,7 +107,17 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     }))
   },
 
-  setReviewActive: (active) => set({ reviewActive: active === true }),
+  setReviewActive: (active) => set({
+    reviewActive: active === true,
+    ...(!active ? { reviewRecovery: null } : {})
+  }),
+
+  suspendReview: (recovery) => {
+    const state = get()
+    if (!state.reviewActive || state.workspaceRoot !== recovery.workspaceRoot ||
+        state.activeFilePath !== recovery.filePath || state.fileContent !== recovery.baseline) return
+    set({ reviewRecovery: recovery })
+  },
 
   clearPendingAgentReview: () => set({ pendingAgentReview: null }),
 
@@ -401,6 +412,6 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   resetWorkspace: () => {
     cancelExternalSyncAnimation()
     lastSavedContent = ''
-    set(initialState())
+    set({ ...initialState(), reviewRecovery: null })
   }
 }))

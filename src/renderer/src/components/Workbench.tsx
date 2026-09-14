@@ -1,4 +1,5 @@
 import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
+import { useThreadComposerDraft } from './chat/use-thread-composer-draft'
 import { isWriteTextFilePath } from '@shared/write-text-file'
 import type { CSSProperties, ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -676,15 +677,20 @@ export function Workbench(): ReactElement {
       sidePanel: s.sidePanel
     }))
   )
-  const [input, setInput] = useState('')
+  const {
+    draft: composerDraft, setInput, setAttachments: setComposerAttachments,
+    setFileReferences: setComposerFileReferences, clearSubmitted: clearSubmittedComposer
+  } = useThreadComposerDraft(
+    threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot || '',
+    activeThreadId
+  )
+  const { input, attachments: composerAttachments, fileReferences: composerFileReferences } = composerDraft
   const [mode, setMode] = useState<'plan' | 'agent'>('agent')
   const [useWorktreePool, setUseWorktreePool] = useState(false)
   const [composerReasoningEffort, setComposerReasoningEffort] =
     useState<ComposerReasoningEffort>('max')
   const [runtimeInfo, setRuntimeInfo] = useState<CoreRuntimeInfoJson | null>(null)
   const [runtimeSkills, setRuntimeSkills] = useState<CoreRuntimeSkillJson[]>([])
-  const [composerAttachments, setComposerAttachments] = useState<AttachmentReference[]>([])
-  const [composerFileReferences, setComposerFileReferences] = useState<ComposerFileReference[]>([])
   const [composerExecutionSettings, setComposerExecutionSettings] =
     useState<ComposerExecutionSettings | null>(null)
   const [composerExecutionApplying, setComposerExecutionApplying] = useState(false)
@@ -747,7 +753,6 @@ export function Workbench(): ReactElement {
     [keyboardShortcuts]
   )
 
-  const draftByThread = useRef<Record<string, string>>({})
   const prevThreadId = useRef<string | null>(null)
   // PM-skill framework selected via an assistant-panel button. The id is only
   // applied on send when its injected prompt text is still present in the
@@ -1741,10 +1746,6 @@ export function Workbench(): ReactElement {
     setOpenFilePreviewTargets([])
   }, [activeThreadId])
 
-  useEffect(() => {
-    if (route !== 'chat') setComposerFileReferences([])
-  }, [route])
-
   const handlePickAttachments = async (
     files: File[],
     options: { localFilePaths?: string[] } = {}
@@ -2616,9 +2617,7 @@ export function Workbench(): ReactElement {
     const publicAttachments = projectAttachmentReferencesForPublicSurfaces(attachments)
     const fileReferences = route === 'chat' ? composerFileReferences : []
     const clearSubmittedDraft = (): void => {
-      if (overrideInput === undefined) setInput((current) => current === input ? '' : current)
-      setComposerAttachments((current) => current.filter((attachment) => !attachmentIds.includes(attachment.id)))
-      setComposerFileReferences((current) => current.filter((reference) => !fileReferences.includes(reference)))
+      clearSubmittedComposer({ includeInput: overrideInput === undefined, attachments, fileReferences })
       for (const quote of frozenQuotes) useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)
     }
     const runtimeFileReferences = runtimeFileReferencesFromComposer(fileReferences)

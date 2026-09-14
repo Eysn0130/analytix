@@ -46,6 +46,8 @@ function makeBaseState(): WriteWorkspaceState {
     setAssistantModel: () => undefined,
     setAssistantAgentPresetId: () => undefined,
     setReviewActive: () => undefined,
+    reviewRecovery: null,
+    suspendReview: () => undefined,
     clearPendingAgentReview: () => undefined,
     setSelection: () => undefined,
     recordRecentEdits: () => undefined,

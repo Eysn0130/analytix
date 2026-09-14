@@ -8,6 +8,17 @@ export type WritePreviewMode = 'rich' | 'source' | 'live' | 'split' | 'preview'
 export type WriteSaveStatus = 'saved' | 'dirty' | 'saving' | 'error'
 export type WriteActiveFileKind = 'text' | 'image' | 'pdf'
 
+export type WriteDiffReviewRecovery = {
+  workspaceRoot: string
+  filePath: string
+  /** The unchanged working copy while the editor owns the pending review. */
+  baseline: string
+  /** Accepted chunks have already advanced this original document. */
+  original: string
+  /** Rejected chunks have already reverted this proposed document. */
+  nextDoc: string
+}
+
 export type WriteWorkspaceState = {
   defaultWorkspaceRoot: string
   workspaceRoots: string[]
@@ -46,6 +57,8 @@ export type WriteWorkspaceState = {
   pendingAgentReview: { nextContent: string } | null
   /** True while an inline diff review (agent edit or AI rewrite) is in progress. */
   reviewActive: boolean
+  reviewRecovery: WriteDiffReviewRecovery | null
+  suspendReview: (recovery: WriteDiffReviewRecovery) => void
   previewMode: WritePreviewMode
   assistantOpen: boolean
   assistantModel: string

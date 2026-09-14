@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { emptyComposerDraft } from './composer-drafts'
 import type { NormalizedThread } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -161,6 +162,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   turnDurationByUserId: {},
   inspectorSelectedId: null,
   composerModel: DEFAULT_ANALYTIX_MODEL,
+  composerDrafts: {},
+  updateComposerDraft: (key, update) => set((state) => {
+    const current = state.composerDrafts[key] ?? emptyComposerDraft
+    const next = update(current)
+    return current === next ? state : { composerDrafts: { ...state.composerDrafts, [key]: next } }
+  }),
   composerProviderId: '',
   composerPickList: mergeComposerPickList(false, []),
   composerModelGroups: [],
