@@ -108,8 +108,13 @@ An adapter or hosted instruction consumer must not recursively enter the Host.
 Unpackaged Electron supplies its own source root to Go. Packaged-executable
 inspection still denies this source route; `analytix_prod` by itself is not
 packaged admission. The development receipt remains `development-source`,
-`source-experiment`, non-publishable. A lawful qualified local packaged route is
-still required by the current target; removing the denial is not that route.
+`source-experiment`, non-publishable. The separate private-local composition now
+requires an inspected nonpublishable macOS resource seal, the exact qualified
+resource tree and current package checks. Its Host wraps the same concrete
+adapters that the server binds to selection/projection authority. Main retrieves
+only a current protected-local resource witness; no Renderer flag or environment
+root grants packaged admission. The independent codec directory is included in
+the real packaged payload. Actual installed acceptance remains required.
 
 Core checks native files with bounded ZIP/XML inspection and rejects active
 content and external relationships. Pinned engine resources/fonts and their

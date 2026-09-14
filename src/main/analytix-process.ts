@@ -333,6 +333,17 @@ function resolveNodeScriptCommand(command: string): string {
   })
 }
 
+export function resolveDocumentCodecLaunch(
+  launch = { appPath: app.getAppPath(), execPath: process.execPath, isPackaged: app.isPackaged },
+  platform: NodeJS.Platform = process.platform
+): { executable: string; entry: string } {
+  const root = launch.isPackaged ? launch.appPath.replace(/app\.asar$/, 'app.asar.unpacked') : launch.appPath
+  return {
+    executable: resolveClawScheduleMcpCommand(launch, platform),
+    entry: join(root, 'out', 'office-codec', 'office-generation-codec-entry.js')
+  }
+}
+
 export function resolveAnalytixDataDir(runtime: { dataDir: string }): string {
   const trimmed = runtime.dataDir?.trim()
   if (trimmed) return expandHomePath(trimmed)
@@ -405,13 +416,14 @@ async function startAnalytixChildOnce(
   })
   const runAsElectron = process.platform === 'darwin' && runtime.computerUse?.enabled === true
   const command = runAsElectron ? resolution.command : resolveNodeScriptCommand(resolution.command)
+  const documentCodec = resolveDocumentCodecLaunch()
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ANALYTIX_RUNTIME_TOKEN: runtime.runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveMainPrivateMcpConfigPath(),
     ANALYTIX_APP_ROOT: appRoot(),
-    ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: resolveNodeScriptCommand(process.execPath),
-    ANALYTIX_DOCUMENT_CODEC_ENTRY: join(appRoot(), 'out', 'main', 'office-generation-codec-entry.js'),
+    ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: documentCodec.executable,
+    ANALYTIX_DOCUMENT_CODEC_ENTRY: documentCodec.entry,
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }
   for (const name of [

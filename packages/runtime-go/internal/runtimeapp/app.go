@@ -1614,8 +1614,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
 	phaseObserver, _ := ctx.Value(asyncTurnPhaseObservationContextKeyV1{}).(func(string))
-	officeAdapters := newOfficeEditingAdapters(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
-	officePackageHost := newDevelopmentPackageHost(ctx, config, identityAuthority, officeAdapters)
+	officeAdapters, officePackageHost, officePrivate := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
@@ -1736,11 +1735,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
-			GeneratedArtifacts: httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
-			ObjectEditing:      objectEditingHTTP,
-			PackageHost:        httpapi.PluginPackageHostHandler{Service: officePackageHost},
-			FundsCSVAdmission:  fundsCSVAdmission,
-			FundsCleaning:      fundsCleaning,
+			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
+			ObjectEditing:          objectEditingHTTP,
+			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},
+			OfficePrivateAdmission: httpapi.OfficePrivateAdmissionHandler{Assets: officePrivate},
+			FundsCSVAdmission:      fundsCSVAdmission,
+			FundsCleaning:          fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(
 				fundsAccountFlow.caseEntities,
 				privateFinalStore,

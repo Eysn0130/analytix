@@ -28,6 +28,13 @@ func newOfficeEditingAdapters(ctx context.Context, config Config, identity ident
 	if err != nil {
 		return nil
 	}
+	return composeOfficeEditingAdapters(config, identity, protected, assets.Current)
+}
+
+func composeOfficeEditingAdapters(config Config, identity identityport.Authority, protected []string, current func(context.Context) bool) map[string]adapterport.Adapter {
+	if identity == nil || current == nil || !filepath.IsAbs(config.DataDir) {
+		return nil
+	}
 	root := filepath.Join(config.DataDir, "object-editing")
 	if err := os.Mkdir(root, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil
@@ -38,7 +45,7 @@ func newOfficeEditingAdapters(ctx context.Context, config Config, identity ident
 		if err != nil {
 			continue
 		}
-		result[id] = officeediting.New(kind, editingapp.New(identity, files), assets.Current)
+		result[id] = officeediting.New(kind, editingapp.New(identity, files), current)
 	}
 	return result
 }

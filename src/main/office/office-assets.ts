@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import privateLayout from '../../../packages/runtime-go/internal/adapters/outbound/officeengineassets/private-local-layout.json'
+import engineManifest from '../../../packages/runtime-go/internal/adapters/outbound/officeengineassets/manifest.json'
 import { constants } from 'node:fs'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -36,7 +38,7 @@ async function readHeld(root: string, name: string, max: number): Promise<Buffer
   const fd = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   try {
     const st = await fd.stat()
-    if (!st.isFile() || st.dev !== before.dev || st.ino !== before.ino || st.size !== before.size) throw officeAssetFailure()
+    if (!st.isFile() || st.dev !== before.dev || st.ino !== before.ino || st.size !== before.size || st.nlink !== 1 || st.mtimeMs !== before.mtimeMs || st.ctimeMs !== before.ctimeMs) throw officeAssetFailure()
     const buffer = Buffer.alloc(st.size + 1)
     let count = 0
     while (count < buffer.length) {
@@ -45,7 +47,7 @@ async function readHeld(root: string, name: string, max: number): Promise<Buffer
       count += read.bytesRead
     }
     const after = await fd.stat(), pathAfter = await lstat(target)
-    if (count !== st.size || after.size !== st.size || after.mtimeMs !== st.mtimeMs || after.ctimeMs !== st.ctimeMs || pathAfter.dev !== st.dev || pathAfter.ino !== st.ino || pathAfter.isSymbolicLink() || await realpath(target) !== target) throw officeAssetFailure()
+    if (count !== st.size || after.nlink !== 1 || pathAfter.nlink !== 1 || after.size !== st.size || after.mtimeMs !== st.mtimeMs || after.ctimeMs !== st.ctimeMs || pathAfter.dev !== st.dev || pathAfter.ino !== st.ino || pathAfter.size !== st.size || pathAfter.mtimeMs !== st.mtimeMs || pathAfter.ctimeMs !== st.ctimeMs || pathAfter.isSymbolicLink() || await realpath(target) !== target) throw officeAssetFailure()
     return buffer.subarray(0, count)
   } finally { await fd.close() }
 }
@@ -100,4 +102,67 @@ export async function startOfficeAssetServer(buffers: Map<string, OfficeBuffer>,
   if (!address || typeof address === 'string') { server.close(); throw officeAssetFailure() }
   origin = 'http://127.0.0.1:' + address.port
   return { server, origin, entryURL: origin + prefix + '/office-surface.html', permits, destroy() { if (destroyed) return; destroyed = true; server.closeAllConnections(); server.close(); routes.clear(); buffers.clear() } }
+}
+
+// These are source-owned, fixed package layout inputs; qualification.json is
+// accepted only when its complete digest was witnessed by the current Core.
+const privateDomain = Buffer.from('AnalytixOfficePrivateLocalV1\0')
+const privateKeys = ['schemaVersion','contract','usage','publishable','releaseEligible','targetKey','sourceCommit','worktreeSnapshotDigest','engineBuildId','engineManifestSha256','files','qualificationDigest']
+const hex = (value: unknown, length: number): value is string => typeof value === 'string' && new RegExp(`^[a-f0-9]{${length}}$`).test(value)
+type PrivateFile = { path: string; byteLength: number; sha256: string }
+export type PrivateOfficeBuffers = { buffers: Map<string, OfficeBuffer>; preloadPath: string }
+
+export function parsePrivateOfficeQualification(raw:Buffer, qualificationDigest:string):ReadonlyMap<string,PrivateFile> {
+  try {
+    if(raw.length>64*1024 || !hex(qualificationDigest,64))throw officeAssetFailure()
+    const q: unknown = JSON.parse(raw.toString('utf8'))
+    if (!record(q) || !exact(q,privateKeys) || !Buffer.from(JSON.stringify(q)+'\n').equals(raw) ||
+        q.schemaVersion !== 1 || q.contract !== 'analytix.office-private-local/v1' || q.usage !== 'private-local' || q.publishable !== false || q.releaseEligible !== false ||
+        q.targetKey !== 'darwin-arm64' || !hex(q.sourceCommit,40) || !hex(q.worktreeSnapshotDigest,64) ||
+        q.engineBuildId !== privateLayout.buildId || q.engineManifestSha256 !== privateLayout.manifestSha256 || q.qualificationDigest !== qualificationDigest ||
+        !Array.isArray(q.files) || q.files.length !== 35 || privateLayout.files.length !== 35) throw officeAssetFailure()
+    // Rebuild the canonical ordered body, so reordered fields or duplicate keys
+    // cannot acquire a different interpretation under the same Core witness.
+    const body = {schemaVersion:q.schemaVersion,contract:q.contract,usage:q.usage,publishable:q.publishable,releaseEligible:q.releaseEligible,targetKey:q.targetKey,
+      sourceCommit:q.sourceCommit,worktreeSnapshotDigest:q.worktreeSnapshotDigest,engineBuildId:q.engineBuildId,engineManifestSha256:q.engineManifestSha256,files:q.files}
+    if (!Buffer.from(JSON.stringify({...body,qualificationDigest})+'\n').equals(raw) ||
+        createHash('sha256').update(privateDomain).update(JSON.stringify(body)).digest('hex') !== qualificationDigest) throw officeAssetFailure()
+    const files = new Map<string,PrivateFile>()
+    let total = 0, previous = ''
+    for (let index=0;index<q.files.length;index++) {
+      const file:unknown=q.files[index], expected=privateLayout.files[index]
+      if (!record(file) || !exact(file,['path','byteLength','sha256']) || file.path !== expected.path || expected.path <= previous ||
+          !Number.isSafeInteger(file.byteLength) || Number(file.byteLength)<=0 || Number(file.byteLength)>expected.maximum || !hex(file.sha256,64) ||
+          (expected.byteLength !== null && file.byteLength !== expected.byteLength) || (expected.sha256 !== null && file.sha256 !== expected.sha256)) throw officeAssetFailure()
+      const entry={path:expected.path,byteLength:Number(file.byteLength),sha256:file.sha256}
+      if (JSON.stringify(file)!==JSON.stringify(entry)) throw officeAssetFailure()
+      files.set(entry.path,entry);previous=entry.path;total+=entry.byteLength
+    }
+    if(total>320*1024*1024)throw officeAssetFailure()
+    return files
+  } catch { throw officeAssetFailure() }
+}
+
+export async function loadPrivateOfficeBuffers(root: string, qualificationDigest: string): Promise<PrivateOfficeBuffers> {
+  const buffers = new Map<string, OfficeBuffer>()
+  try {
+    if (!hex(qualificationDigest,64)) throw officeAssetFailure()
+    const raw = await readHeld(root,'qualification.json',64*1024)
+    const files = parsePrivateOfficeQualification(raw,qualificationDigest)
+    const read = async (path:string) => {
+      const entry=files.get(path)
+      if(!entry)throw officeAssetFailure()
+      const bytes=await readHeld(root,path,entry.byteLength)
+      if(bytes.length!==entry.byteLength || hash(bytes)!==entry.sha256)throw officeAssetFailure()
+      return bytes
+    }
+    const manifest=await read('manifest.json')
+    if(!manifest.equals(Buffer.from(JSON.stringify(engineManifest,null,2)+'\n')) || hash(manifest)!==privateLayout.manifestSha256 || engineManifest.buildId!==privateLayout.buildId)throw officeAssetFailure()
+    for(const [name,[path,mime]] of Object.entries(paths))buffers.set('/assets/'+name,{bytes:await read('assets/'+path),mime})
+    for(const name of ['office-surface.html','office-surface.js','office-worker.js'])buffers.set('/'+name,{bytes:await read('surface/'+name),mime:name.endsWith('.html')?'text/html; charset=utf-8':'text/javascript; charset=utf-8'})
+    // Electron requires a preload pathname. Verify its exact bytes as part of
+    // the same witness before the caller rechecks Core and creates the view.
+    await read('preload/office.cjs')
+    return {buffers,preloadPath:join(root,'preload/office.cjs')}
+  } catch { buffers.clear(); throw officeAssetFailure() }
 }

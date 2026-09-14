@@ -93,7 +93,7 @@ func MatchRuntimeRoute(path string) RuntimeRouteMatch {
 		path == LocalDisplayDirectPreviewPathV1 || path == LocalDisplayAcceptedSlotsPathV1 ||
 		path == HostFundsImportStagePathV1 || path == HostFundsImportConfirmPathV1 ||
 		path == HostFundsImportCancelPathV1 || path == HostFundsImportStatusPathV1 ||
-		path == HostFundsDeterministicCleaningPathV1 || path == HostFundsCleaningRevokePathV1 || path == ObjectEditingPath || path == PluginPackageHostPath || path == GeneratedArtifactPath:
+		path == HostFundsDeterministicCleaningPathV1 || path == HostFundsCleaningRevokePathV1 || path == ObjectEditingPath || path == PluginPackageHostPath || path == GeneratedArtifactPath || path == OfficePrivateAdmissionPath:
 		return RuntimeRouteMatch{Route: RouteLocalDisplay}
 	case path == "/v1/case-projects" || strings.HasPrefix(path, "/v1/case-projects/"):
 		return RuntimeRouteMatch{Route: RouteCaseProjects}

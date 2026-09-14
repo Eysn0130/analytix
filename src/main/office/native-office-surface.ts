@@ -4,17 +4,15 @@ import { nativeWorkspaceCommandFromInput } from '../../shared/native-office'
 import { randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
+import { isOfficePrivateAdmission, loadAdmittedOfficeBuffers, type OfficePrivateAdmission } from './office-private-admission'
 import { loadOfficeBuffers, startOfficeAssetServer, type OfficeAssetServer } from './office-assets'
 import { OFFICE_BIND_IPC, isOfficeEvent, isOfficeEngineFailure, isOfficeReady, isOfficeRequest, isOfficeResult, officeRecord, sameOfficeEnvelope, type OfficeEvent, type OfficeRequest, type OfficeRequestInput, type OfficeResult, type OfficeState } from './office-protocol'
 
 export type OfficeSurfaceFatal = { type: 'fatal'; code: 'office-startup-failed' | 'office-assets-unavailable' | 'office-protocol-invalid' | 'office-operation-timeout-unknown' | 'office-engine-closed-unknown' }
 export type NativeOfficeSurfaceOptions = {
   owner: BrowserWindow
-  assetRoot: string
-  sourceRoot: string
-  preloadPath: string
   onEvent: (event: OfficeEvent | OfficeSurfaceFatal) => void
-}
+} & ({ assetRoot:string; sourceRoot:string; preloadPath:string; privateAdmission?:never } | { privateAdmission:OfficePrivateAdmission; assetRoot?:never; sourceRoot?:never; preloadPath?:never })
 type Pending = { request: OfficeRequest; resolve: (result: OfficeResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
 const failure = (code: string) => new Error(code)
 const validBounds = (bounds: Rectangle) => ['x', 'y', 'width', 'height'].every(k => Number.isSafeInteger(bounds[k as keyof Rectangle]) && bounds[k as keyof Rectangle] >= 0 && bounds[k as keyof Rectangle] <= 16384) && bounds.width > 0 && bounds.height > 0
@@ -45,7 +43,7 @@ export class NativeOfficeSurface {
   private readonly ownerClosed = () => this.destroy()
 
   constructor(private readonly options: NativeOfficeSurfaceOptions) {
-    if (app.isPackaged) throw failure('office-source-experiment-only')
+    if (app.isPackaged ? !isOfficePrivateAdmission(options.privateAdmission) : options.privateAdmission !== undefined) throw failure('office-source-experiment-only')
     if (options.owner.isDestroyed()) throw failure('office-owner-unavailable')
     options.owner.once('closed', this.ownerClosed)
   }
@@ -113,11 +111,12 @@ export class NativeOfficeSurface {
 
   private async initialize(): Promise<void> {
     try {
-      const { preloadPath, sourceRoot, assetRoot } = this.options
+      const admitted = this.options.privateAdmission ? await loadAdmittedOfficeBuffers(this.options.privateAdmission) : undefined
+      const preloadPath = admitted?.preloadPath ?? this.options.preloadPath!
       if (!isAbsolute(preloadPath) || resolve(preloadPath) !== preloadPath || await realpath(preloadPath) !== preloadPath) throw failure('office-assets-unavailable')
       const preloadStat = await lstat(preloadPath)
       if (!preloadStat.isFile() || preloadStat.isSymbolicLink() || preloadStat.nlink !== 1) throw failure('office-assets-unavailable')
-      const buffers = await loadOfficeBuffers(sourceRoot, assetRoot)
+      const buffers = admitted?.buffers ?? await loadOfficeBuffers(this.options.sourceRoot!, this.options.assetRoot!)
       if (this.destroyed) { buffers.clear(); throw failure('office-surface-destroyed') }
       const server = await startOfficeAssetServer(buffers, randomUUID())
       if (this.destroyed) { server.destroy(); throw failure('office-surface-destroyed') }

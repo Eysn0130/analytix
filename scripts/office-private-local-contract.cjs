@@ -158,14 +158,21 @@ function directoriesFor(files) {
   for (const file of files) for (let parent = dirname(file); parent !== '.'; parent = dirname(parent)) directories.add(parent)
   return directories
 }
-function inspectClosedTree(root, files) {
+function inspectClosedTree(root, files, privatePayload = false) {
   const chain = directoryChain(root), expected = new Set(files), directories = directoriesFor(files), seen = new Set()
+  // Payload directories must not grant write access to group/other. External
+  // source/cache/installation ancestors retain identity and symlink checks.
+  if (privatePayload && (chain[0].info.mode & 0o022n) !== 0n) fail('unsafe-directory')
   const visit = (path, prefix) => {
     for (const name of fs.readdirSync(path)) {
       const rel = prefix ? `${prefix}/${name}` : name, absolute = join(path, name)
       const info = fs.lstatSync(absolute, { bigint: true })
       if (info.isSymbolicLink()) fail('unsafe-tree')
-      if (directories.has(rel) && info.isDirectory()) visit(absolute, rel)
+      if (directories.has(rel) && info.isDirectory()) {
+        if (privatePayload && (info.mode & 0o022n) !== 0n) fail('unsafe-directory')
+        chain.push({ path: absolute, info })
+        visit(absolute, rel)
+      }
       else if (expected.has(rel) && safeFile(info, MAX_TOTAL)) seen.add(rel)
       else fail('unexpected-payload')
     }
@@ -204,7 +211,7 @@ function verifyPrivateLocal(root, expected) {
     const qualification = validateQualification(initial.bytes)
     if (qualification.sourceCommit !== expected.sourceCommit || qualification.worktreeSnapshotDigest !== expected.worktreeSnapshotDigest ||
         qualification.targetKey !== expected.targetKey) fail('identity-mismatch')
-    inspectClosedTree(root, [...FILES, 'qualification.json'])
+    inspectClosedTree(root, [...FILES, 'qualification.json'], true)
     const observations = []
     for (const file of qualification.files) {
       const actual = readStable(join(root, file.path), sources.get(file.path).maximum)
@@ -214,7 +221,7 @@ function verifyPrivateLocal(root, expected) {
     for (const kind of PLUGINS) verifyPlugin(join(root, `plugins/analytix-${kind}`), kind)
     const final = readBytes(join(root, 'qualification.json'), MAX_QUALIFICATION)
     if (!sameFile(initial.info, final.info) || !initial.bytes.equals(final.bytes)) fail('qualification-changed')
-    inspectClosedTree(root, [...FILES, 'qualification.json'])
+    inspectClosedTree(root, [...FILES, 'qualification.json'], true)
     for (const observation of observations) {
       if (!sameFile(observation.info, fs.lstatSync(observation.path, { bigint: true }))) fail('content-changed')
     }

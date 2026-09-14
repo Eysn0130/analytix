@@ -32,6 +32,15 @@ func newDevelopmentPackageHost(ctx context.Context, config Config, identity iden
 	if err != nil {
 		return nil
 	}
+	return composeOfficePackageHost(ctx, config, identity, adapters, root, nil)
+}
+
+// Source attribution/materialization is shared, but execution admission belongs
+// to the caller. A private package supplies its sealed, continuously checked root.
+func composeOfficePackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, root string, current func(context.Context) bool) *hostapp.Service {
+	if identity == nil || (current != nil && !current(ctx)) {
+		return nil
+	}
 	dataDir, runtimeHome, err := bundledFundsRuntimeRootsV1(config.DataDir)
 	if err != nil {
 		return nil
@@ -104,12 +113,19 @@ func newDevelopmentPackageHost(ctx context.Context, config Config, identity iden
 		if registration.OfficeSkillSHA256V1() != "" {
 			skillReader = pluginstore.OfficeSkillReader{Store: store, Authority: authority, SHA256: registration.OfficeSkillSHA256V1()}
 		}
+		var resolver hostapp.ActiveResolver = service
+		if current != nil {
+			resolver = qualifiedOfficeResolver{inner: service, current: current}
+		}
 		hosted = append(hosted, hostapp.Registration{Identity: registration.Identity,
 			SourceRegistrationSHA256: domainpackage.DevelopmentSourceRegistrationSHA256V1(registration),
-			Materialization:          service, State: store, Adapter: adapters[id], SkillReader: skillReader})
+			Materialization:          resolver, State: store, Adapter: adapters[id], SkillReader: skillReader})
 	}
 	host, err := hostapp.New(identity, authority, hosted, time.Now)
 	if err != nil {
+		return nil
+	}
+	if current != nil && !current(ctx) {
 		return nil
 	}
 	return host

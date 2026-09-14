@@ -26,6 +26,7 @@
     "e2e:test-account": "node ./scripts/dev-test-account-launcher.mjs --built",
     "build": "npm run build:runtime && electron-vite build",
     "build:runtime": "node ./scripts/ensure-runtime-install.cjs && npm --prefix packages/runtime run build",
+    "build:office-codec": "node ./scripts/build-office-codec.mjs",
     "build:data-native": "node ./scripts/build-data-analysis-native-tools.cjs",
     "build:data-native:development": "node ./scripts/build-data-analysis-native-tools.cjs --development",
     "build:data-native:package": "node ./scripts/build-data-analysis-native-tools.cjs --all-package-targets",

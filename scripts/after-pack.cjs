@@ -3,6 +3,7 @@ const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
 const { dirname, isAbsolute, join, relative, resolve, sep } = require('node:path')
 const { parse: parseJavaScriptModule } = require('acorn')
+const { stagePrivateLocal, verifyPrivateLocal } = require('./office-private-local-contract.cjs')
 const {
   RECEIPT_FILE_NAME,
   assertNativeBinaryTarget,
@@ -1653,6 +1654,39 @@ function formalPackagedReleaseIntent(env = process.env) {
       env.ANALYTIX_WINDOWS_EXPECTED_SIGNER_SHA1)
 }
 
+// Private Office admission is a build-only disposition. The runtime never reads
+// these variables; it verifies the installed resource seal and qualified bytes.
+function privateOfficeBuildRequested(context, nativeDisposition, env = process.env) {
+  const requested = env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD
+  const assetRoot = env.ANALYTIX_OFFICE_PRIVATE_LOCAL_ASSET_ROOT
+  if (requested == null && assetRoot == null) return false
+  if (requested !== '1' || typeof assetRoot !== 'string' || !isAbsolute(assetRoot) ||
+    resolve(assetRoot) !== assetRoot || packagedTargetKey(context) !== 'darwin-arm64' ||
+    nativeDisposition.kind !== NATIVE_DISPOSITION_DEVELOPMENT || formalPackagedReleaseIntent(env) ||
+    env.ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE !== 'isolated-local-v1') {
+    throw new Error('[after-pack] office_private_local_build_scope_invalid')
+  }
+  return true
+}
+function stagePrivateOfficeForPack(context, nativeDisposition, repoRoot, snapshot, env = process.env) {
+  const root = join(packedResourcesDir(context), 'office-private')
+  const requested = privateOfficeBuildRequested(context, nativeDisposition, env)
+  if (pathEntryExists(root)) throw new Error('[after-pack] office_private_local_payload_already_present')
+  if (!requested) return
+  return stagePrivateLocal({repoRoot,assetRoot:env.ANALYTIX_OFFICE_PRIVATE_LOCAL_ASSET_ROOT,
+    destination:root,worktreeSnapshot:snapshot,targetKey:packagedTargetKey(context)})
+}
+function verifyPrivateOfficeForPack(context, nativeDisposition, snapshot, env = process.env) {
+  const root = join(packedResourcesDir(context), 'office-private')
+  const requested = privateOfficeBuildRequested(context, nativeDisposition, env)
+  if (!requested) {
+    if (pathEntryExists(root)) throw new Error('[after-pack] office_private_local_payload_not_authorized')
+    return
+  }
+  return verifyPrivateLocal(root,{sourceCommit:snapshot.sourceCommit,
+    worktreeSnapshotDigest:snapshot.snapshotDigest,targetKey:packagedTargetKey(context)})
+}
+
 function syncRegularFile(path) {
   const fd = openSync(path, constants.O_RDONLY)
   try {
@@ -1760,6 +1794,7 @@ function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
   if (formalPackagedReleaseIntent(options.env || process.env) && worktreeSnapshot.dirty) {
     throw new Error('[after-pack] Formal packaged release requires a clean Git worktree')
   }
+  verifyPrivateOfficeForPack(context, nativeDisposition, worktreeSnapshot, options.env || process.env)
   const buildContext = options.buildContext || collectEffectiveBuilderContextV1(context)
   const stagedPayload = options.stagedPayload || collectStagedPayloadClosureV1(context)
   const expectedFundsPluginAdmission = options.fundsPluginAdmission
@@ -4461,6 +4496,9 @@ async function afterPack(context) {
     canonicalJSON(worktreeSnapshotAfter) !== canonicalJSON(entrySnapshot)) {
     throw new Error('[after-pack] Source worktree changed during afterPack')
   }
+  stagePrivateOfficeForPack(context, nativeDisposition, repoRoot, worktreeSnapshotAfter)
+  const { validateOfficeCodecDirectory } = await import('./build-office-codec.mjs')
+  await validateOfficeCodecDirectory(join(unpackedAppRoot(context), 'out', 'office-codec'))
   const authority = writePackagedBuildAuthorityV2(context, nativeDisposition, {
     repoRoot,
     worktreeSnapshot: worktreeSnapshotAfter,
@@ -4491,6 +4529,9 @@ exports.NATIVE_DISPOSITION_DEVELOPMENT = NATIVE_DISPOSITION_DEVELOPMENT
 exports.DOCUMENT_RUNTIME_MANIFEST_FILE = DOCUMENT_RUNTIME_MANIFEST_FILE
 exports.DOCUMENT_RUNTIME_UNAVAILABLE = DOCUMENT_RUNTIME_UNAVAILABLE
 exports._internals = {
+  privateOfficeBuildRequested,
+  stagePrivateOfficeForPack,
+  verifyPrivateOfficeForPack,
   appBundlePath,
   packedResourcesDir,
   unpackedAppRoot,

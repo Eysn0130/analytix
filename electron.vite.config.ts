@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { extname, join, posix, relative, resolve } from 'path'
+import { pathToFileURL } from 'node:url'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
@@ -24,6 +25,21 @@ const FLOW_RUNTIME_ROUTE_PREFIX = '/flow-runtime/'
 
 function toPosixPath(value: string): string {
   return value.replace(/\\/g, '/')
+}
+
+function officeCodecBuildPlugin(): Plugin {
+  return {
+    name: 'analytix-office-codec-build',
+    async buildStart() {
+      // Keep the data-only subprocess separate from Main's external dependencies
+      // and shared chunks. This hook also covers direct electron-vite dev runs.
+      const script = pathToFileURL(resolve('scripts/build-office-codec.mjs')).href
+      const { buildOfficeCodec } = await import(/* @vite-ignore */ script)
+      const output: { watchFiles: string[] } = await buildOfficeCodec()
+      this.addWatchFile(resolve('scripts/build-office-codec.mjs'))
+      for (const file of output.watchFiles) this.addWatchFile(file)
+    }
+  }
 }
 
 function buildGraphModuleId(moduleId: string): string | null {
@@ -294,12 +310,11 @@ async function writeFetchResponse(res: NodeJS.WritableStream & {
 export default defineConfig({
   main: {
     envDir: developmentEnvDir,
-    plugins: [externalizeDepsPlugin(), hubColdBuildGraphPlugin('main')],
+    plugins: [externalizeDepsPlugin(), hubColdBuildGraphPlugin('main'), officeCodecBuildPlugin()],
     build: {
       rollupOptions: {
         input: {
           index: resolve('src/main/index.ts'),
-          'office-generation-codec-entry': resolve('src/main/office/office-generation-codec-entry.ts'),
           'claw-schedule-mcp-node-entry': resolve('src/main/claw-schedule-mcp-node-entry.ts')
         }
       }

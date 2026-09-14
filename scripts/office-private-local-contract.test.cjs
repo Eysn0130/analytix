@@ -169,6 +169,44 @@ test('rejects symlinked root, qualification and intermediate directory', t => {
   assert.throws(() => verifyPrivateLocal(root, EXPECTED), /unsafe-tree/)
 })
 
+test('rejects initially writable payload root and nested directories, permitting writable host ancestors', t => {
+  for (const relative of ['.', 'assets/fonts', 'plugins/analytix-documents/skills/documents']) {
+    for (const mode of [0o775, 0o777]) {
+      const root = tinyTree(t)
+      fs.chmodSync(join(root, relative), mode)
+      assert.throws(() => verifyPrivateLocal(root, EXPECTED), /unsafe-directory/)
+    }
+  }
+  const parent = temporary(t), previous = tinyTree(t), root = join(parent, 'office-private')
+  fs.renameSync(previous, root)
+  fs.chmodSync(parent, 0o777)
+  // Permission validation succeeds; synthetic bytes still fail the fixed hash.
+  assert.throws(() => verifyPrivateLocal(root, EXPECTED), /content-mismatch/)
+})
+
+for (const change of ['root-chmod', 'subdir-chmod', 'subdir-rename']) {
+  test(`rejects ${change} after directory observation during verification`, t => {
+    const root = tinyTree(t), original = fs.readdirSync
+    const target = change === 'root-chmod' ? root : join(root, 'assets/fonts')
+    let changed = false
+    t.mock.method(fs, 'readdirSync', (path, ...args) => {
+      const entries = original(path, ...args)
+      if (!changed && path === target) {
+        changed = true
+        if (change === 'subdir-rename') {
+          const outside = temporary(t)
+          fs.renameSync(target, join(outside, 'old-fonts'))
+          fs.mkdirSync(target)
+          fs.writeFileSync(join(target, 'NotoSansCJKsc-Regular.otf'), 'synthetic')
+        } else fs.chmodSync(target, 0o777)
+      }
+      return entries
+    })
+    assert.throws(() => verifyPrivateLocal(root, EXPECTED), /directory-changed/)
+    assert.equal(changed, true)
+  })
+}
+
 test('held-descriptor checks reject a link introduced during the qualification read', t => {
   const root = tinyTree(t), outside = temporary(t), original = fs.readSync
   let injected = false

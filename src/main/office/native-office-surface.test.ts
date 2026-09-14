@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { fixture } from './test-fixture'
-const mock = vi.hoisted(() => ({ packaged: false, views: [] as any[], sessions: [] as any[], peers: [] as any[] }))
+const mock = vi.hoisted(() => ({ privateLoad:vi.fn(), packaged: false, views: [] as any[], sessions: [] as any[], peers: [] as any[] }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class Port extends EventEmitter {
@@ -36,6 +36,9 @@ vi.mock('electron', async () => {
     }
   }
 })
+vi.mock('./office-assets',async(importOriginal)=>({...await importOriginal<object>(),loadPrivateOfficeBuffers:mock.privateLoad}))
+import { createOfficePrivateAdmissionProvider } from './office-private-admission'
+import { loadOfficeBuffers } from './office-assets'
 import { NativeOfficeSurface } from './native-office-surface'
 import { isOfficeRequest, isOfficeResult, isOfficeEvent, OFFICE_MAX_BYTES } from './office-protocol'
 const live: any[] = [], cleanup: (() => Promise<void>)[] = []
@@ -224,4 +227,33 @@ test('native focus routes only fixed workspace shortcuts and leaves content inpu
     s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',meta:true,...input})
   }
   expect(preventDefault).toHaveBeenCalledTimes(3)
+})
+
+
+test('packaged surface accepts only an internal Core token and rechecks it before creating the isolated sink',async()=>{
+  const f=await fixture();cleanup.push(f.cleanup)
+  const buffers=await loadOfficeBuffers(f.sourceRoot,f.assetRoot)
+  mock.privateLoad.mockResolvedValue({buffers,preloadPath:f.preloadPath})
+  const resources='/Applications/analytix.app/Contents/Resources'
+  const transport=vi.fn(async(_path:string,body:string)=>({ok:true,status:200,body:JSON.stringify({ok:true,requestId:JSON.parse(body).requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})}))
+  const token=await createOfficePrivateAdmissionProvider(transport,resources)()
+  const owner=Object.assign(new EventEmitter(),{isDestroyed:()=>false,webContents:{getZoomFactor:()=>1},contentView:{addChildView:vi.fn(),removeChildView:vi.fn()}})
+  mock.packaged=true
+  expect(()=>new NativeOfficeSurface({owner:owner as any,privateAdmission:{...token} as any,onEvent(){}})).toThrow('office-source-experiment-only')
+  const surface=new NativeOfficeSurface({owner:owner as any,privateAdmission:token,onEvent(){}});live.push(surface)
+  await surface.attach(bounds)
+  expect(transport).toHaveBeenCalledTimes(3)
+  expect(mock.views.at(-1).options.webPreferences).toMatchObject({preload:f.preloadPath,sandbox:true,nodeIntegration:false,contextIsolation:true})
+  expect(mock.views.at(-1).webContents.url).toMatch(/^http:\/\/127\.0\.0\.1:/)
+})
+test('a previously minted private token cannot create a view after Core admission disappears',async()=>{
+  const resources='/Applications/analytix.app/Contents/Resources'
+  const transport=vi.fn(async(_path:string,body:string)=>({ok:true,status:200,body:JSON.stringify({ok:true,requestId:JSON.parse(body).requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})}))
+  const token=await createOfficePrivateAdmissionProvider(transport,resources)()
+  transport.mockResolvedValue({ok:false,status:503,body:JSON.stringify({ok:false,code:'unavailable'})})
+  const owner=Object.assign(new EventEmitter(),{isDestroyed:()=>false})
+  mock.packaged=true
+  const surface=new NativeOfficeSurface({owner:owner as any,privateAdmission:token,onEvent(){}});live.push(surface)
+  await expect(surface.attach(bounds)).rejects.toThrow('office-assets-unavailable')
+  expect(mock.views).toHaveLength(0)
 })

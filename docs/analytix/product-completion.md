@@ -36,7 +36,7 @@ below are not yet installed-application evidence.
 | Write migration | Existing MD/TXT editors, exports and same-thread document surface retained | Map all custom actions, presets, retrieval, autosave, conflicts, review and export to the shared product flow |
 | Browser / files / PDF / knowledge | Existing surfaces remain | Shared authorized object opening and typed annotation anchors; no implicit indexing or uploading |
 | Apply / recovery / Diff | Core-owned originals, exact save candidates and approved changes; thread-bound discovery, protected-local Diff, explicit interrupted-save continuation, restart undo and cancellation of proven unsubmitted changes | Native format fidelity and actual third-object/restart GUI journey |
-| Installation | Independent private-local payload qualification/staging binds 35 files, fixed engine hashes and retained notices; source-experiment and packaged rejection remain | Package identity/seal integration, packaged plugin/codec resolution, local installer and installed end-to-end journey; separate public redistribution obligations |
+| Installation | Private-local candidate verifies the actual package seal, 35 fixed-layout files and notices; Core/Main consume the qualified resources; independent codec bundle includes its JS dependencies | Real local installer, installed package inspection and end-to-end journey; separate public redistribution obligations |
 | Security / delivery | Existing macro prohibition, privacy authority and protected profiles preserved; controlled object reads/commits reject hard-link aliases, including post-inspection drift | Exact-candidate CodeQL, applicable CI/review and remaining required negative cases |
 
 The numeric/formula text-path restriction is interim damage prevention. It is not
@@ -237,6 +237,41 @@ Independent read-only review accepted the bounded close/quit corrections. These
 checks establish note persistence and shutdown ordering in source/fixtures;
 multiple location-aware annotations, installed IME behavior and normal-restart
 GUI acceptance remain required.
+
+## Qualified private-local installation candidate
+
+A separate build entry stages the pinned engine, surface/preload, Office packages
+and notices before the existing packaged authority and resource seal. Core derives
+the directory from its real executable inspection, refuses insecure private
+composition and never falls back to development roots when package verification
+fails. Current resource identity is checked before and after materialization and
+Host operations. The server retains the concrete adapter pointers for binding
+selection/privacy/capture; the Host wraps those same instances for qualification.
+
+Main uses a nonce-bound, bearer-protected local-display query unavailable to the
+Renderer. A private internal token permits loading only the fixed qualified
+resource directory. The metadata digest and held bytes must agree with Core,
+including the native preload. Normal source startup retains its original gate.
+Note input is handed to an existing Main controller synchronously so a new
+qualification query cannot delay the last keystroke past a close acknowledgement.
+
+The independent codec bundle includes its JavaScript dependencies and leaves only
+Node builtins external. Its exact two-file directory is unpacked and checked before
+packaged authority generation. Go through a real Electron Helper successfully
+generates and inspects all three formats from an isolated copy; the bundle does
+not resolve the repository dependency tree. This proves that bounded execution
+chain, not an actual installed application or native visual result.
+
+Current checks: 99 focused Main/native/admission/annotation/quit tests and all
+56 process-launch tests pass. Fourteen qualification/staging checks and four
+private build-scope checks pass. Go asset/materialization packages, protected
+admission routing and production-tag composition checks pass. Independent review
+caught and corrected a missing transport allowlist, insecure authorization,
+post-operation qualification and a concrete-adapter binding regression. Main's
+qualification metadata also cross-checks the production JavaScript contract.
+The original source gate, signed activation and file/privacy authority remain.
+Real package staging, signed executable inspection, native GUI and installation
+acceptance are still required; no public-release permission is established.
 
 ## Completion evidence
 

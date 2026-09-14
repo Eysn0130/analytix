@@ -15,6 +15,7 @@ vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (..
   state.create(...args)
   return { freezeAnnotationInput:state.freezeAnnotationInput, hasPendingAnnotations:state.hasPendingAnnotations, flushAnnotations:state.flushAnnotations, request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
 } }))
+import { createOfficePrivateAdmissionProvider, type OfficePrivateAdmission } from './office-private-admission'
 import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './native-office-ipc'
 beforeEach(() => {
   vi.clearAllMocks(); state.packaged = false; state.handlers.clear(); state.lifecycle.clear()
@@ -24,11 +25,11 @@ beforeEach(() => {
   state.menu.mockReturnValue({ popup: state.popup })
 })
 afterEach(()=>vi.useRealTimers())
-function setup() {
+function setup(privateAdmission?:()=>Promise<OfficePrivateAdmission>) {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
     webContents: { mainFrame: {}, send: vi.fn() } })
   let current: typeof main | null = main
-  registerNativeOfficeIpc(() => current as any, vi.fn())
+  registerNativeOfficeIpc(() => current as any, vi.fn(), privateAdmission)
   const event = { sender: main.webContents, senderFrame: main.webContents.mainFrame }
   return { main, event, invoke: (e: unknown = event, payload: unknown = { action: 'status' }) => state.handlers.get('office:request')!(e, payload),
     pick: (payload: unknown = { kind: 'docx', workspace: '/workspace' }, e: unknown = event) => state.handlers.get('office:pick-file')!(e, payload),
@@ -232,4 +233,54 @@ it.each(['flush-failure','user-cancel'] as const)('quit %s releases the freeze a
   expect(await prepareNativeOfficeQuit()).toBe(false)
   expect(state.freezeAnnotationInput.mock.calls).toEqual([[true],[false]])
   expect(state.destroy).not.toHaveBeenCalled();expect(h.main.close).not.toHaveBeenCalled();expect(state.quit).not.toHaveBeenCalled()
+})
+
+
+it('packaged Office accepts current Main-only Core admission without reading the development asset environment',async()=>{
+  const resources='/Applications/analytix.app/Contents/Resources'
+  const transport=vi.fn(async(_path:string,body:string)=>({ok:true,status:200,body:JSON.stringify({ok:true,requestId:JSON.parse(body).requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})}))
+  const h=setup(createOfficePrivateAdmissionProvider(transport,resources));state.packaged=true
+  expect(await h.invoke()).toEqual({ok:true,view:null});expect(state.create).toHaveBeenCalledOnce()
+  state.picker.mockResolvedValue({canceled:true,filePaths:[]})
+  expect(await h.pick()).toEqual({ok:true,path:null})
+  transport.mockResolvedValue({ok:false,status:503,body:JSON.stringify({ok:false,code:'unavailable'})})
+  expect(await h.invoke()).toMatchObject({ok:false,error:'unavailable'})
+  expect(await h.pick()).toMatchObject({ok:false,error:'unavailable'})
+  expect(state.request).toHaveBeenCalledOnce();expect(state.picker).toHaveBeenCalledOnce()
+})
+it('structurally forged tokens cannot bypass the packaged guard',async()=>{
+  const h=setup(async()=>({root:'/private',qualificationDigest:'a'.repeat(64)} as unknown as OfficePrivateAdmission));state.packaged=true
+  expect(await h.invoke()).toMatchObject({ok:false,error:'unavailable'})
+  expect(await h.pick()).toMatchObject({ok:false,error:'unavailable'})
+  expect(state.create).not.toHaveBeenCalled();expect(state.picker).not.toHaveBeenCalled()
+})
+it('an admission response arriving after the owner frame changes cannot create a controller',async()=>{
+  let finish!:(value:{ok:boolean;status:number;body:string})=>void,requestId=''
+  const resources='/Applications/analytix.app/Contents/Resources'
+  const provider=createOfficePrivateAdmissionProvider(async(_path,body)=>{requestId=JSON.parse(body).requestId;return new Promise(resolve=>{finish=resolve})},resources)
+  const h=setup(provider);state.packaged=true
+  const pending=h.invoke();h.main.webContents.mainFrame={}
+  finish({ok:true,status:200,body:JSON.stringify({ok:true,requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})})
+  expect(await pending).toMatchObject({ok:false,error:'unavailable'})
+  expect(state.create).not.toHaveBeenCalled()
+})
+it('an admitted controller records the last annotation synchronously before freeze ACK without waiting on another admission query',async()=>{
+  const resources='/Applications/analytix.app/Contents/Resources'
+  const transport=vi.fn(async(_path:string,body:string)=>({ok:true,status:200,body:JSON.stringify({ok:true,requestId:JSON.parse(body).requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})}))
+  const h=setup(createOfficePrivateAdmissionProvider(transport,resources));state.packaged=true;await h.invoke()
+  const order:string[]=[]
+  state.request.mockImplementation(async request=>{if(request.action==='annotationSave'){order.push('note');state.hasPendingAnnotations.mockReturnValue(true)}return {ok:true,view:null}})
+  state.freezeAnnotationInput.mockImplementation(async()=>{order.push('freeze')})
+  // A new admission query would never finish. Earlier note IPC must still be
+  // delivered to Main before the independently delivered freeze ACK.
+  transport.mockImplementation(()=>new Promise(()=>{}))
+  const request={action:'annotationSave',objectId:'a'.repeat(64),threadId:'thread',note:'last key',sourceRevision:'b'.repeat(64)}
+  const saving=h.invoke(h.event,request)
+  expect(state.request).toHaveBeenLastCalledWith(request);expect(state.hasPendingAnnotations()).toBe(true)
+  h.main.emit('close',{preventDefault:vi.fn()})
+  expect(order.slice(0,2)).toEqual(['note','freeze']);expect(transport).toHaveBeenCalledOnce()
+  state.hasPendingAnnotations.mockReturnValue(false);await saving
+  await vi.waitFor(()=>expect(h.main.close).toHaveBeenCalledOnce())
+  h.replace();expect(await h.invoke(h.event,request)).toMatchObject({ok:false,error:'unavailable'})
+  expect(state.request.mock.calls.filter(([input])=>input.action==='annotationSave')).toHaveLength(1)
 })

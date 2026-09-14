@@ -11,7 +11,8 @@ import (
 
 // DevelopmentSourceBindingV1 is immutable outside this package. It freezes a
 // validated source registration; it is never a FormalPackageBindingV1.
-// Runtime composition must separately enforce source-experiment-only startup.
+// Runtime composition separately enforces source-only startup or a qualified,
+// sealed private-local package. This binding alone grants neither admission.
 type DevelopmentSourceBindingV1 struct {
 	registration domainpackage.DevelopmentSourceRegistrationV1
 	digest       string

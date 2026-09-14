@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { nativeOfficeActionMenuSchema, nativeOfficePickerRequestSchema, nativeOfficeRequestSchema, nativeOfficeInputFreezeSchema } from '../../shared/native-office'
 import { createNativeOfficeController } from './native-office-controller'
+import { isOfficePrivateAdmission, type OfficePrivateAdmission } from './office-private-admission'
 import { NativeOfficeSurface } from './native-office-surface'
 import type { PluginPackageHostRequest, PluginPackageHostResponse } from '../../../packages/runtime/src/contracts/plugin-package-host'
 
@@ -17,9 +18,17 @@ export async function cancelNativeOfficeQuit(): Promise<void> { await quitGuard?
 /** The Office view never receives this IPC or the generic desktop bridge. */
 export function registerNativeOfficeIpc(
   getMainWindow: () => BrowserWindow | null,
-  packageHost: (request: PluginPackageHostRequest) => Promise<PluginPackageHostResponse>
+  packageHost: (request: PluginPackageHostRequest) => Promise<PluginPackageHostResponse>,
+  privateAdmission?: () => Promise<OfficePrivateAdmission>
 ): void {
+  const admit = async () => {
+    if (!privateAdmission) throw Error('office-assets-unavailable')
+    const result = await privateAdmission()
+    if (!isOfficePrivateAdmission(result)) throw Error('office-assets-unavailable')
+    return result
+  }
   let owner: BrowserWindow | undefined
+  let controllerPrivate = false
   let controller: ReturnType<typeof createNativeOfficeController> | undefined
   const freezes = new Map<string, {main:BrowserWindow; frame:Electron.WebFrameMain; frozen:boolean; finish:(ok:boolean)=>void}>()
   const freezeInput = (main:BrowserWindow, frozen:boolean) => new Promise<boolean>(resolve => {
@@ -59,11 +68,13 @@ export function registerNativeOfficeIpc(
   ipcMain.handle('office:pick-file', async (event, payload: unknown) => {
     const main = getMainWindow()
     const unavailable = { ok: false as const, error: 'unavailable' as const }
-    if (app.isPackaged || !main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return unavailable
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return unavailable
     const parsed = nativeOfficePickerRequestSchema.safeParse(payload)
     if (!parsed.success || !isAbsolute(parsed.data.workspace)) return { ok: false, error: 'invalid_request' }
     const frame = main.webContents.mainFrame
     try {
+      if (app.isPackaged) await admit()
+      if (getMainWindow() !== main || main.isDestroyed() || main.webContents.mainFrame !== frame) return unavailable
       const result = await dialog.showOpenDialog(main, { title: app.getLocale().startsWith('zh') ? '打开办公文件' : 'Open Office file',
         defaultPath: parsed.data.workspace, filters: [{ name: parsed.data.kind.toUpperCase(), extensions: [parsed.data.kind] }],
         properties: ['openFile', 'dontAddToRecent'] })
@@ -76,15 +87,27 @@ export function registerNativeOfficeIpc(
   ipcMain.handle('office:request', async (event, payload: unknown) => {
     const main = getMainWindow()
     const unavailable = { ok: false as const, view: null, error: 'unavailable' as const }
-    if (app.isPackaged || !main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return unavailable
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return unavailable
+    const incomingFrame = main.webContents.mainFrame
+    const annotation = nativeOfficeRequestSchema.safeParse(payload)
+    const recordingAnnotation = controllerPrivate && annotation.success && annotation.data.action === 'annotationSave'
+    // Earlier Renderer note invokes must reach Main synchronously before its
+    // freeze ACK. Core still verifies every annotation write and its CAS.
+    if (app.isPackaged && !recordingAnnotation) {
+      try { await admit() } catch { return unavailable }
+      if (getMainWindow() !== main || main.isDestroyed() || main.webContents.mainFrame !== incomingFrame) return unavailable
+    }
     if (!controller) {
       owner = main
       const sourceRoot = app.getAppPath()
-      const assetRoot = process.env.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT ?? ''
+      const assetRoot = app.isPackaged ? '' : process.env.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT ?? ''
+      controllerPrivate = app.isPackaged
       controller = createNativeOfficeController({ packageHost,
         freezeAnnotationInput: frozen => freezeInput(main,frozen),
-        createSurface: (onEvent) => new NativeOfficeSurface({ owner: main, sourceRoot, assetRoot,
-          preloadPath: realpathSync(join(sourceRoot, 'out', 'preload', 'office.cjs')), onEvent }),
+        createSurface: async (onEvent) => app.isPackaged
+          ? new NativeOfficeSurface({owner:main,privateAdmission:await admit(),onEvent})
+          : new NativeOfficeSurface({ owner: main, sourceRoot, assetRoot,
+            preloadPath: realpathSync(join(sourceRoot, 'out', 'preload', 'office.cjs')), onEvent }),
         onChange: (view) => { if (!main.isDestroyed()) main.webContents.send('office:changed', view) }
       })
       const current = controller
@@ -131,7 +154,7 @@ export function registerNativeOfficeIpc(
         if (quitGuard === guard) quitGuard = undefined
         for (const pending of freezes.values()) if (pending.main === main) pending.finish(false)
         void current.destroy()
-        if (controller === current) { controller = undefined; owner = undefined }
+        if (controller === current) { controller = undefined; controllerPrivate = false; owner = undefined }
       })
     }
     if (owner !== main) return unavailable

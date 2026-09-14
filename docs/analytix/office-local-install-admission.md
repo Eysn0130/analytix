@@ -140,9 +140,19 @@ MIT、OFL 文本授予使用权限；OFL 要求在随软件复制/捆绑字体�
 自行重建是不同工程路线。本机私用不应直接套用上述对外分发分母。公开发布和
 对外分发门禁仍保持，且 `publishable: false` 不能被展示成“可分发”。
 
-后续主线程需实现独立、可验证的本机准入状态，保留源实验拒绝和公开门禁；不能
-只翻转旧 manifest 标签。安装后的实际资源完整性、notice 保留、正常功能及回滚
-验收另行产生证据。本记录不预先认定这些步骤已经完成。
+当前候选已实现独立本机准入，保留源实验拒绝和公开门禁。Go 从实际 executable
+验证既有 packaged authority 与 macOS nonpublishable resource seal，再检查固定
+`Resources/office-private` 的资格、源码快照和 35 项文件闭包。源注册的归因不会
+因此变成正式发行回执。Host、原生适配器和 Main 准入请求复核当前资源身份。
+Main 通过受保护的专用 local-display 请求获取一次性关联的资格摘要，再以 held
+读取核对原生引擎、surface 和 preload；不接受 Renderer 提交的准入标志或路径。
+
+专用入口 `scripts/package-office-private-local.mjs` 只允许隔离 ARM64 本机候选，
+新建输出目录并固定 `--publish never`。afterPack 在既有 authority/staged payload
+与签名封印前复制完整资源和 notices。普通构建拒绝未授权的私有 payload，正式
+发行意图不能采用该路径。生成 codec 另行打成仅依赖 Node builtins 的独立目录，
+精确解包，并由实际文件集合纳入原有包权威。上述代码仍需真实安装验收；不以
+候选实现或单元测试宣称安装后的完整性、正常功能、回滚或原生渲染已通过。
 
 ## Host-scope 证据位置
 
@@ -158,6 +168,6 @@ name 表，以及 `fonts/font-assets.json`、`fonts/FONT-NOTICE.txt`、`fonts/OF
 ## 本次证据边界
 
 完成：本机六资源 hash、上述固定许可原文 hash、字体元数据分类、官方当前文本
-范围核对。未完成：完整构建对应关系、全部内置字体精确许可闭合、本机准入代码、
-安装或 packaged GUI 验收。本次文档落地只验证相对链接/引用路径及
-`git diff --check`，不运行应用、Provider、构建或安装。
+范围核对及独立本机准入候选代码。未完成：完整对外发行构建对应关系、全部
+内置字体精确许可闭合、安装与 packaged GUI 验收。实现验证记录见产品能力矩阵；
+许可材料不替代运行验收，源码与合成数据检查也不替代完整产品验收。
