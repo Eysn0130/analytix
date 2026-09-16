@@ -53,13 +53,23 @@ test.each(['sender','frame','id','phase','extra','navigation'] as const)('reject
   expect(w.main.close).not.toHaveBeenCalled()
 })
 test('native cancel thaws every prepared renderer and permits another attempt', async () => {
+  // Do not race vi.waitFor's polling interval against the 50ms ACK timeout.
+  // Advancing zero time drains prepare continuations without expiring a hold.
+  vi.useFakeTimers()
   const h = setup(), a = h.window(), b = h.window(); a.autoCancel(); b.autoCancel(); h.native.mockResolvedValue(false)
   const quit = h.coordinator.prepareQuit(); a.ack()
-  await vi.waitFor(() => expect(b.main.webContents.send).toHaveBeenCalledOnce()); b.ack()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(b.main.webContents.send).toHaveBeenCalledOnce()
+  expect(h.native).not.toHaveBeenCalled()
+  b.ack()
   expect(await quit).toBe(false)
   for (const w of [a,b]) expect(w.main.webContents.send).toHaveBeenLastCalledWith('write:shutdown-request', expect.objectContaining({phase:'cancel'}))
   h.native.mockResolvedValue(true)
-  const retry = h.coordinator.prepareQuit(); a.ack(); await vi.waitFor(() => expect(b.main.webContents.send.mock.calls.at(-1)![1].phase).toBe('prepare')); b.ack()
+  const retry = h.coordinator.prepareQuit(); a.ack()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(b.main.webContents.send.mock.calls.at(-1)![1].phase).toBe('prepare')
+  expect(h.native).toHaveBeenCalledOnce()
+  b.ack()
   expect(await retry).toBe(true)
 })
 test('an earlier tray/ask cancellation does not start any preparation', () => {

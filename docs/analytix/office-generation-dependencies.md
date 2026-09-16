@@ -60,3 +60,15 @@ versions and remain covered by the existing dependency inventory.
 `h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=`; its source revision is
 `d58dcfa8a74514c0ef0fc401259156c5e2fc9ff5`. Final package resource/notice presence
 and native engine/font admission are separate remaining checks.
+
+## Exact notice binding
+
+The artifact audit's expected notice digest is updated together with this already
+recorded dependency inventory, not derived from whichever file is under audit.
+The pre-Office notice bytes remain unchanged as a prefix (SHA-256
+`66671ab885458de62437bed11d67c8924d319df59958d7aa6dc1149614911f92`).
+The complete current notice has SHA-256
+`1cb4aef282d61bc32bc87e6296df30a78d880f21d9af12746a5d3b6b1494cc9b`.
+Missing, edited or truncated notices still fail the exact artifact check. This
+binding does not admit Office/WASM/fonts, establish signing or publication
+authorization, or replace inspection of the actual packaged dependencies.

@@ -131,6 +131,7 @@ describe('preload sandbox guard', () => {
     ).map((match) => match[1])
 
     expect(domains).toEqual([
+      'canvas',
       'office',
       'packageHost',
       'objects',
