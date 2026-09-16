@@ -1,0 +1,56 @@
+name: Independent source snapshot
+
+# Opt-in transfer of already committed source for an isolated reviewer whose
+# network cannot clone GitHub. This is not a test, package, or release gate.
+on:
+  push:
+    branches: [codex/workbench-product-delivery-20260914]
+    paths: [.github/workflows/independent-source-snapshot.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-source-snapshot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.ref == 'refs/heads/codex/workbench-product-delivery-20260914'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact committed source without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+      - name: Export tracked Git objects and their identities only
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          out="$RUNNER_TEMP/analytix-source-snapshot"
+          mkdir -p "$out"
+          git ls-tree -rz --full-tree HEAD > "$out/tree.ls-tree-z"
+          git archive --format=tar.gz --output="$out/source.tar.gz" HEAD
+          test "$(stat -c %s "$out/source.tar.gz")" -le 268435456
+          printf 'repository=%s\nhead=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\nkind=tracked-source-only\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$(git rev-parse 'HEAD^{tree}')" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$out/identity.txt"
+          (cd "$out" && sha256sum source.tar.gz tree.ls-tree-z identity.txt > SHA256SUMS)
+      - name: Retain the exact source snapshot for independent verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: analytix-source-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/analytix-source-snapshot/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
