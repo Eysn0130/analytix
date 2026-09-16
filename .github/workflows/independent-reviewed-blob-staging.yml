@@ -1,0 +1,110 @@
+name: Independent reviewed blob staging
+
+# Temporary, bounded source transport only. Creates unreferenced Git blobs, not
+# commits, refs, test results or releases. Removed after the reviewed integration.
+on:
+  push:
+    branches: [codex/workbench-product-delivery-20260914]
+    paths:
+      - .github/workflows/independent-reviewed-blob-staging.yml
+      - .github/independent-reviewed-edits.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-reviewed-blobs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    if: github.repository == 'Eysn0130/analytix' && github.ref == 'refs/heads/codex/workbench-product-delivery-20260914'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Read exact source without persisting credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+      - name: Validate reviewed bytes and stage unreferenced blobs only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, re, stat, urllib.request
+          assert os.environ['GITHUB_REPOSITORY'] == 'Eysn0130/analytix'
+          root = pathlib.Path.cwd().resolve()
+          data = (root / '.github/independent-reviewed-edits.json').read_bytes()
+          assert len(data) < 65536
+          assert hashlib.sha256(data).hexdigest() == '23846116628006f29edcbee2d9d4e540c4dbef10ce5e93e640a76f112abdb1b6'
+          plan = json.loads(data)
+          assert plan['schemaVersion'] == 1
+          assert plan['sourceHead'] == '4c2907adfa4edb5fa3b942d8efb294b06041e3da'
+          allowed = {
+              'scripts/artifact-legal-obligations-audit.mjs',
+              'src/preload/preload-sandbox.test.ts',
+              'packages/runtime/src/conformance/fixtures/go-g5-full-loop-contract.json',
+              'src/main/write-shutdown.test.ts',
+              'src/main/packaging-config.test.ts',
+              'docs/analytix/office-generation-dependencies.md',
+          }
+          assert len(plan['files']) == len(allowed)
+          assert {item['path'] for item in plan['files']} == allowed
+          def blob_id(value):
+              return hashlib.sha1(b'blob ' + str(len(value)).encode() + b'\0' + value).hexdigest()
+          staged = []
+          for item in plan['files']:
+              target = root / item['path']
+              assert target.resolve() == target and stat.S_ISREG(target.lstat().st_mode)
+              before = target.read_bytes()
+              assert len(before) <= 1048576 and blob_id(before) == item['before']
+              text = before.decode('utf-8')
+              for edit in item['replacements']:
+                  assert edit['old'] and text.count(edit['old']) == 1
+                  text = text.replace(edit['old'], edit['new'], 1)
+              after = text.encode('utf-8')
+              assert len(after) <= 1048576 and blob_id(after) == item['after']
+              staged.append((item, after))
+          receipts = []
+          # No repository code, npm lifecycle, test or generated command executes
+          # with this token. The sole HTTP operation creates a content blob.
+          for item, content in staged:
+              body = json.dumps({'encoding':'base64', 'content':base64.b64encode(content).decode()}).encode()
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/Eysn0130/analytix/git/blobs',
+                  data=body, method='POST', headers={
+                      'Authorization':'Bearer ' + os.environ['GH_TOKEN'],
+                      'Content-Type':'application/json',
+                      'Accept':'application/vnd.github+json',
+                      'X-GitHub-Api-Version':'2022-11-28',
+                  })
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  raw = response.read(65537)
+              assert len(raw) <= 65536
+              result = json.loads(raw)
+              assert result.get('sha') == item['after'] and re.fullmatch('[0-9a-f]{40}', result['sha'])
+              receipts.append({'path':item['path'], 'before':item['before'], 'after':result['sha']})
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'analytix-reviewed-blobs'
+          out.mkdir(mode=0o700)
+          (out / 'receipt.json').write_text(json.dumps({
+              'workflowHead':os.environ['GITHUB_SHA'], 'runId':os.environ['GITHUB_RUN_ID'],
+              'kind':'unreferenced-blobs-only', 'files':receipts,
+          }, indent=2) + '\n')
+          print(json.dumps({'stagedBlobs':len(receipts), 'branchUpdated':False}))
+          PY
+      - name: Return only verified blob identities
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: analytix-reviewed-blobs-${{ github.sha }}
+          path: ${{ runner.temp }}/analytix-reviewed-blobs/receipt.json
+          if-no-files-found: error
+          retention-days: 1
