@@ -1,4 +1,5 @@
 import { WRITE_SHUTDOWN_REQUEST, WRITE_SHUTDOWN_ACK, writeShutdownRequestSchema, writeShutdownResultSchema, type WriteShutdownHandler } from '../shared/write-shutdown'
+import { canvasHostRequestSchema, canvasHostResponseSchema } from '../../packages/runtime/src/contracts/canvas-host'
 import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
@@ -653,6 +654,25 @@ const api = {
   },
   packageHost: {
     request: (request) => ipcRenderer.invoke('plugin:package-host', request)
+  },
+  canvas: {
+    request: async request => {
+      const input = canvasHostRequestSchema.safeParse(request)
+      if (!input.success) return { ok: false, code: 'invalid_request' }
+      try {
+        const result = canvasHostResponseSchema.safeParse(await ipcRenderer.invoke('canvas:request', input.data))
+        if (result.success) return result.data
+      } catch { /* Unknown operations are reconciled from Core recovery. */ }
+      return { ok: false, code: 'unavailable' }
+    },
+    pickFile: async request => {
+      try {
+        const result: unknown = await ipcRenderer.invoke('canvas:pick-file', request)
+        if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'path' in result &&
+          (result.path === null || (typeof result.path === 'string' && result.path.length <= 4096 && !result.path.includes('\0')))) return { ok: true, path: result.path }
+      } catch { /* Preserve the current surface. */ }
+      return { ok: false }
+    }
   },
   objects: {
     resolveArtifact: (request) => ipcRenderer.invoke('object:resolve-artifact', request),

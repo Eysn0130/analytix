@@ -44,8 +44,8 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		t.Fatal("actual source host was not composed")
 	}
 	views, err := host.List(ctx)
-	if err != nil || len(views) != 3 {
-		t.Fatalf("actual three source packages: %d %v", len(views), err)
+	if err != nil || len(views) != 4 {
+		t.Fatalf("actual four source packages: %d %v", len(views), err)
 	}
 	for _, view := range views {
 		if !view.Materialized || view.Publishable || view.Available || view.ActivationState != "unset" {
@@ -57,28 +57,28 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		}
 	}
 	skills := host.Skills(ctx)
-	if len(skills) != 3 {
-		t.Fatal("actual three enabled Office skills were not admitted")
+	if len(skills) != 4 {
+		t.Fatal("actual four enabled productivity skills were not admitted")
 	}
 	for _, skill := range skills {
-		if skill.Binding.PackageID != "analytix-documents" && skill.Binding.PackageID != "analytix-spreadsheets" && skill.Binding.PackageID != "analytix-presentations" {
+		if skill.Binding.PackageID != "analytix-documents" && skill.Binding.PackageID != "analytix-spreadsheets" && skill.Binding.PackageID != "analytix-presentations" && skill.Binding.PackageID != "analytix-canvas" {
 			t.Fatal("unexpected skill contribution")
 		}
 		instructions, ok := skill.Snapshot.File("SKILL.md")
-		if !ok || !strings.Contains(string(instructions), "generate_office_document") {
+		tool := "generate_office_document"
+		if skill.Binding.PackageID == "analytix-canvas" {
+			tool = "generate_canvas_object"
+		}
+		if !ok || !strings.Contains(string(instructions), tool) {
 			t.Fatal("installed skill has no generation workflow")
 		}
-	}
-	instructions, ok := skills[0].Snapshot.File("SKILL.md")
-	if !ok || !strings.Contains(string(instructions), "generate_office_document") {
-		t.Fatal("installed skill did not contain its real generation workflow")
 	}
 	reopened := newDevelopmentPackageHost(ctx, config, identity, nil)
 	if reopened == nil {
 		t.Fatal("source host did not reopen")
 	}
 	restored, err := reopened.List(ctx)
-	if err != nil || len(restored) != 3 {
+	if err != nil || len(restored) != 4 {
 		t.Fatal("source inventory disappeared")
 	}
 	for index, view := range restored {
@@ -87,8 +87,8 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		}
 	}
 	restoredSkills := reopened.Skills(ctx)
-	if len(restoredSkills) != 3 {
-		t.Fatal("restart lost Office skills")
+	if len(restoredSkills) != 4 {
+		t.Fatal("restart lost productivity skills")
 	}
 	for i, skill := range restoredSkills {
 		if skill.Binding != skills[i].Binding || skill.Snapshot.Digest() != skills[i].Snapshot.Digest() {

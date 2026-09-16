@@ -19,6 +19,12 @@ func newOfficeRuntime(ctx context.Context, config Config, identity identityport.
 	inspection, err := packagedauthority.InspectCurrentPackageV2(ctx)
 	if errors.Is(err, packagedauthority.ErrNotPackagedRuntimeV2) {
 		adapters := newOfficeEditingAdapters(ctx, config, identity, protected)
+		if canvas := newDevelopmentCanvasAdapter(ctx, config, identity, protected); canvas != nil {
+			if adapters == nil {
+				adapters = make(map[string]adapterport.Adapter)
+			}
+			adapters["analytix-canvas"] = canvas
+		}
 		return adapters, newDevelopmentPackageHost(ctx, config, identity, adapters), nil
 	}
 	if err != nil || identity == nil || config.Insecure || strings.TrimSpace(config.RuntimeToken) == "" {

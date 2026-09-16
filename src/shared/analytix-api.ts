@@ -1256,6 +1256,10 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  canvas: {
+    request: (request: import('../../packages/runtime/src/contracts/canvas-host').CanvasHostRequest) => Promise<import('../../packages/runtime/src/contracts/canvas-host').CanvasHostResponse>
+    pickFile: (request: { workspace: string }) => Promise<{ ok: true; path: string | null } | { ok: false }>
+  }
   office: {
     onAnnotationInputFreeze: (handler: (frozen: boolean) => void) => () => void
     onMenuRequested: (handler: (target: import('./native-office').NativeOfficeMenuTarget) => void) => () => void

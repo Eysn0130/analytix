@@ -13,6 +13,7 @@ import (
 	attachmentauthorityapp "analytix.local/runtime-go/internal/app/attachmentauthority"
 	attachmentpublicationapp "analytix.local/runtime-go/internal/app/attachmentpublication"
 	attachmentuseapp "analytix.local/runtime-go/internal/app/attachmentuse"
+	canvaseditingapp "analytix.local/runtime-go/internal/app/canvasediting"
 	caseentityapp "analytix.local/runtime-go/internal/app/caseentity"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
@@ -273,6 +274,11 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	for _, adapter := range components.OfficeAdapters {
 		if office, ok := adapter.(*officeeditingapp.Adapter); ok {
 			if err := office.BindSelectionHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+				return nil, err
+			}
+		}
+		if canvas, ok := adapter.(*canvaseditingapp.Adapter); ok {
+			if err := canvas.BindHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
 				return nil, err
 			}
 		}

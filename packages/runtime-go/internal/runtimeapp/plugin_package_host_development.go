@@ -32,13 +32,34 @@ func newDevelopmentPackageHost(ctx context.Context, config Config, identity iden
 	if err != nil {
 		return nil
 	}
-	return composeOfficePackageHost(ctx, config, identity, adapters, root, nil)
+	descriptors := officePackageDescriptors(root, nil)
+	descriptors["analytix-canvas"] = staticEditorPackageDescriptor{root: root}
+	return composeStaticEditorPackageHost(ctx, config, identity, adapters, descriptors)
 }
 
 // Source attribution/materialization is shared, but execution admission belongs
 // to the caller. A private package supplies its sealed, continuously checked root.
 func composeOfficePackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, root string, current func(context.Context) bool) *hostapp.Service {
-	if identity == nil || (current != nil && !current(ctx)) {
+	return composeStaticEditorPackageHost(ctx, config, identity, adapters, officePackageDescriptors(root, current))
+}
+
+type staticEditorPackageDescriptor struct {
+	root    string
+	current func(context.Context) bool
+}
+
+func officePackageDescriptors(root string, current func(context.Context) bool) map[string]staticEditorPackageDescriptor {
+	result := make(map[string]staticEditorPackageDescriptor)
+	for _, id := range []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations"} {
+		result[id] = staticEditorPackageDescriptor{root: root, current: current}
+	}
+	return result
+}
+
+// One Host and one materialization authority own all fixed editor packages.
+// Each descriptor retains its own continuously checked source admission.
+func composeStaticEditorPackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, descriptors map[string]staticEditorPackageDescriptor) *hostapp.Service {
+	if identity == nil {
 		return nil
 	}
 	dataDir, runtimeHome, err := bundledFundsRuntimeRootsV1(config.DataDir)
@@ -47,11 +68,15 @@ func composeOfficePackageHost(ctx context.Context, config Config, identity ident
 	}
 	// Inspect before enrolling anything. These are the only source packages this
 	// executable knows how to compose; descriptors contain no executable scripts.
-	ids := []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations"}
+	ids := []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas"}
 	bindings := make(map[string]materializationapp.DevelopmentSourceBindingV1)
 	registrations := make(map[string]domainpackage.DevelopmentSourceRegistrationV1)
 	for _, id := range ids {
-		source := filepath.Join(root, "plugins", id)
+		descriptor, exists := descriptors[id]
+		if !exists || descriptor.root == "" || (descriptor.current != nil && !descriptor.current(ctx)) {
+			continue
+		}
+		source := filepath.Join(descriptor.root, "plugins", id)
 		observed, err := pluginstore.InspectDevelopmentSourceTreeV1(ctx, source)
 		if err != nil {
 			continue
@@ -110,10 +135,11 @@ func composeOfficePackageHost(ctx context.Context, config Config, identity ident
 		}
 		registration := registrations[id]
 		var skillReader adapterport.SkillReader
-		if registration.OfficeSkillSHA256V1() != "" {
-			skillReader = pluginstore.OfficeSkillReader{Store: store, Authority: authority, SHA256: registration.OfficeSkillSHA256V1()}
+		if registration.StaticEditorSkillSHA256V1() != "" {
+			skillReader = pluginstore.StaticEditorSkillReader{Store: store, Authority: authority, SHA256: registration.StaticEditorSkillSHA256V1()}
 		}
 		var resolver hostapp.ActiveResolver = service
+		current := descriptors[id].current
 		if current != nil {
 			resolver = qualifiedOfficeResolver{inner: service, current: current}
 		}
@@ -125,8 +151,11 @@ func composeOfficePackageHost(ctx context.Context, config Config, identity ident
 	if err != nil {
 		return nil
 	}
-	if current != nil && !current(ctx) {
-		return nil
+	for _, registration := range hosted {
+		current := descriptors[registration.Identity.PackageID].current
+		if current != nil && !current(ctx) {
+			return nil
+		}
 	}
 	return host
 }

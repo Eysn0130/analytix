@@ -1,6 +1,7 @@
 import { createWriteExportSnapshotResolver } from './write-export-ipc'
 import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
 import { registerNativeOfficeIpc } from '../office/native-office-ipc'
+import { registerCanvasIpc } from '../canvas/canvas-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
 import { createObjectEditingHandler } from './object-editing-ipc'
 import { createGeneratedArtifactHandler } from './generated-artifact-ipc'
@@ -2725,6 +2726,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
 
   const packageHost = createPluginPackageHostHandler(localDisplayRequest)
   registerNativeOfficeIpc(getMainWindow, packageHost, createOfficePrivateAdmissionProvider(localDisplayRequest))
+  registerCanvasIpc(event => isTrustedProviderRegistrySender?.(event) === true, packageHost)
   const rendererPackageHost = createPluginPackageHostHandler(localDisplayRequest, 'renderer')
   ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
     const main = getMainWindow()
