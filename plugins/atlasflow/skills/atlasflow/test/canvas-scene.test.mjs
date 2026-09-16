@@ -85,8 +85,12 @@ test('Canvas treats script, paths, CSS and template syntax as escaped text, neve
   assert.ok(result.html.includes('&lt;script src=&quot;https://evil.invalid/x&quot;&gt;'));
   assert.match(result.html, /script-src 'none'/);
   assert.match(result.html, /connect-src 'none'/);
-  assert.ok(!result.html.includes('fonts.googleapis.com'));
-  assert.ok(!result.html.includes('fonts.gstatic.com'));
+  // Check the actual resource policy and stylesheet content, not a blacklist
+  // of host substrings (which is neither URL parsing nor a resource boundary).
+  assert.match(result.html, /font-src 'none'/);
+  const styles = [...result.html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)];
+  assert.ok(styles.length > 0);
+  for (const [, css] of styles) assert.doesNotMatch(css, /@import|@font-face|url\s*\(/i);
 });
 
 test('Canvas type/resource checks reject lossy, incomplete and active values before execution', () => {
@@ -116,6 +120,19 @@ test('Canvas type/resource checks reject lossy, incomplete and active values bef
 test('local document refuses active SVG and external styles/resources', () => {
   for (const svg of ['<svg><script>alert(1)</script></svg>', '<svg><image href="file:///private"/></svg>', '<svg onload="x()"></svg>', '<svg><style>@import "https://evil.invalid";</style></svg>', '<svg><path fill="url(https://evil.invalid)"/></svg>']) {
     assert.throws(() => renderLocalDocument({ svg, title: 'Canvas' }));
+  }
+});
+
+test('local document rejects external resources regardless of a familiar host in the URL', () => {
+  const resources = [
+    'https://fonts.googleapis.com.evil.invalid/a',
+    'https://evil.invalid/fonts.gstatic.com/a',
+    'https://fonts.googleapis.com@evil.invalid/a',
+    '//evil.invalid/a'
+  ];
+  for (const resource of resources) {
+    assert.throws(() => renderLocalDocument({ svg: `<svg><style>@import "${resource}";</style></svg>`, title: 'Canvas' }));
+    assert.throws(() => renderLocalDocument({ svg: `<svg><path fill="url(${resource})"/></svg>`, title: 'Canvas' }));
   }
 });
 
