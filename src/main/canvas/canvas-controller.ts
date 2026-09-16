@@ -1,5 +1,5 @@
 import { canvasHostRequestSchema, canvasHostResponseSchema, type CanvasHostRequest, type CanvasHostResponse } from '../../../packages/runtime/src/contracts/canvas-host'
-import type { PluginPackageHostRequest, PluginPackageHostResponse, PluginPackageView } from '../../../packages/runtime/src/contracts/plugin-package-host'
+import { pluginPackageHostResponseSchema, type PluginPackageHostRequest, type PluginPackageHostResponse, type PluginPackageView } from '../../../packages/runtime/src/contracts/plugin-package-host'
 
 const unavailable = (): CanvasHostResponse => ({ ok: false, code: 'unavailable' })
 
@@ -13,9 +13,11 @@ export function createCanvasController(options: {
   let tail: Promise<unknown> = Promise.resolve()
   const binding = async (): Promise<PluginPackageView | null> => {
     if (!options.current()) return null
-    const result = await options.packageHost({ action: 'list' })
-    if (!options.current() || !result.ok || !('packages' in result)) return null
-    return result.packages.find(p => p.packageId === 'analytix-canvas' && p.available && p.desiredState === 'enabled') ?? null
+    const parsed = pluginPackageHostResponseSchema.safeParse(await options.packageHost({ action: 'list' }))
+    if (!options.current() || !parsed.success || !parsed.data.ok || !('packages' in parsed.data)) return null
+    const packages = parsed.data.packages
+    if (new Set(packages.map(pkg => pkg.packageId)).size !== packages.length) return null
+    return packages.find(p => p.packageId === 'analytix-canvas' && p.available && p.desiredState === 'enabled') ?? null
   }
   const invoke = async (pkg: PluginPackageView, request: CanvasHostRequest) => {
     const { operation, ...input } = request
@@ -32,9 +34,9 @@ export function createCanvasController(options: {
     if (!pkg || !pkg.operations.includes(request.operation) || (owned &&
       (owned.binding.generationId !== pkg.generationId || owned.binding.activationRevision !== pkg.activationRevision))) return unavailable()
     if (request.operation === 'open-object' && sessions.size >= 64) return unavailable()
-    const outer = await invoke(pkg, request)
-    if (!outer.ok || !('output' in outer)) return unavailable()
-    const result = canvasHostResponseSchema.safeParse(outer.output)
+    const outer = pluginPackageHostResponseSchema.safeParse(await invoke(pkg, request))
+    if (!outer.success || !outer.data.ok || !('output' in outer.data)) return unavailable()
+    const result = canvasHostResponseSchema.safeParse(outer.data.output)
     if (!result.success) return unavailable()
     const response = result.data
     if (!options.current()) {

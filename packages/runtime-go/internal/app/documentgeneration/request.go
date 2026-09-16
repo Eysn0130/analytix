@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 	"unicode/utf16"
@@ -52,11 +52,13 @@ func ParseRequest(args map[string]any) (Request, error) {
 	if _, err := domainsecurity.DecodeCanonicalJSONValue(body); err != nil {
 		return Request{}, ErrInvalidRequest
 	}
+	// The extension is lexical request syntax; filesystem authorization remains
+	// with the file port. Keep this application layer independent of host paths.
 	var request Request
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&request) != nil || request.Path == "" || request.Path != strings.TrimSpace(request.Path) ||
-		len(request.Path) > 4096 || strings.ContainsRune(request.Path, 0) || strings.ToLower(filepath.Ext(request.Path)) != "."+request.Kind ||
+		len(request.Path) > 4096 || strings.ContainsRune(request.Path, 0) || strings.ToLower(path.Ext(request.Path)) != "."+request.Kind ||
 		!utf8.ValidString(request.Title) || len(utf16.Encode([]rune(request.Title))) > 256 || len(request.Images) > 24 {
 		return Request{}, ErrInvalidRequest
 	}

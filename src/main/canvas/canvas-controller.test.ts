@@ -6,7 +6,7 @@ const id = 'a'.repeat(48), hash = 'b'.repeat(64)
 function fixture() {
   let current = true
   let pkg: PluginPackageView = { packageId: 'analytix-canvas', packageVersion: '0.1.0', displayName: 'Canvas', origin: 'development-source', publishable: false, materialized: true,
-    generationId: hash, activationState: 'enabled', desiredState: 'enabled', activationRevision: 1, activationId: 'c'.repeat(64), available: true,
+    generationId: hash, activationState: 'recorded', desiredState: 'enabled', activationRevision: 1, activationId: 'c'.repeat(64), available: true,
     operations: ['open-object', 'read-object', 'close-object', 'proposal-apply', 'object-recovery'] }
   const document = { sessionId: id, objectId: hash, threadId: 'thread-main', kind: 'canvas' as const, path: '/workspace/diagram.canvas', revision: hash, content: 'e30=' }
   let respond: (request: PluginPackageHostRequest) => Promise<PluginPackageHostResponse> = async request => request.action === 'list'
@@ -18,6 +18,35 @@ function fixture() {
 }
 
 describe('Canvas Main ownership boundary', () => {
+  it('rejects malformed activation metadata before invoking the adapter', async () => {
+    const invalidPackages: Array<Partial<PluginPackageView> | { activationState: string }> = [
+      { activationState: 'enabled' },
+      { activationId: undefined },
+      { activationRevision: 0 },
+      { generationId: '' },
+      { desiredState: 'disabled' },
+      { materialized: false }
+    ]
+    for (const patch of invalidPackages) {
+      const f = fixture()
+      f.respond(async () => ({ ok: true, packages: [{ ...f.getPackage(), ...patch }] }) as PluginPackageHostResponse)
+      expect(await f.controller.request(f.open)).toEqual({ ok: false, code: 'unavailable' })
+      expect(f.packageHost.mock.calls.some(([request]) => request.action === 'invoke')).toBe(false)
+    }
+  })
+  it('rejects ambiguous duplicate package identities before invoking the adapter', async () => {
+    const f = fixture()
+    f.respond(async () => ({ ok: true, packages: [f.getPackage(), f.getPackage()] }))
+    expect(await f.controller.request(f.open)).toEqual({ ok: false, code: 'unavailable' })
+    expect(f.packageHost.mock.calls.some(([request]) => request.action === 'invoke')).toBe(false)
+  })
+  it('rejects a malformed host envelope even when its inner document looks valid', async () => {
+    const f = fixture()
+    f.respond(async request => request.action === 'list'
+      ? { ok: true, packages: [f.getPackage()] }
+      : { ok: true, output: { ok: true, document: f.document }, unexpected: 'untrusted' })
+    expect(await f.controller.request(f.open)).toEqual({ ok: false, code: 'unavailable' })
+  })
   it('opens through the finite Host and rejects unowned or wrong-thread sessions', async () => {
     const f = fixture()
     expect(await f.controller.request(f.open)).toEqual({ ok: true, document: f.document })
