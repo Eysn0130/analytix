@@ -11,6 +11,10 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 
 ## 最新保留快照
 
+- [`2026-09-17-knowledge-acceptance.md`](2026-09-17-knowledge-acceptance.md)：
+  三层知识治理验收、Round2 本地候选原件归档、SHA/交付清单与线程接续补充。
+  与下面的 PR #28 产品检查点一起读取；归档完成不表示补丁已集成或产品通过。
+
 - [`2026-09-16-pr28-continuation.md`](2026-09-16-pr28-continuation.md)：
   当前 Draft PR #28、`codex/workbench-product-delivery-20260914`、精确候选 CI、
   CodeQL/review、GUI 外部阻塞、Notion/Drive 知识治理和新线程恢复协议。恢复当前
@@ -38,8 +42,9 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 
 ## 新线程恢复顺序
 
-1. 读取根 `AGENTS.md`；文档工作再读 `docs/AGENTS.md`。读取
-   `docs/analytix/README.md`、本页、最新一份交接和
+1. 先读取当前目标 PR 元数据，并在其 fresh head 分支读取根 `AGENTS.md`；
+   文档工作再读 `docs/AGENTS.md`。读取 `docs/analytix/README.md`、本页、
+   当前产品检查点及其治理/归档补充和
    [`../knowledge-base.md`](../knowledge-base.md)。
 2. fresh 获取当前 `main`、目标分支、PR、Base SHA、HEAD、Draft/merge 状态和
    current checks；有本地 worktree 时再执行 `git status --short --branch`、

@@ -11,10 +11,11 @@
 - [`git-workflow.md`](git-workflow.md) 是 canonical 与 GitHub 公开主线的
   `pull` / `commit` / `push` 操作入口，也说明保留的私有历史与资源排除范围。
 - [`handovers/README.md`](handovers/README.md) 是跨线程暂停和恢复的操作入口。
-- 当前保留的最新交接快照是
-  [`handovers/2026-09-10-owner-replacement.md`](handovers/2026-09-10-owner-replacement.md)。
-  它记录旧 Owner/AI 的安全撤权、R131 与 B1 同源链的聚焦检查点、无自动化路线和
-  A0/B1 的下一项可验证缺口；它不是产品验收或永久实时状态表。
+- 当前施工快照与补充记录统一由
+  [`handovers/README.md`](handovers/README.md) 路由；本页不再重复维护“最新”文件名。
+  PR #28 未合并时，先 fresh 读取 PR 的 head 分支，再在该分支读取交接入口，
+  不假设默认 `main` 已包含候选分支的记录。
+  `2026-09-10-owner-replacement.md` 保留为 R131/B1 与旧 Owner 交接的历史快照。
   恢复时仍须从当前 Git、active OpenSpec、代码和 fresh 验证重建状态。
 - `2026-08-05-damaged-cache-retirement.md` 仍是损坏缓存退役的历史来源，
   不是当前 HEAD、容量、writer 或施工顺序的依据。
@@ -28,8 +29,8 @@
   记录大文档、历史材料、碎片和重复副本的分类与后续归并队列。
 - [`development-runbook.md`](development-runbook.md) 是缓存、验证、打包和启动
   诊断的当前命令入口；命令被列出不等于已经通过。
-- [`knowledge-base.md`](knowledge-base.md) 定义 canonical Obsidian vault、
-  有界常驻同步授权、敏感内容排除和冲突处理。
+- [`knowledge-base.md`](knowledge-base.md) 定义 GitHub 工程事实源、Notion 有界知识
+  镜像与 Google Drive 正式交付层；Obsidian 仅保留为 legacy，不自动同步或迁移。
 - [`../legacy/README.md`](../legacy/README.md) 明确 `docs/legacy/` 只作历史
   provenance，不能作为当前 Analytix 实现入口。
 
@@ -173,7 +174,7 @@ archive timestamp 不能替代这些证据。
 | --- | --- | --- |
 | `AGENTS.md`、嵌套 `AGENTS.md` | Operational | 只能约束工作方式，不能证明实现。 |
 | [`development-runbook.md`](development-runbook.md) | Operational | 路由当前命令；列出命令不等于该命令当前通过。 |
-| [`knowledge-base.md`](knowledge-base.md) | Operational | 约束知识同步；Obsidian 内容不证明实现或验收。 |
+| [`knowledge-base.md`](knowledge-base.md) | Operational | 约束 GitHub → Notion → Drive 的有界记录；外部知识与交付物不证明当前实现或验收。 |
 | [`docs/analytix/specs/README.md`](specs/README.md) 与已登记 specs | Registry + accepted targets/contracts + historical reference | 登记表决定 lifecycle；accepted 文档能定义目标，当前实现仍需代码/测试证据。 |
 | `openspec/changes/<active-change>/` | Scoped proposal/work plan | 只有当前请求采纳的 scope 才能指导施工；未完成任务不能写成现状。 |
 | `openspec/changes/archive/` | Accepted decision/history | 可解释已归档 change 的决策，不自动证明当前 worktree 仍通过。 |
