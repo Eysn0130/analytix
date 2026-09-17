@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
-import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2 } from 'lucide-react'
+import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { CanvasOpenButton } from '../../canvas/CanvasOpenButton'
 import type { WorkspaceTab } from '../../store/workspace-tabs-store'
 import './workspace-tabs.css'
 
@@ -15,7 +16,7 @@ function SortableWorkspaceTab({ tab, active, focusable, onFocus, onSelect, onClo
 }): ReactElement {
   const { t } = useTranslation('common')
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id })
-  const Icon = tab.mode === 'browser' ? Globe : tab.mode === 'files' ? Files : tab.mode === 'changes' ? ScanEye : tab.mode === 'child-agent' ? (tab.id.startsWith('sidechat:') ? MessageSquare : Users) : tab.mode === 'summary' ? Users : tab.mode === 'todo' || tab.mode === 'plan' ? ListChecks : File
+  const Icon = tab.preview === 'canvas' || /\.canvas$/i.test(tab.path ?? '') ? Shapes : tab.mode === 'browser' ? Globe : tab.mode === 'files' ? Files : tab.mode === 'changes' ? ScanEye : tab.mode === 'child-agent' ? (tab.id.startsWith('sidechat:') ? MessageSquare : Users) : tab.mode === 'summary' ? Users : tab.mode === 'todo' || tab.mode === 'plan' ? ListChecks : File
   const status = tab.error ? t('error') : tab.loading ? t('loading') : tab.dirty ? t('unsavedChanges', { defaultValue: '未保存' }) : ''
   return (
     <div ref={setNodeRef} className="workspace-tab" data-active={active} data-dragging={isDragging}
@@ -117,6 +118,6 @@ export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, p
   ]
   return <section className="workspace-tool-selector" aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })}>
     <h2>{t('workspaceSelectTool', { defaultValue: '打开工作面' })}</h2>
-    <div>{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={17} aria-hidden="true" /><span>{label}</span></button>)}</div>
+    <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={17} aria-hidden="true" /><span>{label}</span></button>)}</div>
   </section>
 }

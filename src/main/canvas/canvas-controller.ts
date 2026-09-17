@@ -1,4 +1,4 @@
-import { canvasHostRequestSchema, canvasHostResponseSchema, type CanvasHostRequest, type CanvasHostResponse } from '../../../packages/runtime/src/contracts/canvas-host'
+import { canvasHostRequestSchema, canvasHostResponseSchema, type CanvasHostRequest, type CanvasHostResponse, type CanvasDocument } from '../../../packages/runtime/src/contracts/canvas-host'
 import { pluginPackageHostResponseSchema, type PluginPackageHostRequest, type PluginPackageHostResponse, type PluginPackageView } from '../../../packages/runtime/src/contracts/plugin-package-host'
 
 const unavailable = (): CanvasHostResponse => ({ ok: false, code: 'unavailable' })
@@ -9,7 +9,9 @@ export function createCanvasController(options: {
   packageHost: (request: PluginPackageHostRequest) => Promise<PluginPackageHostResponse>
   current: () => boolean
 }) {
-  const sessions = new Map<string, { threadId: string; binding: PluginPackageView }>()
+  const sessions = new Map<string, { threadId: string; binding: PluginPackageView; object: Pick<CanvasDocument, 'objectId' | 'kind' | 'path'> }>()
+  const sameObject = (left: Pick<CanvasDocument, 'objectId' | 'kind' | 'path'>, right: CanvasDocument): boolean =>
+    left.objectId === right.objectId && left.kind === right.kind && left.path === right.path
   let tail: Promise<unknown> = Promise.resolve()
   const binding = async (): Promise<PluginPackageView | null> => {
     if (!options.current()) return null
@@ -51,10 +53,15 @@ export function createCanvasController(options: {
     switch (request.operation) {
       case 'open-object':
         if (!('document' in response) || response.document.threadId !== request.threadId || response.document.kind !== request.kind) return unavailable()
-        sessions.set(response.document.sessionId, { threadId: request.threadId, binding: pkg })
+        {
+          const previous = sessions.get(response.document.sessionId)
+          if (previous && (previous.threadId !== request.threadId || !sameObject(previous.object, response.document))) return unavailable()
+          const { objectId, kind, path } = response.document
+          sessions.set(response.document.sessionId, { threadId: request.threadId, binding: pkg, object: { objectId, kind, path } })
+        }
         break
       case 'read-object':
-        if (!('document' in response) || response.document.sessionId !== request.sessionId || response.document.threadId !== request.threadId) return unavailable()
+        if (!('document' in response) || response.document.sessionId !== request.sessionId || response.document.threadId !== request.threadId || !owned || !sameObject(owned.object, response.document)) return unavailable()
         break
       case 'close-object':
         if (!('closed' in response)) return unavailable()

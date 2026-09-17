@@ -20,8 +20,8 @@ const loadDevBrowserPanel = () =>
   import('../DevBrowserPanel').then((module) => ({ default: module.DevBrowserPanel }))
 
 const loadWorkspaceFilePreviewPanel = () =>
-  import('../WorkspaceFilePreviewPanel').then((module) => ({
-    default: module.WorkspaceFilePreviewPanel
+  import('./WorkspaceObjectPreviewPanel').then((module) => ({
+    default: module.WorkspaceObjectPreviewPanel
   }))
 
 const loadPlanPanel = () =>

@@ -8,6 +8,8 @@ export type WorkspaceTab = {
   title: string
   workspaceRoot?: string
   path?: string
+  /** Local display choice, never an authorization grant or provider context. */
+  preview?: 'canvas'
   instanceId?: string
   dirty?: boolean
   loading?: boolean

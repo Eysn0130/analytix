@@ -83,4 +83,29 @@ describe('Canvas Main ownership boundary', () => {
     f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] } : { ok: true, output: unknown })
     expect(await f.controller.request(apply)).toEqual(unknown)
   })
+  it('binds reads to the opened object, not only its session and thread', async () => {
+    for (const patch of [{ objectId: 'd'.repeat(64) }, { path: '/other/diagram.canvas' }, { kind: 'png' as const }]) {
+      const f = fixture(); await f.controller.request(f.open)
+      f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] }
+        : { ok: true, output: { ok: true, document: { ...f.document, ...patch } } })
+      expect(await f.controller.request({ operation: 'read-object', sessionId: id, threadId: 'thread-main' })).toEqual({ ok: false, code: 'unavailable' })
+    }
+  })
+  it('permits a Core-validated new revision of the same object', async () => {
+    const f = fixture(); await f.controller.request(f.open)
+    const document = { ...f.document, revision: 'd'.repeat(64), content: 'e30K' }
+    f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] }
+      : { ok: true, output: { ok: true, document } })
+    expect(await f.controller.request({ operation: 'read-object', sessionId: id, threadId: 'thread-main' })).toEqual({ ok: true, document })
+  })
+  it('cannot replace an existing owner with a colliding open response', async () => {
+    const f = fixture(); await f.controller.request(f.open)
+    f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] }
+      : { ok: true, output: { ok: true, document: { ...f.document, threadId: 'thread-b' } } })
+    expect(await f.controller.request({ ...f.open, threadId: 'thread-b' })).toEqual({ ok: false, code: 'unavailable' })
+    const count = f.packageHost.mock.calls.length
+    expect(await f.controller.request({ operation: 'read-object', sessionId: id, threadId: 'thread-b' })).toEqual({ ok: false, code: 'unavailable' })
+    expect(f.packageHost.mock.calls).toHaveLength(count)
+  })
+
 })
