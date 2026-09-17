@@ -21,16 +21,18 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
   const { t } = useTranslation('canvas')
   const path = activeTab?.path
   const inWorkspace = !path || activeTab?.workspaceRoot === workspaceRoot
-  const key = JSON.stringify([threadId, workspaceRoot, path])
+  const [reload, setReload] = useState(0)
+  const key = JSON.stringify([threadId, workspaceRoot, path, inWorkspace, reload])
   const current = useRef({ key, visible, epoch: 0 })
   if (current.current.key !== key || current.current.visible !== visible) current.current = { key, visible, epoch: current.current.epoch + 1 }
+  const epoch = current.current.epoch
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
-  const [reload, setReload] = useState(0)
   const [selection, setSelection] = useState<{ key: string; id: string } | null>(null)
   const [copyState, setCopyState] = useState<{ key: string; id: string; ok: boolean } | null>(null)
   const [picking, setPicking] = useState(false)
   const pickingRef = useRef(false)
+  const copying = useRef(0)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; current.current.epoch++ } }, [])
   const opening = useRef(0)
@@ -61,28 +63,30 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
   const preview = visible && inWorkspace && loaded?.key === key ? loaded : null
   const selected = selection?.key === key ? [...(preview?.scene?.facts.nodes ?? []), ...(preview?.scene?.facts.edges ?? [])].find(item => item.id === selection.id) : null
   const title = path?.replaceAll('\\', '/').split('/').at(-1) || t('canvasWorkspace')
+  // A reply belongs to one presentation epoch, even when the same file is reopened.
+  const isCurrent = () => mounted.current && current.current.visible && current.current.key === key && current.current.epoch === epoch
   const pick = async (): Promise<void> => {
-    if (pickingRef.current || !threadId || !workspaceRoot || !visible) return
-    const origin = key, epoch = current.current.epoch
-    const stillCurrent = () => mounted.current && current.current.visible && current.current.key === origin && current.current.epoch === epoch
+    if (pickingRef.current || !threadId || !workspaceRoot || !isCurrent()) return
+    const origin = key
     pickingRef.current = true; setPicking(true); setErrorKey(null)
     try {
       const result = await window.analytix.canvas.pickFile({ workspace: workspaceRoot })
-      if (!stillCurrent()) return
+      if (!isCurrent()) return
       if (!result.ok) { setErrorKey(origin); return }
       if (result.path && /\.(canvas|png)$/i.test(result.path)) onOpenObject(workspaceRoot, result.path)
       else if (result.path) setErrorKey(origin)
-    } catch { if (stillCurrent()) setErrorKey(origin) }
+    } catch { if (isCurrent()) setErrorKey(origin) }
     finally { pickingRef.current = false; if (mounted.current) setPicking(false) }
   }
-  const select = (id: string): void => { setSelection({ key, id }); setCopyState(null) }
+  const select = (id: string): void => { copying.current++; setSelection({ key, id }); setCopyState(null) }
   const copy = async (): Promise<void> => {
-    if (!selected || !preview) return
-    const origin = key
+    if (!selected || !preview || !isCurrent()) return
+    const origin = key, operation = ++copying.current
+    setCopyState(null)
     try {
       await navigator.clipboard.writeText(JSON.stringify(selected, null, 2))
-      if (mounted.current && current.current.visible && current.current.key === origin) setCopyState({ key: origin, id: selected.id, ok: true })
-    } catch { if (mounted.current && current.current.visible && current.current.key === origin) setCopyState({ key: origin, id: selected.id, ok: false }) }
+      if (isCurrent() && copying.current === operation) setCopyState({ key: origin, id: selected.id, ok: true })
+    } catch { if (isCurrent() && copying.current === operation) setCopyState({ key: origin, id: selected.id, ok: false }) }
   }
   const activate = (event: KeyboardEvent<SVGElement>, id: string): void => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return
@@ -90,7 +94,7 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
   }
   const viewBox = preview?.layout?.viewBox
   return <section className="canvas-workspace" inert={!visible} aria-label={t('canvasWorkspace')}
-    onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape' && selected) { event.preventDefault(); setSelection(null) } }}>
+    onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape' && selected) { event.preventDefault(); select('') } }}>
     <header className="canvas-workspace-header">
       <span className="canvas-workspace-title" title={title}>{title}</span>
       <span className="text-xs text-ds-muted">{t('canvasLocalPreview')}</span>
@@ -105,7 +109,7 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
       : <div className="canvas-workspace-content">
         <div className="canvas-workspace-visual">
           {viewBox && preview.scene && preview.layout ? <svg viewBox={viewBox.join(' ')} aria-label={title}>
-            <image href={preview.url} x={viewBox[0]} y={viewBox[1]} width={viewBox[2]} height={viewBox[3]} onError={() => { if (current.current.key === key && current.current.visible) setErrorKey(key) }} />
+            <image href={preview.url} x={viewBox[0]} y={viewBox[1]} width={viewBox[2]} height={viewBox[3]} onError={() => { if (isCurrent()) setErrorKey(key) }} />
             {preview.layout.connections.map(edge => <polyline key={edge.id} points={edge.points.map(point => point.join(',')).join(' ')}
               className="canvas-hit canvas-hit-edge" data-selected={selected?.id === edge.id} fill="none" stroke="transparent" strokeWidth={14} vectorEffect="non-scaling-stroke"
               role="button" tabIndex={0} aria-pressed={selected?.id === edge.id} aria-label={preview.scene!.facts.edges.find(fact => fact.id === edge.id)?.label || edge.id}
@@ -114,7 +118,7 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
               className="canvas-hit canvas-hit-node" data-selected={selected?.id === node.id} fill="transparent" vectorEffect="non-scaling-stroke"
               role="button" tabIndex={0} aria-pressed={selected?.id === node.id} aria-label={preview.scene!.facts.nodes.find(fact => fact.id === node.id)?.label || node.id}
               onClick={() => select(node.id)} onKeyDown={event => activate(event, node.id)} />)}
-          </svg> : <img src={preview.url} alt={title} onError={() => { if (current.current.key === key && current.current.visible) setErrorKey(key) }} />}
+          </svg> : <img src={preview.url} alt={title} onError={() => { if (isCurrent()) setErrorKey(key) }} />}
         </div>
         {preview.scene ? <details className="canvas-workspace-inspector" open={Boolean(selected)}>
           <summary>{t('canvasObjects', { count: preview.scene.facts.nodes.length + preview.scene.facts.edges.length })}</summary>

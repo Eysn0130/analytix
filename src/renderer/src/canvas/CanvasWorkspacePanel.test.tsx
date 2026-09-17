@@ -102,4 +102,72 @@ describe('Canvas object work surface', () => {
     await act(async () => resolve({ ok: true, path: '/project/late.canvas' }))
     expect(onOpenObject).not.toHaveBeenCalled()
   })
+  it.each(['reload', 'thread roundtrip', 'collapse roundtrip'])('does not acknowledge an old copy after %s, but allows a fresh copy', async transition => {
+    let finish!: () => void
+    writeText.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    await render()
+    const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(`canvas:${label}`)}"]`)!
+    const selectFirst = () => act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await selectFirst()
+    await act(async () => button('canvasCopySelection').click())
+    if (transition === 'reload') await act(async () => button('canvasReload').click())
+    else {
+      await render(transition === 'thread roundtrip' ? { threadId: 'thread-b' } : { visible: false })
+      await render()
+    }
+    await selectFirst()
+    await act(async () => finish())
+    expect(container.textContent).not.toContain(i18n.t('canvas:canvasCopied'))
+    expect(container.textContent).not.toContain(i18n.t('canvas:canvasCopyFailed'))
+    writeText.mockResolvedValueOnce(undefined)
+    await act(async () => button('canvasCopySelection').click())
+    expect(container.textContent).toContain(i18n.t('canvas:canvasCopied'))
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(writeText.mock.calls[1][0]).toBe(JSON.stringify(scene.facts.nodes[0], null, 2))
+  })
+  it.each([true, false])('shows the newest copy result (success=%s), regardless of completion order', async success => {
+    let oldResolve!: () => void, oldReject!: (error: Error) => void
+    let newResolve!: () => void, newReject!: (error: Error) => void
+    writeText.mockReturnValueOnce(new Promise<void>((resolve, reject) => { oldResolve = resolve; oldReject = reject }))
+      .mockReturnValueOnce(new Promise<void>((resolve, reject) => { newResolve = resolve; newReject = reject }))
+    await render()
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const copy = container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('canvas:canvasCopySelection')}"]`)!
+    await act(async () => copy.click())
+    await act(async () => copy.click())
+    await act(async () => { if (success) newResolve(); else newReject(new Error('synthetic new failure')) })
+    const message = i18n.t(success ? 'canvas:canvasCopied' : 'canvas:canvasCopyFailed')
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(message)
+    await act(async () => { if (success) oldReject(new Error('synthetic old failure')); else oldResolve() })
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(message)
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object'])
+  })
+  it('clearing and reselecting an object invalidates a pending copy acknowledgement', async () => {
+    let finish!: () => void
+    writeText.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    await render()
+    const hit = container.querySelector('svg rect')!
+    await act(async () => hit.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const copy = container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('canvas:canvasCopySelection')}"]`)!
+    await act(async () => copy.click())
+    await act(async () => hit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(container.querySelector('pre')).toBeNull()
+    await act(async () => hit.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => finish())
+    expect(container.querySelector('[role="status"]')).toBeNull()
+    expect(container.querySelector('pre')?.textContent).toContain('9007199254740993.01')
+  })
+  it('does not use a file-picker reply from before a same-file reload', async () => {
+    let finish!: (value: unknown) => void
+    pickFile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await render()
+    const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(`canvas:${label}`)}"]`)!
+    await act(async () => button('canvasOpen').click())
+    await act(async () => button('canvasReload').click())
+    await act(async () => finish({ ok: true, path: '/project/late.canvas' }))
+    expect(onOpenObject).not.toHaveBeenCalled()
+    expect(button('canvasOpen').disabled).toBe(false)
+    expect(container.querySelector('svg image')).not.toBeNull()
+  })
 })
