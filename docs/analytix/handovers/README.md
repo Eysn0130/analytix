@@ -11,6 +11,10 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 
 ## 最新保留快照
 
+- [`2026-09-17-round3-privacy-projection.md`](2026-09-17-round3-privacy-projection.md)：
+  新增 Go 隐私投影修复、精确金额与受信任协议边界回归、受限环境验证及下一步。
+  Round2 仍未集成；先读本增量，再按需读取下述产品与归档检查点。
+
 - [`2026-09-17-knowledge-acceptance.md`](2026-09-17-knowledge-acceptance.md)：
   三层知识治理验收、Round2 本地候选原件归档、SHA/交付清单与线程接续补充。
   与下面的 PR #28 产品检查点一起读取；归档完成不表示补丁已集成或产品通过。
