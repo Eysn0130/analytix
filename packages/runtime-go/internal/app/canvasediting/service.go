@@ -19,6 +19,7 @@ import (
 	identity "analytix.local/runtime-go/internal/domain/identity"
 	identityport "analytix.local/runtime-go/internal/ports/identity"
 	files "analytix.local/runtime-go/internal/ports/objectediting"
+	host "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
 var ErrUnavailable = errors.New("canvas_unavailable")
@@ -61,12 +62,18 @@ type proposal struct {
 	view      Proposal
 	candidate []byte
 	changeID  string
+	reviewID  string
 }
 type session struct {
 	id, thread, workspace, kind string
 	principal                   identity.PrincipalV1
 	object                      objectapp.Opened
 	proposals                   map[string]*proposal
+	binding                     host.Binding
+	securityBinding             string
+	scopes                      map[string]*selectionScope
+	reviewRevision              string
+	reviews                     []files.CanvasReviewIntent
 }
 type Service struct {
 	mu        sync.Mutex
@@ -115,7 +122,7 @@ func (s *Service) principal(ctx context.Context, p identity.PrincipalV1) error {
 	return nil
 }
 func (s *Service) authority(current *session, purpose string) objectapp.ScopeAuthority {
-	return objectapp.ScopeAuthority{Principal: current.principal, ObjectID: current.object.ObjectID, ThreadID: current.thread, Purpose: purpose, Workspace: current.workspace, Path: current.object.Path}
+	return objectapp.ScopeAuthority{Principal: current.principal, ObjectID: current.object.ObjectID, ThreadID: current.thread, Purpose: purpose, Workspace: current.workspace, Path: current.object.Path, SecurityBinding: current.securityBinding}
 }
 func decode(kind string, opened objectapp.Opened) ([]byte, error) {
 	if len(opened.Content) > base64.StdEncoding.EncodedLen(16<<20) {
@@ -143,6 +150,10 @@ func view(current *session, opened objectapp.Opened) Document {
 }
 
 func (s *Service) Open(ctx context.Context, p identity.PrincipalV1, thread, workspace, path, kind string) (Document, error) {
+	return s.openBound(ctx, p, thread, workspace, path, kind, host.Binding{})
+}
+
+func (s *Service) openBound(ctx context.Context, p identity.PrincipalV1, thread, workspace, path, kind string, binding host.Binding) (Document, error) {
 	if s.principal(ctx, p) != nil || !threadPattern.MatchString(thread) || s.objects[kind] == nil {
 		return Document{}, ErrUnavailable
 	}
@@ -167,15 +178,21 @@ func (s *Service) Open(ctx context.Context, p identity.PrincipalV1, thread, work
 		// prevent releasing an unclaimed, principal-owned in-memory handle.
 		_ = s.objects[kind].Close(context.WithoutCancel(ctx), opened.SessionID)
 	}()
-	current := &session{thread: thread, workspace: workspace, kind: kind, principal: p, object: opened, proposals: map[string]*proposal{}}
+	current := &session{thread: thread, workspace: workspace, kind: kind, principal: p, object: opened, proposals: map[string]*proposal{}, binding: binding, scopes: map[string]*selectionScope{}}
 	if s.projector.ValidateCurrent(ctx, s.authority(current, "discuss")) != nil || s.principal(ctx, p) != nil {
 		return Document{}, ErrUnavailable
+	}
+	if freezer, ok := s.projector.(objectapp.SelectionAuthorityFreezer); ok {
+		current.securityBinding, err = freezer.FreezeSelectionAuthority(ctx, s.authority(current, "discuss"))
+		if err != nil || !revisionPattern.MatchString(current.securityBinding) {
+			return Document{}, ErrUnavailable
+		}
 	}
 	if _, err = decode(kind, opened); err != nil {
 		return Document{}, err
 	}
 	for _, old := range s.sessions {
-		if old.object.SessionID == opened.SessionID && old.thread == thread && old.kind == kind && identity.SamePrincipalV1(old.principal, p) {
+		if old.object.SessionID == opened.SessionID && old.thread == thread && old.kind == kind && old.binding == binding && old.securityBinding == current.securityBinding && identity.SamePrincipalV1(old.principal, p) {
 			return view(old, opened), nil
 		}
 	}
@@ -184,6 +201,13 @@ func (s *Service) Open(ctx context.Context, p identity.PrincipalV1, thread, work
 	}
 	current.id, err = token()
 	if err != nil {
+		return Document{}, err
+	}
+	raw, err := decode(kind, opened)
+	if err != nil {
+		return Document{}, err
+	}
+	if err = s.loadReviews(ctx, current, opened, raw); err != nil {
 		return Document{}, err
 	}
 	// Bytes remain only in bounded proposals; reread the current object for every operation.
@@ -236,6 +260,10 @@ func (s *Service) ProposeScene(ctx context.Context, p identity.PrincipalV1, id, 
 	if err != nil {
 		return Proposal{}, err
 	}
+	return s.proposeSceneLocked(ctx, current, opened, raw, base, selected, operations)
+}
+
+func (s *Service) proposeSceneLocked(ctx context.Context, current *session, opened objectapp.Opened, raw []byte, base string, selected []string, operations []canvas.Operation) (Proposal, error) {
 	if current.kind != "canvas" || opened.Revision != base || len(selected) == 0 || len(selected) > canvas.MaxNodes+canvas.MaxEdges {
 		return Proposal{}, ErrStale
 	}
@@ -270,7 +298,7 @@ func (s *Service) ProposeScene(ctx context.Context, p identity.PrincipalV1, id, 
 	if err != nil {
 		return Proposal{}, ErrInvalid
 	}
-	return s.storeProposal(current, base, candidate, Proposal{Kind: "canvas", FactsDigest: result.FactsDigest, SceneDiff: result.Diff})
+	return s.storeProposal(ctx, current, base, candidate, Proposal{Kind: "canvas", FactsDigest: result.FactsDigest, SceneDiff: result.Diff}, selected, operations, nil)
 }
 
 // Image coordinates refer to natural pixels. Semantic Provider edits require
@@ -292,18 +320,16 @@ func (s *Service) ProposeImage(ctx context.Context, p identity.PrincipalV1, id, 
 	if err != nil || result.Digest == opened.Revision || len(result.PNG) > 16<<20 {
 		return Proposal{}, ErrInvalid
 	}
-	return s.storeProposal(current, base, result.PNG, Proposal{Kind: "png", ImageDiff: result.Diff})
+	return s.storeProposal(ctx, current, base, result.PNG, Proposal{Kind: "png", ImageDiff: result.Diff}, nil, nil, operations)
 }
-func (s *Service) storeProposal(current *session, base string, candidate []byte, v Proposal) (Proposal, error) {
-	if len(current.proposals) >= 16 {
-		for id, p := range current.proposals {
-			if p.view.Status == "applied" || p.view.Status == "rejected" {
-				delete(current.proposals, id)
-				break
-			}
+func (s *Service) storeProposal(ctx context.Context, current *session, base string, candidate []byte, v Proposal, selected []string, sceneOps []canvas.Operation, imageOps []canvas.ImageOperation) (Proposal, error) {
+	active := 0
+	for _, p := range current.proposals {
+		if p.view.Status != "applied" && p.view.Status != "rejected" {
+			active++
 		}
 	}
-	if len(current.proposals) >= 16 {
+	if active >= 16 {
 		return Proposal{}, ErrUnavailable
 	}
 	// Bound retained image candidates across this session, not just per proposal.
@@ -323,7 +349,7 @@ func (s *Service) storeProposal(current *session, base string, candidate []byte,
 	if global > 64<<20 {
 		return Proposal{}, ErrUnavailable
 	}
-	id, err := token()
+	id, err := selectionToken()
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -337,7 +363,16 @@ func (s *Service) storeProposal(current *session, base string, candidate []byte,
 	if json.Unmarshal(encoded, &owned) != nil {
 		return Proposal{}, ErrInvalid
 	}
-	current.proposals[id] = &proposal{view: owned, candidate: append([]byte(nil), candidate...), changeID: digest([]byte(current.id + "\x00" + current.thread + "\x00" + base + "\x00" + id + "\x00" + v.CandidateDigest))}
+	reviewID, changeID, err := s.appendReview(ctx, current, owned, selected, sceneOps, imageOps)
+	if err != nil {
+		return Proposal{}, err
+	}
+	for oldID, p := range current.proposals {
+		if p.view.Status == "applied" || p.view.Status == "rejected" {
+			delete(current.proposals, oldID)
+		}
+	}
+	current.proposals[id] = &proposal{view: owned, candidate: append([]byte(nil), candidate...), changeID: changeID, reviewID: reviewID}
 	return v, nil
 }
 func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread, proposalID string) (files.Receipt, error) {
@@ -366,6 +401,7 @@ func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread,
 		if err == nil && receipt.Status == files.StatusCommitted {
 			proposal.view.Status = "applied"
 			proposal.candidate = nil
+			releaseSelections(current)
 		}
 		// A repeated click queries the original operation. Retrying a pending
 		// replacement requires the separate explicit recovery operation.
@@ -391,6 +427,9 @@ func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread,
 	if err = validate(); err != nil {
 		return files.Receipt{}, err
 	}
+	if err = s.reviewCurrent(ctx, current, proposal); err != nil {
+		return files.Receipt{}, err
+	}
 	review, err := json.Marshal(proposal.view)
 	if err != nil || len(review) > 65536 {
 		return files.Receipt{}, ErrInvalid
@@ -411,6 +450,10 @@ func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread,
 	if err == nil && receipt.Status == files.StatusCommitted {
 		proposal.view.Status = "applied"
 		proposal.candidate = nil
+		releaseSelections(current)
+		// A failed review cleanup must not turn a confirmed save into a retry.
+		// The native journal reconciles any leftover intent on reopening.
+		_ = s.removeReview(ctx, current, proposal.reviewID)
 	}
 	return receipt, err
 }
@@ -471,6 +514,9 @@ func (s *Service) Reject(ctx context.Context, p identity.PrincipalV1, id, thread
 	if item == nil || item.view.Status == "pending" || item.view.Status == "applied" {
 		return ErrInvalid
 	}
+	if err = s.removeReview(ctx, current, item.reviewID); err != nil {
+		return err
+	}
 	item.view.Status = "rejected"
 	item.candidate = nil
 	return nil
@@ -500,6 +546,7 @@ func (s *Service) Cancel(ctx context.Context, p identity.PrincipalV1, id, thread
 	}
 	for _, item := range current.proposals {
 		if item.changeID == change {
+			_ = s.removeReview(ctx, current, item.reviewID)
 			item.view.Status = "rejected"
 			item.candidate = nil
 		}
@@ -531,6 +578,7 @@ func (s *Service) Close(ctx context.Context, p identity.PrincipalV1, id, thread 
 			return err
 		}
 	}
+	releaseSelections(current)
 	delete(s.sessions, id)
 	return nil
 }
@@ -572,6 +620,9 @@ func (s *Service) RecoverOperation(ctx context.Context, p identity.PrincipalV1, 
 	}
 	if validate() != nil {
 		return files.Receipt{OperationID: receipt.OperationID, Status: files.StatusUnknown}, ErrUnavailable
+	}
+	if err == nil && receipt.Status == files.StatusCommitted {
+		releaseSelections(current)
 	}
 	return receipt, err
 }

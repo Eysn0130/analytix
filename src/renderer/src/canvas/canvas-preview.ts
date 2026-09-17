@@ -4,6 +4,7 @@ import { renderCanvasScene } from '../../../../plugins/atlasflow/skills/atlasflo
 
 export type CanvasPreview = {
   blob: Blob
+  imageSize?: { width: number; height: number }
   scene?: CanvasScene
   layout?: ReturnType<typeof renderCanvasScene>['layout']
 }
@@ -24,7 +25,7 @@ export async function decodeCanvasPreview(document: CanvasDocument): Promise<Can
         new DataView(bytes.buffer).getUint32(8) !== 13 || String.fromCharCode(...bytes.slice(12, 16)) !== 'IHDR') throw new Error('canvas_preview_invalid')
     const header = new DataView(bytes.buffer), width = header.getUint32(16), height = header.getUint32(20)
     if (!width || !height || width > MaxCanvasImageDimension || height > MaxCanvasImageDimension || width * height > MaxCanvasImagePixels) throw new Error('canvas_preview_invalid')
-    return { blob: new Blob([bytes], { type: 'image/png' }) }
+    return { blob: new Blob([bytes], { type: 'image/png' }), imageSize: { width, height } }
   }
   const scene = canvasSceneSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)))
   const rendered = renderCanvasScene(scene)

@@ -66,7 +66,7 @@ describe('Canvas preview lease ordering (no model or write authority)', () => {
       return canClose ? closed : { ok: false, code: 'unavailable' }
     })
     await session.open(target)
-    expect(await session.open({ ...target, path: '/project/b.canvas' })).toBe(null)
+    expect(await session.open({ ...target, threadId: 'thread-b', path: '/project/b.canvas' })).toBe(null)
     expect(opens).toBe(1)
     canClose = true
     expect(await session.close()).toBe(true)
@@ -90,5 +90,74 @@ describe('Canvas preview lease ordering (no model or write authority)', () => {
       const session = createCanvasPreviewSession(async () => ({ ok: true, document: { ...document, ...replacement } }))
       expect(await session.open(target)).toBe(null)
     }
+  })
+})
+
+describe('Canvas retained preview lifecycle', () => {
+  const docFor = (path: string): CanvasDocument => ({ ...document, path,
+    sessionId: (path.includes('b.canvas') ? 'b' : path.includes('c.canvas') ? 'c' : 'a').repeat(48) })
+  const host = (calls: CanvasHostRequest[]) => async (request: CanvasHostRequest): Promise<CanvasHostResponse> => {
+    calls.push(request)
+    if (request.operation === 'open-object') return { ok: true, document: docFor(request.object.path) }
+    if (request.operation === 'read-object') return { ok: true, document: docFor(`/project/${request.sessionId[0]}.canvas`) }
+    return closed
+  }
+  it('retains A across A-B-A and reauthorizes its bytes before redisplay', async () => {
+    const calls: CanvasHostRequest[] = [], session = createCanvasPreviewSession(host(calls))
+    await session.open(target)
+    await session.open({ ...target, path: '/project/b.canvas' })
+    expect(await session.open(target)).toStrictEqual(document)
+    expect(calls.map(call => call.operation)).toEqual(['open-object', 'open-object', 'read-object'])
+    expect(await session.close()).toBe(true)
+    expect(calls.filter(call => call.operation === 'close-object')).toHaveLength(2)
+  })
+  it('suspends presentation without closing the retained object or losing local selection', async () => {
+    const calls: CanvasHostRequest[] = [], session = createCanvasPreviewSession(host(calls))
+    await session.open(target)
+    session.select(target, ['n1'])
+    session.suspend()
+    expect(calls.map(call => call.operation)).toEqual(['open-object'])
+    expect(await session.open(target)).toStrictEqual(document)
+    expect(session.selected(target)).toEqual(['n1'])
+    const selected = session.selected(target); selected.push('not-owned')
+    expect(session.selected(target)).toEqual(['n1'])
+    await session.close()
+  })
+  it('evicts only the least recently visible third object and retains failed close ownership', async () => {
+    const calls: CanvasHostRequest[] = []; let canClose = false
+    const respond = host(calls)
+    const session = createCanvasPreviewSession(async request => request.operation === 'close-object' && !canClose
+      ? (calls.push(request), { ok: false, code: 'unavailable' }) : respond(request))
+    await session.open(target)
+    await session.open({ ...target, path: '/project/b.canvas' })
+    expect(await session.open({ ...target, path: '/project/c.canvas' })).toBe(null)
+    expect(calls.filter(call => call.operation === 'open-object')).toHaveLength(2)
+    expect(await session.open(target)).toStrictEqual(document)
+    canClose = true
+    await session.open({ ...target, path: '/project/c.canvas' })
+    expect(calls.filter(call => call.operation === 'close-object').at(-1)).toMatchObject({ sessionId: 'b'.repeat(48) })
+    expect(session.selected({ ...target, path: '/project/b.canvas' })).toEqual([])
+    await session.close()
+  })
+  it('never redisplays retained content when fresh authority/read is unavailable', async () => {
+    const calls: CanvasHostRequest[] = []; const respond = host(calls)
+    const session = createCanvasPreviewSession(async request => request.operation === 'read-object'
+      ? { ok: false, code: 'unavailable' } : respond(request))
+    await session.open(target); session.suspend()
+    expect(await session.open(target)).toBe(null)
+    await session.close()
+  })
+  it('closes old-thread handles before entering a different thread', async () => {
+    const calls: CanvasHostRequest[] = []
+    const session = createCanvasPreviewSession(async request => {
+      calls.push(request)
+      if (request.operation === 'open-object') return { ok: true, document: { ...docFor(request.object.path), threadId: request.threadId } }
+      return closed
+    })
+    await session.open(target)
+    await session.open({ ...target, path: '/project/b.canvas' })
+    await session.open({ ...target, threadId: 'thread-b' })
+    expect(calls.map(call => call.operation)).toEqual(['open-object', 'open-object', 'close-object', 'close-object', 'open-object'])
+    await session.close()
   })
 })

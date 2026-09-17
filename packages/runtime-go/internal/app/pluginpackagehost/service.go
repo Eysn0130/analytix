@@ -282,6 +282,13 @@ func (s *Service) SetDesiredState(ctx context.Context, request SetDesiredStateRe
 		return PackageView{}, err
 	}
 	committed, err := registration.State.SetDesiredState(ctx, materializationport.SetDesiredStateRequestV1{GenerationID: request.GenerationID, ExpectedRevision: request.ExpectedRevision, DesiredState: request.DesiredState}, s.authority, s.now().UTC())
+	// A state transition (including a lost acknowledgement) must not retain
+	// executable selections from its predecessor. Durable review data is owned
+	// elsewhere; this optional callback releases only in-memory capture leases.
+	if lifecycle, ok := registration.Adapter.(adapterport.CapturedScopeLifecycle); ok {
+		lifecycle.SynchronizeCapturedScopes(adapterport.Binding{})
+	}
+
 	if err != nil {
 		if errors.Is(err, materializationport.ErrConflict) {
 			return PackageView{}, ErrConflict
@@ -333,8 +340,15 @@ func (s *Service) Invoke(ctx context.Context, request InvokeRequest) (InvokeResu
 		return InvokeResult{}, err
 	}
 	if !exists || activation.DesiredState != domainplugin.DesiredEnabledV1 {
+		if lifecycle, ok := registration.Adapter.(adapterport.CapturedScopeLifecycle); ok {
+			lifecycle.SynchronizeCapturedScopes(adapterport.Binding{})
+		}
 		return InvokeResult{}, ErrDisabled
 	}
+	if lifecycle, ok := registration.Adapter.(adapterport.CapturedScopeLifecycle); ok {
+		lifecycle.SynchronizeCapturedScopes(bindingFor(registration, current, activation.Revision))
+	}
+
 	if activation.Revision != request.ExpectedRevision {
 		return InvokeResult{}, ErrConflict
 	}

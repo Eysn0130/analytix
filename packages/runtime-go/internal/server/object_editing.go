@@ -1,18 +1,22 @@
 package server
 
 import (
-	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"time"
 
 	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
+	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
+	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	"analytix.local/runtime-go/internal/ports"
 )
@@ -23,6 +27,18 @@ import (
 type runtimeObjectProjector struct{ handler *runtimeServerHandler }
 
 func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editingapp.ScopeAuthority) error {
+	return p.validateSelectionAuthority(ctx, scope, nil)
+}
+
+func (p runtimeObjectProjector) FreezeSelectionAuthority(ctx context.Context, scope editingapp.ScopeAuthority) (string, error) {
+	// The caller cannot choose a fingerprint to be made current.
+	scope.SecurityBinding = ""
+	var frozen string
+	err := p.validateSelectionAuthority(ctx, scope, &frozen)
+	return frozen, err
+}
+
+func (p runtimeObjectProjector) validateSelectionAuthority(ctx context.Context, scope editingapp.ScopeAuthority, frozen *string) error {
 	h := p.handler
 	if ctx == nil || ctx.Err() != nil || h == nil || h.store == nil || h.turnSecurity.Identity == nil || h.turnSecurity.Observer == nil ||
 		(scope.Purpose != "discuss" && scope.Purpose != "edit") ||
@@ -96,10 +112,55 @@ func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editi
 			return editingapp.ErrProjection
 		}
 	}
-	if h.turnSecurity.Identity.ValidateCurrent(ctx, scope.Principal) != nil {
+	if frozen != nil || scope.SecurityBinding != "" {
+		binding, err := selectionAuthorityFingerprint(scope, securityContext)
+		if err != nil || scope.SecurityBinding != "" && scope.SecurityBinding != binding {
+			return editingapp.ErrProjection
+		}
+		if frozen != nil {
+			*frozen = binding
+		}
+	}
+	if h.turnSecurity.Identity.ValidateCurrent(ctx, scope.Principal) != nil || ctx.Err() != nil {
 		return editingapp.ErrProjection
 	}
 	return nil
+}
+
+// A fingerprint invalidates an old selection; it never validates authority.
+// The caller first revalidates identity, case/epoch, publication and the actual
+// current risk witness under the existing transition read gate. Fresh witness
+// challenge replies may change ObservationDigest without changing the enrolled
+// index/checkpoint. Bind that stable head, not per-read challenge entropy.
+func selectionAuthorityFingerprint(scope editingapp.ScopeAuthority, current domainsecurity.TurnSecurityContext) (string, error) {
+	risk := current.RiskAuthorityBinding
+	observation := risk.ObservationDigest
+	if risk.State == domainsecurity.RiskAuthorityBindingStateWitnessed {
+		observation = ""
+	}
+	stable, err := json.Marshal(struct {
+		Version                          int
+		Thread, Workspace, Object, Path  string
+		Principal                        domainidentity.PrincipalV1
+		Case, Binding, Dataset, Manifest string
+		Epoch                            uint64
+		Publication                      domainsecurity.TurnPublicationPolicyV1
+		Risk                             any
+	}{current.Version, scope.ThreadID, scope.Workspace, scope.ObjectID, scope.Path,
+		scope.Principal, current.CaseID,
+		current.CaseBindingHash, current.DatasetSnapshotID, current.SourceManifestHash,
+		current.ContextEpoch, current.PublicationPolicy, struct {
+			Version                                                                                                     int
+			Purpose, State, Index, Checkpoint, Observation, ThreadPolicy, GeneralPolicy, HostPolicy, BindingObservation string
+			Generation                                                                                                  uint64
+		}{risk.SchemaVersion, risk.Purpose, risk.State, risk.IndexDigest, risk.CheckpointDigest,
+			observation, risk.ThreadPolicyDigest, risk.GeneralPolicyDigest, risk.HostPolicyDigest,
+			risk.BindingObservationDigest, risk.Generation}})
+	if err != nil {
+		return "", editingapp.ErrProjection
+	}
+	sum := sha256.Sum256(stable)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // A newly created primary thread has no turn security record until its first
@@ -192,12 +253,18 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 		return failure()
 	}
 	for key := range args {
-		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook") {
+		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook" && key != "canvas") {
 			return failure()
 		}
 	}
-	if _, typed := args["workbook"]; typed {
-		if _, text := args["parts"]; text {
+	if pending.Call.Name == "native_selection_propose" {
+		payloads := 0
+		for _, key := range []string{"parts", "workbook", "canvas"} {
+			if _, ok := args[key]; ok {
+				payloads++
+			}
+		}
+		if payloads != 1 {
 			return failure()
 		}
 	}
@@ -206,7 +273,9 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 	if pending.Call.Name == "native_selection_propose" {
 		operation = "model-selection-propose"
 		input["operationId"] = args["operationId"]
-		if value, ok := args["workbook"]; ok {
+		if value, ok := args["canvas"]; ok {
+			input["canvas"] = value
+		} else if value, ok := args["workbook"]; ok {
 			input["workbook"] = value
 		} else {
 			input["parts"] = args["parts"]
@@ -221,7 +290,7 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 		return failure()
 	}
 	for _, pkg := range packages {
-		if !pkg.Available {
+		if !pkg.Available || !slices.Contains(pkg.Operations, operation) {
 			continue
 		}
 		result, err := h.officePackageHost.Invoke(ctx, packagehostapp.InvokeRequest{PackageID: pkg.PackageID, GenerationID: pkg.GenerationID, ExpectedRevision: pkg.ActivationRevision, ContributionID: "workspace-editor", Operation: operation, Input: body})

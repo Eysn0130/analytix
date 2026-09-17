@@ -51,3 +51,11 @@ type Adapter interface {
 type SkillReader interface {
 	ReadSkill(context.Context, Binding) (domainskill.PackageSnapshot, error)
 }
+
+// CapturedScopeLifecycle only revokes in-memory capture leases. An empty binding
+// revokes all; otherwise retain only scopes bound to the currently verified Host
+// generation/activation. This cannot read/write files, grant new authority or
+// re-enter the serialized Host. Implementations are optional trusted adapters.
+type CapturedScopeLifecycle interface {
+	SynchronizeCapturedScopes(Binding)
+}

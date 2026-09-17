@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type ReactElement, type KeyboardEvent } from 'react'
-import { Copy, FolderOpen, RotateCw } from 'lucide-react'
+import { Copy, FolderOpen, RotateCw, MessageSquarePlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceTab } from '../store/workspace-tabs-store'
-import { createCanvasPreviewSession } from './canvas-preview-session'
+import type { CanvasDocument } from '../../../../packages/runtime/src/contracts/canvas-host'
+import { canvasHostResponseSchema } from '../../../../packages/runtime/src/contracts/canvas-host'
+import { canvasPreviewSessions as session } from './canvas-preview-owner'
+import { useNativeReferenceStore } from '../office/native-reference-store'
+import { CanvasReviewPanel } from './CanvasReviewPanel'
 import { decodeCanvasPreview, type CanvasPreview } from './canvas-preview'
 import './canvas-workspace.css'
 
-// One active preview lease in this renderer, including across route remounts.
-// The Go Host still authorizes every open; this queue only orders UI cleanup.
-const session = createCanvasPreviewSession(request => window.analytix.canvas.request(request))
-type Loaded = CanvasPreview & { key: string; url: string }
+type Loaded = CanvasPreview & { key: string; url: string; document: CanvasDocument }
 
 export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visible, onOpenObject }: {
   threadId: string | null
@@ -22,7 +23,12 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
   const path = activeTab?.path
   const inWorkspace = !path || activeTab?.workspaceRoot === workspaceRoot
   const [reload, setReload] = useState(0)
+  const objectKey = JSON.stringify([threadId, workspaceRoot, path])
   const key = JSON.stringify([threadId, workspaceRoot, path, inWorkspace, reload])
+  const [saved, setSaved] = useState<{ objectKey: string; revision: string } | null>(null)
+  const [quoting, setQuoting] = useState(false)
+  const [quoteState, setQuoteState] = useState<{ key: string; ok: boolean } | null>(null)
+  const quoteBusy = useRef(false), refreshBusy = useRef(false)
   const current = useRef({ key, visible, epoch: 0 })
   if (current.current.key !== key || current.current.visible !== visible) current.current = { key, visible, epoch: current.current.epoch + 1 }
   const epoch = current.current.epoch
@@ -40,7 +46,7 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
     const ticket = ++opening.current
     let cancelled = false
     let url: string | null = null
-    setLoaded(null); setErrorKey(null); setSelection(null); setCopyState(null)
+    setLoaded(null); setErrorKey(null); setSelection(null); setCopyState(null); setQuoteState(null)
     const kind = path && /\.canvas$/i.test(path) ? 'canvas' : path && /\.png$/i.test(path) ? 'png' : null
     if (visible && threadId && workspaceRoot && inWorkspace && path && kind) {
       void (async () => {
@@ -51,13 +57,15 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
           const decoded = await decodeCanvasPreview(document)
           if (cancelled || opening.current !== ticket || !current.current.visible || current.current.key !== key) return
           url = URL.createObjectURL(decoded.blob)
-          setLoaded({ ...decoded, key, url })
+          setLoaded({ ...decoded, key, url, document })
+          const retained = session.selected({ threadId, workspace: workspaceRoot, path, kind })
+          if (retained[0]) setSelection({ key, id: retained[0] })
         } catch {
-          if (!cancelled && opening.current === ticket) { setErrorKey(key); void session.close() }
+          if (!cancelled && opening.current === ticket) { setErrorKey(key) }
         }
       })()
     } else if (visible && threadId && workspaceRoot && inWorkspace && path && !kind) setErrorKey(key)
-    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); void session.close() }
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); session.suspend() }
   }, [key, path, threadId, workspaceRoot, visible, inWorkspace, reload])
   // Gate the render itself, not just an effect after paint, when scope changes.
   const preview = visible && inWorkspace && loaded?.key === key ? loaded : null
@@ -78,7 +86,40 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
     } catch { if (isCurrent()) setErrorKey(origin) }
     finally { pickingRef.current = false; if (mounted.current) setPicking(false) }
   }
-  const select = (id: string): void => { copying.current++; setSelection({ key, id }); setCopyState(null) }
+  const select = (id: string): void => {
+    copying.current++; setSelection({ key, id }); setCopyState(null); setQuoteState(null)
+    if (preview && threadId && path) session.select({ threadId, workspace: workspaceRoot, path, kind: preview.document.kind }, id ? [id] : [])
+  }
+  const quote = async (): Promise<void> => {
+    if (quoteBusy.current || !selected || !preview || !threadId || !path || !isCurrent()) return
+    const target = selected.id, ticket = copying.current
+    quoteBusy.current = true; setQuoting(true); setQuoteState(null)
+    try {
+      const response = canvasHostResponseSchema.parse(await window.analytix.canvas.request({ operation: 'capture-selection', sessionId: preview.document.sessionId,
+        threadId, baseRevision: preview.document.revision, selectedIds: [target] }))
+      if (!isCurrent() || ticket !== copying.current) return
+      if (!response.ok || !('selection' in response) || response.selection.sessionId !== preview.document.sessionId || response.selection.threadId !== threadId ||
+          response.selection.baseRevision !== preview.document.revision || response.selection.selectedIds.length !== 1 || response.selection.selectedIds[0] !== target) throw new Error('canvas_scope_invalid')
+      useNativeReferenceStore.getState().add({ kind: 'canvas', objectId: preview.document.objectId, threadId, workspace: workspaceRoot, path,
+        sessionId: response.selection.sessionId, scopeId: response.selection.scopeId, revision: response.selection.baseRevision,
+        selectedIds: response.selection.selectedIds, editable: true, label: `${title} · ${selected.label || selected.id}`, text: '' })
+      setQuoteState({ key, ok: true })
+    } catch { if (isCurrent() && ticket === copying.current) setQuoteState({ key, ok: false }) }
+    finally { quoteBusy.current = false; if (mounted.current) setQuoting(false) }
+  }
+  const refresh = async (): Promise<void> => {
+    if (refreshBusy.current || !path || !isCurrent()) return
+    refreshBusy.current = true; current.current.epoch++; copying.current++; opening.current++
+    setLoaded(null); setCopyState(null); setQuoteState(null)
+    const origin = key
+    try {
+      if (preview) useNativeReferenceStore.getState().revokeScopes(preview.document.objectId)
+      const closed = await session.closeObject(workspaceRoot, path)
+      if (!mounted.current || current.current.key !== origin || !current.current.visible) return
+      if (closed) setReload(value => value + 1)
+      else setErrorKey(origin)
+    } finally { refreshBusy.current = false }
+  }
   const copy = async (): Promise<void> => {
     if (!selected || !preview || !isCurrent()) return
     const origin = key, operation = ++copying.current
@@ -98,9 +139,10 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
     <header className="canvas-workspace-header">
       <span className="canvas-workspace-title" title={title}>{title}</span>
       <span className="text-xs text-ds-muted">{t('canvasLocalPreview')}</span>
-      <button type="button" className="ds-toolbar-icon-button" disabled={!path || !threadId || !inWorkspace} onClick={() => setReload(value => value + 1)} title={t('canvasReload')} aria-label={t('canvasReload')}><RotateCw size={16} /></button>
+      <button type="button" className="ds-toolbar-icon-button" disabled={!path || !threadId || !inWorkspace} onClick={() => void refresh()} title={t('canvasReload')} aria-label={t('canvasReload')}><RotateCw size={16} /></button>
       <button type="button" className="ds-toolbar-icon-button" disabled={picking || !threadId || !workspaceRoot} onClick={() => void pick()} title={t('canvasOpen')} aria-label={t('canvasOpen')}><FolderOpen size={16} /></button>
     </header>
+    {saved?.objectKey === objectKey ? <p className="canvas-saved-receipt">{t('canvasSaved')}{errorKey === key ? ` ${t('canvasSavedRefreshFailed')}` : ''}</p> : null}
     {!threadId || !workspaceRoot ? <p className="canvas-workspace-message">{t('canvasThreadRequired')}</p>
       : !inWorkspace ? <p className="canvas-workspace-message">{t('canvasWorkspaceMismatch')}</p>
       : errorKey === key ? <p role="alert" className="canvas-workspace-message">{t('canvasPreviewFailed')}</p>
@@ -129,10 +171,18 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
           {selected ? <div>
             <div className="flex items-center justify-between gap-2"><strong>{selected.label || selected.id}</strong><button type="button" className="ds-toolbar-icon-button" onClick={() => void copy()} title={t('canvasCopySelection')} aria-label={t('canvasCopySelection')}><Copy size={15} /></button></div>
             {selected.assumption ? <p>{t('canvasAssumption')}</p> : null}
+            <button type="button" className="canvas-quote-button" disabled={quoting} onClick={() => void quote()}><MessageSquarePlus size={15} />{t('canvasQuote')}</button>
+            {quoteState?.key === key ? <p role={quoteState.ok ? 'status' : 'alert'}>{t(quoteState.ok ? 'canvasQuoteAdded' : 'canvasQuoteFailed')}</p> : null}
             <pre>{JSON.stringify(selected, null, 2)}</pre>
             {copyState?.key === key && copyState.id === selected.id ? <p role="status">{t(copyState.ok ? 'canvasCopied' : 'canvasCopyFailed')}</p> : null}
           </div> : <p className="text-xs text-ds-muted">{t('canvasSelectHint')}</p>}
         </details> : null}
+        <CanvasReviewPanel key={key} document={preview.document} imageSize={preview.imageSize} onCommitted={receipt => {
+          if (!isCurrent()) return
+          setSaved({ objectKey, revision: receipt.revision })
+          useNativeReferenceStore.getState().revokeScopes(preview.document.objectId)
+          setReload(value => value + 1)
+        }} />
       </div>}
   </section>
 }

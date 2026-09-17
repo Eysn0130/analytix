@@ -6,6 +6,8 @@ import i18n from '../i18n'
 import type { WorkspaceTab } from '../store/workspace-tabs-store'
 import type { CanvasHostRequest } from '../../../../packages/runtime/src/contracts/canvas-host'
 import { CanvasWorkspacePanel } from './CanvasWorkspacePanel'
+import { canvasPreviewSessions } from './canvas-preview-owner'
+import { useNativeReferenceStore } from '../office/native-reference-store'
 
 const decode = vi.hoisted(() => vi.fn())
 vi.mock('./canvas-preview', () => ({ decodeCanvasPreview: decode }))
@@ -25,7 +27,15 @@ function reply(threadId: string) {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   request.mockReset(); pickFile.mockReset(); onOpenObject.mockReset(); writeText.mockReset(); revokeObjectURL.mockReset(); createObjectURL.mockReset(); decode.mockReset()
-  request.mockImplementation(async (input: CanvasHostRequest) => input.operation === 'open-object' ? reply(input.threadId) : { ok: true, closed: true })
+  useNativeReferenceStore.setState({ references: [], drafts: {} })
+  request.mockImplementation(async (input: CanvasHostRequest) => {
+    if (input.operation === 'open-object' || input.operation === 'read-object') return reply(input.threadId)
+    if (input.operation === 'proposals-list') return { ok: true, proposals: [] }
+    if (input.operation === 'object-recovery') return { ok: true, recovery: { current: null, pending: null } }
+    if (input.operation === 'capture-selection') return { ok: true, selection: { sessionId: input.sessionId, threadId: input.threadId,
+      scopeId: 'd'.repeat(48), baseRevision: input.baseRevision, selectedIds: input.selectedIds, editable: true } }
+    return { ok: true, closed: true }
+  })
   decode.mockResolvedValue({ blob: new Blob(['svg']), scene, layout: { viewBox: [0, 0, 120, 60], components: [{ id: 'a', x: 0, y: 0, width: 120, height: 60 }], connections: [] } })
   createObjectURL.mockReturnValue('blob:synthetic-preview')
   vi.stubGlobal('analytix', { canvas: { request, pickFile } })
@@ -36,7 +46,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  await act(async () => { root.unmount(); await canvasPreviewSessions.close() }); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 describe('Canvas object work surface', () => {
   it('reads only through the finite Host, previews as an image and copies exact facts only on explicit action', async () => {
@@ -52,7 +62,7 @@ describe('Canvas object work surface', () => {
     const copy = container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('canvas:canvasCopySelection')}"]`)!
     await act(async () => copy.click())
     expect(writeText).toHaveBeenCalledExactlyOnceWith(JSON.stringify(scene.facts.nodes[0], null, 2))
-    expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object'])
+    expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object', 'proposals-list', 'object-recovery'])
   })
   it('ignores IME selection activation and Escape clears a selected object', async () => {
     await render()
@@ -68,7 +78,7 @@ describe('Canvas object work surface', () => {
     await render({ visible: false })
     expect(container.querySelector('svg image')).toBeNull()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-preview')
-    expect(request.mock.calls.some(call => call[0].operation === 'close-object')).toBe(true)
+    expect(request.mock.calls.some(call => call[0].operation === 'close-object')).toBe(false)
     request.mockClear()
     await render({ workspaceRoot: '/other-project' })
     expect(container.textContent).toContain(i18n.t('canvas:canvasWorkspaceMismatch'))
@@ -141,7 +151,7 @@ describe('Canvas object work surface', () => {
     await act(async () => { if (success) oldReject(new Error('synthetic old failure')); else oldResolve() })
     expect(container.querySelector('[role="status"]')?.textContent).toBe(message)
     expect(writeText).toHaveBeenCalledTimes(2)
-    expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object'])
+    expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object', 'proposals-list', 'object-recovery'])
   })
   it('clearing and reselecting an object invalidates a pending copy acknowledgement', async () => {
     let finish!: () => void
@@ -170,4 +180,62 @@ describe('Canvas object work surface', () => {
     expect(button('canvasOpen').disabled).toBe(false)
     expect(container.querySelector('svg image')).not.toBeNull()
   })
+})
+
+// These exercise real renderer consumers, not a screenshot-only surface.
+describe('Canvas quotation and suspended presentation', () => {
+  it('adds only a bounded Core scope and never sends or overwrites composer drafts', async () => {
+    useNativeReferenceStore.getState().setDraft('thread-a/other', { note: 'preserve independent note', dirty: true })
+    await render()
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => container.querySelector<HTMLButtonElement>('.canvas-quote-button')!.click())
+    const [reference] = useNativeReferenceStore.getState().references
+    expect(reference).toMatchObject({ kind: 'canvas', scopeId: 'd'.repeat(48), threadId: 'thread-a', text: '', selectedIds: ['a'] })
+    expect(useNativeReferenceStore.getState().drafts['thread-a/other'].note).toBe('preserve independent note')
+    expect(request.mock.calls.filter(call => !['open-object', 'proposals-list', 'object-recovery', 'capture-selection'].includes(call[0].operation))).toHaveLength(0)
+    expect(request.mock.calls.find(call => call[0].operation === 'capture-selection')?.[0]).toMatchObject({ baseRevision: 'c'.repeat(64), selectedIds: ['a'] })
+  })
+  it('restores local selection after suspension but rereads Core rather than reusing old bytes', async () => {
+    await render()
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await render({ visible: false }); request.mockClear(); await render()
+    expect(request.mock.calls[0][0].operation).toBe('read-object')
+    expect(container.querySelector('svg rect')?.getAttribute('aria-pressed')).toBe('true')
+    expect(decode).toHaveBeenCalledTimes(2)
+  })
+  it('ignores a captured selection reply after changing the selected object', async () => {
+    await render()
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    let resolve!: (value: unknown) => void
+    request.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.canvas-quote-button')!.click())
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    await act(async () => resolve({ ok: true, selection: { sessionId: 'a'.repeat(48), threadId: 'thread-a', scopeId: 'd'.repeat(48), baseRevision: 'c'.repeat(64), selectedIds: ['a'], editable: true } }))
+    expect(useNativeReferenceStore.getState().references).toHaveLength(0)
+  })
+  it('keeps a confirmed save receipt truthful when fresh decoding fails and never repeats Apply', async () => {
+    const proposed = { proposalId: 'e'.repeat(48), baseRevision: 'c'.repeat(64), candidateDigest: 'f'.repeat(64), kind: 'canvas', status: 'proposed', factsDigest: 'f'.repeat(64), sceneDiff: [
+      { kind: 'set-display-label', id: 'a', target: 'node', field: 'displayLabel', factLabel: 'original party', before: 'Before', after: 'After' }
+    ] }
+    const original = request.getMockImplementation()!
+    let saved = false
+    request.mockImplementation(async (input: CanvasHostRequest) => {
+      if (input.operation === 'proposals-list') return { ok: true, proposals: saved ? [] : [proposed] }
+      if (input.operation === 'proposal-apply') {
+        saved = true; decode.mockRejectedValueOnce(new Error('private decoder details'))
+        return { ok: true, receipt: { operationId: 'native_save_' + 'f'.repeat(64), revision: 'f'.repeat(64), status: 'committed', savedAt: '2026-09-17T00:00:00Z' } }
+      }
+      if (input.operation === 'read-object' && saved) return { ...reply(input.threadId), document: { ...reply(input.threadId).document, revision: 'f'.repeat(64) } }
+      return original(input)
+    })
+    await render()
+    const accept = [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === i18n.t('canvas:canvasAccept'))!
+    await act(async () => accept.click())
+    expect(container.querySelector('.canvas-saved-receipt')?.textContent).toContain(i18n.t('canvas:canvasSaved'))
+    expect(container.querySelector('.canvas-saved-receipt')?.textContent).toContain(i18n.t('canvas:canvasSavedRefreshFailed'))
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('canvas:canvasPreviewFailed'))
+    expect(container.textContent).not.toContain('private decoder details')
+    expect(request.mock.calls.filter(c => c[0].operation === 'proposal-apply')).toHaveLength(1)
+  })
+
 })

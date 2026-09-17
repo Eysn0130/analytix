@@ -1,3 +1,6 @@
+import { validateCanvasReferences } from '../canvas/canvas-references'
+import { canvasPreviewSessions } from '../canvas/canvas-preview-owner'
+import { openCanvasWorkspaceObject } from '../canvas/canvas-workspace-open'
 import { nativeWorkspaceCommandFromInput, type NativeWorkspaceCommand } from '@shared/native-office'
 import { useNativeReferenceStore, nativeReferencesPrompt, nativeActionReferencesCurrent, type NativeReference } from '../office/native-reference-store'
 import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
@@ -2560,31 +2563,36 @@ export function Workbench(): ReactElement {
         editorPersona: editorPreset ? resolveWriteAgentPreset(editorPreset).persona : undefined,
         retrieveContext: window.analytix?.write?.retrieveWriteContext
       })
+      let fileContext: Awaited<ReturnType<typeof readComposerFileContextEntries>> | null = null
+      if (fileReferences.length > 0) {
+        const workspace = normalizeWorkspaceRoot(
+          threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot
+        )
+        if (!workspace) {
+          setError(t('workspaceRequiredToCreateThread'))
+          return null
+        }
+        try {
+          fileContext = await readComposerFileContextEntries(fileReferences, workspace)
+        } catch (error) {
+          setError(error instanceof Error ? error.message : String(error))
+          return null
+        }
+      }
+      // The last asynchronous preparation step rechecks Core, after document
+      // retrieval and file reads. A scope revoked during that work cannot be
+      // submitted or make a failed preparation clear the user's composer.
+      if (!(await validateCanvasReferences(frozenNativeReferences,
+        request => window.analytix.canvas.request(request), referenceCurrent))) {
+        setError(t('workbenchReferenceChanged'))
+        return null
+      }
       const messageText = frozenNativeReferences.length ? `${documentMessage}\n\n${nativeReferencesPrompt(frozenNativeReferences)}` : documentMessage
-      if (fileReferences.length === 0) {
-        return {
-          text: messageText,
-          ...(emptyDisplayText ? { displayText: emptyDisplayText } : {})
-        }
-      }
-      const workspace = normalizeWorkspaceRoot(
-        threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot
-      )
-      if (!workspace) {
-        setError(t('workspaceRequiredToCreateThread'))
-        return null
-      }
-      try {
-        const fileContext = await readComposerFileContextEntries(fileReferences, workspace)
-        const displayText = v || emptyDisplayText
-        return {
-          text: buildComposerFileContextPrompt(messageText, fileContext),
-          ...(displayText ? { displayText } : {}),
-          ...(runtimeFileReferences.length ? { fileReferences: runtimeFileReferences } : {})
-        }
-      } catch (error) {
-        setError(error instanceof Error ? error.message : String(error))
-        return null
+      const displayText = fileContext === null ? emptyDisplayText : v || emptyDisplayText
+      return {
+        text: fileContext === null ? messageText : buildComposerFileContextPrompt(messageText, fileContext),
+        ...(displayText ? { displayText } : {}),
+        ...(fileContext !== null && runtimeFileReferences.length ? { fileReferences: runtimeFileReferences } : {})
       }
     }
 
@@ -3070,6 +3078,13 @@ export function Workbench(): ReactElement {
   const closeWorkspaceTab = async (id: string): Promise<void> => {
     const tab = useWorkspaceTabsStore.getState().tabs.find((item) => item.id === id)
     if (!tab) return
+    if (tab.path && tab.workspaceRoot && (tab.preview === 'canvas' || /\.canvas$/i.test(tab.path))) {
+      if (!(await canvasPreviewSessions.closeObject(tab.workspaceRoot, tab.path))) {
+        activateWorkspaceTab(id)
+        setError(t('canvas:canvasCloseFailed'))
+        return
+      }
+    }
     if (tab.kind === 'document' && tab.path && tab.workspaceRoot) {
       if (isNativeOfficeFilePath(tab.path)) {
         if (!(await useNativeOfficeStore.getState().close(tab.workspaceRoot, tab.path))) {
@@ -3490,7 +3505,10 @@ export function Workbench(): ReactElement {
                           </div>
                           {nativeReferences.some(r => r.threadId === activeThreadId) ? <div className="mb-2 flex flex-wrap gap-2" aria-label="原生文档引用">
                             {nativeReferences.filter(r => r.threadId === activeThreadId).map(reference => <div key={reference.id} className="flex items-center gap-2 rounded-lg border border-ds-border px-2 py-1 text-xs">
-                              <button type="button" title={[reference.note, reference.text].filter(Boolean).join('\n\n')} onClick={() => useWorkspaceTabsStore.getState().openTab({id:workspaceObjectTabId(reference.workspace, reference.path), kind:'document', mode:'documents', title:reference.path.split(/[\\/]/).at(-1) ?? reference.path, path:reference.path, workspaceRoot:reference.workspace})}>{reference.label}{reference.selection.capture?.truncated ? ' · 部分引用' : ''}{reference.editable === false ? ' · 仅讨论' : ''}{reference.note ? <span className="ml-1 text-ds-muted">· {reference.note.slice(0, 48)}{reference.note.length > 48 ? '…' : ''}</span> : null}</button>
+                              {reference.kind === 'canvas' ? <button type="button" title={reference.label}
+                                onClick={() => openCanvasWorkspaceObject(reference.workspace, reference.path)}>
+                                {reference.label}{reference.editable === false ? ` · ${t('canvas:canvasRecaptureRequired')}` : ''}
+                              </button> : <button type="button" title={[reference.note, reference.text].filter(Boolean).join('\n\n')} onClick={() => useWorkspaceTabsStore.getState().openTab({id:workspaceObjectTabId(reference.workspace, reference.path), kind:'document', mode:'documents', title:reference.path.split(/[\\/]/).at(-1) ?? reference.path, path:reference.path, workspaceRoot:reference.workspace})}>{reference.label}{reference.selection.capture?.truncated ? ' · 部分引用' : ''}{reference.editable === false ? ' · 仅讨论' : ''}{reference.note ? <span className="ml-1 text-ds-muted">· {reference.note.slice(0, 48)}{reference.note.length > 48 ? '…' : ''}</span> : null}</button>}
                               <button type="button" aria-label={`移除 ${reference.label}`} onClick={() => useNativeReferenceStore.getState().remove(reference.id)}>×</button>
                             </div>)}
                           </div> : null}

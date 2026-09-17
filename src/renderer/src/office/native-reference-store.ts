@@ -2,11 +2,19 @@ import { nativeTypedWorkbookSelection } from '../../../shared/native-office'
 import { create } from 'zustand'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
 
-export type NativeReference = {
+export type OfficeNativeReference = {
+  kind?: 'office'
   id: string; threadId: string | null; workspace: string; path: string
   scopeId?: string; editable?: boolean; note?: string;
   objectId: string; revision: string; label: string; text: string; selection: NativeOfficeSelection
 }
+export type CanvasNativeReference = {
+  kind: 'canvas'; id: string; threadId: string; workspace: string; path: string
+  objectId: string; revision: string; label: string; text: ''
+  sessionId: string; scopeId?: string; editable?: boolean; selectedIds: string[]
+}
+export type NativeReference = OfficeNativeReference | CanvasNativeReference
+export type NativeReferenceInput = Omit<OfficeNativeReference, 'id'> | Omit<CanvasNativeReference, 'id'>
 const column = (n: number): string => { let label = ''; for (n++; n; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label; return label }
 export function nativeSelectionLabel(view: NativeOfficeView, selection: NativeOfficeSelection): string {
   const name = view.path.split(/[\\/]/).at(-1) ?? view.kind
@@ -39,19 +47,21 @@ export function isNativeSelectionEditable(view: NativeOfficeView, selection: Nat
 /** Recheck an explicit task after asynchronous preparation; the Core still owns authority. */
 export function nativeActionReferencesCurrent(references: readonly NativeReference[], views: readonly NativeOfficeView[]): boolean {
   return references.length > 0 && references.every(reference => {
+    if (reference.kind === 'canvas') return false // Canvas quotations use send-time Core validation.
     const view = views.find(candidate => candidate.objectId === reference.objectId)
     return !!view && view.revision === reference.revision &&
       (view.changeSequence ?? 0) === reference.selection.changeSequence &&
       (!reference.editable || view.scope?.scopeId === reference.scopeId && view.scope?.threadId === reference.threadId)
   })
 }
-/** Frozen local snapshots. A quote remains a discussion reference after switching tabs. */
+/** Frozen local snapshots. Office may retain discussion-only text; Canvas always
+ * requires a current Core scope and never falls back to copied source content. */
 export const useNativeReferenceStore = create<{
   references: NativeReference[]
   drafts: Record<string, { note: string; selection?: NativeOfficeSelection; dirty?: boolean; sourceRevision?: string }>
   setDraft: (key: string, draft: { note: string; selection?: NativeOfficeSelection; dirty?: boolean; sourceRevision?: string }) => void
   revokeScopes: (objectId: string) => void
-  add: (reference: Omit<NativeReference, 'id'>) => NativeReference
+  add: (reference: NativeReferenceInput) => NativeReference
   remove: (id: string) => void
 }>((set) => ({
   references: [],
@@ -63,8 +73,8 @@ export const useNativeReferenceStore = create<{
     return {...snapshot,editable:false}
   })})),
   add: reference => {
-    const snapshot = {...reference, id:crypto.randomUUID()}
-    set(state => ({references:[...state.references.slice(-7).map(previous => {
+    const snapshot: NativeReference = {...structuredClone(reference), id:crypto.randomUUID()}
+    set(state => ({references:[...state.references.filter(previous => !(reference.kind === 'canvas' && previous.kind === 'canvas' && previous.objectId === reference.objectId && previous.threadId === reference.threadId)).slice(-7).map(previous => {
     if (!reference.scopeId || !previous.scopeId || previous.objectId !== reference.objectId || previous.threadId !== reference.threadId) return previous
     const {scopeId: _scopeId, ...snapshot} = previous
     return {...snapshot, editable:false}
@@ -75,6 +85,12 @@ export const useNativeReferenceStore = create<{
 }))
 export function nativeReferencesPrompt(references: NativeReference[]): string {
   return references.map(r => {
+    if (r.kind === 'canvas') {
+      if (!r.scopeId || !r.editable || !/^[a-f0-9]{48}$/.test(r.scopeId)) throw new Error('Canvas selection must be recaptured before sending.')
+      // Never use the Office snapshot fallback for a Canvas quote. Raw Scene,
+      // path, labels, stable IDs and copied notes stay on the local display lane.
+      return `[Canvas selection]\nCore scopeId: ${r.scopeId}\nUse native_selection_read for this scope, then native_selection_propose with the canvas payload and selected opaque aliases. Preserve facts and unrelated objects. The proposal requires explicit user acceptance; it is not a saved edit.`
+    }
     const version = `版本: ${r.revision}；修改序列: ${r.selection.changeSequence}${r.selection.capture?.truncated ? '；部分捕获，不能视为完整选区' : ''}`
     const note = r.note?.trim() ? `\n[用户标注备注]\n${r.note.trim()}\n[/用户标注备注]` : ''
     if (r.scopeId && r.editable) return `[原生文档选区] ${r.label}\n${version}\nCore scopeId: ${r.scopeId}\n用户请求局部修改时，使用 native_selection_read 读取此 scope，再使用 native_selection_propose 提交提案：typed workbook scope 使用显式 number/formula/range 与矩形内相对坐标，text scope 使用受保护 parts，等待用户接受。不能通过文件工具修改整个文件，不猜测选区，不将提案描述为已应用。${note}`

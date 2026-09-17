@@ -16,9 +16,13 @@ export const canvasHostRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('read-object'), ...binding }).strict(),
   z.object({ operation: z.literal('close-object'), ...binding }).strict(),
   z.object({ operation: z.literal('object-recovery'), ...binding }).strict(),
+  z.object({ operation: z.literal('proposals-list'), ...binding }).strict(),
+  z.object({ operation: z.literal('capture-selection'), ...binding, baseRevision: revision, selectedIds: z.array(id).min(1).max(64).refine(v => new Set(v).size === v.length) }).strict(),
+  z.object({ operation: z.literal('validate-selection'), ...binding, scopeId: sessionId }).strict(),
   z.object({ operation: z.literal('propose-scene'), ...binding, baseRevision: revision, selectedIds: z.array(id).min(1).max(1280).refine(v => new Set(v).size === v.length), operations: canvasOperationsSchema }).strict(),
   z.object({ operation: z.literal('propose-image'), ...binding, baseRevision: revision, operations: canvasImageOperationsSchema }).strict(),
   z.object({ operation: z.literal('proposal-read'), ...proposalBinding }).strict(),
+  z.object({ operation: z.literal('proposal-status'), ...proposalBinding }).strict(),
   z.object({ operation: z.literal('proposal-apply'), ...proposalBinding }).strict(),
   z.object({ operation: z.literal('proposal-reject'), ...proposalBinding }).strict(),
   z.object({ operation: z.literal('undo-change'), ...recoveryBinding }).strict(),
@@ -29,12 +33,18 @@ export const canvasDocumentSchema = z.object({
   ...binding, objectId: revision, kind: z.enum(['canvas', 'png']), path, revision,
   content: z.string().min(4).max(Math.ceil((16 << 20) / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 }).strict()
-const proposalCommon = { proposalId: sessionId, baseRevision: revision, candidateDigest: revision, status: z.enum(['proposed', 'pending', 'applied', 'rejected']) }
+const proposalCommon = { proposalId: sessionId, baseRevision: revision, candidateDigest: revision, status: z.enum(['proposed', 'pending', 'applied', 'rejected', 'stale']) }
 export const canvasProposalSchema = z.discriminatedUnion('kind', [
   z.object({ ...proposalCommon, kind: z.literal('canvas'), factsDigest: revision, sceneDiff: z.array(canvasChangeSchema).min(1).max(128) }).strict(),
   z.object({ ...proposalCommon, kind: z.literal('png'), imageDiff: canvasImageResultSchema.shape.diff }).strict()
 ])
+export const canvasSelectionSchema = z.object({
+  ...binding, scopeId: sessionId, baseRevision: revision,
+  selectedIds: z.array(id).min(1).max(64).refine(v => new Set(v).size === v.length), editable: z.literal(true)
+}).strict()
 export const canvasHostResponseSchema = z.union([
+  z.object({ ok: z.literal(true), selection: canvasSelectionSchema }).strict(),
+  z.object({ ok: z.literal(true), proposals: z.array(canvasProposalSchema).max(16).refine(v => new Set(v.map(p => p.proposalId)).size === v.length) }).strict(),
   z.object({ ok: z.literal(true), document: canvasDocumentSchema }).strict(),
   z.object({ ok: z.literal(true), proposal: canvasProposalSchema }).strict(),
   z.object({ ok: z.literal(true), receipt: objectEditingReceiptSchema }).strict(),
@@ -47,3 +57,5 @@ export type CanvasHostRequest = z.infer<typeof canvasHostRequestSchema>
 export type CanvasHostResponse = z.infer<typeof canvasHostResponseSchema>
 export type CanvasDocument = z.infer<typeof canvasDocumentSchema>
 export type CanvasProposal = z.infer<typeof canvasProposalSchema>
+
+export type CanvasSelection = z.infer<typeof canvasSelectionSchema>

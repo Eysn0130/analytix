@@ -48,7 +48,8 @@ func (a *Adapter) Readiness(ctx context.Context, binding host.Binding) (host.Rea
 	}
 	return host.Readiness{Available: a.available(ctx), Operations: []string{
 		"open-object", "read-object", "close-object", "propose-scene", "propose-image",
-		"proposal-read", "proposal-apply", "proposal-reject", "object-recovery", "undo-change", "resume-change", "cancel-change",
+		"capture-selection", "validate-selection", "model-selection-read", "model-selection-propose",
+		"proposals-list", "proposal-status", "proposal-read", "proposal-apply", "proposal-reject", "object-recovery", "undo-change", "resume-change", "cancel-change",
 	}}, nil
 }
 
@@ -84,15 +85,45 @@ func (a *Adapter) Invoke(ctx context.Context, call host.Call) (host.Result, erro
 		if !keys(input, "threadId", "object", "kind") || !ok || !keys(object, "workspace", "path") || workspace == "" || path == "" || strings.ContainsAny(workspace+path, "\x00\r\n") || (kind != "canvas" && kind != "png") {
 			return adapterFailure(ErrInvalid, files.Receipt{})
 		}
-		document, e := a.service.Open(ctx, call.Principal, thread, workspace, path, kind)
+		document, e := a.service.openBound(ctx, call.Principal, thread, workspace, path, kind, call.Binding)
 		return a.result(ctx, "document", document, e)
 	}
+	if call.Operation == "model-selection-read" || call.Operation == "model-selection-propose" {
+		v, e := a.service.modelSelection(ctx, call, input)
+		if errors.Is(e, errScope) {
+			return adapterOutput(map[string]any{"ok": false, "code": "scope_invalid"})
+		}
+		return a.result(ctx, "result", v, e)
+	}
 	id := field(input, "sessionId")
-	if !sessionPattern.MatchString(id) {
+	if !sessionPattern.MatchString(id) || !a.service.bound(id, thread, call.Principal, call.Binding, call.Operation == "close-object") {
 		return adapterFailure(ErrInvalid, files.Receipt{})
 	}
 	switch call.Operation {
-	case "read-object", "close-object", "object-recovery":
+	case "capture-selection":
+		if !keys(input, "sessionId", "threadId", "baseRevision", "selectedIds") || !revisionPattern.MatchString(field(input, "baseRevision")) {
+			break
+		}
+		values, ok := input["selectedIds"].([]any)
+		if !ok || len(values) == 0 || len(values) > maxSelectedObjects {
+			break
+		}
+		ids := make([]string, len(values))
+		for i, v := range values {
+			ids[i], ok = v.(string)
+			if !ok {
+				return adapterFailure(ErrInvalid, files.Receipt{})
+			}
+		}
+		v, e := a.service.CaptureSelection(ctx, call.Principal, id, thread, field(input, "baseRevision"), ids)
+		return a.result(ctx, "selection", v, e)
+	case "validate-selection":
+		if !keys(input, "sessionId", "threadId", "scopeId") {
+			break
+		}
+		v, e := a.service.ValidateSelection(ctx, call.Principal, call.Binding, id, thread, field(input, "scopeId"))
+		return a.result(ctx, "selection", v, e)
+	case "read-object", "close-object", "object-recovery", "proposals-list":
 		if !keys(input, "sessionId", "threadId") {
 			break
 		}
@@ -100,6 +131,9 @@ func (a *Adapter) Invoke(ctx context.Context, call host.Call) (host.Result, erro
 		case "read-object":
 			v, e := a.service.Read(ctx, call.Principal, id, thread)
 			return a.result(ctx, "document", v, e)
+		case "proposals-list":
+			v, e := a.service.Proposals(ctx, call.Principal, id, thread)
+			return a.result(ctx, "proposals", v, e)
 		case "close-object":
 			return a.result(ctx, "closed", true, a.service.Close(ctx, call.Principal, id, thread))
 		default:
@@ -144,12 +178,15 @@ func (a *Adapter) Invoke(ctx context.Context, call host.Call) (host.Result, erro
 		}
 		v, e := a.service.ProposeImage(ctx, call.Principal, id, thread, base, ops)
 		return a.result(ctx, "proposal", v, e)
-	case "proposal-read", "proposal-apply", "proposal-reject":
+	case "proposal-read", "proposal-apply", "proposal-reject", "proposal-status":
 		proposal := field(input, "proposalId")
 		if !keys(input, "sessionId", "threadId", "proposalId") || !sessionPattern.MatchString(proposal) {
 			break
 		}
 		switch call.Operation {
+		case "proposal-status":
+			v, e := a.service.ProposalStatus(ctx, call.Principal, id, thread, proposal)
+			return a.receipt(ctx, v, e)
 		case "proposal-read":
 			v, e := a.service.Proposal(ctx, call.Principal, id, thread, proposal)
 			return a.result(ctx, "proposal", v, e)
@@ -226,4 +263,17 @@ func adapterOutput(value any) (host.Result, error) {
 		return host.Result{}, ErrUnavailable
 	}
 	return host.Result{Output: raw}, nil
+}
+
+func (a *Adapter) SynchronizeCapturedScopes(binding host.Binding) {
+	if a == nil || a.service == nil {
+		return
+	}
+	a.service.mu.Lock()
+	defer a.service.mu.Unlock()
+	for _, current := range a.service.sessions {
+		if binding.PackageID == "" || current.binding != binding {
+			releaseSelections(current)
+		}
+	}
 }

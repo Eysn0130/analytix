@@ -9,7 +9,46 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：2026-09-17 独立构建环境与回执授权边界
+## 当前本地候选：2026-09-17 Canvas 引用、持久审阅与消费者闭环
+
+Status: **LOCAL_SOURCE_CANDIDATE / NOT_PUSHED**。源代码、测试和本节在同一候选批次；
+准确候选 SHA/tree 在随本轮交付的机器清单和当前 Git 中读取，不为自引用另造提交。
+原分支 `codex/workbench-product-delivery-20260914`、PR28 Draft 保持不变；
+最后远端核对仍为 `dde784437dc8563e84066629dd57f4a11fd9acc9`。
+
+用户已经明确允许：不再以取得原未提交 Canvas 候选作为本轮独立源码施工前提，
+从实时核实的已提交基线补齐功能，交付可回放源码候选，再由 Codex 审阅整合。
+本轮没有取得、删除或冒充恢复那批旧候选，也没有声明控制原环境或原 writer。
+这项授权不表示远端已经推送，或允许覆盖后来到达的代码与独立 UI Refresh。
+
+- 从准确 `dde` 基线复用原 Go Core/Host/Registry/projector/filestore/Composer，
+  完成 Canvas 选择引用、短期模型安全 scope、有限提案、真实差异、明确接受、CAS、
+  原操作只读查询、持久审阅重开、撤销/恢复与有界两对象预览消费者；PNG 保持本地
+  有限裁剪/旋转/标记，不冒充真实媒体生成。
+- 已验证的源代码闭环、协议/隐私/存储边界、命令、失败及剩余门禁，见
+  [本批 QA 记录](../qa/canvas-product-loop-2026-09-17.md)。
+- 独立 Linux 非特权执行：受影响8包 normal 979顶层PASS、prod 992顶层PASS，
+  各944嵌套子测试PASS、4既有SKIP、0FAIL；race 41顶层/91子测试PASS、0SKIP；
+  前端/Main/相邻Office/契约/Composer 437PASS、30实际文件、0SKIP。
+  不叠加不同模式、重复运行或顶层与子测试。不将其记为远端CI、GUI或安装验收。
+- 双配置typecheck、16文件ESLint零警告、runtime TS与Electron源代码构建、Linux
+  Go production runtime编译通过。未执行npm lifecycle/native安装或放宽完整构建门禁。
+- 对相同旧基线的权限失败已经验证为测试环境umask0022使私有根不满足0700；
+  改执行环境umask0077后通过，原断言未动。并发长上下文诊断超时保留；顺序完整
+  server normal/prod均通过。细节和既有4跳过见QA记录。
+
+**下一有效动作**：Codex先校验源码包manifest/patch/bundle与此基线，读取实时GitHub
+和实际工作树，按真实diff保全所有不同来源的修改；仅整合本批，定向验证后普通非强制
+push原分支，保持原PR28 Draft。若远端或工作树已变化，先审阅具体重叠，不整包覆盖，
+不自动merge/rebase/cherry-pick另一任务，不复用旧测试替代变化部分的新证据。
+本地源码候选并不依赖再次取回旧未提交候选；后来找到它时按真实代码去重和审阅。
+
+原远端恢复锚点仍为comment `5709839864`；此次未更改评论或远端仓库。
+新SHA的必需CI、安全告警37high的完整路径与复扫、DuckDB历史间歇性问题、独立原生
+GUI/IME/安装、Provider/媒体、A0/B1/ProductRC/FormalRC等均未由本轮宣告闭合。
+未访问用户Mac、Keychain、旧profile、凭据或真实案件；Notion/Drive没有替代仓库。
+
+## 历史检查点：2026-09-17 独立构建环境与回执授权边界
 
 仍使用 [PR28 comment 5709839864](https://github.com/Eysn0130/analytix/pull/28#issuecomment-5709839864)
 作为唯一活动恢复锚点。恢复时 fresh 查询原分支、PR、该评论和准确候选的 checks/jobs；

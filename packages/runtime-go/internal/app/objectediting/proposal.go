@@ -49,6 +49,9 @@ type ScopeAuthority struct {
 	Principal                   identitydomain.PrincipalV1
 	ObjectID, ThreadID, Purpose string
 	Workspace, Path             string
+	// SecurityBinding is a Core-frozen current-authority fingerprint. It is not
+	// a grant, and is never accepted from a renderer or model request.
+	SecurityBinding string
 }
 type ProjectionInput struct {
 	ScopeAuthority
@@ -60,6 +63,13 @@ type ProtectedRange struct{ StartByte, EndByte int }
 type TrustedSelectionProjector interface {
 	ValidateCurrent(context.Context, ScopeAuthority) error
 	AuthorizeAndProject(context.Context, ProjectionInput) ([]ProtectedRange, error)
+}
+
+// SelectionAuthorityFreezer binds a long-lived selection to the current
+// thread/case epoch and publication authority without binding it to one turn.
+// Implementations must freeze under the same gate used by ValidateCurrent.
+type SelectionAuthorityFreezer interface {
+	FreezeSelectionAuthority(context.Context, ScopeAuthority) (string, error)
 }
 
 // NewWithProjector is trusted composition only. New leaves capture unavailable;

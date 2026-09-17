@@ -14,3 +14,17 @@
 .canvas-workspace-inspector select { display:block; width:100%; margin:8px 0; background:transparent; border:1px solid var(--ds-border-muted); border-radius:5px; padding:5px; }
 .canvas-workspace-inspector pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 ui-monospace,monospace; }
 @media (prefers-reduced-motion:reduce) { .canvas-hit { transition:none; } }
+.canvas-workspace-review { flex:none; max-height:48%; overflow:auto; padding:8px 12px; border-top:1px solid var(--ds-border-muted); font-size:12px; }
+.canvas-review-heading, .canvas-review-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.canvas-review-heading { justify-content:space-between; }
+.canvas-workspace-review button, .canvas-quote-button { border:1px solid var(--ds-border-muted); border-radius:5px; padding:5px 8px; }
+.canvas-quote-button { display:inline-flex; align-items:center; gap:6px; }
+.canvas-workspace-review button:disabled, .canvas-quote-button:disabled { opacity:.5; cursor:not-allowed; }
+.canvas-review-proposal { padding:8px 0; border-bottom:1px solid var(--ds-border-muted); }
+.canvas-review-diff pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 ui-monospace,monospace; }
+.canvas-review-diff del { color:var(--ds-danger); text-decoration:line-through; }
+.canvas-review-diff ins { color:var(--ds-success); text-decoration:underline; }
+.canvas-image-form { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
+.canvas-image-form label { display:flex; flex-direction:column; gap:4px; }
+.canvas-image-form input, .canvas-image-form select { max-width:150px; border:1px solid var(--ds-border-muted); background:transparent; border-radius:4px; padding:4px; }
+.canvas-saved-receipt { padding:6px 12px; font-size:12px; }

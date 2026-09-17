@@ -108,4 +108,37 @@ describe('Canvas Main ownership boundary', () => {
     expect(f.packageHost.mock.calls).toHaveLength(count)
   })
 
+  it('keeps captured selection binding exact and rejects model-only operations from Renderer', async () => {
+    for (const patch of [{}, { sessionId: 'e'.repeat(48) }, { threadId: 'other-thread' }, { baseRevision: 'd'.repeat(64) }, { selectedIds: ['other'] }]) {
+      const f = fixture(); await f.controller.request(f.open)
+      f.changePackage({ operations: [...f.getPackage().operations, 'capture-selection', 'validate-selection'] })
+      const selection = { scopeId: 'd'.repeat(48), sessionId: id, threadId: 'thread-main', baseRevision: hash, selectedIds: ['node-a'], editable: true, ...patch }
+      f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] } : { ok: true, output: { ok: true, selection } })
+      const result = await f.controller.request({ operation: 'capture-selection', sessionId: id, threadId: 'thread-main', baseRevision: hash, selectedIds: ['node-a'] })
+      expect(result.ok).toBe(Object.keys(patch).length === 0)
+      const calls = f.packageHost.mock.calls.length
+      expect(await f.controller.request({ operation: 'model-selection-read', scopeId: 'd'.repeat(48), threadId: 'thread-main' })).toEqual({ ok: false, code: 'invalid_request' })
+      expect(f.packageHost.mock.calls).toHaveLength(calls)
+    }
+  })
+  it('validates a quoted scope through Core but does not use a mismatched returned handle', async () => {
+    const f = fixture(); await f.controller.request(f.open)
+    f.changePackage({ operations: [...f.getPackage().operations, 'validate-selection'] })
+    const selection = { scopeId: 'd'.repeat(48), sessionId: id, threadId: 'thread-main', baseRevision: hash, selectedIds: ['node-a'], editable: true }
+    f.respond(async request => request.action === 'list' ? { ok: true, packages: [f.getPackage()] } : { ok: true, output: { ok: true, selection } })
+    const input = { operation: 'validate-selection', sessionId: id, threadId: 'thread-main', scopeId: selection.scopeId }
+    expect(await f.controller.request(input)).toEqual({ ok: true, selection })
+    expect(await f.controller.request({ ...input, scopeId: 'f'.repeat(48) })).toEqual({ ok: false, code: 'unavailable' })
+  })
+  it('permits only same-owner close after a generation change, not reading or applying', async () => {
+    const f = fixture(); await f.controller.request(f.open)
+    f.changePackage({ generationId: 'd'.repeat(64), activationRevision: 3 })
+    expect(await f.controller.request({ operation: 'read-object', sessionId: id, threadId: 'thread-main' })).toEqual({ ok: false, code: 'unavailable' })
+    expect(await f.controller.request({ operation: 'close-object', sessionId: id, threadId: 'foreign-thread' })).toEqual({ ok: false, code: 'unavailable' })
+    expect(await f.controller.request({ operation: 'close-object', sessionId: id, threadId: 'thread-main' })).toEqual({ ok: true, closed: true })
+    const count = f.packageHost.mock.calls.length
+    expect(await f.controller.request({ operation: 'read-object', sessionId: id, threadId: 'thread-main' })).toEqual({ ok: false, code: 'unavailable' })
+    expect(f.packageHost.mock.calls).toHaveLength(count)
+  })
+
 })

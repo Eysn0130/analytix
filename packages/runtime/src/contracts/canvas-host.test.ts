@@ -21,4 +21,44 @@ describe('Canvas protected-local Host contract', () => {
     expect(canvasHostResponseSchema.safeParse({ ok: true, receipt: { ...receipt, savedAt: '' } }).success).toBe(false)
     expect(canvasHostResponseSchema.safeParse({ ok: false, code: 'unavailable', receipt: { ...receipt, revision: '', status: 'unknown', savedAt: '' } }).success).toBe(true)
   })
+  it('admits only bounded, unique actual selections and never a raw model payload', () => {
+    const capture = { operation: 'capture-selection', ...binding, baseRevision: revision, selectedIds: ['n1', 'e1'] }
+    expect(canvasHostRequestSchema.safeParse(capture).success).toBe(true)
+    for (const selectedIds of [[], ['n1', 'n1'], Array.from({ length: 65 }, (_, i) => `n${i}`), ['../other']]) {
+      expect(canvasHostRequestSchema.safeParse({ ...capture, selectedIds }).success).toBe(false)
+    }
+    for (const extra of ['content', 'scopeId', 'principal', 'securityBinding', 'publicationPolicy', 'canvas']) {
+      expect(canvasHostRequestSchema.safeParse({ ...capture, [extra]: 'untrusted' }).success).toBe(false)
+    }
+    for (const operation of ['model-selection-read', 'model-selection-propose']) {
+      expect(canvasHostRequestSchema.safeParse({ operation, ...binding, scopeId: 'c'.repeat(48) }).success).toBe(false)
+    }
+  })
+  it('keeps validation and proposal status read-only at the public boundary', () => {
+    const validate = { operation: 'validate-selection', ...binding, scopeId: 'c'.repeat(48) }
+    const status = { operation: 'proposal-status', ...binding, proposalId: 'd'.repeat(48) }
+    expect(canvasHostRequestSchema.safeParse(validate).success).toBe(true)
+    expect(canvasHostRequestSchema.safeParse(status).success).toBe(true)
+    for (const value of [validate, status]) {
+      for (const extra of ['apply', 'operations', 'content', 'changeId', 'path']) {
+        expect(canvasHostRequestSchema.safeParse({ ...value, [extra]: true }).success).toBe(false)
+      }
+    }
+    const selection = { ...binding, scopeId: 'c'.repeat(48), baseRevision: revision, selectedIds: ['n1'], editable: true }
+    expect(canvasHostResponseSchema.safeParse({ ok: true, selection }).success).toBe(true)
+    expect(canvasHostResponseSchema.safeParse({ ok: true, selection: { ...selection, rawText: 'private' } }).success).toBe(false)
+    expect(canvasHostResponseSchema.safeParse({ ok: true, selection: { ...selection, editable: false } }).success).toBe(false)
+  })
+  it('bounds review lists, accepts stale intent, and rejects duplicate proposal owners', () => {
+    const proposal = { proposalId: 'c'.repeat(48), baseRevision: revision, candidateDigest: 'd'.repeat(64),
+      kind: 'canvas', factsDigest: 'e'.repeat(64), status: 'stale', sceneDiff: [
+        { kind: 'set-display-label', id: 'n1', target: 'node', field: 'displayLabel', factLabel: 'Original', before: 'Before', after: 'After' }
+      ] }
+    expect(canvasHostResponseSchema.safeParse({ ok: true, proposals: [proposal] }).success).toBe(true)
+    expect(canvasHostResponseSchema.safeParse({ ok: true, proposals: [proposal, proposal] }).success).toBe(false)
+    const tooMany = Array.from({ length: 17 }, (_, index) => ({ ...proposal, proposalId: index.toString(16).padStart(48, '0') }))
+    expect(canvasHostResponseSchema.safeParse({ ok: true, proposals: tooMany }).success).toBe(false)
+    expect(canvasHostResponseSchema.safeParse({ ok: true, proposals: [proposal], applied: true }).success).toBe(false)
+  })
+
 })

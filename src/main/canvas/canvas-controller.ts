@@ -33,7 +33,7 @@ export function createCanvasController(options: {
     const owned = request.operation === 'open-object' ? null : sessions.get(request.sessionId)
     if (request.operation !== 'open-object' && (!owned || owned.threadId !== request.threadId)) return unavailable()
     const pkg = await binding()
-    if (!pkg || !pkg.operations.includes(request.operation) || (owned &&
+    if (!pkg || !pkg.operations.includes(request.operation) || (owned && request.operation !== 'close-object' &&
       (owned.binding.generationId !== pkg.generationId || owned.binding.activationRevision !== pkg.activationRevision))) return unavailable()
     if (request.operation === 'open-object' && sessions.size >= 64) return unavailable()
     const outer = pluginPackageHostResponseSchema.safeParse(await invoke(pkg, request))
@@ -70,13 +70,23 @@ export function createCanvasController(options: {
       case 'propose-scene': case 'propose-image':
         if (!('proposal' in response) || response.proposal.baseRevision !== request.baseRevision || response.proposal.kind !== (request.operation === 'propose-scene' ? 'canvas' : 'png')) return unavailable()
         break
+      case 'capture-selection': case 'validate-selection':
+        if (!owned || owned.object.kind !== 'canvas' || !('selection' in response) ||
+          response.selection.sessionId !== request.sessionId || response.selection.threadId !== request.threadId) return unavailable()
+        if (request.operation === 'capture-selection' && (response.selection.baseRevision !== request.baseRevision ||
+          JSON.stringify(response.selection.selectedIds) !== JSON.stringify(request.selectedIds))) return unavailable()
+        if (request.operation === 'validate-selection' && response.selection.scopeId !== request.scopeId) return unavailable()
+        break
+      case 'proposals-list':
+        if (!owned || !('proposals' in response) || response.proposals.some(p => p.kind !== owned.object.kind)) return unavailable()
+        break
       case 'proposal-read':
         if (!('proposal' in response) || response.proposal.proposalId !== request.proposalId) return unavailable()
         break
       case 'proposal-reject':
         if (!('rejected' in response)) return unavailable()
         break
-      case 'proposal-apply': case 'undo-change': case 'resume-change':
+      case 'proposal-apply': case 'proposal-status': case 'undo-change': case 'resume-change':
         if (!('receipt' in response)) return unavailable()
         break
       case 'object-recovery': case 'cancel-change':
