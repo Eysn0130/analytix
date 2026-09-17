@@ -9,11 +9,50 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
+## 当前接续：2026-09-17 Canvas 受控写入修复
+
+当前活动恢复入口为 [PR28 comment 5709839864](https://github.com/Eysn0130/analytix/pull/28#issuecomment-5709839864)。
+先 fresh 读取该评论、PR refs/checks，再读下方历史快照；旧评论和旧 PASS 不覆盖它。
+分支仍是 `codex/workbench-product-delivery-20260914`，PR28 Open / Draft，未合并。
+
+本轮代码基线 `57d1add9960f2f72ab926dd34695ac2f5b778d8a`；已非强制推送
+`0f4c7af4c4e0d0f2b4057069ff81d6bf9f7fd520`。本页为后续文档提交，包含本页的
+提交与最新 HEAD 从 GitHub 获取，不把代码候选检查自动转记到新 HEAD。
+
+- 修复 `canvasediting.Service` 的 Apply / RecoverOperation：managed capture 的
+  session-ID 参数使用 Core 的 `current.id`，不再误传绝对 workspace 路径。
+  原路径、重新授权、CAS、回执与释放检查不变；不是 CodeQL 告警关闭证明。
+- 三个代码文件 +187/-17：生产 1 文件 +2/-2；测试 2 文件 +185/-15。
+  真实 Registry 的 18 个成对场景覆盖合法 apply/undo/resume、跨线程、旧修订、
+  撤权、硬链接和持久化失败。既有 Canvas/PNG 文件 CAS/重启/撤销测试改用真实
+  Registry，去掉忽略 session 参数的宽松替身；未新增依赖或放宽门禁。
+- 本地 Go1.23.2、独立 Linux、23 包标准库源码闭包，不是完整当前 checkout。
+  新场景对原实现 12 PASS / 6 FAIL，修复后 18 PASS；相关 5 包共 23 个顶层测试
+  PASS、0 SKIP，race 同样通过，重复运行不重复计数。持久化 spy 不冒充真实写盘。
+  module-mode 调用因仓库要求 Go >=1.25 而 BLOCKED；完整 filestore 与当前 CI
+  的真实结果仍须查询。历史快照 6,341 blob 校验不代表完整新 HEAD 可构建。
+- 基线 `35197821626` attempt1 的 51 作业已完整分页：46 SUCCESS、2 FAILURE、
+  3 CANCELLED。实际 checkout `e29cef4f857dd334fc446ff016343d0fc293fe60`。
+  data_engine `105125131513` SUCCESS；analysis_compute `105125131323` FAILURE：
+  `output_file_cases::query_stats_rows_cli_writes_result_payload_to_output_json`
+  遇 DuckDB index0/size0 INTERNAL 错误。没有最小复现，不猜测 SQL 修法；原失败保留。
+- 代码候选 Development `35202453830`、CodeQL check `105140340461` 必须 fresh
+  核验；后者初次返回缺少三个配置的中间状态，不是通过。此前 37 high 未关闭。
+  当前连接器拒绝完整 code-scanning alerts 端点，不能据此认定无告警。
+- 下一步先核对准确 HEAD 的 Go/filestore 和完整 CI，再复用现有 CanvasHost、Core
+  objectediting scope/projector 与 native selection 工具补齐安全引用到同一主会话。
+  Selector 必须重新捕获，引用不自动发送，未接受不写盘；不另建权限/提交体系。
+  同项目重新授权正例、旧线程句柄拒绝、草稿保全、审阅/CAS/恢复都仍在验收范围内。
+- 完整 Canvas 对话链、Office/图片共同旅程、原生 GUI/中文 IME、独立 macOS ARM64
+  安装、真实 Provider/媒体与 Product/Formal RC 仍未验收。终端 DNS、工具链和独立
+  原生设施/授权缺口分别记录；未访问用户 Mac、Keychain、真实 profile 或案件。
+  Notion mirror: PENDING；GitHub 可独立恢复。无 main/force/merge/tag/release 或新付费设施。
+
 ## 最新保留快照
 
 - [`2026-09-17-round2-integration.md`](2026-09-17-round2-integration.md)：
   Round2 代码已按两批集成至 `d7f542ab…`，保留 Round3 隐私修复；含本轮计数、
-  独立复验、CI/CodeQL 证据边界及中断恢复锚点。先读此项，再按需读取历史记录。
+  独立复验、CI/CodeQL 证据边界及当时恢复锚点；按需读取，不覆盖上方新检查点。
 
 - [`2026-09-17-round3-privacy-projection.md`](2026-09-17-round3-privacy-projection.md)：
   新增 Go 隐私投影修复、精确金额与受信任协议边界回归、受限环境验证及下一步。
