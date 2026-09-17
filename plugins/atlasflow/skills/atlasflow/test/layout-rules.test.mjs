@@ -147,8 +147,7 @@ test('contract: ajv path errors are annotated with the element id', () => {
   const d = load('workflow');
   d.nodes[3].colour = 'red'; // unknown property → ajv additionalProperties
   const { stderr } = render('workflow', d);
-  // Only meaningful when ajv is installed; skip the assertion in degraded mode.
-  if (!/schema validation failed/.test(stderr)) return;
+  assert.match(stderr, /schema validation failed/);
   assert.match(stderr, /id\/label:/);
 });
 
@@ -188,6 +187,13 @@ test('workflow: edge crossing a non-endpoint node is rejected', () => {
   assert.notEqual(code, 0, `expected non-zero exit; stderr:\n${stderr}`);
   assert.match(stderr, /crosses node "middle"/);
   assert.match(stderr, /fromSide\/toSide|channel|lane\/column/);
+});
+
+test('schema dispatch rejects prototype property names as unknown diagram types', async () => {
+  const { validateSchema } = await import('../renderers/shared/validator.mjs');
+  for (const type of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.throws(() => validateSchema(type, {}), /unknown diagram type/);
+  }
 });
 
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }));

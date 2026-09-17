@@ -12,6 +12,9 @@ export function renderLocalDocument({ svg, title }) {
     if (/^<!--[\s\S]*-->$/.test(tag)) continue;
     const name = /^<\/?([a-z][a-z0-9]*)\b/i.exec(tag)?.[1];
     if (!name || !allowedTags.has(name)) throw new Error('Canvas local output contains an unsupported resource.');
+    // The fixed renderer emits only bare style tags. Do not admit another
+    // spelling that the stylesheet-content check below would fail to inspect.
+    if (name === 'style' && !/^<\/?style>$/.test(tag)) throw new Error('Canvas local stylesheet tag is invalid.');
     // Inspect actual attributes, not escaped text inside aria-label/title.
     const attributes = /([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*("[^"]*"|'[^']*')/g;
     const allowedAttributes = new Set(['xmlns', 'viewBox', 'role', 'aria-label', 'id', 'markerWidth', 'markerHeight', 'refX', 'refY', 'orient', 'points', 'class', 'patternUnits', 'd', 'x', 'y', 'cx', 'cy', 'width', 'height', 'rx', 'ry', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'marker-end', 'font-size', 'font-weight', 'text-anchor', 'data-canvas-node-id', 'data-canvas-edge-id']);

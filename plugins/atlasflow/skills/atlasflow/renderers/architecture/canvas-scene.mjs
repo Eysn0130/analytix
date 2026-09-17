@@ -44,10 +44,17 @@ function plainData(value, depth = 0, budget = { tokens: 0, bytes: 0 }) {
   if (typeof value === 'string') { text(value, MAX_INPUT); budget.bytes += encoder.encode(value).length; }
   else if (typeof value === 'number') { if (!Number.isFinite(value)) fail(); }
   else if (value !== null && typeof value !== 'boolean') {
-    if (!value || typeof value !== 'object' || (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) fail();
-    for (const key of Reflect.ownKeys(value)) {
-      if (Array.isArray(value) && key === 'length') continue;
-      if (typeof key !== 'string') fail();
+    if (!value || typeof value !== 'object') fail();
+    const array = Array.isArray(value), prototype = Object.getPrototypeOf(value);
+    if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) fail();
+    if (array && value.length > 524288 - budget.tokens) fail();
+    const ownKeys = Reflect.ownKeys(value);
+    // JSON must neither execute inherited hooks nor drop extra array fields.
+    // Reject holes before serialization can expand a sparse array without limit.
+    if (array && ownKeys.length !== value.length + 1) fail();
+    for (const key of ownKeys) {
+      if (array && key === 'length') continue;
+      if (typeof key !== 'string' || (array && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length))) fail();
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) fail();
       budget.bytes += encoder.encode(key).length;
