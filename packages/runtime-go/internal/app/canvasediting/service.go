@@ -357,6 +357,12 @@ func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread,
 	objects := s.objects[current.kind]
 	if proposal.view.Status == "applied" || proposal.view.Status == "pending" {
 		receipt, err := objects.Status(ctx, current.object.SessionID, "native_save_"+proposal.changeID)
+		if s.principal(ctx, p) != nil || s.projector.ValidateCurrent(ctx, s.authority(current, "edit")) != nil {
+			// Receipt lookup is an authority boundary too. Reveal no revision or
+			// committed state after revocation; retain the original operation ID
+			// so a fresh authorized query can resolve it without another write.
+			return files.Receipt{OperationID: "native_save_" + proposal.changeID, Status: files.StatusUnknown}, ErrUnavailable
+		}
 		if err == nil && receipt.Status == files.StatusCommitted {
 			proposal.view.Status = "applied"
 			proposal.candidate = nil

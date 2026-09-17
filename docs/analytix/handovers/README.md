@@ -9,7 +9,94 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：2026-09-17 Canvas 受控写入修复
+## 当前接续：2026-09-17 独立构建环境与回执授权边界
+
+仍使用 [PR28 comment 5709839864](https://github.com/Eysn0130/analytix/pull/28#issuecomment-5709839864)
+作为唯一活动恢复锚点。恢复时 fresh 查询原分支、PR、该评论和准确候选的 checks/jobs；
+本节不将历史 PASS 自动转记给新 HEAD，不授权合并或发布。
+
+本轮实际起点为 `d57b5282fccad025b5f4812a17056527980662c9`。
+已推送配置提交 `0bc900e98d9f7152c902481776eaac49777273fb`，真实父提交为 d57b。
+本节与回执修复和测试原子提交；包含本节的实际代码 SHA 从 GitHub 读取，不为自引用再提交。
+
+### 已落实的构建依赖
+
+- 新增 `.github/workflows/pr28-independent-environment.yml`，配置 1 文件 +141/-0。
+  使用现有标准 Ubuntu runner、固定 action SHA、只读权限、无持久 checkout 凭据；
+  限原分支、20 分钟、1 天产物保留，只导出准确公开 HEAD 的祖先对象及锁定工具输入。
+  原 Development CI、CodeQL、路径过滤、依赖锁和门禁不变，无新付费设施或 Provider 调用。
+- `35209039144` attempt1 在 0bc 上 SUCCESS。源代码 artifact `10490972138`，
+  Go `10491192006`，Node `10491477101`，Rust `10490689192`；摘要及恢复步骤在原评论。
+  全部外层/内部 SHA256、ZIP CRC 和依赖输入摘要校验通过。产物过期时仅按实际需要
+  重运行既有取源作业；不得以重试替代测试根因修复，也不得回退当前分支。
+- 独立 Linux 的完整 tracked checkout 已建立：0bc tree
+  `0dfcaa5bae4caea214d1804c57cc5d8e8dd020bf`，6,363 个 blob/文件模式、157 个真实历史
+  提交、唯一公开根和 `git fsck --full --strict` 均通过。不是四文件索引或重造父历史。
+  Go1.26.4、Node22.22.1/npm10.9.4、Rust1.94.1/cargo1.94.1 实际运行且输入与锁一致。
+  npm lifecycle 脚本未在取源中执行；完整源码不等于原生安装、合法资源和 GUI 已验收。
+- 配置静态/四段 shell 语法检查、7 项合成 Git 导出正常/拒绝测试通过；这些是环境验证，
+  不是产品功能或模型测试。终端 DNS 仍不可用，连接器读写可用，两者不能混为权限问题。
+
+### 本批真实产品修复与验证
+
+- `canvasediting.Service.Apply` 的 pending/applied 重复点击分支，在原 operation 的
+  Status 返回后、暴露回执或改变 proposal 状态之前，再校验 principal、scope 和取消状态。
+  撤权/取消只返回原 operation ID、UNKNOWN 和 ErrUnavailable，不返回磁盘 revision 或
+  committed 状态，不再次写盘；正常重新授权仍能查询该原操作。保留已有 current.id、CAS、
+  文件检查与唯一 Core，不改变跨层 API，不声称关闭 CodeQL 告警。
+- 生产 `packages/runtime-go/internal/app/canvasediting/service.go` +6/-0；新增测试
+  `packages/runtime-go/internal/adapters/outbound/filestore/canvas_receipt_test.go` +137/-0。
+  一个顶层测试含 8 个子场景：applied/pending × 合法/撤 scope/撤 identity/取消。
+  使用真实 object service、filestore、文件 CAS 与 Registry；包装器仅模拟丢失回执和
+  Status 返回后的授权变化，授权 projector/identity 为可控测试边界，不冒充完整隐私链。
+- 原实现 RED：8 子场景 2 PASS / 6 FAIL，exit1；修复 GREEN：8 PASS，exit0。
+  非特权 uid1000、独立 HOME/TMPDIR、Go1.26.4、GOPROXY=off 下，完整受影响两包
+  normal/prod 各 268 顶层 PASS、4 既有 SKIP、0 FAIL，exit0。两种模式不重复计数。
+  `go test -race -count=1 -p 1 -parallel 2 -json ./internal/app/canvasediting
+  ./internal/adapters/outbound/filestore -run 'TestCanvas'`：9 顶层 PASS、35 子场景 PASS、
+  0 SKIP，exit0；子场景内含于顶层，不相加。均在 `packages/runtime-go` 执行。
+  完整包命令去掉 race/run 过滤，production 模式增加 `-tags analytix_prod`。
+- 初次 root 包测试 267 PASS / 4 SKIP / 1 FAIL：root 可读 chmod000，导致
+  `TestCaseBindingObserverClassifiesUnreadableFile` 失败。原失败保留，改用非特权测试身份，
+  未改用例或断言。4 既有跳过为 BundledCodecPackageContract、FilesystemAliasesShareReceiptBinding、
+  OfficePackageSavedSyntheticFixtures、CreatePlanAutoSelectionDoesNotOverwriteFilesystemAliases；
+  当前 Canvas/capture/receipt 测试无跳过。不得据此声称零跳过或完整安装 Office 验收。
+
+### CI、安全和 DuckDB 的真实边界
+
+- d57b 的 Development `35203579095` attempt1 已完整分页：51/51 作业 SUCCESS，
+  包括 gate `105160409258`；0bc push 未取消这些已结束作业。两个 Go 日志
+  `105144536417` / `105144536403` 确认实际 checkout
+  `26a2e0ee820bbd743a57779f8aa93b523040f826`，并确实选择 Canvas/filestore 测试。
+  303/297 是 package 分区数量，不是用例数。此证据复用，不重复全量执行旧测试。
+- d57b CodeQL check `105144046012` 为 FAILURE、37 high/37 annotations；旧“缺少三个
+  配置/NEUTRAL”只保留为历史中间观察。完整 source-to-sink 尚未取得，未关闭或 dismiss。
+  0bc Development `35209046530`、dynamic CodeQL `35209040822` 及本批新候选必须 fresh
+  核验；环境取源 SUCCESS 和旧 d57b 开发测试通过不能替代它们或安全准入。
+- 在准确锁定 Rust/DuckDB 依赖、未改 Rust 源码的 0bc 独立环境，原失败定向复现：
+  `cargo test --offline --locked --manifest-path tools/analysis_compute/Cargo.toml
+  --test stats_query_cli output_file_cases::query_stats_rows_cli_writes_result_payload_to_output_json
+  -- --exact --nocapture`，exit101，同样 INTERNAL index0/vector-size0，1 FAIL。
+  堆栈明确在 `tests/stats_query_cli/output_file_cases.rs:16` 的第一次 inline 调用；第二次
+  output-json 调用未执行。路径为 `query_rows.rs:124` → `session.rs:319` 的范围非空
+  COUNT 检查 → `duckdb_utils.rs:174`。这不是输出文件写盘失败，也未完成最小复现或根因修复。
+  不加 SQL 猜修、重试、串行、假计数、skip 或弱化 coverage 条件。原失败日志仍保留。
+
+### 下一依赖有效动作
+
+继续原 CanvasHost/Adapter、Core scope/projector/capture、native selection 工具和原 Composer
+引用机制。当前 Canvas 仍缺 model-selection-read/propose/capture；现有原生工具仅由 Office
+实现对应分派，schema 的 parts/workbook 不等于 Canvas ops。预览切换/隐藏会关闭 Core
+会话，未接受 proposal 的内存生命周期需要与引用、折叠、第三对象回收一起闭合。
+不得只加引用按钮或拼原始 Scene 到模型；引用不自动发送，草稿/附件保全，未知结果查原操作。
+先补有界选择、真实投影和跨线程/epoch/撤权正反例，再原子贯通接受/CAS/重开/撤销的消费者。
+
+DuckDB 下一步针对 inline 的实际 SQL/计划做最小复现；CodeQL 需完整路径和流证据后按共同
+根因修复并复扫。完整 Canvas 主会话链、Office/图片共同旅程、独立 macOS ARM64 安装、
+原生 GUI/中文 IME、合法资源、当前受保护 Provider 授权/费用和 Product/Formal RC 均仍未验收。
+不依赖用户旧 Mac，不访问旧 Keychain/profile/案件/凭据；Notion 非权威镜像不阻塞 GitHub。
+
+## 历史检查点：2026-09-17 Canvas 受控写入修复
 
 当前活动恢复入口为 [PR28 comment 5709839864](https://github.com/Eysn0130/analytix/pull/28#issuecomment-5709839864)。
 先 fresh 读取该评论、PR refs/checks，再读下方历史快照；旧评论和旧 PASS 不覆盖它。
