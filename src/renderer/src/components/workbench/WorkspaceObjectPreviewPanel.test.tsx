@@ -6,7 +6,8 @@ import { useChatStore } from '../../store/chat-store'
 import { useWorkspaceTabsStore, workspaceObjectTabId } from '../../store/workspace-tabs-store'
 import { WorkspaceObjectPreviewPanel } from './WorkspaceObjectPreviewPanel'
 
-const canvas = vi.hoisted(() => vi.fn((_props: Record<string, unknown>) => null)), file = vi.hoisted(() => vi.fn((_props: Record<string, unknown>) => null))
+const canvas = vi.hoisted(() => vi.fn((_props: Record<string, unknown>) => null))
+const file = vi.hoisted(() => vi.fn((_props: Record<string, unknown>) => null))
 vi.mock('../../canvas/CanvasWorkspacePanel', () => ({ CanvasWorkspacePanel: canvas }))
 vi.mock('../WorkspaceFilePreviewPanel', () => ({ WorkspaceFilePreviewPanel: file }))
 let container: HTMLDivElement, root: Root
