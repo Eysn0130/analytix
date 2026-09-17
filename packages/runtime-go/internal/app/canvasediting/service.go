@@ -377,7 +377,7 @@ func (s *Service) Apply(ctx context.Context, p identity.PrincipalV1, id, thread,
 		}
 		return nil
 	}
-	release, err := s.capture(ctx, current.workspace, current.object.Path, validate)
+	release, err := s.capture(ctx, current.id, current.object.Path, validate)
 	if err != nil || release == nil {
 		return files.Receipt{}, ErrUnavailable
 	}
@@ -547,7 +547,7 @@ func (s *Service) RecoverOperation(ctx context.Context, p identity.PrincipalV1, 
 		}
 		return nil
 	}
-	release, err := s.capture(ctx, current.workspace, current.object.Path, validate)
+	release, err := s.capture(ctx, current.id, current.object.Path, validate)
 	if err != nil || release == nil {
 		return files.Receipt{}, ErrUnavailable
 	}

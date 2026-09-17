@@ -11,8 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"analytix.local/runtime-go/internal/adapters/outbound/managededitingfiles"
 	canvasapp "analytix.local/runtime-go/internal/app/canvasediting"
+	"analytix.local/runtime-go/internal/app/managedediting"
 	objectapp "analytix.local/runtime-go/internal/app/objectediting"
+	"analytix.local/runtime-go/internal/app/workspacemutation"
 	canvas "analytix.local/runtime-go/internal/domain/canvas"
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
@@ -172,26 +175,20 @@ func TestCanvasServiceReviewApplyRestartUndo(t *testing.T) {
 				t.Fatal(err)
 			}
 			authority := &officeTestIdentity{principal: principal}
-			leases, writes := 0, 0
+			registry := managedediting.New(workspacemutation.NewCoordinator(), managededitingfiles.New())
+			writes := 0
 			bind := func() *canvasapp.Service {
 				files.replaceDocument = func(request atomicTextReplaceRequest) error {
-					if leases != 1 {
+					if !registry.HasCaptures() {
 						t.Fatal("mutation lacked managed capture")
 					}
 					writes++
 					return atomicReplaceText(request)
 				}
 				service := canvasapp.New(authority, map[string]canvasapp.Objects{kind: objectapp.New(authority, files)})
-				err := service.BindHost(officeRecoveryTestProjector{authority}, func(_ context.Context, _ string, captured string, validate func() error) (func(), error) {
-					if captured != path {
-						t.Fatal("wrong capture")
-					}
-					if err := validate(); err != nil {
-						return nil, err
-					}
-					leases++
-					return func() { leases-- }, nil
-				})
+				// Use the production registry: a path in its session-ID argument
+				// must fail rather than being accepted by a permissive test callback.
+				err := service.BindHost(officeRecoveryTestProjector{authority}, registry.WithCapture)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -231,8 +228,8 @@ func TestCanvasServiceReviewApplyRestartUndo(t *testing.T) {
 				t.Fatal("view aliased Core", err)
 			}
 			receipt, err := service.Apply(ctx, principal, doc.SessionID, doc.ThreadID, proposal.ID)
-			if err != nil || receipt.Status != fileport.StatusCommitted || writes != 1 || leases != 0 {
-				t.Fatal("apply", receipt, err, writes, leases)
+			if err != nil || receipt.Status != fileport.StatusCommitted || writes != 1 || registry.HasCaptures() {
+				t.Fatal("apply", receipt, err, writes, registry.HasCaptures())
 			}
 			replay, err := service.Apply(ctx, principal, doc.SessionID, doc.ThreadID, proposal.ID)
 			if err != nil || replay != receipt || writes != 1 {
@@ -252,7 +249,7 @@ func TestCanvasServiceReviewApplyRestartUndo(t *testing.T) {
 				t.Fatal("restart recovery", recovery, err)
 			}
 			undo, err := service.RecoverOperation(ctx, principal, doc.SessionID, doc.ThreadID, "undo", recovery.Current.ChangeID, doc.Revision)
-			if err != nil || undo.Status != fileport.StatusCommitted || writes != 2 || leases != 0 {
+			if err != nil || undo.Status != fileport.StatusCommitted || writes != 2 || registry.HasCaptures() {
 				t.Fatal("undo", undo, err)
 			}
 			officeEditingAssertBytes(t, path, before)
