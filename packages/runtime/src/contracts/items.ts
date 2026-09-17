@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ReviewOutputSchema, ReviewTargetSchema } from './review.js'
 import { RuntimeErrorSeverity } from './errors.js'
+import { generatedArtifactMetadataSchema } from './generated-artifact.js'
 
 /**
  * Conversation items returned as part of a thread or turn.
@@ -1024,6 +1025,15 @@ const PublicToolResultPlanStatusV1 = z.object({
   }).strict()
 }).strict()
 
+const PublicToolResultArtifactStatusV1 = z.object({
+  ...PublicToolResultBaseV1,
+  projectionKind: z.literal('artifact_status'),
+  messageKey: z.literal('artifact_created'),
+  code: z.literal('artifact_created'),
+  status: z.literal('completed'),
+  artifact: generatedArtifactMetadataSchema
+}).strict()
+
 const PublicToolResultCaseSourceStatusV1 = z.object({
   ...PublicToolResultBaseV1,
   projectionKind: z.literal('case_source_status'),
@@ -1059,6 +1069,7 @@ const PublicToolResultProjectionShapeV1 = z.discriminatedUnion('projectionKind',
   PublicToolResultWithheldV1,
   PublicToolResultHostStatusV1,
   PublicToolResultPlanStatusV1,
+  PublicToolResultArtifactStatusV1,
   PublicToolResultCaseSourceStatusV1,
   PublicToolResultMcpDiagnosticV1
 ])

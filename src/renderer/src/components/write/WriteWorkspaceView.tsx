@@ -1,3 +1,4 @@
+import { captureWriteExport } from '../../write/write-export-snapshot'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
@@ -24,7 +25,6 @@ import {
   type WriteSaveStatus,
   writeBasenameFromPath,
   writeJoinPath,
-  writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
 import { getWriteRenderSafety } from '../../write/write-render-safety'
 import {
@@ -48,6 +48,7 @@ import type { WriteRichEditorHandle } from '../../write/tiptap/WriteRichEditor'
 import { useWriteSplitScrollSync } from './use-write-split-scroll-sync'
 import { WriteWorkspaceEmptyState } from './WriteWorkspaceEmptyState'
 import { WriteWorkspaceToolbar } from './WriteWorkspaceToolbar'
+import { WriteConflictReview } from './WriteConflictReview'
 import { WriteInlineAgent } from './WriteInlineAgent'
 import { WriteWorkspaceDocumentPane } from './WriteWorkspaceDocumentPane'
 import { resolveWriteAgentPreset } from '../../write/agent-presets'
@@ -67,21 +68,25 @@ import {
 } from './write-workspace-view-utils'
 
 type Props = {
+  threadId?: string | null
   leftSidebarCollapsed: boolean
   input: string; setInput: (value: string) => void
   onSubmitPrompt?: (value: string) => void
   onOpenAgentSettings?: () => void
+  onFocusConversation?: () => void
 }
 
 export function WriteWorkspaceView({
-  leftSidebarCollapsed,
+  threadId,
   input,
   setInput,
   onSubmitPrompt,
-  onOpenAgentSettings
+  onOpenAgentSettings,
+  onFocusConversation
 }: Props): ReactElement {
   const { t } = useTranslation('common')
-  const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
+  const shutdownFrozen = useWriteWorkspaceStore((s) => s.shutdownFrozen)
+  const exportPaused = useWriteWorkspaceStore((s) => s.exportInProgress)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   // Field-level subscription: this view must follow fileContent, but it should
@@ -107,6 +112,7 @@ export function WriteWorkspaceView({
     fileError,
     fileLoading,
     saveStatus,
+    legacyObjectEditing,
     previewMode,
     assistantOpen,
     selection,
@@ -131,6 +137,8 @@ export function WriteWorkspaceView({
     pendingAgentReview,
     clearPendingAgentReview,
     reviewActive,
+    reviewRecovery,
+    suspendReview,
     setReviewActive
   } = useWriteWorkspaceStore(
     useShallow((s) => ({
@@ -147,6 +155,8 @@ export function WriteWorkspaceView({
       pendingAgentReview: s.pendingAgentReview,
       clearPendingAgentReview: s.clearPendingAgentReview,
       reviewActive: s.reviewActive,
+      reviewRecovery: s.reviewRecovery,
+      suspendReview: s.suspendReview,
       setReviewActive: s.setReviewActive,
       imageGenReady: s.imageGenReady,
       fileContent: s.fileContent,
@@ -160,6 +170,7 @@ export function WriteWorkspaceView({
       fileError: s.fileError,
       fileLoading: s.fileLoading,
       saveStatus: s.saveStatus,
+      legacyObjectEditing: s.legacyObjectEditing,
       previewMode: s.previewMode,
       assistantOpen: s.assistantOpen,
       selection: s.selection,
@@ -208,19 +219,17 @@ export function WriteWorkspaceView({
     fileSize,
     truncated: fileTruncated
   })
+  if (shutdownFrozen) renderSafety.readOnly = true
   const debouncedPreviewContent = useDebouncedValue(fileContent, writePreviewDebounceMs(fileContent.length))
   const saveLabel = activeFileIsImage
     ? t('writeImagePreview')
     : activeFileIsPdf ? t('writePdfPreview')
-    : renderSafety.readOnly ? t('writeReadOnly') : formatSaveLabel(saveStatus, t)
+    : renderSafety.readOnly ? t('writeReadOnly')
+    : legacyObjectEditing ? t('writeObjectLegacySave', { status: formatSaveLabel(saveStatus, t) }) : formatSaveLabel(saveStatus, t)
   // Only surface the toolbar once the selection gesture settles: while the
   // pointer is down (dragging to select) it stays hidden to avoid flicker.
   const selectionAction =
     selection.charCount > 0 && !pointerSelecting ? inlineAgentPosition(selection, { compact: activeFileIsPdf }) : null
-  const activeFileLabel = activeFilePath
-    ? writeRelativeToWorkspace(workspaceRoot, activeFilePath)
-    : t('writeNoFileOpen')
-  const activeFileName = activeFilePath ? writeBasenameFromPath(activeFilePath) : t('writeStudio')
   const documentStats = useMemo(
     () => (activeFileIsText ? computeWriteDocumentStats(fileContent, isMarkdown) : null),
     [activeFileIsText, fileContent, isMarkdown],
@@ -271,6 +280,7 @@ export function WriteWorkspaceView({
 
   const setAssistantPrompt = (prompt: string): void => {
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInput(input.trim() ? `${input.trim()}\n\n${prompt}` : prompt)
   }
 
@@ -281,6 +291,7 @@ export function WriteWorkspaceView({
     // context in sendWritePrompt) so it never shows as raw text in the bubble.
     quoteCurrentSelection(workspaceRoot)
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInlineAgentValue('')
     if (onSubmitPrompt) {
       onSubmitPrompt(trimmed)
@@ -292,6 +303,7 @@ export function WriteWorkspaceView({
   const quoteSelectionToAssistant = (): void => {
     if (!workspaceReady || !activeFilePath) return
     quoteCurrentSelection(workspaceRoot)
+    onFocusConversation?.()
     setInlineAgentValue('')
   }
 
@@ -360,6 +372,18 @@ export function WriteWorkspaceView({
     }
     if (selection.ranges.length !== 1) {
       setFileError(t(selection.ranges.length > 1 ? 'writeInlineEditMultiSelection' : 'writeInlineEditNoSelection'))
+      return
+    }
+    if (onSubmitPrompt) {
+      const snapshot = useWriteWorkspaceStore.getState()
+      if (!(await flushSave(workspaceRoot))) return
+      const current = useWriteWorkspaceStore.getState()
+      if (current.workspaceRoot !== snapshot.workspaceRoot || current.activeFilePath !== snapshot.activeFilePath ||
+          current.fileContent !== snapshot.fileContent || current.selection !== snapshot.selection) {
+        setFileError(t('workbenchReferenceChanged'))
+        return
+      }
+      submitInlineAgent(trimmed)
       return
     }
     if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') {
@@ -649,7 +673,6 @@ export function WriteWorkspaceView({
       const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || undefined)
       if (!picked.canceled && picked.path) {
         await addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
       }
     } catch (error) {
       setFileError(formatWorkspacePickerError(error))
@@ -658,7 +681,7 @@ export function WriteWorkspaceView({
 
   const exportCurrentFile = async (format: WriteExportFormat): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.exportWriteDocument !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeExportUnavailable') })
       return
@@ -666,11 +689,13 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(format)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.exportWriteDocument({
-        path: activeFilePath,
+        ...prepared.binding,
         format,
-        content: fileContent,
         typography: currentTypography
       })
       if (!result.ok) {
@@ -698,13 +723,14 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
 
   const copyCurrentFileAsRichText = async (): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.copyWriteDocumentAsRichText !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeCopyRichTextUnavailable') })
       return
@@ -712,11 +738,12 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(WRITE_RICH_CLIPBOARD_ACTION)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.copyWriteDocumentAsRichText({
-        path: activeFilePath,
-        workspaceRoot,
-        content: fileContent
+        ...prepared.binding
       })
       if (!result.ok) {
         showExportNotice({
@@ -739,6 +766,7 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
@@ -826,26 +854,27 @@ export function WriteWorkspaceView({
   // already on disk) instead of overwriting the document.
   useEffect(() => {
     if (!pendingAgentReview) return
+    if (previewMode !== 'source') {
+      setPreviewMode('source')
+      return
+    }
+    const editor = markdownHandleRef.current
+    if (!editor) return
     const nextContent = pendingAgentReview.nextContent
-    clearPendingAgentReview()
     const baseline = useWriteWorkspaceStore.getState().fileContent
-    const started = markdownHandleRef.current?.beginDiffReview({
+    const started = editor.beginDiffReview({
       original: baseline,
       nextDoc: nextContent
-    }) ?? false
-    if (!started) {
-      // Rich mode / no source editor / identical content: apply directly.
-      setFileContent(nextContent)
-      setReviewActive(false)
-    }
-  }, [pendingAgentReview, clearPendingAgentReview, setFileContent, setReviewActive])
+    })
+    if (started || baseline === nextContent) clearPendingAgentReview()
+  }, [pendingAgentReview, previewMode, setPreviewMode, clearPendingAgentReview, setFileContent, setReviewActive])
 
   useEffect(() => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
+    if (exportPaused || saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null
       void flushSave(workspaceRoot)
@@ -856,7 +885,7 @@ export function WriteWorkspaceView({
         saveTimerRef.current = null
       }
     }
-  }, [flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
+  }, [exportPaused, flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
@@ -982,15 +1011,12 @@ export function WriteWorkspaceView({
         activeFileIsImage={activeFileIsImage}
         activeFileIsPdf={activeFileIsPdf}
         activeFileIsText={activeFileIsText}
-        activeFileLabel={activeFileLabel}
-        activeFileName={activeFileName}
         activeFilePath={activeFilePath ?? ''}
         documentStatsLabel={documentStatsLabel}
         assistantOpen={assistantOpen}
         exportInFlight={exportInFlight}
         exportMenuOpen={exportMenuOpen}
         exportMenuRef={exportMenuRef}
-        leftSidebarCollapsed={leftSidebarCollapsed}
         liveModeActive={liveModeActive}
         modeMenuItems={modeMenuItems}
         modeMenuOpen={modeMenuOpen}
@@ -999,7 +1025,7 @@ export function WriteWorkspaceView({
         saveLabel={saveLabel}
         saveStatus={saveStatus}
         reviewActive={reviewActive}
-        setAssistantOpen={setAssistantOpen}
+        setAssistantOpen={(open) => { setAssistantOpen(open); onFocusConversation?.() }}
         setExportMenuOpen={setExportMenuOpen}
         setModeMenuOpen={setModeMenuOpen}
         setPreviewMode={setPreviewMode}
@@ -1014,6 +1040,7 @@ export function WriteWorkspaceView({
         onResetOfficialDocumentFormat={resetOfficialDocumentFormat}
         onTypographyChange={setCurrentTypography}
       />
+      <WriteConflictReview />
       <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden pb-3 pt-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-ds-border-muted bg-ds-card/92 shadow-[0_12px_32px_rgba(20,47,95,0.04)] backdrop-blur-xl">
           <WriteWorkspaceDocumentPane
@@ -1044,6 +1071,8 @@ export function WriteWorkspaceView({
             richHandleRef={richHandleRef}
             markdownHandleRef={markdownHandleRef}
             onMarkdownReviewStateChange={setReviewActive}
+            reviewRecovery={reviewActive ? reviewRecovery : null}
+            onMarkdownReviewSuspend={suspendReview}
             debouncedPreviewContent={debouncedPreviewContent}
             isMarkdown={isMarkdown}
             inlineCompletion={inlineCompletion}

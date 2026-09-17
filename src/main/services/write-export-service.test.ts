@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+import { createWriteExportSnapshotResolver } from '../ipc/write-export-ipc'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -901,4 +903,70 @@ describe('write-export-service helpers', () => {
     expect(authorityCurrent).toHaveBeenCalledTimes(2)
     expect(clipboard.write).not.toHaveBeenCalled()
   })
+  it.each(['dialog', 'clipboard'])('refuses publication when the Core snapshot is revoked during %s', async effect => {
+    const sourcePath = join(workspaceRoot, 'draft.md')
+    const targetPath = join(workspaceRoot, 'export.html')
+    await writeFile(sourcePath, 'disk original', 'utf8')
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'main-thread', baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const content = 'unsaved local export'
+    const snapshot = { ...binding, path: sourcePath, workspace: workspaceRoot, content,
+      contentDigest: createHash('sha256').update(content).digest('hex') }
+    let revoked = false
+    let reads = 0
+    const transport = vi.fn(async () => {
+      reads++
+      if (effect === 'clipboard' && reads === 3) revoked = true
+      return revoked ? { ok: false, status: 409, body: '{"ok":false,"code":"draft_stale"}' }
+        : { ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }
+    })
+    const resolved = await createWriteExportSnapshotResolver(transport)(binding, () => true)
+    expect(resolved).not.toBeNull()
+    vi.mocked(dialog.showSaveDialog).mockImplementationOnce(async () => {
+      revoked = true
+      return { canceled: false, filePath: targetPath }
+    })
+    const options = { workspaceRoot: resolved!.snapshot.workspace, authorityCurrent: resolved!.authorityCurrent }
+    const document = { path: resolved!.snapshot.path, content: resolved!.snapshot.content }
+    const result = effect === 'dialog' ? await exportWriteDocument({ ...document, format: 'html' }, options)
+      : await copyWriteDocumentAsRichText(document, options)
+    expect(result.ok).toBe(false)
+    expect(existsSync(targetPath)).toBe(false)
+    expect(clipboard.write).not.toHaveBeenCalled()
+    expect(await readFile(sourcePath, 'utf8')).toBe('disk original')
+  })
+
+  it.for(['html', 'docx', 'clipboard'] as const)('accepts a real Core case-fold workspace with original-case source path for %s', async (effect, context) => {
+    const originalWorkspace = join(workspaceRoot, 'MixedCaseWorkspace')
+    await mkdir(originalWorkspace)
+    const coreWorkspace = originalWorkspace.toLowerCase()
+    if (!existsSync(coreWorkspace)) return context.skip('fixture filesystem is case-sensitive')
+    const originalInfo = await stat(originalWorkspace)
+    const aliasInfo = await stat(coreWorkspace)
+    expect({ dev: aliasInfo.dev, ino: aliasInfo.ino }).toEqual({ dev: originalInfo.dev, ino: originalInfo.ino })
+    expect(await realpath(coreWorkspace)).toBe(await realpath(originalWorkspace))
+    const sourcePath = join(originalWorkspace, 'Draft.md')
+    await writeFile(sourcePath, 'original disk content', 'utf8')
+    const content = 'Case preserving export draft'
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'main-thread', baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const snapshot = { ...binding, workspace: coreWorkspace, path: sourcePath, content,
+      contentDigest: createHash('sha256').update(content).digest('hex') }
+    const transport = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }))
+    const resolved = await createWriteExportSnapshotResolver(transport)(binding, () => true)
+    expect(resolved).not.toBeNull()
+    const targetPath = join(workspaceRoot, `published.${effect}`)
+    vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: false, filePath: targetPath })
+    const document = { path: resolved!.snapshot.path, content: resolved!.snapshot.content }
+    const options = { workspaceRoot: resolved!.snapshot.workspace, authorityCurrent: resolved!.authorityCurrent }
+    const result = effect === 'clipboard' ? await copyWriteDocumentAsRichText(document, options)
+      : await exportWriteDocument({ ...document, format: effect }, options)
+    expect(result.ok).toBe(true)
+    if (effect === 'clipboard') expect(clipboard.write).toHaveBeenCalledWith(expect.objectContaining({ text: content }))
+    else if (effect === 'html') expect(await readFile(targetPath, 'utf8')).toContain(content)
+    else {
+      const zip = await JSZip.loadAsync(await readFile(targetPath))
+      expect(await zip.file('word/document.xml')!.async('string')).toContain(content)
+    }
+    expect(await readFile(sourcePath, 'utf8')).toBe('original disk content')
+  })
+
 })

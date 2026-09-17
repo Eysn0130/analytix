@@ -132,6 +132,39 @@ export function developmentBuildEnvironment(profile, env = process.env) {
   return { ...profile.env, RUSTUP_HOME: env.RUSTUP_HOME || join(homedir(), '.rustup') }
 }
 
+export async function launchDevelopment(profile, options, {
+  assertProfileReady = assertDevelopmentProfileReady,
+  promptPassword = promptDevelopmentKeychainPassword,
+  prepareKeychain = prepareDevelopmentKeychain,
+  runPrerequisite = script => {
+    const args = script === 'doctor' ? ['run', script, '--', '--native'] : ['run', script]
+    const result = spawnSync('npm', args, { cwd: repo, stdio: 'inherit', env: developmentBuildEnvironment(profile) })
+    if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
+  },
+  startApplication = () => {
+    console.log(`[dev] Isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
+    console.log('[dev] Profile is retained for restart/recovery; this is not packaged or live-Provider acceptance.')
+    // Invoke the local executable directly, without routing through dev:fast.
+    return spawn(join(repo, 'node_modules/.bin/electron-vite'), ['dev'], {
+      cwd: repo, stdio: 'inherit', env: profile.env
+    })
+  }
+} = {}) {
+  if (!profile.needsKeychain) assertProfileReady(profile)
+  for (const script of ['doctor', ...(!options.fast ? ['build:data-native:development', 'build:runtime'] : [])]) {
+    await runPrerequisite(script)
+  }
+  // Build time must not consume the task Keychain's unlocked window. A failed
+  // prerequisite also leaves a new profile without a provisioned Keychain.
+  if (profile.needsKeychain || options.unlockKeychain) {
+    const password = promptPassword()
+    try { await prepareKeychain(profile, password, { create: profile.needsKeychain }) }
+    finally { password.fill(0) }
+  }
+  assertProfileReady(profile)
+  return startApplication()
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseDevelopmentArgs(process.argv.slice(2))
@@ -141,23 +174,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     // reduced-capability desktop on an unqualified host.
     if (process.platform !== 'darwin') throw new Error('Native desktop development currently requires the qualified macOS build environment. Source checks remain available on other hosts.')
     const profile = prepareDevelopmentProfile(options)
-    if (profile.needsKeychain || options.unlockKeychain) {
-      const password = promptDevelopmentKeychainPassword()
-      try { await prepareDevelopmentKeychain(profile, password, { create: profile.needsKeychain }) }
-      finally { password.fill(0) }
-    }
-    assertDevelopmentProfileReady(profile)
-    for (const script of ['doctor', ...(!options.fast ? ['build:data-native:development', 'build:runtime'] : [])]) {
-      const args = script === 'doctor' ? ['run', script, '--', '--native'] : ['run', script]
-      const result = spawnSync('npm', args, { cwd: repo, stdio: 'inherit', env: developmentBuildEnvironment(profile) })
-      if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
-    }
-    console.log(`[dev] Isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
-    console.log('[dev] Profile is retained for restart/recovery; this is not packaged or live-Provider acceptance.')
-    // Invoke the local executable directly, without routing through dev:fast.
-    const child = spawn(join(repo, 'node_modules/.bin/electron-vite'), ['dev'], {
-      cwd: repo, stdio: 'inherit', env: profile.env
-    })
+    const child = await launchDevelopment(profile, options)
     const signals = ['SIGINT', 'SIGTERM']
     const forward = signal => child.kill(signal)
     const listeners = signals.map(signal => {

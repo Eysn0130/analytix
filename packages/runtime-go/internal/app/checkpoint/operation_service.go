@@ -37,6 +37,7 @@ type OperationService struct {
 }
 
 type BeginOperationInput struct {
+	GenerationPrincipalDigest   string
 	SecurityContext             domainsecurity.TurnSecurityContext
 	ExecutionGrant              domainsecurity.ExecutionGrant
 	CheckpointID                string
@@ -112,7 +113,8 @@ func (service OperationService) Begin(ctx context.Context, input BeginOperationI
 		}
 	}
 	intent, terminal, existing, err := service.Authority.BeginOperationGroup(ctx, BeginOperationGroupAuthorityInput{
-		SecurityContext: input.SecurityContext, ExecutionGrant: input.ExecutionGrant,
+		GenerationPrincipalDigest: input.GenerationPrincipalDigest,
+		SecurityContext:           input.SecurityContext, ExecutionGrant: input.ExecutionGrant,
 		CheckpointID: input.CheckpointID, SourceWorkspaceCheckpointID: input.SourceWorkspaceCheckpointID,
 		ToolName: input.ToolName, ArgumentsJSON: input.ArgumentsJSON, Paths: domainPaths, CreatedAt: input.CreatedAt,
 	})
@@ -144,7 +146,7 @@ func (service OperationService) Settle(ctx context.Context, draft OperationDraft
 		if index < len(draft.Paths) && strings.TrimSpace(draft.Paths[index].Role) == expected.Role {
 			resolvedPath = draft.Paths[index].ResolvedPath
 		}
-		observed = append(observed, service.Observer.Observe(
+		observed = append(observed, service.observeOperationPath(draft.AuthorityIntent, false,
 			ctx, draft.Workspace, operationPathAuthority(expected, draft.Workspace), resolvedPath,
 		))
 	}
@@ -223,9 +225,9 @@ func (prepared PreparedOpenOperationRecovery) Apply(ctx context.Context, observe
 		}
 		observed := make([]domaincheckpoint.ObservedOperationPathV2, 0, len(intent.Paths))
 		for _, expected := range intent.Paths {
-			observed = append(observed, service.Observer.ObserveRelative(
+			observed = append(observed, service.observeOperationPath(intent, true,
 				ctx, intent.SecurityContext.WorkspaceRealPath,
-				operationPathAuthority(expected, intent.SecurityContext.WorkspaceRealPath),
+				operationPathAuthority(expected, intent.SecurityContext.WorkspaceRealPath), "",
 			))
 		}
 		status, ok := domaincheckpoint.ClassifyObservedOperationGroup(intent, observed)
@@ -243,6 +245,29 @@ func (prepared PreparedOpenOperationRecovery) Apply(ctx context.Context, observe
 		}
 	}
 	return results, quarantineErr
+}
+
+func (service OperationService) observeOperationPath(intent domaincheckpoint.OperationGroupIntentV2, relative bool,
+	ctx context.Context, workspace string, authority checkpointfileport.PathAuthority, resolvedPath string,
+) domaincheckpoint.ObservedOperationPathV2 {
+	if intent.ToolName == "generate_office_document" {
+		observer, ok := service.Observer.(checkpointfileport.GeneratedFileObserver)
+		if !ok || len(intent.Paths) != 1 || intent.Paths[0].BeforeExisted || !intent.Paths[0].ExpectedAfterExisted {
+			return domaincheckpoint.ObservedOperationPathV2{
+				PathAuthoritySchemaVersion: authority.SchemaVersion, AuthorityKind: authority.Kind,
+				AuthorityRootHash: authority.RootHash, RelativePath: authority.RelativePath,
+				ObservationStatus: "unavailable", BlockerCode: "path_unsafe",
+			}
+		}
+		if relative {
+			return observer.ObserveGeneratedRelative(ctx, workspace, authority)
+		}
+		return observer.ObserveGenerated(ctx, workspace, authority, resolvedPath)
+	}
+	if relative {
+		return service.Observer.ObserveRelative(ctx, workspace, authority)
+	}
+	return service.Observer.Observe(ctx, workspace, authority, resolvedPath)
 }
 
 func (service OperationService) RecoverOpen(ctx context.Context, observedAt time.Time) ([]OperationRecoveryResult, error) {

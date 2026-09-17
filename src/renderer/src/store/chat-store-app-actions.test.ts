@@ -147,6 +147,8 @@ describe('chat-store app actions composer model loading', () => {
     expect(state.composerModelGroups).toEqual(modelGroups)
     expect(state.composerModel).toBe('deepseek-v4-pro')
     expect(state.composerProviderId).toBe('deepseek')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('deepseek-v4-pro')
+    expect(localStorage.getItem(COMPOSER_PROVIDER_STORAGE_KEY)).toBe('deepseek')
     expect(state.composerModelGroups[0].modelProfiles).toBeUndefined()
   })
 
@@ -165,6 +167,68 @@ describe('chat-store app actions composer model loading', () => {
 
     expect(state.composerModel).toBe('shared-model')
     expect(state.composerProviderId).toBe('beta')
+  })
+
+  it.each(['current', 'stored', 'thread'] as const)('preserves an unavailable explicit %s Provider instead of switching to a namesake', async (source) => {
+    const { actions, state } = buildHarness({
+      ok: true, modelIds: ['shared-model'],
+      modelGroups: [{ providerId: 'other', label: 'Other', modelIds: ['shared-model'] }]
+    })
+    if (source === 'current') {
+      state.composerModel = 'shared-model'
+      state.composerProviderId = 'missing'
+    } else if (source === 'stored') {
+      localStorage.setItem(COMPOSER_MODEL_STORAGE_KEY, 'shared-model')
+      localStorage.setItem(COMPOSER_PROVIDER_STORAGE_KEY, 'missing')
+    } else {
+      state.activeThreadId = 'thread-a'
+      state.threads = [{ id: 'thread-a', model: 'shared-model' } as ChatState['threads'][number]]
+      localStorage.setItem(THREAD_COMPOSER_SELECTION_STORAGE_KEY,
+        JSON.stringify({ 'thread-a': { model: 'shared-model', providerId: 'missing' } }))
+    }
+    await actions.loadComposerModels()
+    expect(state.composerModel).toBe('shared-model')
+    expect(state.composerProviderId).toBe('missing')
+    expect(window.analytix.settings.saveSettingsSilent).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicit in-memory Provider when the catalog order changes', async () => {
+    const { actions, state } = buildHarness({
+      ok: true, modelIds: ['shared-model'], modelGroups: [
+        { providerId: 'other', label: 'Other', modelIds: ['shared-model'] },
+        { providerId: 'selected', label: 'Selected', modelIds: ['shared-model'] }
+      ]
+    })
+    state.composerModel = 'shared-model'
+    state.composerProviderId = 'selected'
+    await actions.loadComposerModels()
+    expect(state.composerProviderId).toBe('selected')
+  })
+
+  it('resolves an alias only within the explicitly selected Provider', () => {
+    const { actions, state } = buildHarness({ ok: true, modelIds: [] })
+    state.composerModelGroups = ['other', 'selected'].map((providerId) => ({
+      providerId, label: providerId, modelIds: [providerId + '-canonical'],
+      modelProfiles: { [providerId + '-canonical']: {
+        inputModalities: ['text'], outputModalities: ['text'],
+        messageParts: ['text'], supportsToolCalling: true, aliases: ['shared-alias']
+      } }
+    }))
+    actions.setComposerModel('shared-alias', 'selected')
+    expect(state.composerModel).toBe('selected-canonical')
+    expect(state.composerProviderId).toBe('selected')
+    expect(window.analytix.settings.saveSettingsSilent).toHaveBeenCalledWith({
+      runtime: { model: 'selected-canonical', providerId: 'selected' }
+    })
+  })
+
+  it('retains the selected Provider and model when Registry refresh fails', async () => {
+    const { actions, state } = buildHarness({ ok: false, message: 'unavailable' })
+    state.composerModel = 'my-custom-model'
+    state.composerProviderId = 'local-profile'
+    await actions.loadComposerModels()
+    expect(state.composerModel).toBe('my-custom-model')
+    expect(state.composerProviderId).toBe('local-profile')
   })
 
   it('restores the previously selected custom model after the full model list loads', async () => {

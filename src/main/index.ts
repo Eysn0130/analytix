@@ -12,6 +12,8 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { existsSync } from 'node:fs'
+import { createWriteShutdownCoordinator } from './write-shutdown'
+import { prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './office/native-office-ipc'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -399,6 +401,16 @@ let trayMenu: Menu | null = null
 let trayMenuOpenPromise: Promise<void> | null = null
 let loadTrayProviderObservation: (() => Promise<TrayProviderObservation | null>) | null = null
 let isQuitting = false
+let nativeOfficeQuitPending = false
+const writeShutdown = createWriteShutdownCoordinator({
+  ipc: ipcMain,
+  prepareNative: prepareNativeOfficeQuit,
+  cancelNative: cancelNativeOfficeQuit,
+  notifyBlocked: async window => {
+    await dialog.showMessageBox(window, { type: 'warning', message: '文档尚未保存，已取消关闭',
+      detail: '草稿仍保留在当前窗口。请完成输入、导出或处理保存提示后重试。', buttons: ['返回文档'], noLink: true })
+  }
+})
 let closeWindowPromptOpen = false
 let pendingDeepLinkThreadId = ''
 let desktopStartupBarrierComplete = false
@@ -1387,7 +1399,9 @@ async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
   noteRuntimeHealthy('restart')
 }
 
-function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?: string; primary?: boolean } = {}): BrowserWindow {
+function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?: string; primary?: boolean } = {}): BrowserWindow | null {
+  // Successful shutdown holds this admission closed while Core stops.
+  if (!writeShutdown.canCreateWindow()) return null
   traceStartup('createWindow:start')
   const preloadPath = resolvePreloadPath()
   const usesDesktopTitleBar = process.platform === 'win32' || process.platform === 'linux'
@@ -1452,6 +1466,7 @@ function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?
     if (appWindow.isDestroyed() || !primary) return
     handleMainWindowClose(appWindow, event)
   })
+  writeShutdown.trackWindow(appWindow)
   appWindow.on('closed', () => {
     if (initialShowFallbackTimer) {
       clearTimeout(initialShowFallbackTimer)
@@ -2328,6 +2343,10 @@ app.whenReady().then(async () => {
     store,
     loadHubAccountService,
     getMainWindow: () => mainWindow,
+    canNavigateWindow: contents => {
+      const owner = BrowserWindow.fromWebContents(contents)
+      return !!owner && writeShutdown.canNavigateWindow(owner)
+    },
     isTrustedProviderRegistrySender: isTrustedDesktopRenderer,
     applySettingsPatch,
     saveSettingsPatch,
@@ -2411,7 +2430,8 @@ app.whenReady().then(async () => {
       ]
     },
     isTrustedSender: isTrustedDesktopRenderer,
-    registerBeforeQuit: (listener) => app.on('before-quit', listener),
+    // The confirmed quit path disposes PTYs in stopManagedRuntimes. A raw
+    // before-quit listener would destroy them even when Office cancels exit.
     logError
   })
   registerBackgroundTaskIpc({ ipcMain })
@@ -2489,15 +2509,26 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
-  stopRuntimeWatchdog()
   if (managedRuntimesStoppedForQuit) return
   event.preventDefault()
-  void stopManagedRuntimesForQuit()
-    .catch((error) => {
+  if (nativeOfficeQuitPending) return
+  nativeOfficeQuitPending = true
+  void (async () => {
+    if (!await writeShutdown.prepareQuit()) {
+      isQuitting = false
+      return
+    }
+    // Native drafts and unresolved file outcomes use the existing Core session.
+    // Confirm and drain them before stopping that runtime, not at window close.
+    stopRuntimeWatchdog()
+    try { await stopManagedRuntimesForQuit() } catch (error) {
       publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
       managedRuntimesStoppedForQuit = true
-    })
-    .finally(() => {
-      app.quit()
-    })
+    }
+    app.quit()
+  })().catch(async () => {
+    await writeShutdown.cancel().catch(() => undefined)
+    isQuitting = false
+    if (desktopStartupBarrierComplete) startRuntimeWatchdog()
+  }).finally(() => { nativeOfficeQuitPending = false })
 })

@@ -51,7 +51,12 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MethodNotAllowed(w)
 		return
 	}
-	if !Authorized(r, mux.RuntimeToken, mux.Insecure) {
+	// Private packaged asset admission never inherits diagnostic insecure mode.
+	insecure := mux.Insecure
+	if r.URL.Path == OfficePrivateAdmissionPath {
+		insecure = false
+	}
+	if (r.URL.Path == OfficePrivateAdmissionPath && strings.TrimSpace(mux.RuntimeToken) == "") || !Authorized(r, mux.RuntimeToken, insecure) {
 		WriteJSON(w, http.StatusUnauthorized, map[string]any{"code": "unauthorized", "message": "unauthorized"})
 		return
 	}
@@ -83,9 +88,13 @@ func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
 }
 
 type LocalDisplayHandlerV1 struct {
-	Service           *localdisplayapp.Service
-	FundsCSVAdmission *fundscsvadmissionapp.ServiceV1
-	FundsCleaning     *fundscleaningapp.ServiceV1
+	OfficePrivateAdmission http.Handler
+	GeneratedArtifacts     http.Handler
+	PackageHost            http.Handler
+	ObjectEditing          http.Handler
+	Service                *localdisplayapp.Service
+	FundsCSVAdmission      *fundscsvadmissionapp.ServiceV1
+	FundsCleaning          *fundscleaningapp.ServiceV1
 	// LoadFrozenSecurityContext is retained for source compatibility with the
 	// transitional composition. DirectSourcePreview never reads it.
 	LoadFrozenSecurityContext  FrozenSecurityContextLoaderV1
@@ -143,6 +152,39 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == OfficePrivateAdmissionPath {
+		if handler.OfficePrivateAdmission == nil {
+			OfficePrivateAdmissionHandler{}.ServeHTTP(w, r)
+			return
+		}
+		handler.OfficePrivateAdmission.ServeHTTP(w, r)
+		return
+	}
+
+	if r.URL.Path == GeneratedArtifactPath {
+		if handler.GeneratedArtifacts == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		handler.GeneratedArtifacts.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == PluginPackageHostPath {
+		if handler.PackageHost == nil {
+			PluginPackageHostHandler{}.ServeHTTP(w, r)
+			return
+		}
+		handler.PackageHost.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == ObjectEditingPath {
+		if handler.ObjectEditing == nil {
+			ObjectEditingHandler{}.ServeHTTP(w, r)
+			return
+		}
+		handler.ObjectEditing.ServeHTTP(w, r)
+		return
+	}
 	if r != nil && r.URL != nil && r.URL.Path == HostFundsImportStagePathV1 && handler.FundsCSVAdmission == nil {
 		writeFundsImportCapabilityUnavailableV1(w)
 		return

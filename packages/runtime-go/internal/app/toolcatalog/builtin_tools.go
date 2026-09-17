@@ -8,8 +8,11 @@ import (
 )
 
 type BuiltinToolSchemaInput struct {
-	AllowBackgroundBash bool
-	WebFetch            bool
+	DocumentGeneration      bool
+	DocumentGenerationKinds []string
+	NativeSelections        bool
+	AllowBackgroundBash     bool
+	WebFetch                bool
 }
 
 func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
@@ -103,6 +106,19 @@ func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
 			Description: "Delete a named Go symbol from a .go file using AST parsing. Relative paths resolve inside the active workspace; explicit external paths are allowed with danger-full-access or a configured allow_write root. Supports func, method, type, interface, const, and var; use kind and parent to disambiguate methods. Requires a fresh read of the file and approval unless policy is auto.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Go source file path"},"name":{"type":"string","description":"Symbol name to delete"},"kind":{"type":"string","description":"Optional kind filter: func, method, type, interface, const, var"},"parent":{"type":"string","description":"Optional receiver/parent type for method disambiguation"}},"required":["path","name"],"additionalProperties":false}`),
 		},
+	}
+	if input.DocumentGeneration {
+		tools = append(tools, domainmodel.ToolSchema{
+			Name:        "generate_office_document",
+			Description: "Create a new native Office file: DOCX from Markdown, XLSX from typed sheets and checked formulas, or PPTX from structured slides. Only currently activated plugin kinds are available. Never overwrites an existing file. Use image identifiers in Markdown, not URLs or local image paths. The complete request is limited to 4 MiB of JSON and each string to 1 MiB of UTF-8. Core validates the file and confirms saving before returning an artifact. Follow the matching Office plugin skill; normal file permission and approval policy apply.",
+			Parameters:  GenerationToolParameters(input.DocumentGenerationKinds),
+		})
+	}
+	if input.NativeSelections {
+		tools = append(tools, []domainmodel.ToolSchema{
+			{Name: "native_selection_read", Description: "Read the model-safe projection of a native Office selection explicitly attached to this conversation. Use only its opaque scopeId. Protected parts are immutable references. This does not read a file path or expose raw document bytes.", Parameters: json.RawMessage(`{"type":"object","properties":{"scopeId":{"type":"string","pattern":"^[a-f0-9]{48}$"}},"required":["scopeId"],"additionalProperties":false}`)},
+			{Name: "native_selection_propose", Description: "Propose a replacement for an editable native Office selection in this conversation. For a typed workbook scope use workbook kind number/formula (single cell) or range with unique scope-relative rowOffset/columnOffset; formula references must remain inside the captured rectangle. For text scopes use parts. Never coerce numbers or formulas through text. Return typed literal/protected parts; include every protected reference exactly once in original order, never substitute or disclose protected text. This creates a proposal for user approval; it does not apply, save or overwrite the document. Use a stable operationId for retries.", Parameters: json.RawMessage(`{"type":"object","properties":{"scopeId":{"type":"string","pattern":"^[a-f0-9]{48}$"},"operationId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},"parts":{"type":"array","maxItems":256,"items":{"oneOf":[{"type":"object","properties":{"kind":{"type":"string","enum":["literal"]},"text":{"type":"string","maxLength":65536}},"required":["kind","text"],"additionalProperties":false},{"type":"object","properties":{"kind":{"type":"string","enum":["protected"]},"protectedRef":{"type":"string","pattern":"^protected_[a-f0-9]{48}$"}},"required":["kind","protectedRef"],"additionalProperties":false}]}},"workbook":{"oneOf":[{"type":"object","properties":{"kind":{"const":"number"},"value":{"type":"number"}},"required":["kind","value"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"formula"},"formula":{"type":"string","minLength":1,"maxLength":1024}},"required":["kind","formula"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"range"},"cells":{"type":"array","minItems":1,"maxItems":256,"items":{"oneOf":[{"type":"object","properties":{"rowOffset":{"type":"integer","minimum":0,"maximum":255},"columnOffset":{"type":"integer","minimum":0,"maximum":255},"type":{"const":"number"},"value":{"type":"number"}},"required":["rowOffset","columnOffset","type","value"],"additionalProperties":false},{"type":"object","properties":{"rowOffset":{"type":"integer","minimum":0,"maximum":255},"columnOffset":{"type":"integer","minimum":0,"maximum":255},"type":{"const":"formula"},"formula":{"type":"string","minLength":1,"maxLength":1024}},"required":["rowOffset","columnOffset","type","formula"],"additionalProperties":false},{"type":"object","properties":{"rowOffset":{"type":"integer","minimum":0,"maximum":255},"columnOffset":{"type":"integer","minimum":0,"maximum":255},"type":{"const":"text"},"text":{"type":"string","maxLength":4096}},"required":["rowOffset","columnOffset","type","text"],"additionalProperties":false}]}}},"required":["kind","cells"],"additionalProperties":false}]}},"required":["scopeId","operationId"],"additionalProperties":false,"oneOf":[{"required":["parts"],"not":{"required":["workbook"]}},{"required":["workbook"],"not":{"required":["parts"]}}]}`)},
+		}...)
 	}
 	if input.WebFetch {
 		tools = append(tools, domainmodel.ToolSchema{

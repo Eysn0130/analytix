@@ -1,3 +1,4 @@
+import { isWriteShutdownFrozen, registerWriteShutdownInput } from '../../write/write-shutdown'
 import { useEffect, useRef, type MutableRefObject, type ReactElement } from 'react'
 import { Annotation, Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
@@ -5,8 +6,9 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { bracketMatching, indentOnInput } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { drawSelection, EditorView, highlightActiveLine, keymap, showPanel, type Panel, type ViewUpdate } from '@codemirror/view'
-import { acceptChunk, getChunks, rejectChunk, unifiedMergeView } from '@codemirror/merge'
+import { acceptChunk, getChunks, getOriginalDoc, rejectChunk, unifiedMergeView } from '@codemirror/merge'
 import i18n from '../../i18n'
+import type { WriteDiffReviewRecovery } from '../../write/write-workspace-store-types'
 import type { WriteTextAlign } from '@shared/app-settings'
 import { applyWriteTextAlignToMarkdownLines } from '@shared/write-text-align'
 import {
@@ -132,6 +134,8 @@ type Props = {
   onImagePasteError?: (message: string) => void
   /** Notified when an inline diff review starts (true) or commits/cancels (false). */
   onReviewStateChange?: (active: boolean) => void
+  reviewRecovery?: WriteDiffReviewRecovery | null
+  onReviewSuspend?: (recovery: WriteDiffReviewRecovery) => void
   handleRef?: MutableRefObject<WriteMarkdownEditorHandle | null>
 }
 
@@ -412,6 +416,8 @@ export function WriteMarkdownEditor({
   onImagePasteSaved,
   onImagePasteError,
   onReviewStateChange,
+  reviewRecovery,
+  onReviewSuspend,
   handleRef
 }: Props): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -442,6 +448,8 @@ export function WriteMarkdownEditor({
   const onReviewStateChangeRef = useRef(onReviewStateChange)
   const mergeCompartmentRef = useRef<Compartment | null>(null)
   const reviewActiveRef = useRef(false)
+  const reviewOwnerRef = useRef<Pick<WriteDiffReviewRecovery, 'workspaceRoot' | 'filePath' | 'baseline'> | null>(null)
+  const onReviewSuspendRef = useRef(onReviewSuspend)
   const valueRef = useRef(value)
   const lastSelectionRef = useRef<WriteEditorSelectionState | null>(null)
   const lastEmittedValueRef = useRef<string | null>(null)
@@ -467,6 +475,7 @@ export function WriteMarkdownEditor({
   onImagePasteSavedRef.current = onImagePasteSaved
   onImagePasteErrorRef.current = onImagePasteError
   onReviewStateChangeRef.current = onReviewStateChange
+  onReviewSuspendRef.current = onReviewSuspend
   valueRef.current = value
 
   useEffect(() => {
@@ -491,6 +500,7 @@ export function WriteMarkdownEditor({
       if (!instance || !reviewActiveRef.current) return
       const finalDoc = instance.state.doc.toString()
       reviewActiveRef.current = false
+      reviewOwnerRef.current = null
       instance.dispatch({
         effects: [
           mergeCompartment.reconfigure([]),
@@ -544,9 +554,14 @@ export function WriteMarkdownEditor({
     // against the same baseline instead of bailing.
     const beginDiffReview = (original: string, nextDoc: string): boolean => {
       const instance = viewRef.current
-      if (!instance || readOnlyRef.current) return false
+      if (!instance || (readOnlyRef.current || isWriteShutdownFrozen())) return false
       if (nextDoc === original) return false
       reviewActiveRef.current = true
+      reviewOwnerRef.current = {
+        workspaceRoot: workspaceRootRef.current,
+        filePath: filePathRef.current,
+        baseline: valueRef.current
+      }
       instance.dispatch({
         changes: { from: 0, to: instance.state.doc.length, insert: nextDoc },
         annotations: externalValueSyncAnnotation.of(true),
@@ -570,7 +585,7 @@ export function WriteMarkdownEditor({
       getLongDebounceMs: () => completionLongDebounceMsRef.current,
       getLongMinAcceptScore: () => completionLongMinAcceptScoreRef.current,
       isLongEnabled: () => completionLongEnabledRef.current,
-      isEnabled: () => completionEnabledRef.current && !readOnlyRef.current,
+      isEnabled: () => completionEnabledRef.current && !(readOnlyRef.current || isWriteShutdownFrozen()),
       getFilePath: () => filePathRef.current,
       language: 'markdown',
       getModel: () => completionModelRef.current,
@@ -605,13 +620,14 @@ export function WriteMarkdownEditor({
     const state = EditorState.create({
       doc: valueRef.current,
       extensions: [
+        EditorState.transactionFilter.of(transaction => isWriteShutdownFrozen() && transaction.docChanged ? [] : transaction),
         themeCompartment.of(buildEditorTheme(appearanceRef.current)),
         livePreviewCompartment.of(
           appearanceRef.current === 'live' && livePreviewEnabledRef.current
             ? writeMarkdownLivePreviewExtensions(filePathRef.current, workspaceRootRef.current)
             : []
         ),
-        editableCompartment.of(buildInteractionExtensions(readOnlyRef.current, appearanceRef.current)),
+        editableCompartment.of(buildInteractionExtensions((readOnlyRef.current || isWriteShutdownFrozen()), appearanceRef.current)),
         mergeCompartment.of([]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         history(),
@@ -626,7 +642,7 @@ export function WriteMarkdownEditor({
           {
             key: 'Tab',
             run: (view) => {
-              if (readOnlyRef.current) return false
+              if ((readOnlyRef.current || isWriteShutdownFrozen())) return false
               return expandWriteTemplateShortcut(view)
             }
           },
@@ -641,7 +657,7 @@ export function WriteMarkdownEditor({
         ]),
         EditorView.domEventHandlers({
           paste(event, view) {
-            if (readOnlyRef.current) return false
+            if ((readOnlyRef.current || isWriteShutdownFrozen())) return false
             if (!hasClipboardImage(event)) return false
             const nextWorkspaceRoot = workspaceRootRef.current.trim()
             const nextFilePath = filePathRef.current.trim()
@@ -765,6 +781,10 @@ export function WriteMarkdownEditor({
       parent: hostRef.current
     })
     viewRef.current = view
+    const unregisterShutdown = registerWriteShutdownInput({
+      composing: () => view.composing,
+      freeze: frozen => view.dispatch({ effects: editableCompartment.reconfigure(buildInteractionExtensions(readOnlyRef.current || frozen, appearanceRef.current)) })
+    })
     lastEmittedValueRef.current = valueRef.current
     const initialSelection = selectionState(view)
     lastSelectionRef.current = initialSelection
@@ -774,7 +794,7 @@ export function WriteMarkdownEditor({
       handleRef.current = {
         applyRangeReplacement: (range, original, replacement) => {
           const instance = viewRef.current
-          if (!instance || readOnlyRef.current) return false
+          if (!instance || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const from = clampOffset(instance.state, range.from)
           const to = clampOffset(instance.state, range.to)
           if (to < from || instance.state.sliceDoc(from, to) !== original) return false
@@ -788,7 +808,7 @@ export function WriteMarkdownEditor({
         },
         setBlockType: (type) => {
           const instance = viewRef.current
-          if (!instance || readOnlyRef.current) return false
+          if (!instance || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const { from, to } = instance.state.selection.main
           const startLine = instance.state.doc.lineAt(from)
           const endLine = instance.state.doc.lineAt(to)
@@ -808,7 +828,7 @@ export function WriteMarkdownEditor({
         },
         setTextAlign: (align) => {
           const instance = viewRef.current
-          if (!instance || readOnlyRef.current) return false
+          if (!instance || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const { from, to } = instance.state.selection.main
           const startLine = instance.state.doc.lineAt(from)
           const endLine = instance.state.doc.lineAt(to)
@@ -833,9 +853,30 @@ export function WriteMarkdownEditor({
       }
     }
 
+    // The merge documents encode partial accept/reject progress. Restoring the
+    // initial proposal would re-open chunks the user has already resolved.
+    if (reviewRecovery && reviewRecovery.workspaceRoot === workspaceRootRef.current &&
+        reviewRecovery.filePath === filePathRef.current && reviewRecovery.baseline === valueRef.current) {
+      if (reviewRecovery.original === reviewRecovery.nextDoc) {
+        lastEmittedValueRef.current = reviewRecovery.nextDoc
+        onChangeRef.current(reviewRecovery.nextDoc)
+        onReviewStateChangeRef.current?.(false)
+      } else {
+        beginDiffReview(reviewRecovery.original, reviewRecovery.nextDoc)
+      }
+    }
+
     return () => {
+      if (reviewActiveRef.current && reviewOwnerRef.current) {
+        onReviewSuspendRef.current?.({
+          ...reviewOwnerRef.current,
+          original: getOriginalDoc(view.state).toString(),
+          nextDoc: view.state.doc.toString()
+        })
+      }
       if (handleRef) handleRef.current = null
       reviewActiveRef.current = false
+      unregisterShutdown()
       view.destroy()
       viewRef.current = null
       themeCompartmentRef.current = null
@@ -861,7 +902,7 @@ export function WriteMarkdownEditor({
             ? writeMarkdownLivePreviewExtensions(filePath, workspaceRoot)
             : []
         ),
-        editableCompartment.reconfigure(buildInteractionExtensions(readOnly, appearance))
+        editableCompartment.reconfigure(buildInteractionExtensions(readOnly || isWriteShutdownFrozen(), appearance))
       ]
     })
   }, [appearance, filePath, livePreviewEnabled, readOnly, workspaceRoot])

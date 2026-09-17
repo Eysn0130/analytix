@@ -7,37 +7,42 @@ import (
 )
 
 type IntentV1 struct {
-	SchemaVersion          int      `json:"schemaVersion"`
-	Purpose                string   `json:"purpose"`
-	IntentID               string   `json:"intentId"`
-	PackageAuthoritySHA256 string   `json:"packageAuthoritySha256"`
-	Target                 TargetV1 `json:"target"`
-	PluginName             string   `json:"pluginName"`
-	PluginVersion          string   `json:"pluginVersion"`
-	SourceRoot             string   `json:"sourceRoot"`
-	SourceTreeSHA256       string   `json:"sourceTreeSha256"`
-	SourceTreeFileCount    uint64   `json:"sourceTreeFileCount"`
-	ManifestSHA256         string   `json:"manifestSha256"`
-	EntrypointSHA256       string   `json:"entrypointSha256"`
-	RequestedAt            string   `json:"requestedAt"`
+	SchemaVersion            int      `json:"schemaVersion"`
+	Purpose                  string   `json:"purpose"`
+	IntentID                 string   `json:"intentId"`
+	PackageAuthoritySHA256   string   `json:"packageAuthoritySha256,omitempty"`
+	Target                   TargetV1 `json:"target"`
+	PluginName               string   `json:"pluginName"`
+	PluginVersion            string   `json:"pluginVersion"`
+	SourceRoot               string   `json:"sourceRoot"`
+	SourceTreeSHA256         string   `json:"sourceTreeSha256"`
+	SourceTreeFileCount      uint64   `json:"sourceTreeFileCount"`
+	ManifestSHA256           string   `json:"manifestSha256"`
+	EntrypointSHA256         string   `json:"entrypointSha256"`
+	RequestedAt              string   `json:"requestedAt"`
+	Origin                   string   `json:"origin,omitempty"`
+	SourceRegistrationSHA256 string   `json:"sourceRegistrationSha256,omitempty"`
 }
 
 type IntentInputV1 struct {
-	PackageAuthoritySHA256 string
-	Target                 TargetV1
-	PluginName             string
-	PluginVersion          string
-	SourceRoot             string
-	SourceTreeSHA256       string
-	SourceTreeFileCount    uint64
-	ManifestSHA256         string
-	EntrypointSHA256       string
-	RequestedAt            time.Time
+	Origin                   string
+	SourceRegistrationSHA256 string
+	PackageAuthoritySHA256   string
+	Target                   TargetV1
+	PluginName               string
+	PluginVersion            string
+	SourceRoot               string
+	SourceTreeSHA256         string
+	SourceTreeFileCount      uint64
+	ManifestSHA256           string
+	EntrypointSHA256         string
+	RequestedAt              time.Time
 }
 
 func NewIntentV1(input IntentInputV1) (IntentV1, error) {
 	intent := IntentV1{
 		SchemaVersion: SchemaVersionV1, Purpose: IntentPurposeV1,
+		Origin: input.Origin, SourceRegistrationSHA256: input.SourceRegistrationSHA256,
 		PackageAuthoritySHA256: input.PackageAuthoritySHA256, Target: input.Target,
 		PluginName: input.PluginName, PluginVersion: input.PluginVersion, SourceRoot: input.SourceRoot,
 		SourceTreeSHA256: input.SourceTreeSHA256, SourceTreeFileCount: input.SourceTreeFileCount,
@@ -54,10 +59,10 @@ func NewIntentV1(input IntentInputV1) (IntentV1, error) {
 func ValidateIntentV1(intent IntentV1) error {
 	if intent.SchemaVersion != SchemaVersionV1 || intent.Purpose != IntentPurposeV1 ||
 		!validPluginIdentityV1(intent.PluginName, intent.PluginVersion) ||
-		!canonicalDigest(intent.PackageAuthoritySHA256) || ValidateTargetV1(intent.Target) != nil ||
+		!validMaterializationOriginV1(intent.Origin, intent.PackageAuthoritySHA256, intent.SourceRegistrationSHA256, intent.PluginName) || ValidateTargetV1(intent.Target) != nil ||
 		!canonicalAbsolutePath(intent.SourceRoot) || !canonicalDigest(intent.SourceTreeSHA256) ||
 		intent.SourceTreeFileCount == 0 || intent.SourceTreeFileCount > MaxSourceTreeFilesV1 ||
-		!canonicalDigest(intent.ManifestSHA256) || !canonicalDigest(intent.EntrypointSHA256) ||
+		!canonicalDigest(intent.ManifestSHA256) || !validEntrypointForOriginV1(intent.Origin, intent.EntrypointSHA256) ||
 		!canonicalTime(intent.RequestedAt) || !canonicalDigest(intent.IntentID) || intent.IntentID != deriveIntentID(intent) {
 		return errors.New("bundled plugin materialization intent is invalid")
 	}

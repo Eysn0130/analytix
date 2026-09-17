@@ -44,6 +44,11 @@ jobs:
         run: npm run verify:baseline
       - name: Verify deterministic Funds entry and report-scenario contracts
         run: npm run test:plugin-contracts
+      - name: Verify AtlasFlow locked renderer and missing-validator contracts
+        working-directory: plugins/atlasflow/skills/atlasflow
+        run: |
+          npm ci --ignore-scripts
+          npm test
 
   application-tests:
     name: Application tests

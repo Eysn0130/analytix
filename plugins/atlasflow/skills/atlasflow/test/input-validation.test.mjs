@@ -1,15 +1,6 @@
-// Robustness net for the no-ajv path. validator.mjs deliberately supports
-// running without ajv (skips schema validation so malformed input still reaches
-// the renderers' friendly layout checks). CI always installs ajv, so this is
-// the one path the rest of the suite never exercises — and it is exactly where
-// the v2.5.0 review found raw TypeErrors and silent `<rect x="NaN">` output.
-//
-// Contract under degraded mode: a malformed-but-JSON-legal document must EXIT
-// NON-ZERO with a friendly message — never crash (TypeError / is not a
-// function) and never write NaN/undefined into the HTML. A random VALID
-// perturbation of an example must still render (exit 0, no NaN).
-//
-//   node --test test/*.test.mjs
+// Malformed JSON must fail cleanly; valid deterministic perturbations must
+// render with the installed schema validator. Missing-dependency behavior is
+// tested independently in schema-availability.test.mjs, including on CI.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(__dirname, '..');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atlasflow-degraded-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atlasflow-input-validation-'));
 
 const EXAMPLES = {
   workflow: 'agent-tool-call.workflow.json',
@@ -30,18 +21,6 @@ const EXAMPLES = {
   lifecycle: 'agent-run.lifecycle.json',
   architecture: 'web-app.architecture.json',
 };
-
-// Hide ajv so validator.mjs takes the degraded branch. We point NODE_PATH at an
-// empty dir AND set a resolution-blocking env? Simplest robust approach: render
-// in a temp copy of the skill with node_modules/ajv renamed aside. But that is
-// heavy. Instead we rely on validator.mjs catching ERR_MODULE_NOT_FOUND — we
-// can't unload an installed ajv per-process. So we detect availability and, if
-// ajv IS installed, still assert the stronger property that holds in BOTH
-// modes: malformed input never crashes and never emits NaN (ajv just makes the
-// message a schema error instead of a layout error). This keeps the test green
-// on CI while still covering the crash/NaN contract end-to-end.
-
-const ajvInstalled = fs.existsSync(path.join(skillRoot, 'node_modules', 'ajv'));
 
 function render(mode, doc) {
   const input = path.join(tmp, `in-${Math.random().toString(36).slice(2)}.json`);
@@ -82,7 +61,6 @@ for (const [mode, fields] of Object.entries(ARRAY_FIELDS)) {
   for (const field of fields) {
     test(`${mode}: ${field} as a string fails friendly`, () => {
       const doc = JSON.parse(fs.readFileSync(path.join(skillRoot, 'examples', EXAMPLES[mode]), 'utf8'));
-      if (!(field in doc)) return; // optional field absent in this example
       doc[field] = 'oops';
       assertFriendlyFailure(mode, doc, `${mode}.${field}`);
     });
@@ -135,11 +113,5 @@ test('property: shuffling node/state order still renders (order-independence)', 
     }
   }
 });
-
-if (!ajvInstalled) {
-  test('(degraded mode active: ajv not installed — schema validation skipped)', () => {
-    assert.ok(true);
-  });
-}
 
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }));

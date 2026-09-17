@@ -232,8 +232,7 @@ async function reconcileThreadListSideEffects(
   const activeThreadIsManagedInCodeRoute =
     get().route === 'chat' &&
     activeThread != null &&
-    (isWriteThreadId(activeThread.id, writeRegistry) ||
-      isClawThread(activeThread, get().clawChannels))
+    isClawThread(activeThread, get().clawChannels)
   const shouldClearSelection =
     allowClearSelection &&
     activeThreadId != null &&
@@ -373,55 +372,10 @@ export function createNavigationActions(
     openCleanCodeStage()
   },
 
+  // Compatibility entry: opening a document never selects or creates a thread.
+  // Workbench consumes this legacy route by opening the right document surface.
   openWrite: async () => {
-    const state = get()
-    const selectedWorkspace = await readActiveWriteWorkspace(state.workspaceRoot)
-    const writeWorkspaceRoots = await readWriteWorkspaceRoots()
-    const registry = hydrateWriteThreadRegistry(
-      state.threads,
-      selectedWorkspace ? [selectedWorkspace, ...writeWorkspaceRoots] : writeWorkspaceRoots,
-      pruneWriteThreadRegistry(state.threads, readWriteThreadRegistry())
-    )
-    saveWriteThreadRegistry(registry)
-    const activeThread = state.activeThreadId
-      ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
-      : null
-    if (
-      activeThread &&
-      activeThread.archived !== true &&
-      selectedWorkspace &&
-      writeThreadBelongsToWorkspace(activeThread, selectedWorkspace, registry)
-    ) {
-      set({ route: 'write' })
-      return
-    }
-
-    const target = activeWriteThreadForWorkspace(
-      selectedWorkspace,
-      state.threads.filter((thread) => thread.archived !== true),
-      registry
-    )
-
     set({ route: 'write' })
-    if (target && state.runtimeConnection === 'ready') {
-      await get().selectThread(target.id)
-      return
-    }
-
-    sseAbortRef.current?.abort()
-    sseAbortRef.current = null
-    clearBusyWatchdog()
-    const nextWatch = { ...state.watchTurnCompletion }
-    if (state.activeThreadId && state.busy) {
-      nextWatch[state.activeThreadId] = true
-      watchTurnCompletionNotification(state.activeThreadId)
-    }
-    set({
-      ...clearedThreadSelection(),
-      route: 'write',
-      watchTurnCompletion: nextWatch
-    })
-    syncTurnCompletionPoll(set, get)
   },
 
   ensureWriteThreadForWorkspace: async (workspaceRoot) => {

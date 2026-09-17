@@ -1,3 +1,6 @@
+import { WRITE_SHUTDOWN_REQUEST, WRITE_SHUTDOWN_ACK, writeShutdownRequestSchema, writeShutdownResultSchema, type WriteShutdownHandler } from '../shared/write-shutdown'
+import { canvasHostRequestSchema, canvasHostResponseSchema } from '../../packages/runtime/src/contracts/canvas-host'
+import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
@@ -7,6 +10,39 @@ import {
   isStrictPublicRuntimeSseIpcPayload
 } from '../shared/public-runtime-sse'
 import { parseRuntimeStatusPublicV1 } from '../shared/analytix-runtime-status'
+
+let officeAnnotationInputFrozen = false
+const officeAnnotationFreezeListeners = new Set<(frozen: boolean) => void>()
+ipcRenderer.on('office:annotation-input-freeze', (_event, value: unknown) => {
+  const request = nativeOfficeInputFreezeSchema.safeParse(value)
+  if (!request.success) return
+  officeAnnotationInputFrozen = request.data.frozen
+  try {
+    for (const listener of officeAnnotationFreezeListeners) listener(officeAnnotationInputFrozen)
+  } catch { return } // A failed UI freeze cannot acknowledge safe shutdown.
+  // Earlier annotationSave invokes have already been sent on this renderer's
+  // IPC stream. Main drains them only after receiving this acknowledgement.
+  void ipcRenderer.invoke('office:annotation-input-frozen',request.data).catch(() => undefined)
+})
+
+let writeShutdownHandler: WriteShutdownHandler | undefined
+ipcRenderer.on(WRITE_SHUTDOWN_REQUEST, (_event, value: unknown) => {
+  const parsed = writeShutdownRequestSchema.safeParse(value)
+  if (!parsed.success) return
+  const request = parsed.data
+  // Do not serialize cancel behind a slow prepare/save. The renderer fences
+  // stale completions by request ID while the existing save remains in flight.
+  void (async () => {
+    let outcome: import('../shared/write-shutdown').WriteShutdownResult = { result: 'blocked', reason: 'unavailable' }
+    try {
+      if (writeShutdownHandler) {
+        const result = writeShutdownResultSchema.safeParse(await writeShutdownHandler(request))
+        if (result.success) outcome = result.data
+      }
+    } catch { /* Fail closed without exposing draft contents. */ }
+    await ipcRenderer.invoke(WRITE_SHUTDOWN_ACK, { ...request, outcome }).catch(() => undefined)
+  })()
+})
 
 // Internal IPC adapter. The renderer receives only the domain facade below.
 const flatApi = {
@@ -573,6 +609,75 @@ const api = {
     listEditors: flatApi.listEditors,
     openEditorPath: flatApi.openEditorPath
   },
+  office: {
+    onAnnotationInputFreeze: (handler) => {
+      officeAnnotationFreezeListeners.add(handler); handler(officeAnnotationInputFrozen)
+      return () => { officeAnnotationFreezeListeners.delete(handler) }
+    },
+    onMenuRequested: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeOfficeMenuTargetSchema.safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:menu-requested', listener)
+      return () => ipcRenderer.removeListener('office:menu-requested', listener)
+    },
+    showActionMenu: async (request) => {
+      const parsed = nativeOfficeActionChoiceSchema.safeParse(await ipcRenderer.invoke('office:action-menu', request))
+      return parsed.success ? parsed.data : {actionId:null}
+    },
+    onWorkspaceCommand: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeWorkspaceCommandSchema.safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:workspace-command', listener)
+      return () => ipcRenderer.removeListener('office:workspace-command', listener)
+    },
+    pickFile: async (request) => {
+      const parsed = nativeOfficePickerResponseSchema.safeParse(await ipcRenderer.invoke('office:pick-file', request))
+      return parsed.success ? parsed.data : { ok: false, error: 'unavailable' }
+    },
+    request: async (request) => {
+      if (officeAnnotationInputFrozen && request.action === 'annotationSave') return {ok:false,view:null,error:'unsaved_changes'}
+      const parsed = nativeOfficeResponseSchema.safeParse(await ipcRenderer.invoke('office:request', request))
+      return parsed.success ? parsed.data : { ok: false, view: null, error: 'unavailable' }
+    },
+    onChange: (handler) => {
+      const listener = (_: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = nativeOfficeViewSchema.nullable().safeParse(value)
+        if (parsed.success) handler(parsed.data)
+      }
+      ipcRenderer.on('office:changed', listener)
+      return () => ipcRenderer.removeListener('office:changed', listener)
+    }
+  },
+  packageHost: {
+    request: (request) => ipcRenderer.invoke('plugin:package-host', request)
+  },
+  canvas: {
+    request: async request => {
+      const input = canvasHostRequestSchema.safeParse(request)
+      if (!input.success) return { ok: false, code: 'invalid_request' }
+      try {
+        const result = canvasHostResponseSchema.safeParse(await ipcRenderer.invoke('canvas:request', input.data))
+        if (result.success) return result.data
+      } catch { /* Unknown operations are reconciled from Core recovery. */ }
+      return { ok: false, code: 'unavailable' }
+    },
+    pickFile: async request => {
+      try {
+        const result: unknown = await ipcRenderer.invoke('canvas:pick-file', request)
+        if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'path' in result &&
+          (result.path === null || (typeof result.path === 'string' && result.path.length <= 4096 && !result.path.includes('\0')))) return { ok: true, path: result.path }
+      } catch { /* Preserve the current surface. */ }
+      return { ok: false }
+    }
+  },
+  objects: {
+    resolveArtifact: (request) => ipcRenderer.invoke('object:resolve-artifact', request),
+    request: (request) => ipcRenderer.invoke('object:editing', request)
+  },
   files: {
     listDirectory: flatApi.listWorkspaceDirectory,
     resolve: flatApi.resolveWorkspaceFile,
@@ -595,6 +700,11 @@ const api = {
     getPathForFile: flatApi.getPathForFile
   },
   write: {
+    onShutdown: handler => {
+      if (writeShutdownHandler) throw new Error('Write shutdown handler already installed.')
+      writeShutdownHandler = handler
+      return () => { if (writeShutdownHandler === handler) writeShutdownHandler = undefined }
+    },
     requestWriteInlineCompletion: flatApi.requestWriteInlineCompletion,
     retrieveWriteContext: flatApi.retrieveWriteContext,
     generateWriteInfographic: flatApi.generateWriteInfographic,

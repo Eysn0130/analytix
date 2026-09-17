@@ -15,7 +15,6 @@ import (
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
-	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
 
@@ -243,10 +242,9 @@ func projectTrustedStructuredOrdinaryV1(value any, scope trustedProjectionScopeV
 }
 
 // stageTrustedPlanDigestV1 protects the SHA-256 and RFC3339Nano metadata of an
-// exact, canonical tool-result item while the generic ordinary projector scans
-// the plan's display-bearing fields. Without this typed staging, a legitimate
-// digest or timestamp containing a long decimal run can be rewritten as PII
-// and the closed plan projection becomes invalid.
+// exact, canonical plan or artifact result while the generic ordinary projector
+// scans display-bearing fields. Without this typed staging, a legitimate digest
+// or timestamp containing a long decimal run can invalidate the closed result.
 func stageTrustedPlanDigestV1(
 	value any,
 	path []trustedProjectionPathSegmentV1,
@@ -284,31 +282,31 @@ func stageCanonicalPlanToolResultDigestV1(
 	path []trustedProjectionPathSegmentV1,
 	entries *[]trustedTerminalProjectionEntryV1,
 ) (map[string]any, bool) {
-	_, ok := domaintoolresult.ClosedPlanToolResultDigestV1(item)
+	container, fields, ok := domainevent.ClosedToolResultPrivacyMetadataV1(item)
 	if !ok {
 		return nil, false
 	}
 	staged, _ := cloneTrustedAuthorityValueV1(item).(map[string]any)
 	output, _ := staged["output"].(map[string]any)
-	plan, _ := output["plan"].(map[string]any)
-	if plan == nil {
+	metadata, _ := output[container].(map[string]any)
+	if metadata == nil {
 		return nil, false
 	}
-	for _, field := range []string{"contentHash", "savedAt"} {
+	for _, field := range fields {
 		placeholder := map[string]any{
 			"kind": "trusted_plan_digest_placeholder_v1", "ordinal": float64(len(*entries)),
 		}
 		stagedPlaceholder, _ := cloneTrustedAuthorityValueV1(placeholder).(map[string]any)
 		metadataPath := append(append([]trustedProjectionPathSegmentV1(nil), path...),
 			trustedProjectionPathSegmentV1{Kind: "key", Key: "output"},
-			trustedProjectionPathSegmentV1{Kind: "key", Key: "plan"},
+			trustedProjectionPathSegmentV1{Kind: "key", Key: container},
 			trustedProjectionPathSegmentV1{Kind: "key", Key: field},
 		)
 		*entries = append(*entries, trustedTerminalProjectionEntryV1{
-			path: metadataPath, authority: plan[field].(string),
+			path: metadataPath, authority: metadata[field].(string),
 			placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
 		})
-		plan[field] = stagedPlaceholder
+		metadata[field] = stagedPlaceholder
 	}
 	return staged, true
 }

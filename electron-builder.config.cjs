@@ -118,6 +118,7 @@ module.exports = {
   ],
   asar: true,
   asarUnpack: [
+    'out/office-codec/**/*',
     '**/packages/runtime/dist/cli/**/*',
     '**/packages/runtime/dist/config/**/*',
     '**/packages/runtime/dist/contracts/**/*',

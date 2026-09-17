@@ -45,9 +45,8 @@ export type WriteModeMenuItem = {
 export type WriteInlineAgentPosition = {
   left: number
   width: number
-  /** Top of the selection rect in viewport coords; the menu measures itself and places above/below. */
+  /** Selection bounds in unzoomed layout pixels, matching fixed-position CSS. */
   anchorTop: number
-  /** Bottom of the selection rect in viewport coords. */
   anchorBottom: number
 }
 
@@ -58,6 +57,8 @@ export function isMarkdownFile(filePath: string): boolean {
 export function formatSaveLabel(status: WriteSaveStatus, t: (key: string) => string): string {
   if (status === 'saving') return t('writeSaving')
   if (status === 'dirty') return t('writeUnsaved')
+  if (status === 'unknown') return t('writeSaveUnknown')
+  if (status === 'conflict') return t('writeSaveConflict')
   if (status === 'error') return t('writeSaveError')
   return t('writeSaved')
 }
@@ -105,21 +106,30 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
+export function writeUiScale(): number {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return 1
+  const scale = Number.parseFloat(window.getComputedStyle(document.body).zoom)
+  return Number.isFinite(scale) && scale > 0 ? scale : 1
+}
+
 export function inlineAgentPosition(selection: {
   anchorRect?: { left: number; top: number; bottom: number; width: number } | null
 }, options: { compact?: boolean } = {}): WriteInlineAgentPosition | null {
   const rect = selection.anchorRect
   if (!rect) return null
+  const scale = writeUiScale()
+  const viewportWidth = window.innerWidth / scale
+  const availableWidth = Math.max(0, viewportWidth - 32)
   const minWidth = options.compact ? 240 : INLINE_AGENT_MIN_WIDTH
   const maxWidth = options.compact ? 320 : INLINE_AGENT_MAX_WIDTH
   const targetRatio = options.compact ? 0.22 : 0.28
-  const width = clamp(Math.round(window.innerWidth * targetRatio), minWidth, maxWidth)
-  const left = clamp(rect.left + rect.width / 2 - width / 2, 16, window.innerWidth - width - 16)
+  const width = clamp(Math.round(viewportWidth * targetRatio), Math.min(minWidth, availableWidth), Math.min(maxWidth, availableWidth))
+  const left = clamp((rect.left + rect.width / 2) / scale - width / 2, 16, viewportWidth - width - 16)
   return {
     left,
     width,
-    anchorTop: rect.top,
-    anchorBottom: rect.bottom
+    anchorTop: rect.top / scale,
+    anchorBottom: rect.bottom / scale
   }
 }
 

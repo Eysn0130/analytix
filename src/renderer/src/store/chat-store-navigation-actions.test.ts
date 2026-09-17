@@ -578,6 +578,18 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.activeThreadId).toBe('thr_default')
   })
 
+  it('opens the legacy document route without changing the active conversation or stream', async () => {
+    const blocks = [{ kind: 'assistant', id: 'retained', text: 'retained conversation' }]
+    const harness = buildHarness({ activeThreadId: 'current-thread', blocks, busy: true } as unknown as Partial<ChatState>)
+    await harness.actions.openWrite()
+    expect(harness.state.route).toBe('write')
+    expect(harness.state.activeThreadId).toBe('current-thread')
+    expect(harness.state.blocks).toEqual(blocks)
+    expect(harness.state.busy).toBe(true)
+    expect(harness.selectThread).not.toHaveBeenCalled()
+    expect(harness.createThread).not.toHaveBeenCalled()
+  })
+
   it('opens the Code home in one clean state when no code thread is available', async () => {
     const harness = buildHarness({
       activeThreadId: 'write-thread',

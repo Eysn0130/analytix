@@ -1,0 +1,17 @@
+{
+  "canvasWorkspace": "画布与图片",
+  "canvasLocalPreview": "本地只读",
+  "canvasReload": "重新读取文件",
+  "canvasOpen": "打开画布或 PNG",
+  "canvasThreadRequired": "请先在项目中打开一个会话。",
+  "canvasWorkspaceMismatch": "此文件属于另一个项目。请切回对应项目后打开。",
+  "canvasPreviewFailed": "无法预览。请检查文件、插件状态或访问权限后重试。",
+  "canvasPickHint": "打开结构化画布或 PNG，在本地查看原图；查看不会调用模型或修改文件。",
+  "canvasObjects": "对象（{{count}}）",
+  "canvasSelectObject": "选择节点或关系",
+  "canvasSelectHint": "选择图中对象或使用此列表查看其原始属性与来源记录。",
+  "canvasAssumption": "此对象标记为假设。",
+  "canvasCopySelection": "复制所选对象信息",
+  "canvasCopied": "已复制到剪贴板。",
+  "canvasCopyFailed": "复制失败，请重试。"
+}

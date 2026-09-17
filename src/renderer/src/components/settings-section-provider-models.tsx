@@ -1,3 +1,4 @@
+import { providerModelDisplayName } from '@shared/provider-display'
 import { useState, type ReactElement, type ReactNode } from 'react'
 import {
   AudioLines,
@@ -217,12 +218,16 @@ function ModelBadge({
 }
 
 function ModelName({ modelId }: { modelId: string }): ReactElement {
+  const label = providerModelDisplayName(modelId)
   return (
-    <span className="group/model-name relative min-w-0" title={modelId}>
-      <span className="block truncate font-mono text-[12.5px] text-ds-ink">{modelId}</span>
+    <span className="group/model-name relative min-w-0" title={modelId} tabIndex={0}>
+      <span className="block truncate text-[13px] font-medium text-ds-ink">{label}</span>
+      {label !== modelId ? (
+        <span className="block truncate text-[11px] text-ds-faint">{modelId}</span>
+      ) : null}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute left-0 top-full z-30 mt-1 max-w-[min(28rem,calc(100vw-3rem))] break-all rounded-lg border border-ds-border bg-white px-2.5 py-1.5 font-mono text-[12px] leading-5 text-ds-ink opacity-0 shadow-[0_12px_32px_rgba(20,47,95,0.16)] transition group-hover/model-name:opacity-100 dark:bg-ds-card"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1 max-w-[min(28rem,calc(100vw-3rem))] break-all rounded-lg border border-ds-border bg-ds-card px-2.5 py-1.5 text-[12px] leading-5 text-ds-ink opacity-0 shadow-lg transition-opacity group-hover/model-name:opacity-100 group-focus/model-name:opacity-100 motion-reduce:transition-none"
       >
         {modelId}
       </span>
@@ -310,7 +315,7 @@ export function ProviderModelsManager({
   const showListTools = modelEntries.length > MODEL_LIST_PAGE_SIZE
   const normalizedQuery = query.trim().toLowerCase()
   const filteredEntries = showListTools && normalizedQuery
-    ? modelEntries.filter(({ modelId }) => modelId.toLowerCase().includes(normalizedQuery))
+    ? modelEntries.filter(({ modelId }) => [modelId, providerModelDisplayName(modelId)].some((label) => label.toLowerCase().includes(normalizedQuery)))
     : modelEntries
   const pageCount = Math.max(1, Math.ceil(filteredEntries.length / MODEL_LIST_PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)

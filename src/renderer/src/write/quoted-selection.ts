@@ -12,8 +12,7 @@ export const WRITE_RETRIEVAL_HEADING = '[相关文献上下文]'
 export const WRITE_RETRIEVAL_END = '[/相关文献上下文]'
 
 const WRITE_ASSISTANT_INTERACTION_RULE =
-  '交互限制: 当前 GUI 无法提交 request_user_input 的 HTTP 响应；需要更多信息时，直接用普通文本向用户提问，不要调用 request_user_input。\n' +
-  '改稿约定: 当用户要求修改、改写、润色、翻译、续写、扩写或整理“当前文件”所指的文档时，你必须用 edit 或 write 工具把改动直接写入该文件（建议先用 read 取到准确原文，再 edit/write），完成后只用一两句话说明改了什么——绝不要只在回复里贴出修改后的文本却不落盘。用户会在编辑器里以行级红绿 Diff 审阅你的改动、逐行接受或拒绝，所以请放心直接改。仅当用户只是提问、讨论、或处理的是只读引用片段时，才用纯文本回答、不改文件。'
+  '改稿约定: 仅在用户明确要求修改所引用的文件、当前权限允许且版本校验通过时，使用现有文件工具执行修改；讨论或只读引用不写文件。当前兼容编辑会先修改文件，再显示行级 Diff 供审阅；不要将其描述为尚未应用的提案，不要把本提示词作为写入授权。'
 
 export type WriteQuotedSelection = {
   id: string
@@ -28,6 +27,9 @@ export type WriteQuotedSelection = {
   rects?: WriteSelectionPageRect[]
   charCount: number
   createdAt: string
+  /** Protected-local working copy, never serialized as authority or prompt metadata. */
+  workspaceRoot?: string
+  snapshotContent?: string
 }
 
 function normalizePath(value: string): string {
@@ -108,6 +110,7 @@ export function formatWriteQuotedSelectionForPrompt(selection: WriteQuotedSelect
 }
 
 type WritePromptContext = {
+  requestUserInputAvailable?: boolean
   workspaceRoot?: string
   activeFilePath?: string | null
   retrieval?: WriteRetrievalContext | null
@@ -193,6 +196,9 @@ export function composeWritePrompt(
 ): string {
   const body = input.trim()
   const contextLines: string[] = []
+  if (context.requestUserInputAvailable === false) {
+    contextLines.push('当前连接未提供用户提问提交能力；需要更多信息时用普通文本提问，不要调用 request_user_input。')
+  }
   contextLines.push(WRITE_ASSISTANT_INTERACTION_RULE)
   if (context.agentPersona?.trim()) {
     contextLines.push(`当前写作 Agent 人设（请严格遵循）：${context.agentPersona.trim()}`)

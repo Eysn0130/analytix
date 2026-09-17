@@ -997,6 +997,10 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     const plan = extractPlanMetadata(item)
     if (plan) meta.plan = plan
   }
+  if (item.kind === 'tool_result' && item.toolName === 'generate_office_document' && !item.isError) {
+    const projection = PublicToolResultProjectionV1.safeParse(item.output)
+    if (projection.success && projection.data.projectionKind === 'artifact_status') meta.generatedArtifact = projection.data.artifact
+  }
   return {
     kind: 'tool',
     id: toolBlockId(item, normalizedChild),

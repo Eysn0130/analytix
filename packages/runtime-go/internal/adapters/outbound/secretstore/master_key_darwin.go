@@ -45,9 +45,12 @@ type keychainCommandRunner interface {
 	Run(context.Context, []string, []byte) (keychainCommandResult, error)
 }
 
-type securityCommandRunner struct{}
+type securityCommandRunner struct {
+	keychainDBPath string
+	checkUnlocked  func(context.Context, string) bool
+}
 
-func (securityCommandRunner) Run(ctx context.Context, arguments []string, stdin []byte) (keychainCommandResult, error) {
+func (runner securityCommandRunner) Run(ctx context.Context, arguments []string, stdin []byte) (keychainCommandResult, error) {
 	// A locked Keychain may wait indefinitely for SecurityAgent interaction.
 	// Unlock is an explicit host operation; credential reads/writes must return
 	// a bounded failure and preserve any unconfirmed write outcome.
@@ -56,6 +59,18 @@ func (securityCommandRunner) Run(ctx context.Context, arguments []string, stdin 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if runner.keychainDBPath != "" {
+		check := runner.checkUnlocked
+		if check == nil {
+			check = taskKeychainUnlocked
+		}
+		// Metadata reads must not turn an already locked task Keychain into a
+		// background password dialog. Keep the command deadline as a second
+		// boundary: the Keychain can still lock after this preflight.
+		if !check(ctx, runner.keychainDBPath) {
+			return keychainCommandResult{}, portsecretstore.ErrMasterKeyUnavailable
+		}
+	}
 	command := exec.CommandContext(ctx, keychainSecurityPath, arguments...)
 	command.WaitDelay = time.Second
 	if stdin != nil {
@@ -474,7 +489,7 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 			return nil, portsecretstore.ErrMasterKeyUnavailable
 		}
 		return &keychainMasterKeyProvider{
-			runner: securityCommandRunner{}, random: rand.Reader,
+			runner: securityCommandRunner{keychainDBPath: options.DarwinKeychainDBPath}, random: rand.Reader,
 			bindingPath: bindingPath, binding: binding,
 			keychainDBPath:         options.DarwinKeychainDBPath,
 			keychainSecurityDigest: options.DarwinKeychainSecurityDigest,

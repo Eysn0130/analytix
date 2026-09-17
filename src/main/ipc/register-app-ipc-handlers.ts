@@ -1,4 +1,11 @@
+import { createWriteExportSnapshotResolver } from './write-export-ipc'
+import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
+import { registerNativeOfficeIpc } from '../office/native-office-ipc'
+import { registerCanvasIpc } from '../canvas/canvas-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
+import { createObjectEditingHandler } from './object-editing-ipc'
+import { createGeneratedArtifactHandler } from './generated-artifact-ipc'
+import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -257,6 +264,7 @@ type RegisterAppIpcHandlersOptions = {
   store: JsonSettingsStore
   loadHubAccountService: LoadHubAccountService
   getMainWindow: () => BrowserWindow | null
+  canNavigateWindow: (contents: WebContents) => boolean
   isTrustedProviderRegistrySender?: (event: IpcMainInvokeEvent) => boolean
   applySettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
   saveSettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
@@ -1295,7 +1303,8 @@ function validateMcpConfigContent(content: string): void {
 function runDesktopCommand(
   command: DesktopCommand,
   sender: WebContents,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  canNavigateWindow: (contents: WebContents) => boolean
 ): void {
   const mainWindow = getMainWindow()
   const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : sender
@@ -1320,6 +1329,7 @@ function runDesktopCommand(
       contents.selectAll()
       return
     case 'reload':
+      if (!canNavigateWindow(contents)) return
       contents.reload()
       return
     case 'zoomIn':
@@ -2714,6 +2724,38 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     openEditorPath(parseIpcPayload('editor:open-path', openEditorPathPayloadSchema, payload))
   )
 
+  const packageHost = createPluginPackageHostHandler(localDisplayRequest)
+  registerNativeOfficeIpc(getMainWindow, packageHost, createOfficePrivateAdmissionProvider(localDisplayRequest))
+  registerCanvasIpc(event => isTrustedProviderRegistrySender?.(event) === true, packageHost)
+  const rendererPackageHost = createPluginPackageHostHandler(localDisplayRequest, 'renderer')
+  ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
+        event.senderFrame !== main.webContents.mainFrame) {
+      return { ok: false, code: 'identity_invalid', message: 'Plugin control requires the main workspace.' }
+    }
+    return rendererPackageHost(payload)
+  })
+
+  const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
+  const objectEditing = createObjectEditingHandler(localDisplayRequest)
+  const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
+  ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return {ok:false,code:'unavailable'}
+    const frame=main.webContents.mainFrame
+    const result=await resolveArtifact(payload)
+    if (getMainWindow()!==main || main.isDestroyed() || main.webContents.mainFrame!==frame) return {ok:false,code:'unavailable'}
+    return result
+  })
+  ipcMain.handle('object:editing', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
+        event.senderFrame !== main.webContents.mainFrame) {
+      return { ok: false, code: 'forbidden', message: 'The protected editor is available only in the main workspace.' }
+    }
+    return objectEditing(payload)
+  })
   ipcMain.handle('file:resolve-workspace', async (_, payload: unknown) =>
     resolveWorkspaceFile(
       parseIpcPayload('file:resolve-workspace', workspaceFileTargetPayloadSchema, payload)
@@ -2856,32 +2898,12 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        canceled: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return exportWriteDocument(request, {
-      parentWindow: getMainWindow(),
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, canceled: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return exportWriteDocument({ path: resolved.snapshot.path, content: resolved.snapshot.content,
+      format: request.format, typography: request.typography }, {
+      parentWindow: getMainWindow(), workspaceRoot: resolved.snapshot.workspace,
+      authorityCurrent: resolved.authorityCurrent
     })
   })
   ipcMain.handle('write:copy-rich-text', async (event, payload: unknown) => {
@@ -2893,32 +2915,13 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return copyWriteDocumentAsRichText(request, {
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return copyWriteDocumentAsRichText({ path: resolved.snapshot.path, content: resolved.snapshot.content }, {
+      workspaceRoot: resolved.snapshot.workspace, authorityCurrent: resolved.authorityCurrent
     })
   })
+
   ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>
     requestWriteInlineCompletion(
       await store.load(),
@@ -2972,7 +2975,8 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     runDesktopCommand(
       parseIpcPayload('desktop:command', desktopCommandSchema, command),
       event.sender,
-      getMainWindow
+      getMainWindow,
+      options.canNavigateWindow
     )
   })
   ipcMain.handle('shell:open-external', async (_, url: unknown) => {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultWriteSettings } from '@shared/app-settings'
 import { createWriteFileActions } from './write-workspace-file-actions'
 import { initialState } from './write-workspace-store-helpers'
+import { useNativeOfficeStore } from '../office/native-office-store'
 import type { WriteWorkspaceGet, WriteWorkspaceSet, WriteWorkspaceState } from './write-workspace-store-types'
 
 function makeBaseState(): WriteWorkspaceState {
@@ -35,7 +36,12 @@ function makeBaseState(): WriteWorkspaceState {
     setFileContent: () => undefined,
     syncActiveFileFromDisk: async () => false,
     syncActiveImageFromDisk: async () => false,
+    shutdownFrozen: false,
+    beginShutdown: () => ({ save: async () => ({ result: 'ready' }), release: () => undefined }),
+    exportInProgress: false,
+    beginExport: () => ({ settled: Promise.resolve(), release: () => undefined }),
     flushSave: async () => true,
+    resolveFileConflict: async () => false,
     createFile: async () => null,
     createDirectory: async () => null,
     renameEntry: async () => null,
@@ -46,6 +52,8 @@ function makeBaseState(): WriteWorkspaceState {
     setAssistantModel: () => undefined,
     setAssistantAgentPresetId: () => undefined,
     setReviewActive: () => undefined,
+    reviewRecovery: null,
+    suspendReview: () => undefined,
     clearPendingAgentReview: () => undefined,
     setSelection: () => undefined,
     recordRecentEdits: () => undefined,
@@ -83,17 +91,20 @@ type FileBridgeTestOverrides = Partial<{
   renameWorkspaceEntry: Window['analytix']['files']['renameEntry']
   deleteWorkspaceEntry: Window['analytix']['files']['deleteEntry']
   readWorkspacePdf: Window['analytix']['files']['readPdf']
+  readWorkspaceFile: Window['analytix']['files']['read']
 }>
 
 function installDsGui(overrides: FileBridgeTestOverrides): void {
   vi.stubGlobal('window', {
     analytix: {
+      objects: { request: async () => ({ ok: false, code: 'unsupported_platform', message: 'Synthetic legacy platform' }) },
       files: {
         listDirectory: overrides.listWorkspaceDirectory,
         createFile: overrides.createWorkspaceFile,
         renameEntry: overrides.renameWorkspaceEntry,
         deleteEntry: overrides.deleteWorkspaceEntry,
-        readPdf: overrides.readWorkspacePdf
+        readPdf: overrides.readWorkspacePdf,
+        read: overrides.readWorkspaceFile
       }
     } as unknown as Window['analytix']
   })
@@ -101,9 +112,61 @@ function installDsGui(overrides: FileBridgeTestOverrides): void {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  useNativeOfficeStore.setState({ target: null, view: null, error: null })
 })
 
 describe('write workspace file actions', () => {
+  it('routes native formats to the controlled Office surface after preserving the text draft', async () => {
+    const h = createHarness()
+    const flush = vi.fn(async () => true)
+    h.set({ flushSave: flush })
+    await h.actions.openFile('/workspace', '/workspace/report.docx')
+    expect(flush).toHaveBeenCalledOnce()
+    expect(useNativeOfficeStore.getState().target).toEqual({ workspace: '/workspace', path: '/workspace/report.docx' })
+    expect(h.get().activeFilePath).toBeNull()
+  })
+
+  it('clears a failed native target when returning to a text file', async () => {
+    const h = createHarness()
+    installDsGui({ readWorkspaceFile: async () => ({ ok: true, path: '/workspace/report.md', content: 'saved text', size: 10, truncated: false }) })
+    useNativeOfficeStore.setState({ target: { workspace: '/workspace', path: '/workspace/missing.docx' }, view: null, error: 'save_failed' })
+    await h.actions.openFile('/workspace', '/workspace/report.md')
+    expect(useNativeOfficeStore.getState()).toMatchObject({ target: null, view: null, error: null })
+    expect(h.get().fileContent).toBe('saved text')
+  })
+
+  it('discards an older open receipt after another document was opened', async () => {
+    let finishFirst!: (value: unknown) => void
+    const read = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+      .mockResolvedValueOnce({ ok: true, path: '/tmp/write/new.md', content: 'new', size: 3, truncated: false })
+    installDsGui({ readWorkspaceFile: read })
+    const { actions, get, set } = createHarness()
+    set({ workspaceRoot: '/tmp/write' })
+    const first = actions.openFile('/tmp/write', '/tmp/write/old.md')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+    await actions.openFile('/tmp/write', '/tmp/write/new.md')
+    finishFirst({ ok: true, path: '/tmp/write/old.md', content: 'old', size: 3, truncated: false })
+    await first
+    expect(get().activeFilePath).toBe('/tmp/write/new.md')
+    expect(get().fileContent).toBe('new')
+  })
+
+  it('does not reopen a document after the workspace home was selected', async () => {
+    let finishRead!: (value: unknown) => void
+    const read = vi.fn(() => new Promise((resolve) => { finishRead = resolve }))
+    installDsGui({ readWorkspaceFile: read as Window['analytix']['files']['read'] })
+    const { actions, get, set } = createHarness()
+    set({ workspaceRoot: '/tmp/write' })
+    const opening = actions.openFile('/tmp/write', '/tmp/write/old.md')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    expect(await actions.openWorkspaceHome('/tmp/write')).toBe(true)
+    finishRead({ ok: true, path: '/tmp/write/old.md', content: 'old', size: 3, truncated: false })
+    await opening
+    expect(get().activeFilePath).toBeNull()
+    expect(get().fileContent).toBe('')
+  })
+
   it('clears loading state and records list errors when directory IPC throws', async () => {
     installDsGui({
       listWorkspaceDirectory: vi.fn(async () => {

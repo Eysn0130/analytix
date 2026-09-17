@@ -2,9 +2,9 @@
 // pure; renderers own their layout tables and pass measured rects
 // ({x, y, width, height, cx, cy}) in.
 
-// In degraded mode (no ajv) a type-wrong top-level field reaches the renderer.
-// Coerce non-arrays to [] so the module-level Maps build without throwing and
-// the friendly validator checks (which run later) report the real problem.
+// Keep pure layout helpers total for callers that do not use the CLI. This
+// convenience is not schema validation; CLI input must pass the required
+// validator before layout starts.
 export function asArray(value) {
   return Array.isArray(value) ? value : [];
 }

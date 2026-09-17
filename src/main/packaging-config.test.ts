@@ -627,6 +627,85 @@ afterEach(() => {
   }
 })
 
+type LockedRuntimePackage = {
+  dependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>
+  link?: boolean
+}
+
+// Test-only traversal of the pinned npm runtime graph. Follow actual nested
+// resolution and fail on unresolved required edges; unrelated plugins must not
+// expand the DOCX adapter's dependency admission.
+function lockedRuntimeClosure(packages: Record<string, LockedRuntimePackage>, root: string): string[] {
+  const visited = new Set<string>()
+  const queue = [root]
+  while (queue.length > 0) {
+    const key = queue.pop()!
+    if (visited.has(key)) continue
+    const pkg = packages[key]
+    if (!pkg || pkg.link) throw new Error(`Unresolved locked package: ${key}`)
+    visited.add(key)
+    const names = new Set([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.optionalDependencies ?? {}),
+      ...Object.keys(pkg.peerDependencies ?? {})
+    ])
+    for (const name of names) {
+      if (!/^(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+$/.test(name) || name.split('/').some(part => part === '.' || part === '..')) {
+        throw new Error('Invalid locked dependency name')
+      }
+      let scope = key
+      let resolved: string | undefined
+      while (true) {
+        const candidate = `${scope ? `${scope}/` : ''}node_modules/${name}`
+        if (Object.hasOwn(packages, candidate)) { resolved = candidate; break }
+        if (!scope) break
+        const parent = scope.lastIndexOf('/node_modules/')
+        scope = parent < 0 ? '' : scope.slice(0, parent)
+      }
+      const optional = Object.hasOwn(pkg.optionalDependencies ?? {}, name) ||
+        (!Object.hasOwn(pkg.dependencies ?? {}, name) && pkg.peerDependenciesMeta?.[name]?.optional === true)
+      if (!resolved) {
+        if (optional) continue
+        throw new Error(`Missing locked dependency: ${key} -> ${name}`)
+      }
+      queue.push(resolved)
+    }
+  }
+  return [...visited].sort()
+}
+
+describe('locked runtime dependency closure', () => {
+  it('follows nested and scoped peers, terminates cycles, and ignores unrelated packages', () => {
+    const packages: Record<string, LockedRuntimePackage> = {
+      'node_modules/docx': { dependencies: { child: '1' } },
+      'node_modules/docx/node_modules/child': { dependencies: { docx: '1' }, peerDependencies: { '@scope/peer': '1' } },
+      'node_modules/@scope/peer': {},
+      'node_modules/child': { dependencies: { 'image-size': '1' } },
+      'node_modules/image-size': {}
+    }
+    expect(lockedRuntimeClosure(packages, 'node_modules/docx')).toEqual([
+      'node_modules/@scope/peer', 'node_modules/docx', 'node_modules/docx/node_modules/child'
+    ])
+    packages['node_modules/docx/node_modules/child'].dependencies!['image-size'] = '1'
+    expect(lockedRuntimeClosure(packages, 'node_modules/docx')).toContain('node_modules/image-size')
+  })
+
+  it('rejects missing required or linked packages while allowing absent optional dependencies', () => {
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { dependencies: { missing: '1' } } }, 'node_modules/docx'))
+      .toThrow('Missing locked dependency')
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { peerDependencies: { missing: '1' } } }, 'node_modules/docx'))
+      .toThrow('Missing locked dependency')
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { link: true } }, 'node_modules/docx'))
+      .toThrow('Unresolved locked package')
+    expect(lockedRuntimeClosure({ 'node_modules/docx': {
+      optionalDependencies: { absent: '1' }, peerDependencies: { peer: '1' }, peerDependenciesMeta: { peer: { optional: true } }
+    } }, 'node_modules/docx')).toEqual(['node_modules/docx'])
+  })
+})
+
 describe('electron-builder Analytix packaging', () => {
   it('omits unstaged optional resources while including every staged resource', () => {
     const absent = builderConfigurationFixture(false)
@@ -654,7 +733,13 @@ describe('electron-builder Analytix packaging', () => {
     expect(rootPackage.dependencies).not.toHaveProperty('html-to-docx')
     expect(rootPackage.devDependencies).not.toHaveProperty('@types/html-to-docx')
     expect(Object.keys(rootPackageLock.packages)).not.toContain('node_modules/html-to-docx')
-    expect(Object.keys(rootPackageLock.packages)).not.toContain('node_modules/image-size')
+    const docxClosure = lockedRuntimeClosure(rootPackageLock.packages, 'node_modules/docx')
+    expect(docxClosure.some(key => /(?:^|\/)node_modules\/image-size$/.test(key))).toBe(false)
+    expect(rootPackage.dependencies).not.toHaveProperty('image-size')
+    // The admitted PPTX generator uses its own locked image dimension helper;
+    // that does not make it part of the pure DOCX generator.
+    expect(lockedRuntimeClosure(rootPackageLock.packages, 'node_modules/pptxgenjs'))
+      .toContain('node_modules/image-size')
     expect(docxImports).not.toMatch(/node:child_process|packages\/runtime-go|provider|mcp/i)
     expect(docxSource).not.toMatch(/pandoc|libreoffice|html-to-docx/i)
   })

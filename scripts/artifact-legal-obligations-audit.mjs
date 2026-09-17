@@ -108,10 +108,11 @@ export const REQUIRED_PRODUCT_LICENSE_TEXT = Object.freeze([
 export const REQUIRED_PRODUCT_LICENSE_SHA256 =
   '339d7dd55119d76a0286d2be28868671e8905ad65df2967324a1b75db8d1f7a8'
 
-// Bind the complete legally reviewed notice without turning third-party product
-// identity or research history into a canonical production-code vocabulary.
+// Bind the complete reviewed notice, including the already recorded Office
+// generation dependency inventory. Keep this expected digest independent of
+// the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '66671ab885458de62437bed11d67c8924d319df59958d7aa6dc1149614911f92'
+  '1cb4aef282d61bc32bc87e6296df30a78d880f21d9af12746a5d3b6b1494cc9b'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 

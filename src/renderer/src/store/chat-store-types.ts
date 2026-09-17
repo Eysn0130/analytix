@@ -26,6 +26,7 @@ import type {
 } from '@shared/app-settings'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import type { ModelReasoningEffort } from '@shared/app-settings'
+import type { ComposerDraft } from './composer-drafts'
 
 export type QueuedUserMessage = {
   id: string
@@ -196,6 +197,8 @@ export type ChatState = {
   turnDurationByUserId: Record<string, number>
   inspectorSelectedId: string | null
   composerModel: string
+  composerDrafts: Record<string, ComposerDraft>
+  updateComposerDraft: (key: string, update: (draft: ComposerDraft) => ComposerDraft) => void
   composerProviderId: string
   composerPickList: string[]
   composerModelGroups: ModelProviderModelGroup[]

@@ -28,6 +28,7 @@ import {
 } from '../agent/accepted-final-projection-receipt'
 import { getProvider } from '../agent/registry'
 import { projectToolEventForRenderer } from '../agent/analytix-mapper'
+import { generatedArtifactMetadataSchema } from '../../../../packages/runtime/src/contracts/generated-artifact'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
@@ -442,7 +443,7 @@ export function looksLikeActiveTurnError(error: unknown): boolean {
 export function isCodeThread(
   thread: NormalizedThread,
   clawChannels: ClawImChannelV1[] = [],
-  writeRegistry?: WriteThreadRegistry
+  _writeRegistry?: WriteThreadRegistry
 ): boolean {
   const workspace = normalizeWorkspaceRoot(thread.workspace)
   return Boolean(workspace) &&
@@ -450,7 +451,6 @@ export function isCodeThread(
     !isInternalTemporaryWorkspace(thread.workspace) &&
     !isClawWorkspacePath(thread.workspace) &&
     !isClawThread(thread, clawChannels) &&
-    !isWriteThreadId(thread.id, writeRegistry) &&
     !isSddAssistantThread(thread)
 }
 
@@ -477,7 +477,7 @@ function notifyWriteWorkspaceFileRefresh(
   get: () => ChatState,
   event?: Pick<ToolEventPayload, 'filePath' | 'status' | 'toolKind'>
 ): void {
-  if (get().route !== 'write') return
+  if (get().route !== 'write' && get().route !== 'chat') return
   if (event && (event.toolKind !== 'file_change' || event.status !== 'success')) return
 
   const writeState = useWriteWorkspaceStore.getState()
@@ -1624,6 +1624,13 @@ export function buildThreadEventSink(
       const projectedEvent = projectToolEventForRenderer(ev)
       if (!projectedEvent) return
       ev = projectedEvent
+      const artifact = ev.status === 'success' && ev.meta?.toolName === 'generate_office_document'
+        ? generatedArtifactMetadataSchema.safeParse(ev.meta.generatedArtifact)
+        : null
+      const artifactScope = { threadId: get().activeThreadId ?? '', workspace: get().workspaceRoot }
+      const shouldOpenArtifact = artifact?.success && artifactScope.threadId && artifactScope.workspace &&
+        !get().blocks.some(block => block.kind === 'tool' && block.status === 'success' &&
+          generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact).data?.artifactId === artifact.data.artifactId)
       invalidateBoundThreadDetail()
       flushPendingStreamingDeltas()
       notifyWriteWorkspaceFileRefresh(get, ev)
@@ -1687,6 +1694,14 @@ export function buildThreadEventSink(
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       })
+      if (shouldOpenArtifact && artifact?.success) {
+        // History hydration already contains the receipt and does not reopen
+        // objects. A newly completed live result opens through the same Core
+        // resolver as its card, with the original conversation scope retained.
+        void import('../office/open-generated-artifact').then(({ openGeneratedArtifact }) => {
+          if (isCurrentStream()) void openGeneratedArtifact(artifact.data.artifactId, artifactScope)
+        })
+      }
     },
     onCompaction: (ev) => {
       if (!isCurrentStream()) return

@@ -1,0 +1,17 @@
+{
+  "canvasWorkspace": "Canvas & images",
+  "canvasLocalPreview": "Local · read-only",
+  "canvasReload": "Reload file",
+  "canvasOpen": "Open canvas or PNG",
+  "canvasThreadRequired": "Open a conversation in a project first.",
+  "canvasWorkspaceMismatch": "This file belongs to another project. Switch to that project to open it.",
+  "canvasPreviewFailed": "Preview unavailable. Check the file, plugin availability and access, then retry.",
+  "canvasPickHint": "Open a structured canvas or PNG locally. Viewing does not call a model or modify the file.",
+  "canvasObjects": "Objects ({{count}})",
+  "canvasSelectObject": "Select a node or relation",
+  "canvasSelectHint": "Select an object in the diagram or this list to inspect its original attributes and source records.",
+  "canvasAssumption": "This object is marked as an assumption.",
+  "canvasCopySelection": "Copy selected object information",
+  "canvasCopied": "Copied to clipboard.",
+  "canvasCopyFailed": "Copy failed. Please retry."
+}

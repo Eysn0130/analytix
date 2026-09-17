@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
@@ -21,27 +22,37 @@ func (s runtimeSkillHTTPService) Skills() map[string]any {
 }
 
 func (h *runtimeServerHandler) skillCapabilityState() map[string]any {
-	return toolcatalogapp.SkillCapabilityState(h.skills)
+	return toolcatalogapp.SkillCapabilityState(h.currentSkillCatalog())
 }
 
 func (h *runtimeServerHandler) skillToolDiagnostics() map[string]any {
-	return toolcatalogapp.SkillToolDiagnostics(h.skills)
+	return toolcatalogapp.SkillToolDiagnostics(h.currentSkillCatalog())
 }
 
 func (h *runtimeServerHandler) skillResponse() map[string]any {
-	return toolcatalogapp.SkillResponse(h.skills)
+	return toolcatalogapp.SkillResponse(h.currentSkillCatalog())
 }
 
 func (h *runtimeServerHandler) runtimeSkillByName(name string) (map[string]any, bool) {
-	return toolcatalogapp.SkillByName(h.skills, name)
+	return toolcatalogapp.SkillByName(h.currentSkillCatalog(), name)
 }
 
 func (h *runtimeServerHandler) runtimeSkillIDs() []any {
-	return toolcatalogapp.SkillIDs(h.skills)
+	return toolcatalogapp.SkillIDs(h.currentSkillCatalog())
 }
 
 func (h *runtimeServerHandler) runtimeSkillEntryBody(skill map[string]any) (string, error) {
-	return toolcatalogapp.SkillEntryBody(h.skills, skill)
+	return toolcatalogapp.SkillEntryBody(h.currentSkillCatalog(), skill)
+}
+
+func (h *runtimeServerHandler) currentSkillCatalog() toolcatalogapp.SkillCatalog {
+	var hosted []toolcatalogapp.HostedOfficeSkill
+	if h.officePackageHost != nil {
+		for _, skill := range h.officePackageHost.Skills(context.Background()) {
+			hosted = append(hosted, toolcatalogapp.HostedOfficeSkill{PackageID: skill.Binding.PackageID, Snapshot: skill.Snapshot})
+		}
+	}
+	return toolcatalogapp.WithOfficeSkills(h.skills, hosted)
 }
 
 func (h *runtimeServerHandler) runtimeSkillSubagentPrompt(skill map[string]any, task string) (string, error) {

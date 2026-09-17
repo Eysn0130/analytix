@@ -21,6 +21,7 @@ import {
 import {
   FloatingComposerModelPicker,
   buildComposerModelMenuGroups,
+  composerModelDisplayLabel,
   calculateFloatingMenuPlacement,
   calculateFloatingSubmenuPlacement,
   composerModelCapabilityKind,
@@ -708,6 +709,56 @@ describe('FloatingComposer model controls', () => {
     expect(html).toContain('High')
   })
 
+  it('scopes friendly model labels to the selected provider and keeps unknown IDs literal', () => {
+    const groups = [
+      { providerId: 'official', modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash' } },
+      { providerId: 'custom' }
+    ]
+    expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'official', 'Auto')).toBe('V4.1 Flash')
+    expect(composerModelDisplayLabel(groups, 'deepseek-v4-flash', 'custom', 'Auto')).toBe('V4.1 Flash')
+    expect(composerModelDisplayLabel(groups, 'future-model', 'official', 'Auto')).toBe('future-model')
+    expect(composerModelDisplayLabel(groups, 'constructor', 'official', 'Auto')).toBe('constructor')
+    expect(composerModelDisplayLabel(groups, '__proto__', 'official', 'Auto')).toBe('__proto__')
+  })
+
+  it.each([true, false])('preserves the unavailable provider identity when catalog has other providers: %s', (hasOtherProvider) => {
+    const html = renderToStaticMarkup(createElement(FloatingComposerModelPicker, {
+      compact: true, mode: 'select', composerModel: 'deepseek-v4-flash', composerProviderId: 'missing-local',
+      composerPickList: ['deepseek-v4-flash'],
+      composerModelGroups: hasOtherProvider ? [{ providerId: 'official', label: 'DeepSeek',
+        modelIds: ['deepseek-v4-flash'], modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash' } }] : [],
+      canChangeModel: true, onComposerModelChange: () => undefined
+    }))
+    expect(html).toContain('deepseek-v4-flash')
+    expect(html).toContain('V4.1 Flash')
+    expect(html).toContain('missing-local')
+    expect(html).not.toContain('DeepSeek · V4.1 Flash')
+  })
+
+  it.each(['select', 'combobox'] as const)('renders a concise %s label with the API identity accessible', (mode) => {
+    const html = renderToStaticMarkup(createElement(FloatingComposerModelPicker, {
+      compact: true, mode, composerModel: 'deepseek-v4-flash', composerProviderId: 'official',
+      composerPickList: ['deepseek-v4-flash'],
+      composerModelGroups: [{ providerId: 'official', label: 'DeepSeek',
+        modelIds: ['deepseek-v4-flash'], modelLabels: { 'deepseek-v4-flash': 'V4.1 Flash' } }],
+      canChangeModel: true, onComposerModelChange: () => undefined
+    }))
+    expect(html).toContain('>V4.1 Flash</span>')
+    expect(html).toContain('DeepSeek · V4.1 Flash · deepseek-v4-flash')
+  })
+
+  it.each(['select', 'combobox'] as const)('shows only the selected model and reasoning in the %s control', (mode) => {
+    const html = renderToStaticMarkup(createElement(FloatingComposerModelPicker, {
+      compact: true, mode, composerModel: 'deepseek-v4-flash', composerProviderId: 'deepseek',
+      composerPickList: ['deepseek-v4-flash'], composerModelGroups: [{
+        providerId: 'deepseek', label: 'DeepSeek', endpointKind: 'local', modelIds: ['deepseek-v4-flash']
+      }], canChangeModel: true, onComposerModelChange: () => undefined
+    }))
+    expect(html).toContain('V4.1 Flash</span>')
+    expect(html).not.toMatch(/>Local service<|>本地服务</)
+    expect(html).toContain('deepseek-v4-flash')
+  })
+
   it('keeps provider setup reachable when no chat providers are available', () => {
     const html = renderToStaticMarkup(
       createElement(FloatingComposerModelPicker, {
@@ -722,7 +773,7 @@ describe('FloatingComposer model controls', () => {
       })
     )
 
-    expect(html).toContain('Set up provider')
+    expect(html).toContain('Unconfigured')
     expect(html).toContain('aria-haspopup="menu"')
     expect(html).not.toContain('disabled=""')
   })
@@ -751,16 +802,16 @@ describe('FloatingComposer model controls', () => {
 
     expect(html).toContain('deepseek-v4-flash')
     expect(html).toContain('aria-haspopup="menu"')
-    expect(html).not.toContain('Set up provider')
+    expect(html).not.toContain('Unconfigured')
   })
 
-  it('does not treat default fallback models as configured providers', () => {
+  it.each([{ models: ['deepseek-v4-pro', 'deepseek-v4-flash'] }, { models: ['orphan-custom-model'] }])('does not treat fallback catalog $models as configured providers', ({ models }) => {
     const html = renderToStaticMarkup(
       createElement(FloatingComposerModelPicker, {
         compact: false,
         mode: 'select',
-        composerModel: 'deepseek-v4-pro',
-        composerPickList: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+        composerModel: models[0],
+        composerPickList: models,
         composerModelGroups: [],
         canChangeModel: true,
         onComposerModelChange: () => undefined,
@@ -768,7 +819,7 @@ describe('FloatingComposer model controls', () => {
       })
     )
 
-    expect(html).toContain('Set up provider')
+    expect(html).toContain('Unconfigured')
     expect(html).not.toContain('deepseek-v4-pro')
   })
 })
@@ -957,6 +1008,21 @@ describe('FloatingComposer capability controls', () => {
     expect(floatingComposerSource).toContain('const showVoiceDictation = speechToTextEnabled')
     expect(floatingComposerSource).not.toMatch(/speechToTextSettings\.(?:baseUrl|model)/u)
     expect(floatingComposerSource).not.toContain('speechToText: speechToTextSettings')
+  })
+
+  it('enables quote-only sending while preserving the runtime readiness gate', () => {
+    useChatStore.setState({ activeThreadId: 'thr_quote', activeThreadGoal: null, route: 'chat', workspaceRoot: '/workspace/analytix' })
+    const render = (count: number, ready = true): string => renderToStaticMarkup(createElement(FloatingComposer, {
+      input: '', setInput: () => undefined, mode: 'agent', setMode: () => undefined,
+      busy: false, runtimeReady: ready, hasActiveThread: true,
+      composerModel: '', composerPickList: [], onComposerModelChange: () => undefined,
+      queuedMessages: [], onRemoveQueuedMessage: () => undefined, onSend: () => undefined,
+      onInterrupt: () => undefined, documentReferenceCount: count
+    })).match(/<button[^>]*ds-composer-primary-action-button[^>]*>/)?.[0] ?? ''
+    expect(render(1)).toContain('ds-composer-primary-action-button')
+    expect(render(1)).not.toContain('disabled=""')
+    expect(render(0)).toContain('disabled=""')
+    expect(render(1, false)).toContain('disabled=""')
   })
 
   it('renders the ProseMirror composer host instead of the legacy overlay textarea', () => {

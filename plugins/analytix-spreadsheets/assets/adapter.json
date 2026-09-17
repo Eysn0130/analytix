@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "adapter": "zeta-office",
+  "documentKind": "xlsx",
+  "openFormats": [
+    "xlsx"
+  ],
+  "readOnly": true,
+  "protocolVersion": 1
+}
