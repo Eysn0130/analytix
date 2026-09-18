@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WriteRetrievalResult } from '@shared/write-retrieval'
 import type { AppSettingsV1 } from '@shared/app-settings'
-import type { NormalizedThread } from '../agent/types'
+import type { NormalizedThread, ThreadEventSink } from '../agent/types'
 import type { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
 
 // Only presentation leaves and external IPC/Provider I/O are replaced. The
@@ -12,7 +12,7 @@ import type { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
 const io = vi.hoisted(() => ({
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
   document: null as { onSubmitPrompt: (value: string) => void } | null,
-  provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn() },
+  provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn() },
   retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
   t: (key: string) => key
 }))
@@ -41,6 +41,7 @@ vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => n
 
 vi.mock('./workbench/ChatTimelineIsland', () => ({ ChatTimelineIsland: () => null, useDevPreviewUrls: () => [] }))
 import { Workbench } from './Workbench'
+import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
 import { useChatStore } from '../store/chat-store'
 import { useNativeReferenceStore, type CanvasNativeReference } from '../office/native-reference-store'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
@@ -49,6 +50,9 @@ import { useGuiPlanStore } from '../plan/plan-store'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { composerDraftKey } from '../store/composer-drafts'
 import { clearBusyWatchdog, stopTurnCompletionPoll } from '../store/chat-store-schedulers'
+import * as schedulers from '../store/chat-store-schedulers'
+import * as runtime from '../store/chat-store-runtime'
+import { appendActiveStreamDeltas, clearActiveStream, getActiveStreamSnapshotFor } from '../thread/streaming/active-stream-store'
 
 const workspace = '/synthetic/canvas-send'
 const thread = (id: string): NormalizedThread => ({ id, title: id,
@@ -83,6 +87,7 @@ beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
   vi.resetAllMocks()
   streams = []
+  clearActiveStream()
   io.document = null
   useWorkspaceTabsStore.setState(useWorkspaceTabsStore.getInitialState(), true)
   localStorage.clear()
@@ -121,6 +126,7 @@ afterEach(async () => {
   })
   clearBusyWatchdog()
   stopTurnCompletionPoll()
+  clearActiveStream()
   element.remove()
   vi.restoreAllMocks()
 })
@@ -374,3 +380,298 @@ async function switchThread() {
     currentTurnId: null, currentTurnUserId: null, error: 'new-thread-error' }))
   await act(async () => composer().setInput('new thread draft'))
 }
+
+
+describe('Reaudit: actual selectThread A-B-A with a delayed send receipt', () => {
+  it.each(['success', 'failure'])('keeps a newer running snapshot when the old %s arrives', async outcome => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => ({
+      thread: thread(id), blocks: id === 'a' ? [{ id: 'newer-user-a', kind: 'user', text: 'newer request' }] : [],
+      latestSeq: 12, threadStatus: id === 'a' ? 'running' : 'idle',
+      latestTurnId: id === 'a' ? 'newer-turn-a' : null,
+      latestUserMessageId: id === 'a' ? 'newer-user-a' : null,
+      turnDurationByUserId: {}
+    }))
+    await send()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+    invalidateThreadDetailCache('b')
+    await act(async () => useChatStore.getState().selectThread('b'))
+    expect(useChatStore.getState().activeThreadId).toBe('b')
+    invalidateThreadDetailCache('a')
+    await act(async () => useChatStore.getState().selectThread('a'))
+    expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', busy: true,
+      currentTurnId: 'newer-turn-a', currentTurnUserId: 'newer-user-a' })
+    await act(async () => composer().setInput('new input after returning'))
+    const snapshot = useChatStore.getState()
+    if (outcome === 'success') receipt.resolve({ turnId: 'old-turn-a', userMessageItemId: 'old-user-a' })
+    else receipt.reject(new Error('old request failed'))
+    await settle()
+    const state = useChatStore.getState()
+    console.info('REAUDIT_OBSERVATION', JSON.stringify({scenario: 'newer-running', outcome,
+      expected: {turn: snapshot.currentTurnId, user: snapshot.currentTurnUserId, busy: snapshot.busy, error:snapshot.error},
+      actual: {turn:state.currentTurnId,user:state.currentTurnUserId,busy:state.busy,error:state.error}}))
+    expect(state.currentTurnId).toBe('newer-turn-a')
+    expect(state.currentTurnUserId).toBe('newer-user-a')
+    expect(state.busy).toBe(true)
+    expect(state.error).toBe(snapshot.error)
+    expect(state.blocks).toEqual(snapshot.blocks)
+    expect(draft().input).toBe('new input after returning')
+  })
+  it('does not resurrect a completed turn after actual selectThread loaded its idle snapshot', async () => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => ({
+      thread: { ...thread(id), status: 'idle' },
+      blocks: id === 'a' ? [
+        { id: 'old-user-a', kind: 'user', text: 'Discuss selected objects', meta: {turnId: 'old-turn-a'} },
+        { id: 'old-answer-a', kind: 'assistant', text: 'Completed before HTTP ack', meta: {turnId: 'old-turn-a'} }
+      ] : [{ id: 'b-user', kind: 'user', text: 'Other completed conversation' }],
+      latestSeq: 12, threadStatus: 'idle', latestTurnId: id === 'a' ? 'old-turn-a' : null,
+      latestUserMessageId: id === 'a' ? 'old-user-a' : null, turnDurationByUserId: { 'old-user-a': 20 }
+    }))
+    await send()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+    invalidateThreadDetailCache('b')
+    await act(async () => useChatStore.getState().selectThread('b'))
+    expect(useChatStore.getState().activeThreadId).toBe('b')
+    invalidateThreadDetailCache('a')
+    await act(async () => useChatStore.getState().selectThread('a'))
+    expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', busy: false,
+      currentTurnId: null, currentTurnUserId: null })
+    const snapshot = useChatStore.getState()
+    receipt.resolve({ turnId: 'old-turn-a', userMessageItemId: 'old-user-a' })
+    await settle()
+    const state = useChatStore.getState()
+    console.info('REAUDIT_OBSERVATION', JSON.stringify({scenario: 'completed-before-ack',
+      expected: {turn:null,user:null,busy:false},actual: {turn:state.currentTurnId,user:state.currentTurnUserId,busy:state.busy}}))
+    expect(state.currentTurnId).toBeNull()
+    expect(state.currentTurnUserId).toBeNull()
+    expect(state.busy).toBe(false)
+    expect(state.turnDurationByUserId).toEqual(snapshot.turnDurationByUserId)
+  })
+})
+
+
+const currentSink = (): ThreadEventSink => io.provider.subscribeThreadEvents.mock.calls.at(-1)![2]
+function runningDetail(id: string) {
+  return { thread: thread(id), blocks: [{ id: `newer-user-${id}`, kind: 'user' as const, text: 'Newer request' }],
+    latestSeq: 20, threadStatus: 'running', latestTurnId: `newer-turn-${id}`,
+    latestUserMessageId: `newer-user-${id}`, turnDurationByUserId: {} }
+}
+async function select(id: string) {
+  invalidateThreadDetailCache(id)
+  await act(async () => useChatStore.getState().selectThread(id))
+  expect(useChatStore.getState().activeThreadId).toBe(id)
+}
+function completedDetail(id: string) {
+  return { thread: { ...thread(id), status: 'idle' as const }, blocks: [
+    { id: 'stable-user', kind: 'user' as const, text: 'Discuss selected objects', meta: { turnId: 'stable-turn' } },
+    { id: 'answer', kind: 'assistant' as const, text: 'Completed answer', meta: { turnId: 'stable-turn' } }
+  ], latestSeq: 20, threadStatus: 'idle', latestTurnId: 'stable-turn',
+  latestUserMessageId: 'stable-user', turnDurationByUserId: { 'stable-user': 50 } }
+}
+function receiptSideEffects() {
+  return { arm: vi.spyOn(runtime, 'armBusyWatchdog'), clear: vi.spyOn(schedulers, 'clearBusyWatchdog'),
+    poll: vi.spyOn(runtime, 'syncTurnCompletionPoll'), subscriptions: io.provider.subscribeThreadEvents.mock.calls.length,
+    refreshes: io.provider.listThreads.mock.calls.length }
+}
+function expectNoReceiptSideEffects(before: ReturnType<typeof receiptSideEffects>) {
+  expect(before.arm).not.toHaveBeenCalled()
+  expect(before.clear).not.toHaveBeenCalled()
+  expect(before.poll).not.toHaveBeenCalled()
+  expect(io.provider.subscribeThreadEvents).toHaveBeenCalledTimes(before.subscriptions)
+  expect(io.provider.listThreads).toHaveBeenCalledTimes(before.refreshes)
+}
+
+describe('Workbench receipt ownership compatibility', () => {
+  it.each(['agent', 'plan', 'no-user-id'] as const)('accepts SSE-normalized IDs before the %s HTTP acknowledgement', async mode => {
+    const receipt = deferred<{ turnId: string; userMessageItemId?: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.listThreads.mockResolvedValue([{ ...thread('a'), title: 'Current synthetic conversation' },
+      { ...thread('b'), title: 'Other synthetic conversation' }])
+    await addAssets()
+    if (mode === 'plan') await act(async () => composer().setMode('plan'))
+    await send()
+    const temporaryId = useChatStore.getState().currentTurnUserId!
+    const started = useChatStore.getState().turnStartedAtByUserId[temporaryId]
+    const sink = currentSink()
+    await act(async () => {
+      sink.onTurnStarted?.({ turnId: 'stable-turn', threadId: 'a', seq: 2, createdAt: new Date().toISOString() })
+      sink.onUserMessage({ itemId: 'stable-user', turnId: 'stable-turn', text: 'Discuss selected objects', createdAt: new Date().toISOString() })
+      // The stream store retains sequencing, but intentionally withholds raw text.
+      appendActiveStreamDeltas({ threadId: 'a', turnId: 'stable-turn', lastSeq: 3 })
+    })
+    expect(useChatStore.getState()).toMatchObject({ busy: true, currentTurnId: 'stable-turn', currentTurnUserId: 'stable-user' })
+    const stream = getActiveStreamSnapshotFor('a', 'stable-turn')
+    expect(stream).toMatchObject({ threadId: 'a', turnId: 'stable-turn', lastSeq: 3, liveAssistant: '' })
+    const arm = vi.spyOn(runtime, 'armBusyWatchdog')
+    receipt.resolve({ turnId: 'stable-turn', ...(mode === 'no-user-id' ? {} : { userMessageItemId: 'stable-user' }) })
+    await settle()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(useChatStore.getState()).toMatchObject({ busy: true, currentTurnId: 'stable-turn', currentTurnUserId: 'stable-user' })
+    expect(useChatStore.getState().blocks.filter(block => block.kind === 'user')).toHaveLength(1)
+    expect(getActiveStreamSnapshotFor('a', 'stable-turn')).toEqual(stream)
+    expect(useChatStore.getState().turnStartedAtByUserId['stable-user']).toBe(started)
+    expect(useChatStore.getState().turnStartedAtByUserId[temporaryId]).toBeUndefined()
+    expect(arm).toHaveBeenCalledOnce()
+    expect(draft().input).toBe('')
+    expect(draft().attachments).toEqual([])
+    expect(draft().fileReferences).toEqual([])
+    expect(useNativeReferenceStore.getState().references).toEqual([])
+  })
+
+  it('acknowledges a completed real SSE turn without reviving its state, stream or timers', async () => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => completedDetail(id))
+    await addAssets()
+    await send()
+    const sink = currentSink()
+    await act(async () => {
+      sink.onUserMessage({ itemId: 'stable-user', turnId: 'stable-turn', text: 'Discuss selected objects', createdAt: new Date().toISOString() })
+      await sink.onTurnComplete({ threadId: 'a', turnId: 'stable-turn', seq: 20 })
+    })
+    await settle()
+    const snapshot = useChatStore.getState()
+    expect(snapshot).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
+    const stream = getActiveStreamSnapshotFor('a')
+    const effects = receiptSideEffects()
+    receipt.resolve({ turnId: 'stable-turn', userMessageItemId: 'stable-user' })
+    await settle()
+    const state = useChatStore.getState()
+    expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
+    expect(state.blocks).toEqual(snapshot.blocks)
+    expect(state.turnDurationByUserId).toEqual(snapshot.turnDurationByUserId)
+    expect(getActiveStreamSnapshotFor('a')).toEqual(stream)
+    expectNoReceiptSideEffects(effects)
+    expect(draft().input).toBe('')
+    expect(draft().attachments).toEqual([])
+    expect(useNativeReferenceStore.getState().references).toEqual([])
+  })
+
+  it.each(['success', 'failure'])('keeps the actual B subscription and clears only acknowledged A assets on old %s', async outcome => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => runningDetail(id))
+    await addAssets()
+    const originalDraft = structuredClone(draft())
+    await send()
+    await select('b')
+    await act(async () => composer().setInput('B must remain untouched'))
+    const snapshot = useChatStore.getState()
+    const stream = getActiveStreamSnapshotFor('b')
+    const effects = receiptSideEffects()
+    if (outcome === 'success') receipt.resolve({ turnId: 'old-turn', userMessageItemId: 'old-user' })
+    else receipt.reject(new Error('old failure'))
+    await settle()
+    expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'b', busy: true,
+      currentTurnId: snapshot.currentTurnId, currentTurnUserId: snapshot.currentTurnUserId, error: snapshot.error })
+    expect(useChatStore.getState().blocks).toEqual(snapshot.blocks)
+    expect(getActiveStreamSnapshotFor('b')).toEqual(stream)
+    expectNoReceiptSideEffects(effects)
+    expect(draft('b').input).toBe('B must remain untouched')
+    if (outcome === 'success') {
+      expect(draft('a').input).toBe('')
+      expect(draft('a').attachments).toEqual([])
+    } else expect(draft('a')).toEqual(originalDraft)
+  })
+
+  it.each(['success', 'failure'])('does not migrate a stale stream or touch the new watchdog/poll after A-B-A %s', async outcome => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => runningDetail(id))
+    await send()
+    const oldPending = useChatStore.getState().currentTurnId!
+    const oldStream = getActiveStreamSnapshotFor('a', oldPending)
+    await select('b')
+    await select('a')
+    const stream = getActiveStreamSnapshotFor('a')
+    const effects = receiptSideEffects()
+    const timing = useChatStore.getState().turnStartedAtByUserId
+    const queue = useChatStore.getState().queuedMessages
+    if (outcome === 'success') receipt.resolve({ turnId: 'old-turn', userMessageItemId: 'old-user' })
+    else receipt.reject(new Error('old failure'))
+    await settle()
+    expect(getActiveStreamSnapshotFor('a')).toEqual(stream)
+    expect(getActiveStreamSnapshotFor('a', oldPending)).toEqual(oldStream)
+    expect(useChatStore.getState().turnStartedAtByUserId).toEqual(timing)
+    expect(useChatStore.getState().queuedMessages).toEqual(queue)
+    expectNoReceiptSideEffects(effects)
+  })
+
+  it('does not adopt a reselected snapshot even when its stable IDs match the late receipt', async () => {
+    const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(receipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => ({ ...runningDetail(id),
+      latestTurnId: 'stable-turn', latestUserMessageId: 'stable-user',
+      blocks: [{ id: 'stable-user', kind: 'user', text: 'Authoritative snapshot', meta: { turnId: 'stable-turn' } }] }))
+    await send()
+    await select('b')
+    await select('a')
+    const snapshot = useChatStore.getState()
+    const effects = receiptSideEffects()
+    receipt.resolve({ turnId: 'stable-turn', userMessageItemId: 'stable-user' })
+    await settle()
+    expect(useChatStore.getState().blocks).toEqual(snapshot.blocks)
+    expect(useChatStore.getState().turnStartedAtByUserId).toEqual(snapshot.turnStartedAtByUserId)
+    expectNoReceiptSideEffects(effects)
+    expect(draft().input).toBe('')
+  })
+
+  it.each(['success', 'failure'])('keeps a newer send owner on the same subscription and millisecond after old %s', async outcome => {
+    vi.spyOn(Date, 'now').mockReturnValue(1789707000000)
+    const oldReceipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    const newReceipt = deferred<{ turnId: string; userMessageItemId: string }>()
+    io.provider.sendUserMessage.mockReturnValueOnce(oldReceipt.promise).mockReturnValueOnce(newReceipt.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => completedDetail(id))
+    await send()
+    const oldPending = useChatStore.getState().currentTurnId
+    const sink = currentSink()
+    await act(async () => {
+      sink.onUserMessage({ itemId: 'stable-user', turnId: 'stable-turn', text: 'Discuss selected objects' })
+      await sink.onTurnComplete({ threadId: 'a', turnId: 'stable-turn', seq: 20 })
+    })
+    await settle()
+    expect(useChatStore.getState().busy).toBe(false)
+    let pendingNew!: Promise<boolean>
+    await act(async () => { pendingNew = useChatStore.getState().sendMessage('Newer ordinary request', 'agent') })
+    await settle()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledTimes(2)
+    // Even equal optimistic IDs cannot give the first operation ownership again.
+    expect(useChatStore.getState().currentTurnId).toBe(oldPending)
+    const snapshot = useChatStore.getState()
+    const effects = receiptSideEffects()
+    if (outcome === 'success') oldReceipt.resolve({ turnId: 'stable-turn', userMessageItemId: 'stable-user' })
+    else oldReceipt.reject(new Error('Old request rejected after a newer send'))
+    await settle()
+    expect(useChatStore.getState()).toMatchObject({ busy: true, currentTurnId: snapshot.currentTurnId,
+      currentTurnUserId: snapshot.currentTurnUserId, error: snapshot.error })
+    expect(useChatStore.getState().blocks).toEqual(snapshot.blocks)
+    expectNoReceiptSideEffects(effects)
+    newReceipt.resolve({ turnId: 'new-turn', userMessageItemId: 'new-user' })
+    await act(async () => { expect(await pendingNew).toBe(true) })
+    expect(useChatStore.getState()).toMatchObject({ busy: true, currentTurnId: 'new-turn', currentTurnUserId: 'new-user' })
+  })
+
+  it.each(['resolve', 'reject'])('fences a receipt-triggered refresh that finishes after A-B-A (%s)', async outcome => {
+    const listing = deferred<NormalizedThread[]>()
+    io.provider.listThreads.mockReturnValueOnce(listing.promise)
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => runningDetail(id))
+    await send()
+    expect(io.provider.listThreads).toHaveBeenCalledOnce()
+    await select('b')
+    await select('a')
+    await act(async () => composer().setInput('Newer draft during old refresh'))
+    const snapshot = useChatStore.getState()
+    const effects = receiptSideEffects()
+    if (outcome === 'resolve') listing.resolve([{ ...thread('a'), title: 'STALE LIST TITLE' }, thread('b')])
+    else listing.reject(new Error('stale refresh failed'))
+    await settle()
+    expect(useChatStore.getState().threads).toEqual(snapshot.threads)
+    expect(useChatStore.getState()).toMatchObject({ runtimeConnection: snapshot.runtimeConnection,
+      activeThreadId: 'a', currentTurnId: snapshot.currentTurnId, currentTurnUserId: snapshot.currentTurnUserId, error: snapshot.error })
+    expectNoReceiptSideEffects(effects)
+    expect(draft().input).toBe('Newer draft during old refresh')
+  })
+})

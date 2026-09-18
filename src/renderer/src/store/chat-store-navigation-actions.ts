@@ -140,9 +140,12 @@ async function reconcileThreadListSideEffects(
     sidebarThreads: NormalizedThread[]
     replaceThreads: boolean
     allowClearSelection: boolean
+    isCurrent?: () => boolean
   }
 ): Promise<{ displayThreads: NormalizedThread[]; enrichedThreads: NormalizedThread[] }> {
   const { provider, replaceThreads, allowClearSelection } = options
+  const cancelled = () => options.isCurrent?.() === false
+  if (cancelled()) return { displayThreads: [], enrichedThreads: [] }
   const rawThreads = filterRevokedPublicProjectionThreads(options.rawThreads)
   const sddThreadRegistry = readSddThreadRegistry()
   const sidebarThreads = filterRevokedPublicProjectionThreads(options.sidebarThreads)
@@ -151,7 +154,6 @@ async function reconcileThreadListSideEffects(
     replaceThreads ? sidebarThreads : mergeThreadsById(get().threads, sidebarThreads),
     readThreadForkRegistry()
   )
-  saveThreadForkRegistry(forkRegistry)
   const enrichedThreads = enrichThreadsWithForkInfo(sidebarThreads, forkRegistry)
 
   const activeId = get().activeThreadId
@@ -200,6 +202,8 @@ async function reconcileThreadListSideEffects(
   }
 
   const writeWorkspaceRoots = await readWriteWorkspaceRoots()
+  if (cancelled()) return { displayThreads: [], enrichedThreads: [] }
+  saveThreadForkRegistry(forkRegistry)
   displayThreads = filterRevokedPublicProjectionThreads(displayThreads)
   const writeRegistry = hydrateWriteThreadRegistry(
     displayThreads,
@@ -268,7 +272,7 @@ async function reconcileThreadListSideEffects(
   cancelScheduledThreadDetailPrewarm = schedulePrewarmThreadDetails(provider, displayThreads, {
     activeThreadId: get().activeThreadId,
     concurrency: 2,
-    shouldSkip: () => get().busy || get().runtimeConnection !== 'ready'
+    shouldSkip: () => cancelled() || get().busy || get().runtimeConnection !== 'ready'
   })
   if (activeThreadIsManagedInCodeRoute) {
     await get().openCode()
@@ -282,6 +286,7 @@ async function reconcileThreadListSideEffects(
 export function createNavigationActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'openCode' | 'openWrite' | 'ensureWriteThreadForWorkspace' | 'createWriteThread' | 'selectWriteThread' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshCaseProjects' | 'loadCaseProjectThreads' | 'setCaseProjectExpanded' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
+  const caseProjectLoadOwners = new Map<string, symbol>()
   let runtimeProbeGeneration = 0
   let activeUserRuntimeProbeGeneration = 0
   let runtimeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -859,11 +864,13 @@ export function createNavigationActions(
     }
 	  },
 
-	  refreshCaseProjects: async () => {
+	  refreshCaseProjects: async (options = {}) => {
+      if (options.isCurrent?.() === false) return
 	    if (get().runtimeConnection !== 'ready') return
 	    const p = getProvider()
 	    if (typeof p.listCaseProjects !== 'function') return
 		    const caseProjectResult = await p.listCaseProjects(caseProjectRefreshLimit)
+        if (options.isCurrent?.() === false) return
 		    const caseProjects = Array.isArray(caseProjectResult)
 		      ? caseProjectResult
 		      : caseProjectResult.caseProjects
@@ -882,8 +889,8 @@ export function createNavigationActions(
 		    if (caseProjectIndexStatus === 'building' && caseProjectIndexRefreshTimer == null) {
 		      caseProjectIndexRefreshTimer = setTimeout(() => {
 		        caseProjectIndexRefreshTimer = null
-		        if (get().runtimeConnection === 'ready') {
-		          void get().refreshCaseProjects().catch(() => {
+		        if (options.isCurrent?.() !== false && get().runtimeConnection === 'ready') {
+		          void get().refreshCaseProjects(options).catch(() => {
 		            /* refreshCaseProjects stores state on success */
 		          })
 		        }
@@ -893,17 +900,22 @@ export function createNavigationActions(
 
 	  loadCaseProjectThreads: async (caseProjectId, options = {}) => {
 	    const projectId = caseProjectId.trim()
+      if (options.isCurrent?.() === false) return
 	    if (!projectId || get().runtimeConnection !== 'ready') return
 	    const p = getProvider()
 	    if (typeof p.listCaseProjectThreads !== 'function') return
 	    if (!options.force && get().caseProjectThreadsById[projectId]) return
 	    if (get().caseProjectLoadingById[projectId]) return
-	    set((s) => ({
+	    const loadOwner = Symbol('case-project-load')
+      caseProjectLoadOwners.set(projectId, loadOwner)
+      const isCurrent = () => caseProjectLoadOwners.get(projectId) === loadOwner && options.isCurrent?.() !== false
+      set((s) => ({
 	      caseProjectLoadingById: { ...s.caseProjectLoadingById, [projectId]: true },
 	      caseProjectErrorsById: { ...s.caseProjectErrorsById, [projectId]: null }
 	    }))
 	    try {
 	      const rawThreads = await p.listCaseProjectThreads(projectId, caseProjectThreadLoadLimit)
+        if (!isCurrent()) return
 	      const threads = rawThreads.map((thread) => ({
 	        ...thread,
 	        workspace: normalizeWorkspaceRoot(thread.workspace)
@@ -916,10 +928,12 @@ export function createNavigationActions(
 		          rawThreads: threads,
 		          sidebarThreads,
 		          replaceThreads: false,
-		          allowClearSelection: false
+		          allowClearSelection: false,
+              isCurrent
 		        }
 		      )
-		      set((s) => ({
+		      if (!isCurrent()) return
+          set((s) => ({
 		        caseProjectThreadsById: {
 		          ...s.caseProjectThreadsById,
 		          [projectId]: filterRevokedPublicProjectionThreads(enrichedThreads)
@@ -928,6 +942,7 @@ export function createNavigationActions(
 		        caseProjectErrorsById: { ...s.caseProjectErrorsById, [projectId]: null }
 		      }))
 	    } catch (error) {
+        if (!isCurrent()) return
 	      set((s) => ({
 	        caseProjectLoadingById: { ...s.caseProjectLoadingById, [projectId]: false },
 	        caseProjectErrorsById: {
@@ -935,7 +950,15 @@ export function createNavigationActions(
 	          [projectId]: formatRuntimeError(error)
 	        }
 	      }))
-	    }
+      } finally {
+        // Release only this request's loading marker, not a replacement load.
+        if (caseProjectLoadOwners.get(projectId) === loadOwner) {
+          caseProjectLoadOwners.delete(projectId)
+          if (get().caseProjectLoadingById[projectId]) {
+            set(state => ({ caseProjectLoadingById: { ...state.caseProjectLoadingById, [projectId]: false } }))
+          }
+        }
+      }
 	  },
 
 	  setCaseProjectExpanded: (caseProjectId, expanded) => {
@@ -952,7 +975,9 @@ export function createNavigationActions(
 	    }
 	  },
 
-	  refreshThreads: async () => {
+	  refreshThreads: async (options = {}) => {
+      const isCurrent = () => options.isCurrent?.() !== false
+      if (!isCurrent()) return
 	    if (get().runtimeConnection !== 'ready') return
 	    const p = getProvider()
 	    try {
@@ -972,13 +997,16 @@ export function createNavigationActions(
         } catch {
           listedThreads = []
         }
-        await get().refreshCaseProjects()
+        if (!isCurrent()) return
+        await get().refreshCaseProjects(options)
+        if (!isCurrent()) return
         const expandedProjectIds = Object.entries(get().caseProjectExpandedById)
           .filter(([, expanded]) => expanded)
           .map(([projectId]) => projectId)
         await Promise.all(expandedProjectIds.map((projectId) =>
-          get().loadCaseProjectThreads(projectId, { force: true })
+          get().loadCaseProjectThreads(projectId, { force: true, isCurrent })
         ))
+        if (!isCurrent()) return
         const retainedThreads = mergeThreadsById(
           get().threads,
           listedThreads
@@ -994,7 +1022,8 @@ export function createNavigationActions(
             rawThreads: retainedThreads,
             sidebarThreads: retainedSidebarThreads,
             replaceThreads: true,
-            allowClearSelection: false
+            allowClearSelection: false,
+            isCurrent
           }
         )
         return
@@ -1007,8 +1036,10 @@ export function createNavigationActions(
 	          includeArchived: true
 	        })
       } catch {
+        if (!isCurrent()) return
         rawThreads = await p.listThreads()
       }
+      if (!isCurrent()) return
       const threads = rawThreads.map((thread) => ({
         ...thread,
         workspace: normalizeWorkspaceRoot(thread.workspace)
@@ -1021,15 +1052,19 @@ export function createNavigationActions(
 	          rawThreads: threads,
 	          sidebarThreads,
 	          replaceThreads: true,
-	          allowClearSelection: true
+	          allowClearSelection: true,
+            isCurrent
 	        }
 	      )
 	    } catch (e) {
+        if (!isCurrent()) return
 	      const refreshError = formatRuntimeError(e)
 	      try {
 	        await p.connect()
+          if (!isCurrent()) return
 	        set({ error: refreshError })
 	      } catch (connectionError) {
+          if (!isCurrent()) return
 	        stopTurnCompletionPoll()
 	        set({
 	          runtimeConnection: 'offline',

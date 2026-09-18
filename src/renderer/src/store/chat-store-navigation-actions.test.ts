@@ -1267,3 +1267,91 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.runtimeConnection).toBe('offline')
   })
 })
+
+
+function deferredReceipt<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+async function settleReceipt() { for (let n = 0; n < 20; n++) await Promise.resolve() }
+
+describe('receipt-scoped navigation refresh', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    rendererRuntimeClient.invalidateSettings()
+    registryMock.getProvider.mockReset()
+  })
+  afterEach(() => {
+    rendererRuntimeClient.invalidateSettings()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+  it.each([true, false])('checks ownership after write-workspace I/O (current=%s)', async currentAfterRead => {
+    let current = true
+    const settings = deferredReceipt<Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>>()
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValue(settings.promise)
+    const provider = { listThreads: vi.fn(async () => [thread({ id: 'new', title: 'Fresh thread', workspace: '/synthetic/receipt' })]) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ threadSearch: '', showArchivedThreads: false })
+    const before = harness.state
+    const pending = harness.actions.refreshThreads({ isCurrent: () => current })
+    await settleReceipt()
+    expect(rendererRuntimeClient.getSettings).toHaveBeenCalledOnce()
+    current = currentAfterRead
+    settings.resolve({ write: { defaultWorkspaceRoot: '', activeWorkspaceRoot: '', workspaces: [] } } as unknown as Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>)
+    await pending
+    if (currentAfterRead) expect(harness.state.threads.some(value => value.id === 'new')).toBe(true)
+    else {
+      expect(harness.state).toEqual(before)
+      expect(harness.setCalls).toEqual([])
+    }
+  })
+  it.each(['resolved', 'rejected'])('does not change connection/error state after stale reconnect %s', async outcome => {
+    let current = true
+    const connection = deferredReceipt<void>()
+    const provider = { listThreads: vi.fn(async () => { throw new Error('Synthetic listing failure') }), connect: vi.fn(() => connection.promise) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ threadSearch: '', showArchivedThreads: false })
+    const before = harness.state
+    const pending = harness.actions.refreshThreads({ isCurrent: () => current })
+    await settleReceipt()
+    expect(provider.connect).toHaveBeenCalledOnce()
+    current = false
+    if (outcome === 'resolved') connection.resolve()
+    else connection.reject(new Error('Synthetic reconnect failure'))
+    await pending
+    expect(harness.state).toEqual(before)
+    expect(harness.setCalls).toEqual([])
+  })
+  it.each([true, false])('checks ownership of the case-summary response (current=%s)', async currentAfterRead => {
+    let current = true
+    const listing = deferredReceipt<never[]>()
+    registryMock.getProvider.mockReturnValue({ listCaseProjects: vi.fn(() => listing.promise) })
+    const harness = buildHarness({ caseProjects: [], caseProjectThreadsById: {}, caseProjectLoadingById: {}, caseProjectErrorsById: {}, caseProjectExpandedById: {} })
+    const pending = harness.actions.refreshCaseProjects({ isCurrent: () => current })
+    current = currentAfterRead
+    listing.resolve([])
+    await pending
+    expect(harness.setCalls).toHaveLength(currentAfterRead ? 1 : 0)
+  })
+  it.each(['resolved', 'rejected'])('releases only its loading marker after a stale case-thread %s response', async outcome => {
+    let current = true
+    const listing = deferredReceipt<NormalizedThread[]>()
+    registryMock.getProvider.mockReturnValue({ listCaseProjectThreads: vi.fn(() => listing.promise) })
+    const harness = buildHarness({ caseProjectThreadsById: {}, caseProjectLoadingById: {}, caseProjectErrorsById: {} })
+    const pending = harness.actions.loadCaseProjectThreads('synthetic-case', { force: true, isCurrent: () => current })
+    expect(harness.state.caseProjectLoadingById['synthetic-case']).toBe(true)
+    const before = harness.state.threads
+    current = false
+    if (outcome === 'resolved') listing.resolve([])
+    else listing.reject(new Error('Stale case-thread lookup'))
+    await pending
+    expect(harness.state.caseProjectLoadingById['synthetic-case']).toBe(false)
+    expect(harness.state.caseProjectErrorsById['synthetic-case']).toBeNull()
+    expect(harness.state.caseProjectThreadsById).toEqual({})
+    expect(harness.state.threads).toEqual(before)
+  })
+})

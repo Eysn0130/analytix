@@ -267,10 +267,10 @@ export type ChatState = {
   selectWorkspaceRoot: (workspaceRoot: string) => Promise<string | null>
   clearWorkspace: () => Promise<void>
 	  deleteWorkspace: (workspacePath: string) => Promise<void>
-	  refreshCaseProjects: () => Promise<void>
-	  loadCaseProjectThreads: (caseProjectId: string, options?: { force?: boolean }) => Promise<void>
+	  refreshCaseProjects: (options?: { isCurrent?: () => boolean }) => Promise<void>
+	  loadCaseProjectThreads: (caseProjectId: string, options?: { force?: boolean; isCurrent?: () => boolean }) => Promise<void>
 	  setCaseProjectExpanded: (caseProjectId: string, expanded: boolean) => void
-	  refreshThreads: () => Promise<void>
+	  refreshThreads: (options?: { isCurrent?: () => boolean }) => Promise<void>
   setThreadSearch: (query: string) => void
   setShowArchivedThreads: (show: boolean) => void
   createThread: (options?: {

@@ -9,7 +9,43 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：2026-09-17 实际发送链与案件授权组合
+## 当前接续：2026-09-17 回执归属修复 / 2026-09-18 UTC
+
+Status: **RECEIPT_SOURCE_CLOSED / REMOTE_SYNC_NOT_CLEARED**。本节随真实源码、测试一次提交，
+单父为 `d4650629f7d030b39430e08e7786e5fa5f938b7d`；准确新 SHA/tree 从当前 Git 和交付包
+`CANDIDATE.json` 读取，不另造自引用或纯状态提交。仍为原分支 / 原 Draft PR28。
+完整旧 bundle、160 提交、6380 跟踪文件和 42 项候选字节/模式均重新核验；不重建 Canvas。
+
+- 已将原报告三项真实 `selectThread('b')` → `selectThread('a')` 回归并入原 Workbench
+  测试，实际 23 PASS / 3 FAIL → 同 26 项全部 PASS。修复原发送 owner 的临时操作令牌、
+  订阅身份与运行轮次写权，不以线程 ID 相同授予旧成功/失败回执覆盖新快照的权限。
+- 原提交已确认仍返回成功、只清原快照；旧失败不得回滚新状态。合法 SSE 在 HTTP 前
+  规范化临时 ID（含 HTTP 不带 user ID）、完成、plan、Office、草稿晚输入均保持。
+  stream 迁移、watchdog、completion poll 及 refresh 后续 I/O 同样受归属约束。
+- 扩展测试又实际复现旧回执触发的列表 refresh 在 A→B→A 后写回；修复既有导航 owner
+  的异步边界和它自己的 loading 标记，不建立第二发送状态机或长期映射。
+- 当前 52 实际测试文件 / 798 PASS / 0 FAIL / 0 SKIP；其中原 Workbench 23 项保留、
+  该文件共 39 项。本轮新增 26 项（3 个原诊断 + 23 个配对兼容/副作用检查），不把
+  额外纳入的 40 个既有测试或旧 732 PASS 计为新测试。双 TS 配置、定向 lint、runtime
+  与 Electron main/preload/renderer 源码构建通过。确切命令、输入及失败分类见
+  [原 QA 页新增记录](../qa/canvas-product-loop-2026-09-17.md) 与交付包。
+
+**安全边界优先于下方历史同步路线**：本轮未取得原 OpenAI `create_tree` 安全阻断已
+解除的证据。没有普通 push、Git Data/contents 替代代码写入或新 SHA CI；不拆分、
+改编码、换接口/会话规避检查。原远端仍 `dde784437dc8563e84066629dd57f4a11fd9acc9`，
+base `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。受支持的只读/依赖下载不是同步许可。
+恢复必须先证明合法获准通路，保留准确出站检查与原 pre-push；否则保存新候选。
+
+当前确认的 R06 及相邻回归已在独立 Linux 源码范围闭合；交付新 bundle 给 Codex 的
+是合法同步/新 SHA CI、安全完整证据与独立原生资源边界，不是重新开发 Canvas。
+旧 CodeQL 37 high 未消除，Go/Rust 本轮未改未重跑；旧 Go 结果仅历史证据。
+不使用用户 Mac/旧凭据/真实案件；GUI/IME/共同 Office—Canvas—图片旅程、真实 Provider/
+media、RC、签名公证仍未验收。Codex 也不得绕过相同安全检查或默认拥有原生资源。
+
+唯一远端锚点仍是 comment `5709839864`；更新必须完整读取并保留原正文。不能在只取得
+截断正文时覆盖历史，也不能新建第二总账。下方内容为原时点历史，不覆盖本节边界。
+
+## 历史接续：2026-09-17 实际发送链与案件授权组合
 
 Status: **VERIFIED_SOURCE_BATCH / READ_FRESH_REMOTE_STATE**。本节与真实源码和测试一起提交，
 不另造状态提交。继续原分支 `codex/workbench-product-delivery-20260914` / Draft PR28。

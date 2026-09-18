@@ -1,5 +1,101 @@
 # Canvas scoped quotation and durable review — 2026-09-17
 
+## Receipt ownership closure — 2026-09-18 UTC / 2026-09-17 Los Angeles
+
+Status: Deterministic source evidence for the single-parent commit containing this addendum;
+parent `d4650629f7d030b39430e08e7786e5fa5f938b7d`. The exact final SHA/tree belongs in Git and
+the delivery CANDIDATE, not a second documentation-only commit. All older sections below
+retain their historical scope; they are not new runs of this candidate.
+
+### Same-input RED to GREEN and original owners
+
+The three supplied diagnostics were applied to the existing Workbench consumer test, not
+installed as a second copy. Actual `selectThread('b')` / `selectThread('a')` loaded and asserted
+a newer-running or completed snapshot before releasing the old Provider Promise. On unchanged
+d465 production code the result was 26 tests: 23 PASS / 3 FAIL / 0 SKIP (exit 1). Old success
+overrode the newer turn, old failure rolled it back, and old success resurrected a completed
+turn ID. The same 26 assertions passed (exit 0) after the send-owner repair. Raw inputs, logs,
+JSON and exits are retained outside the repository in the delivery capsule.
+
+A per-factory ephemeral operation token and original subscription fence now distinguish
+original submission acknowledgement from permission to write current visible state. The
+running predicate accepts legitimate SSE-normalized IDs before HTTP acknowledgement, including
+an omitted HTTP user ID backed by the actual stable user block. It rejects a replacement
+subscription even with identical stable IDs, and rejects a newer send even when the same clock
+produces identical temporary IDs. Acknowledged success is not converted into failure by later
+refresh/housekeeping exceptions. Submitted snapshot cleanup remains with the original Composer.
+
+The existing navigation owner accepts an optional short-lived freshness predicate through
+list, workspace-registry, case-summary, case-thread and reconnect I/O. This closes two further
+actual stale refresh resolve/reject failures discovered while exercising the receipt owner.
+Loading cleanup releases only its own marker. Stream migration, timers/polling and later
+refresh cannot mutate a reselected/newer/completed operation. No durable map, new authority,
+Provider loop, dependency, gate, UI redesign or parallel send state machine was introduced.
+
+### Current verification
+
+Independent Linux x86_64 uid1000, isolated HOME/TMPDIR/caches, umask077, Node22.22.1/npm10.9.4.
+The existing authorized GitHub artifact was fresh, downloaded, checksum verified and restored
+with safe path/type/link checks; its five version/lock inputs exactly matched current source.
+No npm lifecycle, Electron native installation, real Provider, cases or user credentials ran.
+
+| Actual final command scope | Result |
+| --- | --- |
+| 52 affected Renderer/Main/Canvas/Office/contracts/Composer/plan/stream/store test files | 798 PASS / 0 FAIL / 0 SKIP, exit 0 |
+| Original Workbench consumer file within that run | 39 PASS, including the original 23 and all three supplied REDs |
+| Original `tsconfig.web.json`, separate `tsc --noEmit` | PASS, exit 0 |
+| Original `tsconfig.node.json`, separate `tsc --noEmit` | PASS, exit 0 |
+| ESLint on all six changed source/test files | PASS, no errors or warnings |
+| `npm --prefix packages/runtime run build` | PASS, exit 0 |
+| `node node_modules/electron-vite/bin/electron-vite.js build` | PASS, exit 0; source Main/preload/Renderer build only |
+
+All final commands recorded identical 6380 tracked-source input manifests with aggregate SHA256
+`3a2461f2d1eb2d79c54c5e3aae5febdfdc6ee07c8679c7879f9dbb4dcd5261dd` before this documentation
+addendum. Non-document inputs are checked again before commit. Build chunk warnings remain in
+the raw log; this is not a claim of a warning-free/native/package build. There are 26 new tests:
+Workbench 16 (three supplied diagnostics plus 13 compatibility/side-effect cases), navigation 8,
+thread owner 2. The 52-file scope adds 40 pre-existing tests beyond the prior 43-file scope;
+neither they nor repeat executions are counted as newly authored coverage.
+
+Compatibility covers current agent and plan acknowledgement, A→B and A→B→A success/failure,
+completed snapshots and actual SSE completion, stable ID normalization, no-HTTP-user-ID,
+reselected identical stable IDs, same-tick replacement sends, submitted-only draft/assets/scope
+cleanup, existing late edits and Office path, stream sequence, watchdog/completion-poll ownership,
+stale refresh success/failure, nested workspace and case I/O, and post-ACK housekeeping failure.
+Provider/IPC and presentation leaves are controlled; Workbench, stores, selectThread, event sink
+and scheduler effects are the real owners. This is not live Provider or native GUI acceptance.
+
+### Preserved failures, not erased or inflated
+
+The initial 26-test product RED and its same-assertion GREEN remain separate. Compatibility
+runs additionally exposed the two stale refresh failures; the same resolve/reject cases now
+pass. Early new fixtures incorrectly expected raw assistant stream text, named `onTurnCompleted`
+instead of the real `onTurnComplete`, used sidebar-hidden placeholder titles, or omitted the
+navigation fixture's search field. Those fixture errors were corrected; they are not additional
+product defects. One TS run found a new test fixture's partial AppSettings assertion (TS2352),
+corrected by explicitly marking the controlled I/O cast. No production guard was weakened.
+
+Two aggregate typecheck attempts were externally interrupted by tool time limits before a
+compiler exit; neither is PASS or a compiler failure. Running the two unchanged TypeScript
+projects separately completed both checks. No repository timeout, skip, test assertion,
+compiler configuration or dependency version was relaxed. All attempts/logs/exits are retained.
+
+### Unchanged inputs and remaining boundaries
+
+No Go or Rust input/lock was changed or executed this round; previous Go normal/prod/race
+records remain historical only. The historical DuckDB inline failure and later non-reproduction
+remain unresolved, with no speculative SQL or dependency repair. Current source UI checks do
+not replace actual native installation, GUI/IME or Office/Canvas/image common journeys.
+
+Remote PR28 remains Draft at `dde784437dc8563e84066629dd57f4a11fd9acc9`, with original main
+base `ce96cf12581acfa0e19fae7c6aa9c709371012c8`. CodeQL check105175890749 still reports 37 high
+at that old SHA; full source-to-sink evidence and rescan are incomplete. No alerts were dismissed.
+The prior OpenAI create_tree safety block was not shown to be lifted. No code push/API rewrite,
+ref update or new-candidate CI was attempted. Supported reads/artifact downloads do not change
+that boundary. Any subsequent Codex execution must obtain a supported lawful path, not change
+interfaces/encoding/sessions to bypass the same check. No main/force/history rewrite/merge/
+rebase/tag/release, UI Refresh changes or user Mac/profile/Keychain/real-data access occurred.
+
 ## Consumer and case-authority continuation — 2026-09-18 UTC / 2026-09-17 Los Angeles
 
 Status: Reference / deterministic source evidence. Applies to the source/test batch

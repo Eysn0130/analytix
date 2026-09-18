@@ -484,6 +484,9 @@ async function steerActiveTurn(options: {
 export function createThreadActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'createThread' | 'recoverActiveTurn' | 'selectThread' | 'subscribeThreadEventsLive' | 'drainQueuedMessages' | 'editQueuedMessage' | 'removeQueuedMessage' | 'reorderQueuedMessages' | 'sendQueuedMessageNow' | 'resumeInterruptedQueue' | 'setQueuedMessagesPausedReason' | 'startThreadHandoff' | 'retryThreadHandoff' | 'cancelThreadHandoff' | 'closeThreadHandoffOperation' | 'hydrateThreadHandoffOperations' | 'handleThreadHandoffEvent' | 'sendMessage' | 'reviewActiveThread'> {
+  // Receipt ownership is local to this action factory, never persisted. A later
+  // send or subscription/snapshot replacement revokes the older completion.
+  let currentReceiptOwner: symbol | null = null
   return {
   createThread: async (options = {}) => {
     if (get().runtimeConnection !== 'ready') {
@@ -1349,6 +1352,8 @@ export function createThreadActions(
       }
       return true
     }
+    const receiptOwner = Symbol('send-receipt')
+    currentReceiptOwner = receiptOwner
     const now = Date.now()
     const queued = overrides?.queued
     const userBlockId = queued?.id ?? `u-${now}`
@@ -1519,14 +1524,41 @@ export function createThreadActions(
     clearBusyWatchdog()
     invalidateThreadDetailCache(activeThreadId)
     let submissionSubscription: AbortController | null = null
+    let receiptSubscription: AbortController | null = null
+    let acknowledged = false
+    const ownsReceiptContext = (): boolean => currentReceiptOwner === receiptOwner &&
+      get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready' &&
+      receiptSubscription !== null && !receiptSubscription.signal.aborted &&
+      (sseAbortRef.current === receiptSubscription || sseAbortRef.current === null)
+    const ownsRunningReceipt = (receipt?: { turnId: string; userMessageItemId?: string }): boolean => {
+      const state = get()
+      if (!ownsReceiptContext() || !state.busy) return false
+      // SSE may already have replaced both optimistic IDs before HTTP returns.
+      // Conversely, an idle snapshot or a different stable turn is not ours.
+      const matchingTurn = state.currentTurnId === provisionalTurnId ||
+        (receipt !== undefined && state.currentTurnId === receipt.turnId)
+      const matchingUser = state.currentTurnUserId === userBlockId ||
+        (receipt?.userMessageItemId !== undefined && state.currentTurnUserId === receipt.userMessageItemId) ||
+        (receipt !== undefined && receipt.userMessageItemId === undefined &&
+          state.currentTurnId === receipt.turnId && state.blocks.some(block =>
+            block.kind === 'user' && block.id === state.currentTurnUserId && block.meta?.turnId === receipt.turnId))
+      return matchingTurn && matchingUser
+    }
+    const refreshReceiptThreads = async (): Promise<void> => {
+      const snapshot = get()
+      const isCurrent = () => ownsReceiptContext() && get().busy === snapshot.busy &&
+        get().currentTurnId === snapshot.currentTurnId && get().currentTurnUserId === snapshot.currentTurnUserId
+      if (isCurrent()) await get().refreshThreads({ isCurrent })
+    }
     const cancelPreparedSubmission = (): void => {
+      const ownsState = ownsRunningReceipt()
       submissionSubscription?.abort()
       if (sseAbortRef.current === submissionSubscription) sseAbortRef.current = null
-      if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
+      if (ownsState && activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
       // A later thread/turn owns its own state. Remove only our unsent optimistic
       // block and timing entry, preserving other events that arrived meanwhile.
       set(state => {
-        if (state.activeThreadId !== activeThreadId || state.currentTurnUserId !== userBlockId) return state
+        if (!ownsState) return state
         const { [userBlockId]: _started, ...started } = state.turnStartedAtByUserId
         const { [userBlockId]: _duration, ...durations } = state.turnDurationByUserId
         return { blocks: state.blocks.filter(block => block.id !== userBlockId), busy: false,
@@ -1543,6 +1575,7 @@ export function createThreadActions(
         const sink = buildThreadEventSink(set, get, { threadId: activeThreadId, signal: ac.signal, sinceSeq: seqAtSend })
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac)
       }
+      receiptSubscription = sseAbortRef.current
       const channel = get().route === 'claw' ? activeClawChannel(get()) : null
       if (!channel && composerModel) {
         rememberThreadComposerSelection(activeThreadId, composerModel, composerProviderId)
@@ -1609,28 +1642,32 @@ export function createThreadActions(
         ...(workspaceCheckpointId ? { workspaceCheckpointId } : {}),
         ...(fileReferences.length ? { fileReferences } : {})
       })
+      acknowledged = true
+      const receipt = { turnId, userMessageItemId }
       // Mirror the composer model selection against the runtime's stable
       // user_message item id so the badge survives page refresh / thread
       // re-selection. The runtime itself doesn't persist per-turn metadata.
       if (userMessageItemId && userModelChip) {
         rememberTurnModel(activeThreadId, userMessageItemId, userModelChip)
       }
+      // Acknowledgement still clears the original composer snapshot, even when
+      // navigation (including A -> B -> A) or completion revoked UI ownership.
+      // Fence stream migration too: it can otherwise replace the latest bucket.
+      if (!ownsRunningReceipt(receipt)) return true
       if (provisionalTurnId && isPendingActiveStreamTurnId(provisionalTurnId)) {
         migrateActiveStreamTurn(activeThreadId, provisionalTurnId, turnId)
       }
-      // The Provider receipt acknowledges this original submission even after
-      // navigation, but must not mutate the newly selected thread's UI state.
-      if (get().activeThreadId !== activeThreadId) return true
-      if (userMessageItemId && userMessageItemId !== userBlockId) {
+      const stableUserBlockId = userMessageItemId ?? get().currentTurnUserId ?? userBlockId
+      if (stableUserBlockId && stableUserBlockId !== userBlockId) {
         set((s) => ({
           blocks: reconcileOptimisticUserBlock(
             s.blocks,
             userBlockId,
-            userMessageItemId,
+            stableUserBlockId,
             displayText,
             userModelChip
           ).map((block) =>
-            block.kind === 'user' && block.id === userMessageItemId
+            block.kind === 'user' && block.id === stableUserBlockId
               ? {
                   ...block,
                   meta: {
@@ -1641,22 +1678,21 @@ export function createThreadActions(
                 }
               : block
           ),
-          currentTurnUserId: s.currentTurnUserId === userBlockId ? userMessageItemId : s.currentTurnUserId,
+          currentTurnUserId: s.currentTurnUserId === userBlockId ? stableUserBlockId : s.currentTurnUserId,
           turnStartedAtByUserId: (() => {
             if (s.turnStartedAtByUserId[userBlockId] === undefined) return s.turnStartedAtByUserId
-            const next = { ...s.turnStartedAtByUserId, [userMessageItemId]: s.turnStartedAtByUserId[userBlockId] }
+            const next = { ...s.turnStartedAtByUserId, [stableUserBlockId]: s.turnStartedAtByUserId[userBlockId] }
             delete next[userBlockId]
             return next
           })(),
           turnDurationByUserId: (() => {
             if (s.turnDurationByUserId[userBlockId] === undefined) return s.turnDurationByUserId
-            const next = { ...s.turnDurationByUserId, [userMessageItemId]: s.turnDurationByUserId[userBlockId] }
+            const next = { ...s.turnDurationByUserId, [stableUserBlockId]: s.turnDurationByUserId[userBlockId] }
             delete next[userBlockId]
             return next
           })(),
         }))
       }
-      const stableUserBlockId = userMessageItemId ?? userBlockId
       set((s) => ({
         blocks: s.blocks.map((block) =>
           block.kind === 'user' && block.id === stableUserBlockId
@@ -1678,6 +1714,7 @@ export function createThreadActions(
           trimmedText,
           'user'
         )
+        if (!ownsRunningReceipt(receipt)) return true
         if (userMirror.ok) {
           rememberPendingClawFeishuMirror(turnId, {
             threadId: activeThreadId,
@@ -1686,18 +1723,22 @@ export function createThreadActions(
           })
         }
       }
-      if (get().activeThreadId !== activeThreadId) return true
+      if (!ownsRunningReceipt(receipt)) return true
       if (!sseAbortRef.current || sseAbortRef.current.signal.aborted) {
         const ac = new AbortController()
+        receiptSubscription = ac
         sseAbortRef.current = ac
         const sink = buildThreadEventSink(set, get, { threadId: activeThreadId, signal: ac.signal, sinceSeq: seqAtSend })
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac)
       }
       armBusyWatchdog(set, get)
-      await get().refreshThreads()
+      await refreshReceiptThreads()
       return true
     } catch (e) {
-      if (get().activeThreadId !== activeThreadId) return false
+      // Post-acknowledgement housekeeping cannot turn a sent message into a
+      // failed draft or roll back a turn that SSE has already established.
+      if (acknowledged) return true
+      if (!ownsRunningReceipt()) return false
       clearBusyWatchdog()
       void window.analytix.logs.error('send-message', 'Failed to send message', {
         message: e instanceof Error ? e.message : String(e),
@@ -1716,7 +1757,7 @@ export function createThreadActions(
           error: i18n.t('common:runtimeActiveTurn')
         })
         await get().recoverActiveTurn()
-        await get().refreshThreads()
+        await refreshReceiptThreads()
         return false
       }
       if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
@@ -1732,8 +1773,10 @@ export function createThreadActions(
           ? { route: 'settings' as const, settingsSection: 'agents' as const }
           : {})
       })
-      await get().refreshThreads()
+      await refreshReceiptThreads()
       return false
+    } finally {
+      if (currentReceiptOwner === receiptOwner) currentReceiptOwner = null
     }
   },
 

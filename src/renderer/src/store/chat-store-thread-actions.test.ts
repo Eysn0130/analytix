@@ -2042,3 +2042,38 @@ describe('chat-store-thread-actions queued messages', () => {
     )
   })
 })
+
+describe('send receipt acknowledgement and housekeeping', () => {
+  beforeEach(() => {
+    rendererRuntimeClient.invalidateSettings()
+    registryMock.getProvider.mockReset()
+  })
+  afterEach(() => {
+    clearActiveStream()
+    rendererRuntimeClient.invalidateSettings()
+    vi.unstubAllGlobals()
+  })
+  it.each(['before-ack', 'after-ack'])('reports the original send result when an error occurs %s', async phase => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        if (phase === 'before-ack') throw new Error('Synthetic send rejected')
+        return { threadId: 'thr_existing', turnId: 'confirmed-turn', userMessageItemId: 'confirmed-user' }
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.busy = false
+    if (phase === 'after-ack') state.refreshThreads = vi.fn(async () => { throw new Error('Synthetic housekeeping failed') })
+    expect(await actions.sendMessage('Original request', 'agent')).toBe(phase === 'after-ack')
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    if (phase === 'after-ack') {
+      expect(state).toMatchObject({ busy: true, currentTurnId: 'confirmed-turn', currentTurnUserId: 'confirmed-user', error: null })
+    } else expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
+    sseAbortRef.current?.abort()
+  })
+})
