@@ -1271,9 +1271,17 @@ export function createThreadActions(
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return false
     }
+    const submissionGuard = overrides?.submissionGuard
+    if (submissionGuard && !submissionGuard.isCurrent()) return false
     const p = getProvider()
     const hasPendingActiveTurn = threadHasPendingRuntimeWork(get().blocks)
     if (get().busy || hasPendingActiveTurn) {
+      // The ordinary queue/steer path does not retain a send-time Core fence.
+      // Never accept a transient Canvas scope there as an acknowledged send.
+      if (submissionGuard) {
+        set({ error: i18n.t('common:runtimeActiveTurn') })
+        return false
+      }
       if (overrides?.guiPlan) {
         set({ error: i18n.t('common:composerQueuePlaceholder') })
         return false
@@ -1510,10 +1518,27 @@ export function createThreadActions(
     }
     clearBusyWatchdog()
     invalidateThreadDetailCache(activeThreadId)
+    let submissionSubscription: AbortController | null = null
+    const cancelPreparedSubmission = (): void => {
+      submissionSubscription?.abort()
+      if (sseAbortRef.current === submissionSubscription) sseAbortRef.current = null
+      if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
+      // A later thread/turn owns its own state. Remove only our unsent optimistic
+      // block and timing entry, preserving other events that arrived meanwhile.
+      set(state => {
+        if (state.activeThreadId !== activeThreadId || state.currentTurnUserId !== userBlockId) return state
+        const { [userBlockId]: _started, ...started } = state.turnStartedAtByUserId
+        const { [userBlockId]: _duration, ...durations } = state.turnDurationByUserId
+        return { blocks: state.blocks.filter(block => block.id !== userBlockId), busy: false,
+          currentTurnId: previousCurrentTurnId, currentTurnUserId: previousCurrentTurnUserId,
+          turnStartedAtByUserId: started, turnDurationByUserId: durations }
+      })
+    }
     try {
       const seqAtSend = get().lastSeq
       if (!sseAbortRef.current || sseAbortRef.current.signal.aborted) {
         const ac = new AbortController()
+        submissionSubscription = ac
         sseAbortRef.current = ac
         const sink = buildThreadEventSink(set, get, { threadId: activeThreadId, signal: ac.signal, sinceSeq: seqAtSend })
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac)
@@ -1565,6 +1590,14 @@ export function createThreadActions(
         runtimeText = buildCodeRuntimePrompt(settings, trimmedText)
       }
       const runtimeDisplayText = channel ? displayText : (userDisplayText ?? trimmedText)
+      if (submissionGuard) {
+        let admitted = false
+        try { admitted = await submissionGuard.validateBeforeSend() } catch { /* fail closed */ }
+        if (!admitted || !submissionGuard.isCurrent() || get().activeThreadId !== activeThreadId || get().runtimeConnection !== 'ready') {
+          cancelPreparedSubmission()
+          return false
+        }
+      }
       const { turnId, userMessageItemId } = await p.sendUserMessage(activeThreadId, runtimeText, {
         mode,
         ...(composerModel ? { model: composerModel } : {}),
@@ -1585,6 +1618,9 @@ export function createThreadActions(
       if (provisionalTurnId && isPendingActiveStreamTurnId(provisionalTurnId)) {
         migrateActiveStreamTurn(activeThreadId, provisionalTurnId, turnId)
       }
+      // The Provider receipt acknowledges this original submission even after
+      // navigation, but must not mutate the newly selected thread's UI state.
+      if (get().activeThreadId !== activeThreadId) return true
       if (userMessageItemId && userMessageItemId !== userBlockId) {
         set((s) => ({
           blocks: reconcileOptimisticUserBlock(
@@ -1650,6 +1686,7 @@ export function createThreadActions(
           })
         }
       }
+      if (get().activeThreadId !== activeThreadId) return true
       if (!sseAbortRef.current || sseAbortRef.current.signal.aborted) {
         const ac = new AbortController()
         sseAbortRef.current = ac
@@ -1660,6 +1697,7 @@ export function createThreadActions(
       await get().refreshThreads()
       return true
     } catch (e) {
+      if (get().activeThreadId !== activeThreadId) return false
       clearBusyWatchdog()
       void window.analytix.logs.error('send-message', 'Failed to send message', {
         message: e instanceof Error ? e.message : String(e),

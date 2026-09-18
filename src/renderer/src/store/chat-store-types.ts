@@ -71,6 +71,12 @@ export type GuiPlanMessageContext = {
 }
 
 export type SendMessageOverrides = {
+  /** Renderer-local, one-submission fence. Core remains the authority. Never
+   * serialize this callback, forward it to a Provider, or retain it in a queue. */
+  submissionGuard?: {
+    isCurrent: () => boolean
+    validateBeforeSend: () => Promise<boolean>
+  }
   queued?: QueuedUserMessage
   model?: string
   providerId?: string

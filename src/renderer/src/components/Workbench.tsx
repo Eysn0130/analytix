@@ -747,6 +747,12 @@ export function Workbench(): ReactElement {
   const pendingSddFrameworkRef = useRef<string | null>(null)
   const pendingSddFrameworkPromptRef = useRef<string | null>(null)
   const inputRef = useRef('')
+  const submissionsInFlight = useRef(new Set<string>())
+  const submissionOwnerMounted = useRef(true)
+  useEffect(() => {
+    submissionOwnerMounted.current = true
+    return () => { submissionOwnerMounted.current = false }
+  }, [])
   const sddUpgradeInFlightRef = useRef(false)
   const sddUpgradeTargetRef = useRef<PendingSddPlanTarget | null>(null)
   const sddTitleSyncTimerRef = useRef<number | null>(null)
@@ -2493,6 +2499,26 @@ export function Workbench(): ReactElement {
   }
 
   const handleSendAsync = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
+    const chat = useChatStore.getState()
+    if (chat.activeThreadId !== activeThreadId || !submissionOwnerMounted.current) return
+    const threadWorkspace = chat.threads.find(thread => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot
+    const key = JSON.stringify([threadWorkspace, chat.activeThreadId])
+    if (submissionsInFlight.current.has(key)) return
+    submissionsInFlight.current.add(key)
+    try {
+      await submitWorkbenchTurn(overrideInput, actionReferences)
+    } catch (error) {
+      const current = useChatStore.getState()
+      const currentWorkspace = current.threads.find(thread => thread.id === current.activeThreadId)?.workspace || current.workspaceRoot
+      if (submissionOwnerMounted.current && current.activeThreadId === chat.activeThreadId && currentWorkspace === threadWorkspace) {
+        setError(error instanceof Error ? error.message : String(error))
+      }
+    } finally {
+      submissionsInFlight.current.delete(key)
+    }
+  }
+
+  const submitWorkbenchTurn = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
     const v = (overrideInput ?? input).trim()
     const nativeAction = actionReferences !== undefined
     const documentState = useWriteWorkspaceStore.getState()
@@ -2511,16 +2537,21 @@ export function Workbench(): ReactElement {
       }
     }
     const frozenReference = { ...currentReferenceSnapshot(), quotes: frozenQuotes, documentContext }
+    const reportSubmissionError = (message: string): void => {
+      const current = currentReferenceSnapshot()
+      if (submissionOwnerMounted.current && current.threadId === frozenReference.threadId &&
+        normalizeWorkspaceRoot(current.threadWorkspace) === normalizeWorkspaceRoot(frozenReference.threadWorkspace)) setError(message)
+    }
     const referenceCurrent = () => {
       const current = currentReferenceSnapshot()
       const native = useNativeOfficeStore.getState()
-      return workbenchReferencesCurrent(frozenReference, current) &&
+      return submissionOwnerMounted.current && workbenchReferencesCurrent(frozenReference, current) &&
         (!nativeAction || route === 'chat' && !!current.threadId) &&
         (!nativeAction || nativeActionReferencesCurrent(frozenNativeReferences, [...(native.view ? [native.view] : []), ...Object.values(native.views)])) &&
         frozenNativeReferences.every(reference => reference.threadId === current.threadId &&
           normalizeWorkspaceRoot(reference.workspace) === normalizeWorkspaceRoot(current.threadWorkspace))
     }
-    if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
+    if (!referenceCurrent()) { reportSubmissionError(t('workbenchReferenceChanged')); return }
     const attachments = !nativeAction && (route === 'chat' || route === 'write') ? composerAttachments : []
     const imageAttachments = attachments.filter((attachment) => attachment.kind === 'image')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
@@ -2532,6 +2563,17 @@ export function Workbench(): ReactElement {
       for (const reference of frozenNativeReferences) useNativeReferenceStore.getState().remove(reference.id)
       for (const quote of frozenQuotes) useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)
     }
+    const validateSubmission = async (): Promise<boolean> => {
+      const valid = await validateCanvasReferences(frozenNativeReferences,
+        request => window.analytix.canvas.request(request), referenceCurrent)
+      if (!valid) reportSubmissionError(t('workbenchReferenceChanged'))
+      return valid
+    }
+    // A Canvas handle cannot survive deferred queueing. The existing send owner
+    // rechecks this one-shot Core fence after all its settings/checkpoint I/O.
+    const submissionGuard = frozenNativeReferences.some(reference => reference.kind === 'canvas')
+      ? { isCurrent: referenceCurrent, validateBeforeSend: validateSubmission }
+      : undefined
     const runtimeFileReferences = runtimeFileReferencesFromComposer(fileReferences)
     const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
     if (!v && attachmentIds.length === 0 && documentAttachments.length === 0 && fileReferences.length === 0 && frozenQuotes.length === 0 && frozenNativeReferences.length === 0) return
@@ -2575,20 +2617,15 @@ export function Workbench(): ReactElement {
         try {
           fileContext = await readComposerFileContextEntries(fileReferences, workspace)
         } catch (error) {
-          setError(error instanceof Error ? error.message : String(error))
+          reportSubmissionError(error instanceof Error ? error.message : String(error))
           return null
         }
       }
-      // The last asynchronous preparation step rechecks Core, after document
-      // retrieval and file reads. A scope revoked during that work cannot be
-      // submitted or make a failed preparation clear the user's composer.
-      if (!(await validateCanvasReferences(frozenNativeReferences,
-        request => window.analytix.canvas.request(request), referenceCurrent))) {
-        setError(t('workbenchReferenceChanged'))
-        return null
-      }
+      // Validate the prepared reference snapshot here, and for Canvas again in
+      // the actual send owner after its final asynchronous preparation.
+      if (!(await validateSubmission())) return null
       const messageText = frozenNativeReferences.length ? `${documentMessage}\n\n${nativeReferencesPrompt(frozenNativeReferences)}` : documentMessage
-      const displayText = fileContext === null ? emptyDisplayText : v || emptyDisplayText
+      const displayText = fileContext === null && !submissionGuard ? emptyDisplayText : v || emptyDisplayText
       return {
         text: fileContext === null ? messageText : buildComposerFileContextPrompt(messageText, fileContext),
         ...(displayText ? { displayText } : {}),
@@ -2609,10 +2646,11 @@ export function Workbench(): ReactElement {
     if (route === 'chat' && mode === 'plan') {
       const prepared = await prepareChatMessage()
       if (!prepared) return
-      if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
+      if (!referenceCurrent()) { reportSubmissionError(t('workbenchReferenceChanged')); return }
       const model = composerModel.trim()
       const providerId = composerProviderId.trim()
       const sent = await sendPlanTurn(prepared.text, {
+        ...(submissionGuard ? { submissionGuard } : {}),
         ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
         ...(model ? { model } : {}),
         ...(providerId ? { providerId } : {}),
@@ -2718,8 +2756,9 @@ export function Workbench(): ReactElement {
     }
     const prepared = await prepareChatMessage()
     if (!prepared) return
-    if (!referenceCurrent()) { setError(t('workbenchReferenceChanged')); return }
+    if (!referenceCurrent()) { reportSubmissionError(t('workbenchReferenceChanged')); return }
     const sent = await sendMessage(prepared.text, mode === 'plan' ? 'plan' : 'agent', {
+      ...(submissionGuard ? { submissionGuard } : {}),
       ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),

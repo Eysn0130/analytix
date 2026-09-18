@@ -9,7 +9,40 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前本地候选：2026-09-17 Canvas 引用、持久审阅与消费者闭环
+## 当前接续：2026-09-17 实际发送链与案件授权组合
+
+Status: **VERIFIED_SOURCE_BATCH / READ_FRESH_REMOTE_STATE**。本节与真实源码和测试一起提交，
+不另造状态提交。继续原分支 `codex/workbench-product-delivery-20260914` / Draft PR28。
+来源候选 `de709d9c322948e786f87b84fffede3d9f988296` 已实际收到，37 文件、完整父/tree/
+blob/模式核验通过。旧未提交候选仍未收到，但用户已取消把它或旧停写回执作为本轮前提。
+后来真实到达的改动仍须保护；不修改独立 UI Refresh，不 merge/rebase/force/main/release。
+
+- 实际 Workbench/plan/send store/引用与草稿 owner 的 17 项初始回归发现 6 项失败，
+  原 owner 修复后同 17 项全部通过；扩展为 23 项真实消费链测试。覆盖最后异步 I/O
+  后 Core 复核、拒绝保留、busy 不排队临时授权、迟到回执/错误线程隔离、重复准备、
+  只清理已提交快照及 Office 原路径。没有复制测试专用 handler 或新建 Canvas。
+- 真实签名案件 Registry、Host risk-policy CAS、case binding、epoch、原 Host/projector/
+  Registry/filestore 验证普通案件工作区文件的合法修改与失效拒绝；4 顶层、7 子场景。
+  该组合明确不授予 DSV2 案件事实发布，不冒充 independent-witness 或完整案件 AI 验收。
+- 本轮完整 UI 回归 43 实际文件 / 732 PASS；双配置类型检查、当前 lint、runtime TS 和
+  Electron 源码构建通过。Go 当前 normal/prod/race 精确结果及命令见
+  [同批 QA 记录](../qa/canvas-product-loop-2026-09-17.md)。新旧、重复、嵌套计数分别保留。
+- 实际 Chromium 首次访问合成 loopback 验收页被 `ERR_BLOCKED_BY_ADMINISTRATOR` 拒绝。
+  未绕过策略，没有浏览器 UI PASS；源码/组件证据不替代原生安装、GUI、IME、Provider。
+
+**恢复顺序**：读取当前 Git/GitHub 原 ref/PR 和 comment `5709839864`，以及交付包实际
+commit/tree/manifest，确认真实写入结果。终端 DNS 失败不等于连接器只读；完整出站检查后
+使用受支持的普通 push 或真实单父 Git Data API + `force=false`，一次前移完整一致 tree。
+若 API 生成等价 tree 的新 commit，准确记录新 SHA，不能声称原 de709 字节已原样推送。
+没有 ref 前移就没有 push；在新 SHA 收口 CI，不借用 dde 的 51-job 历史成功。
+只有实际动作证明必要通路/合规资源不可用，且不依赖该缺口的工作完成后，才把保存的
+最终实际候选及准确剩余项交 Codex；下方旧“下一步 Codex”不覆盖这项接续要求。
+
+37-high 完整 traces/复扫、历史 DuckDB inline 根因、原生共同对象旅程、授权真实模型/
+媒体、安装、A0/B1/ProductRC/FormalRC、签名公证仍逐项核验。当前 PR comment 与外部
+执行胶囊记录实际远端 SHA/CI/写入边界；本索引不把工具发现、setup 或旧 PASS 变成验收。
+
+## 历史本地候选：2026-09-17 Canvas 引用、持久审阅与消费者闭环
 
 Status: **LOCAL_SOURCE_CANDIDATE / NOT_PUSHED**。源代码、测试和本节在同一候选批次；
 准确候选 SHA/tree 在随本轮交付的机器清单和当前 Git 中读取，不为自引用另造提交。

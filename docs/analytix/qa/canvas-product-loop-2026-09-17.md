@@ -1,5 +1,116 @@
 # Canvas scoped quotation and durable review — 2026-09-17
 
+## Consumer and case-authority continuation — 2026-09-18 UTC / 2026-09-17 Los Angeles
+
+Status: Reference / deterministic source evidence. Applies to the source/test batch
+containing this addendum, continuing the authentic local `de709d9c322948e786f87b84fffede3d9f988296`
+(tree `b0c223c10c64d25c1cb013fd21aa463470871b78`, parent `dde784437dc8563e84066629dd57f4a11fd9acc9`).
+The inherited capsule's 37 files, modes, SHA256 hashes, Git parent/tree and bundle were
+verified in a complete independent checkout; the previously unavailable older writer's
+uncommitted work was not recovered or claimed. It is not a prerequisite for this continuation.
+Remote integration and CI must be read at the resulting real SHA in PR28 comment
+`5709839864`; local passes and API action discovery do not prove a ref update.
+
+### Confirmed consumer defects and existing-owner repairs
+
+The new `Workbench.canvas-send.test.tsx` mounts the actual Workbench and uses the actual
+plan controller, Composer draft hook, chat send action and native/document reference stores.
+Only presentation leaves and external Core/Provider/settings/files/retrieval/checkpoint I/O
+are replaced with controlled synthetic boundaries. The submitted handler, identity checks,
+reference selection and cleanup paths are not copied or mocked into passing.
+
+The original consumer implementation failed six of the first 17 regressions: navigation
+could write an old preparation error into the new thread; plan directory I/O could retarget
+an old Canvas prompt; settings and checkpoint I/O could outlive the Core check; an old
+Provider acknowledgement could mutate the new thread; repeated clicks could duplicate
+preparation. The exact same 17 tests passed after repair; RED and GREEN logs are retained.
+
+Workbench now deduplicates in-flight preparation per workspace/thread and fences errors to
+its mounted owner. A renderer-local, one-submission callback reaches the existing plan/send
+owners; the send action invokes Core again after its final settings/checkpoint preparation
+and immediately before calling the Provider adapter. Failed admission removes only its own
+optimistic state. This callback is never serialized, sent to a Provider or retained in the
+ordinary busy queue; Canvas submissions rejected as busy retain the draft and scope.
+Late acknowledgements/errors cannot mutate another selected thread. Draft revision and
+object-identity cleanup remain in the existing Composer owner, preserving later input,
+attachments, files and replacement Canvas references. Plan metadata uses the user request,
+not transient expanded scope instructions. Office's established message path is preserved.
+
+The complete new file contains 23 tests: ordinary and plan sends; no automatic send on quote;
+Core denial/exception, file denial/exception and Provider failure; document/file/plan-directory
+and final settings/checkpoint races; busy refusal; late success/failure; duplicate preparation;
+post-submit edits; model-prompt privacy and Office compatibility. These are deterministic
+consumer tests, not real Provider or installed-GUI evidence.
+
+### Real case authority, with a deliberately bounded claim
+
+`canvas_case_authority_test.go` reuses the existing production Host/projector/Registry/CAS
+assembly through a minimal fixture extraction. Synthetic cases use the real signed case
+Registry, real case-binding observer, installation signer, thread risk-policy CAS store,
+`HostPolicyAuthority`, and actual context-epoch transitions. The fixture principal and
+root-scoped test private-CAS lease are synthetic; this is not independent-witness admission.
+
+Four top-level tests (one has seven subcases) cover legitimate ordinary-artifact
+capture/read/propose/review/explicit accept/reopen/undo, different-thread refusal, and paired
+refusal before read/propose/accept after case binding, committed epoch, quarantine, unavailable
+risk record, Host disable, source CAS or authority-store reload/session reopen changes.
+Source bytes remain unchanged on rejected writes. The actual current ordinary-effect check
+passes while the case-data-effect check rejects this same non-DSV2 context.
+
+This matches accepted ordinary-file behavior in
+`openspec/specs/case-claim-publication-gate/spec.md` and
+`openspec/specs/case-data-forensics/spec.md`: a case workspace does not make ordinary files
+uneditable, and ordinary editing does not grant dataset/evidence publication authority.
+No dataset, global PII mapping or second permission engine was created. Authority reload plus
+session reopen is not claimed as a full application/process restart or complete case-AI journey.
+Initial fixture-only failures used the wrong no-dataset sentinel and a mixed signing-authority
+root; those fixtures were corrected to the existing domain constants and dedicated private root.
+Production assertions and authority checks were not relaxed.
+
+### Current execution evidence and actual resource boundary
+
+Independent Linux x86_64 uid1000, isolated HOME/TMPDIR/caches, umask077; Go1.26.4 and
+Node22.22.1/npm10.9.4, offline locked modules. UI regression: **43 actual files / 732 PASS**,
+0 skipped/failed. Both TypeScript configurations, five changed TS/TSX lint targets, runtime
+TypeScript build and Electron main/preload/renderer source build pass. These source commands
+do not execute or substitute for the aggregate native-install/package admission wrappers.
+
+| Current checked scope | Result |
+| --- | --- |
+| Complete affected eight Go packages, normal | 983 top-level PASS / 951 nested PASS / 4 existing top-level SKIP / 0 FAIL |
+| Same packages, `analytix_prod` | 996 top-level PASS / 951 nested PASS / 4 same SKIP / 0 FAIL |
+| `-race -run TestCanvas` in Core/server/filestore, plus full Plugin Host | 40 top-level PASS / 82 nested PASS / 0 SKIP or FAIL across 4 packages |
+| Production-tag Go runtime source build | PASS, independent Linux output only |
+
+The seven non-server packages and full server ran separately in each normal/prod mode,
+with `-count=1 -p 1 -parallel 2 -json`; server used the existing 360-second package budget.
+Race selected `TestCanvas` in canvasediting/server/filestore and ran the complete
+pluginpackagehost race suite separately. No other test names are implied by that selector.
+All original four skips remain unchanged. These are affected-package checks, not all-repository
+Go or full native-install CI acceptance.
+
+The preserved 17-test RED is not counted as a new pass, and describes five defect categories
+with two distinct final-I/O boundaries. Repeats, normal/prod/race modes, top-level/subtests
+and suite/describe counts are not added together as coverage. Full source inputs, manifests,
+commands, timestamps, exits, fixture/setup failures and the earlier typecheck external timeout
+are retained in the execution capsule. Product gates, dependencies and lockfiles are unchanged.
+
+A Chromium browser, the real panel/Main controller and a loopback real-Go-Host test gateway
+were prepared. The **first browser navigation was blocked by environment policy** with
+`ERR_BLOCKED_BY_ADMINISTRATOR`. No browser UI assertion or screenshot ran. The policy was
+not modified or bypassed; gateway setup/cleanup PASS is not UI acceptance. Native Electron
+installation, macOS/Windows GUI, Chinese IME, authorized real Provider/media and RC/signing
+remain separate unmet prerequisites. No user Mac, old profile/Keychain, case data or credentials
+were accessed. Existing CodeQL 37-high history and DuckDB inline failure/non-reproduction are
+not closed by this batch. Fresh reviews show two unresolved path threads; four other threads
+were already bot-resolved, not repaired or dismissed by this continuation.
+
+## Historical de709 source-candidate evidence (unchanged results)
+
+The remainder records the received candidate before this continuation. Its old routing,
+NOT_PUSHED status and counts are historical, not a reason to stop current supported GitHub
+integration or to replace this round's exact-input verification with old CI.
+
 Status: Reference / verified local source candidate, NOT remote CI or release admission.
 Baseline: `dde784437dc8563e84066629dd57f4a11fd9acc9` on
 `codex/workbench-product-delivery-20260914`; PR28 remains Draft.

@@ -55,6 +55,12 @@ func newCanvasProductFixture(t *testing.T) *canvasProductFixture {
 		t.Fatal(riskErr)
 	}
 	p.handler.turnSecurity.RiskAuthority = risk
+	return newCanvasProductFixtureWithAuthority(t, p, scope)
+}
+
+// Both general and case tests enter the same real Host/projector/CAS assembly.
+func newCanvasProductFixtureWithAuthority(t *testing.T, p runtimeObjectProjector, scope objectapp.ScopeAuthority) *canvasProductFixture {
+	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
 	receipts := filepath.Join(root, "receipts")
