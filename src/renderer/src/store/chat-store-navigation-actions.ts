@@ -109,7 +109,6 @@ let clawChannelActivityUnsubscribe: (() => void) | null = null
 let runtimeStatusUnsubscribe: (() => void) | null = null
 let cancelScheduledThreadDetailPrewarm: (() => void) | null = null
 let searchRefreshTimer: ReturnType<typeof setTimeout> | null = null
-let caseProjectIndexRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const defaultThreadRefreshLimit = 50
 const archivedThreadRefreshLimit = 200
 const caseProjectRefreshLimit = 100
@@ -287,11 +286,21 @@ export function createNavigationActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'openCode' | 'openWrite' | 'ensureWriteThreadForWorkspace' | 'createWriteThread' | 'selectWriteThread' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshCaseProjects' | 'loadCaseProjectThreads' | 'setCaseProjectExpanded' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
   const caseProjectLoadOwners = new Map<string, symbol>()
+  let caseProjectIndexRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let caseProjectRefreshGeneration = 0
   let runtimeProbeGeneration = 0
   let activeUserRuntimeProbeGeneration = 0
   let runtimeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
   let runtimeRecoveryAttempt = 0
   let runtimeRecoveryEpoch = 0
+
+  const invalidateCaseProjectRefresh = (): void => {
+    caseProjectRefreshGeneration += 1
+    if (caseProjectIndexRefreshTimer != null) {
+      clearTimeout(caseProjectIndexRefreshTimer)
+      caseProjectIndexRefreshTimer = null
+    }
+  }
 
   const clearRuntimeRecovery = (): void => {
     runtimeRecoveryEpoch += 1
@@ -476,6 +485,8 @@ export function createNavigationActions(
     if (mode === 'user') {
       clearRuntimeRecovery()
       activeUserRuntimeProbeGeneration = probeGeneration
+      // A later ready state cannot revive work from before this connection check.
+      invalidateCaseProjectRefresh()
       set({ runtimeConnection: 'checking' })
     }
     try {
@@ -522,6 +533,7 @@ export function createNavigationActions(
       const detail = runtimeErrorDetail(e)
       const needsSettings = shouldOpenSettingsForError(e)
       if (mode === 'user') {
+        invalidateCaseProjectRefresh()
         stopTurnCompletionPoll()
         set({
           runtimeConnection: 'offline',
@@ -533,6 +545,7 @@ export function createNavigationActions(
         })
       } else {
         if (prev === 'ready') {
+          invalidateCaseProjectRefresh()
           stopTurnCompletionPoll()
           set({
             runtimeConnection: 'offline',
@@ -864,39 +877,51 @@ export function createNavigationActions(
     }
 	  },
 
-	  refreshCaseProjects: async (options = {}) => {
-      if (options.isCurrent?.() === false) return
-	    if (get().runtimeConnection !== 'ready') return
-	    const p = getProvider()
-	    if (typeof p.listCaseProjects !== 'function') return
-		    const caseProjectResult = await p.listCaseProjects(caseProjectRefreshLimit)
-        if (options.isCurrent?.() === false) return
-		    const caseProjects = Array.isArray(caseProjectResult)
-		      ? caseProjectResult
-		      : caseProjectResult.caseProjects
-		    const caseProjectIndexStatus = Array.isArray(caseProjectResult)
-		      ? 'ready'
-		      : caseProjectResult.indexStatus
-		    const validProjectIds = new Set(caseProjects.map((project) => project.id))
-		    set((s) => ({
-		      caseProjects,
-		      caseProjectIndexStatus,
-		      caseProjectThreadsById: pruneRecordToIds(s.caseProjectThreadsById, validProjectIds),
-		      caseProjectLoadingById: pruneRecordToIds(s.caseProjectLoadingById, validProjectIds),
-		      caseProjectErrorsById: pruneRecordToIds(s.caseProjectErrorsById, validProjectIds),
-		      caseProjectExpandedById: pruneRecordToIds(s.caseProjectExpandedById, validProjectIds)
-		    }))
-		    if (caseProjectIndexStatus === 'building' && caseProjectIndexRefreshTimer == null) {
-		      caseProjectIndexRefreshTimer = setTimeout(() => {
-		        caseProjectIndexRefreshTimer = null
-		        if (options.isCurrent?.() !== false && get().runtimeConnection === 'ready') {
-		          void get().refreshCaseProjects(options).catch(() => {
-		            /* refreshCaseProjects stores state on success */
-		          })
-		        }
-		      }, 1500)
-		    }
-		  },
+  refreshCaseProjects: async (options = {}) => {
+    if (options.isCurrent?.() === false || get().runtimeConnection !== 'ready') return
+    const p = getProvider()
+    if (typeof p.listCaseProjects !== 'function') return
+    // A newer admitted read owns the existing timer slot, even while its I/O is
+    // pending. An obsolete timer/result must neither block nor replace its chain.
+    invalidateCaseProjectRefresh()
+    const generation = caseProjectRefreshGeneration
+    const isCurrent = () => generation === caseProjectRefreshGeneration &&
+      options.isCurrent?.() !== false && get().runtimeConnection === 'ready'
+    try {
+      const caseProjectResult = await p.listCaseProjects(caseProjectRefreshLimit)
+      if (!isCurrent()) return
+      const caseProjects = Array.isArray(caseProjectResult)
+        ? caseProjectResult
+        : caseProjectResult.caseProjects
+      const caseProjectIndexStatus = Array.isArray(caseProjectResult)
+        ? 'ready'
+        : caseProjectResult.indexStatus
+      const validProjectIds = new Set(caseProjects.map((project) => project.id))
+      set((s) => ({
+        caseProjects,
+        caseProjectIndexStatus,
+        caseProjectThreadsById: pruneRecordToIds(s.caseProjectThreadsById, validProjectIds),
+        caseProjectLoadingById: pruneRecordToIds(s.caseProjectLoadingById, validProjectIds),
+        caseProjectErrorsById: pruneRecordToIds(s.caseProjectErrorsById, validProjectIds),
+        caseProjectExpandedById: pruneRecordToIds(s.caseProjectExpandedById, validProjectIds)
+      }))
+      if (caseProjectIndexStatus === 'building' && isCurrent()) {
+        const timer = setTimeout(() => {
+          if (caseProjectIndexRefreshTimer !== timer) return
+          caseProjectIndexRefreshTimer = null
+          if (isCurrent()) {
+            void get().refreshCaseProjects(options).catch(() => {
+              /* refreshCaseProjects stores state on success */
+            })
+          }
+        }, 1500)
+        caseProjectIndexRefreshTimer = timer
+      }
+    } catch (error) {
+      // Do not turn an obsolete read failure into current reconnect/error state.
+      if (isCurrent()) throw error
+    }
+  },
 
 	  loadCaseProjectThreads: async (caseProjectId, options = {}) => {
 	    const projectId = caseProjectId.trim()
@@ -1065,6 +1090,7 @@ export function createNavigationActions(
 	        set({ error: refreshError })
 	      } catch (connectionError) {
           if (!isCurrent()) return
+          invalidateCaseProjectRefresh()
 	        stopTurnCompletionPoll()
 	        set({
 	          runtimeConnection: 'offline',

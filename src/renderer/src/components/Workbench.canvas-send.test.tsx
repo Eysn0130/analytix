@@ -675,3 +675,160 @@ describe('Workbench receipt ownership compatibility', () => {
     expect(draft().input).toBe('Newer draft during old refresh')
   })
 })
+
+describe('R07 reaudit: normal receipt follow-up lifetime', () => {
+  it.each(['success', 'failure'])('continues a building case index after a current send returns (%s)', async outcome => {
+    vi.useFakeTimers()
+    const listCaseProjects = vi.fn()
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockResolvedValue({ caseProjects: [], indexStatus: 'ready' })
+    Object.assign(io.provider, { listCaseProjects })
+    if (outcome === 'failure') io.provider.sendUserMessage.mockRejectedValueOnce(new Error('Synthetic current send rejected'))
+    try {
+      await send()
+      expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+      expect(draft().input).toBe(outcome === 'success' ? '' : 'Discuss selected objects')
+      expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', busy: outcome === 'success',
+        currentTurnId: outcome === 'success' ? 'turn-a' : null,
+        currentTurnUserId: outcome === 'success' ? 'message-a' : null, caseProjectIndexStatus: 'building' })
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      await settle()
+      console.info('R07_OBSERVATION', JSON.stringify({ scenario: 'normal-follow-up', outcome,
+        listCalls: listCaseProjects.mock.calls.length, indexStatus: useChatStore.getState().caseProjectIndexStatus,
+        activeThreadId: useChatStore.getState().activeThreadId, draft: draft().input }))
+      expect(listCaseProjects).toHaveBeenCalledTimes(2)
+      expect(useChatStore.getState().caseProjectIndexStatus).toBe('ready')
+    } finally {
+      Reflect.deleteProperty(io.provider, 'listCaseProjects')
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let an obsolete receipt timer suppress a newer independent index refresh', async () => {
+    vi.useFakeTimers()
+    const listCaseProjects = vi.fn()
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockResolvedValue({ caseProjects: [], indexStatus: 'ready' })
+    Object.assign(io.provider, { listCaseProjects })
+    try {
+      await send()
+      expect(draft().input).toBe('')
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      await act(async () => { await useChatStore.getState().refreshCaseProjects() })
+      expect(listCaseProjects).toHaveBeenCalledTimes(2)
+      expect(useChatStore.getState().caseProjectIndexStatus).toBe('building')
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      await settle()
+      console.info('R07_OBSERVATION', JSON.stringify({ scenario: 'newer-independent-index-refresh',
+        listCalls: listCaseProjects.mock.calls.length, indexStatus: useChatStore.getState().caseProjectIndexStatus }))
+      expect(listCaseProjects).toHaveBeenCalledTimes(3)
+      expect(useChatStore.getState().caseProjectIndexStatus).toBe('ready')
+    } finally {
+      Reflect.deleteProperty(io.provider, 'listCaseProjects')
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not run an old receipt index timer after real A-B-A navigation replaced its subscription', async () => {
+    vi.useFakeTimers()
+    const listCaseProjects = vi.fn()
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockResolvedValue({ caseProjects: [], indexStatus: 'ready' })
+    Object.assign(io.provider, { listCaseProjects })
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => ({
+      thread: thread(id), blocks: [{ kind: 'user', id: 'replacement-user-' + id, text: 'Replacement request' }],
+      latestSeq: 42, threadStatus: 'running', latestTurnId: 'replacement-turn-' + id,
+      latestUserMessageId: 'replacement-user-' + id, turnDurationByUserId: {}
+    }))
+    try {
+      await send()
+      expect(draft().input).toBe('')
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      invalidateThreadDetailCache('b')
+      await act(async () => { await useChatStore.getState().selectThread('b') })
+      expect(useChatStore.getState().activeThreadId).toBe('b')
+      invalidateThreadDetailCache('a')
+      await act(async () => { await useChatStore.getState().selectThread('a') })
+      expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', currentTurnId: 'replacement-turn-a' })
+      const snapshot = useChatStore.getState()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      await settle()
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', currentTurnId: 'replacement-turn-a',
+        caseProjectIndexStatus: snapshot.caseProjectIndexStatus, error: snapshot.error })
+    } finally {
+      Reflect.deleteProperty(io.provider, 'listCaseProjects')
+      vi.useRealTimers()
+    }
+  })
+})
+
+
+describe('R07 follow-up consumers after the send promise settles', () => {
+  it.each(['current', 'stale-resolve', 'stale-reject'])('checks delayed timer I/O against the actual receipt context (%s)', async outcome => {
+    vi.useFakeTimers()
+    const listing = deferred<{ caseProjects: never[]; indexStatus: 'ready' }>()
+    const listCaseProjects = vi.fn()
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockReturnValueOnce(listing.promise)
+    Object.assign(io.provider, { listCaseProjects })
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => runningDetail(id))
+    try {
+      await send()
+      expect(draft().input).toBe('')
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(listCaseProjects).toHaveBeenCalledTimes(2)
+      if (outcome !== 'current') {
+        await select('b')
+        await select('a')
+      }
+      await act(async () => composer().setInput('Later unsent draft'))
+      const snapshot = useChatStore.getState()
+      const effects = receiptSideEffects()
+      if (outcome === 'stale-reject') listing.reject(new Error('Synthetic obsolete index response'))
+      else listing.resolve({ caseProjects: [], indexStatus: 'ready' })
+      await settle()
+      expect(useChatStore.getState()).toMatchObject({ activeThreadId: 'a', busy: snapshot.busy,
+        currentTurnId: snapshot.currentTurnId, currentTurnUserId: snapshot.currentTurnUserId,
+        caseProjectIndexStatus: outcome === 'current' ? 'ready' : snapshot.caseProjectIndexStatus,
+        runtimeConnection: snapshot.runtimeConnection, error: snapshot.error })
+      expect(draft().input).toBe('Later unsent draft')
+      expectNoReceiptSideEffects(effects)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(listCaseProjects).toHaveBeenCalledTimes(2)
+    } finally {
+      Reflect.deleteProperty(io.provider, 'listCaseProjects')
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('keeps normal idle housekeeping prewarm bounded by its receipt context (reselected=%s)', async reselected => {
+    vi.useFakeTimers()
+    // Named threads avoid the separate fallback-title visibility lookup.
+    const warm = { ...thread('warm-r07'), title: 'Synthetic warm thread', status: 'idle' }
+    invalidateThreadDetailCache(warm.id)
+    io.provider.listThreads.mockResolvedValue([{ ...thread('a'), title: 'Named A' }, { ...thread('b'), title: 'Named B' }, warm])
+    io.provider.getThreadDetail.mockImplementation(async (id: string) => runningDetail(id))
+    io.provider.sendUserMessage.mockRejectedValueOnce(new Error('Synthetic current send failure'))
+    try {
+      await send()
+      expect(useChatStore.getState().busy).toBe(false)
+      expect(draft().input).toBe('Discuss selected objects')
+      expect(io.provider.getThreadDetail).not.toHaveBeenCalled()
+      if (reselected) {
+        await select('b')
+        await select('a')
+      }
+      await act(async () => { await vi.advanceTimersByTimeAsync(750) })
+      const warmCalls = io.provider.getThreadDetail.mock.calls.filter(([id]) => id === warm.id)
+      expect(warmCalls).toHaveLength(reselected ? 0 : 1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(750) })
+      expect(io.provider.getThreadDetail.mock.calls.filter(([id]) => id === warm.id)).toHaveLength(reselected ? 0 : 1)
+    } finally {
+      invalidateThreadDetailCache(warm.id)
+      vi.useRealTimers()
+    }
+  })
+})

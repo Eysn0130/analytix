@@ -487,6 +487,7 @@ export function createThreadActions(
   // Receipt ownership is local to this action factory, never persisted. A later
   // send or subscription/snapshot replacement revokes the older completion.
   let currentReceiptOwner: symbol | null = null
+  let sendGeneration = 0
   return {
   createThread: async (options = {}) => {
     if (get().runtimeConnection !== 'ready') {
@@ -1353,6 +1354,7 @@ export function createThreadActions(
       return true
     }
     const receiptOwner = Symbol('send-receipt')
+    const receiptGeneration = ++sendGeneration
     currentReceiptOwner = receiptOwner
     const now = Date.now()
     const queued = overrides?.queued
@@ -1526,10 +1528,11 @@ export function createThreadActions(
     let submissionSubscription: AbortController | null = null
     let receiptSubscription: AbortController | null = null
     let acknowledged = false
-    const ownsReceiptContext = (): boolean => currentReceiptOwner === receiptOwner &&
+    const ownsFollowupContext = (): boolean => sendGeneration === receiptGeneration &&
       get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready' &&
       receiptSubscription !== null && !receiptSubscription.signal.aborted &&
       (sseAbortRef.current === receiptSubscription || sseAbortRef.current === null)
+    const ownsReceiptContext = (): boolean => currentReceiptOwner === receiptOwner && ownsFollowupContext()
     const ownsRunningReceipt = (receipt?: { turnId: string; userMessageItemId?: string }): boolean => {
       const state = get()
       if (!ownsReceiptContext() || !state.busy) return false
@@ -1545,9 +1548,13 @@ export function createThreadActions(
       return matchingTurn && matchingUser
     }
     const refreshReceiptThreads = async (): Promise<void> => {
-      const snapshot = get()
-      const isCurrent = () => ownsReceiptContext() && get().busy === snapshot.busy &&
-        get().currentTurnId === snapshot.currentTurnId && get().currentTurnUserId === snapshot.currentTurnUserId
+      if (!ownsReceiptContext()) return
+      // Only the initiating receipt can start housekeeping. Its bounded follow-up
+      // outlives send's finally, but not another send, subscription or turn snapshot.
+      // Keep only primitive snapshot fields, not the entire store/draft graph.
+      const { busy, currentTurnId, currentTurnUserId } = get()
+      const isCurrent = () => ownsFollowupContext() && get().busy === busy &&
+        get().currentTurnId === currentTurnId && get().currentTurnUserId === currentTurnUserId
       if (isCurrent()) await get().refreshThreads({ isCurrent })
     }
     const cancelPreparedSubmission = (): void => {

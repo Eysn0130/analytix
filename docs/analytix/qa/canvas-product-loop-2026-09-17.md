@@ -1,5 +1,99 @@
 # Canvas scoped quotation and durable review — 2026-09-17
 
+## R07 follow-up lifetime closure — 2026-09-18 UTC / 2026-09-17 Los Angeles
+
+Status: Focused deterministic source validation for the single-parent commit containing this
+addendum; parent `43a3d7d7314773c8f3de6a5d682e88fc60109b32`. Exact new HEAD/tree are recorded
+in Git and the delivery CANDIDATE. This section supersedes the prior R06 exit assessment for
+this defect only, not its receipt protections. Earlier runs below remain historical evidence.
+
+### Reproduced failure and bounded existing-owner repair
+
+The supplied +89-line patch adds exactly four tests to the original Workbench consumer file.
+On the received production code: 43 assertions, 40 PASS / 3 FAIL / 0 SKIP. The old 39 all
+passed; successful-send continuation, failed-send housekeeping and a newer independent
+building-index refresh failed. The actual A→B→A old-timer cancellation counterexample passed.
+These are controlled I/O/clock source failures, not a claim of a production incident or rate.
+
+`sendMessage` used the pending receipt token for delayed refresh liveness, but `finally`
+cleared that token on normal success/failure. The repaired original owner retains its strict
+receipt write predicate and finally release. A per-factory send generation supports only
+bounded follow-up work after return, still fenced by active thread, original subscription,
+abort state, busy and turn/user snapshot. A newer send/subscription revokes it. Only primitive
+snapshot fields are retained, not the complete store/draft graph or a collection of old owners.
+
+The existing navigation index timer is now per action factory, not module-global. Each admitted
+read replaces the prior timer and request generation; invalid callers cannot take ownership.
+Responses and exceptions recheck generation and caller context. Only current building results
+schedule the existing 1500ms timer; ready leaves no continuation. A late timer cannot clear a
+replacement slot. This is not a new scheduler, authority, persistent token or polling removal.
+
+Two additional deterministic cases exposed old response/timer revival during a real failed
+`probeRuntime` followed by successful reconnect while its real thread-list preload was pending.
+The intermediate source produced 92 PASS / 2 FAIL in the two targeted files; the original
+navigation runtime-check/offline paths now invalidate that index generation and timer. The
+same assertions are GREEN, and the new reconnect preload independently reaches ready.
+
+### Verification and counting
+
+All runs use independent Linux uid1000, isolated HOME/TMP/cache, umask077 and exact
+Node22.22.1/npm10.9.4. The supported GitHub artifact download was checksum verified, including
+all five locked inputs. No npm lifecycle, Electron native install, user credentials, cases,
+real Provider/media or user Mac was used. No lock, compiler, lint, test or CI gate changed.
+
+| Actual final scope | Result |
+| --- | --- |
+| Original 52 related files | 818 PASS / 0 FAIL / 0 SKIP, exit 0 |
+| Workbench consumer file, included above | 48 PASS (39 original + supplied 4 + additional 5) |
+| Navigation file, included above | 46 PASS (35 original + 11 additional) |
+| Two existing thread-detail cache/sidebar files, separate | 13 PASS / 0 FAIL / 0 SKIP |
+| Original web and node TypeScript projects, run separately | Both exit 0 |
+| ESLint on the four changed production/test files | Exit 0, no warnings/errors |
+| Existing runtime TypeScript build | Exit 0 |
+| Electron main/preload/renderer source build | Exit 0; build warnings retained |
+
+There are 20 newly committed tests, not 818 or 831: Workbench 9 and navigation 11. The supplied
+four are counted once; no duplicated diagnostic file is tracked. The original 798 test names
+remain in the final 52-file run. Thirteen additional cache tests already existed. Repeated
+runs and Vitest describe/suite counts are not new tests or extra file coverage.
+
+Direct compatibility includes the original R06 receipt/stream/watchdog/completion-poll/plan/
+Office paths, temp-to-stable IDs, completed snapshots, later drafts/assets, three delayed timer
+I/O outcomes, normal and cancelled idle prewarm, timer replacement/ready termination, stale
+read resolve/reject, offline boundaries, invalid callers, observable current errors and factory
+isolation. Controls replace I/O, clocks and presentation leaves, not the tested owners.
+
+Final tests, types, lint and builds used identical tracked-input manifest SHA256
+`e12e7ab3582a7295b36bd3c5d034546b3539d8fb6c17e5ca54f6e5045af67c19` before this addendum.
+Non-document drift is checked before commit. Full commands, start/end UTC, exits, inputs and
+raw JSON/logs are retained in the delivery evidence, together with the pre-runtime-invalidation
+source snapshot for exact intermediate RED reproduction.
+
+### Failed attempts and limits retained
+
+The first safe-unpack verifier expected outer-manifest `files` while the inner uses `entries`;
+the schema error was corrected and every entry independently verified before source use.
+An early navigation RED fixture left the baseline module timer handle after an early failed
+assertion; draining that fixture's callbacks isolated six genuine navigation assertions from
+two cascading failures. An early prewarm fixture used thread-ID fallback titles and triggered
+the real sidebar visibility lookup before prewarm; named synthetic titles corrected this test
+setup. These setup failures remain logged, not counted as new product defects or erased.
+No existing assertion, skip, timeout or production guard was weakened to obtain GREEN.
+
+Go/Rust and dependency locks are unchanged-input evidence only, not new executions. Source
+builds do not validate native packages, GUI/IME, Office—Canvas—image end-to-end journeys,
+real Provider/media, A0/B1/ProductRC/FormalRC or signing/notarization. The historical DuckDB
+inline failure and later non-reproduction have not been diagnosed or changed here.
+
+Fresh remote PR28 is still Open/Draft/unmerged at `dde784437dc8563e84066629dd57f4a11fd9acc9`,
+base `ce96cf12581acfa0e19fae7c6aa9c709371012c8`. The old CodeQL check105175890749 remains
+failure with 37 high/37 annotations; complete traces and rescan remain missing. There is no
+new-SHA remote CI. No code push/API write, ref change, comment update, merge or release was
+attempted: no clearance of the prior OpenAI safety block was established. Codex is a resource
+handoff, not a bypass. Continue only through a supported, explicitly lawful path and preserve
+the original pre-push and exact outgoing-range checks. The existing handover index/comment
+remain the sole anchors; no separate long-lived ledger was created.
+
 ## Receipt ownership closure — 2026-09-18 UTC / 2026-09-17 Los Angeles
 
 Status: Deterministic source evidence for the single-parent commit containing this addendum;

@@ -1355,3 +1355,194 @@ describe('receipt-scoped navigation refresh', () => {
     expect(harness.state.threads).toEqual(before)
   })
 })
+
+describe('case-index refresh continuation ownership', () => {
+  const result = (indexStatus: 'building' | 'ready') => ({ caseProjects: [], indexStatus })
+  function indexHarness() {
+    const harness = buildHarness({ caseProjects: [], caseProjectIndexStatus: 'ready',
+      caseProjectThreadsById: {}, caseProjectLoadingById: {}, caseProjectErrorsById: {}, caseProjectExpandedById: {} })
+    Object.assign(harness.state, harness.actions)
+    return harness
+  }
+  beforeEach(() => {
+    vi.useFakeTimers()
+    registryMock.getProvider.mockReset()
+  })
+  afterEach(async () => {
+    // Drain this fixture's scheduled callback even when a RED assertion exits early.
+    // Resetting fake clocks alone would strand the baseline module's timer handle.
+    try { await vi.runOnlyPendingTimersAsync() } finally { vi.useRealTimers() }
+  })
+
+  it('replaces an invalid receipt timer with one newer bounded continuation', async () => {
+    let current = true
+    const listCaseProjects = vi.fn().mockResolvedValueOnce(result('building'))
+      .mockResolvedValueOnce(result('building')).mockResolvedValue(result('ready'))
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const harness = indexHarness()
+    await harness.actions.refreshCaseProjects({ isCurrent: () => current })
+    expect(vi.getTimerCount()).toBe(1)
+    current = false
+    await harness.actions.refreshCaseProjects()
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(3)
+    expect(harness.state.caseProjectIndexStatus).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(4500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(3)
+  })
+
+  it('cancels a prior building timer when the latest explicit refresh is ready', async () => {
+    const listCaseProjects = vi.fn().mockResolvedValueOnce(result('building')).mockResolvedValue(result('ready'))
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const harness = indexHarness()
+    await harness.actions.refreshCaseProjects()
+    expect(vi.getTimerCount()).toBe(1)
+    await harness.actions.refreshCaseProjects()
+    expect(harness.state.caseProjectIndexStatus).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(4500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['resolved', 'rejected'])('does not let an older %s I/O replace a newer building continuation', async outcome => {
+    const old = deferredReceipt<ReturnType<typeof result>>()
+    const listCaseProjects = vi.fn().mockReturnValueOnce(old.promise)
+      .mockResolvedValueOnce(result('building')).mockResolvedValue(result('ready'))
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const harness = indexHarness()
+    const pending = harness.actions.refreshCaseProjects()
+    await harness.actions.refreshCaseProjects()
+    expect(harness.state.caseProjectIndexStatus).toBe('building')
+    const snapshot = harness.state
+    if (outcome === 'resolved') old.resolve(result('ready'))
+    else old.reject(new Error('Synthetic obsolete index response'))
+    await expect(pending).resolves.toBeUndefined()
+    expect(harness.state).toBe(snapshot)
+    expect(harness.setCalls).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(3)
+    expect(harness.state.caseProjectIndexStatus).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['response', 'timer'])('stops a pending index %s when the runtime disconnects', async boundary => {
+    const listing = deferredReceipt<ReturnType<typeof result>>()
+    const listCaseProjects = vi.fn().mockReturnValueOnce(listing.promise)
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const harness = indexHarness()
+    const pending = harness.actions.refreshCaseProjects()
+    if (boundary === 'timer') {
+      listing.resolve(result('building'))
+      await pending
+      expect(vi.getTimerCount()).toBe(1)
+    }
+    Object.assign(harness.state, { runtimeConnection: 'offline' })
+    const snapshot = harness.state
+    if (boundary === 'response') listing.resolve(result('building'))
+    await pending
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(harness.state).toBe(snapshot)
+    expect(listCaseProjects).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not let an invalid caller cancel the current timer', async () => {
+    const listCaseProjects = vi.fn().mockResolvedValueOnce(result('building')).mockResolvedValue(result('ready'))
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const harness = indexHarness()
+    await harness.actions.refreshCaseProjects()
+    await harness.actions.refreshCaseProjects({ isCurrent: () => false })
+    expect(listCaseProjects).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(2)
+    expect(harness.state.caseProjectIndexStatus).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps a current listing failure observable without leaving a timer', async () => {
+    const error = new Error('Synthetic current index failure')
+    registryMock.getProvider.mockReturnValue({ listCaseProjects: vi.fn().mockRejectedValue(error) })
+    const harness = indexHarness()
+    await expect(harness.actions.refreshCaseProjects()).rejects.toBe(error)
+    expect(harness.setCalls).toEqual([])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the existing index timer local to its navigation action factory', async () => {
+    const listCaseProjects = vi.fn().mockResolvedValueOnce(result('building'))
+      .mockResolvedValueOnce(result('building')).mockResolvedValue(result('ready'))
+    registryMock.getProvider.mockReturnValue({ listCaseProjects })
+    const first = indexHarness()
+    const second = indexHarness()
+    await first.actions.refreshCaseProjects()
+    await second.actions.refreshCaseProjects()
+    expect(vi.getTimerCount()).toBe(2)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(4)
+    expect(first.state.caseProjectIndexStatus).toBe('ready')
+    expect(second.state.caseProjectIndexStatus).toBe('ready')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+
+describe('case-index continuation across actual runtime reconnection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('window', { analytix: {} })
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue({
+      write: { defaultWorkspaceRoot: '', activeWorkspaceRoot: '', workspaces: [] }
+    } as unknown as Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>)
+  })
+  afterEach(async () => {
+    try { await vi.runOnlyPendingTimersAsync() } finally {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
+  it.each(['response', 'timer'])('does not revive a pre-disconnect index %s while reconnect preload is pending', async boundary => {
+    const oldListing = deferredReceipt<{ caseProjects: never[]; indexStatus: 'building' }>()
+    const newThreads = deferredReceipt<NormalizedThread[]>()
+    const listCaseProjects = vi.fn()
+      .mockImplementationOnce(() => boundary === 'response' ? oldListing.promise : Promise.resolve({ caseProjects: [], indexStatus: 'building' }))
+      .mockResolvedValue({ caseProjects: [], indexStatus: 'ready' })
+    const provider = {
+      connect: vi.fn().mockRejectedValueOnce(new Error('Synthetic disconnect')).mockResolvedValue(undefined),
+      listCaseProjects, listThreads: vi.fn(() => newThreads.promise)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ threadSearch: '', showArchivedThreads: false,
+      caseProjects: [], caseProjectIndexStatus: 'ready', caseProjectThreadsById: {},
+      caseProjectLoadingById: {}, caseProjectErrorsById: {}, caseProjectExpandedById: {} })
+    Object.assign(harness.state, harness.actions)
+    const oldRefresh = harness.actions.refreshCaseProjects()
+    if (boundary === 'timer') await oldRefresh
+    await harness.actions.probeRuntime('user')
+    expect(harness.state.runtimeConnection).toBe('offline')
+    const reconnect = harness.actions.probeRuntime('user')
+    try {
+      await settleReceipt()
+      expect(harness.state.runtimeConnection).toBe('ready')
+      expect(provider.listThreads).toHaveBeenCalledOnce()
+      const snapshot = harness.state
+      oldListing.resolve({ caseProjects: [], indexStatus: 'building' })
+      await oldRefresh
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      expect(harness.state).toBe(snapshot)
+    } finally {
+      newThreads.resolve(harness.state.threads)
+      await reconnect
+    }
+    expect(listCaseProjects).toHaveBeenCalledTimes(2)
+    expect(harness.state.caseProjectIndexStatus).toBe('ready')
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(listCaseProjects).toHaveBeenCalledTimes(2)
+  })
+})

@@ -9,7 +9,44 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：2026-09-17 回执归属修复 / 2026-09-18 UTC
+## 当前接续：R07 合法后续刷新生命周期 / 2026-09-18 UTC
+
+Status: **R07_FOCUSED_SOURCE_VERIFIED / REMOTE_SYNC_NOT_CLEARED**。本节与本批真实生产
+修改、原测试增量一同提交，单父为 `43a3d7d7314773c8f3de6a5d682e88fc60109b32`；准确
+新 SHA/tree 以 Git 和交付包 `CANDIDATE.json` 为准。仍沿原分支及 Draft PR28，不重造 Canvas。
+已独立核验原完整 161 提交 bundle、6380 源文件字节/Git blob/逻辑模式及外内层清单。
+
+- 原 Workbench 39 项上接入 supplied R07 四项：实跑 40 PASS / 3 FAIL，三项正常索引
+  接续失败，真实 A→B→A 取消反例保持 PASS。修复后四项全通过，原 39 项均保留。
+- 原 send owner 分离短期回执写权与后续刷新代次；正常 `finally` 仍释放回执令牌，
+  不再误杀合法刷新。后续仍核对发送代次、线程、原订阅/abort、busy 和 turn/user 快照；
+  只捕获必要原始字段，不永久保留旧 owner 或整个 store。R06 的稳定 ID 兼容未回退。
+- 原 navigation 将已有单个 1500ms 索引计时槽归其 action factory，使用有界请求代次；
+  新合法读取替代旧槽，过期返回/异常不写回，ready 取消轮询，失效调用不能抢占新任务。
+  实测快速断线重连、但新预加载仍未返回时，旧 timer/response 也会复活；两个 RED 已
+  在原 runtime-check/offline 路径失效该索引任务后 GREEN，不新增调度系统。
+- 最终原 52 文件 818 PASS / 0 FAIL / 0 SKIP；原 Workbench 文件 48 项、navigation
+  46 项。另 2 个原缓存/侧栏兼容文件 13 PASS，未计为新增。新增共 20 项：Workbench
+  9（supplied 4 + 延迟 I/O 3 + 预热 2），navigation 11。原 798 项全部保留且通过。
+  双原 TS 配置、四文件 lint、runtime TS/Electron 源码构建通过。原始 RED/GREEN、
+  输入、命令、真实退出码和 fixture 修正保存在交付包；详见[原 QA 页](../qa/canvas-product-loop-2026-09-17.md)。
+
+本批为独立 Linux 非特权源码证据，不是产品完整、原生安装、GUI/IME 或真实 Provider
+验收。未变 Go/Rust/锁定输入仅比对，不虚称新跑；不修改 UI Refresh、权限架构或门禁。
+
+本轮 fresh PR28 为 Open/Draft/unmerged，真实远端仍 `dde784437dc8563e84066629dd57f4a11fd9acc9`，
+base 为 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。旧 SHA CodeQL 仍 failure/37 high；
+完整 source→sink、可达性和新扫描仍缺。未取得旧出站安全阻断解除证据，因此无源码
+出站写入、push/ref/评论更新或新 SHA CI。只读及正式 artifact 下载不构成写入许可。
+
+下一执行者接收新修复全量源码和 bundle，再处理确有许可的同步/精确新 SHA CI及独立
+原生资源。不得把 Codex/换接口/转码/拆分/换会话当作解除；不得要求用户运行 Git、
+重新导出、传话、提供旧凭据或使用用户 Mac。保持 main/历史/UI 分支不动、PR28 Draft。
+唯一远端恢复锚点仍 comment `5709839864`；完整读取并核对正文与 updated_at、保留历史
+且获准写入后才更新。本次未读写该评论，不新建第二总账。下方结论均为历史，不覆盖
+R07 的修复证据与当前安全边界；无新的确定性本地缺陷时不无限扩大验证或另造 Canvas。
+
+## 历史接续：2026-09-17 回执归属修复 / 2026-09-18 UTC
 
 Status: **RECEIPT_SOURCE_CLOSED / REMOTE_SYNC_NOT_CLEARED**。本节随真实源码、测试一次提交，
 单父为 `d4650629f7d030b39430e08e7786e5fa5f938b7d`；准确新 SHA/tree 从当前 Git 和交付包
