@@ -76,6 +76,9 @@ export function registerBrowserSelectionIpc(getMainWindow: () => BrowserWindow |
     try {
       if (captures.size >= 8) retire(captures.values().next().value!)
       const text: unknown = await execute('capture')
+      if (current() && text && typeof text === 'object' && 'error' in text && text.error === 'child-frame-unsupported') {
+        lease.release(); return { ok: false, error: 'child-frame-unsupported' }
+      }
       if (!current() || typeof text !== 'string' || !text.trim() || text.length > 4096 || Buffer.byteLength(text) > 16384) throw Error('selection-unavailable')
       const result = await request({ action: 'capture', capture: { threadId: input.threadId, documentId, selectionId, text } })
       const scope = browserScopeSchema.parse(result.scope)

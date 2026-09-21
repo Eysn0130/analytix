@@ -13,6 +13,7 @@ import {
   Sparkles,
   X
 } from 'lucide-react'
+import type { NativeReference } from '../office/native-reference-store'
 import type { ChatBlock } from '../agent/types'
 import {
   DEFAULT_DEV_PREVIEW_URL,
@@ -125,40 +126,46 @@ export function DevBrowserPanel({
   detectedUrls: providedDetectedUrls,
   preferredUrl,
   className,
-  onCollapse
+  onCollapse,
+  onSubmitPrompt
 }: {
   blocks?: ChatBlock[]
   detectedUrls?: string[]
   preferredUrl?: string | null
   className?: string
   onCollapse: () => void
+  onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void
 }): ReactElement {
   const { t } = useTranslation('common')
   const webviewRef = useRef<DevWebviewTag | null>(null)
   const captureEpoch = useRef(0)
   const [capturingSelection, setCapturingSelection] = useState(false)
   useEffect(() => {
+    const epoch = captureEpoch
     const unsubscribe = useChatStore.subscribe((state, previous) => {
       if (state.activeThreadId !== previous.activeThreadId || state.workspaceRoot !== previous.workspaceRoot) captureEpoch.current++
     })
-    return () => { captureEpoch.current++; unsubscribe() }
+    return () => { epoch.current++; unsubscribe() }
   }, [])
-  const captureSelection = async () => {
+  const captureSelection = async (actionPrompt?: string) => {
     const guest = webviewRef.current, threadId = useChatStore.getState().activeThreadId
     if (!guest || !threadId || capturingSelection) return
     const epoch = captureEpoch.current
     setCapturingSelection(true)
     try {
       const response = await window.analytix.browserSelection.request({ action: 'capture', guestId: guest.getWebContentsId(), threadId })
+      if (!response.ok && response.error === 'child-frame-unsupported') { setLoadError(t('browserChildSelectionUnsupported')); return }
       const scope = response.ok ? browserScopeSchema.safeParse(response.scope) : null
       if (!scope?.success) throw Error('selection-unavailable')
       if (epoch !== captureEpoch.current || guest !== webviewRef.current || useChatStore.getState().activeThreadId !== threadId) {
         void window.analytix.browserSelection.request({ action: 'revoke', scope: scope.data })
         return
       }
-      useNativeReferenceStore.getState().add({ kind: 'browser-selection', threadId, workspace: scope.data.workspace,
+      const reference: NativeReference = { id: crypto.randomUUID(), kind: 'browser-selection', threadId, workspace: scope.data.workspace,
         objectId: scope.data.documentId, revision: scope.data.selectionId, scopeId: scope.data.scopeId,
-        browserScope: scope.data, editable: false, path: '', text: '', label: t('browserSelectedText') })
+        browserScope: scope.data, editable: false, path: '', text: '', label: t('browserSelectedText') }
+      if (actionPrompt) onSubmitPrompt?.(actionPrompt, [reference])
+      else useNativeReferenceStore.getState().add(reference)
     } catch { setLoadError(t('browserSelectionUnavailable')) }
     finally { setCapturingSelection(false) }
   }
@@ -460,6 +467,8 @@ export function DevBrowserPanel({
           <div className="ml-auto flex shrink-0 items-center">
             {useElectronWebview && <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
               className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserQuoteSelection')}</button>}
+            {useElectronWebview && onSubmitPrompt && <button type="button" onClick={() => void captureSelection(t('browserExplainPrompt'))} disabled={capturingSelection}
+              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserExplainSelection')}</button>}
             <PanelCollapseButton
               onClick={onCollapse}
               ariaLabel={t('rightPanelCollapse')}

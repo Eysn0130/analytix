@@ -59,7 +59,10 @@ export function isNativeSelectionEditable(view: NativeOfficeView, selection: Nat
 /** Recheck an explicit task after asynchronous preparation; the Core still owns authority. */
 export function nativeActionReferencesCurrent(references: readonly NativeReference[], views: readonly NativeOfficeView[]): boolean {
   return references.length > 0 && references.every(reference => {
-    if (reference.kind === 'canvas' || reference.kind === 'image-region' || reference.kind === 'browser-selection') return false // Send-time Core validation.
+    // Browser has no Office view. Its full binding and live Core challenge are
+    // mandatory in validateBrowserReferences, including the final send fence.
+    if (reference.kind === 'browser-selection') return !!reference.scopeId
+    if (reference.kind === 'canvas' || reference.kind === 'image-region') return false // Send-time Core validation.
     const view = views.find(candidate => candidate.objectId === reference.objectId)
     return !!view && view.revision === reference.revision &&
       (view.changeSequence ?? 0) === reference.selection.changeSequence &&

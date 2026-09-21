@@ -14,4 +14,4 @@ export const browserSelectionRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('revoke'), scope: browserScopeSchema }).strict()
 ])
 export type BrowserSelectionRequest = z.infer<typeof browserSelectionRequestSchema>
-export type BrowserSelectionResponse = { ok: true; scope?: BrowserScope } | { ok: false }
+export type BrowserSelectionResponse = { ok: true; scope?: BrowserScope } | { ok: false; error?: 'child-frame-unsupported' }

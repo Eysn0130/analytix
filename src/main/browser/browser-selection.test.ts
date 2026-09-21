@@ -93,3 +93,10 @@ test('navigation during Core capture retires its late scope', async () => {
   finish(undefined); expect(await pending).toEqual({ ok: false })
   expect(h.transport.mock.calls.some(([, body]) => JSON.parse(body).action === 'revoke')).toBe(true)
 })
+
+test('returns child-frame unsupported without submitting text to Core', async () => {
+  const f = fixture()
+  f.guest.executeJavaScriptInIsolatedWorld.mockResolvedValueOnce({ error: 'child-frame-unsupported' } as any)
+  expect(await f.invoke({ action: 'capture', guestId: f.guest.id, threadId: 'thread' })).toEqual({ ok: false, error: 'child-frame-unsupported' })
+  expect(f.transport).not.toHaveBeenCalled()
+})

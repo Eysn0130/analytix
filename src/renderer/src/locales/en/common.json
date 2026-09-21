@@ -1,4 +1,7 @@
 {
+  "browserChildSelectionUnsupported": "Selections inside embedded frames are not supported yet. Select text in the main page.",
+  "browserExplainSelection": "Explain selection",
+  "browserExplainPrompt": "Explain the selected browser text in this conversation.",
   "browserSelectedText": "Browser selected text",
   "browserQuoteSelection": "Quote selection",
   "browserSelectionUnavailable": "Select text in the main browser document and try again. The selection may have changed.",

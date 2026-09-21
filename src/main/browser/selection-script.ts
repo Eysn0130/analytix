@@ -4,13 +4,16 @@ export function browserSelectionScript(action: 'capture' | 'check' | 'release', 
   return `(${isolatedSelection.toString()})(${JSON.stringify(action)},${JSON.stringify(id)})`
 }
 
-function isolatedSelection(action: string, id: string): string | boolean {
+function isolatedSelection(action: string, id: string): string | boolean | { error: 'child-frame-unsupported' } {
   type Held = { range: Range; start: Node; end: Node; startOffset: number; endOffset: number; text: string; dirty: boolean; observer: MutationObserver }
   const world = globalThis as typeof globalThis & { __analytixSelections?: Map<string, Held> }
   const held = world.__analytixSelections ??= new Map()
   const remove = (key: string) => { held.get(key)?.observer.disconnect(); held.delete(key) }
   if (action === 'release') { remove(id); return true }
   if (action === 'capture') {
+    // A focused child frame may leave an old selection in the parent document.
+    // Never substitute that stale parent text for the user's child-frame intent.
+    if (document.activeElement?.matches('iframe, frame')) return { error: 'child-frame-unsupported' }
     const selection = window.getSelection()
     if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return false
     const range = selection.getRangeAt(0).cloneRange(), text = range.toString()

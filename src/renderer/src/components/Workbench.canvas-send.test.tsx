@@ -11,7 +11,7 @@ import type { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
 // mounted Workbench, plan controller, composer draft hook and stores are real.
 const io = vi.hoisted(() => ({
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
-  document: null as { onSubmitPrompt: (value: string) => void } | null,
+  document: null as { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void } | null,
   provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn() },
   browser: vi.fn(), retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
   t: (key: string) => key
@@ -37,7 +37,7 @@ vi.mock('./shell/ShellNavigationControls', () => ({ ShellNavigationControls: () 
 vi.mock('./DevPreviewLaunchCard', () => ({ DevPreviewLaunchCard: () => null }))
 vi.mock('./RuntimeBanner', () => ({ RuntimeBanner: () => null }))
 vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null }))
-vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null, SubagentInspectorPanelIsland: () => null, ThreadSummaryPanelIsland: () => null, TodoPanel: () => null, WorkspaceFilePreviewPanel: () => null, DocumentWorkspacePanel: (props: { onSubmitPrompt: (value: string) => void }) => { io.document = props; return null }, preloadRightPanelIsland: () => null }))
+vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null, SubagentInspectorPanelIsland: () => null, ThreadSummaryPanelIsland: () => null, TodoPanel: () => null, WorkspaceFilePreviewPanel: () => null, DocumentWorkspacePanel: (props: { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void }) => { io.document = props; return null }, preloadRightPanelIsland: () => null }))
 
 vi.mock('./workbench/ChatTimelineIsland', () => ({ ChatTimelineIsland: () => null, useDevPreviewUrls: () => [] }))
 import { Workbench } from './Workbench'
@@ -844,6 +844,28 @@ describe('Workbench Browser selected-text consumer path', () => {
     })
     io.browser.mockResolvedValue({ ok: true })
   }
+  it.each([false, true])('explicit Browser action preserves composer assets (revoked=%s)', async revoked => {
+    await attachBrowser(); await addAssets()
+    await act(async () => useWriteWorkspaceStore.setState({ workspaceRoot: workspace,
+      activeFilePath: workspace + '/synthetic.md', saveStatus: 'saved' }))
+    const before = structuredClone(draft())
+    const refs = structuredClone(useNativeReferenceStore.getState().references)
+    const settings = deferred<AppSettingsV1>(); io.settings.mockReturnValueOnce(settings.promise)
+    await act(async () => io.document!.onSubmitPrompt('Explain the selected browser text', refs))
+    await settle()
+    expect(io.browser).toHaveBeenCalled()
+    expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
+    if (revoked) io.browser.mockResolvedValue({ ok: false })
+    settings.resolve({ workspaceRoot: workspace } as AppSettingsV1); await settle()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledTimes(revoked ? 0 : 1)
+    expect(draft()).toEqual(before)
+    expect(io.read).not.toHaveBeenCalled()
+    if (!revoked) {
+      expect(io.provider.sendUserMessage.mock.calls[0][0]).toBe('a')
+      expect(io.provider.sendUserMessage.mock.calls[0][1]).toContain('Core scopeId: ' + 'a'.repeat(48))
+      expect(io.provider.sendUserMessage.mock.calls[0][1]).not.toContain('PRIVATE-BROWSER-TITLE')
+    }
+  })
   it('quotes without sending and explicitly sends an opaque reference in the same conversation', async () => {
     await attachBrowser()
     expect(io.provider.sendUserMessage).not.toHaveBeenCalled()

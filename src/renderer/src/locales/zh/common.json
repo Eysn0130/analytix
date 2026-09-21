@@ -1,4 +1,7 @@
 {
+  "browserChildSelectionUnsupported": "暂不支持子框架中的选区，请在主页面中选择文本。",
+  "browserExplainSelection": "解释选区",
+  "browserExplainPrompt": "请在当前会话解释浏览器选区的内容。",
   "browserSelectedText": "浏览器选中文本",
   "browserQuoteSelection": "引用选区",
   "browserSelectionUnavailable": "请在浏览器主文档中选择文本后重试，原选区可能已变化。",

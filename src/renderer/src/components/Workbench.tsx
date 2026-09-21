@@ -3239,7 +3239,7 @@ export function Workbench(): ReactElement {
               ) : null}
               {workspaceTabs.some((tab) => tab.mode === 'browser') ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'browser'} inert={panelMode !== 'browser' || !rightPanelVisible}>
-                  <DevBrowserPanelIsland preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
+                  <DevBrowserPanelIsland onSubmitPrompt={sendWritePrompt} preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
                 </div>
               ) : null}
               {panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'summary' ? renderSummaryPanel() : panelMode === 'child-agent' && activeSubagentInspector ? (

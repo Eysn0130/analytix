@@ -30,3 +30,14 @@ test('rejects absent/collapsed/oversized selections and cannot resurrect release
   document.body.textContent = 'x'.repeat(4097); const r = document.createRange(); r.selectNodeContents(document.body)
   window.getSelection()!.addRange(r); expect(execute('capture')).toBe(false)
 })
+
+test('rejects a focused child frame instead of capturing the stale main-frame selection', () => {
+  const node = select()
+  const frame = document.createElement('iframe'); document.body.append(frame); frame.focus()
+  expect(document.activeElement).toBe(frame)
+  // Model the retained parent Range after child focus (jsdom clears it on focus).
+  const range = document.createRange(); range.setStart(node, 6); range.setEnd(node, 11)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  expect(execute('capture')).toEqual({ error: 'child-frame-unsupported' })
+  expect(execute('check')).toBe(false)
+})

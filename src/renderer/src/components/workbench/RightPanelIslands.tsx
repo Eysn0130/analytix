@@ -120,11 +120,13 @@ export function ChangeInspectorIsland({
 export function DevBrowserPanelIsland({
   preferredUrl,
   className,
-  onCollapse
+  onCollapse,
+  onSubmitPrompt
 }: {
   preferredUrl?: string | null
   className?: string
   onCollapse: () => void
+  onSubmitPrompt?: ComponentProps<typeof DevBrowserPanel>['onSubmitPrompt']
 }): ReactElement {
   const detectedUrls = useDevPreviewUrls(extractLatestTurnDevPreviewUrls)
   return (
@@ -133,6 +135,7 @@ export function DevBrowserPanelIsland({
       preferredUrl={preferredUrl}
       className={className}
       onCollapse={onCollapse}
+      onSubmitPrompt={onSubmitPrompt}
     />
   )
 }
