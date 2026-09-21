@@ -116,3 +116,23 @@ Hub-first 冲突、插件身份归属与规范分类。文档地图中的 2026-0
 迁至 [Historical reference](upstreams/agent-guidance-review-2026-07-29.md)，
 原入口保留链接。历史报告、归档 change 和打包要求的 reference 镜像保留；
 不会因为文件长、旧或重复就删除仍被消费或用于证据追溯的内容。
+
+## 2026-09-21 PR28 current-entry consolidation
+
+Scope: the two actual current entry files and their existing dated evidence owner,
+not a whole-repository documentation approval. START d8640957c; product SOURCE2f25c22f7.
+
+| Original at d8640957c | Exact original SHA256 | Preserved owner / action |
+| --- | --- | --- |
+| `handovers/README.md` | `57d367da2f4971651f1627f9ccdd71c674c83700716d2cf566b93379ea4714c2` | Complete snapshot moved to `handovers/2026-09-16-pr28-continuation.md`, explicit historical heading IDs; README now current identity/gaps/recovery with compatibility links |
+| `product-completion.md` | `c2d7429c6fc7a389587535ef0a606e322bed94704ac7461b4339144491aa881e` | Complete snapshot in the same dated owner; product-relative links rebased, current file becomes P0–P5 as-built/gap/evidence/gate matrix |
+
+Original text remains recoverable at the exact Git commit; migration changes heading
+currentness labels and link locations, not recorded outcomes. Private migration
+receipts bind original/relocated hashes and each heading's old/new anchor. The current
+QA adds errata for the wrong LibreOffice anchor, browser-red executed-versus-discovered
+counts, and old65ab totals. It does not rewrite immutable command receipts.
+The document map and knowledge governance now preserve a newer unsynchronized local
+writer/checkpoint before consulting an older remote. No license, historical failure,
+compatibility reader or product feature was removed. Other documents are UNREVIEWED
+unless a specific reading/validation record says otherwise.

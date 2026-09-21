@@ -1,11 +1,174 @@
 # PR28 independent-review continuation — 2026-09-21
 
 Status: Current continuation plus historical execution receipts; not product/release acceptance.
-Scope: latest user-adopted closure continuation A–N, retaining prior A–I/A–M receipts and the original A–M/P0–P5 outcome.
+Scope: latest user-adopted readiness continuation A–N, retaining prior A–I/A–M receipts and the original A–M/P0–P5 outcome.
 Repository and source writer remain the canonical Analytix checkout and original Codex owner.
 No Goal, scheduled continuation, new independent task, public release or writer transfer was used.
 
-## Current closure continuation A–N: Browser actions, DOCX structure and bounded Rust probes
+## Current readiness continuation from d864
+
+START `d8640957c4c1c69c5ddee4e3a9b017382c088047` / tree
+`2e4576860898320de4805fd5090540c6386ce724`, clean/ahead61. Original repository,
+branch and writer retained. SOURCE `2f25c22f7c8fb9626e204e34d573fb1de3e7208b` /
+tree `63b1edccec3475abc7990776e77b5cda2df92245`, clean/ahead62 before documentation.
+Production/contracts/config4 files +40/-5; tests3 files +62/-4; total7 files +102/-9.
+Documentation-only DELIVERY and totals are recorded separately in the final manifest.
+
+### Intake and precise errata
+
+Release-Readiness-Review ZIP SHA256
+`305e690e34b36207520bd9980a9698900f464600171c00308f74d381b6978e50`,88062bytes,
+20members/19manifest objects/305788 expanded bytes: safe paths, unique NFC/casefold
+names, regular types, encryption/size/ratio checks, CRC and19/19SHA256 pass. No
+external sidecar was supplied; internal hashes do not prove author authenticity.
+The user-adopted A–N was read in full; review attachments are evidence and proposals,
+not independent permission. No attachment script was automatically executed. The
+reviewer's30 new selftests, prior64 tool selftests and32 scenario specifications are
+not product tests and were not rerun merely to raise counts.
+
+- The prior browser-red group discovered59, executed3, passed0, failed3, skipped56.
+  Its old `matched:3` meant executed tests; it did not include skipped tests. Original
+  receipt remains immutable. Candidate movement still prevents calling it stable RED.
+- The old LibreOffice CharFontSize link ending `#L7363` is an incorrect anchor.
+  Correct pinned location is [7943–7957](https://github.com/LibreOffice/core/blob/efaf0670b4d055f838a2849becb10f08aa06a257/sw/source/filter/ww8/docxattributeoutput.cxx#L7943-L7957).
+  This erratum does not rewrite the old experiment or upgrade it to a complete proof.
+- The old tail's25production+609/-14 and9tests+495/-2 refer to65ab, not4343 or2f25.
+  Its title is now version-qualified. Old13/26/32/64 review/vector counts stay separate.
+- Missing every OOXML font-size source does not mandate10.5pt. Ad-hoc verification is
+  not Developer ID/notarization. Empty combined-status output is not green check-runs.
+
+### F0/F1/F2 and actual DOCX protection
+
+The immutable original fixture SHA256
+`056c46b78817f37af957d76ca7738a31bd5cad3724b51fdac97adf7c59b9560f`
+has four ZIP parts: document, its relationships, root relationships and content types.
+It has no styles/settings/fontTable, paragraph/character style references, direct
+w:sz or w:szCs. Relationship IDs are unique. Thus there is no basedOn chain or cycle
+in this fixture; observed11/10.5 sizes are application defaults, not declared values.
+One run declares Liberation Serif/Noto Sans CJK SC; file bytes alone do not establish
+font substitution. Member bytes/hashes and relationship records are retained privately.
+
+F1 adds only styles/docDefaults w:sz22 plus its relationship/content type; document.xml
+remains byte-identical. Fixed engine original/no-op/reopen stays11/11. F2 adds a default
+paragraph style w:sz21 and a run-local22 override: original/no-op/reopen stays11/11 and
+10.5/10.5 respectively. Both comparisons retain every recorded Western/Asian font,
+size, weight, posture, color, link and text value. Adjacent identical-style runs may
+merge for semantic comparison; no font property is dropped. Both screenshot pairs
+were visually read with no observed layout difference in this small synthetic page.
+This is not a full rendered-document oracle or installed GUI acceptance.
+
+The existing worker now checks native body/table portions before edit admission and
+again before export, with8192 traversal steps and16 nested-table levels. Different
+Western/CJK sizes, unavailable/invalid properties and exceeded bounds return finite
+`unsupported-format-fidelity` before storeToURL. Main maps the refusal to the existing
+unsupported-selection contract; the isolated surface explains that the original was
+not saved and preview remains available. The document is not silently normalized.
+The existing field/link structure guard and Core CAS/review/undo chain remain intact.
+This check does not claim coverage of every header, footnote, drawing, relationship or
+formatting property; broader candidate validation and original preservation remain open.
+
+Real pinned LibreOffice `efaf0670b4d055f838a2849becb10f08aa06a257` / zetajs
+`57360bcb0e7726ffa0e66567c8041261b959f8dd`, all6assets byte/hash verified, running in
+Electron41.10.3 on this arm64 Mac: original fixture rejects editing with sequence0,
+clean state and no export; both explicit/inherited-size positive controls still accept
+cross-run replacement, export and reopen with all measured properties preserved.
+The private probe uses test-only selection/inspection hooks; product source adds no
+arbitrary UNO/IPC or preload exception. Original4-case14pass/8fail evidence remains;
+the new refusal is a loss-prevention result, not8 successful original-file edits.
+
+### Proportional verification and retained failures
+
+All storage-consuming commands source `scripts/use-analytix-cache.sh` in the same
+shell. New runner records command/cwd/start/end, source HEAD/tree/dirty fingerprints,
+lockfile hashes, platform, actual exit and raw log bytes/hash. New native helpers and
+the test-only worker were fingerprinted **before** execution. Per-run executable
+versions not captured by a receipt are NOT_RECORDED, not backfilled; the separate
+version observation is Node22.22.1/npm10.9.4/Python3.11.15. Engine logs bind Electron41.10.3.
+
+| Actual group | Exit / observed result | Scope |
+| --- | --- | --- |
+| typography-red |1;3 executed/0pass/3fail/18skip,21discovered | Stable original worker + new tests; no moving product candidate |
+| typography-green |0;45pass/0fail/0skip | worker/typed/PPT/transport |
+| typography-controller |1;62pass/1fail | New test incorrectly passed revision fields to the close request; retained fixture failure |
+| typography-controller-final |0;78pass/0fail/0skip | Main/controller/surface/preload/transport after exact close request correction |
+| typography-final |0;41pass/0fail/0skip | final worker/transport, including invalid sizes and traversal bounds |
+| typography-typecheck |0 | Both web/node TS configurations |
+| typography-lint |0 | Five changed TS production/test files; empty stdout is not inferred success, executor exit is recorded |
+| docdefaults-control / style-control |0 each | Actual fixed engine F1/F2, not mock or alternate Office |
+| typography-native |1 overall | Original pre-mutation refusal passed; positive comparison stopped on semantically identical run segmentation |
+| typography-native-positive |0 | Two controls cross-run edit/export/reopen; canonicalization merges only identical complete style maps |
+
+Groups overlap and must not be summed. No995-test/full-CI, repeated Rust experiment,
+new private package, installation, Provider or release check was run. Old private4343
+DMG cannot validate2f25 source. Native raw logs and helper implementations remain in
+private task evidence, not report-only exports. The report contains actual commands,
+receipts and fingerprints, not a claim that all raw logs travel with it.
+
+### Source-gap investigation without fabricated admission
+
+Skills: current `app/pluginmaterialization/service.go` freezes FormalPackageBinding
+from pre-admitted packaged resources; `app/pluginpackagehost/service.go` accepts a
+bounded fixed development-source registration set, not arbitrary publisher ZIPs.
+`pluginmaterializationfs` already owns signed stage/index/journal and activation.
+Desktop remote install still returns `remote_plugin_materialization_requires_go_archive_authority`.
+No current trusted remote publisher/registry descriptor binding was found in these
+owners; hashing a ZIP or adding a fake Host uninstall method would not complete it.
+Archive authorization/materialization and installed uninstall remain SOURCE_GAP,
+not a completed filesystem fixture or merely a GUI environment limitation.
+
+Imported pivot/chart: existing typed cells, real pivot generation and PPT geometry/fill
+are retained. Stable imported part/relationship/field identities, actual fixed UNO
+mutation/refresh, shared-cache preservation and reopen rebind are still SOURCE_GAP.
+No SUMIF substitute, whole-file reconstruction or permissive renderer authority was added.
+
+Chromium: nine Electron41.10.3 source blobs were read and their Git object hashes checked.
+[PostCreateMainMessageLoop](https://github.com/electron/electron/blob/v41.10.3/shell/browser/electron_browser_main_parts.cc#L517-L562)
+sets macOS service `<app name> Safe Storage` and account `<app name>`.
+[Network-service initialization](https://github.com/electron/electron/blob/v41.10.3/shell/browser/net/system_network_context_manager.cc#L279-L284)
+gets the process-bound raw encryption key when Cookie encryption is enabled.
+[Fixed safeStorage exports](https://github.com/electron/electron/blob/v41.10.3/shell/browser/api/electron_api_safe_storage.cc)
+provide no public task-Keychain selector; Linux password-store configuration does not
+apply on macOS. Chromium146.0.7680.216 keychain/OSCrypt sources were also read.
+These are static source observations, not an OS credential trace. No personal profile,
+Keychain, SecurityAgent, global search list or signing policy was accessed/changed.
+Isolated userData and the Go Secret Store binding do not establish this missing native
+boundary. Exact process-specific storage admission is still required before installed launch.
+
+Rust: current require_nonempty_query performs COUNT(wrapper) then registers the observed
+range; current query_rows already labels aggregate_count/page_nonempty/page_values/
+nonempty/output_nonempty/page_output. Historical0bc output_file order is not the ce96
+aggregate target. No new discriminating hypothesis or matching binary/symbol artifact
+was established, so no repeat of the prior six query executions was performed.
+No SQL,3000/10000ascending fixture, optimizer or DuckDB version changed.
+
+### Documentation, remote state and remaining outcome
+
+The two long current entry files were consolidated into a single current handover and
+product matrix. Their complete d864 contents were moved into the existing dated
+`handovers/2026-09-16-pr28-continuation.md`, labeled Historical with exact original
+content SHA256, source commit and compatibility anchors. Product-relative links were
+rebased. No old failure, legal notice or execution result was removed. The existing
+consolidation register records the move; unreviewed repository documents remain unreviewed.
+
+Fresh read-only GitHub observation at2026-09-21T17:06:22.418597Z: PR28open/Draft/unmerged,
+head `dde784437dc8563e84066629dd57f4a11fd9acc9`, actual main/base
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`. Rules remain separately applicable.
+This read did not refresh every historical CI job and does not validate2f25.
+Original create_tree refusal remains PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED; exact payload
+and regular clearance are not newly available. No alternate push/API/sourceZIP/executor,
+remote write, Ready, merge, tag, publication, Goal or automatic continuation occurred.
+
+Full A–N/P0–P5 is **partial**, not all locally implementable source work completed.
+The current matrix lists SOURCE_GAP for imported editing/Skills/Chromium, EVIDENCE_NOT_RUN
+for installed/native/Provider/current-scan seams, EVIDENCE_FAILURE for unresolved old
+Rust and original typography, and SAFETY_NOT_CLEARED for source egress.
+MERGED_MAIN, VERIFIED_MAIN, COMPLETE_PRODUCT, FORMAL_RC and PUBLIC_RELEASE remain false.
+The original writer is retained. New report-only evidence permits REVIEW_ONLY follow-up;
+it neither supplies nor approves the current product diff or releases the writer.
+
+<a id="current-closure-continuation-an-browser-actions-docx-structure-and-bounded-rust-probes"></a>
+
+## Historical 4343/d864 closure: Browser actions, DOCX structure and bounded Rust probes
 
 START `5242782f099f10ddb6af91eb70e8ad5a0944aa1e`, tree
 `c52bd237bd5e1520d8c4a69c54423cfaee74700d`, was clean/ahead57 on the original
@@ -578,4 +741,4 @@ latest local source is not supplied through the report package. Repository QA an
 handover are authoritative; the existing Notion ledger receives only a bounded
 verified summary after the local checkpoint, never source or raw private logs.
 
-Current source change totals: production_contract_config: 25 files +609/-14; test: 9 files +495/-2. Documentation totals and final DELIVERY are recorded after the documentation checkpoint; no tested source is changed by it.
+Historical 65ab source change totals: production_contract_config: 25 files +609/-14; test: 9 files +495/-2. Documentation totals and final DELIVERY are recorded after the documentation checkpoint; no tested source is changed by it.

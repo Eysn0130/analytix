@@ -17,8 +17,9 @@
 - [`handovers/README.md`](handovers/README.md) 是跨线程暂停和恢复的操作入口。
 - 当前施工快照与补充记录统一由
   [`handovers/README.md`](handovers/README.md) 路由；本页不再重复维护“最新”文件名。
-  PR #28 未合并时，先 fresh 读取 PR 的 head 分支，再在该分支读取交接入口，
-  不假设默认 `main` 已包含候选分支的记录。
+  PR #28 未合并时，先识别 canonical 本机 writer、HEAD、tree、dirty 与有效后继，
+  再 fresh 读取远端 PR/head/main。远端仅能恢复已合法同步的内容，不用旧远端
+  覆盖较新本机检查点，也不假设默认 `main` 已包含候选分支的记录。
   `2026-09-10-owner-replacement.md` 保留为 R131/B1 与旧 Owner 交接的历史快照。
   恢复时仍须从当前 Git、active OpenSpec、代码和 fresh 验证重建状态。
 - `2026-08-05-damaged-cache-retirement.md` 仍是损坏缓存退役的历史来源，

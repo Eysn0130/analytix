@@ -28,7 +28,7 @@ Analytix 采用三层治理，职责不可互换：
 | What an active change proposes or tracks | its `openspec/changes/<change>/` artifacts, only inside the scope authorized by the current user request |
 | How agents work | every applicable `AGENTS.md` plus the task-matched workflow / Skill |
 | What was verified at a point in time | dated evidence tied to the exact commit/worktree, command, platform/environment and result |
-| How a new thread resumes | `docs/analytix/handovers/README.md` plus its latest checkpoint, then fresh GitHub facts |
+| How a new thread resumes | canonical local writer/HEAD/tree/dirty and `docs/analytix/handovers/README.md`, then fresh GitHub facts; remote recovery covers only legally synchronized content |
 
 When these differ, preserve `as-built`, `target` and `gap` separately. Never make them agree by
 silently rewriting one layer.
@@ -47,7 +47,10 @@ The configured project knowledge layer is the connected Notion workspace contain
 
 Do not put private Notion workspace IDs or private page URLs into this public repository merely to
 make automation easier. Agents with the connector should locate the pages by the stable names above.
-If the connector is unavailable, repository construction must remain resumable from GitHub alone.
+If the connector is unavailable, committed canonical handovers still govern recovery.
+GitHub alone can recover only legally synchronized work. A newer unsynchronized local
+checkpoint must be preserved with its original writer; a knowledge mirror cannot
+reconstruct missing source or clear an outbound refusal.
 
 ### Google Drive
 
