@@ -96,6 +96,10 @@ func (s *Service) WithSkill(ctx context.Context, expected adapterport.Binding, d
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	principal, err := s.principal(ctx)
+	if err != nil {
+		return err
+	}
 	loaded, err := s.loadSkillLocked(ctx, expected)
 	if err != nil {
 		return err
@@ -103,5 +107,24 @@ func (s *Service) WithSkill(ctx context.Context, expected adapterport.Binding, d
 	if loaded.Snapshot.Digest() != digest {
 		return ErrConflict
 	}
-	return consume(loaded.Snapshot)
+	if err := s.validatePrincipal(ctx, principal); err != nil {
+		return err
+	}
+	if err := consume(loaded.Snapshot); err != nil {
+		return err
+	}
+	// The Host lock orders local activation calls, but not identity revocation
+	// or independently changed installed state. A late result must retain both
+	// the original principal and the exact installed snapshot authority.
+	if err := s.validatePrincipal(ctx, principal); err != nil {
+		return err
+	}
+	current, err := s.loadSkillLocked(ctx, expected)
+	if err != nil {
+		return err
+	}
+	if current.Snapshot.Digest() != digest {
+		return ErrConflict
+	}
+	return s.validatePrincipal(ctx, principal)
 }
