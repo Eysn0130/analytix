@@ -318,6 +318,7 @@ Module.zetajs.then(zeta => {
           const type = typeof nativeType === 'number' ? nativeType : nativeType.value;
           if (![0,2].includes(type) || handle.target.getIsMerged()) throw Error('unsupported-selection');
         }
+        if (handle.target.getString() === r.text) throw Error('invalid-control-value');
         mutate(() => handle.target.setString(r.text));
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'replaceCells') {

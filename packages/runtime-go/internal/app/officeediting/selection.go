@@ -396,6 +396,11 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if err != nil {
 			return failure(err)
 		}
+		// Workbook reviews carry typed changes beyond their display text. Plain
+		// text must change before creating durable native recovery state.
+		if proposal.Review == nil && replacement == beforeText {
+			return failure(editingapp.ErrProposal)
+		}
 		recovery, ok := a.service.(NativeRecoveryService)
 		if !ok {
 			return failure(ErrUnavailable)
@@ -498,8 +503,12 @@ func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydo
 		if patch != nil {
 			return nil, editingapp.ErrProposal
 		}
-		if _, err := renderNativeProposal(scope, parts); err != nil {
+		replacement, err := renderNativeProposal(scope, parts)
+		if err != nil {
 			return nil, err
+		}
+		if replacement == scope.originalText {
+			return nil, editingapp.ErrProposal
 		}
 	}
 	body, _ := json.Marshal(parts)

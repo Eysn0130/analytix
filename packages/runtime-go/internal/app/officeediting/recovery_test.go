@@ -203,7 +203,7 @@ func TestNativeRecoveryCommitAndUndoStayBoundToApprovedChange(t *testing.T) {
 	}
 	fake.receipt = fileport.Receipt{Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted, SavedAt: "2026-09-15T00:00:00Z"}
 	fields := approvedNativeCommit(t, a, fake, "docx", []byte("after"))
-	if fake.draft.BeforeText != "Before PRIVATE after" || fake.draft.AfterText != "Before PRIVATE after" {
+	if fake.draft.BeforeText != "Before PRIVATE after" || fake.draft.AfterText != "Updated PRIVATE after" {
 		t.Fatal("durable review omitted original/private fields")
 	}
 	for key, value := range map[string]string{"threadId": "thread_other", "changeId": strings.Repeat("f", 64), "operationId": "native_other_operation"} {

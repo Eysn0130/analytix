@@ -11,6 +11,7 @@ import (
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
@@ -83,7 +84,12 @@ func proposed(t *testing.T, a *Adapter, scope map[string]any) map[string]any {
 	t.Helper()
 	fields := modelFields(scope)
 	fields["operationId"] = "propose_0001"
-	fields["parts"] = scope["parts"]
+	parts, err := decodeNativeParts(scope["parts"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts[0].Text = "Updated "
+	fields["parts"] = parts
 	out := nativeInvoke(t, a, "model-selection-propose", fields)
 	if out["ok"] != true {
 		t.Fatal(out)
@@ -176,7 +182,7 @@ func TestNativeSelectionProposalProtectedReplacementAndReplay(t *testing.T) {
 	proposal := proposed(t, a, scope)
 	fields := decisionFields(scope, proposal)
 	result := nativeInvoke(t, a, "proposal-accept", fields)
-	if result["ok"] != true || result["replacement"].(map[string]any)["text"] != "Before PRIVATE after" {
+	if result["ok"] != true || result["replacement"].(map[string]any)["text"] != "Updated PRIVATE after" {
 		t.Fatal(result)
 	}
 	replay := nativeInvoke(t, a, "proposal-accept", fields)
@@ -200,6 +206,86 @@ func TestNativeSelectionProposalProtectedReplacementAndReplay(t *testing.T) {
 	}
 	if out := nativeInvoke(t, a, "close-object", map[string]any{"sessionId": scope["sessionId"]}); out["ok"] != true || *leases != 0 {
 		t.Fatal("lease not released on session close")
+	}
+}
+
+func TestNativeSelectionNoopProposalDoesNotCreateRecoveryState(t *testing.T) {
+	a, fake, _ := nativeRecoveryFixture(t, "docx")
+	capturedScope := captured(t, a, fake.fakeEditing, true)
+	fields := modelFields(capturedScope)
+	fields["operationId"] = "propose_0001"
+	fields["parts"] = capturedScope["parts"]
+	if out := nativeInvoke(t, a, "model-selection-propose", fields); out["code"] != "proposal_invalid" {
+		t.Fatal("unchanged protected text became a proposal", out)
+	}
+	scope := a.scopes[capturedScope["scopeId"].(string)]
+	if len(scope.proposals) != 0 || len(scope.operations) != 0 || fake.prepared {
+		t.Fatal("no-op proposal consumed an operation or prepared a change")
+	}
+	for _, call := range fake.calls {
+		if call == "native-prepare" || call == "native-commit" {
+			t.Fatal("no-op proposal reached persistence")
+		}
+	}
+	// A real edit can reuse the rejected operation; rejection records no write.
+	if out := proposed(t, a, capturedScope); out["status"] != "proposed" {
+		t.Fatal(out)
+	}
+}
+
+func TestNativeSelectionNoopAcceptanceDoesNotPrepare(t *testing.T) {
+	a, fake, _ := nativeRecoveryFixture(t, "docx")
+	capturedScope := captured(t, a, fake.fakeEditing, true)
+	proposal := proposed(t, a, capturedScope)
+	scope := a.scopes[capturedScope["scopeId"].(string)]
+	stored := scope.proposals[proposal["proposalId"].(string)]
+	changed := stored.Parts
+	// Exercise a retained candidate that predates no-op proposal admission.
+	stored.Parts = nativeParts(scope.Parts)
+	fields := decisionFields(capturedScope, proposal)
+	if out := nativeInvoke(t, a, "proposal-accept", fields); out["code"] != "proposal_invalid" || out["replacement"] != nil {
+		t.Fatal("unchanged candidate became a native replacement", out)
+	}
+	if fake.prepared || stored.Status != "proposed" || stored.decisionOperation != "" || scope.operations["approve_0001"] != "" {
+		t.Fatal("no-op acceptance created recovery state or consumed approval")
+	}
+	for _, call := range fake.calls {
+		if call == "native-prepare" || call == "native-commit" {
+			t.Fatal("no-op acceptance reached persistence")
+		}
+	}
+	stored.Parts = changed
+	if out := nativeInvoke(t, a, "proposal-accept", fields); out["ok"] != true || !fake.prepared {
+		t.Fatal("real edit could not retry approval", out)
+	}
+}
+
+func TestNativeTypedReviewIsNotComparedOnlyByDisplayText(t *testing.T) {
+	a, fake, _, selection := typedSelectionFixture(t, 1)
+	fields := captureFields(fake, true)
+	fields["text"], fields["workbook"] = "1", selection
+	capturedScope := nativeInvoke(t, a, "capture-selection", fields)["scope"].(map[string]any)
+	input := modelFields(capturedScope)
+	input["operationId"] = "typed_proposal_01"
+	value := 2.0
+	input["workbook"] = office.WorkbookPatch{Kind: "range", Cells: []office.WorkbookCellEdit{{Type: "number", Value: &value}}}
+	result := nativeInvoke(t, a, "model-selection-propose", input)
+	if result["ok"] != true {
+		t.Fatal(result)
+	}
+	proposal := result["result"].(map[string]any)
+	stored := a.scopes[capturedScope["scopeId"].(string)].proposals[proposal["proposalId"].(string)]
+	// A trusted typed review may differ in metadata omitted from display text.
+	// Keep that semantic distinction even when the rendered summaries match.
+	stored.Review.After = stored.Review.Before
+	stored.Review.After.Cells = append([]office.WorkbookSelectedCell(nil), stored.Review.Before.Cells...)
+	stored.Review.After.Cells[0].NumberFormat++
+	stored.Review.Results = nil
+	if workbookReviewText(stored.Review.Before, nil) != workbookReviewText(stored.Review.After, nil) {
+		t.Fatal("fixture summaries differ")
+	}
+	if out := nativeInvoke(t, a, "proposal-accept", decisionFields(capturedScope, proposal)); out["ok"] != true || out["replacement"].(map[string]any)["workbook"] == nil {
+		t.Fatal("typed change was mistaken for a plain-text no-op", out)
 	}
 }
 

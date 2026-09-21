@@ -8,7 +8,7 @@ const objectId = 'a'.repeat(64), sessionId = 'e'.repeat(48), revision = hash(ori
 const threadId = 'thread-native', changeId = '9'.repeat(64), saveOperationId = 'save_core_0001', undoOperationId = 'undo_core_0001'
 const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds:{x:0,y:0,width:800,height:600}}
 function setup(typed = false) {
-  let failTyped=false
+  let failTyped=false, rejectNoop=false
   const workbook={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[{sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number' as const,numberFormat:0,rowVisible:true as const,columnVisible:true as const,merged:false as const}]}
   const workbookReview={before:workbook,after:{...workbook,cells:[{...workbook.cells[0],text:'2',formula:'2',value:2}]},results:['']}
   let current = {documentId:objectId,version:revision,kind:(typed?'xlsx':'docx') as 'xlsx'|'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
@@ -45,6 +45,7 @@ function setup(typed = false) {
       }
       if(r.operation==='selection-revoke'){revoked++;return {ok:true,output:{ok:true,revoked:true}}}
       if(r.operation==='proposal-accept'){
+        if(rejectNoop)return {ok:true,output:{ok:false,code:'proposal_invalid',message:'The proposal does not change the selected text.'}}
         if(acceptedOperation)expect(r.input.operationId).toBe(acceptedOperation)
         acceptedOperation=r.input.operationId as string
         persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
@@ -120,7 +121,7 @@ function setup(typed = false) {
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -210,6 +211,15 @@ async function applyProposal(h: ReturnType<typeof setup>) {
   await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId:'thread-native',editable:true})
   return h.controller.request({action:'acceptProposal',...h.target(),scopeId:h.scopeId,proposalId:h.proposalId})
 }
+test('Core rejection of an unchanged proposal never replaces, exports, or commits native bytes',async()=>{
+  const h=setup();h.rejectNoop()
+  expect(await applyProposal(h)).toMatchObject({ok:false,error:'unavailable',view:{dirty:false,changeSequence:0,revision}})
+  expect(h.requests.filter(r=>r.command==='replace'||r.command==='replaceCells'||r.command==='export')).toHaveLength(0)
+  expect(h.getPrepared()).toBeUndefined()
+  expect(h.getCommitCalls()).toBe(0)
+  expect(h.getSaved()).toBe(revision)
+  expect(h.controller.getView()?.appliedProposals ?? []).not.toContain(h.proposalId)
+})
 test('accept automatically persists and undo restores exactly the previous file once',async()=>{
   const h=setup();expect(await applyProposal(h)).toMatchObject({ok:true,view:{canUndo:true,dirty:false}})
   expect(h.getCommitCalls()).toBe(1);expect(h.getSaved()).toBe(hash(edited))

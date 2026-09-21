@@ -7,7 +7,7 @@ function worker(text = '重复文本', kind = 'docx', cellType = 2) {
   const paragraphs = ['重复文本', text]
   const messages: any[] = [], properties: any[][] = []
   const range = (i: number): any => ({
-    getString: () => paragraphs[i], setString: (text: string) => { paragraphs[i] = text; modified = true; listener.modified() },
+    getString: () => paragraphs[i], setString: vi.fn((text: string) => { paragraphs[i] = text; modified = true; listener.modified() }),
     getPropertySetInfo: () => ({ getPropertyByName: () => ({ Type: 'property' }), hasPropertyByName: () => true }),
     setPropertyValue: vi.fn(() => { modified = true; listener.modified() })
   })
@@ -33,6 +33,18 @@ test.each([1,3])('never coerces native numeric/formula cell type %s through text
   expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'变成文本',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
   expect(w.paragraphs[1]).toBe('123')
   expect(w.model.isModified()).toBe(false)
+})
+test.each(['docx', 'xlsx'])('unchanged %s text is refused before native mutation or export', kind => {
+  const w = worker('same text', kind); w.send('edit')
+  const captured = w.send('captureSelection')
+  expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'same text', valueType: 'text'})).toMatchObject({ok: false, error: 'invalid-control-value'})
+  expect(w.ranges[1].setString).not.toHaveBeenCalled()
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+  expect(w.model.isModified()).toBe(false)
+  expect(w.send('captureSelection')).toMatchObject({ok: true, state: {dirty: false, changeSequence: 0, acknowledgedSequence: 0}})
+  // Rejection must not consume the selection handle or invent a change.
+  expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'changed text', valueType: 'text'}).ok).toBe(true)
+  expect(w.ranges[1].setString).toHaveBeenCalledOnce()
 })
 test('private AI edit preserves the readonly native model, macro prohibition and existing selection',()=>{
   const w=worker()
