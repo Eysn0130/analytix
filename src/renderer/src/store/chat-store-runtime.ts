@@ -224,20 +224,6 @@ function isInterruptSettledError(error: unknown, message: string): boolean {
     lowered.includes('canceled')
 }
 
-export async function readActiveWriteWorkspace(fallbackWorkspaceRoot: string): Promise<string> {
-  try {
-    const settings = await rendererRuntimeClient.getSettings()
-    return normalizeWorkspaceRoot(
-      settings.write.activeWorkspaceRoot ||
-      settings.write.defaultWorkspaceRoot ||
-      settings.write.workspaces[0] ||
-      fallbackWorkspaceRoot
-    )
-  } catch {
-    return normalizeWorkspaceRoot(fallbackWorkspaceRoot)
-  }
-}
-
 export async function readWriteWorkspaceRoots(): Promise<string[]> {
   try {
     const settings = await rendererRuntimeClient.getSettings()

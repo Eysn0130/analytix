@@ -2024,14 +2024,12 @@ describe('chat-store-thread-actions queued messages', () => {
     const { actions, state } = buildHarness()
     state.route = 'write'
     state.busy = false
-    state.ensureWriteThreadForWorkspace = vi.fn(async () => 'thr_existing') as never
 
     await expect(actions.sendMessage('make a prototype', 'agent', {
       model: 'MiniMax-M3',
       providerId: 'minimax-token-plan'
     })).resolves.toBe(true)
 
-    expect(state.ensureWriteThreadForWorkspace).not.toHaveBeenCalled()
     expect(saveSettingsSilent).not.toHaveBeenCalled()
     expect(restartRuntime).not.toHaveBeenCalled()
     expect(provider.connect).not.toHaveBeenCalled()

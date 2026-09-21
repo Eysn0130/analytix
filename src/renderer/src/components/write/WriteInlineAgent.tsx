@@ -58,7 +58,7 @@ type Props = {
   onApplyFormat?: (kind: WriteInlineFormatKind) => void
   blockType?: WriteBlockType
   onSetBlockType?: (type: WriteBlockType) => void
-  /** Configurable AI quick actions (edit ones rewrite in place, chat ones go to the sidebar). */
+  /** Configurable AI quick actions; the caller routes edit and chat requests. */
   quickActions?: ResolvedWriteQuickAction[]
   onQuickAction?: (action: ResolvedWriteQuickAction) => void
   /** Writing-assistant persona presets for quick role switching; active '' = no agent. */

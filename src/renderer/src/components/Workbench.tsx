@@ -1024,7 +1024,6 @@ export function Workbench(): ReactElement {
       preloadRightPanelIsland('plan')
       preloadRightPanelIsland('sdd-ai')
       preloadRightPanelIsland('child-agent')
-      preloadRightPanelIsland('write-assistant')
     }, 1200)
     return () => {
       window.clearTimeout(timer)

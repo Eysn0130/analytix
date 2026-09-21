@@ -8,13 +8,15 @@ import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
 
 vi.mock('react-i18next', async importOriginal => ({ ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t: (key:string) => key }) }))
 vi.mock('../../office/NativeOfficePanel', () => ({ NativeOfficePanel: ({fileActions}: {fileActions:ReactNode}) => createElement('div',{'data-testid':'native-panel',role:'toolbar'},fileActions) }))
-vi.mock('../write/WriteWorkspaceView', () => ({ WriteWorkspaceView: ({ threadId }: { threadId?: string }) => createElement('div',{'data-testid':'write-panel','data-thread':threadId}) }))
+vi.mock('../write/WriteWorkspaceView', () => ({ WriteWorkspaceView: ({ threadId, onSubmitPrompt }: { threadId?: string; onSubmitPrompt: (value: string) => void }) => createElement('button',{'data-testid':'write-panel','data-thread':threadId,onClick:() => onSubmitPrompt('Revise the selected paragraph')}) }))
 let root:Root, container:HTMLDivElement
+const onSubmitPrompt = vi.fn()
 const openEditorPath = vi.fn(async () => ({ok:true}))
 const path = '/synthetic/report.docx'
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
   openEditorPath.mockClear()
+  onSubmitPrompt.mockClear()
   Object.defineProperty(window,'analytix',{configurable:true,value:{workspace:{openEditorPath}}})
   useNativeOfficeStore.setState({target:{workspace:'/synthetic',path},view:null,error:null})
   useWriteWorkspaceStore.setState({workspaceRoot:'/synthetic',activeFilePath:null})
@@ -27,7 +29,7 @@ afterEach(async () => {
 })
 async function render() {
   await act(async () => root.render(createElement(DocumentWorkspacePanel,{
-    threadId:'current-main',visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt:vi.fn(),focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
+    threadId:'current-main',visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt,focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
   })))
 }
 async function select(action:string) {
@@ -64,4 +66,6 @@ it('passes the same main thread into the text document export surface', async ()
   useWriteWorkspaceStore.setState({activeFilePath:'/synthetic/note.md',activeFileKind:'text'})
   await render()
   expect(container.querySelector('[data-testid="write-panel"]')?.getAttribute('data-thread')).toBe('current-main')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="write-panel"]')!.click())
+  expect(onSubmitPrompt).toHaveBeenCalledExactlyOnceWith('Revise the selected paragraph')
 })

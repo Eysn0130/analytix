@@ -27,15 +27,9 @@ import {
   writeJoinPath,
 } from '../../write/write-workspace-store'
 import { getWriteRenderSafety } from '../../write/write-render-safety'
-import {
-  applyWriteInlineEditReplacement,
-  buildWriteInlineEditCompletionRequest,
-  buildWriteInlineEditDraft
-} from '../../write/inline-edit'
 import type { WriteBlockType } from '../../write/block-type'
 import { toggleWriteInlineFormat, type WriteInlineFormatKind } from '../../write/inline-format'
 import { resolveWriteQuickActions, type ResolvedWriteQuickAction } from '../../write/quick-actions'
-import { createWriteRecentEdit } from '../../write/recent-edits'
 import {
   beginPendingInfographic,
   buildPendingInfographicMarkdown,
@@ -54,7 +48,6 @@ import { WriteWorkspaceDocumentPane } from './WriteWorkspaceDocumentPane'
 import { resolveWriteAgentPreset } from '../../write/agent-presets'
 import type { WriteMarkdownEditorHandle } from './WriteMarkdownEditor'
 import {
-  INLINE_EDIT_RECENT_CONTEXT_CHARS,
   WRITE_AUTOSAVE_MS,
   writePreviewDebounceMs,
   WRITE_RICH_CLIPBOARD_ACTION,
@@ -71,7 +64,7 @@ type Props = {
   threadId?: string | null
   leftSidebarCollapsed: boolean
   input: string; setInput: (value: string) => void
-  onSubmitPrompt?: (value: string) => void
+  onSubmitPrompt: (value: string) => void
   onOpenAgentSettings?: () => void
   onFocusConversation?: () => void
 }
@@ -202,7 +195,6 @@ export function WriteWorkspaceView({
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [pointerSelecting, setPointerSelecting] = useState(false)
   const resolvedAgentPresets = agentPresets.map((preset) => resolveWriteAgentPreset(preset))
-  const [inlineEditInFlight, setInlineEditInFlight] = useState(false)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportingFormat, setExportingFormat] = useState<WriteExportFormat | typeof WRITE_RICH_CLIPBOARD_ACTION | null>(null)
@@ -293,11 +285,7 @@ export function WriteWorkspaceView({
     setAssistantOpen(true)
     onFocusConversation?.()
     setInlineAgentValue('')
-    if (onSubmitPrompt) {
-      onSubmitPrompt(trimmed)
-      return
-    }
-    setInput(input.trim() ? `${input.trim()}\n\n${trimmed}` : trimmed)
+    onSubmitPrompt(trimmed)
   }
 
   const quoteSelectionToAssistant = (): void => {
@@ -307,9 +295,8 @@ export function WriteWorkspaceView({
     setInlineAgentValue('')
   }
 
-  // Edit-mode quick actions rewrite the selection in place through the
-  // inline-edit pipeline; chat-mode actions (润色/解释) quote the selection and
-  // hand the prompt to the sidebar assistant (auto-expanding it).
+  // Both quick-action modes submit the selection to the current conversation.
+  // Edit requests first save and validate the selected document snapshot.
   const runQuickAction = (quickAction: ResolvedWriteQuickAction): void => {
     if (quickAction.mode === 'edit') {
       void submitInlineEdit(quickAction.prompt)
@@ -361,7 +348,7 @@ export function WriteWorkspaceView({
 
   const submitInlineEdit = async (prompt: string): Promise<void> => {
     const trimmed = prompt.trim()
-    if (!trimmed || !workspaceReady || !activeFilePath || inlineEditInFlight) return
+    if (!trimmed || !workspaceReady || !activeFilePath) return
     if (renderSafety.readOnly) {
       setFileError(t('writeReadOnlySaveDisabled'))
       return
@@ -374,144 +361,15 @@ export function WriteWorkspaceView({
       setFileError(t(selection.ranges.length > 1 ? 'writeInlineEditMultiSelection' : 'writeInlineEditNoSelection'))
       return
     }
-    if (onSubmitPrompt) {
-      const snapshot = useWriteWorkspaceStore.getState()
-      if (!(await flushSave(workspaceRoot))) return
-      const current = useWriteWorkspaceStore.getState()
-      if (current.workspaceRoot !== snapshot.workspaceRoot || current.activeFilePath !== snapshot.activeFilePath ||
-          current.fileContent !== snapshot.fileContent || current.selection !== snapshot.selection) {
-        setFileError(t('workbenchReferenceChanged'))
-        return
-      }
-      submitInlineAgent(trimmed)
+    const snapshot = useWriteWorkspaceStore.getState()
+    if (!(await flushSave(workspaceRoot))) return
+    const current = useWriteWorkspaceStore.getState()
+    if (current.workspaceRoot !== snapshot.workspaceRoot || current.activeFilePath !== snapshot.activeFilePath ||
+        current.fileContent !== snapshot.fileContent || current.selection !== snapshot.selection) {
+      setFileError(t('workbenchReferenceChanged'))
       return
     }
-    if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') {
-      setFileError(t('writeInlineEditUnavailable'))
-      return
-    }
-
-    // In rich mode the inline edit operates on the markdown projection: the
-    // selection ranges are projection offsets and the replacement is applied
-    // through the editor so undo history and node structure stay intact.
-    const richHandle = richModeActive ? richHandleRef.current : null
-    const richProjectionText = richHandle?.getProjectionText() ?? null
-    const editContent = richProjectionText ?? fileContent
-
-    const draft = buildWriteInlineEditDraft(editContent, selection.ranges[0], trimmed, {
-      workspaceRoot,
-      currentFilePath: activeFilePath,
-      model: inlineCompletion.model,
-      language: 'markdown',
-      recentEdits
-    })
-
-    setInlineEditInFlight(true)
-    try {
-      const result = await window.analytix.write.requestWriteInlineCompletion(
-        buildWriteInlineEditCompletionRequest(draft.request)
-      )
-      if (!result.ok) {
-        setFileError(t('writeInlineEditFailed', { message: result.message }))
-        return
-      }
-      const replacement = result.action?.kind === 'edit'
-        ? result.action.replacement
-        : result.completion
-      // An empty rewrite of non-empty text means the model failed to follow
-      // the instruction; applying it would silently delete the selection.
-      if (!replacement.trim() && draft.scope.text.trim()) {
-        setFileError(t('writeInlineEditEmpty'))
-        return
-      }
-
-      if (richHandle) {
-        const applied = richHandle.applyProjectedReplacement(
-          { from: draft.scope.from, to: draft.scope.to },
-          draft.scope.text,
-          replacement,
-          trimmed
-        )
-        if (!applied) {
-          setFileError(t('writeInlineEditChanged'))
-          return
-        }
-        setSelection({ text: '', ranges: [], charCount: 0 })
-        setInlineAgentValue('')
-        setFileError(null)
-        showExportNotice({ tone: 'success', message: t('writeInlineEditApplied') })
-        return
-      }
-
-      const latest = useWriteWorkspaceStore.getState()
-      if (latest.activeFilePath !== activeFilePath || latest.activeFileKind !== 'text') {
-        setFileError(t('writeInlineEditChanged'))
-        return
-      }
-      // The document can shift during the multi-second model call (live-preview
-      // normalization, autosave round-trips, …). Re-locate the scope in the
-      // latest content instead of hard-failing on a stale offset; only give up
-      // when the selected text is gone or no longer unique.
-      const baseline = latest.fileContent
-      let scopeFrom = draft.scope.from
-      let scopeTo = draft.scope.to
-      if (baseline.slice(scopeFrom, scopeTo) !== draft.scope.text) {
-        const firstMatch = draft.scope.text ? baseline.indexOf(draft.scope.text) : -1
-        const unique = firstMatch >= 0 && baseline.indexOf(draft.scope.text, firstMatch + 1) === -1
-        if (!unique) {
-          setFileError(t('writeInlineEditChanged'))
-          return
-        }
-        scopeFrom = firstMatch
-        scopeTo = firstMatch + draft.scope.text.length
-      }
-
-      const nextContent = applyWriteInlineEditReplacement(
-        baseline,
-        { ...draft.scope, from: scopeFrom, to: scopeTo },
-        replacement
-      )
-      const inlineEditRecord = createWriteRecentEdit({
-        source: 'inline-edit',
-        filePath: activeFilePath,
-        from: scopeFrom,
-        to: scopeTo,
-        deletedText: draft.scope.text,
-        insertedText: replacement,
-        beforeContext: baseline.slice(Math.max(0, scopeFrom - INLINE_EDIT_RECENT_CONTEXT_CHARS), scopeFrom),
-        afterContext: nextContent.slice(
-          scopeFrom + replacement.length,
-          Math.min(nextContent.length, scopeFrom + replacement.length + INLINE_EDIT_RECENT_CONTEXT_CHARS)
-        ),
-        instruction: trimmed,
-        scopeKind: draft.scope.kind
-      })
-
-      // Land the rewrite as an inline red/green diff review when the editor
-      // supports it (source/live CodeMirror); fall back to a direct apply
-      // (rich mode, or no handle) otherwise.
-      const startedReview = markdownHandleRef.current?.beginDiffReview({
-        original: baseline,
-        nextDoc: nextContent
-      }) ?? false
-      if (!startedReview) {
-        setFileContent(nextContent)
-        if (inlineEditRecord) recordRecentEdits([inlineEditRecord])
-      }
-      setSelection({ text: '', ranges: [], charCount: 0 })
-      setInlineAgentValue('')
-      setFileError(null)
-      showExportNotice({
-        tone: 'success',
-        message: startedReview ? t('writeInlineEditReview') : t('writeInlineEditApplied')
-      })
-    } catch (error) {
-      setFileError(t('writeInlineEditFailed', {
-        message: error instanceof Error ? error.message : String(error)
-      }))
-    } finally {
-      setInlineEditInFlight(false)
-    }
+    submitInlineAgent(trimmed)
   }
 
   // Inserts an animated placeholder right away and resolves it in the
@@ -1105,7 +963,7 @@ export function WriteWorkspaceView({
         <WriteInlineAgent
           action={selectionAction}
           value={inlineAgentValue}
-          inFlight={inlineEditInFlight}
+          inFlight={false}
           textareaRef={inlineAgentTextareaRef}
           onValueChange={setInlineAgentValue}
           onSubmitPrompt={submitInlineAgent}
