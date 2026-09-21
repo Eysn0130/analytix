@@ -213,7 +213,7 @@ func writePluginHostError(w http.ResponseWriter, err error, relist bool) {
 	}
 	message := "The plugin operation could not be completed."
 	if relist {
-		message += " Refresh the plugin list before retrying."
+		message = "The plugin result could not be confirmed. Refresh the plugin list and check the operation's state before taking further action."
 	}
 	writePluginHostJSON(w, status, pluginHostErrorResponse{Code: code, Message: message, Relist: relist})
 }

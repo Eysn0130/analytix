@@ -142,6 +142,9 @@ func TestPluginPackageHostHTTPClosedFailuresRequireRelist(t *testing.T) {
 			if w.Code != test.status || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.OK || response.Code != test.code || !response.Relist || !strings.Contains(response.Message, "Refresh the plugin list") {
 				t.Fatal("unsafe failure projection", action, w.Code, w.Body.String())
 			}
+			if !strings.Contains(response.Message, "check the operation's state") || strings.Contains(response.Message, "retrying") {
+				t.Fatal("unconfirmed invocation must not invite a blind retry")
+			}
 			for _, private := range []string{"/private", "principal-secret", "unknown internal cause"} {
 				if strings.Contains(w.Body.String(), private) {
 					t.Fatal("raw internal error leaked")

@@ -367,13 +367,10 @@ func (s *Service) Invoke(ctx context.Context, request InvokeRequest) (InvokeResu
 	if !supported {
 		return InvokeResult{}, ErrInvalid
 	}
-	// Readiness is not authority: revalidate the signed generation/source after it.
-	latest, err := s.resolve(ctx, registration)
-	if err != nil {
+	// Readiness is not authority. The Host lock does not cover independent
+	// store commits, so both the generation and signed activation must remain current.
+	if err := s.validateInvocationState(ctx, registration, current, activation); err != nil {
 		return InvokeResult{}, err
-	}
-	if latest != current {
-		return InvokeResult{}, ErrConflict
 	}
 	if err := s.validatePrincipal(ctx, principal); err != nil {
 		return InvokeResult{}, err
@@ -385,10 +382,39 @@ func (s *Service) Invoke(ctx context.Context, request InvokeRequest) (InvokeResu
 	if err := s.validatePrincipal(ctx, principal); err != nil {
 		return InvokeResult{}, err
 	}
+	// An adapter may have completed an effect. Rejecting its stale result does
+	// not undo that effect and must never imply that retrying it is safe.
+	if err := s.validateInvocationState(ctx, registration, current, activation); err != nil {
+		return InvokeResult{}, err
+	}
+	if err := s.validatePrincipal(ctx, principal); err != nil {
+		return InvokeResult{}, err
+	}
 	if jsonstrict.Validate(result.Output, jsonstrict.Options{MaxBytes: MaxOutputBytes, MaxDepth: 32, MaxTokens: 131072, MaxStringBytes: MaxOutputBytes}) != nil {
 		return InvokeResult{}, ErrAdapterUnavailable
 	}
 	return InvokeResult{Output: append(json.RawMessage(nil), result.Output...)}, nil
+}
+
+func (s *Service) validateInvocationState(ctx context.Context, registration Registration, expected materializationport.ResultV1, activation domainplugin.ActivationV1) error {
+	current, err := s.resolve(ctx, registration)
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return ErrConflict
+	}
+	latest, exists, err := s.activation(ctx, registration, current)
+	if err != nil {
+		return err
+	}
+	if !exists || latest.DesiredState != domainplugin.DesiredEnabledV1 {
+		return ErrDisabled
+	}
+	if latest != activation {
+		return ErrConflict
+	}
+	return nil
 }
 
 func validOperation(operation string) bool {
