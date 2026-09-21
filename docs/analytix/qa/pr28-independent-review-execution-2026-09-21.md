@@ -7,6 +7,60 @@ No Goal, scheduled continuation, new independent task, public release or writer 
 
 ## Current readiness continuation from d864
 
+Latest SOURCE is `7815634ba5dd9deb4cae9c2cb4478c2bda8718e5`, tree
+`f599a5b65bbb37e2654444929124a0832e06f60e`. It retains the DOCX checkpoint below
+and intermediate documentation DELIVERY `d73bcd615`. Final documentation DELIVERY
+is recorded in the report manifest; no source writer has been released.
+
+### Additional local Host revocation repair
+
+After the first report snapshot, continued source review found a concrete gap in
+`pluginpackagehost.Service.Invoke`: readiness was followed by generation validation
+but not activation validation; a completed adapter result was not checked against
+current generation/activation. The Host lock serializes its own calls, not independent
+store commits. Ten synthetic boundary cases reproduced nine wrong successes and one
+existing rejection (generation changed during readiness). The original RED remains.
+
+The existing owner now rechecks the exact signed materialization and activation
+after readiness and after invocation, retaining principal checks around those reads.
+Disabled/missing activation, a disable-enable revision change, replaced generation
+and corrupt activation cannot publish an old success. This does not roll back an
+effect already performed by the adapter. The HTTP error wording now requests state
+reconciliation instead of inviting a blind retry; finite error codes are unchanged.
+Main already performs one transport call and Office save recovery queries its existing
+operation receipt rather than automatically repeating a write. No uninstall/dispose
+API, second registry or executable archive authority was invented.
+
+- `host-currentness-red`: exit1, one top-level test,10 leaf cases=1pass/9fail.
+- `host-currentness-green`: exit0, five top-level tests,17 leaf cases pass. Includes
+  all10 new boundary cases and4 real-filesystem/signed-activation/reopened-store
+  disable/disable-enable cases plus3 existing focused checks. The four actual-store
+  cases also prove the old revision remains rejected after reopening, while the
+  freshly enabled revision is usable. They are not desktop installation/uninstallation.
+- `host-currentness-contract`: exit0 under `analytix_prod`,25 top-level tests,
+  48 leaf cases pass across Host/Skills and protected HTTP contract. Groups overlap.
+- Production2 files +33/-7; tests3 files +221/-0; total5 files +254/-7.
+  Combined with2f25: production6 files +73/-12; tests6 files +283/-4.
+
+Commands, times, candidate/dirty-file fingerprints and raw-log hashes are in the
+new receipts. No product source changed after these passing checks. The first
+d73 report is a superseded stage snapshot, not the final delivery identity.
+The67 finding table still binds its previous4343 mapping: its then-current mapping
+was50UNCHANGED/17CHANGED;51/16 describes the earlier9cf mapping. This new Host caller
+change makes any blanket statement that all Go files are unchanged false. No fresh
+scan or complete caller approval is inferred from unchanged legacy sink blobs.
+
+Remaining source tasks are **unfinished implementation**, not all environment blockers:
+imported pivot/chart lacks the typed stable OOXML part/relationship/field binding and
+native local-mutation/candidate-validation route; local development of that route does
+not require source egress. Skills archive staging and uninstall also remain development
+work. Enabling a real remote archive additionally requires a trusted publisher/registry
+descriptor and policy binding that the current Core composition does not expose; a ZIP
+digest cannot supply that trust. Native Chromium installation requires the supported
+process-storage boundary described below. H01–H08 complete journeys remain partial;
+this Host repair adds evidence to a specific H02-style boundary only. No claim is made
+that all currently authorized local implementation has been completed.
+
 START `d8640957c4c1c69c5ddee4e3a9b017382c088047` / tree
 `2e4576860898320de4805fd5090540c6386ce724`, clean/ahead61. Original repository,
 branch and writer retained. SOURCE `2f25c22f7c8fb9626e204e34d573fb1de3e7208b` /

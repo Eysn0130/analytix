@@ -6,8 +6,9 @@ not shrink the original A–M/P0–P5 outcome or declare product/release accepta
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-Current SOURCE `2f25c22f7c8fb9626e204e34d573fb1de3e7208b`, tree
-`63b1edccec3475abc7990776e77b5cda2df92245`; START/previous DELIVERY `d8640957c`.
+Current SOURCE `7815634ba5dd9deb4cae9c2cb4478c2bda8718e5`, tree
+`f599a5b65bbb37e2654444929124a0832e06f60e`; START/previous DELIVERY `d8640957c`.
+DOCX checkpoint2f25 and intermediate documentationd73 are preserved.
 The following documentation-only delivery does not change tested production files.
 [Current QA](qa/pr28-independent-review-execution-2026-09-21.md#current-readiness-continuation-from-d864)
 records commands, retained failures, candidate fingerprints and claim limits.
@@ -26,7 +27,7 @@ drafts, attachments and IME remain protected. Go Core retains sole authority.
 | P2 image collections | Original image/canvas owner: up to8 regions, stable IDs, original-pixel geometry, notes, shared budget, v2 read/v3 CAS, display rotation/zoom; three race fixes retained | Actual multiple-region GUI/save/conflict/reopen journey; trusted pixel/metadata projector remains absent for non-generate editing | SOURCE implemented in recorded scope / native not run |
 | P2 Browser and PDF | Main guest/document lease, isolated selection/Range, opaque Core reference/currentness, explicit same-thread Explain; existing PDF remains | Child-frame capture unsupported; complete actual guest/Main/Core/installed lifecycle still unverified. URL/text/hash alone never establishes authority | SOURCE partial / fixed Electron partial / installed not run |
 | P3 XLSX/PPT | Real pivot generation, typed cells/formulas and bounded PPT text/geometry/fill; existing Core objectediting and fixed worker | Imported pivot/chart edit/refresh stable relationship/object/field binding is still SOURCE_GAP; shared-cache preservation, original/no-op/edited/reopen and true Diff required | SOURCE incomplete / native incomplete |
-| P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable and exact revision/inflight checks for pre-admitted sources | Arbitrary remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed | SOURCE incomplete / installed not run |
+| P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable; new Invoke checks reject activation/generation changes across readiness and completion, including real-store disable-enable/reopen | Remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed. Source tasks remain unfinished, not all blocked on GUI | SOURCE incomplete / installed not run |
 | P4 one conversation / cleanup | Primary conversation, bounded retrieval8 caches/4 builds, completion cancellation and retained history; old three Write routes removed | H01–H08 end-to-end authority/compaction/recovery evidence remains partial. Do not restore second runtime/RAG/Provider or alter independent UI Refresh | SOURCE retained / integration partial |
 | P0 Rust correctness | Fixed3000/10000 ascending/13000 fixture, static stage labels and prior bounded query controls retained | Old main INTERNAL root cause unresolved. COUNT-wrapper source lead differs from target; no new arbitrary reruns or alternative-binary symbols | EVIDENCE_FAILURE / root cause open |
 | P5 desktop storage/install | Private4343 DMG built and integrity checked; current Go task-Keychain binding exists | Electron41.10.3 OSCrypt chooses macOS storage before Core; userData alone does not isolate keychain. Need legitimate storage boundary before actual installed journey; do not disable Cookie encryption | SOURCE_GAP / ENVIRONMENT_LIMIT / installed not run |

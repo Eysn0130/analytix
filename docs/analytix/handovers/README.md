@@ -10,8 +10,9 @@ branch `codex/workbench-product-delivery-20260914`；[Draft PR28](https://github
 
 本轮 START `d8640957c4c1c69c5ddee4e3a9b017382c088047`，tree
 `2e4576860898320de4805fd5090540c6386ce724`，接收时 clean/ahead61。
-最新 SOURCE `2f25c22f7c8fb9626e204e34d573fb1de3e7208b`，tree
-`63b1edccec3475abc7990776e77b5cda2df92245`；随后文档 DELIVERY 是包含本页的提交，
+最新 SOURCE `7815634ba5dd9deb4cae9c2cb4478c2bda8718e5`，tree
+`f599a5b65bbb37e2654444929124a0832e06f60e`；保留2f25字号修复与d73文档检查点。
+随后文档 DELIVERY 是包含本页的提交，
 精确 SHA/tree/dirty 在交付 manifest 单列，不把文档提交借作重新运行源码的证据。
 保留148d、fe656、65ab、5242、4343、d864及所有有效后继。
 
@@ -32,6 +33,11 @@ SOURCE新增正文/表格字号检查，在编辑准入和导出前拒绝已知�
 保留原件、只读预览及普通/跨run正向编辑，未把输入归一化成11pt。
 这是已知损失保护，不是完整格式保真或 installed 产品验收。
 
+后续继续修复原Host调用的撤权边界：readiness后与adapter回包后均核对准确generation及
+签名activation，拒绝旧revision/迟到结果；10场景先9fail/1pass再全通过，另4真实store
+禁用/再启用/重开场景通过。HTTP提示要求核对操作状态，不暗示失败必然无副作用。
+analytix_prod定向48叶用例通过；不代表archive安装/uninstall或完整H01–H08已完成。
+
 | 剩余项 | 类型 | 下一最小动作 |
 | --- | --- | --- |
 | DOCX非目标内容、关系、页眉/脚注/视觉完整保真及Core文件闭环 | EVIDENCE_NOT_RUN / SOURCE_GAP | 在现有worker/codec/Core CAS链验证候选；保护不能等同全文件已验收 |
@@ -44,6 +50,7 @@ SOURCE新增正文/表格字号检查，在编辑准入和导出前拒绝已知�
 
 完整 A–N 与原 A–M/P0–P5 尚未完成。Browser、8region图像、Canvas、数值边界、
 单Go Core、已有Write清退与受控检索成果继续保留。测试细节和失败见 QA，不在本页累积日志。
+导入编辑、archive stage/uninstall等仍有可开发的源码工作；不得把这些统一归为外发或GUI阻断。
 
 ## 五个独立出口
 
