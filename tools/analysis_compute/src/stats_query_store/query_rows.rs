@@ -89,7 +89,8 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         let matched_group_count = crate::scalar_i64(
             session.conn(),
             &build_paginated_count_sql(&agg_sql, &search_where),
-        )?;
+        )
+        .context("stats_rows.aggregate_count")?;
         if matched_group_count <= 0 {
             anyhow::bail!("stats_query_scope_empty");
         }
@@ -121,7 +122,8 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             let stage_started = Instant::now();
             let data_sql = self.paginated_data_sql();
             self.session
-                .require_nonempty_query("stats_rows_page", &data_sql)?;
+                .require_nonempty_query("stats_rows_page", &data_sql)
+                .context("stats_rows.page_nonempty")?;
             self.diagnostics
                 .record_elapsed("sql.paginated_data_build", stage_started);
             let stage_started = Instant::now();
@@ -131,7 +133,8 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
                 self.request.group_key,
                 true,
                 &output_spec,
-            )?;
+            )
+            .context("stats_rows.page_values")?;
             self.diagnostics
                 .record_elapsed("sql.query_rows_values", stage_started);
             if result.rows.is_empty() && self.request.row_offset > 0 {
@@ -154,7 +157,8 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         let stage_started = Instant::now();
         let data_sql = self.unpaginated_data_sql();
         self.session
-            .require_nonempty_query("stats_rows", &data_sql)?;
+            .require_nonempty_query("stats_rows", &data_sql)
+            .context("stats_rows.nonempty")?;
         self.diagnostics
             .record_elapsed("sql.unpaginated_data_build", stage_started);
         let stage_started = Instant::now();
@@ -203,14 +207,16 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         } else {
             self.unpaginated_data_sql()
         };
-        self.session.require_nonempty_query(
-            if self.request.uses_pagination() {
-                "stats_rows_page"
-            } else {
-                "stats_rows"
-            },
-            &data_sql,
-        )?;
+        self.session
+            .require_nonempty_query(
+                if self.request.uses_pagination() {
+                    "stats_rows_page"
+                } else {
+                    "stats_rows"
+                },
+                &data_sql,
+            )
+            .context("stats_rows.output_nonempty")?;
         let stage_started = Instant::now();
         writer.write_all(b"\"rows\":")?;
         self.diagnostics
@@ -228,7 +234,8 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
                 &output_spec,
                 writer,
                 &mut self.diagnostics,
-            )?;
+            )
+            .context("stats_rows.page_output")?;
             self.diagnostics
                 .record_elapsed("sql.query_rows_json_write", stage_started);
             let mut total = write_result.total;
@@ -415,3 +422,6 @@ pub(crate) fn query_stats_rows_to_json_writer<W: Write>(
     session.commit()?;
     Ok(result)
 }
+
+#[cfg(test)]
+mod plan_probe_tests;
