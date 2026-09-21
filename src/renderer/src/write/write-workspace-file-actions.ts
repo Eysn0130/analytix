@@ -76,7 +76,7 @@ export function createWriteFileActions({
       const revision = ++navigation.revision
       const normalized = normalizePath(workspaceRoot.trim())
       const previous = get()
-      if (previous.workspaceRoot !== normalized && !(await previous.flushSave(previous.workspaceRoot))) return
+      if (previous.workspaceRoot !== normalized && (!(await previous.flushSave(previous.workspaceRoot)) || !(await get().closeImageRegion()))) return
       if (revision !== navigation.revision) return
       if (!normalized) {
         cancelExternalSyncAnimation()
@@ -180,7 +180,7 @@ export function createWriteFileActions({
       const revision = ++navigation.revision
       const root = normalizePath(workspaceRoot || get().workspaceRoot)
       const saved = await get().flushSave(get().workspaceRoot || root)
-      if (!saved || revision !== navigation.revision) return false
+      if (!saved || revision !== navigation.revision || !(await get().closeImageRegion())) return false
       const session = get().objectSession
       if (session) await window.analytix.objects.request({ action: 'close', sessionId: session.sessionId }).catch(() => undefined)
       if (revision !== navigation.revision) return false
@@ -218,6 +218,7 @@ export function createWriteFileActions({
       cancelExternalSyncAnimation()
       const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
       if (!saved || revision !== navigation.revision) return
+      if (!(await get().closeImageRegion()) || revision !== navigation.revision) return
       if (isNativeOfficeFilePath(path)) {
         await useNativeOfficeStore.getState().select(workspaceRoot, path)
         return
@@ -405,6 +406,7 @@ export function createWriteFileActions({
     },
 
     renameEntry: async (workspaceRoot, path, newName) => {
+      if (get().imageRegionEditor && (!(await get().flushSave(get().workspaceRoot)) || !(await get().closeImageRegion()))) return null
       invalidateActiveTarget(workspaceRoot, path)
       cancelExternalSyncAnimation()
       let result: Awaited<ReturnType<typeof window.analytix.files.renameEntry>>
@@ -469,6 +471,7 @@ export function createWriteFileActions({
     },
 
     deleteEntry: async (workspaceRoot, path) => {
+      if (get().imageRegionEditor && (!(await get().flushSave(get().workspaceRoot)) || !(await get().closeImageRegion()))) return false
       invalidateActiveTarget(workspaceRoot, path)
       cancelExternalSyncAnimation()
       let result: Awaited<ReturnType<typeof window.analytix.files.deleteEntry>>

@@ -549,7 +549,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
   async function loadAnnotation(document: Active) {
     if (!document.threadId) fail('invalid_request')
     const result = await invokeSelection(document, 'annotation-read', {sessionId:document.sessionId,threadId:document.threadId})
-    if (!('annotation' in result) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId) fail('invalid_response')
+    if (!('annotation' in result) || !('draftRevision' in result.annotation) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId) fail('invalid_response')
     document.view.annotation = result.annotation
     publish()
   }
@@ -569,7 +569,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         // can replace the desired note, but cannot change an uncertain request.
         const attempt = document.annotationAttempt ??= {expectedDraftRevision:saved.draftRevision,...desired!}
         const result = await invokeSelection(document, 'annotation-write', {sessionId:document.sessionId,threadId:document.threadId,...attempt})
-        if (!('annotation' in result) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId ||
+        if (!('annotation' in result) || !('draftRevision' in result.annotation) || result.annotation.objectId !== document.view.objectId || result.annotation.threadId !== document.threadId ||
           result.annotation.note !== attempt.note || result.annotation.sourceRevision !== attempt.sourceRevision || !result.annotation.draftRevision) fail('invalid_response')
         document.view.annotation = result.annotation
         delete document.annotationAttempt

@@ -312,3 +312,66 @@ describe('chat-store Claw actions helpers', () => {
     expect(selectThread).toHaveBeenCalledWith('thr-codewhale-conversation')
   })
 })
+
+describe('image note composition protects Claw thread navigation', () => {
+  async function setup(composing: boolean) {
+    const { useWriteWorkspaceStore } = await import('../write/write-workspace-store')
+    useWriteWorkspaceStore.setState({ imageRegionEditor: {
+      workspace: '/synthetic', path: '/synthetic/image.png', threadId: 'image-owner', snapshot: null, annotation: null,
+      region: null, note: '组合文本', dirty: true, pending: null, loading: false, revoked: false, stale: false,
+      composing, status: 'dirty', error: null
+    } })
+    let state = { activeThreadId: 'image-owner', route: 'claw', runtimeConnection: 'ready', threads: [], clawChannels: [], activeClawChannelId: '' } as never
+    const set = (patch: Record<string, unknown> | ((value: unknown) => Record<string, unknown>)) => {
+      state = { ...state as object, ...(typeof patch === 'function' ? patch(state) : patch) } as never
+    }
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue({ claw: { channels: [] } } as never)
+    const disconnect = vi.fn()
+    vi.stubGlobal('window', { analytix: { connectPhone: { disconnectImChannel: disconnect } } })
+    const provider = { createThread: vi.fn(), getThreadDetail: vi.fn(), deleteThread: vi.fn() }
+    const stream = new AbortController()
+    const actions = createClawActions({ set: set as never, get: () => state, i18n: { t: key => key }, getProvider: () => provider,
+      newClawChannel: vi.fn(), normalizeClawComposerModel: value => value, activeClawChannel: () => null,
+      normalizeWorkspaceRoot: value => value ?? '', formatRuntimeError: String, shouldOpenSettingsForError: () => false,
+      clearedThreadSelection: () => ({ activeThreadId: null, blocks: [], liveAssistant: '', busy: false, lastSeq: 0,
+        currentTurnId: null, currentTurnUserId: null, inspectorSelectedId: null }),
+      sseAbortRef: { current: stream }, clearBusyWatchdog: vi.fn() })
+    return { actions, get: () => state as { activeThreadId: string; clawChannels: unknown[] }, useWriteWorkspaceStore, getSettings, disconnect, stream }
+  }
+  it.each(['select', 'conversation', 'delete', 'reset', 'add'] as const)('rejects %s before thread/navigation side effects during composition', async name => {
+    const h = await setup(true)
+    try {
+      if (name === 'select') await h.actions.selectClawChannel('channel')
+      if (name === 'conversation') await h.actions.selectClawConversation('channel', 'thread')
+      if (name === 'delete') await h.actions.deleteClawChannel('channel')
+      if (name === 'reset') await h.actions.resetClawChannelSession('channel')
+      if (name === 'add') await h.actions.addClawChannel('feishu')
+      expect(h.get().activeThreadId).toBe('image-owner')
+      expect(h.getSettings).not.toHaveBeenCalled(); expect(h.disconnect).not.toHaveBeenCalled()
+      expect(h.stream.signal.aborted).toBe(false)
+    } finally { h.useWriteWorkspaceStore.setState({ imageRegionEditor: null }); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+  })
+  it('background channel refresh defers clearing the active image owner', async () => {
+    const h = await setup(true)
+    try {
+      await h.actions.refreshClawChannels()
+      expect(h.get().clawChannels).toEqual([])
+      expect(h.get().activeThreadId).toBe('image-owner')
+      expect(h.stream.signal.aborted).toBe(false)
+    } finally { h.useWriteWorkspaceStore.setState({ imageRegionEditor: null }); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+  })
+  it('composition starting during channel discovery prevents subsequent selection or clearing', async () => {
+    const h = await setup(false)
+    let resolve!: (value: never) => void
+    h.getSettings.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    try {
+      const navigation = h.actions.selectClawChannel('channel')
+      h.useWriteWorkspaceStore.getState().setImageRegionComposing(true)
+      h.useWriteWorkspaceStore.getState().setImageRegionComposing(false)
+      resolve({ claw: { channels: [channel({ id: 'channel', threadId: '', conversations: [] })] } } as never)
+      await navigation
+      expect(h.get().activeThreadId).toBe('image-owner')
+      expect(h.stream.signal.aborted).toBe(false)
+    } finally { h.useWriteWorkspaceStore.setState({ imageRegionEditor: null }); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+  })
+})

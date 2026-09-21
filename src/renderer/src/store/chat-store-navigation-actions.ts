@@ -1,3 +1,4 @@
+import { withImageThreadNavigation, deferImageThreadSelectionClear } from '../write/image-thread-navigation'
 import type { AgentProvider, NormalizedThread } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -232,7 +233,7 @@ async function reconcileThreadListSideEffects(
     activeThread != null &&
     isClawThread(activeThread, get().clawChannels)
   const shouldClearSelection =
-    allowClearSelection &&
+    allowClearSelection && !deferImageThreadSelectionClear() &&
     activeThreadId != null &&
     !displayThreads.some((thread) => thread.id === activeThreadId)
   if (shouldClearSelection) {
@@ -351,7 +352,7 @@ export function createNavigationActions(
   }
 
   return {
-  openCode: async () => {
+  openCode: async () => withImageThreadNavigation(undefined, async () => {
     const state = get()
     const activeThread = state.activeThreadId
       ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
@@ -379,7 +380,7 @@ export function createNavigationActions(
     }
 
     openCleanCodeStage()
-  },
+  }),
 
   // Compatibility entry: opening a document never selects or creates a thread.
   // Workbench consumes this legacy route by opening the right document surface.
@@ -605,13 +606,14 @@ export function createNavigationActions(
     return bootPromise
   },
 
-  chooseWorkspace: async ({ createThreadAfter = false, selectThreadAfter = true } = {}) => {
+  chooseWorkspace: async ({ createThreadAfter = false, selectThreadAfter = true } = {}) => withImageThreadNavigation(null, async navigationCurrent => {
     try {
       const wasWriteRoute = get().route === 'write'
       if (typeof window.analytix === 'undefined' || typeof window.analytix.workspace.pickDirectory !== 'function') {
         throw new Error(i18n.t('common:workspacePickerUnavailable'))
       }
       const picked = await window.analytix.workspace.pickDirectory(get().workspaceRoot || undefined)
+      if (!navigationCurrent()) return null
       if (picked.canceled || !picked.path) {
         if (createThreadAfter) {
           set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
@@ -619,6 +621,7 @@ export function createNavigationActions(
         return null
       }
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: picked.path })
+      if (!navigationCurrent()) return null
       const workspaceRoot = normalizeWorkspaceRoot(next.workspaceRoot)
       const codeWorkspaceRoots = rememberCodeWorkspaceRoots(get().codeWorkspaceRoots, [workspaceRoot])
 
@@ -629,10 +632,12 @@ export function createNavigationActions(
         error: null
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return null
       if (workspaceRoot) {
         if (!selectThreadAfter) return workspaceRoot
         if (wasWriteRoute) {
           await get().openWrite()
+          if (!navigationCurrent()) return null
           return workspaceRoot
         }
         const workspaceThreads = get().threads
@@ -642,27 +647,30 @@ export function createNavigationActions(
 
         if (createThreadAfter || workspaceThreads.length === 0) {
           await get().createThread({ workspaceRoot })
+          if (!navigationCurrent()) return null
         } else {
           const targetThreadId = workspaceThreads[0]?.id
           if (targetThreadId && get().activeThreadId !== targetThreadId) {
             await get().selectThread(targetThreadId)
+            if (!navigationCurrent()) return null
           }
         }
       }
       return workspaceRoot
     } catch (e) {
+      if (!navigationCurrent()) return null
       set({
         error: formatWorkspacePickerError(e)
       })
       return null
     }
-  },
+  }),
 
   // Switch the active working directory to an already-known workspace (no native
   // picker). Persists the choice and lands on a clean new-conversation state for
   // that directory — typing then starts a fresh thread there. This backs the
   // workspace picker shown beneath the composer.
-  selectWorkspaceRoot: async (workspaceRoot) => {
+  selectWorkspaceRoot: async (workspaceRoot) => withImageThreadNavigation(null, async navigationCurrent => {
     const normalized = normalizeWorkspaceRoot(workspaceRoot)
     if (!normalized) return null
     if (get().runtimeConnection !== 'ready') {
@@ -676,6 +684,7 @@ export function createNavigationActions(
     }
     try {
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: normalized })
+      if (!navigationCurrent()) return null
       const persisted = normalizeWorkspaceRoot(next.workspaceRoot) || normalized
       sseAbortRef.current?.abort()
       sseAbortRef.current = null
@@ -690,19 +699,22 @@ export function createNavigationActions(
         error: null
       }))
       await get().refreshThreads()
+      if (!navigationCurrent()) return null
       return persisted
     } catch (e) {
+      if (!navigationCurrent()) return null
       set({ error: formatRuntimeError(e) })
       return null
     }
-  },
+  }),
 
-  clearWorkspace: async () => {
+  clearWorkspace: async () => withImageThreadNavigation(undefined, async navigationCurrent => {
     try {
       if (typeof window.analytix === 'undefined' || typeof window.analytix.settings.setSettings !== 'function') {
         return
       }
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: '' })
+      if (!navigationCurrent()) return
       set({
         workspaceRoot: normalizeWorkspaceRoot(next.workspaceRoot),
         codeWorkspaceRoots: get().codeWorkspaceRoots,
@@ -710,12 +722,14 @@ export function createNavigationActions(
         error: null
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch {
+      if (!navigationCurrent()) return
       // silently ignore — the workspace will remain set
     }
-  },
+  }),
 
-  deleteWorkspace: async (workspacePath) => {
+  deleteWorkspace: async (workspacePath) => withImageThreadNavigation(undefined, async navigationCurrent => {
     const normalizedPath = normalizeWorkspaceRoot(workspacePath)
     if (!normalizedPath) return
     if (get().runtimeConnection !== 'ready') {
@@ -734,11 +748,14 @@ export function createNavigationActions(
       clearBusyWatchdog()
     }
     try {
+      const removeIds = new Set<string>()
       for (const th of workspaceThreads) {
         await p.deleteThread(th.id)
+        removeIds.add(th.id)
+        if (!navigationCurrent()) break
       }
-      const removeIds = new Set(workspaceThreads.map((th) => th.id))
-      const codeWorkspaceRoots = forgetCodeWorkspaceRoot(get().codeWorkspaceRoots, normalizedPath)
+      const codeWorkspaceRoots = removeIds.size === workspaceThreads.length
+        ? forgetCodeWorkspaceRoot(get().codeWorkspaceRoots, normalizedPath) : get().codeWorkspaceRoots
       set((s) => {
         const w = { ...s.watchTurnCompletion }
         const u = { ...s.unreadThreadIds }
@@ -749,20 +766,21 @@ export function createNavigationActions(
         }
         return {
           threads: s.threads.filter(
-            (thread) => !threadBelongsToWorkspace(thread, normalizedPath)
+            (thread) => !removeIds.has(thread.id)
           ),
           codeWorkspaceRoots,
           watchTurnCompletion: w,
           unreadThreadIds: u,
-          ...(deletingActive ? clearedThreadSelection() : {}),
+          ...(deletingActive && navigationCurrent() ? clearedThreadSelection() : {}),
           error: null
         }
       })
       // If the deleted workspace is the current workspaceRoot, clear it.
-      if (normalizeWorkspaceRoot(get().workspaceRoot) === normalizedPath) {
+      if (navigationCurrent() && normalizeWorkspaceRoot(get().workspaceRoot) === normalizedPath) {
         try {
           if (typeof window.analytix?.settings?.setSettings === 'function') {
             const next = await rendererRuntimeClient.setSettings({ workspaceRoot: '' })
+            if (!navigationCurrent()) return
             set({
               workspaceRoot: normalizeWorkspaceRoot(next.workspaceRoot),
               codeWorkspaceRoots: get().codeWorkspaceRoots,
@@ -770,11 +788,14 @@ export function createNavigationActions(
             })
           }
         } catch {
+          if (!navigationCurrent()) return
           /* silently keep workspaceRoot if settings clear fails */
         }
       }
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -782,8 +803,9 @@ export function createNavigationActions(
           : {})
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     }
-	  },
+	  }),
 
   refreshCaseProjects: async (options = {}) => {
     if (options.isCurrent?.() === false || get().runtimeConnection !== 'ready') return

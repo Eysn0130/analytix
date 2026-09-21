@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
@@ -25,6 +26,22 @@ import (
 // authority. Public thread projection and caller-supplied owner fields are not
 // authorization. Raw text and private file paths never enter ordinary events.
 type runtimeObjectProjector struct{ handler *runtimeServerHandler }
+
+func (p runtimeObjectProjector) ResolveImageWorkspace(ctx context.Context, principal domainidentity.PrincipalV1, threadID string) (string, error) {
+	h := p.handler
+	if ctx == nil || ctx.Err() != nil || h == nil || h.store == nil || h.turnSecurity.Identity == nil || h.turnSecurity.Identity.ValidateCurrent(ctx, principal) != nil {
+		return "", editingapp.ErrProjection
+	}
+	thread, err := h.store.GetThread(threadID)
+	if err != nil || stringField(thread, "id") != threadID || stringField(thread, "relation") != "primary" || strings.TrimSpace(stringField(thread, "parentThreadId")) != "" {
+		return "", editingapp.ErrProjection
+	}
+	workspace := stringField(thread, "workspace")
+	if p.ValidateCurrent(ctx, editingapp.ScopeAuthority{Principal: principal, ThreadID: threadID, Workspace: workspace, Path: "image-snapshot", ObjectID: "image-snapshot", Purpose: "discuss"}) != nil {
+		return "", editingapp.ErrProjection
+	}
+	return workspace, nil
+}
 
 func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editingapp.ScopeAuthority) error {
 	return p.validateSelectionAuthority(ctx, scope, nil)
@@ -245,9 +262,6 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 	failure := func() (any, bool) {
 		return map[string]any{"code": "tool_failed", "error": "The native selection is unavailable or stale."}, true
 	}
-	if h.officePackageHost == nil {
-		return failure()
-	}
 	scopeID, ok := args["scopeId"].(string)
 	if !ok {
 		return failure()
@@ -256,6 +270,18 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook" && key != "canvas" && key != "presentation") {
 			return failure()
 		}
+	}
+	if h.objectEditing != nil {
+		result, found, err := h.objectEditing.ReadImageScopeForModel(ctx, pending.ThreadID, scopeID)
+		if found {
+			if err != nil || pending.Call.Name != "native_selection_read" {
+				return failure()
+			}
+			return result, false
+		}
+	}
+	if h.officePackageHost == nil {
+		return failure()
 	}
 	if pending.Call.Name == "native_selection_propose" {
 		payloads := 0

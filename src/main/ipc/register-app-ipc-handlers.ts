@@ -2778,12 +2778,14 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return result
   })
   ipcMain.handle('object:editing', async (event, payload: unknown) => {
-    const main = getMainWindow()
-    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
-        event.senderFrame !== main.webContents.mainFrame) {
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) {
       return { ok: false, code: 'forbidden', message: 'The protected editor is available only in the main workspace.' }
     }
-    return objectEditing(payload)
+    try {
+      const result = await objectEditing(payload)
+      return owner.isCurrent() ? result : { ok: false, code: 'unavailable', message: 'The protected editor owner changed.' }
+    } finally { owner.release() }
   })
   ipcMain.handle('file:resolve-workspace', async (_, payload: unknown) =>
     resolveWorkspaceFile(

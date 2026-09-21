@@ -39,7 +39,54 @@ export const objectEditingScopeSchema = z.object({ scopeId: sessionId, objectId:
 export const objectEditingProposalSchema = z.object({ proposalId: sessionId, scopeId: sessionId, draftVersion: sessionId, parts, status: z.enum(['proposed', 'accepted', 'rejected']) }).strict()
 export const objectEditingDecisionSchema = z.object({ proposalId: sessionId, status: z.enum(['accepted', 'rejected']), draftVersion: sessionId }).strict()
 
+// Image geometry is measured in Core-verified natural pixels. It is neither
+// a crop nor a grant to send image bytes to a model.
+export const imageRegionSchema = z.object({
+  x: z.number().int().min(0).max(8191), y: z.number().int().min(0).max(8191),
+  width: z.number().int().min(1).max(8192), height: z.number().int().min(1).max(8192)
+}).strict()
+const imageDimension = z.number().int().min(1).max(8192)
+const imageFits = (value: { width: number; height: number; region?: { x: number; y: number; width: number; height: number } | null }): boolean =>
+  value.width * value.height <= 16 * 1024 * 1024 && (!value.region ||
+    value.region.x + value.region.width <= value.width && value.region.y + value.region.height <= value.height)
+export const imageObjectSnapshotSchema = z.object({
+  sessionId, objectId: revision, threadId, path: text(4096).refine(value => !!value && !value.includes('\0')),
+  sourceRevision: revision, mimeType: z.enum(['image/png', 'image/jpeg']),
+  width: imageDimension, height: imageDimension,
+  // Avoid a repeated group: V8 can exhaust its regexp stack on an
+  // otherwise valid payload near the 12 MiB decoded limit.
+  dataBase64: z.string().min(4).max(16 * 1024 * 1024).regex(/^[A-Za-z0-9+/]+={0,2}$/)
+    .refine(value => value.length % 4 === 0 && value.trim() === value)
+}).strict().refine(imageFits)
+export const imageAnnotationSchema = z.object({
+  objectId: revision, threadId, annotationRevision: z.union([revision, z.literal('')]),
+  sourceRevision: z.union([revision, z.literal('')]),
+  width: z.number().int().min(0).max(8192), height: z.number().int().min(0).max(8192),
+  region: imageRegionSchema.nullable(), note: text(16_384).max(4096), updatedAt: z.string(), current: z.boolean()
+}).strict().refine(value => {
+  if (!value.annotationRevision) return !value.sourceRevision && !value.updatedAt && !value.current &&
+    value.width === 0 && value.height === 0 && value.region === null && value.note === ''
+  return !!value.sourceRevision && value.width > 0 && value.height > 0 && imageFits(value) &&
+    z.string().datetime({ offset: true }).safeParse(value.updatedAt).success && (value.region !== null || value.note === '')
+})
+export const imageRegionScopeSchema = z.object({
+  kind: z.literal('image-region'), sessionId, scopeId: sessionId, objectId: revision, threadId,
+  sourceRevision: revision, annotationRevision: revision, width: imageDimension, height: imageDimension,
+  region: imageRegionSchema, purpose: z.literal('discuss'), editable: z.literal(false), current: z.literal(true)
+}).strict().refine(imageFits)
+export type ImageObjectSnapshot = z.infer<typeof imageObjectSnapshotSchema>
+export type ImageAnnotation = z.infer<typeof imageAnnotationSchema>
+export type ImageRegion = z.infer<typeof imageRegionSchema>
+export type ImageRegionScope = z.infer<typeof imageRegionScopeSchema>
+
 export const objectEditingRequestSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('image-open'), threadId, path: text(4096).refine(value => !!value.trim() && !value.includes('\0')) }).strict(),
+  z.object({ action: z.literal('image-annotation-read'), sessionId, threadId }).strict(),
+  z.object({ action: z.literal('image-annotation-write'), sessionId, threadId, sourceRevision: revision,
+    expectedAnnotationRevision: z.union([revision, z.literal('')]), region: imageRegionSchema.nullable(), note: text(16_384).max(4096) }).strict(),
+  z.object({ action: z.literal('image-scope-capture'), sessionId, threadId, sourceRevision: revision, annotationRevision: revision }).strict(),
+  z.object({ action: z.literal('image-scope-read'), sessionId, threadId, scopeId: sessionId }).strict(),
+  z.object({ action: z.literal('image-scope-revoke'), sessionId, threadId, scopeId: sessionId }).strict(),
   z.object({ action: z.literal('open'), workspace: text(1_572_864).refine(value => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value) && !value.includes("\0")), path: text(1_572_864).refine(value => value.length > 0 && !value.includes("\0")) }).strict(),
   z.object({ action: z.literal('commit'), sessionId, operationId, baseRevision: revision, content }).strict(),
   z.object({ action: z.literal('status'), sessionId, operationId }).strict(),
@@ -67,6 +114,9 @@ export const objectEditingReceiptSchema = z.object({
 
 // These values are protected-local only, never ordinary turn/history events.
 export const objectEditingResponseSchema = z.union([
+  z.object({ ok: z.literal(true), image: imageObjectSnapshotSchema }).strict(),
+  z.object({ ok: z.literal(true), annotation: imageAnnotationSchema }).strict(),
+  z.object({ ok: z.literal(true), scope: imageRegionScopeSchema }).strict(),
   z.object({ ok: z.literal(true), draft: objectEditingDraftSchema }).strict(),
   z.object({ ok: z.literal(true), scope: objectEditingScopeSchema }).strict(),
   z.object({ ok: z.literal(true), revoked: z.literal(true) }).strict(),

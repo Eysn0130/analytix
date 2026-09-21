@@ -403,6 +403,22 @@ describe('registerAppIpcHandlers', () => {
     expect(sender.eventNames()).toEqual([])
   })
 
+  it('suppresses private object responses after same-frame navigation and denies foreign frames', async () => {
+    const frame = {}, sender = Object.assign(new EventEmitter(), {mainFrame: {}, isDestroyed: () => false})
+    sender.mainFrame = frame
+    const transport = vi.fn(async () => {
+      sender.emit('did-start-navigation', {}, 'analytix://app', false, true)
+      return {ok:true,status:200,body:JSON.stringify({ok:true,closed:true})}
+    })
+    registerAppIpcHandlers(registerOptions({localDisplayRequest:transport,getMainWindow:()=>({webContents:sender,isDestroyed:()=>false}) as never}))
+    const request = {action:'close',sessionId:'a'.repeat(48)}
+    expect(await handlers.get('object:editing')?.({sender,senderFrame:{}},request)).toMatchObject({ok:false})
+    expect(transport).not.toHaveBeenCalled()
+    expect(await handlers.get('object:editing')?.({sender,senderFrame:frame},request)).toMatchObject({ok:false})
+    expect(transport).toHaveBeenCalledOnce()
+    expect(sender.eventNames()).toEqual([])
+  })
+
   it('does not load Hub compatibility during registration or ordinary IPC and loads it only on explicit Hub invocation', async () => {
     const options = registerOptions()
 

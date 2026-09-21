@@ -1,3 +1,4 @@
+import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { AgentProvider, AttachmentReference, ChatBlock, NormalizedThread, ReviewTarget, ThreadEventSink, UserFileReference } from '../agent/types'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
 import { getProvider } from '../agent/registry'
@@ -485,13 +486,14 @@ export function createThreadActions(
   let currentReceiptOwner: symbol | null = null
   let sendGeneration = 0
   return {
-  createThread: async (options = {}) => {
+  createThread: async (options = {}) => withImageThreadNavigation(undefined, async navigationCurrent => {
     if (get().runtimeConnection !== 'ready') {
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return
     }
     try {
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const activeThread = get().activeThreadId
         ? get().threads.find((thread) => thread.id === get().activeThreadId)
         : null
@@ -503,6 +505,7 @@ export function createThreadActions(
         normalizeWorkspaceRoot(settings.workspaceRoot)
       if (!workspaceRoot) {
         await get().chooseWorkspace({ createThreadAfter: true })
+        if (!navigationCurrent()) return
         return
       }
       const codeWorkspaceRoots = rememberCodeWorkspaceRoots(get().codeWorkspaceRoots, [workspaceRoot])
@@ -538,9 +541,11 @@ export function createThreadActions(
             workspaceRoot,
             (thread) => isCodeThread(thread, get().clawChannels)
           )
+      if (!navigationCurrent()) return
       if (reusableThreadId) {
         if (get().activeThreadId !== reusableThreadId) {
           await get().selectThread(reusableThreadId)
+          if (!navigationCurrent()) return
         } else {
           set({ error: null })
         }
@@ -552,6 +557,7 @@ export function createThreadActions(
           const poolIndex = await window.analytix.workspace.findAvailableWorktreePoolIndex({
             projectPath: workspaceRoot
           })
+          if (!navigationCurrent()) return
           if (poolIndex === null) {
             set({ error: i18n.t('common:worktreePoolFull') })
           } else {
@@ -566,6 +572,7 @@ export function createThreadActions(
             try {
               wt = await acquireWithForce(false)
             } catch (acquireErr) {
+              if (!navigationCurrent()) return
               const acquireMsg = acquireErr instanceof Error ? acquireErr.message : String(acquireErr)
               if (parseWorktreeHasChangesError(acquireMsg)) {
                 wt = await acquireWithForce(true)
@@ -580,8 +587,16 @@ export function createThreadActions(
               branch: wt.branch
             }
             workspaceRoot = wt.path
+            if (!navigationCurrent()) {
+              // Acquisition completed; cancel selection without orphaning its slot.
+              try {
+                await window.analytix.workspace.releaseWorktree({ projectPath: acquiredWorktree.projectPath, poolIndex })
+              } catch (error) { set({ error: formatRuntimeError(error) }) }
+              return
+            }
           }
         } catch {
+          if (!navigationCurrent()) return
           set({ error: i18n.t('common:worktreeAcquireFailed') })
         }
       }
@@ -592,15 +607,6 @@ export function createThreadActions(
         ...(get().composerModel.trim() ? { model: get().composerModel.trim() } : {}),
         ...(get().composerProviderId.trim() ? { providerId: get().composerProviderId.trim() } : {})
       })
-      // Register + activate optimistically before refreshing. A freshly created
-      // Analytix thread may not be listed until the first message is written.
-      // Setting it active first lets refreshThreads preserve it in the sidebar.
-      set((s) => ({
-        activeThreadId: t.id,
-        codeWorkspaceRoots: rememberCodeWorkspaceRoots(s.codeWorkspaceRoots, [workspaceRoot, t.workspace]),
-        threads: s.threads.some((thread) => thread.id === t.id) ? s.threads : [t, ...s.threads]
-      }))
-      await get().selectThread(t.id)
       if (acquiredWorktree) {
         saveThreadWorktreeRegistry(
           markThreadWorktree(t.id, {
@@ -612,8 +618,21 @@ export function createThreadActions(
           })
         )
       }
+      // Register + activate optimistically before refreshing. A freshly created
+      // Analytix thread may not be listed until the first message is written.
+      // Setting it active first lets refreshThreads preserve it in the sidebar.
+      set((s) => ({
+        ...(navigationCurrent() ? { activeThreadId: t.id } : {}),
+        codeWorkspaceRoots: rememberCodeWorkspaceRoots(s.codeWorkspaceRoots, [workspaceRoot, t.workspace]),
+        threads: s.threads.some((thread) => thread.id === t.id) ? s.threads : [t, ...s.threads]
+      }))
+      if (!navigationCurrent()) return
+      await get().selectThread(t.id)
+      if (!navigationCurrent()) return
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -621,7 +640,7 @@ export function createThreadActions(
           : {})
       })
     }
-  },
+  }),
 
   recoverActiveTurn: async () => {
     const state = get()
@@ -756,29 +775,13 @@ export function createThreadActions(
     }
   },
 
-  selectThread: async (id) => {
+  selectThread: async (id) => withImageThreadNavigation(undefined, async navigationCurrent => {
     if (get().runtimeConnection !== 'ready') {
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return
     }
-    const prevId = get().activeThreadId
-    const prevBusy = get().busy
-    let nextWatch = { ...get().watchTurnCompletion }
-    delete nextWatch[id]
-    clearWatchedCompletionNotification(id)
-    if (prevId && prevId !== id && prevBusy) {
-      nextWatch[prevId] = true
-      watchTurnCompletionNotification(prevId)
-    }
-    const nextUnread = { ...get().unreadThreadIds }
-    delete nextUnread[id]
-
-    sseAbortRef.current?.abort()
-    sseAbortRef.current = null
     const p = getProvider()
     try {
-      resetBusyRecoveryAttempts()
-      clearBusyWatchdog()
       const threadSnap = get().threads.find((thread) => thread.id === id) ?? null
       const {
         thread: detailThread,
@@ -792,7 +795,24 @@ export function createThreadActions(
         goal,
         todos
       } = await loadThreadDetailWithCache(p, id, threadSnap)
+      if (!navigationCurrent()) return
       if (detailThread && detailThread.id !== id) throw new Error('Runtime thread response identity mismatch.')
+      const prevId = get().activeThreadId
+      const prevBusy = get().busy
+      let nextWatch = { ...get().watchTurnCompletion }
+      delete nextWatch[id]
+      clearWatchedCompletionNotification(id)
+      if (prevId && prevId !== id && prevBusy) {
+        nextWatch[prevId] = true
+        watchTurnCompletionNotification(prevId)
+      }
+      const nextUnread = { ...get().unreadThreadIds }
+      delete nextUnread[id]
+
+      sseAbortRef.current?.abort()
+      sseAbortRef.current = null
+      resetBusyRecoveryAttempts()
+      clearBusyWatchdog()
       const blocks = hydrateBlockModelLabels(id, rawBlocks)
       const busy = threadSnapshotLooksRunning(blocks, threadStatus)
       const currentTurnUserId = busy
@@ -846,6 +866,7 @@ export function createThreadActions(
       subscribeThreadEventsWithRecovery(p, id, latestSeq, sink, ac.signal, get, sseAbortRef, ac)
       if (busy) armBusyWatchdog(set, get)
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -853,9 +874,9 @@ export function createThreadActions(
           : {})
       })
     }
-  },
+  }),
 
-  subscribeThreadEventsLive: async (threadId) => {
+  subscribeThreadEventsLive: async (threadId) => withImageThreadNavigation(undefined, async navigationCurrent => {
     if (get().runtimeConnection !== 'ready') return
     const targetThreadId = threadId.trim()
     if (!targetThreadId) return
@@ -925,6 +946,7 @@ export function createThreadActions(
         todos,
         historyAuthority
       } = await p.getThreadDetail(targetThreadId)
+      if (!navigationCurrent()) return
       if (
         ac.signal.aborted ||
         isPublicProjectionRevoked(targetThreadId) ||
@@ -995,6 +1017,7 @@ export function createThreadActions(
         void get().drainQueuedMessages()
       }
     } catch (e) {
+      if (!navigationCurrent()) return
       if (ac.signal.aborted || isPublicProjectionRevoked(targetThreadId)) return
       set({
         error: formatRuntimeError(e),
@@ -1003,7 +1026,7 @@ export function createThreadActions(
           : {})
       })
     }
-  },
+  }),
 
   drainQueuedMessages: async () => {
     if (drainingQueuedMessages) return

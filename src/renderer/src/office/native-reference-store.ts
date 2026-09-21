@@ -1,6 +1,7 @@
 import { nativeTypedPresentationSelection, nativeTypedWorkbookSelection } from '../../../shared/native-office'
 import { create } from 'zustand'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
+import type { ImageRegion } from '../../../../packages/runtime/src/contracts/object-editing'
 
 export type OfficeNativeReference = {
   kind?: 'office'
@@ -13,8 +14,14 @@ export type CanvasNativeReference = {
   objectId: string; revision: string; label: string; text: ''
   sessionId: string; scopeId?: string; editable?: boolean; selectedIds: string[]
 }
-export type NativeReference = OfficeNativeReference | CanvasNativeReference
-export type NativeReferenceInput = Omit<OfficeNativeReference, 'id'> | Omit<CanvasNativeReference, 'id'>
+export type ImageRegionNativeReference = {
+  kind: 'image-region'; id: string; threadId: string; workspace: string; path: string
+  objectId: string; revision: string; label: string; text: ''
+  sessionId: string; scopeId?: string; editable: false
+  annotationRevision: string; width: number; height: number; region: ImageRegion
+}
+export type NativeReference = OfficeNativeReference | CanvasNativeReference | ImageRegionNativeReference
+export type NativeReferenceInput = Omit<OfficeNativeReference, 'id'> | Omit<CanvasNativeReference, 'id'> | Omit<ImageRegionNativeReference, 'id'>
 const column = (n: number): string => { let label = ''; for (n++; n; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label; return label }
 export function nativeSelectionLabel(view: NativeOfficeView, selection: NativeOfficeSelection): string {
   const name = view.path.split(/[\\/]/).at(-1) ?? view.kind
@@ -47,7 +54,7 @@ export function isNativeSelectionEditable(view: NativeOfficeView, selection: Nat
 /** Recheck an explicit task after asynchronous preparation; the Core still owns authority. */
 export function nativeActionReferencesCurrent(references: readonly NativeReference[], views: readonly NativeOfficeView[]): boolean {
   return references.length > 0 && references.every(reference => {
-    if (reference.kind === 'canvas') return false // Canvas quotations use send-time Core validation.
+    if (reference.kind === 'canvas' || reference.kind === 'image-region') return false // Send-time Core validation.
     const view = views.find(candidate => candidate.objectId === reference.objectId)
     return !!view && view.revision === reference.revision &&
       (view.changeSequence ?? 0) === reference.selection.changeSequence &&
@@ -70,14 +77,14 @@ export const useNativeReferenceStore = create<{
   revokeScopes: objectId => set(state => ({references:state.references.map(previous => {
     if (!previous.scopeId || previous.objectId !== objectId) return previous
     const {scopeId: _scopeId, ...snapshot} = previous
-    return {...snapshot,editable:false}
+    return {...snapshot,editable:false as const}
   })})),
   add: reference => {
     const snapshot: NativeReference = {...structuredClone(reference), id:crypto.randomUUID()}
-    set(state => ({references:[...state.references.filter(previous => !(reference.kind === 'canvas' && previous.kind === 'canvas' && previous.objectId === reference.objectId && previous.threadId === reference.threadId)).slice(-7).map(previous => {
+    set(state => ({references:[...state.references.filter(previous => !((reference.kind === 'canvas' || reference.kind === 'image-region') && previous.kind === reference.kind && previous.objectId === reference.objectId && previous.threadId === reference.threadId)).slice(-7).map(previous => {
     if (!reference.scopeId || !previous.scopeId || previous.objectId !== reference.objectId || previous.threadId !== reference.threadId) return previous
     const {scopeId: _scopeId, ...snapshot} = previous
-    return {...snapshot, editable:false}
+    return {...snapshot, editable:false as const}
   }), snapshot]}))
     return snapshot
   },
@@ -85,6 +92,11 @@ export const useNativeReferenceStore = create<{
 }))
 export function nativeReferencesPrompt(references: NativeReference[]): string {
   return references.map(r => {
+    if (r.kind === 'image-region') {
+      if (!r.scopeId || !/^[a-f0-9]{48}$/.test(r.scopeId)) throw new Error('Image region must be recaptured before sending.')
+      // Geometry, notes and pixels are never trusted from the composer snapshot.
+      return `[Image region reference]\nCore scopeId: ${r.scopeId}\nUse native_selection_read for the current region and projected note. This is discussion-only. No image pixels have been supplied; do not claim to see, redact or modify the image.`
+    }
     if (r.kind === 'canvas') {
       if (!r.scopeId || !r.editable || !/^[a-f0-9]{48}$/.test(r.scopeId)) throw new Error('Canvas selection must be recaptured before sending.')
       // Never use the Office snapshot fallback for a Canvas quote. Raw Scene,

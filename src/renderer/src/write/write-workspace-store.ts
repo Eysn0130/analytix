@@ -1,4 +1,5 @@
 import i18n from '../i18n'
+import { createImageRegionActions, imageRegionHasDraft } from './image-region-session'
 import { create } from 'zustand'
 import { objectEditingFailure, openTextObject } from './object-editing-client'
 import {
@@ -111,6 +112,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   assistantAgentPresetId: '',
 
   ...createWriteSettingsActions({ set, get }),
+  ...createImageRegionActions(set, get),
   ...shutdownAwareFileActions(createWriteFileActions({
     set,
     get,
@@ -278,6 +280,11 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     if (snapshot.shutdownFrozen || !snapshot.activeFilePath || snapshot.activeFileKind !== 'image') return false
     if (!pathsEqual(workspaceRoot, snapshot.workspaceRoot)) return false
     if (path && !pathsEqual(path, snapshot.activeFilePath)) return false
+    if (snapshot.imageRegionEditor) {
+      if (imageRegionHasDraft(snapshot.imageRegionEditor)) return false
+      snapshot.invalidateImageRegion()
+      return !!snapshot.imageRegionThreadId && get().openImageRegion(workspaceRoot, snapshot.activeFilePath, snapshot.imageRegionThreadId)
+    }
     const activePath = snapshot.activeFilePath
     const revision = navigation.revision
     const sequence = ++imageRefreshSequence
@@ -334,6 +341,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       },
       save: async () => {
         const snapshot = get()
+        if (snapshot.imageRegionEditor?.composing) return { result: 'blocked', reason: 'composing' }
         if (snapshot.exportInProgress) return { result: 'blocked', reason: 'exporting' }
         if (fileActionsInFlight || snapshot.fileLoading || externalSyncTimer !== null) return { result: 'blocked', reason: 'unavailable' }
         if (snapshot.reviewActive || snapshot.pendingAgentReview || snapshot.saveStatus === 'conflict') return { result: 'blocked', reason: 'conflict' }
@@ -348,8 +356,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
         if (!sameDocument()) return { result: 'blocked', reason: 'unavailable' }
         const saved = await get().flushSave(snapshot.workspaceRoot).catch(() => false)
         if (!current() || !sameDocument()) return { result: 'blocked', reason: 'unavailable' }
-        if (!saved || get().pendingSave || (snapshot.activeFileKind === 'text' && get().saveStatus !== 'saved')) {
-          return { result: 'blocked', reason: get().saveStatus === 'conflict' ? 'conflict' : 'save_unconfirmed' }
+        if (!saved || imageRegionHasDraft(get().imageRegionEditor) || get().pendingSave || (snapshot.activeFileKind === 'text' && get().saveStatus !== 'saved')) {
+          return { result: 'blocked', reason: get().saveStatus === 'conflict' || get().imageRegionEditor?.status === 'conflict' ? 'conflict' : 'save_unconfirmed' }
         }
         return { result: 'ready' }
       }
@@ -370,6 +378,9 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
   flushSave: async (workspaceRoot) => {
     if (get().exportInProgress) return false
+    if (get().imageRegionEditor) {
+      if (get().workspaceRoot !== workspaceRoot || !(await get().flushImageRegion())) return false
+    }
     // One write at a time. A caller switching documents must also persist edits
     // made while an earlier save was awaiting its receipt.
     if (saveInFlight) {
@@ -536,7 +547,9 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   clearQuotedSelections: () => set({ quotedSelections: [] }),
 
   resetWorkspace: () => {
-    if (get().shutdownFrozen) return
+    if (get().shutdownFrozen || imageRegionHasDraft(get().imageRegionEditor)) return
+    get().invalidateImageRegion(true)
+    set({ imageRegionEditor: null })
     navigation.revision += 1
     cancelExternalSyncAnimation()
     lastSavedContent = ''

@@ -8,6 +8,7 @@ import {
   persistComposerModel,
   readStoredComposerModel
 } from './chat-store-helpers'
+import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { createAppActions } from './chat-store-app-actions'
 
 const COMPOSER_MODEL_STORAGE_KEY = 'analytix.composerModel'
@@ -590,4 +591,21 @@ describe('chat-store app actions composer model loading', () => {
     }
     expectTypeOf<Extract<AppRoute, ForbiddenTopLevelRoute>>().toEqualTypeOf<never>()
   })
+})
+
+it('does not clear the active thread or refresh Claw while an image note is composing', () => {
+  const { actions, state, refreshClawChannels } = buildHarness({ ok: false, message: 'synthetic unavailable' })
+  state.activeThreadId = 'image-owner'
+  useWriteWorkspaceStore.setState({ imageRegionEditor: {
+    workspace: '/synthetic', path: '/synthetic/image.png', threadId: 'image-owner', snapshot: null, annotation: null,
+    region: null, note: '组合文本', dirty: true, pending: null, loading: false, revoked: false, stale: false,
+    composing: true, status: 'dirty', error: null
+  } })
+  try {
+    actions.openClaw()
+    expect(state.activeThreadId).toBe('image-owner')
+    expect(state.route).toBe('chat')
+    expect(refreshClawChannels).not.toHaveBeenCalled()
+    expect(useWriteWorkspaceStore.getState().imageRegionEditor?.note).toBe('组合文本')
+  } finally { useWriteWorkspaceStore.setState({ imageRegionEditor: null }); vi.unstubAllGlobals() }
 })

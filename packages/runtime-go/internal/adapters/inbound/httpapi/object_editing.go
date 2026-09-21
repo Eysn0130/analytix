@@ -52,6 +52,91 @@ func (h ObjectEditingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	operationPattern := regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$`)
 	revisionPattern := regexp.MustCompile(`^[a-f0-9]{64}$`)
 	switch envelope.Action {
+	case "image-open":
+		var request struct {
+			Action   string `json:"action"`
+			ThreadID string `json:"threadId"`
+			Path     string `json:"path"`
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		image, err := h.Service.OpenImage(r.Context(), request.ThreadID, request.Path)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "image": image})
+	case "image-annotation-read":
+		var request struct {
+			Action    string `json:"action"`
+			SessionID string `json:"sessionId"`
+			ThreadID  string `json:"threadId"`
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		value, err := h.Service.ReadImageAnnotation(r.Context(), request.SessionID, request.ThreadID)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "annotation": value})
+	case "image-annotation-write":
+		var request struct {
+			Action string `json:"action"`
+			editingapp.ImageAnnotationWrite
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		value, err := h.Service.WriteImageAnnotation(r.Context(), request.ImageAnnotationWrite)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "annotation": value})
+	case "image-scope-capture":
+		var request struct {
+			Action string `json:"action"`
+			editingapp.ImageScopeCapture
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		value, err := h.Service.CaptureImageScope(r.Context(), request.ImageScopeCapture)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "scope": value})
+	case "image-scope-read", "image-scope-revoke":
+		var request struct {
+			Action string `json:"action"`
+			editingapp.ImageScopeBinding
+		}
+		if !decode(&request) {
+			writeObjectEditingError(w, fileport.ErrInvalidInput, fileport.Receipt{})
+			return
+		}
+		if envelope.Action == "image-scope-revoke" {
+			if err := h.Service.RevokeImageScope(r.Context(), request.ImageScopeBinding); err != nil {
+				writeObjectEditingError(w, err, fileport.Receipt{})
+				return
+			}
+			writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "revoked": true})
+			return
+		}
+		value, err := h.Service.ReadImageScope(r.Context(), request.ImageScopeBinding)
+		if err != nil {
+			writeObjectEditingError(w, err, fileport.Receipt{})
+			return
+		}
+		writeObjectEditingJSON(w, http.StatusOK, map[string]any{"ok": true, "scope": value})
 	case "open":
 		var request struct {
 			Action    string `json:"action"`
@@ -309,7 +394,7 @@ func objectEditingExactFields(raw json.RawMessage, keys string) (map[string]json
 	}
 	for _, key := range expected {
 		value, ok := fields[key]
-		if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		if !ok || key != "region" && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return nil, false
 		}
 	}
@@ -317,10 +402,16 @@ func objectEditingExactFields(raw json.RawMessage, keys string) (map[string]json
 }
 
 var objectEditingKeys = map[string]string{
-	"open":            "action workspace path",
-	"export-snapshot": "action sessionId objectId threadId baseRevision draftVersion",
-	"commit":          "action sessionId operationId baseRevision content",
-	"status":          "action sessionId operationId", "close": "action sessionId",
+	"image-open":             "action threadId path",
+	"image-annotation-read":  "action sessionId threadId",
+	"image-annotation-write": "action sessionId threadId sourceRevision expectedAnnotationRevision region note",
+	"image-scope-capture":    "action sessionId threadId sourceRevision annotationRevision",
+	"image-scope-read":       "action sessionId threadId scopeId",
+	"image-scope-revoke":     "action sessionId threadId scopeId",
+	"open":                   "action workspace path",
+	"export-snapshot":        "action sessionId objectId threadId baseRevision draftVersion",
+	"commit":                 "action sessionId operationId baseRevision content",
+	"status":                 "action sessionId operationId", "close": "action sessionId",
 	"draft-update": "action sessionId baseRevision expectedVersion content", "draft-read": "action sessionId",
 	"scope-capture":   "action sessionId draftVersion threadId purpose range",
 	"scope-read":      "action sessionId scopeId threadId purpose draftVersion",
@@ -345,6 +436,19 @@ func validObjectEditingRequest(body []byte, action string) bool {
 		return false
 	}
 	for key, raw := range fields {
+		if key == "region" {
+			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				continue
+			}
+			if _, ok := objectEditingExactFields(raw, "x y width height"); !ok {
+				return false
+			}
+			var region fileport.ImageRegion
+			if json.Unmarshal(raw, &region) != nil || !fileport.ValidImageAnnotationWrite("", strings.Repeat("0", 64), "", &region) {
+				return false
+			}
+			continue
+		}
 		if key == "range" {
 			if _, ok := objectEditingExactFields(raw, "start end"); !ok {
 				return false
@@ -398,8 +502,16 @@ func validObjectEditingRequest(body []byte, action string) bool {
 			if value != "" && !objectEditingToken.MatchString(value) {
 				return false
 			}
-		case "baseRevision", "objectId":
+		case "baseRevision", "objectId", "sourceRevision", "annotationRevision":
 			if !objectEditingHash.MatchString(value) {
+				return false
+			}
+		case "expectedAnnotationRevision":
+			if value != "" && !objectEditingHash.MatchString(value) {
+				return false
+			}
+		case "note":
+			if !fileport.ValidAnnotationWrite("", value, strings.Repeat("0", 64)) {
 				return false
 			}
 		case "operationId":
@@ -419,7 +531,7 @@ func validObjectEditingRequest(body []byte, action string) bool {
 				return false
 			}
 		case "path":
-			if value == "" || strings.ContainsRune(value, 0) {
+			if value == "" || strings.ContainsRune(value, 0) || action == "image-open" && (len(value) > 4096 || strings.TrimSpace(value) == "") {
 				return false
 			}
 		case "content":

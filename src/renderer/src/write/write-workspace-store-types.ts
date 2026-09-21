@@ -1,3 +1,4 @@
+import type { ImageRegionActions } from './image-region-session'
 import type { WriteShutdownResult } from '@shared/write-shutdown'
 import type { WriteAgentPresetV1, WriteInlineCompletionSettingsV1, WriteSelectionAssistSettingsV1 } from '@shared/app-settings'
 import type { WorkspaceEntry } from '@shared/workspace-file'
@@ -23,7 +24,7 @@ export type WriteDiffReviewRecovery = {
   nextDoc: string
 }
 
-export type WriteWorkspaceState = {
+export type WriteWorkspaceState = ImageRegionActions & {
   defaultWorkspaceRoot: string
   workspaceRoots: string[]
   inlineCompletion: WriteInlineCompletionSettingsV1

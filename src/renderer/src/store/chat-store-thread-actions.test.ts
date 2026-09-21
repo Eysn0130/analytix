@@ -1462,14 +1462,17 @@ describe('chat-store-thread-actions queued messages', () => {
     state.lastSeq = 0
     state.busy = false
 
-    await actions.subscribeThreadEventsLive('thr_existing')
+    const subscribing = actions.subscribeThreadEventsLive('thr_existing')
+    const subscribedSignal = sseAbortRef.current?.signal
+    expect(subscribedSignal).toBeInstanceOf(AbortSignal)
+    await subscribing
 
     expect(provider.getThreadDetail).toHaveBeenCalledTimes(1)
     expect(provider.subscribeThreadEvents).toHaveBeenCalledWith(
       'thr_existing',
       0,
       expect.any(Object),
-      sseAbortRef.current?.signal
+      subscribedSignal
     )
     expect(state.lastSeq).toBe(5)
     expect(state.liveAssistant).toBe('')

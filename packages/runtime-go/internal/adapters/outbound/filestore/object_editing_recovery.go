@@ -77,7 +77,16 @@ func (s *ObjectEditingFiles) nativePath(identity, change, suffix string) string 
 	return filepath.Join(s.receiptRoot, "native-"+digestAtomicText([]byte(identity+"\x00"+change))+suffix)
 }
 func (s *ObjectEditingFiles) readNativePrivate(path string, maxBytes int64) ([]byte, string, error) {
-	if s.officeKind == "" || s.checkRoot() != nil {
+	if s.officeKind == "" {
+		return nil, "", editing.ErrForbidden
+	}
+	return s.readObjectPrivate(path, maxBytes)
+}
+
+// Object annotations and native recovery share the same protected local CAS
+// storage. Format-specific admission stays in their respective entry points.
+func (s *ObjectEditingFiles) readObjectPrivate(path string, maxBytes int64) ([]byte, string, error) {
+	if s.checkRoot() != nil {
 		return nil, "", editing.ErrForbidden
 	}
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
@@ -93,7 +102,13 @@ func (s *ObjectEditingFiles) readNativePrivate(path string, maxBytes int64) ([]b
 	return state.Content, digestAtomicText(state.Content), nil
 }
 func (s *ObjectEditingFiles) writeNativePrivate(path string, body []byte, expected string, maxBytes int64) error {
-	if s.officeKind == "" || s.checkRoot() != nil || int64(len(body)) > maxBytes {
+	if s.officeKind == "" {
+		return editing.ErrPersistence
+	}
+	return s.writeObjectPrivate(path, body, expected, maxBytes)
+}
+func (s *ObjectEditingFiles) writeObjectPrivate(path string, body []byte, expected string, maxBytes int64) error {
+	if s.checkRoot() != nil || int64(len(body)) > maxBytes {
 		return editing.ErrPersistence
 	}
 	replace := s.replaceJournal
@@ -103,7 +118,7 @@ func (s *ObjectEditingFiles) writeNativePrivate(path string, body []byte, expect
 	if replace(atomicTextReplaceRequest{Path: path, Content: body, MaxBytes: maxBytes, ReadPolicy: atomicTextReadPolicy{RequireSingleLink: true}, ExpectedExists: expected != "", ExpectedHash: expected, DefaultMode: 0600}) != nil {
 		return editing.ErrPersistence
 	}
-	actual, _, err := s.readNativePrivate(path, maxBytes)
+	actual, _, err := s.readObjectPrivate(path, maxBytes)
 	if err != nil || !bytes.Equal(actual, body) {
 		return editing.ErrPersistence
 	}

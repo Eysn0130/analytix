@@ -156,6 +156,8 @@ type Decision struct {
 }
 type protectedSpan struct{ token, text string }
 type capturedScope struct {
+	image              *ImageScope
+	imageBinding       string
 	view               Scope
 	startByte, endByte int
 	spans              []protectedSpan

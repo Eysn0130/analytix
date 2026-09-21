@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createObjectEditingHandler } from './object-editing-ipc'
-import { objectEditingPath, objectEditingReceiptSchema } from '../../../packages/runtime/src/contracts/object-editing'
+import { imageObjectSnapshotSchema, objectEditingPath, objectEditingReceiptSchema } from '../../../packages/runtime/src/contracts/object-editing'
 
 const commit = { action: 'commit', sessionId: 'a'.repeat(48), operationId: 'save_1234', baseRevision: 'b'.repeat(64), content: 'local draft' }
 
@@ -108,5 +108,30 @@ describe('private draft/scope/proposal response binding', () => {
       const result = await createObjectEditingHandler(privateResponse({ ...failure, receipt: { ...failure.receipt, operationId: 'other_0001' } }, false))(request)
       expect(result).toMatchObject(action === 'commit' ? { ok: false, code: 'persistence_failure', receipt: { operationId: commit.operationId, status: 'unknown' } } : { ok: false, code: 'unavailable' })
     }
+  })
+})
+
+describe('image object protected response bindings', () => {
+  const dataBase64 = 'cGl4ZWxz', sourceRevision = '6ec9c2b0eb14010746c8bce8939303b382344b2962066126d4f2c5bb64c3d3da'
+  const image = {sessionId:token,objectId:hash,threadId:'thread-1',path:'image.png',sourceRevision,mimeType:'image/png',width:100,height:80,dataBase64}
+  const annotation = {objectId:hash,threadId:'thread-1',annotationRevision:hash,sourceRevision:hash,width:100,height:80,region:{x:0,y:1,width:40,height:20},note:'local note',updatedAt:'2026-09-21T06:00:00Z',current:true}
+  it('validates the maximum admitted image payload without exhausting the regexp stack', () => {
+    expect(imageObjectSnapshotSchema.safeParse({ ...image, dataBase64: 'A'.repeat(16 * 1024 * 1024) }).success).toBe(true)
+    for (const malformed of ['AAA', 'A===', 'AA=A', 'AAA\n', 'AAA\r', 'AAAA\n', 'AAAA====']) {
+      expect(imageObjectSnapshotSchema.safeParse({ ...image, dataBase64: malformed }).success).toBe(false)
+    }
+  })
+  it('rejects image byte/hash mismatches and cross-family success', async () => {
+    const request={action:'image-open',threadId:'thread-1',path:'image.png'}
+    const {createHash}=await import('node:crypto')
+    const good={...image,sourceRevision:createHash('sha256').update(Buffer.from(dataBase64,'base64')).digest('hex')}
+    expect(await createObjectEditingHandler(privateResponse({ok:true,image:good}))(request)).toEqual({ok:true,image:good})
+    for(const changed of [{...good,sourceRevision:'0'.repeat(64)},{...good,threadId:'thread-2'},{...good,dataBase64:'cGl4ZWxz===='}])expect(await createObjectEditingHandler(privateResponse({ok:true,image:changed}))(request)).toMatchObject({ok:false})
+    expect(await createObjectEditingHandler(privateResponse({ok:true,closed:true}))(request)).toMatchObject({ok:false})
+  })
+  it('requires confirmed exact CAS note, source, thread and geometry', async () => {
+    const request={action:'image-annotation-write',sessionId:token,threadId:annotation.threadId,sourceRevision:hash,expectedAnnotationRevision:'',region:annotation.region,note:annotation.note}
+    expect(await createObjectEditingHandler(privateResponse({ok:true,annotation}))(request)).toEqual({ok:true,annotation})
+    for(const changed of [{...annotation,current:false},{...annotation,note:'other'},{...annotation,sourceRevision:'0'.repeat(64)},{...annotation,region:{...annotation.region,width:41}},{...annotation,threadId:'thread-2'}])expect(await createObjectEditingHandler(privateResponse({ok:true,annotation:changed}))(request)).toMatchObject({ok:false})
   })
 })

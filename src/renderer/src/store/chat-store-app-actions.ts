@@ -1,3 +1,4 @@
+import { isImageNoteComposing } from '../write/image-thread-navigation'
 import type i18next from 'i18next'
 import { DEFAULT_ANALYTIX_MODEL, isComposerChatModelId, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -245,6 +246,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       })),
 
     openClaw: () => {
+      if (isImageNoteComposing()) return
       set((state) => ({
         ...(state.route === 'claw' ? {} : clearedThreadSelection()),
         route: 'claw'

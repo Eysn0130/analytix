@@ -35,6 +35,7 @@ type session struct {
 	workspace string
 	path      string
 	principal identitydomain.PrincipalV1
+	image     bool
 }
 
 type Service struct {
@@ -113,13 +114,13 @@ func (s *Service) Open(ctx context.Context, workspace, path string) (Opened, err
 		return Opened{}, ErrUnavailable
 	}
 	id := hex.EncodeToString(token[:])
-	s.sessions[id] = session{id, objectID, doc.Workspace, doc.Path, p}
+	s.sessions[id] = session{id: id, objectID: objectID, workspace: doc.Workspace, path: doc.Path, principal: p}
 	return Opened{id, objectID, doc.Path, doc.Content, doc.Revision}, nil
 }
 
-// currentLocked is called with mu held. Close and accepted commits are ordered
+// currentSessionLocked is called with mu held. Close and accepted commits are ordered
 // by the same lock; revoking a session cannot race a new write through it.
-func (s *Service) currentLocked(ctx context.Context, id string) (session, error) {
+func (s *Service) currentSessionLocked(ctx context.Context, id string) (session, error) {
 	p, err := s.principal(ctx)
 	if err != nil {
 		return session{}, err
@@ -129,6 +130,16 @@ func (s *Service) currentLocked(ctx context.Context, id string) (session, error)
 		return session{}, ErrSession
 	}
 	return current, nil
+}
+
+// Existing document operations accept only non-image sessions. Image access
+// uses currentSessionLocked through its typed branch and never gains text writes.
+func (s *Service) currentLocked(ctx context.Context, id string) (session, error) {
+	current, err := s.currentSessionLocked(ctx, id)
+	if err == nil && current.image {
+		return session{}, fileport.ErrNotText
+	}
+	return current, err
 }
 
 func (s *Service) Commit(ctx context.Context, id, operationID, baseRevision, content string) (fileport.Receipt, error) {
@@ -194,7 +205,7 @@ func (s *Service) Close(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.currentLocked(ctx, id); err != nil {
+	if _, err := s.currentSessionLocked(ctx, id); err != nil {
 		return err
 	}
 	delete(s.sessions, id)

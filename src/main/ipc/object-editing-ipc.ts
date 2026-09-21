@@ -2,6 +2,7 @@ import {
   objectEditingPath, objectEditingRequestSchema, objectEditingResponseSchema,
   type ObjectEditingRequest, type ObjectEditingResponse
 } from '../../../packages/runtime/src/contracts/object-editing'
+import { createHash } from 'node:crypto'
 
 type Transport = (path: string, body: string) => Promise<{ ok: boolean; status: number; body: string }>
 
@@ -34,6 +35,26 @@ export function createObjectEditingHandler(transport: Transport) {
 // authority; Main must not invent a second state store to infer missing fields.
 function matchesObjectEditingSuccess(request: ObjectEditingRequest, value: Extract<ObjectEditingResponse, { ok: true }>): boolean {
   switch (request.action) {
+    case 'image-open': {
+      if (!('image' in value) || value.image.threadId !== request.threadId) return false
+      const bytes = Buffer.from(value.image.dataBase64, 'base64')
+      return bytes.length <= 12 * 1024 * 1024 && bytes.toString('base64') === value.image.dataBase64 &&
+        createHash('sha256').update(bytes).digest('hex') === value.image.sourceRevision
+    }
+    case 'image-annotation-read':
+      return 'annotation' in value && value.annotation.threadId === request.threadId
+    case 'image-annotation-write':
+      return 'annotation' in value && value.annotation.threadId === request.threadId && value.annotation.current &&
+        value.annotation.sourceRevision === request.sourceRevision && value.annotation.note === request.note &&
+        JSON.stringify(value.annotation.region) === JSON.stringify(request.region)
+    case 'image-scope-capture':
+      return 'scope' in value && 'kind' in value.scope && value.scope.sessionId === request.sessionId &&
+        value.scope.threadId === request.threadId && value.scope.sourceRevision === request.sourceRevision &&
+        value.scope.annotationRevision === request.annotationRevision
+    case 'image-scope-read':
+      return 'scope' in value && 'kind' in value.scope && value.scope.sessionId === request.sessionId &&
+        value.scope.threadId === request.threadId && value.scope.scopeId === request.scopeId
+    case 'image-scope-revoke': return 'revoked' in value
     case 'open': return 'document' in value
     case 'commit':
     case 'status': return 'receipt' in value // Operation identity was checked above.
@@ -42,11 +63,11 @@ function matchesObjectEditingSuccess(request: ObjectEditingRequest, value: Extra
       return 'draft' in value && value.draft.baseRevision === request.baseRevision && value.draft.content === request.content
     case 'draft-read': return 'draft' in value
     case 'scope-capture':
-      return 'scope' in value && value.scope.threadId === request.threadId && value.scope.purpose === request.purpose &&
+      return 'scope' in value && 'draftVersion' in value.scope && value.scope.threadId === request.threadId && value.scope.purpose === request.purpose &&
         value.scope.draftVersion === request.draftVersion && value.scope.current &&
         value.scope.range.start === request.range.start && value.scope.range.end === request.range.end
     case 'scope-read':
-      return 'scope' in value && value.scope.scopeId === request.scopeId && value.scope.threadId === request.threadId &&
+      return 'scope' in value && 'draftVersion' in value.scope && value.scope.scopeId === request.scopeId && value.scope.threadId === request.threadId &&
         value.scope.purpose === request.purpose && value.scope.draftVersion === request.draftVersion
     case 'scope-revoke': return 'revoked' in value
     case 'proposal-create':
