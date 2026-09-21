@@ -24,6 +24,7 @@ import (
 const DefaultProviderStreamMaxAttempts = 2
 
 var ErrProviderOutputTokenBudgetExceeded = errors.New("provider output token budget exceeded")
+var ErrProviderOutputByteBudgetExceeded = errors.New("provider output byte budget exceeded")
 
 type ProviderStreamCallbacks struct {
 	AcquireProviderAttempt func(context.Context, int) (context.Context, func(), error)
@@ -56,8 +57,10 @@ type ProviderStreamInput struct {
 	HostEntitySelection HostCaseEntitySelectionV1
 	// OrdinaryEffect is host-owned. Its zero value preserves the strict
 	// case-data projection used by existing case callers.
-	OrdinaryEffect        bool
-	MaxAttempts           int
+	OrdinaryEffect bool
+	MaxAttempts    int
+	// MaxOutputBytes bounds text, reasoning and tool material before buffering; zero preserves the existing unlimited byte policy.
+	MaxOutputBytes        int
 	Callbacks             ProviderStreamCallbacks
 	ContinuationAuthority ProviderContinuationAuthorityInput
 	toolCallIDRandom      io.Reader
@@ -171,6 +174,9 @@ func (err providerAttemptPrepareError) Unwrap() error {
 func StreamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (ProviderStreamOutput, error) {
 	if err := domainmodel.ValidateReasoningEffortV1(input.Request.ReasoningEffort); err != nil {
 		return ProviderStreamOutput{}, err
+	}
+	if input.MaxOutputBytes < 0 {
+		return ProviderStreamOutput{}, ErrProviderOutputByteBudgetExceeded
 	}
 	if input.Request.MaxOutputTokens < 0 {
 		return ProviderStreamOutput{}, ErrProviderOutputTokenBudgetExceeded
@@ -446,6 +452,8 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		}
 		toolCallIDs := newProviderToolCallIDIssuerV1(input.toolCallIDRandom)
 		outputBudget := newProviderOutputTokenBudgetV1(request.MaxOutputTokens)
+		outputBytes := 0
+		var outputBytesErr error
 		providerStartedAt := time.Now()
 		firstTokenLatencyMs := int64(-1)
 		markFirstToken := func(observedAt time.Time) {
@@ -456,6 +464,16 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		request.OnChunk = func(chunk domainmodel.Chunk) error {
 			if err := attemptCtx.Err(); err != nil {
 				return ProviderStreamCallbackError{Err: err}
+			}
+			if input.MaxOutputBytes > 0 {
+				size := providerChunkBytes(chunk)
+				if size > input.MaxOutputBytes-outputBytes {
+					outputBytesErr = ErrProviderOutputByteBudgetExceeded
+				}
+				if outputBytesErr != nil {
+					return ProviderStreamCallbackError{Err: outputBytesErr}
+				}
+				outputBytes += size
 			}
 			normalizedChunk, identityErr := toolCallIDs.normalizeCallbackChunk(chunk)
 			if identityErr != nil {
@@ -595,6 +613,21 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			if providerOutputStarted(streamErr) {
 				attemptOutput.StreamedDeltas = true
 				attemptOutput.PartialTextStarted = true
+			}
+		}
+		if input.MaxOutputBytes > 0 {
+			resultBytes := 0
+			for _, chunk := range result.Chunks {
+				size := providerChunkBytes(chunk)
+				if size > input.MaxOutputBytes-resultBytes {
+					outputBytesErr = ErrProviderOutputByteBudgetExceeded
+					break
+				}
+				resultBytes += size
+			}
+			if outputBytesErr != nil {
+				result.Chunks = nil
+				streamErr = errors.Join(streamErr, outputBytesErr)
 			}
 		}
 		result = appmodel.NormalizeProviderResult(request, result)
@@ -933,4 +966,8 @@ func providerFirstTokenLatencyMillis(startedAt time.Time, observedAt time.Time, 
 		observedAt = now
 	}
 	return observedAt.Sub(startedAt).Milliseconds()
+}
+
+func providerChunkBytes(chunk domainmodel.Chunk) int {
+	return len(chunk.Text) + len(chunk.Signature) + len(chunk.ToolCall.ID) + len(chunk.ToolCall.Name) + len(chunk.ToolCall.Arguments)
 }

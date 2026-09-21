@@ -2,6 +2,7 @@ import type {
   WriteInlineEditRecentEdit,
   WriteInlineEditScopeKind
 } from './write-inline-edit'
+import type { InlineCompletionDocument } from '../../packages/runtime/src/contracts/inline-completion'
 
 export type WriteInlineCompletionMode = 'short' | 'long' | 'edit'
 
@@ -33,6 +34,8 @@ export type WriteInlineCompletionAction =
 
 export type WriteInlineCompletionRequest = {
   threadId?: string
+  requestId?: string
+  document?: InlineCompletionDocument
   prefix: string
   suffix: string
   mode?: WriteInlineCompletionMode

@@ -10,7 +10,8 @@ describe('typed local-display runtime path allowlist', () => {
     expect(LOCAL_DISPLAY_RUNTIME_PATHS_V1).toEqual([
       '/v1/local-display/generated-artifact',
       '/v1/local-display/object-editing',
-      '/v1/local-display/workspace-read',
+  '/v1/local-display/workspace-read',
+  '/v1/local-display/inline-completion',
       '/v1/local-display/plugin-package-host',
       '/v1/local-display/office-private-admission',
       '/v1/local-display/import-mapping-preview',

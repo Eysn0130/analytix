@@ -105,6 +105,11 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 			}
 		}
 	}()
+	releasePreparation, err := h.runtimeControl().PrepareForeground(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer releasePreparation()
 	thread, startBaselineDigest, err := turnstartapp.PrepareStartBaselineV1(turnstartapp.PrepareStartBaselineInputV1{
 		Context: ctx, Store: h.store, Compactor: h.runtimeThreadService(), ThreadID: threadID,
 		Prompt: request.Prompt, MainThread: request.InternalSubagentDepth == 0 && strings.TrimSpace(request.InternalChildRunID) == "",

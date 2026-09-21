@@ -902,6 +902,7 @@ export type AnalytixFlatApi = {
   requestWriteInlineCompletion: (
     payload: WriteInlineCompletionRequest
   ) => Promise<WriteInlineCompletionResult>
+  cancelWriteInlineCompletion: (payload: { requestId: string }) => Promise<{ canceled: boolean }>
   retrieveWriteContext: (
     payload: WriteRetrievalRequest
   ) => Promise<WriteRetrievalResult>
@@ -1166,6 +1167,7 @@ export type AnalytixFilesApi = {
 export type AnalytixWriteApi = Pick<
   AnalytixFlatApi,
   | 'requestWriteInlineCompletion'
+  | 'cancelWriteInlineCompletion'
   | 'retrieveWriteContext'
   | 'generateWriteInfographic'
   | 'authorizeWritePrototype'

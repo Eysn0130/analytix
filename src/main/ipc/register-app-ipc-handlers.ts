@@ -142,6 +142,7 @@ import {
   writeRichClipboardPayloadSchema,
   writeInfographicPayloadSchema,
   writeInlineCompletionPayloadSchema,
+  writeInlineCompletionCancelSchema,
   writePrototypeFilePayloadSchema,
   writeRetrievalPayloadSchema,
   workspaceRootSchema,
@@ -282,7 +283,7 @@ type RegisterAppIpcHandlersOptions = {
   getCurrentProfile?: () => { profileBinding: string; dataDirectory: string } | null | Promise<{ profileBinding: string; dataDirectory: string } | null>
   /** Fixed Main-only media transport; absent injection must fail closed. */
   privateMediaRequest?: PrivateMediaRuntimeRequest
-  localDisplayRequest: (path: string, body: string) => Promise<RuntimeRequestResult>
+  localDisplayRequest: (path: string, body: string, signal?: AbortSignal) => Promise<RuntimeRequestResult>
   restartRuntime: () => Promise<void>
   fetchUpstreamModels: () => Promise<UpstreamModelsResult>
   getClawRuntime: () => ClawRuntime | null
@@ -1226,7 +1227,9 @@ function localDisplayRendererIsCurrent(
 function captureWriteRendererOwner(event: IpcMainInvokeEvent, getMainWindow: () => BrowserWindow | null) {
   if (!localDisplayRendererIsCurrent(event, getMainWindow)) return null
   let active = true
-  const invalidate = (): void => { active = false }
+  const controller = new AbortController()
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
+  const invalidate = (): void => { active = false; controller.abort() }
   const navigating = (_event: Electron.Event, _url: string, _inPlace: boolean, mainFrame: boolean): void => {
     if (mainFrame) invalidate()
   }
@@ -1234,7 +1237,9 @@ function captureWriteRendererOwner(event: IpcMainInvokeEvent, getMainWindow: () 
   event.sender.on('render-process-gone', invalidate)
   event.sender.once('destroyed', invalidate)
   return {
-    isCurrent: () => active && localDisplayRendererIsCurrent(event, getMainWindow),
+    signal,
+    cancel: invalidate,
+    isCurrent: () => active && !signal.aborted && localDisplayRendererIsCurrent(event, getMainWindow),
     release: () => {
       invalidate()
       event.sender.removeListener('did-start-navigation', navigating)
@@ -2946,20 +2951,35 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     })
   })
 
+  let activeInlineCompletion: { sender: IpcMainInvokeEvent['sender']; requestId: string; owner: NonNullable<ReturnType<typeof captureWriteRendererOwner>> } | null = null
+  ipcMain.handle('write:inline-completion:cancel', (event, payload: unknown) => {
+    if (!localDisplayRendererIsCurrent(event, getMainWindow)) return { canceled: false }
+    const parsed = writeInlineCompletionCancelSchema.safeParse(payload)
+    const active = activeInlineCompletion
+    if (!parsed.success || !active || active.sender !== event.sender || active.requestId !== parsed.data.requestId || !active.owner.isCurrent()) return { canceled: false }
+    active.owner.cancel()
+    return { canceled: true }
+  })
   ipcMain.handle('write:inline-completion', async (event, payload: unknown) => {
     const denied = { ok: false as const, message: 'Write completion requires the current main window.' }
     const owner = captureWriteRendererOwner(event, getMainWindow)
     if (!owner) return denied
     try {
       const request = parseIpcPayload('write:inline-completion', writeInlineCompletionPayloadSchema, payload)
+      if (!request.threadId || !request.requestId || !request.document) return denied
+      activeInlineCompletion?.owner.cancel()
+      activeInlineCompletion = { sender: event.sender, requestId: request.requestId, owner }
       const settings = await store.load()
       if (!owner.isCurrent()) return denied
       const source = settings.write.inlineCompletion.retrievalEnabled === false ? null
-        : await authorizeWriteRetrievalSource(localDisplayRequest, request.threadId, request.workspaceRoot, owner.isCurrent)
+        : await authorizeWriteRetrievalSource((path, body) => localDisplayRequest(path, body, owner.signal), request.threadId, request.workspaceRoot, owner.isCurrent)
       if (!owner.isCurrent()) return denied
-      const result = await requestWriteInlineCompletion(settings, request, runtimeRequest, { isCurrent: owner.isCurrent, source: source ?? undefined })
+      const result = await requestWriteInlineCompletion(settings, request, localDisplayRequest, { isCurrent: owner.isCurrent, signal: owner.signal, source: source ?? undefined })
       return owner.isCurrent() ? result : denied
-    } finally { owner.release() }
+    } finally {
+      if (activeInlineCompletion?.owner === owner) activeInlineCompletion = null
+      owner.release()
+    }
   })
   ipcMain.handle('write:retrieve-context', async (event, payload: unknown) => {
     const denied = { ok: false as const, message: 'Write retrieval requires the current main window.' }
@@ -2967,7 +2987,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     if (!owner) return denied
     try {
       const request = parseIpcPayload('write:retrieve-context', writeRetrievalPayloadSchema, payload)
-      const source = await authorizeWriteRetrievalSource(localDisplayRequest, request.threadId, request.workspaceRoot, owner.isCurrent)
+      const source = await authorizeWriteRetrievalSource((path, body) => localDisplayRequest(path, body, owner.signal), request.threadId, request.workspaceRoot, owner.isCurrent)
       if (!source) return { ok: false as const, message: 'Write retrieval is unavailable.' }
       const context = await retrieveWriteContext(request, { isCurrent: owner.isCurrent, source })
       return owner.isCurrent() ? { ok: true as const, context } : denied

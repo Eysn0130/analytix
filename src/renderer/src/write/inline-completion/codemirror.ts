@@ -40,7 +40,8 @@ type InlineCompletionConfig = {
   getModel?: () => string
   requestCompletion: (
     context: InlineCompletionRequestContext,
-    mode: WriteInlineCompletionMode
+    mode: WriteInlineCompletionMode,
+    signal: AbortSignal
   ) => Promise<InlineCompletionSuggestion | null>
   onError?: (error: unknown) => void
   onFeedback?: (feedback: InlineCompletionFeedback) => void
@@ -56,7 +57,7 @@ const clearInlineCompletionEffect = StateEffect.define<null>()
 const completionCancellations = new WeakMap<EditorView, () => void>()
 
 // Revoke suggestions and pending display work without changing the document.
-// This is logical cancellation; it does not abort a provider request in flight.
+// Cancellation also reaches the request transport through its AbortSignal.
 export function cancelInlineCompletion(view: EditorView): void {
   completionCancellations.get(view)?.()
 }
@@ -281,10 +282,14 @@ const inlineCompletionRenderPlugin = ViewPlugin.fromClass(
 const inlineCompletionController = (config: InlineCompletionConfig) =>
   ViewPlugin.fromClass(class {
     private sequence = 0
+    private blurred = false
+    private destroyed = false
     private shortTimer: number | null = null
     private longTimer: number | null = null
+    private readonly retryTimers = new Map<WriteInlineCompletionMode, number>()
     private readonly inFlightModes = new Set<WriteInlineCompletionMode>()
-    private readonly pendingAfterInFlight = new Set<WriteInlineCompletionMode>()
+    private readonly requestControllers = new Map<WriteInlineCompletionMode, AbortController>()
+    private readonly pendingAfterInFlight = new Map<WriteInlineCompletionMode, number>()
     private readonly lastRequestStartedAt = new Map<WriteInlineCompletionMode, number>()
     private readonly emptyCooldowns = new Map<string, number>()
     private emptyEvents: number[] = []
@@ -293,11 +298,24 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     constructor(private readonly view: EditorView) {
       completionCancellations.set(view, () => {
         this.sequence += 1
+        for (const controller of this.requestControllers.values()) controller.abort()
         this.clearTimers()
         this.pendingAfterInFlight.clear()
         clearInlineCompletion(view)
       })
+      view.contentDOM.addEventListener('blur', this.onBlur)
+      view.contentDOM.addEventListener('focus', this.onFocus)
       this.schedule(view.state)
+    }
+
+    private readonly onBlur = (): void => {
+      this.blurred = true
+      cancelInlineCompletion(this.view)
+    }
+
+    private readonly onFocus = (): void => {
+      this.blurred = false
+      this.schedule(this.view.state)
     }
 
     update(update: { docChanged: boolean; selectionSet: boolean; focusChanged: boolean; state: EditorState }): void {
@@ -306,8 +324,11 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     }
 
     private schedule(state: EditorState): void {
+      this.pendingAfterInFlight.clear()
       this.sequence += 1
+      for (const controller of this.requestControllers.values()) controller.abort()
       this.clearTimers()
+      if (this.destroyed || this.blurred) return
 
       const requestContext = buildRequestContext(state, config)
       const shouldRequestShort = shouldRequestInlineCompletion(requestContext, config.isEnabled)
@@ -337,6 +358,7 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     }
 
     private async requestAndRender(mode: WriteInlineCompletionMode, requestId: number): Promise<void> {
+      if (this.destroyed || this.blurred || requestId !== this.sequence) return
       const latestState = this.view.state
       const latestContext = buildRequestContext(latestState, config)
       const shouldRequest = mode === 'long'
@@ -358,33 +380,39 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
       const minInterval = inlineCompletionMinRequestInterval(mode)
       const waitMs = minInterval - (now - lastStartedAt)
       if (waitMs > 0) {
-        window.setTimeout(() => {
+        this.retryTimers.set(mode, window.setTimeout(() => {
+          this.retryTimers.delete(mode)
           if (requestId === this.sequence) void this.requestAndRender(mode, requestId)
-        }, waitMs)
+        }, waitMs))
         return
       }
 
-      if (this.inFlightModes.has(mode)) {
-        this.pendingAfterInFlight.add(mode)
+      if (this.inFlightModes.size > 0) {
+        this.pendingAfterInFlight.set(mode, requestId)
         return
       }
 
       this.inFlightModes.add(mode)
       this.lastRequestStartedAt.set(mode, now)
+      const controller = new AbortController()
+      this.requestControllers.set(mode, controller)
       let suggestion: InlineCompletionSuggestion | null = null
       try {
-        suggestion = await config.requestCompletion(latestContext, mode).catch((error: unknown) => {
+        suggestion = await config.requestCompletion(latestContext, mode, controller.signal).catch((error: unknown) => {
           config.onError?.(error)
           return null
         })
       } finally {
+        this.requestControllers.delete(mode)
         this.inFlightModes.delete(mode)
-        if (this.pendingAfterInFlight.delete(mode)) {
-          this.schedule(this.view.state)
+        const next = this.pendingAfterInFlight.entries().next().value
+        if (next) {
+          this.pendingAfterInFlight.delete(next[0])
+          queueMicrotask(() => { void this.requestAndRender(next[0], next[1]) })
         }
       }
 
-      if (requestId !== this.sequence) return
+      if (controller.signal.aborted || this.destroyed || requestId !== this.sequence) return
       if (this.view.state !== latestState) return
 
       const decision = evaluateInlineCompletionCandidate(latestContext, suggestion, {
@@ -414,6 +442,8 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     }
 
     private clearTimers(): void {
+      for (const timer of this.retryTimers.values()) window.clearTimeout(timer)
+      this.retryTimers.clear()
       if (this.shortTimer) window.clearTimeout(this.shortTimer)
       if (this.longTimer) window.clearTimeout(this.longTimer)
       this.shortTimer = null
@@ -443,8 +473,12 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     }
 
     destroy(): void {
+      this.destroyed = true
+      this.view.contentDOM.removeEventListener('blur', this.onBlur)
+      this.view.contentDOM.removeEventListener('focus', this.onFocus)
       completionCancellations.delete(this.view)
       this.sequence += 1
+      for (const controller of this.requestControllers.values()) controller.abort()
       this.clearTimers()
       this.pendingAfterInFlight.clear()
     }

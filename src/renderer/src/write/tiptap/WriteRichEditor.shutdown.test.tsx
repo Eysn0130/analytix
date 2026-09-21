@@ -26,13 +26,13 @@ beforeEach(async()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
   useWriteWorkspaceStore.getState().resetWorkspace();handler=createWriteShutdownHandler()
   container=document.createElement('div');document.body.append(container);root=createRoot(container)
-  await act(async()=>root.render(createElement(WriteRichEditor,{value:'最后一键',completionEnabled:false,fallback:null,
+  await act(async()=>root.render(createElement(WriteRichEditor,{value:'最后一键',workspaceRoot:'/workspace',filePath:'/workspace/plan.md',completionEnabled:false,fallback:null,
     onChange:useWriteWorkspaceStore.getState().setFileContent,onSelectionChange:()=>undefined,onSaveShortcut:()=>undefined})))
   expect(capture.editor).toBeDefined()
 })
 afterEach(async()=>{
   await act(async()=>{await handler({requestId,phase:'cancel'});root.unmount()})
-  container.remove();useWriteWorkspaceStore.getState().resetWorkspace();vi.restoreAllMocks();vi.unstubAllGlobals()
+  container.remove();useWriteWorkspaceStore.getState().resetWorkspace();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()
 })
 test('freezes actual ProseMirror editing and late commands, then restores the rich editor',async()=>{
   const editor=capture.editor!
@@ -54,19 +54,19 @@ test('active rich composition preserves the editable document and cancels prepar
 test('binds rich completion to the document owner and rejects a late thread round trip',async()=>{
   const options = capture.editor!.extensionManager.extensions.find(extension => extension.name === 'writeRichInlineCompletion')!.options as WriteRichInlineCompletionOptions
   const request = vi.fn().mockResolvedValue({ ok: true, completion: 'next' })
-  Object.defineProperty(window, 'analytix', { configurable: true, value: { write: { requestWriteInlineCompletion: request } } })
-  const context = { filePath: '' } as InlineCompletionRequestContext
-  expect(await options.requestCompletion(context, 'short')).toMatchObject({ text: 'next' })
+  Object.defineProperty(window, 'analytix', { configurable: true, value: { write: { requestWriteInlineCompletion: request, cancelWriteInlineCompletion: vi.fn(async () => undefined) } } })
+  const context = { filePath: '/workspace/plan.md' } as InlineCompletionRequestContext
+  expect(await options.requestCompletion(context, 'short', new AbortController().signal)).toMatchObject({ text: 'next' })
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thread-a' }))
   useChatStore.setState({ activeThreadId: 'thread-b' })
-  expect(await options.requestCompletion(context, 'short')).toBeNull()
+  expect(await options.requestCompletion(context, 'short', new AbortController().signal)).toBeNull()
   useChatStore.setState({ activeThreadId: null })
-  expect(await options.requestCompletion(context, 'short')).toBeNull()
+  expect(await options.requestCompletion(context, 'short', new AbortController().signal)).toBeNull()
   expect(request).toHaveBeenCalledTimes(1)
   useChatStore.setState({ activeThreadId: 'thread-a' })
   let resolve!: (value: unknown) => void
   request.mockImplementationOnce(() => new Promise(done => { resolve = done }))
-  const pending = options.requestCompletion(context, 'short')
+  const pending = options.requestCompletion(context, 'short', new AbortController().signal)
   useChatStore.setState({ activeThreadId: 'thread-b' })
   useChatStore.setState({ activeThreadId: 'thread-a' })
   resolve({ ok: true, completion: 'late' })
@@ -84,4 +84,35 @@ test('revokes a displayed rich ghost synchronously so Tab cannot accept it in an
   expect(container.querySelector('.write-rich-ghost-text')).toBeNull()
   await act(async()=>{editor.commands.keyboardShortcut('Tab')})
   expect(editor.getText()).not.toContain('stale completion')
+})
+
+
+test.each(['thread', 'file', 'workspace', 'model', 'enabled', 'long-enabled', 'read-only', 'shutdown'])('cancels the rich transport on %s changes without accepting late output', async change => {
+  vi.useFakeTimers()
+  let resolve!: (value: unknown) => void
+  const request = vi.fn((_input: { requestId: string }) => new Promise(done => { resolve = done }))
+  const cancel = vi.fn(async () => undefined)
+  Object.defineProperty(window, 'analytix', { configurable: true, value: { write: { requestWriteInlineCompletion: request, cancelWriteInlineCompletion: cancel } } })
+  const props = { value: 'This is an existing paragraph ', workspaceRoot: '/workspace', filePath: '/workspace/plan.md',
+    completionEnabled: true, completionModel: 'synthetic', completionDebounceMs: 1, completionMinAcceptScore: 0,
+    completionLongEnabled: true, completionLongDebounceMs: 10000, completionLongMinAcceptScore: 0, fallback: null,
+    onChange: useWriteWorkspaceStore.getState().setFileContent, onSelectionChange: () => undefined, onSaveShortcut: () => undefined }
+  await act(async () => root.render(createElement(WriteRichEditor, props)))
+  await act(async () => { capture.editor!.commands.setTextSelection(capture.editor!.state.doc.content.size - 1) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+  expect(request).toHaveBeenCalledOnce()
+  await act(async () => {
+    if (change === 'thread') useChatStore.setState({ activeThreadId: 'thread-b' })
+    else if (change === 'shutdown') await handler({ requestId, phase: 'prepare' })
+    else root.render(createElement(WriteRichEditor, { ...props,
+      ...(change === 'file' ? { filePath: '/workspace/other.md' } : {}),
+      ...(change === 'workspace' ? { workspaceRoot: '/other' } : {}),
+      ...(change === 'model' ? { completionModel: 'other' } : {}),
+      ...(change === 'enabled' ? { completionEnabled: false } : {}),
+      ...(change === 'long-enabled' ? { completionLongEnabled: false } : {}),
+      ...(change === 'read-only' ? { readOnly: true } : {}) }))
+  })
+  expect(cancel).toHaveBeenCalledExactlyOnceWith({ requestId: request.mock.calls[0][0].requestId })
+  await act(async () => { resolve({ ok: true, completion: 'stale completion' }); await Promise.resolve() })
+  expect(container.querySelector('.write-rich-ghost-text')).toBeNull()
 })

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
-	attachmentpipelineapp "analytix.local/runtime-go/internal/app/attachmentpipeline"
 	caseentityapp "analytix.local/runtime-go/internal/app/caseentity"
 	apploop "analytix.local/runtime-go/internal/app/loop"
 	appmodel "analytix.local/runtime-go/internal/app/model"
@@ -155,94 +154,7 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 		}
 	}
 	loopEvents := apploop.NewRuntimeEventRecorderWithTrace(h.store, runtimeThreadTraceEnabled())
-	executionInput := runtimeProviderExecutionInputV1(input)
-	_, requireIntentMatch := h.providerExecution.(ProviderExecutionIntentResolver)
-	resolveProviderIntent := func(intentCtx context.Context) (apploop.RuntimeProviderIntent, error) {
-		if !requireIntentMatch {
-			config := input.ProviderConfig
-			config.APIKey = ""
-			return apploop.RuntimeProviderIntent{
-				ProviderConfig: config, ProviderID: input.ProviderID, Model: input.Model, Effort: input.Effort,
-			}, nil
-		}
-		resolved, err := h.resolveRuntimeTurnIntent(intentCtx, executionInput)
-		if err != nil {
-			return apploop.RuntimeProviderIntent{}, err
-		}
-		return apploop.RuntimeProviderIntent{
-			ProviderConfig: resolved.Config, ProviderID: resolved.ProviderID, Model: resolved.Model, Effort: resolved.Effort,
-		}, nil
-	}
-	var currentProviderIntentResolver func(context.Context) (apploop.RuntimeProviderIntent, error)
-	if requireIntentMatch {
-		currentProviderIntentResolver = resolveProviderIntent
-	}
-	prepareProviderAttempt := func(
-		attemptCtx context.Context,
-		attempt int,
-		request domainmodel.Request,
-		promptRoute string,
-		toolManifestHash string,
-		providerCallSequence uint64,
-	) (domainmodel.Request, apploop.ProviderAttemptSettlement, error) {
-		if err := h.requireRuntimeTurnExecutionCurrentness(); err != nil {
-			return domainmodel.Request{}, nil, err
-		}
-		resolved, err := h.resolveRuntimeTurnExecution(attemptCtx, executionInput)
-		if err != nil {
-			return domainmodel.Request{}, nil, err
-		}
-		if strings.TrimSpace(resolved.Config.APIKey) == "" ||
-			(requireIntentMatch && !runtimeProviderExecutionMatchesIntentV1(resolved.Config, request)) {
-			resolved.Config.APIKey = ""
-			return domainmodel.Request{}, nil, errors.New("provider execution authority changed before effect")
-		}
-		request = bindRuntimeProviderExecutionV1(request, resolved)
-		request.PrivateProviderProxyAuthority = requireIntentMatch
-		authority := resolved.Authority
-		beforeCurrentness := request.PrivateProviderCurrentnessBeforeSend
-		request.PrivateProviderCurrentnessBeforeSend = func(physicalAttempt int) error {
-			if beforeCurrentness != nil {
-				if err := beforeCurrentness(physicalAttempt); err != nil {
-					return err
-				}
-			}
-			return h.validateRuntimeTurnExecutionCurrent(attemptCtx, authority)
-		}
-		resolved.Config.APIKey = ""
-		var attachmentSettle apploop.ProviderAttemptSettlement
-		if !input.Attachments.Empty() {
-			attachmentPipeline := h.runtimeAttachmentPipeline()
-			prepared, prepareErr := attachmentPipeline.PrepareProviderAttempt(attemptCtx, attachmentpipelineapp.ProviderAttemptInput{
-				SecurityContext: input.SecurityContext, Plan: input.Attachments, Request: request,
-				Primary: resolved.Config, PrimaryProvider: resolved.ProviderID, PrimaryModel: resolved.Model,
-				PromptRoute: promptRoute, ToolManifestHash: toolManifestHash,
-				Sequence: providerCallSequence, Attempt: attempt,
-			})
-			if prepareErr != nil {
-				return domainmodel.Request{}, nil, prepareErr
-			}
-			token := prepared.Token
-			request = prepared.Request
-			attachmentSettle = func(settleCtx context.Context, status, reason string) error {
-				return attachmentPipeline.SettleProviderAttempt(settleCtx, token, status, reason)
-			}
-		}
-		settle := func(settleCtx context.Context, status, reason string) error {
-			currentErr := h.validateRuntimeTurnExecutionCurrent(settleCtx, authority)
-			if currentErr != nil {
-				if attachmentSettle != nil {
-					return errors.Join(currentErr, attachmentSettle(settleCtx, "failed", "provider_authority_changed"))
-				}
-				return currentErr
-			}
-			if attachmentSettle != nil {
-				return attachmentSettle(settleCtx, status, reason)
-			}
-			return nil
-		}
-		return request, settle, nil
-	}
+	providerAttempts := h.runtimeProviderAttempts(input)
 	caseFundPolicy, boundary := h.resolveRuntimeCaseFundAnalysisPolicy(&input)
 	additionalCaseDataEffect := input.Attachments.UsesCaseDataAuthority() || len(input.initialProviderAliases) != 0
 	if boundary != "" {
@@ -291,7 +203,7 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 		}(),
 	}, apploop.RuntimeRunnerDependencies{
 		Provider: h.provider, PendingWork: h.pendingWork, Events: loopEvents,
-		ResolveProviderIntent: currentProviderIntentResolver,
+		ResolveProviderIntent: providerAttempts.CurrentIntent,
 		PrepareProviderStep: func(stepCtx context.Context, step apploop.RuntimeProviderStep) (apploop.RuntimeProviderStep, error) {
 			if !step.UsesFundsDataAuthority() {
 				return step, nil
@@ -368,7 +280,7 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 				},
 			)
 		},
-		PrepareProviderAttempt: prepareProviderAttempt,
+		PrepareProviderAttempt: providerAttempts.Prepare,
 		MaterializeCreatePlan: func(materializeCtx context.Context, currentMessages []domainmodel.Message, planText string, privateProtocolObserved bool) (apploop.RuntimeMaterializedPlan, error) {
 			output, isError, nextMessages, continuationRef, err := h.materializeRuntimeCreatePlanText(
 				materializeCtx,

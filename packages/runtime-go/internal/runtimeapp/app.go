@@ -1709,6 +1709,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if !ok {
 		return nil, errors.Join(errors.New("generated artifact resolver is unavailable"), nativeAuthority.Close())
 	}
+	var inlineCompletion httpapi.InlineCompletionService
+	if !objectEditingHandler.UnsupportedPlatform {
+		inlineCompletion, err = server.NewInlineCompletionService(handler, providerTelemetry)
+		if err != nil {
+			return nil, errors.Join(err, nativeAuthority.Close())
+		}
+	}
 	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
@@ -1743,6 +1750,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
 			ObjectEditing:          objectEditingHTTP,
 			WorkspaceRead:          httpapi.WorkspaceReadHandler{Service: workspaceRead},
+			InlineCompletion:       httpapi.InlineCompletionHandler{Service: inlineCompletion},
 			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},
 			OfficePrivateAdmission: httpapi.OfficePrivateAdmissionHandler{Assets: officePrivate},
 			FundsCSVAdmission:      fundsCSVAdmission,

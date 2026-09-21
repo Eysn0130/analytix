@@ -1,3 +1,4 @@
+import { requestDocumentInlineCompletion } from '../inline-completion/request'
 import { isWriteShutdownFrozen, registerWriteShutdownInput } from '../write-shutdown'
 import {
   useEffect,
@@ -342,6 +343,10 @@ export function WriteRichEditor({
     }
   }), [])
 
+  useEffect(() => {
+    if (editorRef.current && !editorRef.current.isDestroyed) cancelWriteRichInlineCompletion(editorRef.current.view)
+  }, [completionEnabled, completionLongEnabled, readOnly, workspaceRoot, filePath, completionModel])
+
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
   imageDirectoryRef.current = imageDirectory ?? ''
@@ -443,22 +448,22 @@ export function WriteRichEditor({
         isEnabled: () => completionEnabledRef.current && Boolean(completionOwnerRef.current.threadId) &&
           completionOwnerRef.current.threadId === useChatStore.getState().activeThreadId && !(readOnlyRef.current || isWriteShutdownFrozen()),
         getFilePath: () => filePathRef.current,
-        requestCompletion: async (context, mode) => {
+        requestCompletion: async (context, mode, signal) => {
           const owner = completionOwnerRef.current
           const threadId = owner.threadId
           const epoch = completionThreadEpochRef.current
           if (!threadId || threadId !== useChatStore.getState().activeThreadId || context.filePath !== filePathRef.current) return null
           if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') return null
-          const result = await window.analytix.write.requestWriteInlineCompletion(
+          const result = await requestDocumentInlineCompletion(
             buildInlineCompletionPayload(context, {
               threadId,
               model: completionModelRef.current,
               workspaceRoot: workspaceRootRef.current,
               mode,
               recentEdits: recentEditsRef.current
-            })
+            }), signal
           )
-          if (!result.ok || threadId !== useChatStore.getState().activeThreadId ||
+          if (signal.aborted || !result.ok || threadId !== useChatStore.getState().activeThreadId ||
             epoch !== completionThreadEpochRef.current || owner !== completionOwnerRef.current) return null
           if (result.action?.kind === 'edit') {
             return { text: result.action.replacement, action: result.action, mode }
@@ -519,7 +524,10 @@ export function WriteRichEditor({
     editorRef.current = editor
     const unregisterShutdown = registerWriteShutdownInput({
       composing: () => editor.view.composing,
-      freeze: frozen => editor.setEditable(!readOnlyRef.current && !frozen, false)
+      freeze: frozen => {
+        if (frozen) cancelWriteRichInlineCompletion(editor.view)
+        editor.setEditable(!readOnlyRef.current && !frozen, false)
+      }
     })
     lastEmittedValueRef.current = value
     onSelectionChangeRef.current(selectionStateFromEditor(editor))

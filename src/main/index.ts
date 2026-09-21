@@ -1728,13 +1728,16 @@ async function runtimeRequest(
 async function localDisplayRuntimeRequest(
   settings: AppSettingsV1,
   path: string,
-  body: string
+  body: string,
+  signal?: AbortSignal
 ): Promise<{ ok: boolean; status: number; body: string }> {
   if (!isLocalDisplayRuntimePathV1(path)) {
     return { ok: false, status: 400, body: '' }
   }
   try {
+    if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const ensuredSettings = await ensureRuntime(settings)
+    if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const requestSettings = ensuredSettings ?? settings
     const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()
     if (!runtimeAuthority) return { ok: false, status: 503, body: '' }
@@ -1747,11 +1750,14 @@ async function localDisplayRuntimeRequest(
       method: 'POST',
       headers,
       body,
-      signal: AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
-        path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
+      signal: AbortSignal.any([
+        ...(signal ? [signal] : []),
+        AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
+          path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
+      ])
     })
     const responseBody = await response.text()
-    if (!isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
+    if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
       return { ok: false, status: 409, body: '' }
     }
     return {
@@ -2395,9 +2401,9 @@ app.whenReady().then(async () => {
       }),
       authHeaders: runtimeAuthHeaders
     }),
-    localDisplayRequest: async (path, body) => {
+    localDisplayRequest: async (path, body, signal) => {
       const settings = await store.load()
-      return localDisplayRuntimeRequest(settings, path, body)
+      return localDisplayRuntimeRequest(settings, path, body, signal)
     },
     restartRuntime: async () => {
       const settings = await store.load()

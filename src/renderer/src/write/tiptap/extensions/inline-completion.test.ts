@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { getSchema } from '@tiptap/core'
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Editor, getSchema } from '@tiptap/core'
+import type { InlineCompletionSuggestion } from '../../inline-completion/types'
 import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { buildWriteRichExtensions, parseWriteMarkdown } from '../markdown-manager'
 import { buildWriteRichMarkdownProjection } from '../markdown-projection'
 import {
+  WriteRichInlineCompletion,
+  cancelWriteRichInlineCompletion,
   buildRichCompletionContext,
   insertCompletionText,
   writeRichInlineCompletionTestInternals
@@ -123,4 +127,91 @@ describe('mapEditActionToDoc', () => {
     }
     expect(mapEditActionToDoc(state, action)).toBeNull()
   })
+})
+
+
+describe('rich completion cancellation', () => {
+  let editor: Editor
+  let element: HTMLDivElement
+  let resolve: (value: InlineCompletionSuggestion | null) => void
+  let signal: AbortSignal
+  let longEnabled = false
+  let request: ReturnType<typeof vi.fn<(context: unknown, mode: unknown, signal: AbortSignal) => Promise<InlineCompletionSuggestion | null>>>
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    longEnabled = false
+    element = document.createElement('div')
+    document.body.append(element)
+    request = vi.fn((_context, _mode, ownedSignal: AbortSignal) => {
+      signal = ownedSignal
+      return new Promise<InlineCompletionSuggestion | null>(done => { resolve = done })
+    })
+    editor = new Editor({ element, extensions: [...buildWriteRichExtensions(), WriteRichInlineCompletion.configure({
+      getDebounceMs: () => 1, isEnabled: () => true, isLongEnabled: () => longEnabled, getLongDebounceMs: () => 2, getFilePath: () => '/workspace/plan.md', requestCompletion: request
+    })], content: '<p>This is an existing paragraph </p>' })
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(request).toHaveBeenCalledOnce()
+    expect(signal).toBeInstanceOf(AbortSignal)
+  })
+  afterEach(() => {
+    editor.destroy()
+    element.remove()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+  it.each(['document', 'selection', 'blur', 'focus', 'cancel', 'destroy'])('aborts on %s and drops a late successful response', async change => {
+    const originalSignal = signal
+    if (change === 'document') editor.commands.insertContent('more ')
+    if (change === 'selection') editor.commands.setTextSelection(3)
+    if (change === 'blur') editor.view.dom.dispatchEvent(new FocusEvent('blur'))
+    if (change === 'focus') editor.view.dom.dispatchEvent(new FocusEvent('focus'))
+    if (change === 'cancel') cancelWriteRichInlineCompletion(editor.view)
+    if (change === 'destroy') editor.destroy()
+    expect(originalSignal.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(request).toHaveBeenCalledOnce()
+    resolve({ text: 'a focused continuation', mode: 'short' })
+    await Promise.resolve(); await Promise.resolve()
+    expect(element.querySelector('.write-rich-ghost-text')).toBeNull()
+  })
+  it('releases the in-flight mode only after the cancelled promise settles', async () => {
+    const originalSignal = signal
+    editor.commands.insertContent('more ')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(originalSignal.aborted).toBe(true)
+    expect(request).toHaveBeenCalledOnce()
+    resolve(null)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(signal).not.toBe(originalSignal)
+    expect(signal.aborted).toBe(false)
+    resolve(null)
+    await Promise.resolve()
+  })
+  it('serializes short and long requests until the shared Core owner settles', async () => {
+    editor.destroy()
+    resolve(null)
+    await Promise.resolve(); await Promise.resolve()
+    request.mockClear()
+    editor = new Editor({ element, extensions: [...buildWriteRichExtensions(), WriteRichInlineCompletion.configure({
+      getDebounceMs: () => 1, isEnabled: () => true, isLongEnabled: () => true, getLongDebounceMs: () => 2,
+      getFilePath: () => '/workspace/plan.md', requestCompletion: request
+    })], content: '<p>This is an existing paragraph </p>' })
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(request).toHaveBeenCalledOnce()
+    expect(request.mock.calls[0][1]).toBe('short')
+    const shortSignal = signal
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(request).toHaveBeenCalledOnce()
+    expect(shortSignal.aborted).toBe(false)
+    resolve(null)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[1][1]).toBe('long')
+    resolve(null)
+    await Promise.resolve()
+  })
+
 })

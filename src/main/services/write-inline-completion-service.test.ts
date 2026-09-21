@@ -62,6 +62,9 @@ function createSettings(patch: Partial<AppSettingsV1['write']['inlineCompletion'
 
 function createRequest(): WriteInlineCompletionRequest {
   return {
+    threadId: 'thread-main',
+    requestId: '7e2e6074-90d4-4e8b-a5c1-1e3d79d737f9',
+    document: { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), baseRevision: 'c'.repeat(64) },
     prefix: '# Draft\n\nThis is',
     suffix: ' a test.',
     currentFilePath: '/tmp/workspace/draft.md',
@@ -110,25 +113,64 @@ afterEach(() => {
   clearWriteInlineCompletionDebugEntries()
 })
 
+function auxiliaryReply(body: string, text: string) {
+  const request = JSON.parse(body)
+  return { ok: true, status: 200, body: JSON.stringify({ ok: true, result: {
+    threadId: request.threadId, requestId: request.requestId,
+    objectId: request.document.objectId ?? 'b'.repeat(64),
+    baseRevision: request.document.baseRevision ?? 'c'.repeat(64), text
+  } }) }
+}
+
 describe('requestWriteInlineCompletion', () => {
-  it.each(['create', 'poll'])('rejects ownership lost during %s while releasing only its own temporary thread', async (phase) => {
+  it('rejects a late response after owner loss without deleting the primary thread', async () => {
     let current = true
-    const runtime = vi.fn(async (path: string, method?: string) => {
-      if (path === '/v1/threads' && method === 'POST') {
-        if (phase === 'create') current = false
-        return { ok: true, status: 201, body: JSON.stringify({ id: 'thr_owned' }) }
-      }
-      if (method === 'POST') return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_owned' }) }
-      if (method === 'DELETE') return { ok: true, status: 204, body: '' }
+    const runtime = vi.fn(async (_path: string, body: string) => {
       current = false
-      return { ok: true, status: 200, body: JSON.stringify({ turns: [{ id: 'turn_owned', status: 'completed',
-        items: [{ kind: 'assistant_text', text: 'LATE_RESULT' }] }] }) }
+      return auxiliaryReply(body, 'LATE_RESULT')
     })
     const result = await requestWriteInlineCompletion(createSettings({ retrievalEnabled: false }), createRequest(), runtime, { isCurrent: () => current })
     expect(result.ok).toBe(false)
     expect(JSON.stringify(result)).not.toContain('LATE_RESULT')
-    expect(runtime).toHaveBeenLastCalledWith('/v1/threads/thr_owned', 'DELETE')
-    if (phase === 'create') expect(runtime).toHaveBeenCalledTimes(2)
+    expect(runtime).toHaveBeenCalledTimes(1)
+    expect(runtime.mock.calls[0][0]).toBe('/v1/local-display/inline-completion')
+  })
+
+  it.each(['threadId', 'requestId', 'objectId', 'baseRevision'])('rejects a reply for another %s', async field => {
+    const runtime = vi.fn(async (_path: string, body: string) => {
+      const reply = auxiliaryReply(body, 'FOREIGN_RESULT')
+      const parsed = JSON.parse(reply.body)
+      parsed.result[field] = field === 'threadId' ? 'other-thread' : field === 'requestId' ? '990c39a5-58bb-4d5a-ac3b-a4f1dce935a6' : 'd'.repeat(64)
+      return { ...reply, body: JSON.stringify(parsed) }
+    })
+    const result = await requestWriteInlineCompletion(createSettings({ retrievalEnabled: false }), createRequest(), runtime)
+    expect(result.ok).toBe(false)
+    expect(JSON.stringify(result)).not.toContain('FOREIGN_RESULT')
+  })
+
+  it('propagates cancellation to the in-flight transport and suppresses a late result', async () => {
+    const controller = new AbortController()
+    let transportSignal: AbortSignal | undefined
+    let release!: () => void
+    const runtime = vi.fn((_path: string, body: string, signal?: AbortSignal) => {
+      transportSignal = signal
+      return new Promise<ReturnType<typeof auxiliaryReply>>(resolve => { release = () => resolve(auxiliaryReply(body, 'LATE_RESULT')) })
+    })
+    const pending = requestWriteInlineCompletion(createSettings({ retrievalEnabled: false }), createRequest(), runtime, { signal: controller.signal })
+    await vi.waitFor(() => expect(runtime).toHaveBeenCalledOnce())
+    controller.abort()
+    expect(transportSignal?.aborted).toBe(true)
+    release()
+    expect((await pending).ok).toBe(false)
+    expect(runtime).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects missing object binding and oversized UTF-8 input before transport', async () => {
+    for (const request of [ { ...createRequest(), document: undefined }, { ...createRequest(), prefix: '中'.repeat(65536) } ]) {
+      const runtime = vi.fn()
+      expect((await requestWriteInlineCompletion(createSettings({ retrievalEnabled: false }), request, runtime)).ok).toBe(false)
+      expect(runtime).not.toHaveBeenCalled()
+    }
   })
 
   it('does not request the API when inline completion is disabled', async () => {
@@ -174,30 +216,9 @@ describe('requestWriteInlineCompletion', () => {
   it.each([true, false])('sends key-free runtime intent with retrievalEnabled=%s and never performs direct provider fetch', async (retrievalEnabled) => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const runtimeRequest = vi.fn(async (path: string, method?: string, body?: string) => {
-      if (path === '/v1/threads' && method === 'POST') {
-        return { ok: true, status: 201, body: JSON.stringify({ id: 'thr_inline' }) }
-      }
-      if (path === '/v1/threads/thr_inline/turns' && method === 'POST') {
-        return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_inline' }) }
-      }
-      if (path === '/v1/threads/thr_inline' && method === 'GET') {
-        return {
-          ok: true,
-          status: 200,
-          body: JSON.stringify({
-            turns: [{
-              id: 'turn_inline',
-              status: 'completed',
-              items: [{ kind: 'assistant_text', text: '<<<SHORT\n continuation\n>>>' }]
-            }]
-          })
-        }
-      }
-      if (path === '/v1/threads/thr_inline' && method === 'DELETE') {
-        return { ok: true, status: 204, body: '' }
-      }
-      throw new Error(`unexpected runtime request ${method ?? 'GET'} ${path} ${body ?? ''}`)
+    const runtimeRequest = vi.fn(async (path: string, body: string) => {
+      expect(path).toBe('/v1/local-display/inline-completion')
+      return auxiliaryReply(body, '<<<SHORT\n continuation\n>>>')
     })
 
     const settings = createSettings({ retrievalEnabled })
@@ -233,12 +254,12 @@ describe('requestWriteInlineCompletion', () => {
       expect(open).not.toHaveBeenCalled()
       expect(serializedCalls).not.toContain('SYNTHETIC_CONTEXT_CANARY')
     }
-    expect(runtimeRequest).toHaveBeenCalledWith(
-      '/v1/threads/thr_inline/turns',
-      'POST',
-      expect.stringContaining('"maxModelSteps":1')
-    )
-    expect(runtimeRequest).toHaveBeenCalledWith('/v1/threads/thr_inline', 'DELETE')
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    const sent = JSON.parse(runtimeRequest.mock.calls[0][1])
+    expect(sent.threadId).toBe(request.threadId)
+    expect(sent.document).toEqual(request.document)
+    expect(Object.keys(sent).sort()).toEqual(['document', 'model', 'prompt', 'requestId', 'threadId'])
+
   })
 
   it('builds the unified action prompt without retrieval snippets when none are supplied', () => {

@@ -171,10 +171,10 @@ func testWorkspaceReadCoreProjection(t *testing.T, protectedSource bool) {
 	if len(snapshot.Files) != 1 || string(snapshot.Files[0].Content) != source {
 		t.Fatal("real local read did not preserve the allowed file or excluded the wrong source")
 	}
-	// Match the current Main completion route: a separate primary thread starts
-	// a read-only, one-step turn. Pass the exact raw local file text; the
-	// test never calls a projector or masks the prompt before Core receives it.
-	// Retain this temporary thread to exercise recovery before DELETE cleanup.
+	// Exercise normal-turn projection and durable recovery independently of the
+	// auxiliary completion route. Pass exact raw local file text; this test never
+	// calls a projector or masks the prompt before Core receives it. Retain this
+	// synthetic thread so recovery can inspect its persisted projection.
 	temporaryID := create("temporary inline completion")
 	started := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads/"+temporaryID+"/turns",
 		bytes.NewReader(caseIngressJSONV1(t, map[string]any{

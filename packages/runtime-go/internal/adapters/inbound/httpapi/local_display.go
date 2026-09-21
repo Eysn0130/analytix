@@ -93,6 +93,7 @@ type LocalDisplayHandlerV1 struct {
 	PackageHost            http.Handler
 	ObjectEditing          http.Handler
 	WorkspaceRead          http.Handler
+	InlineCompletion       http.Handler
 	Service                *localdisplayapp.Service
 	FundsCSVAdmission      *fundscsvadmissionapp.ServiceV1
 	FundsCleaning          *fundscleaningapp.ServiceV1
@@ -153,8 +154,19 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == InlineCompletionPath {
+		if handler.InlineCompletion == nil {
+			InlineCompletionHandler{}.ServeHTTP(w, r)
+			return
+		}
+		handler.InlineCompletion.ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path == WorkspaceReadPath {
-		if handler.WorkspaceRead == nil { writeLocalDisplayUnavailableV1(w); return }
+		if handler.WorkspaceRead == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
 		handler.WorkspaceRead.ServeHTTP(w, r)
 		return
 	}

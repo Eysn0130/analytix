@@ -327,6 +327,44 @@ describe('registerAppIpcHandlers', () => {
     }
   )
 
+  it('cancels only the current owner request and keeps a replacement alive after old cleanup', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    const localDisplayRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) }))
+    registerAppIpcHandlers(registerOptions({ localDisplayRequest, getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never }))
+    const event = { sender, senderFrame: frame }
+    const context = { language: 'markdown', currentLinePrefix: 'draft', currentLineSuffix: '', previousLine: '', previousNonEmptyLine: '', nextLine: '', indentation: '', signals: {
+      list: false, quote: false, heading: false, table: false, atLineEnd: true, endsWithSentencePunctuation: false,
+      previousLineEndsWithSentencePunctuation: false, prefersNewLineCompletion: false, paragraphBreakOpportunity: false
+    } }
+    const payload = { threadId: 'thread-1', requestId: '7e2e6074-90d4-4e8b-a5c1-1e3d79d737f9', document: {path: '/workspace/draft.md'}, prefix: 'draft', suffix: '', workspaceRoot: '/workspace', cursor: {line: 1, column: 5}, context,
+      policy: {name: 'test', instruction: 'Continue', acceptanceCriteria: [], rejectionCriteria: []}, preview: {local: '', documentTail: ''} }
+    const finishes: Array<() => void> = []
+    const signals: AbortSignal[] = []
+    writeReadMock.requestWriteInlineCompletion.mockImplementation((_settings, _request, transport, options) => {
+      expect(transport).toBe(localDisplayRequest)
+      signals.push(options.signal)
+      return new Promise(resolve => finishes.push(() => resolve({ok: true, completion: 'late'})))
+    })
+    const first = handlers.get('write:inline-completion')!(event, payload)
+    await vi.waitFor(() => expect(signals).toHaveLength(1))
+    expect(handlers.get('write:inline-completion:cancel')!({...event, senderFrame: {}}, {requestId: payload.requestId})).toEqual({canceled: false})
+    expect(handlers.get('write:inline-completion:cancel')!(event, {requestId: '990c39a5-58bb-4d5a-ac3b-a4f1dce935a6'})).toEqual({canceled: false})
+    expect(signals[0].aborted).toBe(false)
+    const secondId = '990c39a5-58bb-4d5a-ac3b-a4f1dce935a6'
+    const second = handlers.get('write:inline-completion')!(event, {...payload, requestId: secondId})
+    await vi.waitFor(() => expect(signals).toHaveLength(2))
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
+    finishes[0]()
+    expect(await first).toMatchObject({ok: false})
+    expect(handlers.get('write:inline-completion:cancel')!(event, {requestId: secondId})).toEqual({canceled: true})
+    expect(signals[1].aborted).toBe(true)
+    finishes[1]()
+    expect(await second).toMatchObject({ok: false})
+    expect(sender.eventNames()).toEqual([])
+  })
+
   it('admits current retrieval but suppresses results after its main frame is replaced', async () => {
     const frame = {}
     const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
@@ -2554,10 +2592,10 @@ describe('registerAppIpcHandlers', () => {
 
   it('keeps the local-display runtime header and generation pin in the main-owned narrow dependency', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/main/index.ts'), 'utf8')
-    expect(source).toContain('localDisplayRequest: async (path, body) =>')
+    expect(source).toContain('localDisplayRequest: async (path, body, signal) =>')
     expect(source).toContain('const requestSettings = ensuredSettings ?? settings')
     expect(source).toContain('const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()')
-    expect(source).toContain('if (!isCurrentFinalPublicationAuthorityPin(runtimeAuthority))')
+    expect(source).toContain('if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority))')
     expect(source).toContain("headers.set('X-Analytix-Local-Display', 'typed-v1')")
   })
 

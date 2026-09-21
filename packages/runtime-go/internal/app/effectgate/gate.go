@@ -150,6 +150,17 @@ func (gate *Gate) AcquireTransitionScopeRead(ctx context.Context, transition Tra
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// A metadata check inside an active effect already owns both read scopes.
+	// Retaining that exact scope avoids waiting behind a writer which itself
+	// must wait for this effect. No new effect-bearing context is returned.
+	if existing, ok := ctx.Value(effectLeaseContextKey{}).(*effectLease); ok && existing != nil &&
+		existing.gate == gate && !existing.released.Load() && existing.keyDigest == scope.keyDigest {
+		if !existing.retain() {
+			return nil, errors.New("metadata effect lease is no longer active")
+		}
+		var once sync.Once
+		return func() { once.Do(existing.releaseReference) }, nil
+	}
 	locks := gate.scopeLocks(scope.keys)
 	acquired := 0
 	for index, lock := range locks {

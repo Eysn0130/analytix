@@ -1,3 +1,4 @@
+import { requestDocumentInlineCompletion } from '../../write/inline-completion/request'
 import { isWriteShutdownFrozen, registerWriteShutdownInput } from '../../write/write-shutdown'
 import { useEffect, useRef, type MutableRefObject, type ReactElement } from 'react'
 import { Annotation, Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state'
@@ -469,6 +470,10 @@ export function WriteMarkdownEditor({
     }
   }), [])
 
+  useEffect(() => {
+    if (viewRef.current) cancelInlineCompletion(viewRef.current)
+  }, [completionEnabled, completionLongEnabled, readOnly, workspaceRoot, filePath, completionModel])
+
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
   imageDirectoryRef.current = imageDirectory ?? ''
@@ -605,22 +610,22 @@ export function WriteMarkdownEditor({
       getFilePath: () => filePathRef.current,
       language: 'markdown',
       getModel: () => completionModelRef.current,
-      requestCompletion: async (context, mode) => {
+      requestCompletion: async (context, mode, signal) => {
         const owner = completionOwnerRef.current
         const threadId = owner.threadId
         const epoch = completionThreadEpochRef.current
         if (!threadId || threadId !== useChatStore.getState().activeThreadId || context.filePath !== filePathRef.current) return null
         if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') return null
-        const result = await window.analytix.write.requestWriteInlineCompletion(
+        const result = await requestDocumentInlineCompletion(
           buildInlineCompletionPayload(context, {
             threadId,
             model: completionModelRef.current,
             workspaceRoot: workspaceRootRef.current,
             mode,
             recentEdits: recentEditsRef.current
-          })
+          }), signal
         )
-        if (!result.ok || threadId !== useChatStore.getState().activeThreadId ||
+        if (signal.aborted || !result.ok || threadId !== useChatStore.getState().activeThreadId ||
           epoch !== completionThreadEpochRef.current || owner !== completionOwnerRef.current) return null
         if (result.action?.kind === 'edit') {
           return {
@@ -805,7 +810,10 @@ export function WriteMarkdownEditor({
     viewRef.current = view
     const unregisterShutdown = registerWriteShutdownInput({
       composing: () => view.composing,
-      freeze: frozen => view.dispatch({ effects: editableCompartment.reconfigure(buildInteractionExtensions(readOnlyRef.current || frozen, appearanceRef.current)) })
+      freeze: frozen => {
+        if (frozen) cancelInlineCompletion(view)
+        view.dispatch({ effects: editableCompartment.reconfigure(buildInteractionExtensions(readOnlyRef.current || frozen, appearanceRef.current)) })
+      }
     })
     lastEmittedValueRef.current = valueRef.current
     const initialSelection = selectionState(view)

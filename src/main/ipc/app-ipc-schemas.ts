@@ -80,6 +80,7 @@ import {
 } from '../../shared/app-settings'
 import { DESKTOP_COMMANDS } from '../../shared/analytix-api'
 import { providerRegistryOAuthBindingSchemaV1 } from '../../../packages/runtime/src/contracts/provider-registry.js'
+import { inlineCompletionDocumentSchema } from '../../../packages/runtime/src/contracts/inline-completion'
 
 const oauthProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/)
 const oauthAccountComponentSchema = z.string().trim().min(1).max(256).refine(
@@ -1411,6 +1412,8 @@ const writeInlineCompletionEditCandidateSchema = z
 export const writeInlineCompletionPayloadSchema = z
   .object({
     threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
+    requestId: z.string().uuid().optional(),
+    document: inlineCompletionDocumentSchema.optional(),
     prefix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     suffix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     mode: z.enum(['short', 'long', 'edit']).optional(),
@@ -1465,6 +1468,8 @@ export const writeInlineCompletionPayloadSchema = z
     model: optionalTrimmedString(128)
   })
   .strict()
+
+export const writeInlineCompletionCancelSchema = z.object({ requestId: z.string().uuid() }).strict()
 
 export const writeInfographicPayloadSchema = z
   .object({

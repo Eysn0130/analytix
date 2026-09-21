@@ -1390,3 +1390,40 @@ func TestStreamProviderWithRetryDoesNotPublishTextFromFailedToolAttempt(t *testi
 		t.Fatalf("failed tool attempt published text: calls=%d output=%#v public=%q err=%v", len(provider.requests), output, public, err)
 	}
 }
+
+func TestProviderStreamByteBudgetRejectsBeforeCallbacksAndReturnedMaterial(t *testing.T) {
+	for _, mode := range []string{"callback", "ignored callback", "result", "reasoning", "tool", "tool identity"} {
+		t.Run(mode, func(t *testing.T) {
+			observed := 0
+			chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: "12345"}
+			if mode == "reasoning" {
+				chunk.Kind = domainmodel.ChunkReasoning
+			}
+			if mode == "tool" {
+				chunk = domainmodel.Chunk{Kind: domainmodel.ChunkToolCall, ToolCall: domainmodel.ToolCall{Name: "abc", Arguments: []byte(`{}`)}}
+			}
+			if mode == "tool identity" {
+				chunk = domainmodel.Chunk{Kind: domainmodel.ChunkToolCallStart, ToolCall: domainmodel.ToolCall{ID: "12345"}}
+			}
+			provider := auxiliaryProviderFunc(func(_ context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+				if mode != "result" {
+					err := request.OnChunk(chunk)
+					if !errors.Is(err, ErrProviderOutputByteBudgetExceeded) {
+						t.Fatalf("oversized chunk accepted: %v", err)
+					}
+					if mode != "ignored callback" {
+						return domainmodel.Result{}, err
+					}
+				}
+				return domainmodel.Result{Chunks: []domainmodel.Chunk{chunk}, StreamCompleted: true}, nil
+			})
+			output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, MaxOutputBytes: 4, MaxAttempts: 1,
+				Request:   domainmodel.Request{Messages: []domainmodel.Message{{Role: "user", Content: "continue"}}},
+				Callbacks: ProviderStreamCallbacks{OnTextDelta: func(string) error { observed++; return nil }},
+			})
+			if !errors.Is(err, ErrProviderOutputByteBudgetExceeded) || observed != 0 || output.Text != "" || len(output.Result.Chunks) != 0 {
+				t.Fatalf("oversized material escaped budget: callbacks=%d err=%v", observed, err)
+			}
+		})
+	}
+}

@@ -317,6 +317,8 @@ const flatApi = {
     ipcRenderer.invoke('write:copy-rich-text', payload),
   requestWriteInlineCompletion: (payload) =>
     ipcRenderer.invoke('write:inline-completion', payload),
+  cancelWriteInlineCompletion: (payload) =>
+    ipcRenderer.invoke('write:inline-completion:cancel', payload),
   retrieveWriteContext: (payload) =>
     ipcRenderer.invoke('write:retrieve-context', payload),
   generateWriteInfographic: (payload) =>
@@ -706,6 +708,7 @@ const api = {
       return () => { if (writeShutdownHandler === handler) writeShutdownHandler = undefined }
     },
     requestWriteInlineCompletion: flatApi.requestWriteInlineCompletion,
+    cancelWriteInlineCompletion: flatApi.cancelWriteInlineCompletion,
     retrieveWriteContext: flatApi.retrieveWriteContext,
     generateWriteInfographic: flatApi.generateWriteInfographic,
     authorizeWritePrototype: flatApi.authorizeWritePrototype,

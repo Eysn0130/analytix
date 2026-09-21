@@ -1343,6 +1343,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
     write: {
       onShutdown: () => () => undefined,
       requestWriteInlineCompletion: async () => ({ ok: false, message: browserPreviewUnavailable('Write inline completion') }),
+      cancelWriteInlineCompletion: async () => ({ canceled: false }),
       retrieveWriteContext: async () => ({ ok: false, message: browserPreviewUnavailable('Write retrieval') }),
       generateWriteInfographic: async () => ({ ok: false, message: browserPreviewUnavailable('Write infographic generation') }),
       authorizeWritePrototype: async () => ({ ok: false, message: browserPreviewUnavailable('Write prototype authorization') }),
