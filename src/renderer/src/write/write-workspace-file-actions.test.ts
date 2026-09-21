@@ -127,8 +127,8 @@ describe('write workspace file actions', () => {
     installDsGui({
       readWorkspaceImage: readImage,
       listWorkspaceDirectory: async () => ({ ok: true, root: '/tmp/write', entries: [] }),
-      renameWorkspaceEntry: async ({ path }) => ({ ok: true, previousPath: path, path: '/tmp/write/renamed' }),
-      deleteWorkspaceEntry: async ({ path }) => ({ ok: true, path })
+      renameWorkspaceEntry: async ({ path }) => ({ ok: true, previousPath: path, path: '/tmp/write/renamed', renamedAt: '2026-09-20T00:00:00.000Z' }),
+      deleteWorkspaceEntry: async ({ path }) => ({ ok: true, path, deletedAt: '2026-09-20T00:00:00.000Z' })
     })
     const { actions, set, get } = createHarness()
     set({ workspaceRoot: '/tmp/write', activeFileKind: 'image', activeFilePath: '/tmp/write/images/old.png' })
