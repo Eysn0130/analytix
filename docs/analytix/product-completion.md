@@ -1,7 +1,7 @@
 # Analytix product completion
 
 Status: Operational. This is the current capability and evidence matrix for the
-user-authorized product delivery, refreshed on 2026-09-20 PDT. It does not declare
+user-authorized product delivery, refreshed on 2026-09-21 PDT. It does not declare
 product acceptance, change licenses, or authorize public release. The accepted
 outcome includes a lawful installed macOS ARM64 application, not only source.
 Historical QA remains valid only for its recorded candidate and environment.
@@ -15,10 +15,13 @@ format adapters cannot replace permission, privacy, Provider or persistence poli
 
 ## Current capability and evidence matrix
 
-The latest local execution starts at `2ef3f9deb22714b7c05583603bf1e394cce1f06e`
+The A–M implementation batch starts at `2ef3f9deb22714b7c05583603bf1e394cce1f06e`
 on the original PR28 branch. Its exact source checkpoint, P0–P5 matrix and fresh
 verification are recorded in the [2026-09-20 A–M execution receipt](qa/pr28-reaudit-execution-2026-09-20.md).
 The [handover index](handovers/README.md) remains the resumption entry.
+The [2026-09-21 dual-executor receipt](qa/pr28-dual-executor-2026-09-21.md) records
+the newer source checkpoint `148d188e4`, integer-boundary fixes, actual SARIF mapping,
+and REVIEW_ONLY handoff. Native/product gaps below remain open; no new remote CI or merge is claimed.
 
 Core-authorized retrieval, primary-thread auxiliary completion, exact subagent
 budgets, skill discovery/revocation fixes, real pivot generation, a synthetic

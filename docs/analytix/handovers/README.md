@@ -9,7 +9,15 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：PR28 A—M 本地源码推进 / 2026-09-20 PDT
+## 当前接续：PR28 双执行器 / 2026-09-21 PDT
+
+最新源码检查点 `148d188e4f7df71e1cf28bc25bfff988365fa1ea` 保留 `2edb7d463` 及之前历史。
+本轮从实际SARIF复现并修复转换前整数范围缺陷；9个Go包995顶层测试通过，生产标签12项通过。
+[双执行器执行记录](../qa/pr28-dual-executor-2026-09-21.md)保存准确tree、差异、失败/通过及拒绝范围。
+下一方为ChatGPT + GitHub REVIEW_ONLY；原Codex保留source writer，最新源码尚未合法同步，
+只交接报告与旧公开SHA的SARIF诊断，不用源码附件绕过外发拒绝。产品全范围和以下剩余事项继续有效。
+
+## 历史接续：PR28 A—M 本地源码推进 / 2026-09-20 PDT
 
 用户采用 `Analytix-PR28-Reaudit-and-Codex-Plan-2026-09-20.zip` 全部 A—M。
 从原分支 clean `2ef3f9deb22714b7c05583603bf1e394cce1f06e` 继续，保留全部后续历史。
