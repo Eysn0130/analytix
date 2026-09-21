@@ -2,7 +2,7 @@
 
 - Status: Operational
 - Applies to: local development, validation, packaging, and startup diagnosis
-- Current as of: 2026-09-12; verify the current worktree before use
+- Development routes updated: 2026-09-20; verify the current worktree before use
 - Source of truth: `package.json`, package scripts, build configuration, and
   `scripts/`
 
@@ -15,6 +15,35 @@ portable source checks, runtime-resource preparation and CI/package status,
 start with [Development baseline](development-baseline.md). The configured
 macOS storage procedures below are host-specific, not prerequisites for every
 public source checkout.
+
+## Development Routes
+
+The primary route is **Codex Desktop on the configured local Mac**, using the
+canonical `/Users/sun/Projects/analytix` workspace. The user's 2026-09-20
+authorization includes source edits, builds, tests, Electron GUI, synthetic
+Office/PDF/image tests, Chinese IME, local private installation and proportionate
+product acceptance on this Mac. Another Mac, VM, cloud host or independent
+execution entry is not a prerequisite. Use the configured cache and isolated
+synthetic profiles/data; this authorization does not open existing personal
+profiles, credentials or real case data to a test process.
+
+The auxiliary route is **ChatGPT + GitHub** for development and review through
+the capabilities actually available and authorized in that environment. Keep
+the same repository, real commit ancestry, PR and evidence ownership across
+both routes. On return to local work, refresh remote refs/receipts and protect
+any newer local or remote candidate before integration. A cloud source test is
+not installed Mac/native Office/IME acceptance; a local result does not prove
+that its candidate has reached GitHub or main.
+
+The earlier task restriction against using the user's Mac has been superseded
+by this explicit authorization. Dated handovers retain their historical facts
+and are not current host prohibitions. Neither route change nor general local
+execution/Git authority clears the earlier `create_tree` safety rejection,
+Chromium `ERR_BLOCKED_BY_ADMINISTRATOR`, or SecurityAgent refusal: each still
+requires its own applicable resolution evidence before a dependent retry.
+Do not switch interfaces, executors, profiles or credentials to bypass them.
+Private installation remains subject to its actual asset/platform/signing
+requirements; this strategy does not authorize tags, releases or publication.
 
 ## Preserve The Worktree
 

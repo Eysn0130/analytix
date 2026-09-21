@@ -1,7 +1,7 @@
 # Analytix product completion
 
 Status: Operational. This is the current capability and evidence matrix for the
-user-authorized 2026-09-15 product delivery instruction. It does not declare
+user-authorized product delivery, refreshed on 2026-09-20 PDT. It does not declare
 product acceptance, change licenses, or authorize public release. The accepted
 outcome includes a lawful installed macOS ARM64 application, not only source.
 Historical QA remains valid only for its recorded candidate and environment.
@@ -14,6 +14,81 @@ The Go runtime remains the sole production agent and authority. Plugins and
 format adapters cannot replace permission, privacy, Provider or persistence policy.
 
 ## Current capability and evidence matrix
+
+Source baseline: `b15a57f7c3a97c238b9361023753e0aed0ab74c5`, followed by the
+focused local changes described below on the original PR28 branch. The
+[current handover](handovers/README.md) records intake and recovery anchors.
+The primary execution route is the authorized local Codex Desktop Mac;
+ChatGPT + GitHub is auxiliary. Native/GUI/install work is no longer blocked by
+the absence of an independent host. Specific safety refusals and resource
+qualification remain separate from this host authorization.
+
+| Requirement / real entry | Existing implementation retained | This batch / minimum next verification / exact limit |
+| --- | --- | --- |
+| Main conversation / `DocumentWorkspacePanel` | Core-owned proposals, real Diff, CAS, receipts and recovery; native quick actions; R07 lifecycle fixes | Removed three unused Write routes below. Full same-thread installed journey remains unverified. |
+| DOCX / `office-worker.js` | Generation and native target selection | `target.setString` remains a fidelity risk, not proof every file is damaged. Reproduce mixed runs, links, fields, table paragraphs, repeated text and cross-run selection with the fixed engine; compare structure and visuals after reopen. Native execution still needs applicable refusal resolution. |
+| XLSX / `officegeneration/workbook.go` | Typed number/formula/range operations already exist; Excelize 2.11.0 | Real pivot schema/handler and native reopen/recalculation are unfinished. Do not redo typed cells or substitute SUMIF text for a pivot. |
+| PPTX / native worker and protocol | Styled generation and single-shape text replacement | Typed style/geometry/chart mutation with stable IDs/base revision and native preservation evidence remains unfinished. |
+| Canvas / AtlasFlow and Core object editing | Existing scene, selection, notes, versioned operations, recovery and same-thread dispatch retained | Do not rebuild Canvas or reapply R07. PNG/JPEG region notes need original-coordinate/versioned anchors, persistence and same-thread references; numeric crop/rotate/mark is insufficient. |
+| Media / `mediaexecution/service.go` | Fail-closed admission before non-generate media | image.edit still requires trusted local source-byte projection, pixel/metadata privacy, masks and Registry/Provider authorization; keep `ErrPrivacyUnavailable`. |
+| Browser / `DevBrowserPanel` | Existing browser capability and lifecycle | Main-thread selection references need navigation/frame/revision identity and text/region anchors; stale/iframe/history cases and Chromium refusal resolution remain. |
+| PDF / file / knowledge | Existing PDF text/page/rect reference, viewport, search/zoom and file surfaces | Preserve these owners; no reproduced rotation bug. Full shared synthetic journey not run. |
+| Skills / installed package host | Installed snapshots, activation and generation binding | Upgrade/revoke/restart/in-flight callback and actual installed-copy discovery/body-loading acceptance remains. No new tool authority follows from reading skill text. |
+| Write / editors and retrieval | Presets, quick actions, retrieval, completion, autosave, conflict review, undo/redo, export snapshots and save barriers retained | Three dead routes removed; cache invalidation races fixed and empty queries avoid scans. Production lifecycle invalidation/bounded retention and runtime inline completion's temporary thread need further work; this batch does not claim the entire migration complete. |
+| Private installation | Existing darwin-arm64 non-publish wrapper and source-bound resource admission | Old `8365b16ce` DMG is historical. Current-candidate installed native/IME/reopen/Provider evidence absent; SecurityAgent refusal not cleared by Mac authorization. |
+| Integration / security | Original real history preserved | Fresh remote at 2026-09-21 02:42 UTC: PR28 open/draft at dde, main ce96, b15 not in main, b15 remote runs zero. dde CodeQL 37 high and two unresolved path review threads are not closed. No exact-candidate/main CI acceptance. |
+
+### Focused local changes and evidence — 2026-09-20 PDT
+
+Retrieval: an invalidation generation prevents a late build from delivering or
+recaching old snippets. An old completion can no longer remove a newer in-flight
+entry for the same key. Scanning/reads check invalidation at asynchronous
+boundaries; empty queries return before directory scanning. This is an in-memory
+cache repair, not proof of production revoke wiring, disk indexing or disclosure.
+The clear function still needs an appropriate production lifecycle owner.
+
+Cleanup was checked against b15 source, dynamic imports and remaining consumers:
+
+| Removed entry / caller evidence | Replacement owner | Retained compatibility and tests |
+| --- | --- | --- |
+| Unmounted `WriteAssistantPanelIsland` → lazy loader → `WriteAssistantPanel`, plus Workbench preload and its union/case | Main conversation and document callback | Shared `write-assistant-panel` CSS still serves `SubagentInspectorPanel`; SDD/i18n retained. Build verifies lazy/import closure. |
+| No production caller for `ensureWriteThreadForWorkspace`, `createWriteThread`, `selectWriteThread`; associated state declarations and exclusive helpers/imports | Existing main-thread navigation | `openWrite`, registry hydrate/read/save/prune/forget, old title identification, archived history and route alias retained. Registry tests now construct legacy records directly instead of using retired creation helpers. |
+| Sole `WriteWorkspaceView` caller always supplies `onSubmitPrompt`; optional direct-rewrite branch unreachable | Required same-conversation callback | Save/snapshot/read-only/selection/pending-Diff checks retained; Markdown/Rich/SDD inline completion, editor undo/review and recent edits retained. New component tests exercise callback, save failure and snapshot drift. |
+
+Fresh local source evidence (all commands source `./scripts/use-analytix-cache.sh`
+in the same shell; Node 22.22.1/npm 10.9.4, configured macOS):
+
+- Retrieval's four new regressions: original production code **4 fail / 4 pass**;
+  fixed code plus inline completion service: **24 pass**, exit 0, via
+  `npm test -- src/main/services/write-retrieval-service.test.ts src/main/services/write-inline-completion-service.test.ts`.
+- Cleanup: `DocumentWorkspacePanel`, registry, navigation, thread and side-action
+  suites **151 pass**; new `WriteWorkspaceView.test.tsx` **10 pass** after fixing
+  its incomplete i18n mock. Initial combined run had one suite initialization
+  failure, not a product assertion failure. No assertion was weakened.
+- `npm run typecheck`: both web and node configurations pass, exit 0.
+- Preservation checks: `Workbench.canvas-send.test.tsx`,
+  `workbench-document-message.test.ts`, `write-shutdown.test.ts`,
+  `write-export-snapshot.test.ts`, `write-workspace-store.test.ts`: **75 pass**,
+  exit 0. This covers existing R07/send, save/recovery, export and IME-barrier
+  contracts, not real IME interaction.
+- `npm run build`: pass, exit 0, including `build:runtime` and Electron
+  main/preload/renderer. `npm run smoke:source`: pass, exit 0. Focused ESLint
+  on retrieval, view, navigation, registry and corresponding new tests: pass.
+- Total across the final successful, non-overlapping focused suites:
+  **13 files / 260 tests passed**. `git diff --check` passes. These source
+  checks do not establish native/GUI/installation acceptance.
+
+No upstream source, prompt, asset or dependency was imported by this batch.
+The cache owner/generation repair and cleanup are independent changes to the
+existing Analytix implementation. Existing pinned upstream research remains
+reference material, not proof of license admission, parity or native fidelity.
+Keep restricted anthropics Office skill material out of the product.
+
+### Historical capability matrix — c7 takeover, 2026-09-15
+
+The following matrix and dated checks describe their original candidates;
+they do not override the refreshed matrix above. In particular typed XLSX and
+Canvas/R07 work must not be restarted from this older gap list.
 
 Baseline: PR 28, `c7e66a7ba427cdd01eef1fe91aacd96ee18328c7`, on
 `codex/workbench-product-delivery-20260914`. At takeover, Development gate passed,

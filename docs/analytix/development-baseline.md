@@ -3,9 +3,19 @@
 Status: Operational. Applies to public-source development and candidate
 packaging. Commands and CI results, not this document, establish readiness.
 
+The primary development and product execution route is Codex Desktop on the
+configured local Mac; ChatGPT + GitHub is the auxiliary route. See
+[Development routes](development-runbook.md#development-routes) for the current
+host authorization, isolated test data and route-specific evidence boundaries.
+An independent Mac or cloud host is not a default prerequisite.
+
 ## Update main, branch, install, verify, commit, PR
 
-Use one public `main`, not a second snapshot checkout. Before editing:
+Use one public `main`, not a second snapshot checkout. The sequence below is
+for new work. When explicitly continuing an existing unmerged PR, first refresh
+its actual head/base and candidate ancestry, preserve newer work, and continue
+that authorized branch; do not switch to old main or rebuild its history.
+Before new work:
 
 ```sh
 git status --short --branch

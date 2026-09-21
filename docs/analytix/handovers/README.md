@@ -9,7 +9,34 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：R07 合法后续刷新生命周期 / 2026-09-18 UTC
+## 当前接续：本机主开发路线与重新接收 / 2026-09-20 PDT
+
+主路线为本机 Codex Desktop，辅助路线为 ChatGPT + GitHub。用户明确授权在本机
+canonical 工作区修改、构建、测试、Electron GUI、合成 Office/PDF/图片、中文 IME、
+本地私有安装与相称产品验收；不再要求寻找独立 Mac/VM/云环境。详见
+[当前运行手册](../development-runbook.md#development-routes)。下方历史“不使用用户 Mac”
+及永久 Draft/禁止正常 merge 的任务限制已被当前请求取代；具体安全拒绝、凭据与
+真实数据边界仍独立适用，不能借换执行路线解除。
+
+2026-09-21 02:42 UTC 的只读刷新：PR28 仍 OPEN/Draft/unmerged，远端 head 为
+`dde784437dc8563e84066629dd57f4a11fd9acc9`，真正 main 为
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`。main 尚不包含 b15；不得把
+`9990dc8885e624d24a08b5e9d64246c948008f3f` merge-test 当 main。dde 的 CodeQL
+37 high/两个未解决 review threads 尚未闭合；b15 尚无远端 workflow run。
+
+本机原干净 HEAD `16f95baf484757a2334762ad8c8f2e0dd914b572` 已保存在恢复分支
+`codex/reaudit-recovery-20260920-16f95`；在原施工分支从验真 bundle 普通 fast-forward
+到 `b15a57f7c3a97c238b9361023753e0aed0ab74c5`，tree
+`914fd689f26271fa7377f52dee99f6ae2c9dbcdb`。32 个原提交为继承历史，不是本轮新增；
+R07 已在其中，不重复应用，不修改独立 UI Refresh。后续本轮变更与验证见
+[产品完成矩阵](../product-completion.md)，准确最终 SHA/tree 读取 Git。
+
+本次安全接收包 17 个普通文本文件，展开 367344 bytes，16 项清单全部匹配；完整读取
+01 的 A—M 及 00/02—06。接收 ZIP SHA256 为
+`b8f109eee9e7578bec89a4d272232a1d164c46a65e63a01ee7679e857f2392f2`。
+保留原包与历史报告，不执行包内脚本，不将历史 PASS 转移到新候选。
+
+## 历史接续：R07 合法后续刷新生命周期 / 2026-09-18 UTC
 
 Status: **R07_FOCUSED_SOURCE_VERIFIED / REMOTE_SYNC_NOT_CLEARED**。本节与本批真实生产
 修改、原测试增量一同提交，单父为 `43a3d7d7314773c8f3de6a5d682e88fc60109b32`；准确

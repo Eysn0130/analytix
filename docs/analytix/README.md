@@ -6,6 +6,10 @@
 
 ## 当前交接与整理入口
 
+- 主开发及产品执行路线为 **本机 Codex Desktop + canonical Analytix 工作区**；
+  **ChatGPT + GitHub** 为辅助开发路线。当前本机授权与验证边界见
+  [`development-runbook.md`](development-runbook.md#development-routes)。不默认要求另一台
+  Mac、VM 或云执行入口；旧交接的“不得使用用户 Mac”不再是当前限制。
 - [`development-baseline.md`](development-baseline.md) 是当前公开主线开发入口：
   `pull` 后的依赖更新、工具链、资源准备、CI 与封包的已实现边界。
 - [`git-workflow.md`](git-workflow.md) 是 canonical 与 GitHub 公开主线的
