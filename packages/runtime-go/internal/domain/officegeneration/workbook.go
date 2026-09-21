@@ -28,6 +28,7 @@ const (
 
 type Workbook struct {
 	Sheets []Sheet `json:"sheets"`
+	Pivots []Pivot `json:"pivots,omitempty"`
 }
 type Sheet struct {
 	ID         string    `json:"id"`
@@ -99,7 +100,7 @@ func workbookCheckShape(v any, kind string) error {
 	var required, optional string
 	switch kind {
 	case "workbook":
-		required = "sheets"
+		required, optional = "sheets", "pivots"
 	case "sheet":
 		required, optional = "id name cells", "columns frozenRows charts"
 	case "cell":
@@ -110,6 +111,10 @@ func workbookCheckShape(v any, kind string) error {
 		required, optional = "id type anchor series", "title"
 	case "series":
 		required = "name categories values"
+	case "pivot":
+		required, optional = "id sourceSheetId sourceRange targetSheetId targetRange rows values", "columns filters"
+	case "pivotValue":
+		required = "field aggregate"
 	default:
 		return workbookInvalid
 	}
@@ -142,7 +147,11 @@ func workbookCheckShape(v any, kind string) error {
 			}
 		}
 	}
-	for key, childKind := range map[string]string{"sheets": "sheet", "cells": "cell", "charts": "chart", "series": "series"} {
+	children := map[string]string{"sheets": "sheet", "cells": "cell", "charts": "chart", "series": "series", "pivots": "pivot"}
+	if kind == "pivot" {
+		children["values"] = "pivotValue"
+	}
+	for key, childKind := range children {
 		if child, ok := object[key]; ok {
 			items, ok := child.([]any)
 			if !ok {
@@ -269,6 +278,9 @@ func (w Workbook) Validate() error {
 	}
 	if textBytes > WorkbookMaxInputBytes {
 		return workbookInvalid
+	}
+	if err := workbookValidatePivots(w); err != nil {
+		return err
 	}
 	return workbookValidateFormulas(w, names)
 }

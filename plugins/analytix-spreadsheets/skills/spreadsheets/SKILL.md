@@ -39,7 +39,25 @@ The Core checks formulas through its calculator and requests recalculation on
 opening. This does not prove every external spreadsheet engine will produce an
 identical result or that a persisted cached result was populated. Validate key
 outputs in the native viewer when that evidence is available. Do not claim
-unsupported Excel compatibility, visual fidelity or a working pivot table.
+unsupported Excel compatibility, visual fidelity or verified pivot refresh results.
+
+Optional `workbook.pivots` creates native, refreshable pivot definitions. Each
+pivot has an ID, sourceSheetId/sourceRange, targetSheetId/targetRange, one row
+field in `rows`, up to one `columns` field, up to two `filters` fields, and one
+`values` entry with `field` and `aggregate` (sum/count/average/min/max). Field
+names refer exactly to non-empty unique source headers. Do not apply a custom
+number format that changes a header's displayed text. Use a complete literal
+source rectangle with consistent column types; formula sources are not supported
+because their cached values are not trustworthy. All fields must be distinct.
+Reserve an empty target rectangle for groups and totals and extra rows above it
+for report filters. Sources and targets must not overlap. Limits are 20 pivots
+and 100,000 combined source/target cells, within the workbook's existing limits.
+
+Generated pivot packages request refresh on open; they do not contain a verified
+cached summary. Check independent expected aggregates against actual native
+refresh/reopen before claiming correct displayed results. Creating a pivot in a
+new workbook does not establish support for editing an imported pivot. Do not
+substitute a SUMIF/COUNTIF summary for a requested native pivot.
 
 Keep each workbook within the advertised tool and format limits. For a larger
 source, aggregate through an authorized deterministic analysis tool first and

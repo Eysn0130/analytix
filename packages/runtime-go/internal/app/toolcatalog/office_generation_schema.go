@@ -32,7 +32,14 @@ func GenerationToolParameters(kinds []string) json.RawMessage {
 	chartSeries := object(map[string]any{"name": map[string]any{"type": "string", "maxLength": 16, "description": "Single A1 cell reference on this sheet, pointing to an existing non-empty text label."}, "categories": text(40), "values": text(40)}, "name", "categories", "values")
 	chart := object(map[string]any{"id": id, "type": enum("bar", "line", "pie"), "title": text(255), "anchor": text(16), "series": array(chartSeries, 20)}, "id", "type", "anchor", "series")
 	sheet := object(map[string]any{"id": id, "name": text(31), "cells": array(cell, 10000), "columns": array(map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 255}, 1024), "frozenRows": map[string]any{"type": "integer", "minimum": 0, "maximum": 99999}, "charts": array(chart, 100)}, "id", "name", "cells")
-	workbook := object(map[string]any{"sheets": array(sheet, 20)}, "sheets")
+	pivotValue := object(map[string]any{"field": text(240), "aggregate": enum("sum", "count", "average", "min", "max")}, "field", "aggregate")
+	one := func(item any) map[string]any { value := array(item, 1); value["minItems"] = 1; return value }
+	pivot := object(map[string]any{
+		"id": id, "sourceSheetId": id, "sourceRange": text(40), "targetSheetId": id, "targetRange": text(40),
+		"rows": one(text(240)), "columns": array(text(240), 1), "filters": array(text(240), 2), "values": one(pivotValue),
+	}, "id", "sourceSheetId", "sourceRange", "targetSheetId", "targetRange", "rows", "values")
+	pivot["description"] = "Native refreshable pivot definition. Literal rectangular source with non-empty unique text headers and consistent column types; formulas are unsupported. Empty target must fit groups and totals, with additional space above for filters. No precomputed pivot summary; native refresh must be verified separately."
+	workbook := object(map[string]any{"sheets": array(sheet, 20), "pivots": array(pivot, 20)}, "sheets")
 	presentationSeries := object(map[string]any{"name": text(6000), "values": array(map[string]any{"type": "number"}, 100)}, "name", "values")
 	presentationObject := object(map[string]any{
 		"id": id, "kind": enum("text", "shape", "chart", "image"), "x": number(0, 13.333333), "y": number(0, 7.5), "w": number(0, 13.333333), "h": number(0, 7.5),

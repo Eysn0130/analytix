@@ -167,6 +167,50 @@ func Encode(ctx context.Context, workbook officegeneration.Workbook) (body []byt
 			}
 		}
 	}
+	sheetNames := map[string]string{}
+	for _, sheet := range workbook.Sheets {
+		sheetNames[sheet.ID] = sheet.Name
+	}
+	for _, pivot := range workbook.Pivots {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Excelize resolves pivot fields using formatted header values and can
+		// silently omit an unmatched field. Refuse formats which rename a header.
+		bounds := strings.Split(strings.ReplaceAll(pivot.SourceRange, "$", ""), ":")
+		firstCol, firstRow, firstErr := excelize.CellNameToCoordinates(bounds[0])
+		lastCol, _, lastErr := excelize.CellNameToCoordinates(bounds[len(bounds)-1])
+		if firstErr != nil || lastErr != nil {
+			return nil, workbookEncodingError
+		}
+		for col := firstCol; col <= lastCol; col++ {
+			address, _ := excelize.CoordinatesToCellName(col, firstRow)
+			raw, rawErr := f.GetCellValue(sheetNames[pivot.SourceSheetID], address, excelize.Options{RawCellValue: true})
+			display, displayErr := f.GetCellValue(sheetNames[pivot.SourceSheetID], address)
+			if rawErr != nil || displayErr != nil || raw != display {
+				return nil, workbookEncodingError
+			}
+		}
+		// Pivot ranges use Excelize's literal sheet-name syntax, not formula
+		// quoting. Validation excludes ! names which that parser cannot encode.
+		native := &excelize.PivotTableOptions{
+			Name:            pivot.ID,
+			DataRange:       sheetNames[pivot.SourceSheetID] + "!" + strings.ToUpper(pivot.SourceRange),
+			PivotTableRange: sheetNames[pivot.TargetSheetID] + "!" + strings.ToUpper(pivot.TargetRange),
+			Rows:            workbookPivotFields(pivot.Rows), Columns: workbookPivotFields(pivot.Columns), Filter: workbookPivotFields(pivot.Filters),
+			RowGrandTotals: true, ColGrandTotals: true, ShowRowHeaders: true, ShowColHeaders: true,
+			ClassicLayout: true,
+		}
+		for _, value := range pivot.Values {
+			native.Data = append(native.Data, excelize.PivotTableField{Data: value.Field, Name: value.Aggregate + " " + value.Field, Subtotal: value.Aggregate})
+		}
+		// Excelize writes a real pivot/cache definition with saveData=false and
+		// refreshOnLoad=true. It does not calculate the displayed pivot result or
+		// persist cache records; consumers must refresh in a native spreadsheet.
+		if err = f.AddPivotTable(native); err != nil {
+			return nil, workbookEncodingError
+		}
+	}
 	auto, on, off := "auto", true, false
 	if err = f.SetCalcProps(&excelize.CalcPropsOptions{CalcMode: &auto, FullCalcOnLoad: &on, ForceFullCalc: &on, CalcOnSave: &on, CalcCompleted: &off, Iterate: &off}); err != nil {
 		return nil, workbookEncodingError
@@ -185,6 +229,14 @@ func Encode(ctx context.Context, workbook officegeneration.Workbook) (body []byt
 		return nil, errors.New("workbook output exceeds 16 MiB")
 	}
 	return buffer.Bytes(), nil
+}
+
+func workbookPivotFields(fields []string) []excelize.PivotTableField {
+	result := make([]excelize.PivotTableField, 0, len(fields))
+	for _, field := range fields {
+		result = append(result, excelize.PivotTableField{Data: field, ShowAll: true})
+	}
+	return result
 }
 
 func workbookStyle(style officegeneration.CellStyle) *excelize.Style {
