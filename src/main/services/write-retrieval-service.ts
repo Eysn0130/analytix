@@ -124,7 +124,8 @@ type QueryModel = {
 }
 
 const indexCache = new Map<string, WorkspaceIndex>()
-const inFlightIndexCache = new Map<string, Promise<WorkspaceIndex>>()
+const inFlightIndexCache = new Map<string, Promise<WorkspaceIndex | null>>()
+let indexGeneration = 0
 
 type WorkspaceIndexOptions = {
   includePdf: boolean
@@ -218,7 +219,8 @@ function isIndexedFile(path: string, includePdf: boolean): boolean {
 async function scanWorkspaceFiles(
   workspaceRoot: string,
   deadline: number,
-  includePdf: boolean
+  includePdf: boolean,
+  isCurrent: () => boolean
 ): Promise<string[]> {
   const files: string[] = []
   const stack = [workspaceRoot]
@@ -228,7 +230,7 @@ async function scanWorkspaceFiles(
     stack.length > 0 &&
     scanned < MAX_SCAN_ENTRIES &&
     files.length < MAX_INDEX_FILES &&
-    !deadlineExceeded(deadline)
+    !deadlineExceeded(deadline) && isCurrent()
   ) {
     const current = stack.pop()!
     let entries
@@ -240,7 +242,7 @@ async function scanWorkspaceFiles(
 
     entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
     for (const entry of entries) {
-      if (deadlineExceeded(deadline)) break
+      if (deadlineExceeded(deadline) || !isCurrent()) break
       scanned += 1
       if (scanned >= MAX_SCAN_ENTRIES || files.length >= MAX_INDEX_FILES) break
       if (entry.name === '.DS_Store') continue
@@ -384,18 +386,19 @@ async function chunkPdf(
   return chunks
 }
 
-async function readIndexableFile(path: string, deadline: number): Promise<string> {
-  if (deadlineExceeded(deadline)) return ''
+async function readIndexableFile(path: string, deadline: number, isCurrent: () => boolean): Promise<string> {
+  if (deadlineExceeded(deadline) || !isCurrent()) return ''
   const info = await stat(path)
-  if (!info.isFile() || info.size <= 0) return ''
+  if (!info.isFile() || info.size <= 0 || !isCurrent()) return ''
   const maxBytes = Math.min(info.size, MAX_FILE_BYTES)
   const handle = await openFile(path, 'r')
   try {
+      if (!isCurrent()) return ''
       const buffer = Buffer.alloc(maxBytes)
       const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0)
       const bytes = buffer.subarray(0, bytesRead)
       if (bytes.includes(0)) return ''
-      if (deadlineExceeded(deadline)) return ''
+      if (deadlineExceeded(deadline) || !isCurrent()) return ''
       return bytes.toString('utf8')
   } finally {
     await handle.close()
@@ -408,21 +411,22 @@ function workspaceIndexCacheKey(workspaceRoot: string, includePdf: boolean): str
 
 async function buildWorkspaceIndex(
   workspaceRoot: string,
-  options: WorkspaceIndexOptions
+  options: WorkspaceIndexOptions,
+  isCurrent: () => boolean
 ): Promise<WorkspaceIndex> {
   const deadline = Date.now() + options.buildMs
-  const files = await scanWorkspaceFiles(workspaceRoot, deadline, options.includePdf)
+  const files = await scanWorkspaceFiles(workspaceRoot, deadline, options.includePdf, isCurrent)
   const chunks: IndexedChunk[] = []
   let indexedFiles = 0
 
   for (const path of files) {
-    if (chunks.length >= MAX_INDEX_CHUNKS || deadlineExceeded(deadline)) break
+    if (chunks.length >= MAX_INDEX_CHUNKS || deadlineExceeded(deadline) || !isCurrent()) break
     try {
       const relativePath = normalizeRelativePath(relative(workspaceRoot, path) || basename(path))
       const ext = extname(path).toLowerCase()
       const fileChunks = isWritePdfFileExtension(ext)
         ? await chunkPdf(path, workspaceRoot, relativePath)
-        : chunkMarkdown(path, relativePath, await readIndexableFile(path, deadline))
+        : chunkMarkdown(path, relativePath, await readIndexableFile(path, deadline, isCurrent))
       if (fileChunks.length > 0) indexedFiles += 1
       chunks.push(...fileChunks.slice(0, Math.max(0, MAX_INDEX_CHUNKS - chunks.length)))
     } catch {
@@ -452,20 +456,22 @@ async function buildWorkspaceIndex(
 async function loadWorkspaceIndex(
   workspaceRoot: string,
   options: WorkspaceIndexOptions
-): Promise<WorkspaceIndex> {
+): Promise<WorkspaceIndex | null> {
   const cacheKey = workspaceIndexCacheKey(workspaceRoot, options.includePdf)
   const cached = indexCache.get(cacheKey)
   if (cached && Date.now() - cached.builtAt <= INDEX_CACHE_TTL_MS) return cached
   const existing = inFlightIndexCache.get(cacheKey)
   if (existing) return existing
 
-  const build = buildWorkspaceIndex(workspaceRoot, options)
+  const generation = indexGeneration
+  const build = buildWorkspaceIndex(workspaceRoot, options, () => generation === indexGeneration)
     .then((index) => {
+      if (generation !== indexGeneration) return null
       indexCache.set(cacheKey, index)
       return index
     })
     .finally(() => {
-      inFlightIndexCache.delete(cacheKey)
+      if (inFlightIndexCache.get(cacheKey) === build) inFlightIndexCache.delete(cacheKey)
     })
 
   inFlightIndexCache.set(cacheKey, build)
@@ -655,14 +661,14 @@ export async function retrieveWriteInlineCompletionContext(
   const currentFilePath = resolveComparablePath(request.currentFilePath)
   if (currentFilePath && !isWithinWorkspace(workspaceRoot, currentFilePath)) return null
 
+  const query = buildQueryModel(request)
+  if (query.terms.length === 0) return null
+  const generation = indexGeneration
   const index = await loadWorkspaceIndex(workspaceRoot, {
     includePdf: false,
     buildMs: MAX_INDEX_BUILD_MS
   })
-  if (index.chunks.length === 0) return null
-
-  const query = buildQueryModel(request)
-  if (query.terms.length === 0) return null
+  if (generation !== indexGeneration || !index || index.chunks.length === 0) return null
 
   const snippets = rankChunks(
     index,
@@ -691,14 +697,14 @@ export async function retrieveWriteContext(
   const currentFilePath = resolveComparablePath(request.currentFilePath)
   if (currentFilePath && !isWithinWorkspace(workspaceRoot, currentFilePath)) return null
 
+  const query = buildQueryModelFromText(request.query)
+  if (query.terms.length === 0) return null
+  const generation = indexGeneration
   const index = await loadWorkspaceIndex(workspaceRoot, {
     includePdf: true,
     buildMs: MAX_ASSISTANT_INDEX_BUILD_MS
   })
-  if (index.chunks.length === 0) return null
-
-  const query = buildQueryModelFromText(request.query)
-  if (query.terms.length === 0) return null
+  if (generation !== indexGeneration || !index || index.chunks.length === 0) return null
 
   const snippets = rankChunks(
     index,
@@ -720,6 +726,7 @@ export async function retrieveWriteContext(
 }
 
 export function clearWriteRetrievalCache(): void {
+  indexGeneration += 1
   indexCache.clear()
   inFlightIndexCache.clear()
 }

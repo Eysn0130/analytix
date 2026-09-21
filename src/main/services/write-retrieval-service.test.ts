@@ -1,8 +1,13 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WriteInlineCompletionRequest } from '../../shared/write-inline-completion'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, open: vi.fn(actual.open), readdir: vi.fn(actual.readdir) }
+})
 
 vi.mock('./write-pdf-text-service', () => ({
   readWritePdfText: async (payload: { path: string }) => {
@@ -82,6 +87,106 @@ function createRequest(workspaceRoot: string): WriteInlineCompletionRequest {
 
 afterEach(() => {
   clearWriteRetrievalCache()
+  vi.clearAllMocks()
+  vi.useRealTimers()
+})
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
+async function retrievalWorkspace(marker: string) {
+  const root = await mkdtemp(join(tmpdir(), 'analytix-write-cache-'))
+  await writeFile(join(root, 'notes.md'), `# BM25 关键词检索\n\nBM25 关键词检索 ${marker} provides sufficiently long synthetic reference context.`, 'utf8')
+  return root
+}
+
+async function holdNextIndexRead(empty = false) {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+  const started = deferred(), release = deferred()
+  vi.mocked(open).mockImplementationOnce(async (...args) => {
+    const handle = await actual.open(...args)
+    const read = await handle.readFile()
+    const bytes = empty ? Buffer.alloc(0) : read
+    await handle.close()
+    started.resolve()
+    await release.promise
+    return {
+      read: async (buffer: Buffer, offset: number, length: number) => ({
+        bytesRead: bytes.copy(buffer, offset, 0, length), buffer
+      }),
+      close: async () => undefined
+    } as Awaited<ReturnType<typeof open>>
+  })
+  return { started: started.promise, release: release.resolve }
+}
+
+describe('write retrieval invalidation', () => {
+  it('does not deliver or recache an index completed after clear', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const root = await retrievalWorkspace('OLD_MARKER')
+    const held = await holdNextIndexRead()
+    const old = retrieveWriteInlineCompletionContext(createRequest(root))
+    await held.started
+    clearWriteRetrievalCache()
+    held.release()
+    expect(await old).toBeNull()
+    await writeFile(join(root, 'notes.md'), '# BM25 关键词检索\n\nBM25 关键词检索 NEW_MARKER remains valid after the old request was cleared.', 'utf8')
+    const current = await retrieveWriteInlineCompletionContext(createRequest(root))
+    expect(current?.snippets[0].text).toContain('NEW_MARKER')
+    expect(current?.snippets[0].text).not.toContain('OLD_MARKER')
+    expect(readdir).toHaveBeenCalledTimes(2)
+  })
+
+  it('old completion cannot delete a newer in-flight index for the same key', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const root = await retrievalWorkspace('VALID_MARKER')
+    const first = await holdNextIndexRead(true)
+    const old = retrieveWriteInlineCompletionContext(createRequest(root))
+    await first.started
+    clearWriteRetrievalCache()
+    const second = await holdNextIndexRead()
+    const current = retrieveWriteInlineCompletionContext(createRequest(root))
+    await second.started
+    first.release()
+    await old
+    const joined = retrieveWriteInlineCompletionContext(createRequest(root))
+    second.release()
+    const [a, b] = await Promise.all([current, joined])
+    expect(a?.snippets[0].text).toContain('VALID_MARKER')
+    expect(b).toEqual(a)
+    expect(readdir).toHaveBeenCalledTimes(2)
+  })
+
+  it('an older index cannot replace the newer completed cache', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const root = await retrievalWorkspace('OLD_MARKER')
+    const held = await holdNextIndexRead()
+    const old = retrieveWriteInlineCompletionContext(createRequest(root))
+    await held.started
+    clearWriteRetrievalCache()
+    await writeFile(join(root, 'notes.md'), '# BM25 关键词检索\n\nBM25 关键词检索 NEW_MARKER is the current synthetic reference after invalidation.', 'utf8')
+    const current = await retrieveWriteInlineCompletionContext(createRequest(root))
+    expect(current?.snippets[0].text).toContain('NEW_MARKER')
+    held.release()
+    await old
+    expect(await retrieveWriteInlineCompletionContext(createRequest(root))).toEqual(current)
+    expect(readdir).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not scan a workspace for an empty inline or assistant query', async () => {
+    const root = await retrievalWorkspace('UNNEEDED')
+    const request = createRequest(root)
+    request.prefix = ''
+    request.preview = { local: '', documentTail: '' }
+    request.context = { ...request.context, currentLinePrefix: '', previousNonEmptyLine: '', previousLine: '' }
+    expect(await retrieveWriteInlineCompletionContext(request)).toBeNull()
+    expect(await retrieveWriteContext({ workspaceRoot: root, query: '' })).toBeNull()
+    expect(readdir).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+  })
 })
 
 describe('write retrieval service', () => {
