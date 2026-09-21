@@ -78,6 +78,9 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		// including failures after the child submitted, destroys that capability.
 		defer input.ForegroundAuthority.Delete(record.ID)
 	}
+	if input.Request.TimeBudgetMSSet && !validTimeBudgetMS(input.Request.TimeBudgetMS) {
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, errInvalidBudget), Record: record, IsError: true}
+	}
 	if err := domainmodel.ValidateReasoningEffortV1(input.Effort); err != nil {
 		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
 	}

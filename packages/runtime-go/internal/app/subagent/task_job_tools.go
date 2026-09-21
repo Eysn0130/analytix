@@ -48,7 +48,14 @@ type TaskJobListRequest struct {
 func TaskJobWaitRequestFromArgs(args map[string]any) TaskJobWaitRequest {
 	timeoutMS := DefaultTaskJobWaitTimeoutMS
 	if value, ok := numericAny(firstNonNilValue(args["timeout_seconds"], args["timeoutSeconds"])); ok {
-		timeoutMS = value * 1000
+		switch {
+		case value <= 0:
+			timeoutMS = 0
+		case value > DefaultTaskJobWaitTimeoutMS/1000:
+			timeoutMS = DefaultTaskJobWaitTimeoutMS
+		default:
+			timeoutMS = value * 1000
+		}
 	} else if value, ok := numericAny(firstNonNilValue(args["timeout_ms"], args["timeoutMs"])); ok {
 		timeoutMS = value
 	}

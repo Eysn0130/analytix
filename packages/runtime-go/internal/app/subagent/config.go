@@ -66,15 +66,13 @@ func MergeProfileSettings(base ProfileSettings, raw map[string]any, source strin
 	if profile := strings.TrimSpace(firstNonEmptyAnyString(raw["defaultProfile"], raw["default_profile"])); profile != "" {
 		base.DefaultProfile = profile
 	}
-	if value, ok := numericAny(raw["maxParallel"]); ok {
+	if value, present, err := budgetInteger(raw["maxParallel"], raw["max_parallel"]); present {
 		base.MaxParallel = value
-	} else if value, ok := numericAny(raw["max_parallel"]); ok {
-		base.MaxParallel = value
+		base.maxParallelInvalid = err != nil
 	}
-	if value, ok := numericAny(raw["maxChildRuns"]); ok {
+	if value, present, err := budgetInteger(raw["maxChildRuns"], raw["max_child_runs"]); present {
 		base.MaxChildRuns = value
-	} else if value, ok := numericAny(raw["max_child_runs"]); ok {
-		base.MaxChildRuns = value
+		base.maxChildRunsInvalid = err != nil
 	}
 	profiles, _ := raw["profiles"].(map[string]any)
 	names := make([]string, 0, len(profiles))
@@ -91,13 +89,14 @@ func MergeProfileSettings(base ProfileSettings, raw map[string]any, source strin
 		if rawProfile == nil {
 			continue
 		}
-		maxSteps, maxStepsSet := numericAny(firstNonNilValue(rawProfile["maxSteps"], rawProfile["max_steps"]))
-		tokenBudget, tokenBudgetSet := numericAny(firstNonNilValue(rawProfile["tokenBudget"], rawProfile["token_budget"]))
-		timeBudgetMS, timeBudgetMSSet := numericAny(firstNonNilValue(rawProfile["timeBudgetMs"], rawProfile["time_budget_ms"]))
+		maxSteps, maxStepsSet, maxStepsErr := budgetInteger(rawProfile["maxSteps"], rawProfile["max_steps"])
+		tokenBudget, tokenBudgetSet, tokenBudgetErr := budgetInteger(rawProfile["tokenBudget"], rawProfile["token_budget"])
+		timeBudgetMS, timeBudgetMSSet, timeBudgetErr := budgetInteger(rawProfile["timeBudgetMs"], rawProfile["time_budget_ms"])
 		if !timeBudgetMSSet {
-			if seconds, ok := numericAny(firstNonNilValue(rawProfile["timeBudgetSeconds"], rawProfile["time_budget_seconds"])); ok {
-				timeBudgetMS = seconds * 1000
-				timeBudgetMSSet = true
+			var seconds int
+			seconds, timeBudgetMSSet, timeBudgetErr = budgetInteger(rawProfile["timeBudgetSeconds"], rawProfile["time_budget_seconds"])
+			if timeBudgetErr == nil && timeBudgetMSSet {
+				timeBudgetMS, timeBudgetErr = budgetSecondsToMS(seconds)
 			}
 		}
 		rawMode := strings.TrimSpace(firstNonEmptyAnyString(rawProfile["mode"]))
@@ -121,6 +120,7 @@ func MergeProfileSettings(base ProfileSettings, raw map[string]any, source strin
 			Variant:           strings.TrimSpace(firstNonEmptyAnyString(rawProfile["variant"], rawProfile["modelVariant"], rawProfile["model_variant"])),
 			Effort:            effort,
 			EffortInvalid:     effortErr != nil,
+			budgetInvalid:     maxStepsErr != nil || tokenBudgetErr != nil || timeBudgetErr != nil || !validTimeBudgetMS(timeBudgetMS),
 			PromptPreamble:    strings.TrimSpace(firstNonEmptyAnyString(rawProfile["promptPreamble"], rawProfile["prompt_preamble"], rawProfile["preamble"])),
 			SystemPrompt:      strings.TrimSpace(firstNonEmptyAnyString(rawProfile["systemPrompt"], rawProfile["system_prompt"])),
 			ToolPolicy:        NormalizeToolPolicy(firstNonEmptyAnyString(rawProfile["toolPolicy"], rawProfile["tool_policy"])),
@@ -147,6 +147,9 @@ func MergeProfileSettings(base ProfileSettings, raw map[string]any, source strin
 }
 
 func ValidateProfileSettings(settings ProfileSettings) error {
+	if settings.maxParallelInvalid || settings.maxChildRunsInvalid {
+		return errInvalidBudget
+	}
 	if strings.TrimSpace(settings.DefaultProfile) == "" {
 		return validateProfileModes(settings)
 	}
@@ -158,6 +161,9 @@ func ValidateProfileSettings(settings ProfileSettings) error {
 
 func validateProfileModes(settings ProfileSettings) error {
 	for name, profile := range settings.Profiles {
+		if profile.budgetInvalid || !validTimeBudgetMS(profile.TimeBudgetMS) {
+			return errInvalidBudget
+		}
 		if profile.EffortInvalid || validateSubagentReasoningEffort(profile.Effort) != nil {
 			return ErrReasoningEffortInvalid
 		}
