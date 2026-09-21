@@ -175,6 +175,13 @@ export function insertCompletionText(
   })
 }
 
+const completionCancellations = new WeakMap<EditorView, () => void>()
+
+// Logical cancellation only: the existing provider transport is not aborted.
+export function cancelWriteRichInlineCompletion(view: EditorView): void {
+  completionCancellations.get(view)?.()
+}
+
 class RichInlineCompletionController {
   private sequence = 0
   private shortTimer: number | null = null
@@ -190,6 +197,12 @@ class RichInlineCompletionController {
     private readonly view: EditorView,
     private readonly options: WriteRichInlineCompletionOptions
   ) {
+    completionCancellations.set(view, () => {
+      this.sequence += 1
+      this.clearTimers()
+      this.pendingAfterInFlight.clear()
+      this.clearSuggestion()
+    })
     this.schedule()
   }
 
@@ -325,8 +338,10 @@ class RichInlineCompletionController {
   }
 
   destroy(): void {
+    completionCancellations.delete(this.view)
     this.sequence += 1
     this.clearTimers()
+    this.pendingAfterInFlight.clear()
   }
 }
 

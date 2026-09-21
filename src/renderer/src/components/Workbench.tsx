@@ -2598,6 +2598,7 @@ export function Workbench(): ReactElement {
       fileReferences?: UserFileReference[]
     } | null> => {
       const documentMessage = await prepareWorkbenchDocumentMessage({
+        threadId: frozenReference.threadId ?? undefined,
         input: rawMessageText, quotes: frozenQuotes, editorRequest,
         workspaceRoot: documentState.workspaceRoot, activeFilePath: documentState.activeFilePath,
         requestUserInputAvailable: typeof getProvider().submitUserInputResponse === 'function',

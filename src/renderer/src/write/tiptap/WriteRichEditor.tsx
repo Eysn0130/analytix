@@ -13,6 +13,7 @@ import { TableKit } from '@tiptap/extension-table'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useChatStore } from '../../store/chat-store'
 import type {
   WriteEditorSelectionState,
   WriteSelectionAnchorRect,
@@ -42,7 +43,7 @@ import { replaceRangeWithMarkdown } from './markdown-insert'
 import { applyExternalMarkdownToEditor } from './markdown-sync'
 import { WriteLocalImage } from './local-image'
 import { WritePasteImage } from './paste-image'
-import { WriteRichInlineCompletion } from './extensions/inline-completion'
+import { WriteRichInlineCompletion, cancelWriteRichInlineCompletion } from './extensions/inline-completion'
 import {
   WriteRichTermPropagation,
   writeRichExternalSyncMeta
@@ -326,6 +327,20 @@ export function WriteRichEditor({
   const onFidelityChangeRef = useRef(onFidelityChange)
   const lastEmittedValueRef = useRef<string | null>(null)
   const [gate, setGate] = useState<GateState | null>(null)
+  // File identity, not a late active-task lookup, determines the completion
+  // owner. A same-file task switch pauses completion until reopen/remount.
+  const completionOwnerKey = JSON.stringify([workspaceRoot ?? '', filePath ?? ''])
+  const completionOwnerRef = useRef({ key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId })
+  const completionThreadEpochRef = useRef(0)
+  if (completionOwnerRef.current.key !== completionOwnerKey) {
+    completionOwnerRef.current = { key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId }
+  }
+  useEffect(() => useChatStore.subscribe((state, previous) => {
+    if (state.activeThreadId !== previous.activeThreadId) {
+      completionThreadEpochRef.current += 1
+      if (editorRef.current && !editorRef.current.isDestroyed) cancelWriteRichInlineCompletion(editorRef.current.view)
+    }
+  }), [])
 
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
@@ -425,19 +440,26 @@ export function WriteRichEditor({
         getLongDebounceMs: () => completionLongDebounceMsRef.current,
         getLongMinAcceptScore: () => completionLongMinAcceptScoreRef.current,
         isLongEnabled: () => completionLongEnabledRef.current,
-        isEnabled: () => completionEnabledRef.current && !(readOnlyRef.current || isWriteShutdownFrozen()),
+        isEnabled: () => completionEnabledRef.current && Boolean(completionOwnerRef.current.threadId) &&
+          completionOwnerRef.current.threadId === useChatStore.getState().activeThreadId && !(readOnlyRef.current || isWriteShutdownFrozen()),
         getFilePath: () => filePathRef.current,
         requestCompletion: async (context, mode) => {
+          const owner = completionOwnerRef.current
+          const threadId = owner.threadId
+          const epoch = completionThreadEpochRef.current
+          if (!threadId || threadId !== useChatStore.getState().activeThreadId || context.filePath !== filePathRef.current) return null
           if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') return null
           const result = await window.analytix.write.requestWriteInlineCompletion(
             buildInlineCompletionPayload(context, {
+              threadId,
               model: completionModelRef.current,
               workspaceRoot: workspaceRootRef.current,
               mode,
               recentEdits: recentEditsRef.current
             })
           )
-          if (!result.ok) return null
+          if (!result.ok || threadId !== useChatStore.getState().activeThreadId ||
+            epoch !== completionThreadEpochRef.current || owner !== completionOwnerRef.current) return null
           if (result.action?.kind === 'edit') {
             return { text: result.action.replacement, action: result.action, mode }
           }

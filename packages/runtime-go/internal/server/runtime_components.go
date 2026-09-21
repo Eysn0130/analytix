@@ -40,6 +40,7 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	workspacemutationapp "analytix.local/runtime-go/internal/app/workspacemutation"
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -72,6 +73,7 @@ type RuntimeServerComponents struct {
 	OfficeAdapters           map[string]adapterport.Adapter
 	OfficePackageHost        *packagehostapp.Service
 	ObjectEditing            *objecteditingapp.Service
+	WorkspaceRead            *workspacereadapp.Service
 	UncontainedMCPConfigured bool
 	AsyncTurnObserverV1      func(AsyncTurnObservationV1)
 	// AsyncTurnPhaseObserverV1 is an optional in-process regression barrier.
@@ -269,6 +271,11 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	handler.managedEditing = managededitingapp.New(handler.workspaceMutations, components.ManagedEditingFiles)
 	handler.shellRunner = managedEditingShellRunner{next: handler.shellRunner, registry: handler.managedEditing}
 	handler.objectEditing = components.ObjectEditing
+	if components.WorkspaceRead != nil {
+		if err := components.WorkspaceRead.BindAuthority(runtimeWorkspaceReadAuthority{handler}); err != nil {
+			return nil, err
+		}
+	}
 	handler.officePackageHost = components.OfficePackageHost
 	handler.documentCodec = components.DocumentCodec
 	for _, adapter := range components.OfficeAdapters {

@@ -32,6 +32,7 @@ export type WriteInlineCompletionAction =
     }
 
 export type WriteInlineCompletionRequest = {
+  threadId?: string
   prefix: string
   suffix: string
   mode?: WriteInlineCompletionMode

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -52,6 +53,19 @@ const threadHandoffServiceMock = vi.hoisted(() => ({
 const writeExportServiceMock = vi.hoisted(() => ({
   exportWriteDocument: vi.fn(),
   copyWriteDocumentAsRichText: vi.fn()
+}))
+
+const writeReadMock = vi.hoisted(() => ({
+  requestWriteInlineCompletion: vi.fn(),
+  retrieveWriteContext: vi.fn()
+}))
+vi.mock('../services/write-inline-completion-service', async (original) => ({
+  ...await original<typeof import('../services/write-inline-completion-service')>(),
+  requestWriteInlineCompletion: writeReadMock.requestWriteInlineCompletion
+}))
+vi.mock('../services/write-retrieval-service', async (original) => ({
+  ...await original<typeof import('../services/write-retrieval-service')>(),
+  retrieveWriteContext: writeReadMock.retrieveWriteContext
 }))
 
 vi.mock('electron', () => ({
@@ -273,6 +287,8 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
 
 describe('registerAppIpcHandlers', () => {
   beforeEach(() => {
+    writeReadMock.requestWriteInlineCompletion.mockReset()
+    writeReadMock.retrieveWriteContext.mockReset()
     handlers.clear()
     gitCheckpointMock.createGitCheckpoint.mockReset()
     gitCheckpointMock.restoreGitCheckpoint.mockReset()
@@ -290,6 +306,63 @@ describe('registerAppIpcHandlers', () => {
     vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
     vi.mocked(dialog.showOpenDialog).mockReset()
     vi.mocked(dialog.showMessageBox).mockReset()
+  })
+
+  it.each(['write:inline-completion', 'write:retrieve-context'])(
+    'rejects untrusted %s before parsing or reading', async (channel) => {
+      const frame = {}
+      const sender = { mainFrame: frame, isDestroyed: () => false }
+      const mainWindow = { webContents: sender, isDestroyed: () => false }
+      const options = registerOptions({ getMainWindow: () => mainWindow as never })
+      registerAppIpcHandlers(options)
+      for (const event of [
+        { sender: { ...sender }, senderFrame: frame },
+        { sender, senderFrame: {} },
+        { sender, senderFrame: null }
+      ]) {
+        await expect(handlers.get(channel)?.(event, { query: 'synthetic' })).resolves.toMatchObject({ ok: false })
+      }
+      expect(writeReadMock.requestWriteInlineCompletion).not.toHaveBeenCalled()
+      expect(writeReadMock.retrieveWriteContext).not.toHaveBeenCalled()
+    }
+  )
+
+  it('admits current retrieval but suppresses results after its main frame is replaced', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    const options = registerOptions({ localDisplayRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) })), getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never })
+    registerAppIpcHandlers(options)
+    const context = { source: 'bm25-keyword', snippets: [{ text: 'synthetic-only' }] }
+    writeReadMock.retrieveWriteContext.mockResolvedValueOnce(context)
+    await expect(handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' }))
+      .resolves.toEqual({ ok: true, context })
+    writeReadMock.retrieveWriteContext.mockImplementationOnce(async (_request, options) => {
+      expect(options.isCurrent()).toBe(true)
+      sender.mainFrame = {}
+      expect(options.isCurrent()).toBe(false)
+      return context
+    })
+    await expect(handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' }))
+      .resolves.toMatchObject({ ok: false })
+    expect(writeReadMock.retrieveWriteContext).toHaveBeenCalledTimes(2)
+    expect(writeReadMock.retrieveWriteContext.mock.calls[1]?.[1]).toEqual({ isCurrent: expect.any(Function), source: expect.objectContaining({ key: expect.any(String) }) })
+    expect(sender.eventNames()).toEqual([])
+  })
+
+  it('invalidates a retrieval across same-frame same-URL navigation and releases listeners', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    registerAppIpcHandlers(registerOptions({ localDisplayRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) })), getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never }))
+    let requestCurrent: (() => boolean) | undefined
+    writeReadMock.retrieveWriteContext.mockImplementationOnce(async (_request, options) => {
+      requestCurrent = options.isCurrent
+      sender.emit('did-start-navigation', {}, 'analytix://app', false, true)
+      return { snippets: [{ text: 'OLD_DOCUMENT' }] }
+    })
+    const result = await handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' })
+    expect(result).toMatchObject({ ok: false })
+    expect(requestCurrent?.()).toBe(false)
+    expect(sender.eventNames()).toEqual([])
   })
 
   it('does not load Hub compatibility during registration or ordinary IPC and loads it only on explicit Hub invocation', async () => {

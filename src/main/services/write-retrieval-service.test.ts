@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, open, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { extname, join, relative } from 'node:path'
+import type { WriteRetrievalSource } from '../ipc/write-retrieval-ipc'
+import type { WriteRetrievalRequest } from '../../shared/write-retrieval'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WriteInlineCompletionRequest } from '../../shared/write-inline-completion'
 
@@ -10,14 +12,14 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 vi.mock('./write-pdf-text-service', () => ({
-  readWritePdfText: async (payload: { path: string }) => {
+  readWritePdfBytes: async () => {
     const text = [
       'PDF BM25 关键词检索 with literature context improves retrieval quality.',
       'The assistant can cite the relevant page when explaining research evidence.'
     ].join(' ')
     return {
       ok: true,
-      path: payload.path,
+      path: '',
       size: 123,
       mtimeMs: 1,
       pageCount: 1,
@@ -36,10 +38,39 @@ vi.mock('./write-pdf-text-service', () => ({
 
 import {
   clearWriteRetrievalCache,
-  retrieveWriteContext,
-  retrieveWriteInlineCompletionContext,
+  retrieveWriteContext as retrieveContext,
+  retrieveWriteInlineCompletionContext as retrieveInline,
   tokenizeWriteRetrievalText
 } from './write-retrieval-service'
+
+// This fixture supplies Core-shaped snapshots. Production Main performs no file IO.
+function fixtureSource(root: string): WriteRetrievalSource {
+  return { threadId: 'test-thread', key: root, workspaceRoot: root, current: async () => true, scan: async includePdf => {
+    const files: Awaited<ReturnType<WriteRetrievalSource['scan']>> = []
+    const visit = async (dir: string) => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) { await visit(path); continue }
+        const kind = extname(path) === '.pdf' ? 'pdf' : 'text'
+        if (!['.md', '.txt', '.markdown', ...(includePdf ? ['.pdf'] : [])].includes(extname(path))) continue
+        const handle = await open(path, 'r')
+        const bytes = Buffer.alloc(600000)
+        try {
+          const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
+          files.push({ path: relative(root, path), kind, revision: '0'.repeat(64), content: bytes.subarray(0, bytesRead).toString('base64') })
+        } finally { await handle.close() }
+      }
+    }
+    await visit(root)
+    return files
+  } }
+}
+function retrieveWriteInlineCompletionContext(request: WriteInlineCompletionRequest, options: Parameters<typeof retrieveInline>[1] = {}) {
+  return retrieveInline(request, { source: fixtureSource(request.workspaceRoot!), ...options })
+}
+function retrieveWriteContext(request: WriteRetrievalRequest, options: Parameters<typeof retrieveContext>[1] = {}) {
+  return retrieveContext(request, { source: fixtureSource(request.workspaceRoot!), ...options })
+}
 
 function createRequest(workspaceRoot: string): WriteInlineCompletionRequest {
   return {
@@ -123,7 +154,79 @@ async function holdNextIndexRead(empty = false) {
   return { started: started.promise, release: release.resolve }
 }
 
+describe('retrieval request ownership', () => {
+  it('fails closed without a Core source and revalidates authority on cache hits', async () => {
+    const root = await retrievalWorkspace('CURRENT')
+    const request = createRequest(root)
+    expect(await retrieveInline(request)).toBeNull()
+    expect(open).not.toHaveBeenCalled()
+    let authorized = true
+    const source = { ...fixtureSource(root), current: async () => authorized }
+    expect(await retrieveInline(request, { source })).not.toBeNull()
+    const reads = vi.mocked(open).mock.calls.length
+    authorized = false
+    expect(await retrieveInline(request, { source })).toBeNull()
+    expect(open).toHaveBeenCalledTimes(reads)
+  })
+
+  it('does no scan for a stale owner, including a previously populated cache', async () => {
+    const root = await retrievalWorkspace('CURRENT_OWNER')
+    const request = createRequest(root)
+    expect(await retrieveWriteInlineCompletionContext(request, { isCurrent: () => false })).toBeNull()
+    expect(readdir).not.toHaveBeenCalled()
+    expect(await retrieveWriteInlineCompletionContext(request, { isCurrent: () => true })).not.toBeNull()
+    const reads = vi.mocked(open).mock.calls.length
+    expect(await retrieveWriteInlineCompletionContext(request, { isCurrent: () => false })).toBeNull()
+    expect(open).toHaveBeenCalledTimes(reads)
+  })
+
+  it('does not deliver or cache an index whose owner is revoked during a read', async () => {
+    const root = await retrievalWorkspace('OLD_OWNER')
+    const held = await holdNextIndexRead()
+    let current = true
+    const result = retrieveWriteInlineCompletionContext(createRequest(root), { isCurrent: () => current })
+    await held.started
+    current = false
+    held.release()
+    expect(await result).toBeNull()
+    await writeFile(join(root, 'notes.md'), '# BM25 关键词检索\n\nBM25 关键词检索 NEW_OWNER provides sufficiently long synthetic reference context.')
+    const next = await retrieveWriteInlineCompletionContext(createRequest(root), { isCurrent: () => true })
+    expect(next?.snippets[0]?.text).toContain('NEW_OWNER')
+  })
+})
+
 describe('write retrieval invalidation', () => {
+  it('releases only the closed workspace and prevents its pending build from returning', async () => {
+    const closed = await retrievalWorkspace('CLOSED')
+    const kept = await retrievalWorkspace('KEPT')
+    const retained = await retrieveWriteInlineCompletionContext(createRequest(kept))
+    const held = await holdNextIndexRead()
+    const pending = retrieveWriteInlineCompletionContext(createRequest(closed))
+    await held.started
+    clearWriteRetrievalCache({ workspaceRoot: closed })
+    held.release()
+    expect(await pending).toBeNull()
+    const reads = vi.mocked(open).mock.calls.length
+    expect(await retrieveWriteInlineCompletionContext(createRequest(kept))).toEqual(retained)
+    expect(open).toHaveBeenCalledTimes(reads)
+    expect(await retrieveWriteInlineCompletionContext(createRequest(closed))).not.toBeNull()
+  })
+
+  it('invalidates a deleted thread without evicting another thread in the same workspace', async () => {
+    const root = await retrievalWorkspace('SHARED')
+    const request = createRequest(root)
+    const a = { ...fixtureSource(root), threadId: 'a', key: 'a' }
+    const b = { ...fixtureSource(root), threadId: 'b', key: 'b' }
+    await retrieveInline(request, { source: a })
+    const retained = await retrieveInline(request, { source: b })
+    clearWriteRetrievalCache({ threadId: 'a' })
+    const reads = vi.mocked(open).mock.calls.length
+    expect(await retrieveInline(request, { source: b })).toEqual(retained)
+    expect(open).toHaveBeenCalledTimes(reads)
+    expect(await retrieveInline(request, { source: a })).not.toBeNull()
+    expect(open).toHaveBeenCalledTimes(reads + 1)
+  })
+
   it('does not deliver or recache an index completed after clear', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const root = await retrievalWorkspace('OLD_MARKER')

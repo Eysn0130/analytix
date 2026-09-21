@@ -111,6 +111,26 @@ afterEach(() => {
 })
 
 describe('requestWriteInlineCompletion', () => {
+  it.each(['create', 'poll'])('rejects ownership lost during %s while releasing only its own temporary thread', async (phase) => {
+    let current = true
+    const runtime = vi.fn(async (path: string, method?: string) => {
+      if (path === '/v1/threads' && method === 'POST') {
+        if (phase === 'create') current = false
+        return { ok: true, status: 201, body: JSON.stringify({ id: 'thr_owned' }) }
+      }
+      if (method === 'POST') return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_owned' }) }
+      if (method === 'DELETE') return { ok: true, status: 204, body: '' }
+      current = false
+      return { ok: true, status: 200, body: JSON.stringify({ turns: [{ id: 'turn_owned', status: 'completed',
+        items: [{ kind: 'assistant_text', text: 'LATE_RESULT' }] }] }) }
+    })
+    const result = await requestWriteInlineCompletion(createSettings({ retrievalEnabled: false }), createRequest(), runtime, { isCurrent: () => current })
+    expect(result.ok).toBe(false)
+    expect(JSON.stringify(result)).not.toContain('LATE_RESULT')
+    expect(runtime).toHaveBeenLastCalledWith('/v1/threads/thr_owned', 'DELETE')
+    if (phase === 'create') expect(runtime).toHaveBeenCalledTimes(2)
+  })
+
   it('does not request the API when inline completion is disabled', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -185,12 +205,14 @@ describe('requestWriteInlineCompletion', () => {
     settings.provider.proxy = { enabled: true, url: 'socks5://copied-proxy.invalid:1080' }
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'analytix-inline-retrieval-'))
     const referencePath = join(workspaceRoot, 'reference.md')
-    await writeFile(referencePath, '# BM25 retrieval\n\nBM25 retrieval SYNTHETIC_CONTEXT_CANARY provides relevant background for this synthetic draft completion.', 'utf8')
+    const reference = '# BM25 retrieval\n\nBM25 retrieval SYNTHETIC_CONTEXT_CANARY provides relevant background for this synthetic draft completion.'
+    await writeFile(referencePath, reference, 'utf8')
+    const scan = vi.fn(async () => [{ path: 'reference.md', kind: 'text' as const, revision: '0'.repeat(64), content: Buffer.from(reference).toString('base64') }])
     const request = {
       ...createRequest(), workspaceRoot, currentFilePath: join(workspaceRoot, 'draft.md'),
       prefix: '# Draft\n\nBM25 retrieval', preview: { local: 'BM25 retrieval', documentTail: 'BM25 retrieval' }
     }
-    const result = await requestWriteInlineCompletion(settings, request, runtimeRequest)
+    const result = await requestWriteInlineCompletion(settings, request, runtimeRequest, { source: { threadId: 'test-thread', key: workspaceRoot, workspaceRoot, current: async () => true, scan } })
 
     expect(result).toMatchObject({
       ok: true,
@@ -201,10 +223,12 @@ describe('requestWriteInlineCompletion', () => {
     const serializedCalls = JSON.stringify(runtimeRequest.mock.calls)
     expect(serializedCalls).not.toMatch(/copied-route|copied-proxy|apiKey|credentialRef|Authorization/)
     if (retrievalEnabled) {
-      expect(readdir).toHaveBeenCalledExactlyOnceWith(workspaceRoot, { withFileTypes: true })
-      expect(open).toHaveBeenCalledExactlyOnceWith(referencePath, 'r')
+      expect(scan).toHaveBeenCalledExactlyOnceWith(false)
+      expect(readdir).not.toHaveBeenCalled()
+      expect(open).not.toHaveBeenCalled()
       expect(serializedCalls).toContain('SYNTHETIC_CONTEXT_CANARY')
     } else {
+      expect(scan).not.toHaveBeenCalled()
       expect(readdir).not.toHaveBeenCalled()
       expect(open).not.toHaveBeenCalled()
       expect(serializedCalls).not.toContain('SYNTHETIC_CONTEXT_CANARY')

@@ -53,6 +53,13 @@ const setInlineCompletionEffect = StateEffect.define<{
   feedback: InlineCompletionFeedback
 }>()
 const clearInlineCompletionEffect = StateEffect.define<null>()
+const completionCancellations = new WeakMap<EditorView, () => void>()
+
+// Revoke suggestions and pending display work without changing the document.
+// This is logical cancellation; it does not abort a provider request in flight.
+export function cancelInlineCompletion(view: EditorView): void {
+  completionCancellations.get(view)?.()
+}
 
 const inlineCompletionState = StateField.define<{
   text: string
@@ -284,6 +291,12 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     private globalEmptyCooldownUntil = 0
 
     constructor(private readonly view: EditorView) {
+      completionCancellations.set(view, () => {
+        this.sequence += 1
+        this.clearTimers()
+        this.pendingAfterInFlight.clear()
+        clearInlineCompletion(view)
+      })
       this.schedule(view.state)
     }
 
@@ -430,8 +443,10 @@ const inlineCompletionController = (config: InlineCompletionConfig) =>
     }
 
     destroy(): void {
+      completionCancellations.delete(this.view)
       this.sequence += 1
       this.clearTimers()
+      this.pendingAfterInFlight.clear()
     }
   })
 

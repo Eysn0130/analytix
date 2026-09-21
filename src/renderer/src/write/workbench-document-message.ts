@@ -17,6 +17,7 @@ export function workbenchEmptyMessageKeys(fileCount: number, quoteCount: number,
 // A quote uses its frozen working copy; only an explicit editor request asks
 // the existing local retrieval service for additional document context.
 export async function prepareWorkbenchDocumentMessage(options: {
+  threadId?: string
   input: string
   quotes: WriteQuotedSelection[]
   editorRequest: boolean
@@ -31,6 +32,7 @@ export async function prepareWorkbenchDocumentMessage(options: {
   if (options.editorRequest && options.retrieveContext) {
     try {
       const result = await options.retrieveContext({
+        threadId: options.threadId,
         workspaceRoot: options.workspaceRoot,
         currentFilePath: options.activeFilePath ?? undefined,
         query: [...options.quotes.map((quote) => quote.text), options.input].join('\n\n'),

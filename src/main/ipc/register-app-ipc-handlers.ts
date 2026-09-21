@@ -1,3 +1,4 @@
+import { authorizeWriteRetrievalSource } from './write-retrieval-ipc'
 import { createWriteExportSnapshotResolver } from './write-export-ipc'
 import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
 import { registerNativeOfficeIpc } from '../office/native-office-ipc'
@@ -1218,6 +1219,29 @@ function localDisplayRendererIsCurrent(
     event.senderFrame != null &&
     event.senderFrame === event.sender.mainFrame
   )
+}
+
+// A main-frame object can survive same-process navigation, including a reload
+// of the same URL. A request that witnessed navigation never regains ownership.
+function captureWriteRendererOwner(event: IpcMainInvokeEvent, getMainWindow: () => BrowserWindow | null) {
+  if (!localDisplayRendererIsCurrent(event, getMainWindow)) return null
+  let active = true
+  const invalidate = (): void => { active = false }
+  const navigating = (_event: Electron.Event, _url: string, _inPlace: boolean, mainFrame: boolean): void => {
+    if (mainFrame) invalidate()
+  }
+  event.sender.on('did-start-navigation', navigating)
+  event.sender.on('render-process-gone', invalidate)
+  event.sender.once('destroyed', invalidate)
+  return {
+    isCurrent: () => active && localDisplayRendererIsCurrent(event, getMainWindow),
+    release: () => {
+      invalidate()
+      event.sender.removeListener('did-start-navigation', navigating)
+      event.sender.removeListener('render-process-gone', invalidate)
+      event.sender.removeListener('destroyed', invalidate)
+    }
+  }
 }
 
 function safeSaveAsFileName(input: string | undefined, fallback = 'generated-file'): string {
@@ -2922,25 +2946,34 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     })
   })
 
-  ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>
-    requestWriteInlineCompletion(
-      await store.load(),
-      parseIpcPayload('write:inline-completion', writeInlineCompletionPayloadSchema, payload),
-      runtimeRequest
-    )
-  )
-  ipcMain.handle('write:retrieve-context', async (_, payload: unknown) => {
+  ipcMain.handle('write:inline-completion', async (event, payload: unknown) => {
+    const denied = { ok: false as const, message: 'Write completion requires the current main window.' }
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) return denied
     try {
-      const context = await retrieveWriteContext(
-        parseIpcPayload('write:retrieve-context', writeRetrievalPayloadSchema, payload)
-      )
-      return { ok: true as const, context }
-    } catch (error) {
-      return {
-        ok: false as const,
-        message: error instanceof Error ? error.message : String(error)
-      }
-    }
+      const request = parseIpcPayload('write:inline-completion', writeInlineCompletionPayloadSchema, payload)
+      const settings = await store.load()
+      if (!owner.isCurrent()) return denied
+      const source = settings.write.inlineCompletion.retrievalEnabled === false ? null
+        : await authorizeWriteRetrievalSource(localDisplayRequest, request.threadId, request.workspaceRoot, owner.isCurrent)
+      if (!owner.isCurrent()) return denied
+      const result = await requestWriteInlineCompletion(settings, request, runtimeRequest, { isCurrent: owner.isCurrent, source: source ?? undefined })
+      return owner.isCurrent() ? result : denied
+    } finally { owner.release() }
+  })
+  ipcMain.handle('write:retrieve-context', async (event, payload: unknown) => {
+    const denied = { ok: false as const, message: 'Write retrieval requires the current main window.' }
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) return denied
+    try {
+      const request = parseIpcPayload('write:retrieve-context', writeRetrievalPayloadSchema, payload)
+      const source = await authorizeWriteRetrievalSource(localDisplayRequest, request.threadId, request.workspaceRoot, owner.isCurrent)
+      if (!source) return { ok: false as const, message: 'Write retrieval is unavailable.' }
+      const context = await retrieveWriteContext(request, { isCurrent: owner.isCurrent, source })
+      return owner.isCurrent() ? { ok: true as const, context } : denied
+    } catch {
+      return { ok: false as const, message: 'Write retrieval is unavailable.' }
+    } finally { owner.release() }
   })
   ipcMain.handle('write:generate-infographic', async (_, payload: unknown) =>
     requestWriteInfographic(

@@ -1,3 +1,4 @@
+import { clearWriteRetrievalCache } from './services/write-retrieval-service'
 import {
   app,
   BrowserWindow,
@@ -432,6 +433,7 @@ async function stopManagedRuntimesForQuit(): Promise<void> {
 }
 
 async function stopManagedRuntimes(): Promise<void> {
+  clearWriteRetrievalCache()
   if (!managedRuntimesStopPromise) {
     managedRuntimesStopPromise = (async () => {
       terminalPtyController?.disposeAll()
@@ -1475,6 +1477,7 @@ function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?
     ipcMain.off(WINDOW_STARTUP_SURFACE_READY_CHANNEL, handleStartupSurfaceReady)
     disposeDataAnalysisRendererPrincipal()
     if (primary && mainWindow === appWindow) {
+      clearWriteRetrievalCache()
       mainWindow = null
     }
   })
@@ -2254,6 +2257,11 @@ app.whenReady().then(async () => {
         await new Promise<void>((resolveReady) => setImmediate(resolveReady))
       }
       saved = await store.patch(partial)
+      if (startupConfigChanged || saved.write.inlineCompletion.enabled === false || saved.write.inlineCompletion.retrievalEnabled === false) {
+        clearWriteRetrievalCache()
+      } else if (prev.workspaceRoot && prev.workspaceRoot !== saved.workspaceRoot) {
+        clearWriteRetrievalCache({ workspaceRoot: prev.workspaceRoot })
+      }
       const runtimeApply = queueRuntimeSettingsApply(prev, saved)
       if (releaseTerminalCreates) {
         const release = releaseTerminalCreates
@@ -2352,7 +2360,10 @@ app.whenReady().then(async () => {
     saveSettingsPatch,
     runtimeRequest: async (path, method, body) => {
       const settings = await store.load()
-      return runtimeRequest(settings, path, { method, body })
+      const result = await runtimeRequest(settings, path, { method, body })
+      const removedThread = method === 'DELETE' && result.ok ? /^\/v1\/threads\/([A-Za-z0-9._:-]+)$/.exec(path)?.[1] : undefined
+      if (removedThread) clearWriteRetrievalCache({ threadId: removedThread })
+      return result
     },
     protectedRuntimeRequest: mainAccountRuntimeRequest,
     getCurrentProfile: async () => {

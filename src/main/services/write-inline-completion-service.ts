@@ -1,3 +1,4 @@
+import type { WriteRetrievalSource } from '../ipc/write-retrieval-ipc'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   resolveWriteInlineCompletionModel,
@@ -705,8 +706,14 @@ async function requestRuntimeInlineCompletion(
   request: WriteInlineCompletionRequest,
   model: string,
   prompt: string,
-  runtimeRequest: WriteInlineRuntimeRequest
+  runtimeRequest: WriteInlineRuntimeRequest,
+  isCurrent: () => boolean,
+  authorityCurrent: () => Promise<boolean>
 ): Promise<string> {
+  const assertCurrent = async (): Promise<void> => {
+    if (!isCurrent() || !await authorityCurrent() || !isCurrent()) throw new Error('runtime_owner_stale')
+  }
+  await assertCurrent()
   const create = await runtimeRequest('/v1/threads', 'POST', JSON.stringify({
     workspace: request.workspaceRoot?.trim() || '',
     model,
@@ -720,6 +727,7 @@ async function requestRuntimeInlineCompletion(
   if (!create.ok || !threadId) throw new Error('runtime_thread_unavailable')
 
   try {
+    await assertCurrent()
     const start = await runtimeRequest(
       `/v1/threads/${encodeURIComponent(threadId)}/turns`,
       'POST',
@@ -738,7 +746,9 @@ async function requestRuntimeInlineCompletion(
 
     const deadline = Date.now() + INLINE_COMPLETION_TIMEOUT_MS
     while (Date.now() < deadline) {
+      await assertCurrent()
       const detail = await runtimeRequest(`/v1/threads/${encodeURIComponent(threadId)}`, 'GET')
+      await assertCurrent()
       if (!detail.ok) throw new Error('runtime_result_unavailable')
       const outcome = runtimeAssistantText(detail.body, turnId)
       if (outcome.status === 'completed') return outcome.text
@@ -756,8 +766,11 @@ async function requestRuntimeInlineCompletion(
 export async function requestWriteInlineCompletion(
   settings: AppSettingsV1,
   request: WriteInlineCompletionRequest,
-  runtimeRequest?: WriteInlineRuntimeRequest
+  runtimeRequest?: WriteInlineRuntimeRequest,
+  options: { isCurrent?: () => boolean; source?: WriteRetrievalSource } = {}
 ): Promise<WriteInlineCompletionResult> {
+  const isCurrent = options.isCurrent ?? (() => true)
+  if (!isCurrent()) return { ok: false, message: 'Inline completion owner is unavailable.' }
   const startedAt = Date.now()
   if (settings.write.inlineCompletion.enabled === false) {
     appendInlineCompletionPreflightFailure(startedAt, settings, request, 'Inline completion is disabled.')
@@ -775,8 +788,11 @@ export async function requestWriteInlineCompletion(
   const retrieval = settings.write.inlineCompletion.retrievalEnabled === false
     ? null
     : await retrieveWriteInlineCompletionContext(request, {
-        maxSnippets: mode === 'long' || mode === 'edit' || actionMayEdit ? 5 : 3
+        maxSnippets: mode === 'long' || mode === 'edit' || actionMayEdit ? 5 : 3,
+        isCurrent,
+        source: options.source
       }).catch(() => null)
+  if (!isCurrent()) return { ok: false, message: 'Inline completion owner is unavailable.' }
   const messages = buildWriteInlineCompletionChatMessages(request, retrieval)
   const prompt = debugPromptFromMessages(messages)
   const debugBase = {
@@ -793,7 +809,8 @@ export async function requestWriteInlineCompletion(
   }
 
   try {
-    const text = await requestRuntimeInlineCompletion(request, model, prompt, runtimeRequest)
+    const text = await requestRuntimeInlineCompletion(request, model, prompt, runtimeRequest, isCurrent, options.source?.current ?? (async () => true))
+    if (!isCurrent()) throw new Error('runtime_owner_stale')
 
     const extractedAction = parseWriteInlineAction(text, {
       fallbackKind: mode,

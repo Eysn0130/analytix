@@ -8,6 +8,7 @@ const quote = {
   workspaceRoot: '/workspace', snapshotContent: '# draft\n中文工作副本🙂'
 }
 const base = {
+  threadId: 'thread-a',
   input: '今天几点？', quotes: [], editorRequest: false,
   workspaceRoot: '/workspace', activeFilePath: '/workspace/report.md',
   requestUserInputAvailable: true
@@ -45,7 +46,7 @@ describe('unified conversation document context', () => {
     const retrieveContext = vi.fn().mockResolvedValue({ ok: true, context: null })
     const text = await prepareWorkbenchDocumentMessage({ ...base, editorRequest: true, editorPersona: 'EXPLICIT_EDITOR_PRESET', requestUserInputAvailable: false, retrieveContext })
     expect(retrieveContext).toHaveBeenCalledOnce()
-    expect(retrieveContext).toHaveBeenCalledWith(expect.objectContaining({ currentFilePath: '/workspace/report.md' }))
+    expect(retrieveContext).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'thread-a', currentFilePath: '/workspace/report.md' }))
     expect(text).toContain('当前文件: report.md')
     expect(text).toContain('EXPLICIT_EDITOR_PRESET')
     expect(text).toContain('普通文本')

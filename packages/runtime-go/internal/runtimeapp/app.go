@@ -1,6 +1,7 @@
 package runtimeapp
 
 import (
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -1617,10 +1618,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	officeAdapters, officePackageHost, officePrivate := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
+	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
 		DocumentCodec:       newDocumentCodec(config),
 		ManagedEditingFiles: managededitingfiles.New(),
 		ObjectEditing:       objectEditingHandler.Service,
+		WorkspaceRead:       workspaceRead,
 		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
 		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
@@ -1737,6 +1740,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
 			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
 			ObjectEditing:          objectEditingHTTP,
+			WorkspaceRead:          httpapi.WorkspaceReadHandler{Service: workspaceRead},
 			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},
 			OfficePrivateAdmission: httpapi.OfficePrivateAdmissionHandler{Assets: officePrivate},
 			FundsCSVAdmission:      fundsCSVAdmission,

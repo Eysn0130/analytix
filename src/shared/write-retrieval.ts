@@ -33,6 +33,7 @@ export type WriteRetrievalContext = {
 }
 
 export type WriteRetrievalRequest = {
+  threadId?: string
   workspaceRoot?: string
   currentFilePath?: string
   query: string

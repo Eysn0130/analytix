@@ -8,6 +8,7 @@ import { languages } from '@codemirror/language-data'
 import { drawSelection, EditorView, highlightActiveLine, keymap, showPanel, type Panel, type ViewUpdate } from '@codemirror/view'
 import { acceptChunk, getChunks, getOriginalDoc, rejectChunk, unifiedMergeView } from '@codemirror/merge'
 import i18n from '../../i18n'
+import { useChatStore } from '../../store/chat-store'
 import type { WriteDiffReviewRecovery } from '../../write/write-workspace-store-types'
 import type { WriteTextAlign } from '@shared/app-settings'
 import { applyWriteTextAlignToMarkdownLines } from '@shared/write-text-align'
@@ -16,7 +17,7 @@ import {
   detectWriteBlockTypeFromLine,
   type WriteBlockType
 } from '../../write/block-type'
-import { buildInlineCompletionExtension, buildInlineCompletionPayload } from '../../write/inline-completion'
+import { buildInlineCompletionExtension, buildInlineCompletionPayload, cancelInlineCompletion } from '../../write/inline-completion'
 import { writeMarkdownLivePreviewExtensions } from '../../write/markdown-live-preview'
 import { createWriteRecentEdit, type WriteRecentEdit } from '../../write/recent-edits'
 import { isSelectableRasterImageSrc, parseImageMarkdownLine } from '../../write/selected-image'
@@ -453,6 +454,20 @@ export function WriteMarkdownEditor({
   const valueRef = useRef(value)
   const lastSelectionRef = useRef<WriteEditorSelectionState | null>(null)
   const lastEmittedValueRef = useRef<string | null>(null)
+  // A shared editor can remain mounted while the active task changes. Keep
+  // its document owner until a different document is presented or it remounts.
+  const completionOwnerKey = JSON.stringify([workspaceRoot ?? '', filePath ?? ''])
+  const completionOwnerRef = useRef({ key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId })
+  const completionThreadEpochRef = useRef(0)
+  if (completionOwnerRef.current.key !== completionOwnerKey) {
+    completionOwnerRef.current = { key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId }
+  }
+  useEffect(() => useChatStore.subscribe((state, previous) => {
+    if (state.activeThreadId !== previous.activeThreadId) {
+      completionThreadEpochRef.current += 1
+      if (viewRef.current) cancelInlineCompletion(viewRef.current)
+    }
+  }), [])
 
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
@@ -585,21 +600,28 @@ export function WriteMarkdownEditor({
       getLongDebounceMs: () => completionLongDebounceMsRef.current,
       getLongMinAcceptScore: () => completionLongMinAcceptScoreRef.current,
       isLongEnabled: () => completionLongEnabledRef.current,
-      isEnabled: () => completionEnabledRef.current && !(readOnlyRef.current || isWriteShutdownFrozen()),
+      isEnabled: () => completionEnabledRef.current && Boolean(completionOwnerRef.current.threadId) &&
+        completionOwnerRef.current.threadId === useChatStore.getState().activeThreadId && !(readOnlyRef.current || isWriteShutdownFrozen()),
       getFilePath: () => filePathRef.current,
       language: 'markdown',
       getModel: () => completionModelRef.current,
       requestCompletion: async (context, mode) => {
+        const owner = completionOwnerRef.current
+        const threadId = owner.threadId
+        const epoch = completionThreadEpochRef.current
+        if (!threadId || threadId !== useChatStore.getState().activeThreadId || context.filePath !== filePathRef.current) return null
         if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') return null
         const result = await window.analytix.write.requestWriteInlineCompletion(
           buildInlineCompletionPayload(context, {
+            threadId,
             model: completionModelRef.current,
             workspaceRoot: workspaceRootRef.current,
             mode,
             recentEdits: recentEditsRef.current
           })
         )
-        if (!result.ok) return null
+        if (!result.ok || threadId !== useChatStore.getState().activeThreadId ||
+          epoch !== completionThreadEpochRef.current || owner !== completionOwnerRef.current) return null
         if (result.action?.kind === 'edit') {
           return {
             text: result.action.replacement,

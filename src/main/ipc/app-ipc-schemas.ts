@@ -83,7 +83,7 @@ import { providerRegistryOAuthBindingSchemaV1 } from '../../../packages/runtime/
 
 const oauthProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/)
 const oauthAccountComponentSchema = z.string().trim().min(1).max(256).refine(
-  (value) => !/[\u0000\r\n\t]/.test(value)
+  (value) => !value.includes('\0') && !/[\r\n\t]/.test(value)
 )
 
 export const providerOAuthBeginPayloadSchema = z.object({
@@ -112,7 +112,7 @@ export const oauthAuthorizationIdPayloadSchema = z.object({
 
 export const providerOAuthSubscriptionPayloadSchema = z.object({
   providerId: oauthProviderIdSchema,
-  subscriptionToken: z.string().min(1).max(32 * 1024).refine((value) => !/[\u0000\r\n]/.test(value))
+  subscriptionToken: z.string().min(1).max(32 * 1024).refine((value) => !value.includes('\0') && !/[\r\n]/.test(value))
 }).strict()
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
 import { THREAD_TRACE_EVENT_NAMES } from '../../shared/thread-trace'
@@ -1356,6 +1356,7 @@ export const workspaceFileWatchPayloadSchema = z
 
 export const writeRetrievalPayloadSchema = z
   .object({
+    threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
     workspaceRoot: defaultPathSchema,
     currentFilePath: defaultPathSchema,
     query: z.string().trim().min(1).max(MAX_CHANNEL_TEXT_LENGTH),
@@ -1409,6 +1410,7 @@ const writeInlineCompletionEditCandidateSchema = z
 
 export const writeInlineCompletionPayloadSchema = z
   .object({
+    threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
     prefix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     suffix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     mode: z.enum(['short', 'long', 'edit']).optional(),
