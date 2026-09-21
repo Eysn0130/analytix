@@ -15,7 +15,8 @@ type NativeChangeDraft struct {
 	BaseRevision string
 	BeforeText   string
 	AfterText    string
-	Workbook     *office.WorkbookReview `json:"workbook,omitempty"`
+	Workbook     *office.WorkbookReview     `json:"workbook,omitempty"`
+	Presentation *office.PresentationReview `json:"presentation,omitempty"`
 }
 
 type NativeChangeInput struct {
@@ -28,23 +29,24 @@ type NativeChangeInput struct {
 // NativeChangeStatus belongs only to the protected-local display lane. Engine
 // selection tokens are intentionally absent: reopening cannot revive a capture.
 type NativeChangeStatus struct {
-	ChangeID        string                 `json:"changeId"`
-	ThreadID        string                 `json:"threadId"`
-	ProposalID      string                 `json:"proposalId"`
-	BaseRevision    string                 `json:"baseRevision"`
-	Revision        string                 `json:"revision"`
-	Status          string                 `json:"status"`
-	BeforeText      string                 `json:"beforeText"`
-	AfterText       string                 `json:"afterText"`
-	Workbook        *office.WorkbookReview `json:"workbook,omitempty"`
-	SaveOperationID string                 `json:"saveOperationId"`
-	UndoOperationID string                 `json:"undoOperationId"`
-	CanUndo         bool                   `json:"canUndo"`
-	CanCancel       bool                   `json:"canCancel"`
-	CanRetryUndo    bool                   `json:"canRetryUndo"`
-	CanResume       bool                   `json:"canResume"`
-	CreatedAt       string                 `json:"createdAt"`
-	SavedAt         string                 `json:"savedAt"`
+	ChangeID        string                     `json:"changeId"`
+	ThreadID        string                     `json:"threadId"`
+	ProposalID      string                     `json:"proposalId"`
+	BaseRevision    string                     `json:"baseRevision"`
+	Revision        string                     `json:"revision"`
+	Status          string                     `json:"status"`
+	BeforeText      string                     `json:"beforeText"`
+	AfterText       string                     `json:"afterText"`
+	Workbook        *office.WorkbookReview     `json:"workbook,omitempty"`
+	Presentation    *office.PresentationReview `json:"presentation,omitempty"`
+	SaveOperationID string                     `json:"saveOperationId"`
+	UndoOperationID string                     `json:"undoOperationId"`
+	CanUndo         bool                       `json:"canUndo"`
+	CanCancel       bool                       `json:"canCancel"`
+	CanRetryUndo    bool                       `json:"canRetryUndo"`
+	CanResume       bool                       `json:"canResume"`
+	CreatedAt       string                     `json:"createdAt"`
+	SavedAt         string                     `json:"savedAt"`
 }
 
 type NativeRecovery struct {
@@ -93,4 +95,18 @@ type NativeRecoveryFiles interface {
 	// Resume is a fresh explicit authorization to try the same pending native
 	// save against its original base, using only Core's durable candidate bytes.
 	ResumeNativeChange(context.Context, NativeUndoInput) (Receipt, error)
+}
+
+// NativePresentationFiles extends the same session-backed native recovery owner.
+// Capture validation does not grant mutation or return caller-selected paths.
+type NativePresentationInput struct {
+	Workspace      string
+	Path           string
+	ObjectIdentity string
+	BaseRevision   string
+	Selection      office.PresentationSelection
+	Patch          *office.PresentationPatch
+}
+type NativePresentationFiles interface {
+	ValidateNativePresentation(context.Context, NativePresentationInput) (*office.PresentationReview, error)
 }

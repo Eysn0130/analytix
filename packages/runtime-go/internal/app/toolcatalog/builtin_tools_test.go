@@ -149,3 +149,24 @@ func TestNativeSelectionSchemasExposeOnlyScopedProposalAuthority(t *testing.T) {
 		t.Fatal("proposal identity/typed parts missing")
 	}
 }
+
+func TestNativePresentationToolSchemaHasOnlyFiniteExclusivePatches(t *testing.T) {
+	schemas := BuiltinToolSchemas(BuiltinToolSchemaInput{NativeSelections: true})
+	prefix := `{"scopeId":"` + strings.Repeat("a", 48) + `","operationId":"presentation_propose_01",`
+	for _, payload := range []string{`"parts":[{"kind":"literal","text":"replacement"}]}`, `"workbook":{"kind":"number","value":1}}`, `"canvas":[{"kind":"set-edge-route","id":"canvas_` + strings.Repeat("a", 48) + `","points":[]}]}`, `"presentation":{"kind":"shape-fill","rgb":"#123456"}}`, `"presentation":{"kind":"shape-geometry","x100thMm":0,"y100thMm":0,"width100thMm":1,"height100thMm":1}}`} {
+		if result, blocked := ValidateToolCallArguments(domainmodel.ToolCall{Name: "native_selection_propose", Arguments: json.RawMessage(prefix + payload)}, schemas); blocked {
+			t.Fatal("finite patch rejected", result)
+		}
+	}
+	for _, payload := range []string{`"canvas":[{"kind":"set-edge-route","id":"canvas_` + strings.Repeat("a", 48) + `","points":[{"x":0,"y":0}]}]}`, `"parts":[],"workbook":{"kind":"number","value":1}}`, `"presentation":{"kind":"chart-data"}}`, `"presentation":{"kind":"shape-fill","rgb":"#123456","shapeIndex":0}}`, `"presentation":{"kind":"shape-fill","rgb":"#123456"},"parts":[]}`, `"presentation":null}`, `"image":{"kind":"region"}}`} {
+		if _, blocked := ValidateToolCallArguments(domainmodel.ToolCall{Name: "native_selection_propose", Arguments: json.RawMessage(prefix + payload)}, schemas); !blocked {
+			t.Fatal("unsupported or mixed payload admitted", payload)
+		}
+	}
+	description := schemaByName(t, schemas, "native_selection_read").Description
+	for _, expected := range []string{"image-region", "noteParts", "imageObservation is unavailable", "no image pixels"} {
+		if !strings.Contains(description, expected) {
+			t.Fatal("image observation boundary missing", expected)
+		}
+	}
+}

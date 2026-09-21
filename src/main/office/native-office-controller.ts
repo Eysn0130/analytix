@@ -11,7 +11,7 @@ import {
   objectEditingResponseSchema, type ObjectEditingResponse
 } from '../../../packages/runtime/src/contracts/object-editing'
 import {
-  nativeTypedWorkbookSelection, nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds, type NativeOfficeAppearance,
+  nativeTypedPresentationSelection, nativeTypedWorkbookSelection, nativeOfficeRequestSchema, nativeOfficeSelectionSchema, type NativeOfficeBounds, type NativeOfficeAppearance,
   type NativeOfficeError, type NativeOfficeKind, type NativeOfficeResponse,
   type NativeOfficeSelection, type NativeOfficeView
 } from '../../shared/native-office'
@@ -663,8 +663,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const textCell = selection.kind !== 'cells' || selection.cells?.every(cell =>
       (cell.valueType === 'text' || cell.valueType === 'empty') && !cell.merged)
     const workbook = selection.kind === 'cells' && !(single && selection.cells?.[0]?.valueType === 'text') ? nativeTypedWorkbookSelection(selection) : null
-    if (request.editable && (!document.view.editing || (!workbook && (!single || !selection.capture?.complete || !text || !textCell)))) fail('unsupported_selection')
-    const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable,...(request.editable && workbook ? {workbook} : {})})
+    const presentation = nativeTypedPresentationSelection(selection)
+    if (request.editable && (!document.view.editing || (!presentation && !workbook && (!single || !selection.capture?.complete || !text || !textCell)))) fail('unsupported_selection')
+    const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable,...(request.editable && workbook ? {workbook} : {}),...(request.editable && presentation ? {presentation} : {})})
     if (!result.ok || !('scope' in result)) fail('invalid_response')
     const parsedScope = nativeOfficeSelectionScopeSchema.safeParse(result.scope)
     if (!parsedScope.success) fail('invalid_response')
@@ -695,11 +696,15 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       if (!result.ok || !('replacement' in result)) fail('invalid_response')
       const replacement = result.replacement
       if (replacement.operationId !== operationId || replacement.proposalId !== proposalId || replacement.selectionToken !== scope.selectionToken || replacement.changeSequence !== scope.changeSequence || replacement.baseRevision !== scope.baseRevision) fail('invalid_response')
-      if (!replacement.workbook && replacement.text.length > 4096) fail('unsupported_selection')
+      if (!replacement.workbook && !replacement.presentation && replacement.text.length > 4096) fail('unsupported_selection')
       document.approvedChange = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
       document.view.canUndo = false
-      if (replacement.workbook) {
-        if (!scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
+      if (replacement.presentation) {
+        if (scope.workbook || !scope.presentation || JSON.stringify(replacement.presentation.before) !== JSON.stringify(scope.presentation)) fail('invalid_response')
+        try { await engine(document,{command:'replacePresentation',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,presentation:replacement.presentation}) }
+        catch { await restoreFailedWorkbook(document); fail('save_failed') }
+      } else if (replacement.workbook) {
+        if (scope.presentation || !scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
         try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook}) }
         catch { await restoreFailedWorkbook(document); fail('save_failed') }
       } else {

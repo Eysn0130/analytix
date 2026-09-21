@@ -182,7 +182,7 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
   const selection = frozenSelection.current?.selection ?? draft?.selection
   const targetRequest = view ? {objectId:view.objectId, revision:view.revision, expectedChangeSequence:view.changeSequence ?? 0} : null
   const selectionMatches = !!(selection && view && targetMatches && selection.documentId === view.objectId && selection.version === view.revision && selection.changeSequence === (view.changeSequence ?? 0))
-  const hasSelection = selectionMatches && !!selection && !!nativeSelectionText(selection).trim()
+  const hasSelection = selectionMatches && !!selection && (!!nativeSelectionText(selection).trim() || (selection.kind === 'shapes' && !!selection.presentation))
   const editable = !!(threadId && view && selection && selectionMatches && isNativeSelectionEditable(view, selection))
   const annotationIdentity = JSON.stringify(selection)
   useEffect(() => {
@@ -280,6 +280,8 @@ export function NativeOfficePanel({ visible, onFocusConversation, onSubmitPrompt
     {view?.scope?.threadId === threadId && view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
       {view.proposals.map(proposal => { const review = view.localReviews?.find(item => item.proposalId === proposal.proposalId); return <div key={proposal.proposalId} className="py-1 text-xs">
         <div className="my-1 overflow-hidden rounded border border-ds-border-muted font-mono text-xs">
+          {review?.presentation ? <p>形状位置、尺寸或填充颜色修改；接受后验证原文件中其他对象保持不变。</p> : null}
+          {review?.presentation ? <table className="w-full text-left"><caption>形状属性（位置与尺寸单位：1/100 毫米）</caption><thead><tr><th>属性</th><th>修改前</th><th>修改后</th></tr></thead><tbody>{(['x100thMm','y100thMm','width100thMm','height100thMm','fillRGB'] as const).map(key => <tr key={key}><th>{{x100thMm:'横坐标',y100thMm:'纵坐标',width100thMm:'宽度',height100thMm:'高度',fillRGB:'填充色'}[key]}</th><td>{review.presentation!.before.shapes[review.presentation!.before.targetShapeIndex][key]}</td><td>{review.presentation!.after.shapes[review.presentation!.after.targetShapeIndex][key]}</td></tr>)}</tbody></table> : null}
           {review?.workbook ? <p>单元格类型与公式修改；Core 验算结果不代表原生缓存值。</p> : null}
           <del aria-label="修改前" className="block whitespace-pre-wrap bg-red-50 px-2 py-1 text-red-800 no-underline dark:bg-red-950/30 dark:text-red-200">{review?.beforeText ?? '原文暂不可核实，请重新选择。'}</del>
           <ins aria-label="修改后" className="block whitespace-pre-wrap bg-emerald-50 px-2 py-1 text-emerald-800 no-underline dark:bg-emerald-950/30 dark:text-emerald-200">{review?.afterText ?? '修改内容暂不可核实。'}</ins>

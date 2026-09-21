@@ -1,4 +1,4 @@
-import { nativeWorkbookSelectionSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativePresentationSelectionSchema, nativeWorkbookSelectionSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema } from '../../packages/runtime/src/contracts/native-office-editing'
 import { z } from 'zod'
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -68,7 +68,7 @@ export const nativeOfficeSelectionSchema = z.discriminatedUnion('kind', [
   z.object({ ...selectionBase, kind: z.literal('cells'), scope: z.literal('sheet-range-address-at-version-and-change-sequence'), text: z.string().max(4096), cells: z.array(z.object({ sheet: index, column: index, row: index, text: z.string().max(4096), formula: z.string().max(4096), value: z.number().finite(), valueType: z.enum(['empty', 'text', 'number', 'formula']), numberFormat: index, rowVisible: z.boolean(), columnVisible: z.boolean(), merged: z.boolean() }).strict()).max(256).optional(), ranges: z.array(z.object({
     sheet: index, sheetName: z.string().max(4096), startColumn: index, startRow: index, endColumn: index, endRow: index
   }).strict().refine(value => value.endColumn >= value.startColumn && value.endRow >= value.startRow)).max(64) }).strict(),
-  z.object({ ...selectionBase, kind: z.literal('shapes'), scope: z.literal('page-and-shape-index-at-version-and-change-sequence'), shapes: z.array(z.object({
+  z.object({ ...selectionBase, kind: z.literal('shapes'), presentation: nativePresentationSelectionSchema.optional(), scope: z.literal('page-and-shape-index-at-version-and-change-sequence'), shapes: z.array(z.object({
     pageIndex: index, shapeIndex: index, name: z.string().max(4096), type: z.string().max(256), text: z.string().max(4096)
   }).strict()).max(64) }).strict(),
   z.object({ ...selectionBase, kind: z.literal('unavailable'), scope: z.literal('engine selection interface unavailable in this view') }).strict()
@@ -103,4 +103,11 @@ export function nativeTypedWorkbookSelection(selection: NativeOfficeSelection) {
   if (selection.kind !== 'cells' || selection.ranges.length !== 1 || !selection.capture?.complete || selection.capture.truncated || !selection.cells) return null
   const parsed=nativeWorkbookSelectionSchema.safeParse({...selection.ranges[0],cells:selection.cells})
   return parsed.success ? parsed.data : null
+}
+
+export function nativeTypedPresentationSelection(selection: NativeOfficeSelection) {
+  if (selection.kind !== 'shapes' || selection.shapes.length !== 1 || !selection.presentation || !selection.token) return null
+  const parsed = nativePresentationSelectionSchema.safeParse(selection.presentation)
+  const target = selection.shapes[0]
+  return parsed.success && parsed.data.pageIndex === target.pageIndex && parsed.data.targetShapeIndex === target.shapeIndex ? parsed.data : null
 }

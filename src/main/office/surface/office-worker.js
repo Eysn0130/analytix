@@ -108,6 +108,66 @@ Module.zetajs.then(zeta => {
       });
     }catch {active.mutationFailed=true;handles.clear();throw Error('typed-mutation-failed');}
   }
+function validPresentationSelection(s) {
+  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+  const n=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
+  const text=v=>typeof v==='string'&&!v.includes('\0')&&!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v)&&new TextEncoder().encode(v).length<=4096;
+  if(!exact(s,['pageIndex','targetShapeIndex','pageWidth100thMm','pageHeight100thMm','shapes'])||!n(s.pageIndex,0,511)||!n(s.pageWidth100thMm,1,1000000)||!n(s.pageHeight100thMm,1,1000000)||!Array.isArray(s.shapes)||!n(s.shapes.length,1,64)||!n(s.targetShapeIndex,0,s.shapes.length-1))return false;
+  let bytes=0;
+  return s.shapes.every((v,i)=>{
+    if(!exact(v,['shapeIndex','kind','name','text','x100thMm','y100thMm','width100thMm','height100thMm','fillRGB'])||v.shapeIndex!==i||!['rectangle','ellipse','text'].includes(v.kind)||!text(v.name)||!text(v.text)||!/^#[0-9a-f]{6}$/.test(v.fillRGB)||!n(v.x100thMm,0,s.pageWidth100thMm)||!n(v.y100thMm,0,s.pageHeight100thMm)||!n(v.width100thMm,1,s.pageWidth100thMm-v.x100thMm)||!n(v.height100thMm,1,s.pageHeight100thMm-v.y100thMm))return false;
+    bytes+=new TextEncoder().encode(v.name+v.text).length;return bytes<=65536;
+  });
+}
+function validPresentationReview(r) {
+  if(!r||Object.keys(r).length!==2||!validPresentationSelection(r.before)||!validPresentationSelection(r.after))return false;
+  const a=r.before,b=r.after,expected=JSON.parse(JSON.stringify(a)),old=a.shapes[a.targetShapeIndex],next=b.shapes[b.targetShapeIndex];
+  if(!next)return false;
+  const target=expected.shapes[a.targetShapeIndex];
+  if(old.fillRGB!==next.fillRGB)target.fillRGB=next.fillRGB;
+  else for(const k of ['x100thMm','y100thMm','width100thMm','height100thMm'])target[k]=next[k];
+  const equal=(x,y)=>x.pageIndex===y.pageIndex&&x.targetShapeIndex===y.targetShapeIndex&&x.pageWidth100thMm===y.pageWidth100thMm&&x.pageHeight100thMm===y.pageHeight100thMm&&x.shapes.length===y.shapes.length&&x.shapes.every((s,i)=>Object.keys(s).every(k=>s[k]===y.shapes[i][k]));
+  return !equal(a,b)&&equal(expected,b);
+}
+  const enumNumber = value => typeof value==='number'?value:value?.value;
+  function presentationSnapshot(pageIndex, targetShapeIndex) {
+    if(active.kind!=='pptx')throw Error('unsupported-selection');
+    const pages=model.getDrawPages();
+    if(pages.getCount()>512||pageIndex<0||pageIndex>=pages.getCount())throw Error('unsupported-selection');
+    const page=pages.getByIndex(pageIndex),count=page.getCount();
+    if(count<1||count>64)throw Error('unsupported-selection');
+    const shapes=[];
+    for(let i=0;i<count;i++){
+      const shape=page.getByIndex(i),kind=({'com.sun.star.drawing.RectangleShape':'rectangle','com.sun.star.drawing.EllipseShape':'ellipse','com.sun.star.drawing.TextShape':'text'})[shape.getShapeType()];
+      if(!kind||enumNumber(shape.getPropertyValue('FillStyle'))!==1||Number(shape.getPropertyValue('RotateAngle'))!==0||Number(shape.getPropertyValue('ShearAngle'))!==0)throw Error('unsupported-selection');
+      // These properties must belong to this shape, not a template/master style.
+      for(const key of ['FillStyle','FillColor'])if(enumNumber(shape.getPropertyState(key))!==0)throw Error('unsupported-selection');
+      const info=shape.getPropertySetInfo();
+      for(const key of ['IsMirrored','MirroredX','MirroredY'])if(info.hasPropertyByName(key)&&shape.getPropertyValue(key)!==false)throw Error('unsupported-selection');
+      const position=shape.getPosition(),size=shape.getSize(),fill=Number(shape.getPropertyValue('FillColor'));
+      if(!Number.isInteger(fill)||fill<0||fill>0xffffff)throw Error('unsupported-selection');
+      shapes.push({shapeIndex:i,kind,name:shape.getName(),text:shape.getString(),x100thMm:position.X,y100thMm:position.Y,width100thMm:size.Width,height100thMm:size.Height,fillRGB:'#'+fill.toString(16).padStart(6,'0')});
+    }
+    const result={pageIndex,targetShapeIndex,pageWidth100thMm:Number(page.getPropertyValue('Width')),pageHeight100thMm:Number(page.getPropertyValue('Height')),shapes};
+    if(!validPresentationSelection(result))throw Error('unsupported-selection');
+    return result;
+  }
+  function replacePresentation(r) {
+    const handle=targetFor(r),review=r.presentation;
+    if(!handle.presentation||!validPresentationReview(review)||JSON.stringify(handle.presentation)!==JSON.stringify(review.before))throw Error('unsupported-selection');
+    const before=review.before,current=presentationSnapshot(before.pageIndex,before.targetShapeIndex);
+    const page=model.getDrawPages().getByIndex(before.pageIndex),target=page.getByIndex(before.targetShapeIndex);
+    if(!zeta.sameUnoObject(target,handle.target)||!zeta.sameUnoObject(controller.getCurrentPage(),page)||JSON.stringify(current)!==JSON.stringify(before))throw Error('stale-selection');
+    const a=before.shapes[before.targetShapeIndex],b=review.after.shapes[before.targetShapeIndex];
+    mutate(()=>{
+      if(a.fillRGB!==b.fillRGB)setViewProperty(target,'FillColor',parseInt(b.fillRGB.slice(1),16));
+      else {
+        target.setPosition(new css.awt.Point({X:b.x100thMm,Y:b.y100thMm}));
+        target.setSize(new css.awt.Size({Width:b.width100thMm,Height:b.height100thMm}));
+      }
+      if(JSON.stringify(presentationSnapshot(before.pageIndex,before.targetShapeIndex))!==JSON.stringify(review.after))throw Error('typed-mutation-failed');
+    });
+  }
   function selection() {
     const base = {documentId:active.documentId, version:active.version, changeSequence:active.sequence};
     try {
@@ -160,7 +220,11 @@ Module.zetajs.then(zeta => {
       }
       const text = rawTexts.join('\n');
       const target = count === 1 && shapes.length === 1 ? selected.getByIndex(0) : null;
-      return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes, capture:captured(text, !selected.getCount || selected.getCount() <= 64), ...(target && text.length > 0 ? {token:remember(target, text, 'shape')} : {})};
+      let presentation;
+      if(target)try {presentation=presentationSnapshot(pageIndex,shapes[0].shapeIndex);}catch { /* Unsupported shapes retain the existing read-only/text selection. */ }
+      const token=target&&(presentation||text.length>0)?remember(target,text,'shape'):null;
+      if(token&&presentation)handles.get(token).presentation=presentation;
+      return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes, capture:captured(text, !selected.getCount || selected.getCount() <= 64), ...(token?{token}:{}),...(presentation?{presentation}:{})};
     } catch {
       return {...base, kind:'unavailable', scope:'engine selection interface unavailable in this view'};
     }
@@ -326,6 +390,8 @@ Module.zetajs.then(zeta => {
         if (handle.target.getString() === r.text) throw Error('invalid-control-value');
         mutate(() => handle.target.setString(r.text));
         reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'replacePresentation') {
+        replacePresentation(r);reply({ok:true,state:state(),selection:selection()});
       } else if (r.command === 'replaceCells') {
         replaceWorkbook(r);reply({ok:true,state:state(),selection:selection()});
       } else if (r.command === 'export') {

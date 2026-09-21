@@ -253,13 +253,13 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 		return failure()
 	}
 	for key := range args {
-		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook" && key != "canvas") {
+		if key != "scopeId" && (pending.Call.Name != "native_selection_propose" || key != "operationId" && key != "parts" && key != "workbook" && key != "canvas" && key != "presentation") {
 			return failure()
 		}
 	}
 	if pending.Call.Name == "native_selection_propose" {
 		payloads := 0
-		for _, key := range []string{"parts", "workbook", "canvas"} {
+		for _, key := range []string{"parts", "workbook", "canvas", "presentation"} {
 			if _, ok := args[key]; ok {
 				payloads++
 			}
@@ -277,6 +277,8 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 			input["canvas"] = value
 		} else if value, ok := args["workbook"]; ok {
 			input["workbook"] = value
+		} else if value, ok := args["presentation"]; ok {
+			input["presentation"] = value
 		} else {
 			input["parts"] = args["parts"]
 		}

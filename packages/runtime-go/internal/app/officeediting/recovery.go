@@ -137,3 +137,8 @@ func (a *Adapter) captureNativeMutation(ctx context.Context, id, thread, change,
 		return nil
 	})
 }
+
+// NativePresentationService shares the existing native original/recovery owner.
+type NativePresentationService interface {
+	ValidateNativePresentation(context.Context, string, string, office.PresentationSelection, *office.PresentationPatch) (*office.PresentationReview, error)
+}

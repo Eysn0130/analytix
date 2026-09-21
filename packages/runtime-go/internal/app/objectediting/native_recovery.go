@@ -154,3 +154,24 @@ func (s *Service) ValidateNativeWorkbook(ctx context.Context, id, base string, s
 	}
 	return result, err
 }
+
+func (s *Service) ValidateNativePresentation(ctx context.Context, id, base string, selected office.PresentationSelection, patch *office.PresentationPatch) (*office.PresentationReview, error) {
+	if s == nil {
+		return nil, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	files, ok := s.files.(fileport.NativePresentationFiles)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	result, err := files.ValidateNativePresentation(ctx, fileport.NativePresentationInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base, Selection: selected, Patch: patch})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return nil, ErrUnavailable
+	}
+	return result, err
+}

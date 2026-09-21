@@ -83,12 +83,40 @@ export const nativeWorkbookPatchSchema = z.discriminatedUnion('kind',[
 export const nativeWorkbookReviewSchema = z.object({before:nativeWorkbookSelectionSchema,after:nativeWorkbookSelectionSchema,results:z.array(z.string().max(65536)).min(1).max(256)}).strict()
 export type NativeWorkbookSelection = z.infer<typeof nativeWorkbookSelectionSchema>
 export type NativeWorkbookReview = z.infer<typeof nativeWorkbookReviewSchema>
+const presentationDimension = z.number().int().min(0).max(1_000_000)
+const presentationText = selectionText.refine(value => !value.includes('\0') && new TextEncoder().encode(value).byteLength <= 4096)
+export const nativePresentationSelectionSchema = z.object({
+  pageIndex: nativeSequence.max(511), targetShapeIndex: nativeSequence.max(63),
+  pageWidth100thMm: presentationDimension.positive(), pageHeight100thMm: presentationDimension.positive(),
+  shapes: z.array(z.object({
+    shapeIndex: nativeSequence.max(63), kind: z.enum(['rectangle', 'ellipse', 'text']),
+    name: presentationText, text: presentationText,
+    x100thMm: presentationDimension, y100thMm: presentationDimension,
+    width100thMm: presentationDimension.positive(), height100thMm: presentationDimension.positive(),
+    fillRGB: z.string().regex(/^#[0-9a-f]{6}$/)
+  }).strict()).min(1).max(64)
+}).strict().refine(s => s.targetShapeIndex < s.shapes.length &&
+  s.shapes.every((shape, i) => shape.shapeIndex === i && shape.x100thMm + shape.width100thMm <= s.pageWidth100thMm && shape.y100thMm + shape.height100thMm <= s.pageHeight100thMm) &&
+  s.shapes.reduce((bytes, shape) => bytes + new TextEncoder().encode(shape.name + shape.text).byteLength, 0) <= 65536)
+export const nativePresentationPatchSchema = z.discriminatedUnion('kind', [
+  z.object({kind: z.literal('shape-geometry'), x100thMm: presentationDimension, y100thMm: presentationDimension, width100thMm: presentationDimension.positive(), height100thMm: presentationDimension.positive()}).strict(),
+  z.object({kind: z.literal('shape-fill'), rgb: z.string().regex(/^#[0-9a-f]{6}$/)}).strict()
+])
+export const nativePresentationReviewSchema = z.object({before: nativePresentationSelectionSchema, after: nativePresentationSelectionSchema}).strict().refine(({before, after}) => {
+  const a = before.shapes[before.targetShapeIndex], b = after.shapes[after.targetShapeIndex]
+  if (!a || !b) return false
+  const expected = structuredClone(before)
+  expected.shapes[before.targetShapeIndex] = a.fillRGB !== b.fillRGB ? {...a, fillRGB: b.fillRGB} : {...a, x100thMm: b.x100thMm, y100thMm: b.y100thMm, width100thMm: b.width100thMm, height100thMm: b.height100thMm}
+  return JSON.stringify(before) !== JSON.stringify(after) && JSON.stringify(expected) === JSON.stringify(after)
+})
+export type NativePresentationSelection = z.infer<typeof nativePresentationSelectionSchema>
+export type NativePresentationReview = z.infer<typeof nativePresentationReviewSchema>
 const selectionCapture = z.object({
   sessionId: selectionSession, threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
   selectionToken: nativeToken, changeSequence: nativeSequence, baseRevision: nativeRevision,
-  text: selectionText, editable: z.boolean(), workbook:nativeWorkbookSelectionSchema.optional()
+  text: selectionText, editable: z.boolean(), workbook:nativeWorkbookSelectionSchema.optional(), presentation:nativePresentationSelectionSchema.optional()
 }).strict()
-export const nativeOfficeSelectionCaptureInputSchema = selectionCapture.refine(value => !value.editable || !!value.workbook || value.text.length <= MaxNativeOfficeSelectionUTF16)
+export const nativeOfficeSelectionCaptureInputSchema = selectionCapture.refine(value => !(value.workbook && value.presentation) && (!value.editable || !!value.workbook || !!value.presentation || value.text.length <= MaxNativeOfficeSelectionUTF16))
 export const nativeOfficeScopeInputSchema = z.object({ sessionId: selectionSession, scopeId }).strict()
 export const nativeOfficeProposalRejectInputSchema = nativeOfficeScopeInputSchema.extend({ proposalId: scopeId, operationId: nativeOperation })
 export const nativeOfficeProposalDecisionInputSchema = nativeOfficeProposalRejectInputSchema.extend({
@@ -96,20 +124,20 @@ export const nativeOfficeProposalDecisionInputSchema = nativeOfficeProposalRejec
 })
 export const nativeOfficeSelectionScopeSchema = selectionCapture.omit({ text: true }).extend({ scopeId, parts: selectionParts })
 const replacementParts = selectionParts.refine(parts => parts.reduce((units, part) => units + (part.kind === 'literal' ? part.text.length : 0), 0) <= MaxNativeOfficeSelectionUTF16)
-export const nativeOfficeProposalSchema = z.object({ proposalId: scopeId, status: z.enum(['proposed', 'approved', 'rejected']), parts: replacementParts, workbook:nativeWorkbookPatchSchema.optional() }).strict()
+export const nativeOfficeProposalSchema = z.object({ proposalId: scopeId, status: z.enum(['proposed', 'approved', 'rejected']), parts: replacementParts, workbook:nativeWorkbookPatchSchema.optional(), presentation:nativePresentationPatchSchema.optional() }).strict()
 export const nativeOfficeReplacementSchema = z.object({
-  proposalId: scopeId, operationId: nativeOperation, text: selectionText, workbook:nativeWorkbookReviewSchema.optional(),
+  proposalId: scopeId, operationId: nativeOperation, text: selectionText, workbook:nativeWorkbookReviewSchema.optional(), presentation:nativePresentationReviewSchema.optional(),
   changeId: nativeRevision, saveOperationId: nativeOperation,
   selectionToken: nativeToken, changeSequence: nativeSequence, baseRevision: nativeRevision
-}).strict().refine(value => !!value.workbook || value.text.length <= MaxNativeOfficeSelectionUTF16)
+}).strict().refine(value => !(value.workbook && value.presentation) && (!!value.workbook || !!value.presentation || value.text.length <= MaxNativeOfficeSelectionUTF16))
 // Raw review text is protected-local display data. Never include this in a
 // model tool result, reference card, or persisted conversation message.
-export const nativeOfficeLocalReviewSchema = z.object({ proposalId: scopeId, beforeText: selectionText, afterText: selectionText, workbook:nativeWorkbookReviewSchema.optional() }).strict()
+export const nativeOfficeLocalReviewSchema = z.object({ proposalId: scopeId, beforeText: selectionText, afterText: selectionText, workbook:nativeWorkbookReviewSchema.optional(), presentation:nativePresentationReviewSchema.optional() }).strict()
 export const nativeOfficeChangeSchema = z.object({
   changeId: nativeRevision, threadId: selectionCapture.shape.threadId, proposalId: scopeId,
   baseRevision: nativeRevision, revision: z.union([nativeRevision, z.literal('')]),
   status: z.enum(['prepared', 'unknown', 'committed', 'conflict', 'undone', 'cancelled', 'superseded']),
-  beforeText: selectionText, afterText: selectionText, workbook:nativeWorkbookReviewSchema.optional(),
+  beforeText: selectionText, afterText: selectionText, workbook:nativeWorkbookReviewSchema.optional(), presentation:nativePresentationReviewSchema.optional(),
   saveOperationId: nativeOperation, undoOperationId: nativeOperation, canUndo: z.boolean(),
   canCancel: z.boolean(), canRetryUndo: z.boolean(), canResume: z.boolean(),
   createdAt: z.string().max(64), savedAt: z.string().max(64)

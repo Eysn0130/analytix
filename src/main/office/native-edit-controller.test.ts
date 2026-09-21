@@ -7,11 +7,13 @@ const original = new Uint8Array([80,75,1]), edited = new Uint8Array([80,75,2])
 const objectId = 'a'.repeat(64), sessionId = 'e'.repeat(48), revision = hash(original)
 const threadId = 'thread-native', changeId = '9'.repeat(64), saveOperationId = 'save_core_0001', undoOperationId = 'undo_core_0001'
 const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds:{x:0,y:0,width:800,height:600}}
-function setup(typed = false) {
+function setup(typed = false, presentation = false) {
+  const presentationSelection={pageIndex:0,targetShapeIndex:0,pageWidth100thMm:1000,pageHeight100thMm:1000,shapes:[{shapeIndex:0,kind:'rectangle' as const,name:'shape',text:'selected',x100thMm:100,y100thMm:100,width100thMm:100,height100thMm:100,fillRGB:'#123456'}]}
+  const presentationReview={before:presentationSelection,after:{...presentationSelection,shapes:[{...presentationSelection.shapes[0],fillRGB:'#abcdef'}]}}
   let failTyped=false, rejectNoop=false
   const workbook={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[{sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number' as const,numberFormat:0,rowVisible:true as const,columnVisible:true as const,merged:false as const}]}
   const workbookReview={before:workbook,after:{...workbook,cells:[{...workbook.cells[0],text:'2',formula:'2',value:2}]},results:['']}
-  let current = {documentId:objectId,version:revision,kind:(typed?'xlsx':'docx') as 'xlsx'|'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
+  let current = {documentId:objectId,version:revision,kind:(presentation?'pptx':typed?'xlsx':'docx') as 'pptx'|'xlsx'|'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
   let onEvent:(event:unknown)=>void = ()=>{}, opened = '', saved = revision, commitCalls=0, undoCalls=0, cancelCalls=0, resumeCalls=0, statusCalls=0
   let receipt:any, deferCommit:((value:any)=>void)|undefined
   let delay=false, conflict=false, hidden=0, destroyed=0, revoked=0, loseCommit=false, failReload=false, rejectCommit=false
@@ -22,14 +24,14 @@ function setup(typed = false) {
   const receipts = new Map<string, any>()
   let scope:any, loseDecision=false, acceptedOperation:string|undefined, replacementText='proposed'
   let openGate:Promise<void>|undefined, releaseOpen:(()=>void)|undefined
-  const pkg:PluginPackageView={packageId:typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
-  const selection=()=>typed?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:workbook.cells,token:'selection_123',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}}):({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text:'selected',token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}})
+  const pkg:PluginPackageView={packageId:presentation?'analytix-presentations':typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
+  const selection=()=>presentation?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[{pageIndex:0,shapeIndex:0,name:'shape',type:'com.sun.star.drawing.RectangleShape',text:'selected'}],presentation:presentationSelection,token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}}):typed?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:workbook.cells,token:'selection_123',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}}):({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text:'selected',token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}})
   const requests:NativeOfficeEngineRequest[]=[]
   const createController=()=>createNativeOfficeController({
     async packageHost(r):Promise<any>{
       if(r.action==='list')return {ok:true,packages:[pkg]}
       if(r.action!=='invoke')throw Error('not authorized')
-      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
+      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
       if(r.operation==='capture-selection'){scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}]};delete scope.text;return {ok:true,output:{ok:true,scope}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
       if(r.operation==='object-recovery'){
@@ -50,7 +52,7 @@ function setup(typed = false) {
         acceptedOperation=r.input.operationId as string
         persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
         if(loseDecision){loseDecision=false;throw Error('transport lost after Core accepted')}
-        return {ok:true,output:{ok:true,replacement:{proposalId,changeId,saveOperationId,operationId:r.input.operationId,text:replacementText,...(typed?{workbook:workbookReview}:{}),selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision}}}
+        return {ok:true,output:{ok:true,replacement:{proposalId,changeId,saveOperationId,operationId:r.input.operationId,text:replacementText,...(presentation?{presentation:presentationReview}:typed?{workbook:workbookReview}:{}),selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision}}}
       }
       if(r.operation==='close-object')return {ok:true,output:{ok:true,closed:true}}
       if(r.operation==='commit-object'){
@@ -58,7 +60,7 @@ function setup(typed = false) {
         expect(input).toMatchObject({changeId:persisted.changeId,threadId:persisted.threadId,operationId:persisted.saveOperationId})
         if(rejectCommit){rejectCommit=false;return {ok:true,output:{ok:false,code:'not_text',message:'unsupported'}}}
         const content = new Uint8Array(Buffer.from(input.content.data, 'base64'))
-        expect(input.content).toEqual({encoding:'base64',kind:typed?'xlsx':'docx',data:Buffer.from(content).toString('base64'),sha256:hash(content),byteLength:3})
+        expect(input.content).toEqual({encoding:'base64',kind:presentation?'pptx':typed?'xlsx':'docx',data:Buffer.from(content).toString('base64'),sha256:hash(content),byteLength:3})
         expect(input.baseRevision).toBe(saved)
         if(interruptSave){
           interruptSave=false;pendingCandidate=content.slice()
@@ -112,8 +114,8 @@ function setup(typed = false) {
       const base={type:'result',channel:'surface',command:r.command,operationId:r.operationId,documentId:r.documentId,version:r.version,ok:true}
       if(r.command==='open'){if(failReload){failReload=false;throw Error('reload failed')}opened=r.operationId;current={...current,version:r.version,changeSequence:0,acknowledgedSequence:0,dirty:false}}
       if(r.command==='close')return base
-      if(r.command==='replaceCells'&&failTyped){current={...current,changeSequence:1,dirty:true};throw Error('typed-mutation-failed')}
-      if(r.command==='replace'||r.command==='replaceCells')current={...current,changeSequence:current.changeSequence+1,dirty:true}
+      if((r.command==='replaceCells'||r.command==='replacePresentation')&&failTyped){current={...current,changeSequence:1,dirty:true};throw Error('typed-mutation-failed')}
+      if(r.command==='replace'||r.command==='replaceCells'||r.command==='replacePresentation')current={...current,changeSequence:current.changeSequence+1,dirty:true}
       if(r.command==='export')return {...base,state:{...current},bytes:edited,exportedSequence:current.changeSequence}
       if(r.command==='ack'&&r.status==='committed')current={...current,version:r.persistedVersion!,acknowledgedSequence:r.exportedSequence!,dirty:current.changeSequence!==r.exportedSequence}
       return {...base,state:{...current},selection:selection()}
@@ -476,4 +478,19 @@ test('partial typed mutation destroys poisoned workcopy and reloads Core origina
  await h.controller.saveAll()
  expect(h.requests.some(r=>r.command==='export')).toBe(false)
  expect(h.getCommitCalls()).toBe(0)
+})
+
+test('presentation approval uses typed worker command and the existing Core save receipt',async()=>{
+ const h=setup(false,true);expect((await h.controller.request({...open,path:'a.pptx'})).ok).toBe(true)
+ expect(await applyProposal(h)).toMatchObject({ok:true})
+ expect(h.requests.filter(r=>r.command==='replacePresentation')).toHaveLength(1)
+ expect(h.requests.some(r=>r.command==='replace')).toBe(false)
+ expect(h.getCommitCalls()).toBe(1)
+})
+test('partially changed presentation is destroyed and original reopened without exporting',async()=>{
+ const h=setup(false,true);expect((await h.controller.request({...open,path:'a.pptx'})).ok).toBe(true);h.failTyped()
+ expect(await applyProposal(h)).toMatchObject({ok:false,error:'save_failed',view:{dirty:false,editing:false,revision}})
+ await h.controller.saveAll()
+ expect(h.getDestroyed()).toBe(1);expect(h.requests.filter(r=>r.command==='open')).toHaveLength(2)
+ expect(h.requests.some(r=>r.command==='export')).toBe(false);expect(h.getCommitCalls()).toBe(0)
 })

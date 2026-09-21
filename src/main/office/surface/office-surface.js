@@ -6,7 +6,7 @@ const identity = r => r && token(r.channel) && token(r.operationId) && token(r.d
 const key = r => r.command + ':' + r.operationId;
 const matches = (a, b) => a.channel === b.channel && a.operationId === b.operationId && a.documentId === b.documentId && a.version === b.version && a.command === b.command;
 const kinds = ['docx', 'xlsx', 'pptx'];
-const previewCommands = ['open', 'edit', 'replace', 'replaceCells', 'export', 'ack', 'captureSelection', 'close'];
+const previewCommands = ['open', 'edit', 'replace', 'replaceCells', 'replacePresentation', 'export', 'ack', 'captureSelection', 'close'];
 function validWorkbookReview(value) {
   const record=v=>v && Object.getPrototypeOf(v)===Object.prototype;
   const exact=(v,keys)=>record(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
@@ -20,6 +20,27 @@ function validWorkbookReview(value) {
   };
   return exact(value,['before','after','results'])&&snapshot(value.before)&&snapshot(value.after)&&fields.filter(k=>k!=='cells').every(k=>value.before[k]===value.after[k])&&Array.isArray(value.results)&&value.results.length===value.after.cells.length&&value.results.every(v=>text(v,65536));
 }
+function validPresentationSelection(s) {
+  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+  const n=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
+  const text=v=>typeof v==='string'&&!v.includes('\0')&&!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v)&&new TextEncoder().encode(v).length<=4096;
+  if(!exact(s,['pageIndex','targetShapeIndex','pageWidth100thMm','pageHeight100thMm','shapes'])||!n(s.pageIndex,0,511)||!n(s.pageWidth100thMm,1,1000000)||!n(s.pageHeight100thMm,1,1000000)||!Array.isArray(s.shapes)||!n(s.shapes.length,1,64)||!n(s.targetShapeIndex,0,s.shapes.length-1))return false;
+  let bytes=0;
+  return s.shapes.every((v,i)=>{
+    if(!exact(v,['shapeIndex','kind','name','text','x100thMm','y100thMm','width100thMm','height100thMm','fillRGB'])||v.shapeIndex!==i||!['rectangle','ellipse','text'].includes(v.kind)||!text(v.name)||!text(v.text)||!/^#[0-9a-f]{6}$/.test(v.fillRGB)||!n(v.x100thMm,0,s.pageWidth100thMm)||!n(v.y100thMm,0,s.pageHeight100thMm)||!n(v.width100thMm,1,s.pageWidth100thMm-v.x100thMm)||!n(v.height100thMm,1,s.pageHeight100thMm-v.y100thMm))return false;
+    bytes+=new TextEncoder().encode(v.name+v.text).length;return bytes<=65536;
+  });
+}
+function validPresentationReview(r) {
+  if(!r||Object.keys(r).length!==2||!validPresentationSelection(r.before)||!validPresentationSelection(r.after))return false;
+  const a=r.before,b=r.after,expected=JSON.parse(JSON.stringify(a)),old=a.shapes[a.targetShapeIndex],next=b.shapes[b.targetShapeIndex];
+  if(!next)return false;
+  const target=expected.shapes[a.targetShapeIndex];
+  if(old.fillRGB!==next.fillRGB)target.fillRGB=next.fillRGB;
+  else for(const k of ['x100thMm','y100thMm','width100thMm','height100thMm'])target[k]=next[k];
+  const equal=(x,y)=>x.pageIndex===y.pageIndex&&x.targetShapeIndex===y.targetShapeIndex&&x.pageWidth100thMm===y.pageWidth100thMm&&x.pageHeight100thMm===y.pageHeight100thMm&&x.shapes.length===y.shapes.length&&x.shapes.every((s,i)=>Object.keys(s).every(k=>s[k]===y.shapes[i][k]));
+  return !equal(a,b)&&equal(expected,b);
+}
 function validRequest(r) {
   if (!identity(r) || Object.getPrototypeOf(r) !== Object.prototype) return false;
   let extra = [];
@@ -29,6 +50,9 @@ function validRequest(r) {
   } else if (r.command === 'close') {
     if (!Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0 || typeof r.discard !== 'boolean') return false;
     extra = ['expectedChangeSequence', 'discard'];
+  } else if (r.command === 'replacePresentation') {
+    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validPresentationReview(r.presentation)) return false;
+    extra=['selectionToken','expectedChangeSequence','presentation'];
   } else if (r.command === 'replaceCells') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook)) return false;
     extra=['selectionToken','expectedChangeSequence','workbook'];
