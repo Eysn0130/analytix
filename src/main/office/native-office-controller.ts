@@ -246,7 +246,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     try { raw = await document.surface.request(request) } catch (error) {
       const code = error instanceof Error ? error.message : ''
       if (code === 'stale-selection') fail('stale_selection')
-      if (['unsupported-selection', 'invalid-control-value', 'unsupported-command', 'command-unavailable', 'single-cell-required'].includes(code)) fail('unsupported_selection')
+      if (['unsupported-selection', 'unsupported-format-fidelity', 'invalid-control-value', 'unsupported-command', 'command-unavailable', 'single-cell-required'].includes(code)) fail('unsupported_selection')
       if (code === 'export-too-large') fail('save_failed')
       if (code === 'unsaved-changes') fail('unsaved_changes')
       fail('engine_unavailable')

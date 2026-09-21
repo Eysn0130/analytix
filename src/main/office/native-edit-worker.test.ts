@@ -18,7 +18,10 @@ function worker(text = '重复文本', kind = 'docx', cellType = 2, portionType 
   const sheet = {getName:()=> 'Sheet1',getCellByPosition:()=>ranges[selected],getRows:()=>({getByIndex:()=>({getPropertyValue:()=>true})}),getColumns:()=>({getByIndex:()=>({getPropertyValue:()=>true})})}
   for (const cell of ranges) Object.assign(cell,{getType:()=>cellType,getFormula:()=>cellType === 3 ? '=SUM(A1:A2)' : '',getValue:()=>123,getPropertyValue:()=>0,getIsMerged:()=>false})
   if (kind === 'xlsx') controller.getSelection = () => ({getRangeAddress:()=>({Sheet:0,StartColumn:0,EndColumn:0,StartRow:0,EndRow:0})})
-  const model = {getSheets:()=>({getByIndex:()=>sheet}),isReadonly:()=>readonly,isModified:()=>modified,setModified:(v:boolean)=>{modified=v},getCurrentController:()=>controller,addModifyListener:(l:any)=>{listener=l},removeModifyListener(){},close(){},storeToURL:vi.fn()}
+  const typography = { western: 11, asian: 11 }
+  const bodyPortion = { getPropertyValue:(name:string)=>name==='CharHeight'?typography.western:typography.asian }
+  const body = {createEnumeration:()=>enumerate([{createEnumeration:()=>enumerate([bodyPortion])}])}
+  const model = {getText:()=>body,getSheets:()=>({getByIndex:()=>sheet}),isReadonly:()=>readonly,isModified:()=>modified,setModified:(v:boolean)=>{modified=v},getCurrentController:()=>controller,addModifyListener:(l:any)=>{listener=l},removeModifyListener(){},close(){},storeToURL:vi.fn()}
   const css = {frame:{Desktop:{create:()=>({loadComponentFromURL: (_url:any,_target:any,_flags:any,p:any[])=>{properties.push(p);readonly=p.find(v=>v.Name==='ReadOnly').Value; return model}})}},beans:{PropertyValue:function(this:any,p:any){Object.assign(this,p)}},util:{XModifyListener:{}},view:{XSelectionChangeListener:{}}}
   const port:any={postMessage:(v:any)=>messages.push(v)}
   const zeta={sameUnoObject:(a:any,b:any)=>a===b,uno:{com:{sun:{star:css}}},getUnoComponentContext(){},unoObject:(_:any,v:any)=>v,mainPort:port,Any:function(this:any,_:any,v:any){this.value=v}}
@@ -26,7 +29,7 @@ function worker(text = '重复文本', kind = 'docx', cellType = 2, portionType 
   let op=0, revision='a'.repeat(64)
   const send=(command:string,extra:any={})=>{port.onmessage({data:{command,channel:'test-channel',operationId:`operation_${++op}`,documentId:'d'.repeat(64),version:revision,...extra}});return messages.at(-1)}
   send('bind');send('open',{kind})
-  return {send,paragraphs,properties,model,ranges,select:(i:number)=>{selected=i},change:()=>{modified=true;listener.modified()},revision:(value:string)=>{revision=value}}
+  return {send,paragraphs,properties,model,ranges,typography,body,select:(i:number)=>{selected=i},change:()=>{modified=true;listener.modified()},revision:(value:string)=>{revision=value}}
 }
 test.each([1,3])('never coerces native numeric/formula cell type %s through text replacement', cellType => {
   const w=worker('123','xlsx',cellType); w.send('edit')
@@ -154,4 +157,43 @@ test('refuses unknown DOCX enumeration instead of flattening it', () => {
   w.ranges[1].createEnumeration=undefined
   expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'replacement',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
   expect(w.ranges[1].setString).not.toHaveBeenCalled()
+})
+
+
+test('split Western/CJK body sizes refuse editing before any mutation and retain readonly preview', () => {
+  const w=worker();w.typography.asian=10.5
+  expect(w.send('edit')).toMatchObject({ok:false,error:'unsupported-format-fidelity'})
+  expect(w.send('captureSelection')).toMatchObject({ok:true,state:{dirty:false,changeSequence:0}})
+  expect(w.model.isReadonly()).toBe(true)
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+  expect(w.ranges[1].setString).not.toHaveBeenCalled()
+  expect(w.send('export').ok).toBe(false)
+  expect(w.send('close',{expectedChangeSequence:0,discard:false}).ok).toBe(true)
+})
+test('rechecks typography at export instead of relying on the initial edit admission', () => {
+  const w=worker();expect(w.send('edit').ok).toBe(true);w.typography.asian=10.5
+  expect(w.send('export')).toMatchObject({ok:false,error:'unsupported-format-fidelity'})
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+  expect(w.send('captureSelection')).toMatchObject({ok:true,state:{dirty:false,changeSequence:0}})
+})
+test('table-cell typography is checked as well as ordinary body paragraphs', () => {
+  const w=worker();const paragraph=w.body.createEnumeration().nextElement()
+  w.body.createEnumeration=()=>{let count=0;return {hasMoreElements:()=>count===0,nextElement:()=>{count++;return {getCellNames:()=>['A1'],getCellByName:()=>({createEnumeration:()=>{let n=0;return {hasMoreElements:()=>n===0,nextElement:()=>{n++;return paragraph}}}})}}}}
+  w.typography.asian=10.5
+  expect(w.send('edit')).toMatchObject({ok:false,error:'unsupported-format-fidelity'})
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+})
+
+
+test.each([NaN,Infinity,0,-1])('unknown or invalid native font size %s never permits an export', value=>{
+  const w=worker();w.typography.western=value;w.typography.asian=value
+  expect(w.send('edit')).toMatchObject({ok:false,error:'unsupported-format-fidelity'})
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+})
+test('unbounded native enumeration fails closed without hanging or mutating',()=>{
+  const w=worker();const block=w.body.createEnumeration().nextElement()
+  w.body.createEnumeration=()=>({hasMoreElements:()=>true,nextElement:()=>block})
+  expect(w.send('edit')).toMatchObject({ok:false,error:'unsupported-format-fidelity'})
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+  expect(w.send('captureSelection')).toMatchObject({ok:true,state:{dirty:false,changeSequence:0}})
 })

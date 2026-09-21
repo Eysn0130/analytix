@@ -20,7 +20,7 @@ export const officeCodes = new Set([
   'document-already-open', 'open-failed', 'stale-document-version',
   'unsaved-changes', 'command-unavailable', 'unsupported-command', 'native-controls-hide-failed',
   'operation-in-progress', 'stale-selection', 'unsupported-selection', 'export-too-large', 'export-awaiting-ack', 'ack-mismatch', 'invalid-control-value', 'operation-replayed', 'session-operation-limit',
-  'typed-mutation-failed', 'engine-timeout-state-unknown', 'surface-state-unknown-recreate-required'
+  'typed-mutation-failed', 'unsupported-format-fidelity', 'engine-timeout-state-unknown', 'surface-state-unknown-recreate-required'
 ])
 const kinds = ['docx', 'xlsx', 'pptx']
 export function officeRecord(v: unknown): v is Record<string, unknown> {

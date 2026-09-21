@@ -78,6 +78,10 @@ test('Main facade starts engine and sends typed correlated replies without expos
   context.Engine.prototype.request.mockRejectedValueOnce(new Error('/private/document content'))
   await vm.runInContext("deliver({command:'bold',channel:'channel',operationId:'bold',documentId:'document',version:'version'})", context)
   expect(bridge.send.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'result', ok: false, error: 'engine-operation-failed' })
+  context.Engine.prototype.request.mockRejectedValueOnce(new Error('unsupported-format-fidelity'))
+  await vm.runInContext("deliver({command:'edit',channel:'channel',operationId:'edit',documentId:'document',version:'version'})", context)
+  expect(bridge.send.mock.calls.at(-1)?.[0]).toMatchObject({type:'result',ok:false,error:'unsupported-format-fidelity'})
+  expect(nodes.status.textContent).toContain('可继续预览')
   expect(JSON.stringify(bridge.send.mock.calls)).not.toContain('/private/document')
 })
 

@@ -10,7 +10,7 @@ const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds
 function setup(typed = false, presentation = false) {
   const presentationSelection={pageIndex:0,targetShapeIndex:0,pageWidth100thMm:1000,pageHeight100thMm:1000,shapes:[{shapeIndex:0,kind:'rectangle' as const,name:'shape',text:'selected',x100thMm:100,y100thMm:100,width100thMm:100,height100thMm:100,fillRGB:'#123456'}]}
   const presentationReview={before:presentationSelection,after:{...presentationSelection,shapes:[{...presentationSelection.shapes[0],fillRGB:'#abcdef'}]}}
-  let failTyped=false, rejectNoop=false, rejectText=false
+  let failTyped=false, rejectNoop=false, rejectText=false, rejectFidelity=false
   const workbook={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[{sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number' as const,numberFormat:0,rowVisible:true as const,columnVisible:true as const,merged:false as const}]}
   const workbookReview={before:workbook,after:{...workbook,cells:[{...workbook.cells[0],text:'2',formula:'2',value:2}]},results:['']}
   let current = {documentId:objectId,version:revision,kind:(presentation?'pptx':typed?'xlsx':'docx') as 'pptx'|'xlsx'|'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
@@ -114,6 +114,7 @@ function setup(typed = false, presentation = false) {
       const base={type:'result',channel:'surface',command:r.command,operationId:r.operationId,documentId:r.documentId,version:r.version,ok:true}
       if(r.command==='open'){if(failReload){failReload=false;throw Error('reload failed')}opened=r.operationId;current={...current,version:r.version,changeSequence:0,acknowledgedSequence:0,dirty:false}}
       if(r.command==='close')return base
+      if(r.command==='edit'&&rejectFidelity)throw Error('unsupported-format-fidelity')
       if(r.command==='replace'&&rejectText)throw Error('unsupported-selection')
       if((r.command==='replaceCells'||r.command==='replacePresentation')&&failTyped){current={...current,changeSequence:1,dirty:true};throw Error('typed-mutation-failed')}
       if(r.command==='replace'||r.command==='replaceCells'||r.command==='replacePresentation')current={...current,changeSequence:current.changeSequence+1,dirty:true}
@@ -124,7 +125,7 @@ function setup(typed = false, presentation = false) {
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -507,4 +508,15 @@ test('native structure rejection retains the prepared review without exporting o
   await h.controller.request({action:'saveStatus',objectId:h.target().objectId})
   expect(await h.controller.request({action:'cancelChange',threadId,changeId,...h.target()})).toMatchObject({ok:true})
   expect(h.getSaved()).toBe(revision);expect(h.getCommitCalls()).toBe(0)
+})
+
+
+test('unsupported DOCX format remains previewable without edit authority or a Core save',async()=>{
+  const h=setup();h.rejectFidelity()
+  expect(await h.controller.request(open)).toMatchObject({ok:true})
+  expect(await h.controller.request({action:'annotate',...h.target()})).toMatchObject({ok:false,error:'unsupported_selection',view:{dirty:false,revision}})
+  expect(h.controller.getView()?.editing).not.toBe(true)
+  expect(h.requests.some(r=>r.command==='replace'||r.command==='export')).toBe(false)
+  expect(h.getCommitCalls()).toBe(0);expect(h.getSaved()).toBe(revision)
+  expect(await h.controller.request({action:'close',objectId})).toMatchObject({ok:true})
 })

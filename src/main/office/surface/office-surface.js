@@ -281,7 +281,7 @@ function installSurface() {
     preview.setAttribute('aria-busy','false');
     footer.dataset.error = String(result?.ok === false);
     if (result?.ok === false) {
-      status.textContent = result.error === 'unsupported-command' ? '只读预览不支持此操作' : '预览未能完成，请重新打开';
+      status.textContent = result.error === 'unsupported-format-fidelity' ? '当前引擎无法确认此文档的中西文字号保真，原件未保存。可继续预览。' : result.error === 'unsupported-command' ? '只读预览不支持此操作' : '预览未能完成，请重新打开';
       return;
     }
     if (!engine?.state) { status.textContent = '等待打开文档'; selectionText.textContent = ''; return; }
@@ -315,7 +315,7 @@ function installSurface() {
       if (!bound || !identity(r) || r.channel !== channel) return;
       try { if (r.command === 'open') loading('正在打开文档…'); const result = await engine.request(r); render(result); bridge.send(result); }
       catch (error) {
-        const known = ['typed-mutation-failed','stale-selection','unsupported-selection','invalid-control-value','invalid-request','already-bound','engine-operation-failed','engine-load-failed',
+        const known = ['typed-mutation-failed','stale-selection','unsupported-selection','unsupported-format-fidelity','invalid-control-value','invalid-request','already-bound','engine-operation-failed','engine-load-failed',
           'document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch',
           'unsaved-changes','command-unavailable','unsupported-command','native-controls-hide-failed',
           'operation-in-progress','export-too-large','engine-timeout-state-unknown','surface-state-unknown-recreate-required'];

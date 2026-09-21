@@ -189,6 +189,39 @@ function validPresentationReview(r) {
       if (!textPortions) throw Error('unsupported-selection');
     } catch { throw Error('unsupported-selection'); }
   }
+  function requireDocxSizeFidelity() {
+    if (active.kind !== 'docx') return;
+    // The pinned DOCX exporter writes one w:sz for Western and CJK text.
+    // A model with different script sizes can lose formatting even on a no-op
+    // export. Refuse that known loss; do not normalize the user's document.
+    // This bounded body/table check is not a general round-trip fidelity proof.
+    let budget = 8192;
+    const take = () => { if (--budget < 0) throw Error('unsupported-format-fidelity'); };
+    const visit = (text, depth) => {
+      if (depth > 16) throw Error('unsupported-format-fidelity');
+      const blocks = text.createEnumeration();
+      while (blocks.hasMoreElements()) {
+        take();
+        const block = blocks.nextElement();
+        if (block.getCellNames) {
+          const names = block.getCellNames();
+          if (names.length > budget) throw Error('unsupported-format-fidelity');
+          for (const name of names) { take(); visit(block.getCellByName(name), depth + 1); }
+        } else {
+          const portions = block.createEnumeration();
+          while (portions.hasMoreElements()) {
+            take();
+            const portion = portions.nextElement();
+            const western = portion.getPropertyValue('CharHeight');
+            const asian = portion.getPropertyValue('CharHeightAsian');
+            if (!Number.isFinite(western) || western <= 0 || western !== asian) throw Error('unsupported-format-fidelity');
+          }
+        }
+      }
+    };
+    try { visit(model.getText(), 0); }
+    catch { throw Error('unsupported-format-fidelity'); }
+  }
   function selection() {
     const base = {documentId:active.documentId, version:active.version, changeSequence:active.sequence};
     try {
@@ -394,6 +427,7 @@ function validPresentationReview(r) {
       } else if (r.command === 'edit') {
         if (active.sequence !== active.acknowledged) throw Error('unsaved-changes');
         if (model.isReadonly() !== true) throw Error('unsupported-command');
+        requireDocxSizeFidelity();
         // Internal AI mutation authority; the native view stays read-only.
         active.editing = true;
         reply({ok:true, state:state(), selection:selection()});
@@ -419,6 +453,7 @@ function validPresentationReview(r) {
       } else if (r.command === 'export') {
         requireEditing();
         if (active.pendingExport) throw Error('export-awaiting-ack');
+        requireDocxSizeFidelity();
         const sequence = active.sequence;
         // Native UI is readonly and worker commands are serialized. Synchronous
         // filter/layout notifications during export are not another AI edit.
@@ -448,7 +483,7 @@ function validPresentationReview(r) {
       } else throw Error('unsupported-command');
     } catch (error) {
       const known = ['typed-mutation-failed','stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
-      const code = known.includes(error.message) ? error.message : 'engine-operation-failed';
+      const code = known.includes(error.message) || error.message === 'unsupported-format-fidelity' ? error.message : 'engine-operation-failed';
       reply({ok:false, error:code});
     }
   };
