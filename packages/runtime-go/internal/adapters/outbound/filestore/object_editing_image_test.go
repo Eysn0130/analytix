@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"hash/crc32"
 	"image"
@@ -16,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	editing "analytix.local/runtime-go/internal/ports/objectediting"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
@@ -157,10 +159,10 @@ func TestImageAnnotationCASLostAcknowledgementRestartAndStaleSource(t *testing.T
 	f, target, raw := imageFileFixture(t)
 	ctx := context.Background()
 	initial, err := f.ReadImageAnnotation(ctx, target)
-	if err != nil || initial.Current || initial.AnnotationRevision != "" || initial.Region != nil {
+	if err != nil || initial.Current || initial.AnnotationRevision != "" || initial.Regions == nil || len(initial.Regions) != 0 {
 		t.Fatal("initial annotation", err)
 	}
-	in := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: digestAtomicText(raw), Region: &editing.ImageRegion{X: 1, Y: 1, Width: 3, Height: 2}, Note: "private-user@example.invalid"}
+	in := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: digestAtomicText(raw), Regions: []editing.ImageAnnotationRegion{{RegionID: strings.Repeat("a", 48), Region: editing.ImageRegion{X: 1, Y: 1, Width: 3, Height: 2}, Note: "private-user@example.invalid"}, {RegionID: strings.Repeat("b", 48), Region: editing.ImageRegion{X: 5, Y: 1, Width: 2, Height: 2}, Note: "second region"}}}
 	writes := 0
 	f.replaceJournal = func(request atomicTextReplaceRequest) error {
 		writes++
@@ -173,7 +175,7 @@ func TestImageAnnotationCASLostAcknowledgementRestartAndStaleSource(t *testing.T
 		t.Fatal("lost ack claimed saved", err)
 	}
 	saved, err := f.WriteImageAnnotation(ctx, in)
-	if err != nil || writes != 1 || !saved.Current || saved.Note != in.Note {
+	if err != nil || writes != 1 || !saved.Current || !reflect.DeepEqual(saved.Regions, in.Regions) {
 		t.Fatal("idempotent retry", err, writes)
 	}
 	restarted, err := NewObjectEditingFiles(f.receiptRoot, nil)
@@ -185,13 +187,15 @@ func TestImageAnnotationCASLostAcknowledgementRestartAndStaleSource(t *testing.T
 		t.Fatal("restart lost typed geometry", err)
 	}
 	stale := in
-	stale.Note = "replacement"
+	stale.Regions = append([]editing.ImageAnnotationRegion{}, in.Regions...)
+	stale.Regions[1].Note = "replacement"
 	if _, err := restarted.WriteImageAnnotation(ctx, stale); !errors.Is(err, editing.ErrConflict) {
 		t.Fatal("CAS bypass", err)
 	}
 	invalid := in
 	invalid.ExpectedAnnotationRevision = saved.AnnotationRevision
-	invalid.Region = &editing.ImageRegion{X: 7, Y: 0, Width: 2, Height: 1}
+	invalid.Regions = append([]editing.ImageAnnotationRegion{}, in.Regions...)
+	invalid.Regions[1].Region = editing.ImageRegion{X: 7, Y: 0, Width: 2, Height: 1}
 	if _, err := restarted.WriteImageAnnotation(ctx, invalid); !errors.Is(err, editing.ErrInvalidInput) {
 		t.Fatal("out of image region", err)
 	}
@@ -209,16 +213,16 @@ func TestImageAnnotationCASLostAcknowledgementRestartAndStaleSource(t *testing.T
 		t.Fatal(err)
 	}
 	restored, err = restarted.ReadImageAnnotation(ctx, target)
-	if err != nil || restored.Current || restored.SourceRevision != saved.SourceRevision || !reflect.DeepEqual(restored.Region, saved.Region) {
+	if err != nil || restored.Current || restored.SourceRevision != saved.SourceRevision || !reflect.DeepEqual(restored.Regions, saved.Regions) {
 		t.Fatal("stale source was remapped", err)
 	}
 	stale.ExpectedAnnotationRevision = saved.AnnotationRevision
 	if _, err := restarted.WriteImageAnnotation(ctx, stale); !errors.Is(err, editing.ErrConflict) {
 		t.Fatal("stale source write", err)
 	}
-	clear := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, ExpectedAnnotationRevision: saved.AnnotationRevision, SourceRevision: digestAtomicText(replacement)}
+	clear := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, ExpectedAnnotationRevision: saved.AnnotationRevision, SourceRevision: digestAtomicText(replacement), Regions: []editing.ImageAnnotationRegion{}}
 	cleared, err := restarted.WriteImageAnnotation(ctx, clear)
-	if err != nil || !cleared.Current || cleared.Region != nil || cleared.Note != "" {
+	if err != nil || !cleared.Current || cleared.Regions == nil || len(cleared.Regions) != 0 || cleared.AnnotationRevision == "" {
 		t.Fatal("clear", err)
 	}
 	if _, err := restarted.WriteImageAnnotation(ctx, in); err == nil {
@@ -235,14 +239,14 @@ func TestImageAnnotationPrivateRecordTamperAndThreadIsolation(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f, target, raw := imageFileFixture(t)
 			ctx := context.Background()
-			input := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: digestAtomicText(raw), Region: &editing.ImageRegion{Width: 3, Height: 2}, Note: "private note"}
+			input := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: digestAtomicText(raw), Regions: []editing.ImageAnnotationRegion{{RegionID: strings.Repeat("a", 48), Region: editing.ImageRegion{Width: 3, Height: 2}, Note: "private note"}}}
 			saved, err := f.WriteImageAnnotation(ctx, input)
 			if err != nil {
 				t.Fatal(err)
 			}
 			other := target
 			other.ThreadID = "another-thread"
-			if got, err := f.ReadImageAnnotation(ctx, other); err != nil || got.Note != "" || got.AnnotationRevision != "" {
+			if got, err := f.ReadImageAnnotation(ctx, other); err != nil || len(got.Regions) != 0 || got.AnnotationRevision != "" {
 				t.Fatal("cross thread annotation", err)
 			}
 			path := f.annotationPath(target.ObjectIdentity, target.ThreadID)
@@ -270,13 +274,109 @@ func TestImageAnnotationPrivateRecordTamperAndThreadIsolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := f.ReadImageAnnotation(ctx, target); err == nil || got.Note != "" || got.Region != nil {
+			if got, err := f.ReadImageAnnotation(ctx, target); err == nil || len(got.Regions) != 0 {
 				t.Fatal("unsafe private record projected", err)
 			}
 			input.ExpectedAnnotationRevision = saved.AnnotationRevision
-			input.Note = "replacement"
+			input.Regions[0].Note = "replacement"
 			if _, err := f.WriteImageAnnotation(ctx, input); err == nil {
 				t.Fatal("unsafe private record overwritten")
+			}
+		})
+	}
+}
+
+func TestImageAnnotationV2ReadMigrationKeepsExactCAS(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(map[bool]string{false: "region", true: "empty"}[empty], func(t *testing.T) {
+			f, target, raw := imageFileFixture(t)
+			resolved, err := f.target(target.Workspace, target.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := annotationRecord{Version: 2, Kind: "image-region", ObjectIdentity: target.ObjectIdentity, PathBinding: resolved.binding, ThreadID: target.ThreadID, SourceRevision: digestAtomicText(raw), Width: 8, Height: 6, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+			if !empty {
+				legacy.Region = &editing.ImageRegion{X: 1, Y: 1, Width: 3, Height: 2}
+				legacy.Note = "legacy annotation"
+			}
+			body, err := json.Marshal(legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := f.annotationPath(target.ObjectIdentity, target.ThreadID)
+			if err := f.writeObjectPrivate(path, body, "", editing.MaxAnnotationRecordBytes); err != nil {
+				t.Fatal(err)
+			}
+			oldHash := digestAtomicText(body)
+			migrated, err := f.ReadImageAnnotation(context.Background(), target)
+			if err != nil || migrated.AnnotationRevision != oldHash || migrated.Regions == nil || !migrated.Current {
+				t.Fatal("migration", migrated, err)
+			}
+			if !empty && (len(migrated.Regions) != 1 || migrated.Regions[0].RegionID != strings.Repeat("0", 48) || migrated.Regions[0].Note != legacy.Note || migrated.Regions[0].Region != *legacy.Region) {
+				t.Fatal("legacy selection changed")
+			}
+			if empty && len(migrated.Regions) != 0 {
+				t.Fatal("empty v2 resurrected region")
+			}
+			again, err := f.ReadImageAnnotation(context.Background(), target)
+			if err != nil || !reflect.DeepEqual(again, migrated) {
+				t.Fatal("unstable migration", err)
+			}
+			after, _ := os.ReadFile(path)
+			if !bytes.Equal(after, body) {
+				t.Fatal("migration wrote on read")
+			}
+			write := editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: migrated.SourceRevision, Regions: migrated.Regions}
+			if _, err := f.WriteImageAnnotation(context.Background(), write); !errors.Is(err, editing.ErrConflict) {
+				t.Fatal("v2 predecessor used as new-write CAS", err)
+			}
+			write.ExpectedAnnotationRevision = oldHash
+			saved, err := f.WriteImageAnnotation(context.Background(), write)
+			if err != nil || saved.AnnotationRevision == oldHash || !reflect.DeepEqual(saved.Regions, migrated.Regions) {
+				t.Fatal("explicit v3 save", err)
+			}
+			v3, _ := os.ReadFile(path)
+			var record imageAnnotationRecordV3
+			if json.Unmarshal(v3, &record) != nil || record.Version != 3 || record.ExpectedDraftRevision != oldHash || record.Regions == nil {
+				t.Fatal("v3 persistence contract")
+			}
+			replay, err := f.WriteImageAnnotation(context.Background(), write)
+			if err != nil || !reflect.DeepEqual(replay, saved) {
+				t.Fatal("v3 lost-ack replay", err)
+			}
+		})
+	}
+}
+
+func TestImageAnnotationVersionsRejectUnknownFields(t *testing.T) {
+	for _, version := range []int{2, 3} {
+		t.Run(map[int]string{2: "v2", 3: "v3"}[version], func(t *testing.T) {
+			f, target, raw := imageFileFixture(t)
+			saved, err := f.WriteImageAnnotation(context.Background(), editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, SourceRevision: digestAtomicText(raw), Regions: []editing.ImageAnnotationRegion{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := f.annotationPath(target.ObjectIdentity, target.ThreadID)
+			body, _ := os.ReadFile(path)
+			var record map[string]any
+			if json.Unmarshal(body, &record) != nil {
+				t.Fatal("decode")
+			}
+			if version == 2 {
+				record["version"] = 2
+				delete(record, "regions")
+				record["note"] = ""
+			}
+			record["unexpected"] = true
+			body, _ = json.Marshal(record)
+			if err := os.WriteFile(path, body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if result, err := f.ReadImageAnnotation(context.Background(), target); err == nil || len(result.Regions) != 0 {
+				t.Fatal("unknown disk field accepted")
+			}
+			if _, err := f.WriteImageAnnotation(context.Background(), editing.ImageAnnotationWriteInput{AnnotationDraftTarget: target, ExpectedAnnotationRevision: saved.AnnotationRevision, SourceRevision: digestAtomicText(raw), Regions: []editing.ImageAnnotationRegion{}}); err == nil {
+				t.Fatal("unknown record overwritten")
 			}
 		})
 	}

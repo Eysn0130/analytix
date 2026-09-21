@@ -598,6 +598,7 @@ it('does not clear the active thread or refresh Claw while an image note is comp
   state.activeThreadId = 'image-owner'
   useWriteWorkspaceStore.setState({ imageRegionEditor: {
     workspace: '/synthetic', path: '/synthetic/image.png', threadId: 'image-owner', snapshot: null, annotation: null,
+    regions: [{ regionId: '9'.repeat(48), region: null, note: '组合文本' }], selectedRegionId: '9'.repeat(48),
     region: null, note: '组合文本', dirty: true, pending: null, loading: false, revoked: false, stale: false,
     composing: true, status: 'dirty', error: null
   } })

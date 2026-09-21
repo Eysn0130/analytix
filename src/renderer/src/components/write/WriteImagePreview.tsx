@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
-import { ExternalLink, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react'
+import { ExternalLink, Image as ImageIcon, RotateCw, ZoomIn, ZoomOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ImageRegion } from '../../../../../packages/runtime/src/contracts/object-editing'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
-import { imagePoint, imageRectangle } from '../../write/image-region-session'
+import { imagePoint, imageRectangle, type ImagePreviewRotation } from '../../write/image-region-session'
 import { registerWriteShutdownInput } from '../../write/write-shutdown'
 import { isImageThreadNavigationFrozen, subscribeImageThreadNavigation } from '../../write/image-thread-navigation'
 import { useChatStore } from '../../store/chat-store'
@@ -56,17 +56,21 @@ export function WriteImagePreview({
   const navigationFrozen = useSyncExternalStore(subscribeImageThreadNavigation, isImageThreadNavigationFrozen)
   const frozen = shutdownFrozen || navigationFrozen
   const imageRef = useRef<HTMLImageElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const frozenRef = useRef(false)
   const shutdownRef = useRef(false)
   const composingRef = useRef(false)
   const drag = useRef<{ x: number; y: number; pointerId: number; original: ImageRegion | null } | null>(null)
   const [referencing, setReferencing] = useState(false)
+  const [rotation, setRotation] = useState<ImagePreviewRotation>(0)
+  const [viewport, setViewport] = useState({ width: 0, height: 0 })
   const supported = mimeType === 'image/png' || mimeType === 'image/jpeg'
   const owner = editor?.workspace === workspaceRoot && editor.path === filePath && editor.threadId === threadId
   const snapshot = owner && !editor.revoked ? editor.snapshot : null
   const editable = !!snapshot && !editor?.loading && !frozen
   const region = owner && !editor.stale ? editor.region : null
+  useEffect(() => { drag.current = null }, [snapshot?.sessionId, snapshot?.sourceRevision])
   useEffect(() => {
     const synchronize = () => {
       const store = useWriteWorkspaceStore.getState(), next = useChatStore.getState().activeThreadId
@@ -104,7 +108,7 @@ export function WriteImagePreview({
   }, [])
   const updateRegion = (x: number, y: number, finish: boolean): void => {
     if (!drag.current || !imageRef.current || !snapshot || frozenRef.current) return
-    const point = imagePoint(x, y, imageRef.current.getBoundingClientRect(), snapshot)
+    const point = imagePoint(x, y, imageRef.current.getBoundingClientRect(), snapshot, rotation)
     const next = point && imageRectangle(drag.current, point)
     if (next) useWriteWorkspaceStore.getState().updateImageRegion({ region: next })
     if (finish) drag.current = null
@@ -125,7 +129,7 @@ export function WriteImagePreview({
         scope.threadId !== useChatStore.getState().activeThreadId || current.imageRegionEditor?.snapshot?.sessionId !== scope.sessionId) return
       useNativeReferenceStore.getState().add({ kind: 'image-region', threadId: scope.threadId, workspace: workspaceRoot, path: filePath,
         objectId: scope.objectId, revision: scope.sourceRevision, sessionId: scope.sessionId, scopeId: scope.scopeId,
-        annotationRevision: scope.annotationRevision, width: scope.width, height: scope.height, region: scope.region,
+        annotationRevision: scope.annotationRevision, regionId: scope.regionId, width: scope.width, height: scope.height, region: scope.region,
         editable: false, text: '', label: writeBasenameFromPath(filePath) })
     } finally { setReferencing(false) }
   }
@@ -137,7 +141,28 @@ export function WriteImagePreview({
   const actualMode = fitMode === 'actual'
   useEffect(() => {
     setDimensions(null)
+    setRotation(0)
+    drag.current = null
   }, [src, filePath])
+  useEffect(() => {
+    const element = viewportRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setViewport({ width: entry.contentRect.width, height: entry.contentRect.height })
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const natural = snapshot || dimensions
+  const swapped = rotation === 90 || rotation === 270
+  const displayWidth = natural ? (swapped ? natural.height : natural.width) : 0
+  const displayHeight = natural ? (swapped ? natural.width : natural.height) : 0
+  const scale = actualMode ? zoom / 100 : natural && viewport.width > 0 && viewport.height > 0
+    ? Math.min(1, viewport.width / displayWidth, viewport.height / displayHeight) : 1
+  const width = (natural?.width ?? 0) * scale, height = (natural?.height ?? 0) * scale
+  const transform = rotation === 90 ? `translate(${height}px, 0) rotate(90deg)`
+    : rotation === 180 ? `translate(${width}px, ${height}px) rotate(180deg)`
+      : rotation === 270 ? `translate(0, ${width}px) rotate(270deg)` : undefined
   const openImage = (): void => {
     if (typeof window.analytix?.workspace?.openEditorPath !== 'function') return
     void window.analytix.workspace.openEditorPath({ path: filePath, workspaceRoot, editorId: 'system' }).catch(() => undefined)
@@ -161,6 +186,7 @@ export function WriteImagePreview({
           <button
             type="button"
             onClick={() => {
+              cancelDrag()
               setFitMode('actual')
               setZoom((value) => clampImageZoom(value - IMAGE_ZOOM_STEP))
             }}
@@ -179,6 +205,7 @@ export function WriteImagePreview({
             aria-label={t('writeImageZoom')}
             className="h-8 w-24 accent-[var(--ds-accent)]"
             onChange={(event) => {
+              cancelDrag()
               setFitMode('actual')
               setZoom(clampImageZoom(Number(event.target.value)))
             }}
@@ -186,6 +213,7 @@ export function WriteImagePreview({
           <button
             type="button"
             onClick={() => {
+              cancelDrag()
               setFitMode('actual')
               setZoom((value) => clampImageZoom(value + IMAGE_ZOOM_STEP))
             }}
@@ -197,12 +225,17 @@ export function WriteImagePreview({
           </button>
           <button
             type="button"
-            onClick={() => setFitMode((mode) => mode === 'fit' ? 'actual' : 'fit')}
+            onClick={() => { cancelDrag(); setFitMode((mode) => mode === 'fit' ? 'actual' : 'fit') }}
             className={`${toolbarMenuButtonClass(fitMode === 'fit')} min-w-[52px] justify-center`}
             title={fitMode === 'fit' ? t('writeImageActualSize') : t('writeImageFit')}
             aria-label={fitMode === 'fit' ? t('writeImageActualSize') : t('writeImageFit')}
           >
             {fitMode === 'fit' ? t('writeImageFitShort') : `${zoom}%`}
+          </button>
+          <button type="button" className={toolbarIconButtonClass()} disabled={frozen || !natural}
+            title={t('writeImageRotatePreview')} aria-label={t('writeImageRotatePreview')}
+            onClick={() => { if (!frozenRef.current) { cancelDrag(); setRotation(value => ((value + 90) % 360) as ImagePreviewRotation) } }}>
+            <RotateCw className="h-4 w-4" strokeWidth={1.85} />
           </button>
         </div>
         <button
@@ -216,16 +249,17 @@ export function WriteImagePreview({
         </button>
       </div>
 
-      <div className="ds-page-scroll-edge min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+      <div ref={viewportRef} className="ds-page-scroll-edge min-h-0 flex-1 overflow-auto p-4 sm:p-6">
         <div className="flex min-h-full items-center justify-center">
-          <div className="relative inline-block max-w-full leading-none" style={actualMode ? { maxWidth: 'none' } : undefined}>
+          <div className="relative shrink-0 leading-none" style={natural ? { width: displayWidth * scale, height: displayHeight * scale } : undefined}>
+          <div data-testid="image-preview-plane" className="relative" style={natural ? { width, height, transform, transformOrigin: 'top left' } : undefined}>
           <img
             ref={imageRef}
             src={snapshot ? `data:${snapshot.mimeType};base64,${snapshot.dataBase64}` : src}
             draggable={false}
             onPointerDown={event => {
               if (!editable || frozenRef.current || event.button !== 0 || !snapshot) return
-              const point = imagePoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), snapshot)
+              const point = imagePoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), snapshot, rotation)
               if (!point) return
               event.preventDefault()
               drag.current = { ...point, pointerId: event.pointerId, original: region ? { ...region } : null }
@@ -236,18 +270,19 @@ export function WriteImagePreview({
             onPointerCancel={cancelDrag}
             onLostPointerCapture={cancelDrag}
             alt={fileName}
-            className={`${actualMode ? 'max-w-none' : 'max-h-full max-w-full'} select-none rounded-lg object-contain shadow-[0_18px_50px_rgba(20,47,95,0.16)]`}
-            style={{ touchAction: editable ? 'none' : undefined, ...(actualMode && (snapshot || dimensions) ? {
-              width: `${Math.round((snapshot || dimensions)!.width * zoom / 100)}px`, height: 'auto'
-            } : {}) }}
+            className="max-w-none select-none rounded-lg object-contain shadow-[0_18px_50px_rgba(20,47,95,0.16)]"
+            style={{ touchAction: editable ? 'none' : undefined, ...(natural ? { width, height } : { maxWidth: '100%' }) }}
             onLoad={(event) => {
               const image = event.currentTarget
               setDimensions(snapshot ? { width: snapshot.width, height: snapshot.height } : { width: image.naturalWidth, height: image.naturalHeight })
             }}
           />
-          {region && snapshot ? <div data-testid="image-region-overlay" className="pointer-events-none absolute border-2 border-blue-600 bg-blue-500/15"
-            style={{ left: `${region.x / snapshot.width * 100}%`, top: `${region.y / snapshot.height * 100}%`,
-              width: `${region.width / snapshot.width * 100}%`, height: `${region.height / snapshot.height * 100}%` }} /> : null}
+          {owner && !editor.stale && snapshot ? editor.regions.map(entry => entry.region ? <div key={entry.regionId}
+            data-testid={entry.regionId === editor.selectedRegionId ? 'image-region-overlay' : 'image-region-inactive-overlay'}
+            className={`pointer-events-none absolute border-2 ${entry.regionId === editor.selectedRegionId ? 'border-blue-600 bg-blue-500/15' : 'border-amber-500 bg-amber-500/10'}`}
+            style={{ left: `${entry.region.x / snapshot.width * 100}%`, top: `${entry.region.y / snapshot.height * 100}%`,
+              width: `${entry.region.width / snapshot.width * 100}%`, height: `${entry.region.height / snapshot.height * 100}%` }} /> : null) : null}
+          </div>
           </div>
         </div>
       </div>
@@ -258,7 +293,18 @@ export function WriteImagePreview({
         {owner && editor.stale ? <p role="alert">{t('imageRegionRecapture')}</p> : null}
         {owner && editor.error ? <p role="alert">{editor.error}</p> : null}
         {owner && editor.loading ? <p role="status">{t('imageRegionLoading')}</p> : null}
-        {snapshot ? <>
+        {snapshot && editor ? <>
+          <div className="flex flex-wrap items-center gap-2">
+            <select aria-label={t('imageRegionSelection')} disabled={!editable || editor.composing} value={editor.selectedRegionId ?? ''}
+              onChange={event => { if (!frozenRef.current) { cancelDrag(); useWriteWorkspaceStore.getState().selectImageRegion(event.target.value || null) } }}>
+              <option value="">{t('imageRegionNew')}</option>
+              {editor.regions.map((entry, index) => <option key={entry.regionId} value={entry.regionId}>{t('imageRegionNumber', { number: index + 1 })}</option>)}
+            </select>
+            <button type="button" className={toolbarMenuButtonClass()} disabled={!editable || editor.composing || editor.regions.length >= 8}
+              onClick={() => { if (!frozenRef.current) { cancelDrag(); useWriteWorkspaceStore.getState().selectImageRegion(null) } }}>{t('imageRegionAdd')}</button>
+            <button type="button" className={toolbarMenuButtonClass()} disabled={!editable || editor.composing || !editor.selectedRegionId}
+              onClick={() => { if (!frozenRef.current) { cancelDrag(); useWriteWorkspaceStore.getState().removeImageRegion() } }}>{t('imageRegionRemove')}</button>
+          </div>
           <p>{t('imageRegionDraw')}</p>
           <div className="flex flex-wrap gap-2">
             {(['x', 'y', 'width', 'height'] as const).map(key => <label key={key} className="flex items-center gap-1">{key}

@@ -12,13 +12,14 @@ import (
 
 func TestImageRequestClosedTypedGeometryBeforeAuthority(t *testing.T) {
 	handler := ObjectEditingHandler{Service: editingapp.New(nil, nil)}
-	baseline := map[string]any{"action": "image-annotation-write", "sessionId": strings.Repeat("a", 48), "threadId": "primary", "sourceRevision": strings.Repeat("b", 64), "expectedAnnotationRevision": "", "region": map[string]any{"x": 0, "y": 0, "width": 1, "height": 1}, "note": "remark"}
-	for _, name := range []string{"fraction", "negative", "empty", "extra geometry", "missing geometry", "string geometry", "null coordinate", "extra authority", "bad revision", "large note"} {
+	baseline := map[string]any{"action": "image-annotation-write", "sessionId": strings.Repeat("a", 48), "threadId": "primary", "sourceRevision": strings.Repeat("b", 64), "expectedAnnotationRevision": "", "regions": []any{map[string]any{"regionId": strings.Repeat("c", 48), "region": map[string]any{"x": 0, "y": 0, "width": 1, "height": 1}, "note": "remark"}}}
+	for _, name := range []string{"fraction", "negative", "empty", "extra geometry", "missing geometry", "string geometry", "null coordinate", "extra authority", "bad revision", "large note", "duplicate id", "null collection", "extra item", "null region", "null note", "legacy payload"} {
 		t.Run(name, func(t *testing.T) {
 			raw, _ := json.Marshal(baseline)
 			var value map[string]any
 			_ = json.Unmarshal(raw, &value)
-			region := value["region"].(map[string]any)
+			item := value["regions"].([]any)[0].(map[string]any)
+			region := item["region"].(map[string]any)
 			switch name {
 			case "fraction":
 				region["x"] = 0.5
@@ -31,15 +32,29 @@ func TestImageRequestClosedTypedGeometryBeforeAuthority(t *testing.T) {
 			case "missing geometry":
 				delete(region, "y")
 			case "string geometry":
-				value["region"] = "0,0,1,1"
+				item["region"] = "0,0,1,1"
 			case "null coordinate":
 				region["x"] = nil
 			case "extra authority":
 				value["workspace"] = "/tmp"
 			case "bad revision":
 				value["sourceRevision"] = "caller"
+			case "duplicate id":
+				value["regions"] = []any{item, item}
+			case "null collection":
+				value["regions"] = nil
+			case "extra item":
+				item["extra"] = true
+			case "null region":
+				item["region"] = nil
+			case "null note":
+				item["note"] = nil
+			case "legacy payload":
+				delete(value, "regions")
+				value["region"] = region
+				value["note"] = "remark"
 			case "large note":
-				value["note"] = strings.Repeat("x", 4097)
+				item["note"] = strings.Repeat("x", 4097)
 			}
 			raw, _ = json.Marshal(value)
 			w := httptest.NewRecorder()

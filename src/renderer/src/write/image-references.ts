@@ -16,7 +16,7 @@ export async function validateImageReferences(
       const scope = response.data.scope
       if (!('kind' in scope) || scope.sessionId !== reference.sessionId || scope.scopeId !== reference.scopeId ||
         scope.threadId !== reference.threadId || scope.objectId !== reference.objectId || scope.sourceRevision !== reference.revision ||
-        scope.annotationRevision !== reference.annotationRevision || scope.width !== reference.width || scope.height !== reference.height ||
+        scope.annotationRevision !== reference.annotationRevision || scope.regionId !== reference.regionId || scope.width !== reference.width || scope.height !== reference.height ||
         JSON.stringify(scope.region) !== JSON.stringify(reference.region)) return false
     } catch { return false }
   }

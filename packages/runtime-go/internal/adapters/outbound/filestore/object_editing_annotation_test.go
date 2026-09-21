@@ -102,7 +102,7 @@ func TestAnnotationDraftLostWriteAcknowledgement(t *testing.T) {
 }
 
 func TestAnnotationDraftRejectsPrivateTampering(t *testing.T) {
-	for _, mode := range []string{"hardlink", "symlink", "permissions", "extra-key", "path-binding", "oversize", "root"} {
+	for _, mode := range []string{"hardlink", "symlink", "permissions", "extra-key", "image-regions", "path-binding", "oversize", "root"} {
 		t.Run(mode, func(t *testing.T) {
 			s, in := annotationFixture(t, "docx")
 			if _, err := s.WriteAnnotationDraft(context.Background(), in); err != nil {
@@ -122,6 +122,8 @@ func TestAnnotationDraftRejectsPrivateTampering(t *testing.T) {
 				err = os.Chmod(path, 0644)
 			case "extra-key":
 				err = os.WriteFile(path, append(body[:len(body)-1], []byte(`,"token":"old-token"}`)...), 0600)
+			case "image-regions":
+				err = os.WriteFile(path, append(body[:len(body)-1], []byte(`,"regions":[]}`)...), 0600)
 			case "path-binding":
 				err = os.WriteFile(path, []byte(strings.Replace(string(body), `"pathBinding":"`, `"pathBinding":"bad`, 1)), 0600)
 			case "oversize":

@@ -18,7 +18,7 @@ export type ImageRegionNativeReference = {
   kind: 'image-region'; id: string; threadId: string; workspace: string; path: string
   objectId: string; revision: string; label: string; text: ''
   sessionId: string; scopeId?: string; editable: false
-  annotationRevision: string; width: number; height: number; region: ImageRegion
+  annotationRevision: string; regionId: string; width: number; height: number; region: ImageRegion
 }
 export type NativeReference = OfficeNativeReference | CanvasNativeReference | ImageRegionNativeReference
 export type NativeReferenceInput = Omit<OfficeNativeReference, 'id'> | Omit<CanvasNativeReference, 'id'> | Omit<ImageRegionNativeReference, 'id'>
@@ -81,8 +81,16 @@ export const useNativeReferenceStore = create<{
   })})),
   add: reference => {
     const snapshot: NativeReference = {...structuredClone(reference), id:crypto.randomUUID()}
-    set(state => ({references:[...state.references.filter(previous => !((reference.kind === 'canvas' || reference.kind === 'image-region') && previous.kind === reference.kind && previous.objectId === reference.objectId && previous.threadId === reference.threadId)).slice(-7).map(previous => {
-    if (!reference.scopeId || !previous.scopeId || previous.objectId !== reference.objectId || previous.threadId !== reference.threadId) return previous
+    set(state => ({references:[...state.references.filter(previous => !(
+      previous.objectId === reference.objectId && previous.threadId === reference.threadId && (
+        reference.kind === 'canvas' && previous.kind === 'canvas' ||
+        reference.kind === 'image-region' && previous.kind === 'image-region' && previous.regionId === reference.regionId
+      )
+    )).slice(-7).map(previous => {
+    if (!previous.scopeId || previous.objectId !== reference.objectId || previous.threadId !== reference.threadId) return previous
+    const imagePair = reference.kind === 'image-region' && previous.kind === 'image-region'
+    if (imagePair && reference.annotationRevision === previous.annotationRevision && reference.revision === previous.revision) return previous
+    if (!reference.scopeId && !imagePair) return previous
     const {scopeId: _scopeId, ...snapshot} = previous
     return {...snapshot, editable:false as const}
   }), snapshot]}))

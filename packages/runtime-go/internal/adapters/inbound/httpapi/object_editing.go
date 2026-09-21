@@ -404,8 +404,8 @@ func objectEditingExactFields(raw json.RawMessage, keys string) (map[string]json
 var objectEditingKeys = map[string]string{
 	"image-open":             "action threadId path",
 	"image-annotation-read":  "action sessionId threadId",
-	"image-annotation-write": "action sessionId threadId sourceRevision expectedAnnotationRevision region note",
-	"image-scope-capture":    "action sessionId threadId sourceRevision annotationRevision",
+	"image-annotation-write": "action sessionId threadId sourceRevision expectedAnnotationRevision regions",
+	"image-scope-capture":    "action sessionId threadId sourceRevision annotationRevision regionId",
 	"image-scope-read":       "action sessionId threadId scopeId",
 	"image-scope-revoke":     "action sessionId threadId scopeId",
 	"open":                   "action workspace path",
@@ -436,15 +436,22 @@ func validObjectEditingRequest(body []byte, action string) bool {
 		return false
 	}
 	for key, raw := range fields {
-		if key == "region" {
-			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-				continue
-			}
-			if _, ok := objectEditingExactFields(raw, "x y width height"); !ok {
+		if key == "regions" {
+			var items []json.RawMessage
+			if json.Unmarshal(raw, &items) != nil || items == nil || len(items) > fileport.MaxImageRegions {
 				return false
 			}
-			var region fileport.ImageRegion
-			if json.Unmarshal(raw, &region) != nil || !fileport.ValidImageAnnotationWrite("", strings.Repeat("0", 64), "", &region) {
+			for _, item := range items {
+				fields, ok := objectEditingExactFields(item, "regionId region note")
+				if !ok {
+					return false
+				}
+				if _, ok := objectEditingExactFields(fields["region"], "x y width height"); !ok {
+					return false
+				}
+			}
+			var regions []fileport.ImageAnnotationRegion
+			if json.Unmarshal(raw, &regions) != nil || !fileport.ValidImageAnnotationWrite("", strings.Repeat("0", 64), regions) {
 				return false
 			}
 			continue
@@ -494,7 +501,7 @@ func validObjectEditingRequest(body []byte, action string) bool {
 			return false
 		}
 		switch key {
-		case "sessionId", "scopeId", "proposalId", "draftVersion":
+		case "sessionId", "scopeId", "proposalId", "draftVersion", "regionId":
 			if !objectEditingToken.MatchString(value) {
 				return false
 			}

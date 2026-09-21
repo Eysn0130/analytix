@@ -16,7 +16,8 @@ vi.mock('../agent/registry', () => ({ getProvider: registry.getProvider }))
 vi.mock('electron', () => ({ clipboard: {} }))
 const thread = (id: string) => ({ id, title: id, workspace: '/workspace', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', mode: 'agent', model: '' })
 const imageEditor = (): ImageRegionEditor => ({ workspace: '/workspace', path: '/workspace/image.png', threadId: 'thr-ime',
-  snapshot: null, annotation: null, region: null, note: '保留组合输入', dirty: true, pending: null, loading: false,
+  snapshot: null, annotation: null, regions: [{ regionId: '9'.repeat(48), region: null, note: '保留组合输入' }], selectedRegionId: '9'.repeat(48),
+  region: null, note: '保留组合输入', dirty: true, pending: null, loading: false,
   revoked: false, stale: false, composing: false, status: 'dirty', error: null })
 const composing = (value: boolean) => useWriteWorkspaceStore.getState().setImageRegionComposing(value)
 let provider: {

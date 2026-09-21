@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { objectEditingRequestSchema, objectEditingResponseSchema, objectExportSnapshotRequestSchema, objectExportSnapshotResponseSchema } from './object-editing'
+import { imageAnnotationSchema, imageRegionScopeSchema, objectEditingRequestSchema, objectEditingResponseSchema, objectExportSnapshotRequestSchema, objectExportSnapshotResponseSchema } from './object-editing'
 
 const token = 'a'.repeat(48)
 const revision = 'b'.repeat(64)
@@ -67,6 +67,73 @@ describe('protected-local object editing contract', () => {
     expect(objectEditingResponseSchema.safeParse({ ok: false, code: 'persistence_failure', message: 'Unknown.', receipt }).success).toBe(true)
     expect(objectEditingResponseSchema.safeParse({ ok: true, receipt: { ...receipt, status: 'committed' } }).success).toBe(false)
     expect(objectEditingResponseSchema.safeParse({ ok: true, receipt: { ...receipt, status: 'committed', revision, savedAt: '2026-09-14T01:00:00Z' } }).success).toBe(true)
+  })
+})
+
+describe('bounded multi-region image annotation contract', () => {
+  const region = { regionId: token, region: { x: 1, y: 2, width: 3, height: 4 }, note: 'local note' }
+  const write = { action: 'image-annotation-write', sessionId: token, threadId: 'thread-1', sourceRevision: revision,
+    expectedAnnotationRevision: '', regions: [region] }
+  const capture = { action: 'image-scope-capture', sessionId: token, threadId: 'thread-1', sourceRevision: revision,
+    annotationRevision: revision, regionId: token }
+  const annotation = { objectId: revision, threadId: 'thread-1', annotationRevision: revision, sourceRevision: revision,
+    width: 100, height: 80, regions: [region], updatedAt: '2026-09-21T06:00:00Z', current: true }
+
+  it.each([write, capture])('requires the exact current $action shape', request => {
+    expect(objectEditingRequestSchema.safeParse(request).success).toBe(true)
+    for (const key of Object.keys(request)) {
+      const incomplete: Record<string, unknown> = { ...request }
+      delete incomplete[key]
+      expect(objectEditingRequestSchema.safeParse(incomplete).success).toBe(false)
+      expect(objectEditingRequestSchema.safeParse({ ...incomplete, [key]: null }).success).toBe(false)
+    }
+    expect(objectEditingRequestSchema.safeParse({ ...request, region: region.region, note: region.note }).success).toBe(false)
+  })
+
+  it('admits zero through eight distinct stable regions and rejects legacy or forged entries', () => {
+    const regions = Array.from({ length: 8 }, (_, index) => ({ ...region, regionId: index.toString(16).padStart(48, '0') }))
+    for (const value of [[], regions]) {
+      expect(objectEditingRequestSchema.safeParse({ ...write, regions: value }).success).toBe(true)
+      expect(imageAnnotationSchema.safeParse({ ...annotation, regions: value }).success).toBe(true)
+    }
+    for (const invalid of [null, [...regions, { ...region, regionId: '9'.repeat(48) }], [region, region],
+      [{ ...region, regionId: 'A'.repeat(48) }], [{ ...region, regionId: 'a'.repeat(47) }],
+      [{ region: region.region, note: '' }], [{ ...region, sourceRevision: revision }], [{ ...region, note: null }]]) {
+      expect(objectEditingRequestSchema.safeParse({ ...write, regions: invalid }).success).toBe(false)
+      expect(imageAnnotationSchema.safeParse({ ...annotation, regions: invalid }).success).toBe(false)
+    }
+    const { regions: _, ...legacy } = annotation
+    expect(imageAnnotationSchema.safeParse({ ...legacy, region: region.region, note: region.note }).success).toBe(false)
+  })
+
+  it('enforces collective UTF16 and UTF8 note bounds and valid Unicode', () => {
+    const regions = [{ ...region, note: '😀'.repeat(1024) }, { ...region, regionId: 'c'.repeat(48), note: '😀'.repeat(1024) }]
+    expect(objectEditingRequestSchema.safeParse({ ...write, regions }).success).toBe(true)
+    for (const invalid of [
+      [regions[0], { ...regions[1], note: regions[1].note + 'x' }],
+      [{ ...region, note: '\ud800' }], [{ ...region, note: '\udfff' }],
+      [{ ...region, note: '界'.repeat(4097) }]
+    ]) {
+      expect(objectEditingRequestSchema.safeParse({ ...write, regions: invalid }).success).toBe(false)
+      expect(imageAnnotationSchema.safeParse({ ...annotation, regions: invalid }).success).toBe(false)
+    }
+  })
+
+  it('validates every geometry and distinguishes absent annotations from committed empty collections', () => {
+    expect(imageAnnotationSchema.safeParse(annotation).success).toBe(true)
+    expect(imageAnnotationSchema.safeParse({ ...annotation, regions: [] }).success).toBe(true)
+    const absent = { ...annotation, annotationRevision: '', sourceRevision: '', updatedAt: '', width: 0, height: 0, current: false, regions: [] }
+    expect(imageAnnotationSchema.safeParse(absent).success).toBe(true)
+    expect(imageAnnotationSchema.safeParse({ ...absent, regions: [region] }).success).toBe(false)
+    const outside = { ...region, regionId: 'c'.repeat(48), region: { x: 99, y: 0, width: 2, height: 1 } }
+    expect(imageAnnotationSchema.safeParse({ ...annotation, regions: [region, outside] }).success).toBe(false)
+    const scope = { kind: 'image-region', sessionId: token, scopeId: token, objectId: revision, threadId: 'thread-1',
+      sourceRevision: revision, annotationRevision: revision, width: 100, height: 80,
+      regionId: token, region: region.region, purpose: 'discuss', editable: false, current: true }
+    expect(imageRegionScopeSchema.safeParse(scope).success).toBe(true)
+    const { regionId: _, ...oldScope } = scope
+    expect(imageRegionScopeSchema.safeParse(oldScope).success).toBe(false)
+    expect(imageRegionScopeSchema.safeParse({ ...scope, region: outside.region }).success).toBe(false)
   })
 })
 

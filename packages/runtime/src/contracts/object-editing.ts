@@ -45,6 +45,18 @@ export const imageRegionSchema = z.object({
   x: z.number().int().min(0).max(8191), y: z.number().int().min(0).max(8191),
   width: z.number().int().min(1).max(8192), height: z.number().int().min(1).max(8192)
 }).strict()
+export const imageAnnotationRegionSchema = z.object({
+  regionId: sessionId, region: imageRegionSchema, note: text(16_384).max(4096)
+}).strict()
+export const imageAnnotationRegionsSchema = z.array(imageAnnotationRegionSchema).max(8).superRefine((regions, ctx) => {
+  if (new Set(regions.map(region => region.regionId)).size !== regions.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Image region identities must be unique.' })
+  }
+  const notes = regions.map(region => region.note).join('')
+  if (notes.length > 4096 || !text(16_384).safeParse(notes).success) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Image notes exceed the total limit.' })
+  }
+})
 const imageDimension = z.number().int().min(1).max(8192)
 const imageFits = (value: { width: number; height: number; region?: { x: number; y: number; width: number; height: number } | null }): boolean =>
   value.width * value.height <= 16 * 1024 * 1024 && (!value.region ||
@@ -62,20 +74,22 @@ export const imageAnnotationSchema = z.object({
   objectId: revision, threadId, annotationRevision: z.union([revision, z.literal('')]),
   sourceRevision: z.union([revision, z.literal('')]),
   width: z.number().int().min(0).max(8192), height: z.number().int().min(0).max(8192),
-  region: imageRegionSchema.nullable(), note: text(16_384).max(4096), updatedAt: z.string(), current: z.boolean()
+  regions: imageAnnotationRegionsSchema, updatedAt: z.string(), current: z.boolean()
 }).strict().refine(value => {
   if (!value.annotationRevision) return !value.sourceRevision && !value.updatedAt && !value.current &&
-    value.width === 0 && value.height === 0 && value.region === null && value.note === ''
+    value.width === 0 && value.height === 0 && value.regions.length === 0
   return !!value.sourceRevision && value.width > 0 && value.height > 0 && imageFits(value) &&
-    z.string().datetime({ offset: true }).safeParse(value.updatedAt).success && (value.region !== null || value.note === '')
+    value.regions.every(({ region }) => imageFits({ ...value, region })) &&
+    z.string().datetime({ offset: true }).safeParse(value.updatedAt).success
 })
 export const imageRegionScopeSchema = z.object({
   kind: z.literal('image-region'), sessionId, scopeId: sessionId, objectId: revision, threadId,
   sourceRevision: revision, annotationRevision: revision, width: imageDimension, height: imageDimension,
-  region: imageRegionSchema, purpose: z.literal('discuss'), editable: z.literal(false), current: z.literal(true)
+  regionId: sessionId, region: imageRegionSchema, purpose: z.literal('discuss'), editable: z.literal(false), current: z.literal(true)
 }).strict().refine(imageFits)
 export type ImageObjectSnapshot = z.infer<typeof imageObjectSnapshotSchema>
 export type ImageAnnotation = z.infer<typeof imageAnnotationSchema>
+export type ImageAnnotationRegion = z.infer<typeof imageAnnotationRegionSchema>
 export type ImageRegion = z.infer<typeof imageRegionSchema>
 export type ImageRegionScope = z.infer<typeof imageRegionScopeSchema>
 
@@ -83,8 +97,8 @@ export const objectEditingRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('image-open'), threadId, path: text(4096).refine(value => !!value.trim() && !value.includes('\0')) }).strict(),
   z.object({ action: z.literal('image-annotation-read'), sessionId, threadId }).strict(),
   z.object({ action: z.literal('image-annotation-write'), sessionId, threadId, sourceRevision: revision,
-    expectedAnnotationRevision: z.union([revision, z.literal('')]), region: imageRegionSchema.nullable(), note: text(16_384).max(4096) }).strict(),
-  z.object({ action: z.literal('image-scope-capture'), sessionId, threadId, sourceRevision: revision, annotationRevision: revision }).strict(),
+    expectedAnnotationRevision: z.union([revision, z.literal('')]), regions: imageAnnotationRegionsSchema }).strict(),
+  z.object({ action: z.literal('image-scope-capture'), sessionId, threadId, sourceRevision: revision, annotationRevision: revision, regionId: sessionId }).strict(),
   z.object({ action: z.literal('image-scope-read'), sessionId, threadId, scopeId: sessionId }).strict(),
   z.object({ action: z.literal('image-scope-revoke'), sessionId, threadId, scopeId: sessionId }).strict(),
   z.object({ action: z.literal('open'), workspace: text(1_572_864).refine(value => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value) && !value.includes("\0")), path: text(1_572_864).refine(value => value.length > 0 && !value.includes("\0")) }).strict(),

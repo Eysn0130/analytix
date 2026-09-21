@@ -108,7 +108,11 @@ func (f *imageProductFixture) open() {
 }
 func (f *imageProductFixture) save(note string) {
 	f.t.Helper()
-	w := f.request(map[string]any{"action": "image-annotation-write", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "expectedAnnotationRevision": f.annotation.AnnotationRevision, "region": map[string]int{"x": 1, "y": 2, "width": 3, "height": 2}, "note": note}, true)
+	f.saveRegions([]editing.ImageAnnotationRegion{{RegionID: strings.Repeat("a", 48), Region: editing.ImageRegion{X: 1, Y: 2, Width: 3, Height: 2}, Note: note}})
+}
+func (f *imageProductFixture) saveRegions(regions []editing.ImageAnnotationRegion) {
+	f.t.Helper()
+	w := f.request(map[string]any{"action": "image-annotation-write", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "expectedAnnotationRevision": f.annotation.AnnotationRevision, "regions": regions}, true)
 	var result struct {
 		Annotation editing.ImageAnnotation `json:"annotation"`
 	}
@@ -119,7 +123,11 @@ func (f *imageProductFixture) save(note string) {
 }
 func (f *imageProductFixture) capture() editingapp.ImageScope {
 	f.t.Helper()
-	w := f.request(map[string]any{"action": "image-scope-capture", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "annotationRevision": f.annotation.AnnotationRevision}, true)
+	return f.captureRegion(strings.Repeat("a", 48))
+}
+func (f *imageProductFixture) captureRegion(regionID string) editingapp.ImageScope {
+	f.t.Helper()
+	w := f.request(map[string]any{"action": "image-scope-capture", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "annotationRevision": f.annotation.AnnotationRevision, "regionId": regionID}, true)
 	var result struct {
 		Scope editingapp.ImageScope `json:"scope"`
 	}
@@ -309,8 +317,63 @@ func TestImageCaptureRechecksSourceAfterProjection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w := f.request(map[string]any{"action": "image-scope-capture", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "annotationRevision": f.annotation.AnnotationRevision}, true)
+	w := f.request(map[string]any{"action": "image-scope-capture", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "annotationRevision": f.annotation.AnnotationRevision, "regionId": strings.Repeat("a", 48)}, true)
 	if w.Code == 200 || strings.Contains(w.Body.String(), "allowed note") || f.service.HasImageScopes() {
 		t.Fatal("capture returned stale authority", w.Body.String())
+	}
+}
+
+func TestImageProductMultipleRegionsCaptureSelectedNotesAndCollectionRevocation(t *testing.T) {
+	f := newImageProductFixture(t)
+	regions := []editing.ImageAnnotationRegion{
+		{RegionID: strings.Repeat("a", 48), Region: editing.ImageRegion{X: 1, Y: 1, Width: 2, Height: 2}, Note: "first area annotation"},
+		{RegionID: strings.Repeat("b", 48), Region: editing.ImageRegion{X: 5, Y: 1, Width: 2, Height: 2}, Note: "second area annotation"},
+	}
+	f.saveRegions(regions)
+	scopes := []editingapp.ImageScope{f.captureRegion(regions[0].RegionID), f.captureRegion(regions[1].RegionID)}
+	for i, scope := range scopes {
+		if scope.RegionID != regions[i].RegionID || scope.Region != regions[i].Region {
+			t.Fatal("wrong region captured")
+		}
+		raw, failed := f.model(f.thread, "native_selection_read", scope.ScopeID)
+		if failed || !strings.Contains(raw, regions[i].Note) || strings.Contains(raw, regions[1-i].Note) {
+			t.Fatal("capture projected other region note", raw)
+		}
+	}
+	for _, field := range []string{"regionId", "annotationRevision", "sourceRevision"} {
+		input := map[string]any{"action": "image-scope-capture", "sessionId": f.opened.SessionID, "threadId": f.thread, "sourceRevision": f.opened.SourceRevision, "annotationRevision": f.annotation.AnnotationRevision, "regionId": regions[0].RegionID}
+		input[field] = strings.Repeat("c", 64)
+		if field == "regionId" {
+			input[field] = strings.Repeat("c", 48)
+		}
+		if w := f.request(input, true); w.Code == 200 {
+			t.Fatal("wrong capture binding accepted", field)
+		}
+	}
+	regions[1].Note = "second area edited"
+	f.saveRegions(regions)
+	for _, scope := range scopes {
+		if _, failed := f.model(f.thread, "native_selection_read", scope.ScopeID); !failed {
+			t.Fatal("collection update retained old scope")
+		}
+	}
+	saved := f.annotation
+	f.restart()
+	f.open()
+	annotation, err := f.service.ReadImageAnnotation(context.Background(), f.opened.SessionID, f.thread)
+	if err != nil || !reflect.DeepEqual(annotation, saved) {
+		t.Fatal("collection restart", err)
+	}
+	f.annotation = annotation
+	scope := f.captureRegion(regions[1].RegionID)
+	if raw, failed := f.model(f.thread, "native_selection_read", scope.ScopeID); failed || !strings.Contains(raw, regions[1].Note) || strings.Contains(raw, regions[0].Note) {
+		t.Fatal("reopened selected note", raw)
+	}
+	f.saveRegions([]editing.ImageAnnotationRegion{})
+	if f.annotation.Regions == nil || len(f.annotation.Regions) != 0 || f.annotation.AnnotationRevision == "" {
+		t.Fatal("clear lost tombstone")
+	}
+	if _, failed := f.model(f.thread, "native_selection_read", scope.ScopeID); !failed {
+		t.Fatal("clear retained scope")
 	}
 }

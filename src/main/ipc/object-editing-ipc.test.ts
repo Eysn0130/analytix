@@ -114,7 +114,11 @@ describe('private draft/scope/proposal response binding', () => {
 describe('image object protected response bindings', () => {
   const dataBase64 = 'cGl4ZWxz', sourceRevision = '6ec9c2b0eb14010746c8bce8939303b382344b2962066126d4f2c5bb64c3d3da'
   const image = {sessionId:token,objectId:hash,threadId:'thread-1',path:'image.png',sourceRevision,mimeType:'image/png',width:100,height:80,dataBase64}
-  const annotation = {objectId:hash,threadId:'thread-1',annotationRevision:hash,sourceRevision:hash,width:100,height:80,region:{x:0,y:1,width:40,height:20},note:'local note',updatedAt:'2026-09-21T06:00:00Z',current:true}
+  const regions = [
+    {regionId:token,region:{x:0,y:1,width:40,height:20},note:'local note'},
+    {regionId:otherToken,region:{x:40,y:1,width:40,height:20},note:'second note'}
+  ]
+  const annotation = {objectId:hash,threadId:'thread-1',annotationRevision:hash,sourceRevision:hash,width:100,height:80,regions,updatedAt:'2026-09-21T06:00:00Z',current:true}
   it('validates the maximum admitted image payload without exhausting the regexp stack', () => {
     expect(imageObjectSnapshotSchema.safeParse({ ...image, dataBase64: 'A'.repeat(16 * 1024 * 1024) }).success).toBe(true)
     for (const malformed of ['AAA', 'A===', 'AA=A', 'AAA\n', 'AAA\r', 'AAAA\n', 'AAAA====']) {
@@ -129,9 +133,22 @@ describe('image object protected response bindings', () => {
     for(const changed of [{...good,sourceRevision:'0'.repeat(64)},{...good,threadId:'thread-2'},{...good,dataBase64:'cGl4ZWxz===='}])expect(await createObjectEditingHandler(privateResponse({ok:true,image:changed}))(request)).toMatchObject({ok:false})
     expect(await createObjectEditingHandler(privateResponse({ok:true,closed:true}))(request)).toMatchObject({ok:false})
   })
-  it('requires confirmed exact CAS note, source, thread and geometry', async () => {
-    const request={action:'image-annotation-write',sessionId:token,threadId:annotation.threadId,sourceRevision:hash,expectedAnnotationRevision:'',region:annotation.region,note:annotation.note}
+  it('requires the confirmed entire CAS collection, source and thread', async () => {
+    const request={action:'image-annotation-write',sessionId:token,threadId:annotation.threadId,sourceRevision:hash,expectedAnnotationRevision:'',regions}
     expect(await createObjectEditingHandler(privateResponse({ok:true,annotation}))(request)).toEqual({ok:true,annotation})
-    for(const changed of [{...annotation,current:false},{...annotation,note:'other'},{...annotation,sourceRevision:'0'.repeat(64)},{...annotation,region:{...annotation.region,width:41}},{...annotation,threadId:'thread-2'}])expect(await createObjectEditingHandler(privateResponse({ok:true,annotation:changed}))(request)).toMatchObject({ok:false})
+    const changedRegions = [regions.slice(0, 1), [...regions].reverse(), [regions[0], {...regions[1],note:'other'}],
+      [regions[0], {...regions[1],regionId:'1'.repeat(48)}], [regions[0], {...regions[1],region:{...regions[1].region,width:41}}]]
+    for(const changed of [{...annotation,current:false},{...annotation,sourceRevision:'0'.repeat(64)},{...annotation,threadId:'thread-2'},
+      ...changedRegions.map(regions => ({...annotation,regions}))])expect(await createObjectEditingHandler(privateResponse({ok:true,annotation:changed}))(request)).toMatchObject({ok:false})
+    expect(await createObjectEditingHandler(privateResponse({ok:true,annotation:{...annotation,regions:[]}}))({...request,regions:[]})).toMatchObject({ok:true,annotation:{regions:[]}})
+  })
+  it('rejects capture of a different region even when geometry and revision agree', async () => {
+    const request={action:'image-scope-capture',sessionId:token,threadId:'thread-1',sourceRevision:hash,annotationRevision:hash,regionId:token}
+    const scope={kind:'image-region',sessionId:token,scopeId:otherToken,objectId:hash,threadId:'thread-1',sourceRevision:hash,annotationRevision:hash,
+      width:100,height:80,regionId:token,region:regions[0].region,purpose:'discuss',editable:false,current:true}
+    expect(await createObjectEditingHandler(privateResponse({ok:true,scope}))(request)).toEqual({ok:true,scope})
+    for(const changed of [{regionId:otherToken},{sessionId:otherToken},{threadId:'thread-2'},{sourceRevision:'0'.repeat(64)},{annotationRevision:'0'.repeat(64)}]) {
+      expect(await createObjectEditingHandler(privateResponse({ok:true,scope:{...scope,...changed}}))(request)).toMatchObject({ok:false})
+    }
   })
 })

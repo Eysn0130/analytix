@@ -45,12 +45,12 @@ function matchesObjectEditingSuccess(request: ObjectEditingRequest, value: Extra
       return 'annotation' in value && value.annotation.threadId === request.threadId
     case 'image-annotation-write':
       return 'annotation' in value && value.annotation.threadId === request.threadId && value.annotation.current &&
-        value.annotation.sourceRevision === request.sourceRevision && value.annotation.note === request.note &&
-        JSON.stringify(value.annotation.region) === JSON.stringify(request.region)
+        value.annotation.sourceRevision === request.sourceRevision &&
+        JSON.stringify(value.annotation.regions) === JSON.stringify(request.regions)
     case 'image-scope-capture':
       return 'scope' in value && 'kind' in value.scope && value.scope.sessionId === request.sessionId &&
         value.scope.threadId === request.threadId && value.scope.sourceRevision === request.sourceRevision &&
-        value.scope.annotationRevision === request.annotationRevision
+        value.scope.annotationRevision === request.annotationRevision && value.scope.regionId === request.regionId
     case 'image-scope-read':
       return 'scope' in value && 'kind' in value.scope && value.scope.sessionId === request.sessionId &&
         value.scope.threadId === request.threadId && value.scope.scopeId === request.scopeId

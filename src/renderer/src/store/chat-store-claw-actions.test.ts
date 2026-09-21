@@ -318,7 +318,8 @@ describe('image note composition protects Claw thread navigation', () => {
     const { useWriteWorkspaceStore } = await import('../write/write-workspace-store')
     useWriteWorkspaceStore.setState({ imageRegionEditor: {
       workspace: '/synthetic', path: '/synthetic/image.png', threadId: 'image-owner', snapshot: null, annotation: null,
-      region: null, note: '组合文本', dirty: true, pending: null, loading: false, revoked: false, stale: false,
+      regions: [{ regionId: '9'.repeat(48), region: null, note: '组合文本' }], selectedRegionId: '9'.repeat(48),
+    region: null, note: '组合文本', dirty: true, pending: null, loading: false, revoked: false, stale: false,
       composing, status: 'dirty', error: null
     } })
     let state = { activeThreadId: 'image-owner', route: 'claw', runtimeConnection: 'ready', threads: [], clawChannels: [], activeClawChannelId: '' } as never

@@ -9,7 +9,21 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：PR28 双执行器 / 2026-09-21 PDT
+## 当前接续：PR28 独立审查落地 / 2026-09-21 PDT
+
+从 clean `fe65622e5d827637f6a7423ef60dc048fee20d3c` 继续原分支，保留148d及全部较晚有效历史。
+[本轮执行记录](../qa/pr28-independent-review-execution-2026-09-21.md)与其所在提交是新源码检查点；
+新交付manifest另记准确HEAD/tree/dirty及67条当前映射。完成Office/Canvas导航失效修复、
+数值与source-read授权/missing-key投影补证，以及最多8区的图片CAS/选择备注/引用/预览旋转。
+新增的引用保存竞态、冲突重选CAS与逐区重画回归均已复现修复。
+
+完整A—M仍未完成。Browser可信guest/document→Core引用、导入pivot/chart与固定引擎/安装
+实际验收继续区分为源码缺口和证据缺口。不要重做既有单区/Canvas/R07、148d数值修复，
+也不要把继承995/1783/prod12写成新图片合同候选全套通过。当前owner保留writer；下一方
+REVIEW_ONLY仅收到新增可分享证据，不收到未获准源码。安全拒绝未解除，不以push/ZIP/另一
+执行器替代被拒的外发；PR仍Draft、未merge、真正main未验证。Notion仅镜像验证后的摘要。
+
+## 历史接续：PR28 双执行器 / 2026-09-21 PDT
 
 最新源码检查点 `148d188e4f7df71e1cf28bc25bfff988365fa1ea` 保留 `2edb7d463` 及之前历史。
 本轮从实际SARIF复现并修复转换前整数范围缺陷；9个Go包995顶层测试通过，生产标签12项通过。

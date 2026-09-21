@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
-import { isNativeSelectionEditable, nativeActionReferencesCurrent, nativeReferencesPrompt, useNativeReferenceStore, type NativeReference } from './native-reference-store'
+import { isNativeSelectionEditable, nativeActionReferencesCurrent, nativeReferencesPrompt, useNativeReferenceStore, type ImageRegionNativeReference, type NativeReference } from './native-reference-store'
 
 const view: NativeOfficeView = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), path: '/synthetic/report.docx', kind: 'docx', status: 'ready', dirty: false, editing: true, changeSequence: 2 }
 const selection: NativeOfficeSelection = { kind: 'text', documentId: view.objectId, version: view.revision, changeSequence: 2, token: 'selection-token', scope: 'session-text-range-at-version-and-change-sequence', text: 'Synthetic text', capture: { capturedCharacters: 14, totalCharacters: 14, unit: 'utf-16', truncated: false, complete: true } }
@@ -67,4 +67,46 @@ it('downgrades revoked prior scopes for the same object and thread without chang
   expect(references[1]).toEqual(otherThread)
   expect(references[2]).toEqual(otherObject)
   expect(references[3]).toMatchObject({editable:true,scopeId:'b'.repeat(48),note:'新标注'})
+})
+
+describe('multi-region image reference identity', () => {
+  const image = (regionId: string): ImageRegionNativeReference => ({ kind: 'image-region', id: 'local', threadId: 'thread',
+    workspace: '/synthetic', path: '/synthetic/image.png', objectId: 'a'.repeat(64), revision: 'b'.repeat(64),
+    label: 'image.png', text: '', sessionId: 'c'.repeat(48), scopeId: 'd'.repeat(48), editable: false,
+    annotationRevision: 'e'.repeat(64), regionId, width: 100, height: 80, region: { x: 1, y: 2, width: 3, height: 4 } })
+
+  it('preserves other current regions and replaces only the same object/thread/region identity', () => {
+    useNativeReferenceStore.setState({ references: [], drafts: {} })
+    const first = useNativeReferenceStore.getState().add(image('1'.repeat(48)))
+    const second = useNativeReferenceStore.getState().add({ ...image('2'.repeat(48)), scopeId: '2'.repeat(48) })
+    const otherThread = useNativeReferenceStore.getState().add({ ...image('1'.repeat(48)), threadId: 'other-thread' })
+    const otherObject = useNativeReferenceStore.getState().add({ ...image('1'.repeat(48)), objectId: 'f'.repeat(64) })
+    expect(useNativeReferenceStore.getState().references).toEqual([first, second, otherThread, otherObject])
+    const replacement = useNativeReferenceStore.getState().add({ ...image('1'.repeat(48)), scopeId: '3'.repeat(48) })
+    expect(useNativeReferenceStore.getState().references).toEqual([second, otherThread, otherObject, replacement])
+    expect(nativeReferencesPrompt([second, replacement])).toContain(second.scopeId)
+    expect(nativeReferencesPrompt([second, replacement])).toContain(replacement.scopeId)
+  })
+
+  it.each(['annotationRevision', 'revision'] as const)('revokes prior region scopes on %s drift while retaining snapshots and unrelated threads', field => {
+    useNativeReferenceStore.setState({ references: [], drafts: {} })
+    const first = useNativeReferenceStore.getState().add(image('1'.repeat(48)))
+    const second = useNativeReferenceStore.getState().add(image('2'.repeat(48)))
+    const unrelated = useNativeReferenceStore.getState().add({ ...image('3'.repeat(48)), threadId: 'other-thread' })
+    const latest = useNativeReferenceStore.getState().add({ ...image('1'.repeat(48)), [field]: '0'.repeat(64) })
+    const references = useNativeReferenceStore.getState().references
+    expect(references).toHaveLength(3)
+    expect(references.some(reference => reference.id === first.id)).toBe(false)
+    expect(references[0]).toEqual({ ...second, scopeId: undefined })
+    expect(references[1]).toEqual(unrelated)
+    expect(references[2]).toEqual(latest)
+    expect(() => nativeReferencesPrompt([references[0]])).toThrow()
+  })
+
+  it('does not preserve an old revision scope merely because the new snapshot has no scope', () => {
+    useNativeReferenceStore.setState({ references: [], drafts: {} })
+    const first = useNativeReferenceStore.getState().add(image('1'.repeat(48)))
+    useNativeReferenceStore.getState().add({ ...image('2'.repeat(48)), annotationRevision: '0'.repeat(64), scopeId: undefined })
+    expect(useNativeReferenceStore.getState().references[0]).toEqual({ ...first, scopeId: undefined })
+  })
 })

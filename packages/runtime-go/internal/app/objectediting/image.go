@@ -30,14 +30,14 @@ type OpenedImage struct {
 	DataBase64     string `json:"dataBase64"`
 }
 type ImageAnnotationWrite struct {
-	SessionID                  string             `json:"sessionId"`
-	ThreadID                   string             `json:"threadId"`
-	SourceRevision             string             `json:"sourceRevision"`
-	ExpectedAnnotationRevision string             `json:"expectedAnnotationRevision"`
-	Region                     *files.ImageRegion `json:"region"`
-	Note                       string             `json:"note"`
+	SessionID                  string                        `json:"sessionId"`
+	ThreadID                   string                        `json:"threadId"`
+	SourceRevision             string                        `json:"sourceRevision"`
+	ExpectedAnnotationRevision string                        `json:"expectedAnnotationRevision"`
+	Regions                    []files.ImageAnnotationRegion `json:"regions"`
 }
 type ImageScopeCapture struct {
+	RegionID           string `json:"regionId"`
 	SessionID          string `json:"sessionId"`
 	ThreadID           string `json:"threadId"`
 	SourceRevision     string `json:"sourceRevision"`
@@ -49,6 +49,7 @@ type ImageScopeBinding struct {
 	ScopeID   string `json:"scopeId"`
 }
 type ImageScope struct {
+	RegionID           string            `json:"regionId"`
 	Kind               string            `json:"kind"`
 	SessionID          string            `json:"sessionId"`
 	ScopeID            string            `json:"scopeId"`
@@ -172,7 +173,7 @@ func (s *Service) WriteImageAnnotation(ctx context.Context, input ImageAnnotatio
 	if s == nil {
 		return files.ImageAnnotation{}, ErrUnavailable
 	}
-	if !files.ValidImageAnnotationWrite(input.ExpectedAnnotationRevision, input.SourceRevision, input.Note, input.Region) {
+	if !files.ValidImageAnnotationWrite(input.ExpectedAnnotationRevision, input.SourceRevision, input.Regions) {
 		return files.ImageAnnotation{}, files.ErrInvalidInput
 	}
 	s.mu.Lock()
@@ -190,7 +191,7 @@ func (s *Service) WriteImageAnnotation(ctx context.Context, input ImageAnnotatio
 			}
 		}
 	}
-	value, err := port.WriteImageAnnotation(ctx, files.ImageAnnotationWriteInput{AnnotationDraftTarget: files.AnnotationDraftTarget{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, ThreadID: input.ThreadID}, ExpectedAnnotationRevision: input.ExpectedAnnotationRevision, SourceRevision: input.SourceRevision, Note: input.Note, Region: input.Region})
+	value, err := port.WriteImageAnnotation(ctx, files.ImageAnnotationWriteInput{AnnotationDraftTarget: files.AnnotationDraftTarget{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, ThreadID: input.ThreadID}, ExpectedAnnotationRevision: input.ExpectedAnnotationRevision, SourceRevision: input.SourceRevision, Regions: input.Regions})
 	if err != nil {
 		return files.ImageAnnotation{}, err
 	}
@@ -203,7 +204,7 @@ func (s *Service) CaptureImageScope(ctx context.Context, input ImageScopeCapture
 	if s == nil {
 		return ImageScope{}, ErrUnavailable
 	}
-	if !proposalHash.MatchString(input.SourceRevision) || !proposalHash.MatchString(input.AnnotationRevision) {
+	if !proposalHash.MatchString(input.SourceRevision) || !proposalHash.MatchString(input.AnnotationRevision) || !files.ValidImageRegionID(input.RegionID) {
 		return ImageScope{}, files.ErrInvalidInput
 	}
 	s.mu.Lock()
@@ -212,7 +213,8 @@ func (s *Service) CaptureImageScope(ctx context.Context, input ImageScopeCapture
 	if err != nil {
 		return ImageScope{}, err
 	}
-	if !note.Current || note.Region == nil || note.SourceRevision != input.SourceRevision || note.AnnotationRevision != input.AnnotationRevision {
+	selected, found := imageAnnotationRegion(note, input.RegionID)
+	if !note.Current || !found || note.SourceRevision != input.SourceRevision || note.AnnotationRevision != input.AnnotationRevision {
 		return ImageScope{}, ErrDraftStale
 	}
 	freezer, ok := s.projector.(SelectionAuthorityFreezer)
@@ -225,11 +227,11 @@ func (s *Service) CaptureImageScope(ctx context.Context, input ImageScopeCapture
 		return ImageScope{}, ErrProjection
 	}
 	authority.SecurityBinding = binding
-	ranges, err := s.projector.AuthorizeAndProject(ctx, ProjectionInput{ScopeAuthority: authority, Text: note.Note})
+	ranges, err := s.projector.AuthorizeAndProject(ctx, ProjectionInput{ScopeAuthority: authority, Text: selected.Note})
 	if err != nil || len(ranges) > MaxProtectedSpans {
 		return ImageScope{}, ErrProjection
 	}
-	parts, err := imageNoteParts(note.Note, ranges)
+	parts, err := imageNoteParts(selected.Note, ranges)
 	if err != nil {
 		return ImageScope{}, err
 	}
@@ -248,7 +250,7 @@ func (s *Service) CaptureImageScope(ctx context.Context, input ImageScopeCapture
 	if err != nil {
 		return ImageScope{}, err
 	}
-	view := ImageScope{Kind: "image-region", SessionID: input.SessionID, ScopeID: id, ObjectID: current.objectID, ThreadID: input.ThreadID, SourceRevision: note.SourceRevision, AnnotationRevision: note.AnnotationRevision, Width: note.Width, Height: note.Height, Region: *note.Region, Purpose: "discuss", Editable: false, Current: true}
+	view := ImageScope{Kind: "image-region", SessionID: input.SessionID, ScopeID: id, ObjectID: current.objectID, ThreadID: input.ThreadID, SourceRevision: note.SourceRevision, AnnotationRevision: note.AnnotationRevision, Width: note.Width, Height: note.Height, RegionID: selected.RegionID, Region: selected.Region, Purpose: "discuss", Editable: false, Current: true}
 	state.scopes[id] = &capturedScope{image: &view, imageBinding: binding, view: Scope{Parts: parts}}
 	if _, err := s.imageScopeLocked(ctx, ImageScopeBinding{SessionID: input.SessionID, ThreadID: input.ThreadID, ScopeID: id}); err != nil {
 		delete(state.scopes, id)
@@ -302,7 +304,8 @@ func (s *Service) imageScopeLocked(ctx context.Context, input ImageScopeBinding)
 		return nil, ErrScope
 	}
 	current, note, err := s.imageAnnotationLocked(ctx, input.SessionID, input.ThreadID)
-	if err != nil || !note.Current || note.Region == nil || note.AnnotationRevision != scope.image.AnnotationRevision || note.SourceRevision != scope.image.SourceRevision || note.Width != scope.image.Width || note.Height != scope.image.Height || !reflect.DeepEqual(*note.Region, scope.image.Region) {
+	selected, found := imageAnnotationRegion(note, scope.image.RegionID)
+	if err != nil || !note.Current || !found || note.AnnotationRevision != scope.image.AnnotationRevision || note.SourceRevision != scope.image.SourceRevision || note.Width != scope.image.Width || note.Height != scope.image.Height || !reflect.DeepEqual(selected.Region, scope.image.Region) {
 		scope.revoked = true
 		scope.image.Current = false
 		scope.view.Parts = nil
@@ -388,4 +391,13 @@ func (s *Service) ReadImageScopeForModel(ctx context.Context, thread, id string)
 		return map[string]any{"kind": "image-region", "scopeId": id, "editable": false, "region": scope.image.Region, "dimensions": map[string]int{"width": scope.image.Width, "height": scope.image.Height}, "noteParts": cloneParts(scope.view.Parts), "imageObservation": "unavailable"}, true, nil
 	}
 	return nil, false, nil
+}
+
+func imageAnnotationRegion(annotation files.ImageAnnotation, id string) (files.ImageAnnotationRegion, bool) {
+	for _, item := range annotation.Regions {
+		if item.RegionID == id {
+			return item, true
+		}
+	}
+	return files.ImageAnnotationRegion{}, false
 }

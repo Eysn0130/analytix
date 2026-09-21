@@ -41,18 +41,18 @@ beforeEach(() => {
   useChatStore.setState({ activeThreadId: 'thread-a' })
   useNativeReferenceStore.setState({ references: [] })
   annotation = { objectId: image.objectId, threadId: 'thread-a', annotationRevision: '', sourceRevision: '',
-    width: 0, height: 0, region: null, note: '', updatedAt: '', current: false }
+    width: 0, height: 0, regions: [], updatedAt: '', current: false }
   request = vi.fn<(input: ObjectEditingRequest) => Promise<unknown>>(async input => {
     if (input.action === 'image-open') return { ok: true, image: { ...image, threadId: input.threadId } }
     if (input.action === 'image-annotation-read') return { ok: true, annotation: { ...annotation, threadId: input.threadId } }
     if (input.action === 'image-annotation-write') {
       annotation = { ...annotation, annotationRevision: 'd'.repeat(64), sourceRevision: input.sourceRevision,
-        width: 400, height: 200, region: input.region, note: input.note, current: true, updatedAt: '2026-09-20T00:00:00Z' }
+        width: 400, height: 200, regions: input.regions, current: true, updatedAt: '2026-09-20T00:00:00Z' }
       return { ok: true, annotation }
     }
     if (input.action === 'image-scope-capture') return { ok: true, scope: { kind: 'image-region', sessionId: image.sessionId,
       scopeId: 'e'.repeat(48), objectId: image.objectId, threadId: 'thread-a', sourceRevision: image.sourceRevision,
-      annotationRevision: annotation.annotationRevision, width: 400, height: 200, region: annotation.region,
+      annotationRevision: annotation.annotationRevision, width: 400, height: 200, regionId: input.regionId, region: annotation.regions.find(entry => entry.regionId === input.regionId)!.region,
       current: true, editable: false, purpose: 'discuss' } }
     if (input.action === 'close') return { ok: true, closed: true }
     if (input.action === 'image-scope-revoke') return { ok: true, revoked: true }
@@ -83,6 +83,24 @@ test('reference only adds a discussion scope without sending or replacing a comp
     scopeId: 'e'.repeat(48), text: '', region: { x: 20, y: 20, width: 60, height: 60 } })])
   expect(request.mock.calls.map(([r]) => r.action)).toEqual(['image-open', 'image-annotation-read', 'image-annotation-write', 'image-scope-capture'])
   expect(container.textContent).toContain('imageRegionDiscussionOnly')
+})
+test('rotated pointer selection saves original coordinates and turning during a gesture cancels only that gesture', async () => {
+  await render()
+  const rotate = () => container.querySelector<HTMLButtonElement>('[aria-label="writeImageRotatePreview"]')!
+  expect(rotate()).not.toBeNull()
+  await act(async () => rotate().click())
+  const img = container.querySelector('img')!
+  vi.spyOn(img, 'getBoundingClientRect').mockReturnValue(new DOMRect(10, 20, 100, 200))
+  await act(async () => { pointer('pointerdown', 80, 60); pointer('pointermove', 50, 120); pointer('pointerup', 50, 120) })
+  expect(state().imageRegionEditor?.region).toEqual({ x: 80, y: 60, width: 120, height: 60 })
+  await act(async () => { state().updateImageRegion({ note: 'keep note' }); await state().flushSave(workspace) })
+  const saved = state().imageRegionEditor!.annotation
+  expect(saved?.regions[0].region).toEqual({ x: 80, y: 60, width: 120, height: 60 })
+  await act(async () => { pointer('pointerdown', 20, 40); pointer('pointermove', 70, 180) })
+  await act(async () => rotate().click())
+  expect(state().imageRegionEditor).toMatchObject({ region: saved!.regions[0].region, note: 'keep note', dirty: false })
+  expect(container.querySelector('[data-testid="image-preview-plane"]')?.getAttribute('style')).toContain('rotate(180deg)')
+  expect(request.mock.calls.filter(([r]) => r.action === 'image-annotation-write')).toHaveLength(1)
 })
 test('unsupported GIF preserves the existing preview without opening a region session', async () => {
   await render('image/gif')
@@ -131,7 +149,7 @@ test('pointer cancel restores pre-gesture geometry without reverting a concurren
   const confirmed = state().imageRegionEditor!.annotation
   await act(async () => pointer('pointercancel', 90, 90))
   expect(state().imageRegionEditor).toMatchObject({ region: original, note: 'retain new note', annotation: confirmed, dirty: true })
-  expect(confirmed?.region).toEqual(moved)
+  expect(confirmed?.regions[0].region).toEqual(moved)
 })
 test('lost pointer capture cancels a new rectangle without creating a no-op dirty annotation', async () => {
   await render()
@@ -165,4 +183,27 @@ test('thread navigation holds the real note input; a queued composition cancels 
   })
   expect(switched).toBe(false)
   expect(state().imageRegionEditor?.note).toBe('组合中的原稿')
+})
+
+test('mounted multi-region controls preserve each note, overlays and stable identity when switching and removing', async () => {
+  await render(); await draw()
+  await act(async () => state().updateImageRegion({ note: 'first note' }))
+  const firstId = state().imageRegionEditor!.selectedRegionId!
+  await act(async () => button('imageRegionAdd').click())
+  expect(state().imageRegionEditor?.selectedRegionId).toBeNull()
+  await draw()
+  await act(async () => state().updateImageRegion({ region: { x: 200, y: 50, width: 50, height: 50 }, note: 'second note' }))
+  const secondId = state().imageRegionEditor!.selectedRegionId!
+  expect(secondId).not.toBe(firstId)
+  expect(container.querySelectorAll('[data-testid="image-region-overlay"]')).toHaveLength(1)
+  expect(container.querySelectorAll('[data-testid="image-region-inactive-overlay"]')).toHaveLength(1)
+  const select = container.querySelector<HTMLSelectElement>('[aria-label="imageRegionSelection"]')!
+  await act(async () => { select.value = firstId; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(container.querySelector('textarea')!.value).toBe('first note')
+  await act(async () => button('imageRegionSave').click())
+  expect(annotation.regions).toHaveLength(2)
+  await act(async () => button('imageRegionRemove').click())
+  expect(state().imageRegionEditor).toMatchObject({ selectedRegionId: secondId, note: 'second note', dirty: true })
+  await act(async () => button('imageRegionSave').click())
+  expect(annotation.regions).toEqual([expect.objectContaining({ regionId: secondId, note: 'second note' })])
 })

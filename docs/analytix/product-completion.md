@@ -23,14 +23,20 @@ The [2026-09-21 dual-executor receipt](qa/pr28-dual-executor-2026-09-21.md) reco
 the newer source checkpoint `148d188e4`, integer-boundary fixes, actual SARIF mapping,
 and REVIEW_ONLY handoff. Native/product gaps below remain open; no new remote CI or merge is claimed.
 
+The [independent-review continuation receipt](qa/pr28-independent-review-execution-2026-09-21.md)
+records the newer current-source evidence: Office/Canvas document-lease repairs,
+retained 148d numeric fixes with focused coverage, missing-key projection and
+read-before-authority tests, and image collections with stable region identities,
+whole-collection CAS and display rotation/zoom. Images remain discussion-only;
+non-normal EXIF/animated PNG and unauthorized pixel editing remain fail closed.
+
 Core-authorized retrieval, primary-thread auxiliary completion, exact subagent
-budgets, skill discovery/revocation fixes, real pivot generation, a synthetic
-DOCX oracle, single-region image notes and bounded PPT shape geometry/fill have
-advanced locally. These source results do not establish fixed-engine fidelity,
-GUI, installation, current remote CI or product acceptance. Image multi-region
-and rotation, trusted browser references, imported pivot/chart editing and the
-recorded native journeys still require implementation or acceptance. Rust's
-original DuckDB failure and current-candidate CodeQL remain unresolved.
+budgets, skill discovery/revocation, real pivot generation, the synthetic DOCX
+oracle and bounded PPT geometry/fill remain integrated. Native image acceptance,
+trusted Browser references, imported pivot/chart editing and the recorded fixed
+engine/installed journeys remain open. Browser authority is a source capability
+gap, not a blanket environment block. Rust's original DuckDB failure and
+current-candidate CodeQL are not closed. Earlier matrices below are historical.
 
 At the latest read, main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`;
 PR28 remains OPEN/Draft at `dde784437dc8563e84066629dd57f4a11fd9acc9`.

@@ -7,10 +7,12 @@ import type { WriteWorkspaceGet, WriteWorkspaceSet } from './write-workspace-sto
 import { useNativeReferenceStore } from '../office/native-reference-store'
 import i18n from '../i18n'
 
+type ImageRegionDraft = { regionId: string; region: ImageRegion | null; note: string }
 type ImageWrite = Extract<ObjectEditingRequest, { action: 'image-annotation-write' }>
 export type ImageRegionEditor = {
   workspace: string; path: string; threadId: string
   snapshot: ImageObjectSnapshot | null; annotation: ImageAnnotation | null
+  regions: ImageRegionDraft[]; selectedRegionId: string | null
   region: ImageRegion | null; note: string; dirty: boolean; pending: ImageWrite | null
   loading: boolean; revoked: boolean; stale: boolean; composing: boolean
   status: 'saved' | 'dirty' | 'saving' | 'unknown' | 'conflict' | 'error'; error: string | null
@@ -18,15 +20,26 @@ export type ImageRegionEditor = {
 export const imageRegionHasDraft = (editor: ImageRegionEditor | null): boolean => !!editor && (editor.dirty || !!editor.pending || editor.composing)
 const sameRegion = (a: ImageRegion | null, b: ImageRegion | null): boolean =>
   a === null ? b === null : b !== null && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+const sameRegions = (a: ImageRegionDraft[], b: ImageRegionDraft[]): boolean => a.length === b.length && a.every((entry, i) =>
+  entry.regionId === b[i].regionId && entry.note === b[i].note && sameRegion(entry.region, b[i].region))
 const sameWrite = (annotation: ImageAnnotation, write: ImageWrite): boolean => annotation.current &&
-  annotation.sourceRevision === write.sourceRevision && annotation.note === write.note && sameRegion(annotation.region, write.region)
+  annotation.sourceRevision === write.sourceRevision && sameRegions(annotation.regions, write.regions)
+const selection = (regions: ImageRegionDraft[], selectedRegionId: string | null) => {
+  const selected = regions.find(entry => entry.regionId === selectedRegionId)
+  return { regions, selectedRegionId: selected?.regionId ?? null, region: selected?.region ?? null, note: selected?.note ?? '' }
+}
+const newRegionId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(24)), value => value.toString(16).padStart(2, '0')).join('')
 
-/** Pointer coordinates are mapped through the rendered image box, never CSS zoom assumptions. */
+export type ImagePreviewRotation = 0 | 90 | 180 | 270
+/** Invert the preview rotation after mapping its bounding box; saved geometry
+ * always names the Core snapshot's original pixels, not the display transform. */
 export function imagePoint(clientX: number, clientY: number, box: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
-  image: Pick<ImageObjectSnapshot, 'width' | 'height'>): { x: number; y: number } | null {
+  image: Pick<ImageObjectSnapshot, 'width' | 'height'>, rotation: ImagePreviewRotation = 0): { x: number; y: number } | null {
   if (!(box.width > 0 && box.height > 0) || !Number.isFinite(clientX + clientY)) return null
-  return { x: Math.max(0, Math.min(image.width, Math.round((clientX - box.left) * image.width / box.width))),
-    y: Math.max(0, Math.min(image.height, Math.round((clientY - box.top) * image.height / box.height))) }
+  const u = Math.max(0, Math.min(1, (clientX - box.left) / box.width))
+  const v = Math.max(0, Math.min(1, (clientY - box.top) / box.height))
+  const [x, y] = rotation === 90 ? [v, 1 - u] : rotation === 180 ? [1 - u, 1 - v] : rotation === 270 ? [1 - v, u] : [u, v]
+  return { x: Math.round(x * image.width), y: Math.round(y * image.height) }
 }
 export function imageRectangle(a: { x: number; y: number }, b: { x: number; y: number }): ImageRegion | null {
   const width = Math.abs(a.x - b.x), height = Math.abs(a.y - b.y)
@@ -45,6 +58,8 @@ export type ImageRegionActions = {
   setImageRegionComposing: (composing: boolean) => void
   openImageRegion: (workspace: string, path: string, threadId: string, recapture?: boolean) => Promise<boolean>
   updateImageRegion: (patch: { region?: ImageRegion | null; note?: string }) => void
+  selectImageRegion: (regionId: string | null) => void
+  removeImageRegion: () => void
   flushImageRegion: () => Promise<boolean>
   closeImageRegion: () => Promise<boolean>
   captureImageRegion: () => Promise<ImageRegionScope | null>
@@ -97,7 +112,7 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
       if (sameOwner && previous?.snapshot && !previous.revoked && !recapture) return true
       const preserved = sameOwner && imageRegionHasDraft(previous) ? previous : null
       const editor: ImageRegionEditor = { workspace, path, threadId, snapshot: null, annotation: null,
-        region: preserved?.region ?? null, note: preserved?.note ?? '', dirty: preserved?.dirty ?? false,
+        ...selection(preserved?.regions ?? [], preserved?.selectedRegionId ?? null), dirty: preserved?.dirty ?? false,
         pending: preserved?.pending ?? null, loading: true, revoked: false, stale: false, composing: false, status: preserved ? 'dirty' : 'saved', error: null }
       set({ imageRegionEditor: editor })
       const operation = (async () => {
@@ -115,11 +130,16 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
           const annotation = response.annotation
           const stale = !!annotation.annotationRevision && (!annotation.current || annotation.sourceRevision !== snapshot.sourceRevision ||
             annotation.width !== snapshot.width || annotation.height !== snapshot.height)
-          const preserveRegion = preserved && !recapture && preserved.snapshot?.sourceRevision === snapshot.sourceRevision && preserved.snapshot.objectId === snapshot.objectId
-          update({ snapshot, annotation: preserved && !recapture ? preserved.annotation : annotation,
-            pending: preserved?.pending ? { ...preserved.pending, sessionId: snapshot.sessionId } : null, loading: false, stale: stale || !!preserved && !preserveRegion && !recapture,
-            region: recapture ? null : preserveRegion ? preserved.region : stale ? null : annotation.region,
-            note: preserved?.note ?? annotation.note, dirty: !!preserved || recapture,
+          const preserveRegion = preserved && preserved.snapshot?.sourceRevision === snapshot.sourceRevision && preserved.snapshot.objectId === snapshot.objectId
+          const sourceChanged = preserved ? !preserveRegion : stale
+          const drafts = preserved?.regions ?? annotation.regions
+          const selectedId = (sameOwner ? previous?.selectedRegionId : null) ?? drafts[0]?.regionId ?? null
+          const regions = sourceChanged ? drafts.map(entry => ({ ...entry, region: null }))
+            : recapture ? drafts.map(entry => entry.regionId === selectedId ? { ...entry, region: null } : entry) : drafts
+          update({ snapshot, annotation: preserved ? preserved.annotation : annotation,
+            pending: preserved?.pending ? { ...preserved.pending, sessionId: snapshot.sessionId } : null,
+            loading: false, stale: sourceChanged && !recapture,
+            ...selection(regions, selectedId), dirty: !!preserved || recapture,
             status: preserved || recapture ? 'dirty' : 'saved' })
           return true
         } catch (error) {
@@ -143,11 +163,40 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
       if (region && (![region.x, region.y, region.width, region.height].every(Number.isInteger) || region.x < 0 || region.y < 0 ||
         region.width < 1 || region.height < 1 || region.x + region.width > editor.snapshot.width || region.y + region.height > editor.snapshot.height)) return
       const note = patch.note ?? editor.note
-      if (note.length > 4096) return
+      let regions = editor.regions
+      let selectedRegionId = editor.selectedRegionId
+      if (region || note) {
+        if (!selectedRegionId) {
+          if (regions.length >= 8) return
+          selectedRegionId = newRegionId()
+          regions = [...regions, { regionId: selectedRegionId, region, note }]
+        } else regions = regions.map(entry => entry.regionId === selectedRegionId ? { ...entry, region, note } : entry)
+      } else {
+        regions = regions.filter(entry => entry.regionId !== selectedRegionId)
+        selectedRegionId = null
+      }
+      if (regions.reduce((sum, entry) => sum + entry.note.length, 0) > 4096 ||
+        regions.reduce((sum, entry) => sum + new TextEncoder().encode(entry.note).length, 0) > 16384) return
       useNativeReferenceStore.getState().revokeScopes(editor.snapshot.objectId)
-      const dirty = !!editor.pending || note !== (editor.annotation?.note ?? '') || !sameRegion(region, editor.annotation?.region ?? null) ||
-        !!region && editor.annotation?.sourceRevision !== editor.snapshot.sourceRevision
-      update({ region, note, dirty, stale: patch.region ? false : editor.stale,
+      const dirty = !!editor.pending || !sameRegions(regions, editor.annotation?.regions ?? []) ||
+        regions.length > 0 && editor.annotation?.sourceRevision !== editor.snapshot.sourceRevision
+      update({ ...selection(regions, selectedRegionId), dirty, stale: patch.region ? false : editor.stale,
+        status: editor.pending ? 'unknown' : dirty ? 'dirty' : 'saved', error: null })
+    },
+    selectImageRegion: (regionId: string | null) => {
+      const editor = get().imageRegionEditor
+      if (!editor?.snapshot || editor.revoked || editor.loading || editor.composing || get().shutdownFrozen ||
+        editor.threadId !== get().imageRegionThreadId || regionId !== null && !editor.regions.some(entry => entry.regionId === regionId)) return
+      update(selection(editor.regions, regionId))
+    },
+    removeImageRegion: () => {
+      const editor = get().imageRegionEditor
+      if (!editor?.snapshot || !editor.selectedRegionId || editor.revoked || editor.loading || editor.composing ||
+        get().shutdownFrozen || editor.threadId !== get().imageRegionThreadId) return
+      const regions = editor.regions.filter(entry => entry.regionId !== editor.selectedRegionId)
+      useNativeReferenceStore.getState().revokeScopes(editor.snapshot.objectId)
+      const dirty = !!editor.pending || !sameRegions(regions, editor.annotation?.regions ?? [])
+      update({ ...selection(regions, regions[0]?.regionId ?? null), dirty,
         status: editor.pending ? 'unknown' : dirty ? 'dirty' : 'saved', error: null })
     },
     flushImageRegion: async (): Promise<boolean> => {
@@ -159,10 +208,11 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
       const editor = get().imageRegionEditor
       if (!editor || !imageRegionHasDraft(editor)) return !editor?.loading
       if (editor.composing || editor.revoked || editor.loading || editor.stale || !editor.snapshot || !editor.annotation ||
-        editor.threadId !== get().imageRegionThreadId || !editor.region && !!editor.note) return false
+        editor.threadId !== get().imageRegionThreadId || editor.regions.some(entry => !entry.region)) return false
       const generation = epoch, image = editor.snapshot
       let pending: ImageWrite = editor.pending ?? { action: 'image-annotation-write', sessionId: image.sessionId, threadId: editor.threadId,
-        sourceRevision: image.sourceRevision, expectedAnnotationRevision: editor.annotation.annotationRevision, region: editor.region, note: editor.note }
+        sourceRevision: image.sourceRevision, expectedAnnotationRevision: editor.annotation.annotationRevision,
+        regions: editor.regions.map(entry => ({ ...entry, region: { ...entry.region! } })) }
       update({ pending, status: 'saving', error: null })
       const operation = (async () => {
         try {
@@ -206,7 +256,7 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
           if (!('annotation' in response) || response.annotation.objectId !== image.objectId || response.annotation.threadId !== editor.threadId ||
             response.annotation.width !== image.width || response.annotation.height !== image.height || !sameWrite(response.annotation, pending)) throw new Error(fail('imageRegionSaveUnconfirmed'))
           const current = get().imageRegionEditor!
-          const unchanged = current.note === pending.note && sameRegion(current.region, pending.region)
+          const unchanged = sameRegions(current.regions, pending.regions)
           update({ annotation: response.annotation, pending: null, dirty: !unchanged, status: unchanged ? 'saved' : 'dirty', error: null })
           return unchanged
         } catch (error) {
@@ -235,13 +285,16 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
       try { return await operation } finally { if (closing === operation) closing = null }
     },
     captureImageRegion: async (): Promise<ImageRegionScope | null> => {
-      if (get().shutdownFrozen || !(await get().flushImageRegion())) return null
+      const intended = get().imageRegionEditor, started = epoch
+      if (get().shutdownFrozen || !intended?.selectedRegionId || !(await get().flushImageRegion())) return null
       const editor = get().imageRegionEditor
-      if (!editor?.snapshot || !editor.annotation?.current || editor.revoked || editor.stale || !editor.region) return null
+      if (started !== epoch || editor?.selectedRegionId !== intended.selectedRegionId ||
+        editor?.snapshot?.objectId !== intended.snapshot?.objectId || editor?.snapshot?.sourceRevision !== intended.snapshot?.sourceRevision) return null
+      if (!editor?.snapshot || !editor.annotation?.current || editor.revoked || editor.stale || !editor.region || !editor.selectedRegionId) return null
       const generation = epoch
       try {
         const response = await request({ action: 'image-scope-capture', sessionId: editor.snapshot.sessionId, threadId: editor.threadId,
-          sourceRevision: editor.snapshot.sourceRevision, annotationRevision: editor.annotation.annotationRevision })
+          sourceRevision: editor.snapshot.sourceRevision, annotationRevision: editor.annotation.annotationRevision, regionId: editor.selectedRegionId })
         if (!owns(editor, generation) || get().shutdownFrozen || get().imageRegionEditor !== editor) {
           if (response.ok && 'scope' in response && 'kind' in response.scope) void request({ action: 'image-scope-revoke',
             sessionId: response.scope.sessionId, threadId: response.scope.threadId, scopeId: response.scope.scopeId }).catch(() => undefined)
@@ -253,7 +306,7 @@ export function createImageRegionActions(set: WriteWorkspaceSet, get: WriteWorks
         if (scope.sessionId !== editor.snapshot.sessionId || scope.objectId !== editor.snapshot.objectId || scope.threadId !== editor.threadId ||
           scope.width !== editor.snapshot.width || scope.height !== editor.snapshot.height ||
           scope.sourceRevision !== editor.snapshot.sourceRevision || scope.annotationRevision !== editor.annotation.annotationRevision ||
-          !sameRegion(scope.region, editor.region)) return null
+          scope.regionId !== editor.selectedRegionId || !sameRegion(scope.region, editor.region)) return null
         return scope
       } catch { if (owns(editor, generation)) update({ error: fail('imageRegionUnavailable') }); return null }
     }

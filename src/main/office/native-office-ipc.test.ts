@@ -28,7 +28,7 @@ beforeEach(() => {
 afterEach(()=>vi.useRealTimers())
 function setup(privateAdmission?:()=>Promise<OfficePrivateAdmission>) {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
-    webContents: Object.assign(new EventEmitter(), { mainFrame: {}, send: vi.fn(), isLoadingMainFrame: () => false, setWindowOpenHandler: vi.fn() }) })
+    webContents: Object.assign(new EventEmitter(), { mainFrame: {}, send: vi.fn(), isDestroyed: () => false, isLoadingMainFrame: () => false, setWindowOpenHandler: vi.fn() }) })
   let current: typeof main | null = main
   registerNativeOfficeIpc(() => current as any, vi.fn(), privateAdmission)
   const event = { sender: main.webContents, senderFrame: main.webContents.mainFrame }
@@ -105,6 +105,80 @@ it('drops a protected local reply when the owner frame changes during the reques
   h.main.webContents.mainFrame = {}
   finish({ ok: true, view: { path: '/private/example.docx' } })
   expect(await pending).toEqual({ ok: false, view: null, error: 'unavailable' })
+})
+it.each(['navigation', 'render-process-gone', 'destroyed'])('revokes %s without destroying retained Office notes or delivering old views', async reason => {
+  const h = setup()
+  let finish!: (value: unknown) => void
+  state.request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const pending = h.invoke()
+  const onChange = state.create.mock.calls[0][0].onChange
+  if (reason === 'navigation') h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  else h.main.webContents.emit(reason)
+  onChange({ path: '/private/old.docx', dirty: true })
+  finish({ ok: true, view: { path: '/private/old.docx', dirty: true } })
+  expect(await pending).toEqual({ ok: false, view: null, error: 'unavailable' })
+  expect(h.main.webContents.send).not.toHaveBeenCalledWith('office:changed', expect.anything())
+  expect(state.destroy).not.toHaveBeenCalled()
+  expect(await h.invoke()).toEqual({ ok: false, view: null, error: 'unavailable' })
+  expect(state.request.mock.calls.filter(([request]) => request.action !== 'hide')).toHaveLength(1)
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
+  expect(h.main.webContents.listenerCount('render-process-gone')).toBe(0)
+  expect(h.main.webContents.listenerCount('destroyed')).toBe(0)
+})
+it('reattaches retained Office state only after a current explicit open succeeds', async () => {
+  const h = setup(); await h.invoke()
+  const onChange = state.create.mock.calls[0][0].onChange
+  h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  const open = { action: 'open', workspace: '/workspace', path: 'report.docx', bounds: { x: 0, y: 0, width: 800, height: 600 } }
+  state.request.mockResolvedValueOnce({ ok: false, view: { path: '/private/old.docx' }, error: 'unknown' })
+  expect(await h.invoke(h.event, open)).toEqual({ ok: false, view: null, error: 'unknown' })
+  expect(await h.invoke()).toEqual({ ok: false, view: null, error: 'unavailable' })
+  state.request.mockResolvedValueOnce({ ok: true, view: { path: '/workspace/report.docx' } })
+  expect(await h.invoke(h.event, open)).toMatchObject({ ok: true })
+  onChange({ path: '/workspace/report.docx' })
+  expect(h.main.webContents.send).toHaveBeenCalledWith('office:changed', { path: '/workspace/report.docx' })
+  expect(state.create).toHaveBeenCalledOnce()
+  expect(state.destroy).not.toHaveBeenCalled()
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(1)
+})
+it('ignores iframe navigation and flushes Main notes without asking a replacement document for freeze ACK', async () => {
+  const h = setup(); await h.invoke()
+  h.main.webContents.emit('did-start-navigation', {}, 'about:blank', false, false)
+  expect(await h.invoke()).toMatchObject({ ok: true })
+  h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  const freezeInput = state.create.mock.calls[0][0].freezeAnnotationInput
+  expect(await freezeInput(true)).toBe(true)
+  expect(h.main.webContents.send.mock.calls.some(([channel]) => channel === 'office:annotation-input-freeze')).toBe(false)
+  expect(await prepareNativeOfficeQuit(h.main as any)).toBe(true)
+  expect(state.flushAnnotations).toHaveBeenCalledOnce()
+  expect(state.destroy).not.toHaveBeenCalled()
+})
+it('rejects same-document picker and menu results after navigation and removes request listeners', async () => {
+  const h = setup()
+  state.picker.mockImplementationOnce(async () => {
+    h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+    return { canceled: false, filePaths: ['/workspace/report.docx'] }
+  })
+  expect(await h.pick()).toEqual({ ok: false, error: 'unavailable' })
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
+  await h.invoke()
+  const view = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), changeSequence: 0 }
+  state.getView.mockReturnValue(view)
+  const pending = state.handlers.get('office:action-menu')!(h.event, { objectId: view.objectId, revision: view.revision, expectedChangeSequence: 0,
+    actions: [{ id: 'task:polish', label: 'Polish', enabled: true }] })
+  expect(state.menu).toHaveBeenCalledOnce()
+  h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  expect(await pending).toEqual({ actionId: null })
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
+})
+it('rejects a same-frame freeze ACK after navigation and does not retain its listeners', async () => {
+  const h = setup(); await h.invoke()
+  const pending = state.create.mock.calls[0][0].freezeAnnotationInput(true)
+  const [, request] = h.main.webContents.send.mock.calls.find(([channel]) => channel === 'office:annotation-input-freeze')!
+  h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  expect(await pending).toBe(false)
+  expect(await state.handlers.get('office:annotation-input-frozen')!(h.event, request)).toEqual({ ok: false })
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
 })
 it('closing a readonly preview freezes and flushes before releasing without a save prompt', async () => {
   const h = setup(); await h.invoke()

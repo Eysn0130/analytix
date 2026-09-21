@@ -136,28 +136,67 @@ func (s *ObjectEditingFiles) imageAnnotationTarget(input editing.AnnotationDraft
 	doc, err := s.readImageTarget(target)
 	return target, doc, err
 }
-func (s *ObjectEditingFiles) imageAnnotationRecord(target objectEditingTarget, input editing.AnnotationDraftTarget) (annotationRecord, string, error) {
+
+// Image collections are distinct from Office v1 and legacy single-region v2.
+type imageAnnotationRecordV3 struct {
+	Version               int                             `json:"version"`
+	Kind                  string                          `json:"kind"`
+	ObjectIdentity        string                          `json:"objectIdentity"`
+	PathBinding           string                          `json:"pathBinding"`
+	ThreadID              string                          `json:"threadId"`
+	ExpectedDraftRevision string                          `json:"expectedDraftRevision"`
+	SourceRevision        string                          `json:"sourceRevision"`
+	Width                 int                             `json:"width"`
+	Height                int                             `json:"height"`
+	Regions               []editing.ImageAnnotationRegion `json:"regions"`
+	UpdatedAt             string                          `json:"updatedAt"`
+}
+
+func (s *ObjectEditingFiles) imageAnnotationRecord(target objectEditingTarget, input editing.AnnotationDraftTarget) (imageAnnotationRecordV3, string, error) {
 	body, hash, err := s.readObjectPrivate(s.annotationPath(input.ObjectIdentity, input.ThreadID), editing.MaxAnnotationRecordBytes)
 	if errors.Is(err, editing.ErrOperationNotFound) {
-		return annotationRecord{}, "", nil
+		return imageAnnotationRecordV3{Regions: []editing.ImageAnnotationRegion{}}, "", nil
 	}
-	var record annotationRecord
-	if err != nil || nativeDecode(body, &record, editing.MaxAnnotationRecordBytes) != nil || record.Version != 2 || record.Kind != "image-region" || record.ObjectIdentity != input.ObjectIdentity || record.ThreadID != input.ThreadID || record.PathBinding != target.binding || !editing.ValidImageAnnotationWrite(record.ExpectedDraftRevision, record.SourceRevision, record.Note, record.Region) || !editing.ValidImageRegion(editing.ImageRegion{Width: 1, Height: 1}, record.Width, record.Height) || record.Region != nil && !editing.ValidImageRegion(*record.Region, record.Width, record.Height) {
-		return annotationRecord{}, "", editing.ErrPersistence
+	var header struct {
+		Version int `json:"version"`
+	}
+	var record imageAnnotationRecordV3
+	if err != nil || json.Unmarshal(body, &header) != nil {
+		return record, "", editing.ErrPersistence
+	}
+	switch header.Version {
+	case 2:
+		var legacy annotationRecord
+		if nativeDecode(body, &legacy, editing.MaxAnnotationRecordBytes) != nil || legacy.Kind != "image-region" || !editing.ValidAnnotationWrite(legacy.ExpectedDraftRevision, legacy.Note, legacy.SourceRevision) || legacy.Region == nil && legacy.Note != "" {
+			return record, "", editing.ErrPersistence
+		}
+		record = imageAnnotationRecordV3{Version: 2, Kind: legacy.Kind, ObjectIdentity: legacy.ObjectIdentity, PathBinding: legacy.PathBinding, ThreadID: legacy.ThreadID, ExpectedDraftRevision: legacy.ExpectedDraftRevision, SourceRevision: legacy.SourceRevision, Width: legacy.Width, Height: legacy.Height, UpdatedAt: legacy.UpdatedAt, Regions: []editing.ImageAnnotationRegion{}}
+		if legacy.Region != nil {
+			record.Regions = append(record.Regions, editing.ImageAnnotationRegion{RegionID: "000000000000000000000000000000000000000000000000", Region: *legacy.Region, Note: legacy.Note})
+		}
+	case 3:
+		if nativeDecode(body, &record, editing.MaxAnnotationRecordBytes) != nil {
+			return record, "", editing.ErrPersistence
+		}
+	default:
+		return record, "", editing.ErrPersistence
+	}
+	if record.Kind != "image-region" || record.ObjectIdentity != input.ObjectIdentity || record.ThreadID != input.ThreadID || record.PathBinding != target.binding || !editing.ValidImageAnnotationWrite(record.ExpectedDraftRevision, record.SourceRevision, record.Regions) || !editing.ValidImageRegion(editing.ImageRegion{Width: 1, Height: 1}, record.Width, record.Height) {
+		return imageAnnotationRecordV3{}, "", editing.ErrPersistence
+	}
+	for _, item := range record.Regions {
+		if !editing.ValidImageRegion(item.Region, record.Width, record.Height) {
+			return imageAnnotationRecordV3{}, "", editing.ErrPersistence
+		}
 	}
 	stamp, err := time.Parse(time.RFC3339Nano, record.UpdatedAt)
 	if err != nil || stamp.UTC().Format(time.RFC3339Nano) != record.UpdatedAt {
-		return annotationRecord{}, "", editing.ErrPersistence
+		return imageAnnotationRecordV3{}, "", editing.ErrPersistence
 	}
 	return record, hash, nil
 }
-func imageAnnotationValue(input editing.AnnotationDraftTarget, record annotationRecord, hash string, doc editing.ImageDocument) editing.ImageAnnotation {
-	var region *editing.ImageRegion
-	if record.Region != nil {
-		value := *record.Region
-		region = &value
-	}
-	return editing.ImageAnnotation{ObjectID: input.ObjectIdentity, ThreadID: input.ThreadID, AnnotationRevision: hash, SourceRevision: record.SourceRevision, Width: record.Width, Height: record.Height, Region: region, Note: record.Note, UpdatedAt: record.UpdatedAt, Current: hash != "" && record.SourceRevision == doc.Revision && record.Width == doc.Width && record.Height == doc.Height}
+func imageAnnotationValue(input editing.AnnotationDraftTarget, record imageAnnotationRecordV3, hash string, doc editing.ImageDocument) editing.ImageAnnotation {
+	return editing.ImageAnnotation{ObjectID: input.ObjectIdentity, ThreadID: input.ThreadID, AnnotationRevision: hash, SourceRevision: record.SourceRevision, Width: record.Width, Height: record.Height, Regions: append([]editing.ImageAnnotationRegion{}, record.Regions...), UpdatedAt: record.UpdatedAt, Current: hash != "" && record.SourceRevision == doc.Revision && record.Width == doc.Width && record.Height == doc.Height}
 }
 func (s *ObjectEditingFiles) ReadImageAnnotation(ctx context.Context, input editing.AnnotationDraftTarget) (editing.ImageAnnotation, error) {
 	if err := objectEditingLock(ctx); err != nil {
@@ -178,7 +217,7 @@ func (s *ObjectEditingFiles) ReadImageAnnotation(ctx context.Context, input edit
 	return imageAnnotationValue(input, record, hash, doc), nil
 }
 func (s *ObjectEditingFiles) WriteImageAnnotation(ctx context.Context, input editing.ImageAnnotationWriteInput) (editing.ImageAnnotation, error) {
-	if !editing.ValidImageAnnotationWrite(input.ExpectedAnnotationRevision, input.SourceRevision, input.Note, input.Region) {
+	if !editing.ValidImageAnnotationWrite(input.ExpectedAnnotationRevision, input.SourceRevision, input.Regions) {
 		return editing.ImageAnnotation{}, editing.ErrInvalidInput
 	}
 	if err := objectEditingLock(ctx); err != nil {
@@ -192,20 +231,22 @@ func (s *ObjectEditingFiles) WriteImageAnnotation(ctx context.Context, input edi
 	if doc.Revision != input.SourceRevision {
 		return editing.ImageAnnotation{}, editing.ErrConflict
 	}
-	if input.Region != nil && !editing.ValidImageRegion(*input.Region, doc.Width, doc.Height) {
-		return editing.ImageAnnotation{}, editing.ErrInvalidInput
+	for _, item := range input.Regions {
+		if !editing.ValidImageRegion(item.Region, doc.Width, doc.Height) {
+			return editing.ImageAnnotation{}, editing.ErrInvalidInput
+		}
 	}
 	old, hash, err := s.imageAnnotationRecord(target, input.AnnotationDraftTarget)
 	if err != nil {
 		return editing.ImageAnnotation{}, err
 	}
-	if hash != "" && old.ExpectedDraftRevision == input.ExpectedAnnotationRevision && old.Note == input.Note && old.SourceRevision == input.SourceRevision && reflect.DeepEqual(old.Region, input.Region) {
+	if hash != "" && old.Version == 3 && old.ExpectedDraftRevision == input.ExpectedAnnotationRevision && old.SourceRevision == input.SourceRevision && reflect.DeepEqual(old.Regions, input.Regions) {
 		return imageAnnotationValue(input.AnnotationDraftTarget, old, hash, doc), ctx.Err()
 	}
 	if hash != input.ExpectedAnnotationRevision {
 		return editing.ImageAnnotation{}, editing.ErrConflict
 	}
-	record := annotationRecord{Version: 2, Kind: "image-region", ObjectIdentity: input.ObjectIdentity, PathBinding: target.binding, ThreadID: input.ThreadID, ExpectedDraftRevision: hash, Note: input.Note, SourceRevision: doc.Revision, Width: doc.Width, Height: doc.Height, Region: input.Region, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	record := imageAnnotationRecordV3{Version: 3, Kind: "image-region", ObjectIdentity: input.ObjectIdentity, PathBinding: target.binding, ThreadID: input.ThreadID, ExpectedDraftRevision: hash, SourceRevision: doc.Revision, Width: doc.Width, Height: doc.Height, Regions: append([]editing.ImageAnnotationRegion{}, input.Regions...), UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	body, err := json.Marshal(record)
 	if err != nil {
 		return editing.ImageAnnotation{}, editing.ErrPersistence

@@ -21,6 +21,7 @@ function makeBaseState(): WriteWorkspaceState {
     imageRegionEditor: null, imageRegionThreadId: null,
     setImageRegionThread: () => undefined, invalidateImageRegion: () => undefined,
     setImageRegionComposing: () => undefined, updateImageRegion: () => undefined,
+    selectImageRegion: () => undefined, removeImageRegion: () => undefined,
     openImageRegion: async () => false, flushImageRegion: async () => true,
     closeImageRegion: async () => true, captureImageRegion: async () => null,
     previewMode: 'live',

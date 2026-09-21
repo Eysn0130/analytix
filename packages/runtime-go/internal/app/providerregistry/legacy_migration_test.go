@@ -4155,6 +4155,16 @@ func TestManagerFinalizesSharedSourceRecoveriesAsOneCrashRecoverableDecision(t *
 	}
 }
 
+type countingLegacySourceReader struct {
+	next  registryport.LegacySourceReader
+	reads int
+}
+
+func (reader *countingLegacySourceReader) ReadLegacySource(request registryport.LegacySourceRequest) (registryport.LegacySourceSnapshot, error) {
+	reader.reads++
+	return reader.next.ReadLegacySource(request)
+}
+
 func TestManagerRequiresProductionOwnerSourceReceiptBeforeMigrationEffects(t *testing.T) {
 	t.Parallel()
 
@@ -4191,6 +4201,59 @@ func TestManagerRequiresProductionOwnerSourceReceiptBeforeMigrationEffects(t *te
 			candidate: candidate, committed: committed,
 		}
 	}
+	t.Run("unissued challenge rejects before read and issued finalization reads once", func(t *testing.T) {
+		current := newFinalizationFixture(t, "unissued-read-count")
+		reader := &countingLegacySourceReader{next: current.manager.legacySource}
+		current.manager.legacySource = reader
+		proof, cleanup := legacyMigrationTestSourceAuthorityProof(t, current.ctx, current.manager,
+			LegacyMigrationSourceAuthorityOperationFinalize, current.candidate, current.committed.RecoveryCredentialRef,
+			current.candidate.ExpectedCleanedSourceSHA256)
+		defer cleanup()
+		command := legacyMigrationTestFinalizeCommand(t, current.candidate, current.committed.RecoveryCredentialRef,
+			current.candidate.ExpectedCleanedSourceSHA256)
+		command.SourceAuthority = proof
+		command.SourceAuthority.Challenge = legacyMigrationSourceAuthorityPrefix + strings.Repeat("X", 43)
+		if _, err := current.manager.FinalizeLegacyMigrationRecovery(current.ctx, command); !errors.Is(err, registryport.ErrVerification) || reader.reads != 0 {
+			t.Fatalf("unissued finalization challenge must fail before source read: err=%v reads=%d", err, reader.reads)
+		}
+		command.SourceAuthority = proof
+		if _, err := current.manager.FinalizeLegacyMigrationRecovery(current.ctx, command); err != nil || reader.reads != 1 {
+			t.Fatalf("issued finalization must perform one physical read and succeed: err=%v reads=%d", err, reader.reads)
+		}
+	})
+	t.Run("finalization challenge cannot authorize rollback source read", func(t *testing.T) {
+		current := newFinalizationFixture(t, "cross-operation-read-count")
+		reader := &countingLegacySourceReader{next: current.manager.legacySource}
+		current.manager.legacySource = reader
+		proof, cleanup := legacyMigrationTestSourceAuthorityProof(t, current.ctx, current.manager,
+			LegacyMigrationSourceAuthorityOperationFinalize, current.candidate, current.committed.RecoveryCredentialRef,
+			current.candidate.ExpectedCleanedSourceSHA256)
+		defer cleanup()
+		if _, err := current.manager.BeginLegacyMigrationRollback(current.ctx, BeginLegacyMigrationRollbackCommand{
+			MigrationID: current.candidate.MigrationID, SourceLocator: current.candidate.SourceLocator,
+			SourceSHA256: current.candidate.SourceSHA256, RecoveryCredentialRef: current.committed.RecoveryCredentialRef,
+			Confirmation: LegacyMigrationRollbackConfirmation,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		command := legacyMigrationTestRollbackCommitCommand(current.registry.snapshot(), current.candidate, current.committed.RecoveryCredentialRef)
+		command.SourceAuthority = proof
+		if _, err := current.manager.CommitLegacyMigrationRollback(current.ctx, command); !errors.Is(err, registryport.ErrVerification) || reader.reads != 0 {
+			t.Fatalf("cross-operation challenge must fail before source read: err=%v reads=%d", err, reader.reads)
+		}
+		if _, exists := current.manager.sourceAuthorityChallenges[proof.Challenge]; exists {
+			t.Fatal("cross-operation request did not reach challenge consumption")
+		}
+		cleanup()
+		proof, cleanupRollback := legacyMigrationTestSourceAuthorityProof(t, current.ctx, current.manager,
+			LegacyMigrationSourceAuthorityOperationRollbackCommit, current.candidate, current.committed.RecoveryCredentialRef,
+			current.candidate.ExpectedCleanedSourceSHA256)
+		defer cleanupRollback()
+		command.SourceAuthority = proof
+		if _, err := current.manager.CommitLegacyMigrationRollback(current.ctx, command); err != nil || reader.reads != 1 {
+			t.Fatalf("issued rollback must perform one physical read and succeed: err=%v reads=%d", err, reader.reads)
+		}
+	})
 
 	t.Run("finalization rejects a complete but stale caller receipt without live source authority", func(t *testing.T) {
 		t.Parallel()
@@ -4446,6 +4509,8 @@ func TestManagerRequiresProductionOwnerSourceReceiptBeforeMigrationEffects(t *te
 
 	t.Run("consumed challenge cannot be replayed after the exact source returns", func(t *testing.T) {
 		current := newFinalizationFixture(t, "consumed-challenge-replay")
+		reader := &countingLegacySourceReader{next: current.manager.legacySource}
+		current.manager.legacySource = reader
 		command := legacyMigrationTestFinalizeCommand(
 			t, current.candidate, current.committed.RecoveryCredentialRef,
 			current.candidate.ExpectedCleanedSourceSHA256,
@@ -4465,6 +4530,9 @@ func TestManagerRequiresProductionOwnerSourceReceiptBeforeMigrationEffects(t *te
 		if _, err := current.manager.FinalizeLegacyMigrationRecovery(current.ctx, command); err == nil {
 			t.Fatal("FinalizeLegacyMigrationRecovery(missing source) error = nil")
 		}
+		if reader.reads != 1 {
+			t.Fatalf("issued challenge must reach the physical reader once: reads=%d", reader.reads)
+		}
 		if err := os.Rename(heldPath, sourcePath); err != nil {
 			t.Fatal(err)
 		}
@@ -4472,6 +4540,9 @@ func TestManagerRequiresProductionOwnerSourceReceiptBeforeMigrationEffects(t *te
 		_, beforeTombstones, beforeDeletes := current.secrets.callCounts()
 		if _, err := current.manager.FinalizeLegacyMigrationRecovery(current.ctx, command); err == nil {
 			t.Fatal("FinalizeLegacyMigrationRecovery(replayed challenge) error = nil")
+		}
+		if reader.reads != 1 {
+			t.Fatalf("replayed challenge performed another source read: reads=%d", reader.reads)
 		}
 		_, afterTombstones, afterDeletes := current.secrets.callCounts()
 		if !reflect.DeepEqual(before, current.registry.snapshot()) ||
