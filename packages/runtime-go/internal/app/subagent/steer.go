@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -562,7 +563,7 @@ func exactTaskJobSteerVersion(value any) (int, bool) {
 	case int:
 		return typed, true
 	case float64:
-		if typed == float64(int(typed)) {
+		if !math.IsNaN(typed) && typed >= float64(math.MinInt) && typed < -float64(math.MinInt) && math.Trunc(typed) == typed {
 			return int(typed), true
 		}
 	}

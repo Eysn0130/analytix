@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -416,7 +417,7 @@ func exactIntField(record map[string]any, key string) int {
 	case int:
 		return value
 	case float64:
-		if value == float64(int(value)) {
+		if !math.IsNaN(value) && value >= float64(math.MinInt) && value < -float64(math.MinInt) && math.Trunc(value) == value {
 			return int(value)
 		}
 	}
@@ -428,7 +429,7 @@ func isExactJSONInteger(raw any) bool {
 	case int:
 		return true
 	case float64:
-		return value == float64(int(value))
+		return !math.IsNaN(value) && value >= float64(math.MinInt) && value < -float64(math.MinInt) && math.Trunc(value) == value
 	default:
 		return false
 	}
