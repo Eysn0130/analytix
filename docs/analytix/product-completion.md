@@ -15,6 +15,32 @@ format adapters cannot replace permission, privacy, Provider or persistence poli
 
 ## Current capability and evidence matrix
 
+The latest local execution starts at `2ef3f9deb22714b7c05583603bf1e394cce1f06e`
+on the original PR28 branch. Its exact source checkpoint, P0–P5 matrix and fresh
+verification are recorded in the [2026-09-20 A–M execution receipt](qa/pr28-reaudit-execution-2026-09-20.md).
+The [handover index](handovers/README.md) remains the resumption entry.
+
+Core-authorized retrieval, primary-thread auxiliary completion, exact subagent
+budgets, skill discovery/revocation fixes, real pivot generation, a synthetic
+DOCX oracle, single-region image notes and bounded PPT shape geometry/fill have
+advanced locally. These source results do not establish fixed-engine fidelity,
+GUI, installation, current remote CI or product acceptance. Image multi-region
+and rotation, trusted browser references, imported pivot/chart editing and the
+recorded native journeys still require implementation or acceptance. Rust's
+original DuckDB failure and current-candidate CodeQL remain unresolved.
+
+At the latest read, main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`;
+PR28 remains OPEN/Draft at `dde784437dc8563e84066629dd57f4a11fd9acc9`.
+Specific outbound and native safety refusals remain separate from the already
+granted local Mac authorization. **The complete A–M request remains partial;
+main merge, main acceptance, full product acceptance and Formal RC are not achieved.**
+Public release is not authorized.
+
+## Historical capability matrix before this execution
+
+The following matrix and dated recheck preserve the earlier candidate's evidence;
+use the current receipt above for later source changes.
+
 Source baseline: `b15a57f7c3a97c238b9361023753e0aed0ab74c5`, followed by the
 focused local changes described below on the original PR28 branch. The
 [current handover](handovers/README.md) records intake and recovery anchors.

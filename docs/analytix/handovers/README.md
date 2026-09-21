@@ -9,7 +9,29 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：完整性复核与缓存资源上限 / 2026-09-20 PDT
+## 当前接续：PR28 A—M 本地源码推进 / 2026-09-20 PDT
+
+用户采用 `Analytix-PR28-Reaudit-and-Codex-Plan-2026-09-20.zip` 全部 A—M。
+从原分支 clean `2ef3f9deb22714b7c05583603bf1e394cce1f06e` 继续，保留全部后续历史。
+本次包与下方旧17文件包不同：新包12个普通文件、manifest核验通过；两份原材料已完整读取。
+本轮源码检查点为 `5c2f1b089533b70e3a7623396e9690d2d355aab4`；其后文档提交不改变源码。
+精确提交、当前矩阵、命令结果和证据上限见
+[本轮执行记录](../qa/pr28-reaudit-execution-2026-09-20.md)。恢复时仍先刷新 HEAD/main/PR/CI，
+不要退回这里的起点或把历史源码验证当成新候选结果。
+
+本轮已推进 Core 授权 Write 检索、主会话辅助补全及取消、预算整数溢出防护、Skills
+发现与消费撤权、真实 pivot package、DOCX oracle、图片区域 Core CAS/引用和有限 PPT
+形状 geometry/fill 的 typed/native/整包验证链；没有重做旧 Write 清退、8/4上限、Canvas或R07。
+完整 A—M **尚未完成**。原生 DOCX 保真/固定引擎实际三格式旅程、图片多区域与旋转、
+浏览器可信 guest/document 引用、导入 pivot/chart 修改、安装版 Skills/Provider/完整 GUI
+仍缺实现或实际验收。Rust/DuckDB根因和新 SHA CodeQL 也未关闭。
+
+本机一般开发/测试/GUI授权已具备；源码外发、Chromium管理和SecurityAgent的具体拒绝
+仍独立处理。原 `create_tree` 自动审核拒绝缺少解除记录，未换 `git push` 绕过，因此
+没有新远端 CI/merge/main验收。用户允许在具体准入与适用gate通过后普通push和正常merge；
+旧永久Draft约束不再是当前用户要求。禁止 Goal/自动续跑/新独立任务、强推、main直推、tag/Release。
+
+## 历史接续：完整性复核与缓存资源上限 / 2026-09-20 PDT
 
 本次起点为 clean `33510c813fc3a93bb98c82ad746476bb9399c987`，tree
 `486b2e3ca654daa7cfe2c31d0110042cde666ff6`，仍在原施工分支；未回退 b15、重做 Canvas
