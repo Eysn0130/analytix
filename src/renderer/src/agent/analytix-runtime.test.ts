@@ -2714,14 +2714,15 @@ describe('AnalytixRuntimeProvider', () => {
       providerCount: 1,
       schemaVersion: 2
     })
-    await expect(provider.listSkills()).resolves.toEqual([
-      expect.objectContaining({
+    await expect(provider.listSkills()).resolves.toMatchObject({
+      validationErrorCount: 0,
+      skills: [expect.objectContaining({
         id: 'review',
         name: 'Review',
         scope: 'project',
         legacy: false
-      })
-    ])
+      })]
+    })
     await expect(provider.uploadAttachment({
       name: 'shot.png',
       mimeType: 'image/png',
@@ -2763,6 +2764,16 @@ describe('AnalytixRuntimeProvider', () => {
         workspace: '/tmp/workspace'
       })
     )
+  })
+
+  it.each([0, 1])('preserves incomplete skill discovery diagnostics with %i usable skills', async (skillCount) => {
+    const response = { schemaVersion: 2, enabled: true, available: skillCount > 0,
+      reasonCode: skillCount > 0 ? 'available' : 'unavailable', configuredRootCount: 0,
+      skillCount, validationErrorCount: 1,
+      skills: skillCount ? [{ id: 'analytix-documents', name: 'Analytix Documents', scope: 'global', legacy: false }] : [] }
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(response) }))
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().listSkills()).resolves.toEqual(response)
   })
 
   it('rejects legacy or private runtime skill catalog responses', async () => {

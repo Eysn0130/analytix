@@ -38,6 +38,16 @@ describe('runtime skills public contract', () => {
     }
   })
 
+  it.each([0, 1])('distinguishes incomplete discovery with %i usable skills from clean empty', (skillCount) => {
+    const response = { schemaVersion: 2, enabled: true, available: skillCount > 0,
+      reasonCode: skillCount > 0 ? 'available' : 'unavailable', configuredRootCount: 0,
+      skillCount, validationErrorCount: 1,
+      skills: skillCount ? [{ id: 'analytix-documents', name: 'Analytix Documents', scope: 'global', legacy: false }] : [] }
+    expect(RuntimeSkillsResponseV2.parse(response)).toEqual(response)
+    expect(RuntimeSkillsResponseV2.parse({ ...response, skillCount: 0, skills: [], available: false,
+      reasonCode: 'unavailable', validationErrorCount: 0 }).validationErrorCount).toBe(0)
+  })
+
   it('accepts only the closed host projection', () => {
     const skill = {
       id: 'deep_review.v2',

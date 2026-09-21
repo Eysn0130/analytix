@@ -78,7 +78,7 @@ import type {
   CoreResumeSessionResponseJson,
   CoreRuntimeInfoJson,
   CoreRuntimeEventJson,
-  CoreRuntimeSkillJson,
+  CoreRuntimeSkillsResponseJson,
   CoreRuntimeToolDiagnosticsJson,
   CoreStartReviewResponseJson,
   CoreClearThreadGoalResponseJson,
@@ -1273,7 +1273,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     )
   }
 
-  async listSkills(): Promise<CoreRuntimeSkillJson[]> {
+  async listSkills(): Promise<CoreRuntimeSkillsResponseJson> {
     const response = await rendererRuntimeClient.runtimeRequest(ANALYTIX_SKILLS_PATH, 'GET')
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'failed to list skills'))
@@ -1282,7 +1282,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid skills response',
       RuntimeSkillsResponseSchema
-    ).skills ?? []
+    )
   }
 
   async uploadAttachment(input: {

@@ -1,4 +1,5 @@
 {
+  "skillDiscoveryIncomplete": "技能发现不完整，部分技能暂不可用。",
   "providerConnection_official-deepseek": "官方接口",
   "providerConnection_local": "本地服务",
   "providerConnection_remote": "远程服务",

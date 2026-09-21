@@ -47,12 +47,15 @@ func (h *runtimeServerHandler) runtimeSkillEntryBody(skill map[string]any) (stri
 
 func (h *runtimeServerHandler) currentSkillCatalog() toolcatalogapp.SkillCatalog {
 	var hosted []toolcatalogapp.HostedOfficeSkill
+	validationErrors := 0
 	if h.officePackageHost != nil {
-		for _, skill := range h.officePackageHost.Skills(context.Background()) {
+		discovery := h.officePackageHost.DiscoverSkills(context.Background())
+		validationErrors = discovery.ValidationErrorCount
+		for _, skill := range discovery.Skills {
 			hosted = append(hosted, toolcatalogapp.HostedOfficeSkill{PackageID: skill.Binding.PackageID, Snapshot: skill.Snapshot})
 		}
 	}
-	return toolcatalogapp.WithOfficeSkills(h.skills, hosted)
+	return toolcatalogapp.WithSkillDiscoveryErrors(toolcatalogapp.WithOfficeSkills(h.skills, hosted), validationErrors)
 }
 
 func (h *runtimeServerHandler) runtimeSkillSubagentPrompt(skill map[string]any, task string) (string, error) {

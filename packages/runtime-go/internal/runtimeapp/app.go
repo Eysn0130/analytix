@@ -1,7 +1,6 @@
 package runtimeapp
 
 import (
-	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -64,9 +63,11 @@ import (
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
@@ -1615,7 +1616,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
 	phaseObserver, _ := ctx.Value(asyncTurnPhaseObservationContextKeyV1{}).(func(string))
-	officeAdapters, officePackageHost, officePrivate := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	officeAdapters, officePackageHost, officePrivate, officeSkillDiscoveryErrors := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	skillCatalog = toolcatalogapp.WithSkillDiscoveryErrors(skillCatalog, officeSkillDiscoveryErrors)
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}

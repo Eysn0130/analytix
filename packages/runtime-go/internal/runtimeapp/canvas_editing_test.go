@@ -66,8 +66,8 @@ func TestCanvasRealHostReviewSaveAndActivationRevocation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	host := composeStaticEditorPackageHost(ctx, config, editingTestIdentity{principal}, map[string]adapterport.Adapter{"analytix-canvas": adapter}, map[string]staticEditorPackageDescriptor{"analytix-canvas": {root: repository}})
-	if host == nil {
+	host, discoveryErrors := composeStaticEditorPackageHost(ctx, config, editingTestIdentity{principal}, map[string]adapterport.Adapter{"analytix-canvas": adapter}, map[string]staticEditorPackageDescriptor{"analytix-canvas": {root: repository}})
+	if host == nil || discoveryErrors != 0 {
 		t.Fatal("real materialized Host absent")
 	}
 	views, err := host.List(ctx)

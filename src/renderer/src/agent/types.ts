@@ -7,7 +7,7 @@ import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
-  CoreRuntimeSkillJson,
+  CoreRuntimeSkillsResponseJson,
   CoreRuntimeToolDiagnosticsJson,
   CoreModelExecutionRefJson,
   CoreModelExecutionSourceJson,
@@ -1077,7 +1077,7 @@ export interface AgentProvider {
   ): Promise<CoreCheckpointRewindApplyResultJson>
   getRuntimeInfo?(): Promise<CoreRuntimeInfoJson>
   getToolDiagnostics?(): Promise<CoreRuntimeToolDiagnosticsJson>
-  listSkills?(): Promise<CoreRuntimeSkillJson[]>
+  listSkills?(): Promise<CoreRuntimeSkillsResponseJson>
   uploadAttachment?(input: {
     name: string
     mimeType?: string

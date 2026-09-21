@@ -35,6 +35,11 @@ func (unavailableDocumentsCodec) Supports(kind string) bool {
 }
 func officeRuntimeFixture(t *testing.T, kind string) (*runtimeServerHandler, hostapp.PackageView) {
 	t.Helper()
+	h, view, _ := officeRuntimeFixtureWithInstalledSkill(t, kind)
+	return h, view
+}
+func officeRuntimeFixtureWithInstalledSkill(t *testing.T, kind string) (*runtimeServerHandler, hostapp.PackageView, string) {
+	t.Helper()
 	ctx := context.Background()
 	packageID := toolcatalogapp.OfficeSkillForKind(kind)
 	root, err := filepath.Abs(filepath.Join("../../../../plugins", packageID))
@@ -95,7 +100,8 @@ func officeRuntimeFixture(t *testing.T, kind string) (*runtimeServerHandler, hos
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h, view
+	contribution, _ := domainpackage.StaticEditorSkillContributionV1(packageID)
+	return h, view, filepath.Join(home, installed.Receipt.ActiveRelativePath, filepath.FromSlash(contribution.Path))
 }
 
 func TestOfficeRuntimeDiscoveryInlineAndPreparedGenerationFollowActivation(t *testing.T) {
@@ -172,4 +178,25 @@ func mustHostedJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestOfficeRuntimeDiscoveryReportsWithdrawnInstalledSkill(t *testing.T) {
+	h, _, installedSkill := officeRuntimeFixtureWithInstalledSkill(t, "docx")
+	healthy := h.skillResponse()
+	if healthy["skillCount"] != float64(1) || healthy["validationErrorCount"] != float64(0) {
+		t.Fatal(healthy)
+	}
+	if err := os.WriteFile(installedSkill, []byte("PRIVATE tampered installed body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	response := h.skillResponse()
+	if response["skillCount"] != float64(0) || response["validationErrorCount"] != float64(1) || response["reasonCode"] != "unavailable" {
+		t.Fatal(response)
+	}
+	if strings.Contains(string(mustHostedJSON(t, response)), "PRIVATE") {
+		t.Fatal("private body leaked")
+	}
+	if h.runtimeToolCatalog().DocumentGeneration {
+		t.Fatal("failed discovery granted generation")
+	}
 }

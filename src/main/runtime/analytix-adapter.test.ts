@@ -2154,6 +2154,16 @@ describe('runtimeRequestViaHost', () => {
     }
   })
 
+  it.each([0, 1])('retains incomplete runtime skill discovery with %i usable skills', (skillCount) => {
+    const response = { schemaVersion: 2, enabled: true, available: skillCount > 0,
+      reasonCode: skillCount > 0 ? 'available' : 'unavailable', configuredRootCount: 0,
+      skillCount, validationErrorCount: 1,
+      skills: skillCount ? [{ id: 'analytix-documents', name: 'Analytix Documents', scope: 'global', legacy: false }] : [] }
+    const projected = sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(response) }, '/v1/skills')
+    expect(projected.ok).toBe(true)
+    expect(JSON.parse(projected.body)).toEqual(response)
+  })
+
   it('accepts the closed runtime skills projection and rejects private catalog fields', () => {
     const response = {
       schemaVersion: 2,

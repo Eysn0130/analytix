@@ -1,10 +1,46 @@
 package toolcatalog
 
 import (
-	domainskill "analytix.local/runtime-go/internal/domain/skill"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
+	domainskill "analytix.local/runtime-go/internal/domain/skill"
 )
+
+func TestHostedSkillDiscoveryErrorsPreservePartialAndEmptyDiagnostics(t *testing.T) {
+	snapshot, _ := domainskill.NewPackageSnapshot("SKILL.md", []domainskill.FileInput{{RelativePath: "SKILL.md", Bytes: []byte("PRIVATE instructions")}})
+	for _, partial := range []bool{false, true} {
+		base := SkillCatalog{Reason: "Skills are disabled by config"}
+		if partial {
+			base = WithDocumentsSkill(base, snapshot)
+		}
+		catalog := WithSkillDiscoveryErrors(base, 2)
+		response := SkillResponse(catalog)
+		if response["enabled"] != true || response["available"] != partial || response["validationErrorCount"] != float64(2) || response["configuredRootCount"] != float64(0) {
+			t.Fatal("lost discovery status", response)
+		}
+		if !partial && response["reasonCode"] != "unavailable" {
+			t.Fatal(response)
+		}
+		projected := runtimeinfoapp.ProjectPublicSkills(SkillToolDiagnostics(catalog))
+		if projected.ValidationErrorCount != 2 || projected.Available != partial {
+			t.Fatal(projected)
+		}
+		body, _ := json.Marshal(response)
+		if strings.Contains(string(body), "PRIVATE") || strings.Contains(string(body), "installed skill discovery") {
+			t.Fatal("private diagnostics leaked")
+		}
+		if len(base.ValidationErrors) != 0 {
+			t.Fatal("base catalog mutated")
+		}
+	}
+	empty := SkillResponse(WithSkillDiscoveryErrors(SkillCatalog{Enabled: true}, 0))
+	if empty["validationErrorCount"] != float64(0) || empty["reasonCode"] != "unavailable" {
+		t.Fatal(empty)
+	}
+}
 
 func TestHostedDocumentsSkillUsesPrivateSnapshotWithoutConfiguredRoot(t *testing.T) {
 	snapshot, _ := domainskill.NewPackageSnapshot("SKILL.md", []domainskill.FileInput{{RelativePath: "SKILL.md", Bytes: []byte("---\nname: ignored\n---\nOriginal host instructions.")}})

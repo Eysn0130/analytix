@@ -682,6 +682,7 @@ export function Workbench(): ReactElement {
     useState<ComposerReasoningEffort>('max')
   const [runtimeInfo, setRuntimeInfo] = useState<CoreRuntimeInfoJson | null>(null)
   const [runtimeSkills, setRuntimeSkills] = useState<CoreRuntimeSkillJson[]>([])
+  const [skillDiscoveryIncomplete, setSkillDiscoveryIncomplete] = useState(false)
   const [composerExecutionSettings, setComposerExecutionSettings] =
     useState<ComposerExecutionSettings | null>(null)
   const [composerExecutionApplying, setComposerExecutionApplying] = useState(false)
@@ -1500,6 +1501,8 @@ export function Workbench(): ReactElement {
     let cancelled = false
     const runtimeReady = runtimeConnection === 'ready'
     const provider = getProvider()
+    setRuntimeSkills([])
+    setSkillDiscoveryIncomplete(false)
     if (!runtimeReady) {
       setRuntimeInfo(null)
       return () => {
@@ -1520,20 +1523,24 @@ export function Workbench(): ReactElement {
     }
 
     const runtimeSkillsTask = provider.listSkills
-      ? provider.listSkills().catch(() => [])
-      : Promise.resolve([])
+      ? provider.listSkills()
+          .then(response => ({ skills: response.skills, incomplete: response.validationErrorCount > 0 }))
+          .catch(() => ({ skills: [], incomplete: true }))
+      : Promise.resolve({ skills: [], incomplete: false })
     const localSkillsTask = typeof window !== 'undefined' && typeof window.analytix?.app?.listSkills === 'function'
       ? window.analytix.app.listSkills(activeSkillWorkspace || undefined).catch(() => ({
-          ok: true as const,
-          skills: [],
-          validationErrors: []
+          ok: false as const,
+          message: 'unavailable'
         }))
       : Promise.resolve({ ok: true as const, skills: [], validationErrors: [] })
 
     void Promise.all([runtimeSkillsTask, localSkillsTask]).then(([runtimeSkillList, localSkillsResult]) => {
       if (cancelled) return
       const localSkillList = localSkillsResult.ok ? localSkillsResult.skills : []
-      setRuntimeSkills(mergeSkillCommands(runtimeSkillList, localSkillList))
+      setRuntimeSkills(mergeSkillCommands(runtimeSkillList.skills, localSkillList))
+      setSkillDiscoveryIncomplete(
+        runtimeSkillList.incomplete || !localSkillsResult.ok || localSkillsResult.validationErrors.length > 0
+      )
     })
     return () => {
       cancelled = true
@@ -3562,6 +3569,9 @@ export function Workbench(): ReactElement {
                                 </div>
                               ))}
                             </div>
+                          ) : null}
+                          {skillDiscoveryIncomplete ? (
+                            <p role="status" className="mb-2 text-xs text-ds-muted">{t('skillDiscoveryIncomplete')}</p>
                           ) : null}
                           <FloatingComposerIsland
                             activeSkillWorkspace={activeSkillWorkspace}

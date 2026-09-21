@@ -13,6 +13,23 @@ type HostedOfficeSkill struct {
 	Snapshot  domainskill.PackageSnapshot
 }
 
+// WithSkillDiscoveryErrors records withdrawn contributions in the existing
+// catalog diagnostics. An attempted but unverifiable discovery is unavailable,
+// not evidence that the capability was disabled by configuration.
+func WithSkillDiscoveryErrors(base SkillCatalog, count int) SkillCatalog {
+	if count <= 0 {
+		return base
+	}
+	out := base
+	out.Enabled = true
+	out.Reason = "Skill discovery is incomplete"
+	out.ValidationErrors = append([]map[string]any(nil), base.ValidationErrors...)
+	for i := 0; i < count; i++ {
+		out.ValidationErrors = append(out.ValidationErrors, map[string]any{"error": "installed skill discovery unavailable"})
+	}
+	return out
+}
+
 func OfficeSkillForKind(kind string) string {
 	switch kind {
 	case "docx":

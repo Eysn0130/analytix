@@ -39,6 +39,71 @@ func skillFixture(t *testing.T) (hostFixture, *testSkillReader) {
 	return f, reader
 }
 
+func TestHostedSkillDiscoveryDistinguishesEmptyAndIncomplete(t *testing.T) {
+	for _, scenario := range []string{"unset", "disabled", "available", "materialization", "activation", "snapshot", "identity", "cancelled"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, reader := skillFixture(t)
+			ctx := context.Background()
+			if scenario != "unset" {
+				f.enable(t)
+			}
+			wantSkills, wantErrors := 0, 0
+			switch scenario {
+			case "available":
+				wantSkills = 1
+			case "disabled":
+				if _, err := f.host.SetDesiredState(ctx, f.setRequest(domainplugin.DesiredDisabledV1)); err != nil {
+					t.Fatal(err)
+				}
+			case "materialization":
+				f.registration.Materialization.(*fakeMaterialization).err = errors.New("PRIVATE materialization failure")
+				wantErrors = 1
+			case "activation":
+				f.state.readErr = errors.New("PRIVATE activation failure")
+				wantErrors = 1
+			case "snapshot":
+				reader.snapshot = domainskill.PackageSnapshot{}
+				wantErrors = 1
+			case "identity":
+				f.identity.invalid = true
+				f.state.afterRead = func() { t.Fatal("discovery read state before principal validation") }
+				wantErrors = 1
+			case "cancelled":
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelled
+				wantErrors = 1
+			}
+			got := f.host.DiscoverSkills(ctx)
+			if len(got.Skills) != wantSkills || got.ValidationErrorCount != wantErrors {
+				t.Fatalf("skills=%d errors=%d; want %d/%d", len(got.Skills), got.ValidationErrorCount, wantSkills, wantErrors)
+			}
+		})
+	}
+}
+
+func TestHostedSkillDiscoveryRetainsVerifiedSiblingAndClearsRecoveredError(t *testing.T) {
+	f, reader := skillFixture(t)
+	f.enable(t)
+	other := fixtureForPackage(t, "analytix-spreadsheets")
+	other.enable(t)
+	registration := other.registration
+	registration.SkillReader = &testSkillReader{snapshot: reader.snapshot}
+	f.host.registrations[registration.Identity.PackageID] = registration
+	f.host.packageIDs = append(f.host.packageIDs, registration.Identity.PackageID)
+	original := reader.snapshot
+	reader.snapshot = domainskill.PackageSnapshot{}
+	partial := f.host.DiscoverSkills(context.Background())
+	if len(partial.Skills) != 1 || partial.Skills[0].Binding.PackageID != registration.Identity.PackageID || partial.ValidationErrorCount != 1 {
+		t.Fatal("valid sibling lost or failed contribution treated as empty", partial)
+	}
+	reader.snapshot = original
+	recovered := f.host.DiscoverSkills(context.Background())
+	if len(recovered.Skills) != 2 || recovered.ValidationErrorCount != 0 {
+		t.Fatal("discovery retained stale failure", recovered)
+	}
+}
+
 func TestHostedSkillRequiresActivationAndRejectsPreviousRevision(t *testing.T) {
 	f, _ := skillFixture(t)
 	ctx := context.Background()

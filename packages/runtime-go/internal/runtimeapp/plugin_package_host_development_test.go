@@ -36,11 +36,11 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 	principal, _ := identitydomain.NewPrincipalV1(strings.Repeat("a", 64), "local", "local")
 	identity := editingTestIdentity{principal}
 	config := Config{DataDir: data, DevelopmentPluginSourceRoot: root}
-	if newDevelopmentPackageHost(ctx, Config{DataDir: data}, identity, nil) != nil {
+	if absent, count := newDevelopmentPackageHost(ctx, Config{DataDir: data}, identity, nil); absent != nil || count != 0 {
 		t.Fatal("ambient source capability")
 	}
-	host := newDevelopmentPackageHost(ctx, config, identity, nil)
-	if host == nil {
+	host, count := newDevelopmentPackageHost(ctx, config, identity, nil)
+	if host == nil || count != 0 {
 		t.Fatal("actual source host was not composed")
 	}
 	views, err := host.List(ctx)
@@ -73,8 +73,8 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 			t.Fatal("installed skill has no generation workflow")
 		}
 	}
-	reopened := newDevelopmentPackageHost(ctx, config, identity, nil)
-	if reopened == nil {
+	reopened, count := newDevelopmentPackageHost(ctx, config, identity, nil)
+	if reopened == nil || count != 0 {
 		t.Fatal("source host did not reopen")
 	}
 	restored, err := reopened.List(ctx)
@@ -115,5 +115,55 @@ func TestDevelopmentPackageHostActualSourceActivationRestartAndProtectedRoute(t 
 		if strings.Contains(w.Body.String(), root) || strings.Contains(w.Body.String(), home) {
 			t.Fatal("private source path projected")
 		}
+	}
+}
+
+func TestDevelopmentPackageHostReportsIncompleteStartupDiscovery(t *testing.T) {
+	ctx := context.Background()
+	root, err := filepath.Abs("../../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, _ := identitydomain.NewPrincipalV1(strings.Repeat("a", 64), "local", "local")
+	identity := editingTestIdentity{principal}
+	for _, partial := range []bool{false, true} {
+		t.Run(map[bool]string{false: "all-failed", true: "partial"}[partial], func(t *testing.T) {
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			data := filepath.Join(home, "data")
+			if err := os.Mkdir(data, 0700); err != nil {
+				t.Fatal(err)
+			}
+			descriptors := map[string]staticEditorPackageDescriptor{"analytix-canvas": {root: t.TempDir()}}
+			if partial {
+				descriptors["analytix-documents"] = staticEditorPackageDescriptor{root: root}
+			}
+			host, count := composeStaticEditorPackageHost(ctx, Config{DataDir: data}, identity, nil, descriptors)
+			if count != 1 {
+				t.Fatalf("lost failed registration: %d", count)
+			}
+			if !partial {
+				if host != nil {
+					t.Fatal("failed sources created host")
+				}
+				return
+			}
+			views, err := host.List(ctx)
+			if err != nil || len(views) != 1 || views[0].PackageID != "analytix-documents" {
+				t.Fatal(views, err)
+			}
+			if _, err := host.SetDesiredState(ctx, hostapp.SetDesiredStateRequest{PackageID: views[0].PackageID, GenerationID: views[0].GenerationID, DesiredState: domainplugin.DesiredEnabledV1}); err != nil {
+				t.Fatal(err)
+			}
+			if discovery := host.DiscoverSkills(ctx); len(discovery.Skills) != 1 || discovery.ValidationErrorCount != 0 {
+				t.Fatal("admitted source lost")
+			}
+		})
 	}
 }

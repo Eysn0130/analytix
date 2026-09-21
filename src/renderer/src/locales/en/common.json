@@ -1,4 +1,5 @@
 {
+  "skillDiscoveryIncomplete": "Skill discovery is incomplete. Some skills are temporarily unavailable.",
   "providerConnection_official-deepseek": "Official API",
   "providerConnection_local": "Local service",
   "providerConnection_remote": "Remote service",

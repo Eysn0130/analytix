@@ -15,7 +15,7 @@ import (
 
 // A successful real executable inspection selects the private path. Invalid or
 // formal packages never fall back to caller-configured development sources.
-func newOfficeRuntime(ctx context.Context, config Config, identity identityport.Authority, protected []string) (map[string]adapterport.Adapter, *hostapp.Service, *officeengineassets.PrivateLocal) {
+func newOfficeRuntime(ctx context.Context, config Config, identity identityport.Authority, protected []string) (map[string]adapterport.Adapter, *hostapp.Service, *officeengineassets.PrivateLocal, int) {
 	inspection, err := packagedauthority.InspectCurrentPackageV2(ctx)
 	if errors.Is(err, packagedauthority.ErrNotPackagedRuntimeV2) {
 		adapters := newOfficeEditingAdapters(ctx, config, identity, protected)
@@ -25,25 +25,29 @@ func newOfficeRuntime(ctx context.Context, config Config, identity identityport.
 			}
 			adapters["analytix-canvas"] = canvas
 		}
-		return adapters, newDevelopmentPackageHost(ctx, config, identity, adapters), nil
+		host, discoveryErrors := newDevelopmentPackageHost(ctx, config, identity, adapters)
+		return adapters, host, nil, discoveryErrors
 	}
 	if err != nil || identity == nil || config.Insecure || strings.TrimSpace(config.RuntimeToken) == "" {
-		return nil, nil, nil
+		return nil, nil, nil, 0
 	}
 	assets, err := officeengineassets.OpenPrivateLocal(ctx, inspection)
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, 0
 	}
 	adapters := composeOfficeEditingAdapters(config, identity, protected, assets.Current)
 	// Server composition binds its projector/capture to the concrete adapters.
 	// The Host uses wrappers around those same pointers, not replacements in
 	// the server map, so all finite selection/editing operations remain bound.
 	hostedAdapters := qualifyOfficeAdapters(adapters, assets.Current)
-	host := composeOfficePackageHost(ctx, config, identity, hostedAdapters, assets.Root(), assets.Current)
+	host, discoveryErrors := composeOfficePackageHost(ctx, config, identity, hostedAdapters, assets.Root(), assets.Current)
 	if host == nil || len(adapters) != 3 || !assets.Current(ctx) {
-		return nil, nil, nil
+		if discoveryErrors == 0 {
+			discoveryErrors = 1
+		}
+		return nil, nil, nil, discoveryErrors
 	}
-	return adapters, host, assets
+	return adapters, host, assets, discoveryErrors
 }
 
 func qualifyOfficeAdapters(adapters map[string]adapterport.Adapter, current func(context.Context) bool) map[string]adapterport.Adapter {

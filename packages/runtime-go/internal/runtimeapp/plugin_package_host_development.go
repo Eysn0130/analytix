@@ -21,16 +21,19 @@ import (
 
 // Source experiments are additive and unavailable in a packaged executable even
 // if it was built without the production tag. No caller can supply registrations.
-func newDevelopmentPackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter) *hostapp.Service {
-	if config.DevelopmentPluginSourceRoot == "" || identity == nil {
-		return nil
+func newDevelopmentPackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter) (*hostapp.Service, int) {
+	if config.DevelopmentPluginSourceRoot == "" {
+		return nil, 0
+	}
+	if identity == nil {
+		return nil, 1
 	}
 	if _, err := packagedauthority.InspectCurrentPackageV2(ctx); !errors.Is(err, packagedauthority.ErrNotPackagedRuntimeV2) {
-		return nil
+		return nil, 1
 	}
 	root, err := canonicalBundledFundsDirectoryV1(config.DevelopmentPluginSourceRoot)
 	if err != nil {
-		return nil
+		return nil, 1
 	}
 	descriptors := officePackageDescriptors(root, nil)
 	descriptors["analytix-canvas"] = staticEditorPackageDescriptor{root: root}
@@ -39,7 +42,7 @@ func newDevelopmentPackageHost(ctx context.Context, config Config, identity iden
 
 // Source attribution/materialization is shared, but execution admission belongs
 // to the caller. A private package supplies its sealed, continuously checked root.
-func composeOfficePackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, root string, current func(context.Context) bool) *hostapp.Service {
+func composeOfficePackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, root string, current func(context.Context) bool) (*hostapp.Service, int) {
 	return composeStaticEditorPackageHost(ctx, config, identity, adapters, officePackageDescriptors(root, current))
 }
 
@@ -58,53 +61,61 @@ func officePackageDescriptors(root string, current func(context.Context) bool) m
 
 // One Host and one materialization authority own all fixed editor packages.
 // Each descriptor retains its own continuously checked source admission.
-func composeStaticEditorPackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, descriptors map[string]staticEditorPackageDescriptor) *hostapp.Service {
+func composeStaticEditorPackageHost(ctx context.Context, config Config, identity identityport.Authority, adapters map[string]adapterport.Adapter, descriptors map[string]staticEditorPackageDescriptor) (*hostapp.Service, int) {
 	if identity == nil {
-		return nil
+		return nil, len(descriptors)
 	}
 	dataDir, runtimeHome, err := bundledFundsRuntimeRootsV1(config.DataDir)
 	if err != nil {
-		return nil
+		return nil, len(descriptors)
 	}
 	// Inspect before enrolling anything. These are the only source packages this
 	// executable knows how to compose; descriptors contain no executable scripts.
 	ids := []string{"analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas"}
+	validationErrors := 0
 	bindings := make(map[string]materializationapp.DevelopmentSourceBindingV1)
 	registrations := make(map[string]domainpackage.DevelopmentSourceRegistrationV1)
 	for _, id := range ids {
 		descriptor, exists := descriptors[id]
-		if !exists || descriptor.root == "" || (descriptor.current != nil && !descriptor.current(ctx)) {
+		if !exists {
+			continue
+		}
+		if descriptor.root == "" || (descriptor.current != nil && !descriptor.current(ctx)) {
+			validationErrors++
 			continue
 		}
 		source := filepath.Join(descriptor.root, "plugins", id)
 		observed, err := pluginstore.InspectDevelopmentSourceTreeV1(ctx, source)
 		if err != nil {
+			validationErrors++
 			continue
 		}
 		registration, err := domainpackage.ParseDevelopmentSourceRegistrationV1([]byte(observed.SourceRegistrationJSON))
 		if err != nil || registration.Identity.PackageID != id {
+			validationErrors++
 			continue
 		}
 		binding, err := materializationapp.NewDevelopmentSourceBindingV1(registration, source, domainplugin.TargetV1{Platform: runtime.GOOS, Arch: runtime.GOARCH})
 		if err != nil {
+			validationErrors++
 			continue
 		}
 		bindings[id], registrations[id] = binding, registration
 	}
 	if len(bindings) == 0 {
-		return nil
+		return nil, validationErrors
 	}
 	_, stateErr := os.Lstat(filepath.Join(runtimeHome, ".state", "bundled-plugin-materialization", "v1"))
 	if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
-		return nil
+		return nil, len(descriptors)
 	}
 	_, cacheErr := os.Lstat(filepath.Join(runtimeHome, "plugins", "cache", "analytix-hub"))
 	if cacheErr != nil && !errors.Is(cacheErr, os.ErrNotExist) {
-		return nil
+		return nil, len(descriptors)
 	}
 	authority, err := pluginauthority.OpenOrCreateV1(dataDir, stateErr == nil || cacheErr == nil)
 	if err != nil {
-		return nil
+		return nil, len(descriptors)
 	}
 	var hosted []hostapp.Registration
 	for _, id := range ids {
@@ -114,22 +125,27 @@ func composeStaticEditorPackageHost(ctx context.Context, config Config, identity
 		}
 		store, err := pluginstore.NewPackageStoreV1(runtimeHome, id, nil)
 		if err != nil {
+			validationErrors++
 			continue
 		}
 		service, err := materializationapp.NewDevelopmentSourceServiceV1(store, authority, binding, time.Now)
 		if err != nil {
+			validationErrors++
 			continue
 		}
 		if _, err := service.ResolveActive(ctx); err != nil {
 			intent, err := binding.NewIntentV1(time.Now().UTC())
 			if err != nil {
+				validationErrors++
 				continue
 			}
 			intent, err = store.PrepareDevelopmentIntentV1(ctx, intent)
 			if err != nil {
+				validationErrors++
 				continue
 			}
 			if _, err := service.Materialize(ctx, intent); err != nil {
+				validationErrors++
 				continue
 			}
 		}
@@ -149,13 +165,13 @@ func composeStaticEditorPackageHost(ctx context.Context, config Config, identity
 	}
 	host, err := hostapp.New(identity, authority, hosted, time.Now)
 	if err != nil {
-		return nil
+		return nil, len(descriptors)
 	}
 	for _, registration := range hosted {
 		current := descriptors[registration.Identity.PackageID].current
 		if current != nil && !current(ctx) {
-			return nil
+			return nil, len(descriptors)
 		}
 	}
-	return host
+	return host, validationErrors
 }

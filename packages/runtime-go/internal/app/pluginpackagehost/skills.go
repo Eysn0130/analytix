@@ -15,6 +15,13 @@ type HostedSkill struct {
 	Snapshot domainskill.PackageSnapshot
 }
 
+// SkillDiscovery distinguishes a verified empty inventory from contributions
+// withdrawn because their current authority or installed bytes could not be read.
+type SkillDiscovery struct {
+	Skills               []HostedSkill
+	ValidationErrorCount int
+}
+
 func (s *Service) loadSkillLocked(ctx context.Context, expected adapterport.Binding) (HostedSkill, error) {
 	principal, err := s.principal(ctx)
 	if err != nil {
@@ -60,31 +67,47 @@ func (s *Service) loadSkillLocked(ctx context.Context, expected adapterport.Bind
 // Skills withdraws contributions whose signed activation or installed generation
 // cannot be verified. Reading does not invoke an adapter or contact a Provider.
 func (s *Service) Skills(ctx context.Context) []HostedSkill {
+	return s.DiscoverSkills(ctx).Skills
+}
+
+func (s *Service) DiscoverSkills(ctx context.Context) SkillDiscovery {
 	if s == nil {
-		return nil
+		return SkillDiscovery{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var skills []HostedSkill
+	var result SkillDiscovery
+	_, principalErr := s.principal(ctx)
 	for _, id := range s.packageIDs {
 		registration := s.registrations[id]
 		if registration.SkillReader == nil {
 			continue
 		}
+		if principalErr != nil {
+			result.ValidationErrorCount++
+			continue
+		}
 		current, err := s.resolve(ctx, registration)
 		if err != nil {
+			result.ValidationErrorCount++
 			continue
 		}
 		activation, exists, err := s.activation(ctx, registration, current)
-		if err != nil || !exists || activation.DesiredState != domainplugin.DesiredEnabledV1 {
+		if err != nil {
+			result.ValidationErrorCount++
+			continue
+		}
+		if !exists || activation.DesiredState != domainplugin.DesiredEnabledV1 {
 			continue
 		}
 		loaded, err := s.loadSkillLocked(ctx, bindingFor(registration, current, activation.Revision))
 		if err == nil {
-			skills = append(skills, loaded)
+			result.Skills = append(result.Skills, loaded)
+		} else {
+			result.ValidationErrorCount++
 		}
 	}
-	return skills
+	return result
 }
 
 // WithSkill serializes consumption of an already prepared skill with disable
