@@ -1,9 +1,167 @@
 # PR28 independent-review continuation — 2026-09-21
 
-Status: Historical execution receipt, not product/release acceptance.
-Scope: user-adopted independent-review continuation A–I, retaining the original A–M/P0–P5 outcome.
+Status: Current continuation plus historical execution receipts; not product/release acceptance.
+Scope: latest user-adopted continuation A–M, retaining prior A–I receipts and the original A–M/P0–P5 outcome.
 Repository and source writer remain the canonical Analytix checkout and original Codex owner.
 No Goal, scheduled continuation, new independent task, public release or writer transfer was used.
+
+## Current continuation A–M: review package and Browser implementation
+
+This later execution starts at clean `40a6a1c9aca56229eb56b43dce381b709a86462b`,
+tree `616a867512c4281544b8a6113564b34a56c2a611`, on the same branch and writer.
+All older checkpoints remain ancestors. SOURCE `65ab0efca8765385dc09d3522ca567d9bffd0f40`, tree
+`36370dd74196b8d7e141c5cdcbff45aeb1145eee`, observed `2026-09-21T11:40:25.920424+00:00`; the final report manifest separately
+records SOURCE and documentation-only DELIVERY, their trees and observation times.
+No old checkpoint was reset or used as a replacement worktree.
+
+The new `Analytix-PR28-Review-Continuation-2026-09-21.zip` was safely extracted
+exclusively after path, duplicate/case-fold, file-type, encryption, size/ratio
+and CRC checks: 17 files, 439,928 expanded bytes; outer manifest **16/16**.
+Its computed archive SHA256 is
+`fd9957f0aa0b817dd4a57cc886a4c014cafeab6536a184f8e3a044e23a2750c3`;
+no absent external checksum sidecar is claimed verified. The unchanged reference
+NO_SOURCE package separately passes **9/9**. These are not the earlier 54/54
+and 30/30 counts below. The adopted A–M and 00–11 reports were read. The supplied
+checker was inspected before offline execution; **32 tool self-tests** pass,
+separate from the prior 13 tool tests/26 Python vectors and product tests.
+
+### Evidence corrections and recovered receipts
+
+The earlier wording is corrected to **16,287 flow steps** and **16,783 records
+including separately listed flow endpoints**. Findings=67, flows=248, ignored-flow
+warning count=1,184; these meanings and all old fingerprints remain unchanged.
+The new report package carries summaries and sanitized executor receipts, not
+all raw private logs. Original owner execution records recovered 13 validation
+groups with actual command suffixes, working directory, tool call/receipt times,
+recorded shell exits, available matched/pass/fail/skip and local-log byte/hash
+identities. Missing process start/end, historical per-run toolchain or candidate
+fingerprints remain `NOT_RECORDED`. Tool observation timestamps are not process
+timestamps. Commands following source edits are labelled validation suffixes,
+not falsely presented as the complete tool call. An empty eslint log is not the
+basis for exit0; the executor completion receipt is. Reused historical log names
+are current retained bytes, not independently proven bytes for every earlier run.
+New checks record real start/end, command, platform, locks, before/after HEAD/tree,
+dirty-file fingerprints, exit and log hash. No unchanged 995-test suite was rerun.
+
+The current QA, handover and product-completion bodies were read locally, along
+with the documentation/spec registries, runtime/desktop guides, development and
+Git runbooks, Office admission/resource manifest and knowledge-base governance.
+This is a local full-text review of the relevant entries, not ChatGPT approval
+of previously unavailable bodies or a claim to have audited every repository doc.
+The Git workflow now explicitly retains the unattributed-change approval rule.
+The Rust fixture also clarifies that 13,000 is `row_summary.total_amount` across
+**two** aggregate rows, ordered by amounts 3,000 then 10,000; it is not 13,000 rows.
+
+### Browser implementation and evidence ceiling
+
+The existing Main guest registry now captures actual isolated-world Selection/
+Range nodes and offsets, bound to the host and guest document leases. The renderer
+can supply only a registered guest ID and thread ID; it cannot supply source text,
+URL, principal or a purported revision. No guest preload, new Provider outlet or
+second RAG/permission system was introduced. The existing Go object-editing owner
+freezes primary-thread/workspace/principal authority and projects the captured
+text through the existing privacy layer. Composer references contain opaque scope
+IDs only. Every Core/model read issues a fresh, one-use challenge answered by Main
+after checking held nodes, offsets, text and irreversible lifecycle identity.
+DOM mutation conservatively invalidates the handle, including text ABA; this is
+selected-text currentness, **not full-page visual revision**. Capture/quote never
+sends; ordinary explicit Send uses the same main conversation and rechecks after
+asynchronous preparation, preserving drafts on rejection.
+
+Budgets: one in-flight Main capture, eight retained Main selections (oldest scope
+revoked on replacement), 64 Core scopes, five-minute lifetime, 4,096 UTF-16 /
+16,384 UTF-8 bytes per selection, one pending read per scope, five-second read
+proof deadline. Foreign full scope bindings are rejected before creating a read
+challenge. Two new implementation counterexamples were reproduced RED→GREEN:
+concurrent captures bypassing the Main reservation, and altered document bindings
+consuming/expiring a legitimate scope. Late Core capture after navigation revokes
+its returned scope. Main-frame/iframe, same URL, same document, provisional cancel,
+crash, close, cross-thread, authority change, nonce replay, expiry and privacy
+projection have bounded tests. Child-frame selection capture itself is not enabled.
+
+The fixed Electron **41.10.3 / Chromium 146.0.7680.216** engine ran eight synthetic
+checks: real isolated Selection/Range; page-world getSelection forgery isolation;
+DOM ABA; same-document navigation; programmatic same-URL load; child-frame
+navigation; programmatic back; actual destroyed event. Initial harness failures
+(file permissions, non-cloneable harness return and synchronous destroyed-event
+assumption) are retained and distinguished from product defects. This engine
+probe uses synthetic files and an isolated profile; it is not actual guest/Main/
+Core end-to-end product GUI, fixed Office fidelity, installed or live Provider
+acceptance. Browser-specific quick-action UI and complete native journeys remain
+open, rather than silently narrowing the accepted product outcome.
+
+### New path #33 counterexample and focused execution
+
+A real synthetic protected directory/file and a symlink into it reproduced
+`exists=true` because WorkspaceStatus performed host Stat before the contained
+CommandProbe. The HTTP handler accepts its query path directly and production
+composition supplies protected roots. The repair keeps the existing owner and
+OS process policy: when roots exist, metadata lookup uses a contained `test -e`
+process without a shell. Resolution and access occur inside that boundary, not
+through a new string-prefix guard. Without protected roots the existing Stat
+semantics remain. Unsupported containment fails closed. Ordinary directories,
+Git dirty status and the existing malicious-fsmonitor containment check remain
+green. This closes the reproduced metadata case, not all15 path findings or the
+old CodeQL flow; no alert was dismissed.
+
+Final focused groups (overlapping runs are not summed):
+
+| Group | Actual result | Scope |
+| --- | --- | --- |
+| Browser Main/script/reference + mounted Workbench + existing consumers | 90/90 Vitest; exit0 | Seven files, new and retained cases; synthetic IPC/Provider seams |
+| Browser objectediting/server, normal | 4 top-level / 11 including subtests; exit0 | Actual Core/HTTP/identity/privacy/tool seam; synthetic Main proof |
+| Browser same selection under analytix_prod + race | 4 top-level / 11 including subtests; exit0 | Distinct build mode, overlapping cases, no installed/live Provider claim |
+| WorkspaceStatus process owner | 4 top-level / 9 including subtests; exit0 | Real synthetic filesystem and existing macOS containment |
+| WorkspaceStatus HTTP | 2 top-level / 2 total; exit0 | Actual handler/service/probe, existence denied |
+| Fixed Electron probe | 8 assertions; exit0 | Real41.10.3 isolation/navigation; separate from mounted product GUI |
+| TypeScript and desktop build | npm run typecheck; npm run build; combined exit0 | Source/build only |
+| Production Go composition | go build -tags analytix_prod ./cmd/runtime-server; exit0 | Rebuilt after metadata repair, private temporary output |
+| Changed TS/TSX eslint | exit0, 0 errors / 1 warning | DevBrowserPanel captureEpoch ref cleanup heuristic; warning retained |
+
+The first Browser typecheck failed on the missing non-Electron bridge facade;
+it was repaired before the final check. Earlier HTTP route-package selection had
+zero matching tests and is not counted as behavior passed. RED logs for Main
+concurrency, altered scope and protected metadata are retained. Cache preflight
+also rejected a probe file mode and an executable mistakenly placed in evidence;
+the exact task-owned files were corrected/moved into the temporary-build area,
+then checks actually reran. No cache guard, signing or security policy changed.
+Toolchain observation: Node22.22.1/npm10.9.4, Go1.26.4 darwin/arm64,
+Rust1.94.1, macOS26.5.2 build25F84. Historical groups are not assigned these
+newly observed versions retroactively. Complete commands, times and log hashes
+are in the report-only execution-receipts and prior-execution-receipts records;
+raw logs and the temporary runtime executable remain local.
+
+Write retirement recheck found no source references to WriteAssistantPanel,
+ensureWriteThreadForWorkspace, createWriteThread or selectWriteThread. The live
+WriteWorkspaceView still requires onSubmitPrompt and calls the same-thread owner.
+No functionality, UI Refresh surface, gate or old evidence was deleted.
+
+### Remaining A–M/P0–P5 work, still in scope
+
+| Requirement | Current classification and next minimum action |
+| --- | --- |
+| C / 67 findings | Original scan remains old analysis1792355564/CodeQL2.27.0/dde. Before the new repair, all43 recorded sink/guard files matched9cf. Afterward66/67 sink files still match; #33 is explicitly CHANGED. Identity comparisons are reuse evidence only; caller changes require review. No CodeQL executable was found on this shell PATH; current-source scan and full caller closure remain EVIDENCE_NOT_RUN, not dismissed. |
+| D / Office/Canvas | Previous lease/disposal tests retained; new actual Electron event evidence supplements them. Close/reopen and canceled provisional navigation in the complete product remain EVIDENCE_NOT_RUN. |
+| E / images | Eight-region CAS, notes, rotation/zoom and three earlier race repairs retained. Multi-region native GUI journey and trusted pixel/metadata projection remain EVIDENCE_NOT_RUN / SOURCE_GAP; no pixel editing or redaction claim. |
+| F / Browser | New source chain and focused evidence implemented. Actual attached guest → Main → Core → composer GUI journey, child-frame capture and Browser-specific explicit quick actions remain EVIDENCE_NOT_RUN / SOURCE_GAP. |
+| G / DOCX | Product worker still uses local-range setString; no new actual fixed-engine loss counterexample. The synthetic oracle is retained. Fixed-worker original/no-op/edited structural and visual comparisons plus Diff/accept/save/reopen remain EVIDENCE_NOT_RUN. |
+| H / XLSX/PPT | Real pivot generation and typed range/PPT geometry/fill remain. Imported pivot refresh/chart modification and additional required styles still need pinned UNO API/object mapping and same-owner integration: SOURCE_GAP, not a GUI-only block. No full-file regeneration substituted. |
+| I / Skills/Write | Desktop installHubAgentPlugin returns remote_plugin_materialization_requires_go_archive_authority before mutation. Actual install/upgrade/uninstall/restart and in-flight teardown therefore remain SOURCE_GAP plus EVIDENCE_NOT_RUN. Existing local-remount protection is retained; filesystem lifecycle is not desktop install evidence. No fake Go Host uninstall API added. Existing Write replacements and 8/4 retrieval bounds remain. |
+| J / Rust | Same analysis tree and old contrasting CI retained; no new falsifiable SQL/environment hypothesis established, so no blind rerun. DuckDB INTERNAL and historical dyld startup delay remain distinct unresolved evidence. |
+| K / install | No package of this new source was made or accepted. Old8365 DMG and current source build do not satisfy it. Resource seal, exact fixed assets/notices, isolated native journey and normal Registry/Provider admission remain prerequisites/evidence gaps. Historical Keychain challenge is not generalized into a Mac GUI ban. |
+| L / synchronization | SAFETY_NOT_CLEARED: create_tree PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED. No push, alternative API, source archive, Ready, merge or release. No writer transfer: OWNER_HANDOFF_NOT_RELEASED; next ChatGPT work remains REVIEW_ONLY. |
+
+Fresh read-only GitHub observation still separates remote PR `dde784437dc8563e84066629dd57f4a11fd9acc9`
+(OPEN/Draft, 56 checks: 55 success, CodeQL failure) and actual main
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8` (64 checks: 62 success, Rust and
+Development gate failure). Two review threads remain unresolved. Strict Development
+gate/app15368, resolution and extra approval for unattributed changes remain;
+ordinary approval count0 does not waive the latter. No fresh local-candidate CI
+or merge/main verification is claimed. Complete product, Formal RC and public
+release remain separate and unachieved. No Goal, automation, new task or subagent
+writer was started.
+
+## Historical execution from fe656 to 9cf / 40a6
 
 ## Identity and intake
 
@@ -27,7 +185,8 @@ matrix/receipts were read. The attachment contains reports and prior public
 analysis, not a source patch or a writer/safety-clearance receipt.
 
 Reviewer tooling was rerun separately: 13 self-tests, 67 results, 248 retained
-flows, 16,287 normalized locations, 1,184 ignored-flow warning, 26 Python floating
+flows, 16,287 flow steps (16,783 flow location records when separately listed
+source/sink endpoints are included), 1,184 ignored-flow warning, 26 Python floating
 point vectors. None is counted as a product test or fresh CodeQL analysis.
 
 ## Current review findings and actual changes
@@ -113,8 +272,12 @@ and normal commands rerun; this was not a bypass or a product RED.
   old test fixtures and JSX narrowing; fixed before the final pass.
 - Focused ESLint and `git diff --check` passed. Build artifacts were not staged.
 
-Exact commands, exit codes, candidate file hashes and raw local logs accompany
-the local execution evidence and new report-only handoff. Full earlier suites,
+Representative commands and reported outcomes are recorded below. Raw private
+execution logs remain in the authorized local evidence directories. The report-only
+handoff carries candidate fingerprints, selected terminal/test-name records and
+raw-log fingerprints, not raw logs or a complete per-run command/environment/
+shell-exit receipt. Missing original fields remain NOT_RECORDED; an empty log
+does not establish exit 0. Record consistency is not an independent product rerun. Full earlier suites,
 real Provider, fixed Office engine, Chromium navigation, native installation,
 IME, current CodeQL and remote CI were not rerun or claimed.
 
@@ -171,7 +334,8 @@ or real case data was used, and no security/signature setting was disabled.
 Remote PR28 remains OPEN/Draft at `dde784437dc8563e84066629dd57f4a11fd9acc9`;
 actual main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`. Strict Development
 gate/app15368, resolved conversations, no bypass remain applicable; ordinary
-approval count is zero. Old dde's Development success/CodeQL failure and two
+approval count is zero, with `require_extra_approval_for_unattributed_changes=true`
+still applicable when triggered. Old dde's Development success/CodeQL failure and two
 unresolved path review threads are not current-local-candidate acceptance.
 Fresh inventories remain dde 56 checks (55 success, CodeQL failure) and main 64
 checks (62 success, Rust and Development gate failure); these are separate SHAs.
@@ -183,3 +347,5 @@ per-finding and executed evidence summaries; source writer is not released and
 latest local source is not supplied through the report package. Repository QA and
 handover are authoritative; the existing Notion ledger receives only a bounded
 verified summary after the local checkpoint, never source or raw private logs.
+
+Current source change totals: production_contract_config: 25 files +609/-14; test: 9 files +495/-2. Documentation totals and final DELIVERY are recorded after the documentation checkpoint; no tested source is changed by it.

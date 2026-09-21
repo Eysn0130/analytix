@@ -76,7 +76,9 @@ tests, isolated Linux/macOS held-state restart contracts and all Rust component 
 requires a PR, that check from GitHub Actions, an up-to-date candidate and resolved
 review conversations. It retains force-update/deletion protection with no bypass
 actor. It does not invent an extra mandatory second approver; applicable review
-and product acceptance still need real evidence. CI success alone is not live
+and product acceptance still need real evidence. The current rules also require
+extra approval for unattributed changes (`require_extra_approval_for_unattributed_changes`);
+ordinary approval count zero does not waive that condition. CI success alone is not live
 Provider, installer or release acceptance. Existing baseline failures remain
 failures and must be repaired on branches, not exempted to merge this workflow.
 

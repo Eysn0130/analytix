@@ -33,9 +33,16 @@ non-normal EXIF/animated PNG and unauthorized pixel editing remain fail closed.
 Core-authorized retrieval, primary-thread auxiliary completion, exact subagent
 budgets, skill discovery/revocation, real pivot generation, the synthetic DOCX
 oracle and bounded PPT geometry/fill remain integrated. Native image acceptance,
-trusted Browser references, imported pivot/chart editing and the recorded fixed
-engine/installed journeys remain open. Browser authority is a source capability
-gap, not a blanket environment block. Rust's original DuckDB failure and
+imported pivot/chart editing and the recorded fixed engine/installed journeys remain open.
+The latest continuation from `40a6a1c9a` adds trusted Main guest/document selected-text
+capture, private Core read challenges, privacy projection and same-thread opaque
+references. Focused tests and eight actual fixed-Electron checks support that source
+increment; actual attached-guest product GUI, child-frame capture and Browser-specific
+quick-action UI remain unaccepted. Desktop Skills installation still waits for the
+Go archive authority; its real lifecycle is not proved by filesystem materialization.
+Source checkpoint `65ab0efca8765385dc09d3522ca567d9bffd0f40` also fixes the reproduced WorkspaceStatus
+protected-metadata leak within the existing OS containment owner. See the current
+section of the same QA for exact evidence and remaining A–M rows. Rust's original DuckDB failure and
 current-candidate CodeQL are not closed. Earlier matrices below are historical.
 
 At the latest read, main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`;

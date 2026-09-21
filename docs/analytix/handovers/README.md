@@ -9,7 +9,26 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：PR28 独立审查落地 / 2026-09-21 PDT
+## 当前接续：PR28 Browser 与证据复核 / 2026-09-21 PDT
+
+从 clean `40a6a1c9aca56229eb56b43dce381b709a86462b`、tree
+`616a867512c4281544b8a6113564b34a56c2a611` 继续原分支、原 writer；保留全部祖先。
+[同一 QA 的本轮记录](../qa/pr28-independent-review-execution-2026-09-21.md#current-continuation-am-review-package-and-browser-implementation)
+区分新的16/16+9/9、32工具自测、实际产品测试与固定Electron引擎证据。
+Browser 已新增可信 Main guest/document→选区→Core私有currentness→隐私投影→
+主会话引用链，不再把整个Browser能力称为零实现。并发捕获与完整scope绑定反例已修复。
+WorkspaceStatus #33另有受保护存在性泄漏的真实反例，已沿现有进程隔离owner修复并验证。
+源码检查点 `65ab0efca8765385dc09d3522ca567d9bffd0f40`，tree `36370dd74196b8d7e141c5cdcbff45aeb1145eee`。
+实际guest产品GUI、child-frame capture/专用快捷动作、导入pivot/chart、固定Office保真、
+Skills archive authority/真实安装生命周期、准确候选私有安装仍分别有源码或证据缺口。
+
+QA已更正flow steps/含端点记录计数，恢复旧实际执行回执并保留NOT_RECORDED；
+不要重跑未失效995项或重做旧Canvas/R07/图片/数值实现。当前完整A—M仍partial。
+远端仍旧dde Draft、main仍ce96，CodeQL/main Rust与Development gate仍失败。
+源码外发拒绝未解除；原owner未release，下一方仍REVIEW_ONLY，不通过ZIP/API/push绕过。
+SOURCE、最终DELIVERY、tree/dirty与精确增删行以本轮manifest和普通提交记录为准。
+
+## 历史接续：PR28 独立审查落地 / 2026-09-21 PDT
 
 从 clean `fe65622e5d827637f6a7423ef60dc048fee20d3c` 继续原分支，保留148d及全部较晚有效历史。
 [本轮执行记录](../qa/pr28-independent-review-execution-2026-09-21.md)与其所在提交是新源码检查点；
