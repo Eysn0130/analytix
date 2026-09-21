@@ -13,7 +13,7 @@ const io = vi.hoisted(() => ({
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
   document: null as { onSubmitPrompt: (value: string) => void } | null,
   provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn() },
-  retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
+  browser: vi.fn(), retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
   t: (key: string) => key
 }))
 vi.mock('../agent/registry', () => ({ getProvider: () => io.provider }))
@@ -109,7 +109,7 @@ beforeEach(async () => {
     workspace: { onThreadHandoffEvent: () => () => {}, getThreadHandoffOperations: async () => ({ ok: true, operations: [] }),
       createGitCheckpoint: io.checkpoint },
     write: { retrieveWriteContext: io.retrieve },
-    files: { read: io.read, listDirectory: io.directory }, canvas: { request: io.canvas },
+    files: { read: io.read, listDirectory: io.directory }, canvas: { request: io.canvas }, browserSelection: { request: io.browser },
     logs: { error: async () => {} }
   } })
   element = document.createElement('div')
@@ -830,5 +830,37 @@ describe('R07 follow-up consumers after the send promise settles', () => {
       invalidateThreadDetailCache(warm.id)
       vi.useRealTimers()
     }
+  })
+})
+
+describe('Workbench Browser selected-text consumer path', () => {
+  async function attachBrowser() {
+    await act(async () => {
+      useNativeReferenceStore.setState({ references: [] })
+      const scope = { scopeId: 'a'.repeat(48), documentId: 'b'.repeat(48), selectionId: 'c'.repeat(48), threadId: 'a', workspace }
+      useNativeReferenceStore.getState().add({ kind: 'browser-selection', threadId: 'a', workspace,
+        objectId: scope.documentId, revision: scope.selectionId, scopeId: scope.scopeId, browserScope: scope,
+        label: 'PRIVATE-BROWSER-TITLE', text: '', path: '', editable: false })
+    })
+    io.browser.mockResolvedValue({ ok: true })
+  }
+  it('quotes without sending and explicitly sends an opaque reference in the same conversation', async () => {
+    await attachBrowser()
+    expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
+    await send()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(io.provider.sendUserMessage.mock.calls[0][0]).toBe('a')
+    expect(io.provider.sendUserMessage.mock.calls[0][1]).toContain('Core scopeId: ' + 'a'.repeat(48))
+    expect(io.provider.sendUserMessage.mock.calls[0][1]).not.toContain('PRIVATE-BROWSER-TITLE')
+    expect(io.provider.sendUserMessage.mock.calls[0][1]).not.toContain(workspace)
+    expect(draft().input).toBe('')
+  })
+  it('rejects revoked Browser scope after settings I/O and preserves the draft', async () => {
+    await attachBrowser()
+    const settings = deferred<AppSettingsV1>(); io.settings.mockReturnValueOnce(settings.promise)
+    await send(); expect(io.browser).toHaveBeenCalled(); expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
+    io.browser.mockResolvedValue({ ok: false }); settings.resolve({ workspaceRoot: workspace } as AppSettingsV1)
+    await settle(); expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
+    expect(draft().input).toBe('Discuss selected objects'); expect(useNativeReferenceStore.getState().references).toHaveLength(1)
   })
 })

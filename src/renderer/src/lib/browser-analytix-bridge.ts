@@ -1315,6 +1315,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       request: async () => ({ ok: false, code: 'unavailable' }),
       pickFile: async () => ({ ok: false })
     },
+    browserSelection: { request: async () => ({ ok: false }) },
     objects: {
       resolveArtifact: async () => ({ok:false,code:'unavailable'}),
       request: async () => ({ ok: false, code: 'forbidden', message: 'Protected object editing requires the desktop workspace.' })

@@ -272,6 +272,15 @@ func (h *runtimeServerHandler) executeNativeSelectionTool(ctx context.Context, p
 		}
 	}
 	if h.objectEditing != nil {
+		if pending.Call.Name == "native_selection_read" {
+			result, found, err := h.objectEditing.ReadBrowserScopeForModel(ctx, pending.ThreadID, scopeID)
+			if found {
+				if err != nil {
+					return failure()
+				}
+				return result, false
+			}
+		}
 		result, found, err := h.objectEditing.ReadImageScopeForModel(ctx, pending.ThreadID, scopeID)
 		if found {
 			if err != nil || pending.Call.Name != "native_selection_read" {

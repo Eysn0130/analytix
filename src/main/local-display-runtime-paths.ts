@@ -1,6 +1,7 @@
 export const LOCAL_DISPLAY_RUNTIME_PATHS_V1 = [
   '/v1/local-display/generated-artifact',
   '/v1/local-display/object-editing',
+  '/v1/local-display/browser-selection',
   '/v1/local-display/workspace-read',
   '/v1/local-display/inline-completion',
   '/v1/local-display/plugin-package-host',

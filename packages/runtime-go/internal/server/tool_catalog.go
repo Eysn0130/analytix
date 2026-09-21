@@ -21,7 +21,7 @@ func (h *runtimeServerHandler) runtimeToolCatalog() toolcatalogapp.RuntimeCatalo
 	}
 	// Advertise the native family while Core holds an editing baseline or a
 	// read-only image scope. Thread/version validation remains required at use.
-	catalog.NativeSelections = h.officePackageHost != nil && h.managedEditing != nil && h.managedEditing.HasCaptures() || h.objectEditing != nil && h.objectEditing.HasImageScopes()
+	catalog.NativeSelections = h.officePackageHost != nil && h.managedEditing != nil && h.managedEditing.HasCaptures() || h.objectEditing != nil && (h.objectEditing.HasImageScopes() || h.objectEditing.HasBrowserScopes())
 	catalog.Skills = h.currentSkillCatalog()
 	if h.turnSecurity.Identity != nil {
 		for _, kind := range []string{"docx", "xlsx", "pptx"} {

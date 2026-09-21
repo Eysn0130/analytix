@@ -28,8 +28,12 @@ import {
   writeBrowserStorageItem
 } from '../lib/browser-storage'
 import { PanelCollapseButton } from './workbench/PanelCollapseButton'
+import { useChatStore } from '../store/chat-store'
+import { useNativeReferenceStore } from '../office/native-reference-store'
+import { browserScopeSchema } from '../../../../packages/runtime/src/contracts/browser-selection'
 
 type DevWebviewTag = HTMLElement & {
+  getWebContentsId(): number
   canGoBack(): boolean
   canGoForward(): boolean
   getURL(): string
@@ -131,6 +135,33 @@ export function DevBrowserPanel({
 }): ReactElement {
   const { t } = useTranslation('common')
   const webviewRef = useRef<DevWebviewTag | null>(null)
+  const captureEpoch = useRef(0)
+  const [capturingSelection, setCapturingSelection] = useState(false)
+  useEffect(() => {
+    const unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.activeThreadId !== previous.activeThreadId || state.workspaceRoot !== previous.workspaceRoot) captureEpoch.current++
+    })
+    return () => { captureEpoch.current++; unsubscribe() }
+  }, [])
+  const captureSelection = async () => {
+    const guest = webviewRef.current, threadId = useChatStore.getState().activeThreadId
+    if (!guest || !threadId || capturingSelection) return
+    const epoch = captureEpoch.current
+    setCapturingSelection(true)
+    try {
+      const response = await window.analytix.browserSelection.request({ action: 'capture', guestId: guest.getWebContentsId(), threadId })
+      const scope = response.ok ? browserScopeSchema.safeParse(response.scope) : null
+      if (!scope?.success) throw Error('selection-unavailable')
+      if (epoch !== captureEpoch.current || guest !== webviewRef.current || useChatStore.getState().activeThreadId !== threadId) {
+        void window.analytix.browserSelection.request({ action: 'revoke', scope: scope.data })
+        return
+      }
+      useNativeReferenceStore.getState().add({ kind: 'browser-selection', threadId, workspace: scope.data.workspace,
+        objectId: scope.data.documentId, revision: scope.data.selectionId, scopeId: scope.data.scopeId,
+        browserScope: scope.data, editable: false, path: '', text: '', label: t('browserSelectedText') })
+    } catch { setLoadError(t('browserSelectionUnavailable')) }
+    finally { setCapturingSelection(false) }
+  }
   const iframeLoadedUrlRef = useRef<string | null>(null)
   const detectedUrls = useMemo(
     () => providedDetectedUrls ?? extractDetectedDevPreviewUrls(blocks),
@@ -427,6 +458,8 @@ export function DevBrowserPanel({
             <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
           </button>
           <div className="ml-auto flex shrink-0 items-center">
+            {useElectronWebview && <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
+              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserQuoteSelection')}</button>}
             <PanelCollapseButton
               onClick={onCollapse}
               ariaLabel={t('rightPanelCollapse')}

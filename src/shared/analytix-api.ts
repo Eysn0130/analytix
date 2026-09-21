@@ -1274,6 +1274,9 @@ export type AnalytixDomainFacade = {
   packageHost: {
     request: (request: import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostRequest) => Promise<import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostResponse>
   }
+  browserSelection: {
+    request: (request: import('../../packages/runtime/src/contracts/browser-selection').BrowserSelectionRequest) => Promise<import('../../packages/runtime/src/contracts/browser-selection').BrowserSelectionResponse>
+  }
   objects: {
     resolveArtifact: (request: import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactRequest) => Promise<import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactResponse>
     request: (request: import('../../packages/runtime/src/contracts/object-editing').ObjectEditingRequest) => Promise<import('../../packages/runtime/src/contracts/object-editing').ObjectEditingResponse>

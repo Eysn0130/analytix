@@ -53,10 +53,10 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Private packaged asset admission never inherits diagnostic insecure mode.
 	insecure := mux.Insecure
-	if r.URL.Path == OfficePrivateAdmissionPath {
+	if r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath {
 		insecure = false
 	}
-	if (r.URL.Path == OfficePrivateAdmissionPath && strings.TrimSpace(mux.RuntimeToken) == "") || !Authorized(r, mux.RuntimeToken, insecure) {
+	if ((r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath) && strings.TrimSpace(mux.RuntimeToken) == "") || !Authorized(r, mux.RuntimeToken, insecure) {
 		WriteJSON(w, http.StatusUnauthorized, map[string]any{"code": "unauthorized", "message": "unauthorized"})
 		return
 	}
@@ -92,6 +92,7 @@ type LocalDisplayHandlerV1 struct {
 	GeneratedArtifacts     http.Handler
 	PackageHost            http.Handler
 	ObjectEditing          http.Handler
+	BrowserSelection       http.Handler
 	WorkspaceRead          http.Handler
 	InlineCompletion       http.Handler
 	Service                *localdisplayapp.Service
@@ -154,6 +155,14 @@ type fundsDeterministicCleaningRequestV1 struct {
 }
 
 func (handler LocalDisplayHandlerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == BrowserSelectionPath {
+		if handler.BrowserSelection == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		handler.BrowserSelection.ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path == InlineCompletionPath {
 		if handler.InlineCompletion == nil {
 			InlineCompletionHandler{}.ServeHTTP(w, r)

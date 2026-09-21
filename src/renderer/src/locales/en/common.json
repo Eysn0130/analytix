@@ -1,4 +1,7 @@
 {
+  "browserSelectedText": "Browser selected text",
+  "browserQuoteSelection": "Quote selection",
+  "browserSelectionUnavailable": "Select text in the main browser document and try again. The selection may have changed.",
   "skillDiscoveryIncomplete": "Skill discovery is incomplete. Some skills are temporarily unavailable.",
   "providerConnection_official-deepseek": "Official API",
   "providerConnection_local": "Local service",

@@ -47,6 +47,7 @@ type Service struct {
 	projector           TrustedSelectionProjector
 	beginManagedCapture func(context.Context, string, string, func() error) (func(), error)
 	managedReleases     map[string]func()
+	browser             map[string]*browserSelection
 }
 
 // BindHost is trusted startup composition, never a transport operation.

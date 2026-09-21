@@ -1,3 +1,4 @@
+import { registerBrowserSelectionIpc } from '../browser/browser-selection'
 import { authorizeWriteRetrievalSource } from './write-retrieval-ipc'
 import { createWriteExportSnapshotResolver } from './write-export-ipc'
 import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
@@ -2767,6 +2768,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
 
   const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
+  registerBrowserSelectionIpc(getMainWindow, localDisplayRequest)
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
   const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
   ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {

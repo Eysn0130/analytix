@@ -1749,6 +1749,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
 			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
 			ObjectEditing:          objectEditingHTTP,
+			BrowserSelection:       httpapi.BrowserSelectionHandler{Service: objectEditingHandler.Service},
 			WorkspaceRead:          httpapi.WorkspaceReadHandler{Service: workspaceRead},
 			InlineCompletion:       httpapi.InlineCompletionHandler{Service: inlineCompletion},
 			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},

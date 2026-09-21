@@ -676,6 +676,9 @@ const api = {
       return { ok: false }
     }
   },
+  browserSelection: {
+    request: (request) => ipcRenderer.invoke('browser:selection', request)
+  },
   objects: {
     resolveArtifact: (request) => ipcRenderer.invoke('object:resolve-artifact', request),
     request: (request) => ipcRenderer.invoke('object:editing', request)

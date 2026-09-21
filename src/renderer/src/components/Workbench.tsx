@@ -1,3 +1,4 @@
+import { validateBrowserReferences } from '../write/browser-references'
 import { validateCanvasReferences } from '../canvas/canvas-references'
 import { validateImageReferences } from '../write/image-references'
 import { canvasPreviewSessions } from '../canvas/canvas-preview-owner'
@@ -2573,13 +2574,14 @@ export function Workbench(): ReactElement {
     const validateSubmission = async (): Promise<boolean> => {
       const valid = await validateCanvasReferences(frozenNativeReferences,
         request => window.analytix.canvas.request(request), referenceCurrent) &&
-        await validateImageReferences(frozenNativeReferences, request => window.analytix.objects.request(request), referenceCurrent)
+        await validateImageReferences(frozenNativeReferences, request => window.analytix.objects.request(request), referenceCurrent) &&
+        await validateBrowserReferences(frozenNativeReferences, request => window.analytix.browserSelection.request(request), referenceCurrent)
       if (!valid) reportSubmissionError(t('workbenchReferenceChanged'))
       return valid
     }
     // A Canvas handle cannot survive deferred queueing. The existing send owner
     // rechecks this one-shot Core fence after all its settings/checkpoint I/O.
-    const submissionGuard = frozenNativeReferences.some(reference => reference.kind === 'canvas' || reference.kind === 'image-region')
+    const submissionGuard = frozenNativeReferences.some(reference => reference.kind === 'canvas' || reference.kind === 'image-region' || reference.kind === 'browser-selection')
       ? { isCurrent: referenceCurrent, validateBeforeSend: validateSubmission }
       : undefined
     const runtimeFileReferences = runtimeFileReferencesFromComposer(fileReferences)
@@ -3556,7 +3558,7 @@ export function Workbench(): ReactElement {
                               {reference.kind === 'canvas' ? <button type="button" title={reference.label}
                                 onClick={() => openCanvasWorkspaceObject(reference.workspace, reference.path)}>
                                 {reference.label}{reference.editable === false ? ` · ${t('canvas:canvasRecaptureRequired')}` : ''}
-                              </button> : reference.kind === 'image-region' ? <span title={reference.label}>{reference.label} · {t('imageRegionDiscussionOnly')}{!reference.scopeId ? ` · ${t('imageRegionRecapture')}` : ''}</span>
+                              </button> : reference.kind === 'browser-selection' ? <span>{reference.label} · {t('imageRegionDiscussionOnly')}</span> : reference.kind === 'image-region' ? <span title={reference.label}>{reference.label} · {t('imageRegionDiscussionOnly')}{!reference.scopeId ? ` · ${t('imageRegionRecapture')}` : ''}</span>
                                 : <button type="button" title={[reference.note, reference.text].filter(Boolean).join('\n\n')} onClick={() => useWorkspaceTabsStore.getState().openTab({id:workspaceObjectTabId(reference.workspace, reference.path), kind:'document', mode:'documents', title:reference.path.split(/[\\/]/).at(-1) ?? reference.path, path:reference.path, workspaceRoot:reference.workspace})}>{reference.label}{reference.selection.capture?.truncated ? ' · 部分引用' : ''}{reference.editable === false ? ' · 仅讨论' : ''}{reference.note ? <span className="ml-1 text-ds-muted">· {reference.note.slice(0, 48)}{reference.note.length > 48 ? '…' : ''}</span> : null}</button>}
                               <button type="button" aria-label={`移除 ${reference.label}`} onClick={() => useNativeReferenceStore.getState().remove(reference.id)}>×</button>
                             </div>)}

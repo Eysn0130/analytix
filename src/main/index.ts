@@ -1,3 +1,4 @@
+import { registerBrowserGuest } from './browser/browser-selection'
 import { clearWriteRetrievalCache } from './services/write-retrieval-service'
 import {
   app,
@@ -503,6 +504,7 @@ async function readGuiUpdateState(): Promise<GuiUpdateState> {
 
 function installDevPreviewWebviewGuards(): void {
   app.on('web-contents-created', (_, contents) => {
+    contents.on('did-attach-webview', (_event, guest) => registerBrowserGuest(contents, guest))
     contents.on('will-attach-webview', (event, webPreferences, params) => {
       const src = typeof params.src === 'string' ? params.src : ''
       // Prototype embeds are file:// pages the renderer authorized through
