@@ -2,11 +2,13 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { expect, test, vi } from 'vitest'
 
-function worker(text = '重复文本', kind = 'docx', cellType = 2) {
+function worker(text = '重复文本', kind = 'docx', cellType = 2, portionType = 'Text', hyperlink = '') {
   let selected = 1, readonly = true, modified = false, listener: any
   const paragraphs = ['重复文本', text]
   const messages: any[] = [], properties: any[][] = []
+  const enumerate = (items: any[]) => { let i=0; return {hasMoreElements:()=>i<items.length,nextElement:()=>items[i++]} }
   const range = (i: number): any => ({
+    createEnumeration: () => enumerate([{createEnumeration:()=>enumerate([{getPropertyValue:(name:string)=>name==='TextPortionType'?portionType:hyperlink}])}]),
     getString: () => paragraphs[i], setString: vi.fn((text: string) => { paragraphs[i] = text; modified = true; listener.modified() }),
     getPropertySetInfo: () => ({ getPropertyByName: () => ({ Type: 'property' }), hasPropertyByName: () => true }),
     setPropertyValue: vi.fn(() => { modified = true; listener.modified() })
@@ -136,4 +138,20 @@ test('export layout notifications do not invent another edit and failure restore
   expect(w.send('export').ok).toBe(false)
   w.change()
   expect(w.send('captureSelection')).toMatchObject({ok:true,state:{changeSequence:2,dirty:true}})
+})
+
+
+test.each([['TextField',''], ['Text','https://example.invalid/fixture'], ['Bookmark',''], ['TextContent','']])('refuses structured DOCX portion %s before setString', (portionType, link) => {
+  const w=worker('before field/link', 'docx', 2, portionType, link);w.send('edit')
+  const captured=w.send('captureSelection')
+  expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'replacement',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
+  expect(w.ranges[1].setString).not.toHaveBeenCalled()
+  expect(w.paragraphs[1]).toBe('before field/link')
+  expect(w.send('captureSelection')).toMatchObject({ok:true,state:{dirty:false,changeSequence:0}})
+})
+test('refuses unknown DOCX enumeration instead of flattening it', () => {
+  const w=worker();w.send('edit');const captured=w.send('captureSelection')
+  w.ranges[1].createEnumeration=undefined
+  expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'replacement',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
+  expect(w.ranges[1].setString).not.toHaveBeenCalled()
 })

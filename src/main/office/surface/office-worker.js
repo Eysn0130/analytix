@@ -168,6 +168,27 @@ function validPresentationReview(r) {
       if(JSON.stringify(presentationSnapshot(before.pageIndex,before.targetShapeIndex))!==JSON.stringify(review.after))throw Error('typed-mutation-failed');
     });
   }
+  function requirePlainTextRange(target) {
+    // setString replaces native structure, not just its displayed characters.
+    // Fields, links and unknown portions need a typed structural edit contract.
+    // Enumerate the captured range itself so unrelated paragraph content is kept.
+    try {
+      const paragraphs = target.createEnumeration();
+      let budget = 8192, textPortions = 0;
+      while (paragraphs.hasMoreElements()) {
+        if (--budget < 0) throw Error('unsupported-selection');
+        const portions = paragraphs.nextElement().createEnumeration();
+        while (portions.hasMoreElements()) {
+          if (--budget < 0) throw Error('unsupported-selection');
+          const portion = portions.nextElement();
+          if (portion.getPropertyValue('TextPortionType') !== 'Text' ||
+              portion.getPropertyValue('HyperLinkURL') !== '') throw Error('unsupported-selection');
+          textPortions++;
+        }
+      }
+      if (!textPortions) throw Error('unsupported-selection');
+    } catch { throw Error('unsupported-selection'); }
+  }
   function selection() {
     const base = {documentId:active.documentId, version:active.version, changeSequence:active.sequence};
     try {
@@ -388,6 +409,7 @@ function validPresentationReview(r) {
           if (![0,2].includes(type) || handle.target.getIsMerged()) throw Error('unsupported-selection');
         }
         if (handle.target.getString() === r.text) throw Error('invalid-control-value');
+        if (handle.kind === 'text') requirePlainTextRange(handle.target);
         mutate(() => handle.target.setString(r.text));
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'replacePresentation') {
