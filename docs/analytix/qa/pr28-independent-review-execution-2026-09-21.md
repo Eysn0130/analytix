@@ -1,11 +1,239 @@
 # PR28 independent-review continuation — 2026-09-21
 
 Status: Current continuation plus historical execution receipts; not product/release acceptance.
-Scope: latest user-adopted continuation A–M, retaining prior A–I receipts and the original A–M/P0–P5 outcome.
+Scope: latest user-adopted closure continuation A–N, retaining prior A–I/A–M receipts and the original A–M/P0–P5 outcome.
 Repository and source writer remain the canonical Analytix checkout and original Codex owner.
 No Goal, scheduled continuation, new independent task, public release or writer transfer was used.
 
-## Current continuation A–M: review package and Browser implementation
+## Current closure continuation A–N: Browser actions, DOCX structure and bounded Rust probes
+
+START `5242782f099f10ddb6af91eb70e8ad5a0944aa1e`, tree
+`c52bd237bd5e1520d8c4a69c54423cfaee74700d`, was clean/ahead57 on the original
+branch. SOURCE `4343ec436ce5df65ba4f413ed49fabab90825a8c`, tree
+`2e94577ae8d9bac4adabb53a33f7cf9513193aec`, retains every prior checkpoint.
+The original owner still holds writer; documentation DELIVERY is recorded separately
+in the final manifest. No Goal, automatic continuation, independent task or parallel
+writer was started. This is an incomplete product continuation, not an A–N closure verdict.
+
+### Intake and independent-review boundary
+
+`Analytix-PR28-Review-Closure-2026-09-21.zip`: 20 members,177233 expanded bytes,
+19/19 manifest entries and CRC pass; safe paths/types, encryption, size/ratio,
+casefold and Unicode NFC collision checks pass. Computed ZIP SHA256:
+`88a7507739fe1041a963b7a9f59d948edecfd305ba8988f8c7de507e7864f8a6`.
+The external checksum sidecar was not supplied. All A–N, report/errata/research/
+interface/GitHub/receipt documents and 32 scenario specifications were read.
+The supplied verifier was read before execution: **64 tool self-tests pass**;
+it also recomputed the previous report package's12/12. These are neither product
+tests nor32 passed scenarios. Prior16/16+9/9 and54/54+30/30 remain different inputs.
+
+Five current-document corrections were applied using the actual matching anchors:
+older Browser gap marked historical, GitHub recovery limited to lawfully synced
+state, historical GitData text not an alternative authorization, conditional release
+goal separated from qualification, and pinned setString risk initially labelled a
+hypothesis. The new fixed-engine counterexample below supersedes that hypothesis
+for fields only. Canonical QA/handover/product-completion remain the owners.
+
+### Implemented and observed
+
+- `dcdbcaca23037becc0b7bb0b1e6c671cd42c18b4`: Browser's explicit Explain selection
+  button routes a fresh opaque reference through the existing primary-thread submit
+  owner. Passive quote remains non-sending. Held preparation/revocation tests retain
+  composer drafts and attachments. A focused iframe returns a finite unsupported
+  result before Core capture. Real Electron41.10.3/Chromium146.0.7680.216 showed
+  simultaneous parent and child selections: baseline5242 captured the stale parent,
+  current source rejects the child. No guest preload, new Provider or second owner.
+- `8a2a3d544caec521239487a034e54f764bfcff88`: Rust adds static failure-stage context
+  and three bounded test controls using existing SQL builders and verified read-only
+  sessions. No production SQL, fixture, optimizer, thread setting or expected result
+  changed. Original exact CLI target passes1/1 with94 filtered. See limitations below.
+- `4343ec436ce5df65ba4f413ed49fabab90825a8c`: fixed Office worker previously flattened
+  a selected DATE field via setString and reported success. The captured-range owner
+  now checks bounded native text portions before mutation; fields, links and unknown
+  structure reject with unsupported-selection. It does not scan or replace the whole
+  document. Fixed-engine field/link rejection preserves model text, changeSequence0
+  and clean state. Ordinary and cross-run plain text edits remain admitted. Controller
+  coverage retains the prepared cancellable review, performs no export/commit on
+  rejection, and does not invent Saved. Notes and the original file remain unchanged.
+
+Source changes total18 files,+314/-28: production/contract/config11 files,+82/-23;
+tests7 files,+232/-5. Exact per-file numstat is in the final source manifest. Browser13+130/-12; Rust2+127/-13; Office3+57/-3.
+No production Go, Canvas, image, Write alternate route, UI Refresh, CI or license gate
+was modified. Prior source evidence is retained within its original scope.
+
+### Fresh checks, failures and provenance
+
+All storage commands source `scripts/use-analytix-cache.sh` in the same shell.
+New receipts record command/cwd, actual UTC start/end, platform, HEAD/tree/dirty,
+modified/untracked fingerprints, lockfiles, process exit and retained log byte/hash.
+Per-run hashes of external temporary probe scripts were NOT_RECORDED; later helper
+contents are not used as retroactive proof of earlier invocations. Named result files,
+logs and committed product hashes retain their separate evidence value.
+Toolchain observation: macOS26.5.2 arm64, Node22.22.1, npm10.9.4, Go1.26.4,
+Rust/Cargo1.94.1, Python3.11.15. Per-run prior unrecorded versions are not backfilled.
+Host evidence root is `/Volumes/AnalytixCache/development-v3/evidence/pr28-closure-20260921`;
+raw logs, injected probe scripts, synthetic binaries and profile stay local. Report
+output carries sanitized receipts/results, not source, patches or private raw logs.
+
+| Group | Actual result and ceiling |
+| --- | --- |
+| browser-dom |59/59:52 mounted Workbench +7 isolated-script fixtures; exit0 |
+| browser-panel | Main13 passed; new panel suite failed collection due incomplete i18n mock; exit1 |
+| browser-panel-fixture-fix | Real mounted panel4/4, exit0; passive/explicit/unsupported/late capture |
+| browser-focused | JSON records28 passes in3 files, but2 requested files absent and shell exit1; PARTIAL, not full pass |
+| browser-red |3 failures/56 skipped; relevant source changed before process end, so not an exact stable-candidate RED. The later fixed-Electron baseline comparison independently reproduces the actual stale-parent defect |
+| browser-electron-baseline-comparison |2 actual engine assertions pass plus old5242 stale-parent substitution observed; not full guest/Main/Core/installed acceptance |
+| office-structured-red |5 new structural assertions fail,13 existing pass; stable pre-fix source; exit1 |
+| office-structured-green |42/42 across worker/typed/PPT/transport, exit0 |
+| office-structure-controller |41/41 including no-save/cancellable-review structural refusal, exit0 |
+| candidate-typecheck-lint | Root web/node typecheck and changed Office/test lint exit0; earlier Browser lint exit0,0 errors/0 warnings |
+| candidate-desktop-build | Exact SOURCE desktop bundle exit0; earlier runtime build also exit0; not package acceptance |
+| rust-target | Original exact stats_query_cli target1 pass/94 filtered; no semantic changes |
+| rust-plan-controls | Wrong --bin target matched0; exit0 is not behavioral evidence |
+| rust-plan-controls-library |3 query results met assertions, then all3 failed verified-session commit because the new diagnostic omitted range receipt registration; exit101 |
+| rust-page-controls-bounded | Receipt fixed using actually observed row count; page and COUNT(page)2/2 pass,287 filtered; aggregate end-to-end case not rerun |
+| office-fixed-font-default-control |2 no-op observations,1 explicit-size stability assertion pass; original omitted-size drift remains; exit0 |
+| office-fixed-complete-observations |4 fixed-engine cases,22 component assertions:14 pass/8 typography failures; exit1. Never report this matrix as pass |
+
+Rust used six total target/query executions: original1, first controls3, corrected
+page pair2. A cancelled incorrect multi-filter command executed no query. Fresh
+read-only connections had threads8, preserve_insertion_order=false,
+enable_external_access=false, no disabled optimizer, memory_limit19.1GiB;
+DuckDB enginev1.5.4, locked Rust duckdb/libduckdb-sys1.10504.0. Exact synthetic SQL,
+fixture hash and parameters remain in local receipts; the report includes hashes
+and outcomes. No INTERNAL occurred, so R-H1 is **not reproduced**, not disproved.
+No extra threads1/optimizer trial or repeated original target was run. The first
+aggregate SQL/result is observed but its corrected full receipt path was not rerun.
+
+A read-only upstream lead is [DuckDB issue22846](https://github.com/duckdb/duckdb/issues/22846):
+its report concerns an intermittent parallel window failure; comments also discuss
+an unrelated SQLite binding stack. Generic index0/size0 text is insufficient to match
+Analytix's cause. No upstream SQL/code was copied, no version was upgraded, and no
+old main failure was dismissed. The old main job103860905234 log was subsequently fetched through read-only GitHub:
+103329 bytes, SHA256 a0d86bd46fd71886fbf1afbf940c38d6b04146a84fa3320d0401a9892ce4074c.
+It confirms94/95 and24 relative stack offsets without function symbols or statement
+stage. Matching retained Linux binary/symbols are needed; never symbolize these
+offsets against a different local build. Fresh run34807061316 artifact inventory is empty (total_count0); no matching symbols
+were available from that workflow inventory. This is an evidence limit, not a rerun
+authorization or proof that no copy can exist elsewhere.
+
+### Fixed-engine DOCX evidence and unresolved fidelity
+
+All6 pinned assets pass byte/hash verification: LibreOffice
+`efaf0670b4d055f838a2849becb10f08aa06a257`, zetajs
+`57360bcb0e7726ffa0e66567c8041261b959f8dd`. A private synthetic DOCX contains Chinese,
+mixed bold/italic/color runs, duplicate text, hyperlink, DATE field and table.
+The real product surface and worker were used with a local test-only selection/
+inspection hook; no product IPC exception or arbitrary UNO entry point was added.
+Four cases cover field, link, uniform and cross-run ranges, with original/no-op/
+edited/reopened observations. Unsupported field/link edits preserve the current
+model; table text and hyperlink relationships remain in all8 exports. Ordinary and
+cross-run edits preserve the unselected field paragraph. Reopened render images
+exist, one was visually inspected; this is not a complete original-vs-edited visual
+comparison or the full Main/Core/Diff/CAS/installed journey.
+
+**A separate unresolved observation remains:** the fixture omits explicit font-size
+defaults. On no-op export/reopen, CharHeightAsian changes10.5→11 while Western
+CharHeight stays11. All4 no-op and4 edited-reopen typography comparisons fail.
+This is a fixed-engine import/export default-style drift, not a proven setString
+style-loss cause or permission to rewrite all DOCX. The pinned
+[DocxAttributeOutput::CharFontSize](https://github.com/LibreOffice/core/blob/efaf0670b4d055f838a2849becb10f08aa06a257/sw/source/filter/ww8/docxattributeoutput.cxx#L7363)
+maps Western/CJK size to the same OOXML size element; this is a diagnostic lead,
+not a complete root-cause proof. A subsequent two-input no-op control keeps the original fixture intact: omitted-size
+input again changes Western/Asian11/10.5→11/11; a derivative with explicit w:sz22
+in each text run stays11/11→11/11. Its one stability assertion passes, not the
+original fidelity comparison. Original/no-op images were visually inspected and show
+changed Chinese glyph spacing/line positions. This narrows the investigation to omitted
+default/script-size representation in this fixture, not a complete codec repair.
+Next: source OOXML/run inheritance and a precise preservation
+or unsupported-format decision at the existing codec/worker owner. Do not erase
+this failure by accepting a weaker typography comparison or silently normalizing input.
+
+Probe failures were also retained: wrong Electron module import; protocol registered
+on the wrong session; bootstrap return not cloneable; missing required canvas ID;
+missing product layout constraints causing test-canvas growth/OOM; equivalent native
+run splitting before adjacent-equal-style normalization. None is labelled a product
+regression. Two terminated probe processes reported exit0 despite no success result;
+their semantic outcome remains FAILED/TERMINATED, not pass. The final matrix still
+keeps all typography assertions and exits1.
+
+### Accurate private package attempt and remaining startup boundary
+
+The first private build failed after native/desktop compilation at Go module
+verification: cached golang.org/x/sys v0.46.0 ZIP had a confirmed CRC failure and
+SHA256 e6ff34bba08b6a1d0c88d31a601614bfb41749852fb2acf40f98c912a757351a.
+The exact corrupt ZIP/hash bytes were preserved privately, then normal module
+download restored CRC validity and `go mod verify` passed without changing locks,
+source, signing policy or checks. One retry stopped at the cache helper because a
+new task-owned evidence JSON used0644; its exact mode was corrected to0600 before
+any build started. The next invocation used the original private build wrapper.
+
+`private-package-verified-cache` exits0 and produces
+`analytix-1.0.6-mac-arm64.dmg`,470395220 bytes, SHA256
+`200a8772dbfe36fc1212684a7b1bb0d183005b0f03a72892d6ba040c18f63338`, under the
+host cache's `tmp/pr28-closure-private-package-4343ec436-verified-cache` directory.
+SOURCE4343 is bound to snapshot
+`81f8d866b602a9b4be4ea7ba229e87d664b1e6e130b79a21e7455939462e0b61`.
+Its classification is **development_dirty_non_publishable**: three task-owned
+uncommitted documentation files were captured; production source was committed.
+Later documentation DELIVERY does not relabel this immutable artifact as clean.
+Build-authority digest is
+`9d906375b75ed46854db223aa1b4657aa83aa62c707cec2f842c386157d03d60`;
+Office35-file qualification digest is
+`af69fde591af1aa3d66cb0d4cfa14386d03c618eb944153fa41438496b5b7538`.
+Read-only `codesign --verify --deep --strict`, `hdiutil verify` and the existing
+`verifyPrivateLocal` all exit0. Original build-owned ad-hoc signing is retained;
+notarization is explicitly skipped by the private configuration. Both publishable
+and releaseEligible remain false. The artifact stays local and is not in the report ZIP.
+
+Installation path is NOT_INSTALLED; no actual app launch/Provider/common journey
+is claimed. The current [development baseline](../development-baseline.md) records
+an additional concrete gap: Electron Cookie encryption initializes OS key storage
+before Core; the accepted non-login task-Keychain binding covers only Go Secret
+Store. A separately admitted Chromium storage boundary is still required. Keep
+Cookie encryption enabled, do not reuse the old task-login harness, and do not
+access personal Keychains or profiles. This is not a blanket prohibition on Mac GUI.
+
+### A–N and original P0–P5 remaining scope
+
+| Section | Actual disposition / next minimum evidence |
+| --- | --- |
+| A/B/C | Intake and64 tool tests complete; five document errata and current evidence updated.32 scenarios have per-item coverage, not32 product passes |
+| D/L | SAFETY_NOT_CLEARED: bounded original-task record lookup found historical references, no original create_tree payload/call or clearance. Keep PAYLOAD_SCOPE_UNKNOWN/NOT_CLEARED; no alternative push/API/source ZIP |
+| E/P0 |67 findings/248 flows/16287 steps/16783 endpoint-inclusive records retained. All67 sink-file blobs equal65ab,50 original-line UNCHANGED/17 CHANGED remain; not all-caller proof or fresh scan. #33 original containment evidence reused; dynamic-policy and stress/timing/global-resource tests not newly run. CodeQL absent from current PATH and checked conventional tool locations, not asserted absent everywhere |
+| F/P0 | Exact original target and bounded page controls observed; Rust root cause unresolved, original main failure remains |
+| G/P1 | DATE/link structure guard verified; default typography drift remains EVIDENCE_FAILURE/SOURCE_GAP in fixed filter/codec preservation. Full Diff/save/recovery/native acceptance incomplete |
+| H/P2/P3 | Browser explicit action and child rejection implemented. Actual guest/Core/installed journey and image GUI remain EVIDENCE_NOT_RUN. Imported pivot/chart edit/refresh, stable imported-object binding and wider PPT style integration remain SOURCE_GAP; existing real pivot generation and typed cells/geometry/fill retained |
+| I/P4 | SOURCE_GAP: desktop archive install still fails closed. Existing Go FormalPackageBinding validates pre-admitted immutable package/source identity, not an arbitrary Hub archive digest. Archive identity/trust/envelope→stage→generation→desktop revoke/uninstall integration remains absent. Required admin/local-remount protections retained; no fake Host API |
+| J | H01–H08 existing owners and evidence mapped below; broad egress/cache/restart/hook journey not declared complete |
+| K/P5 | DMG build exit0; signature/DMG/35-file Office content checks exit0; development_dirty_non_publishable, not installed. Accurate installed/common native/provider journey is unaccepted; the current development baseline also records a missing admitted Chromium cookie-encryption storage boundary before Core; the Go task-Keychain binding alone is insufficient. Keep encryption enabled and do not reuse the old task-login harness. No personal/old Keychain or profile is read or reused |
+| M | Conditional final publication is the current goal; source refusal, fixed-binary build/relink/license materials and exact installed/RC/release gates are unmet. No tag/Release/public upload |
+| N | Three focused source commits and canonical evidence update; report-only next handoff REVIEW_ONLY. OWNER_HANDOFF_NOT_RELEASED; clean is not writer release |
+
+Harness mapping (source inspection unless fresh test named): H01 existing
+`app/pluginpackagehost/skills.go` rechecks generation/principal/digest before and after
+consumption, backed by prior installed-filesystem tests; H02 current Workbench
+held-queue revocation tests pass; H03 `server/runtime_restore_execution_grant_test.go`
+contains approved/non-required/report-stage unknown-outcome recovery without resend;
+H04 existing `async_terminal_closure_test.go`/`event_bundle_delivery_test.go` own
+cancel/terminal/cursor semantics; H05 `app/thread/compaction_privacy_projection_test.go`
+checks durable exact privacy proofs; H06 `auto_compaction.go` preserves exact-input
+budget handling, without inventing a competitor auto=false setting; H07
+`app/turnsecurity/service.go` frozen hooks do not replace execution authority;
+H08 workspace/attachment/projector/recovery seams remain existing owners, not a
+second RAG. No new general hook/autonomous-Skill framework or unmeasured token claim.
+
+Fresh read-only GitHub observation2026-09-21T14:05:05Z: PR28 OPEN/Draft/BLOCKED,
+HEAD `dde784437dc8563e84066629dd57f4a11fd9acc9`; actual main
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`; two unresolved filestore review threads.
+Strict Development gate/app15368, no bypass, resolved threads and extra
+unattributed-change approval remain applicable. Old CodeQL/main checks do not test
+SOURCE4343. MERGED_MAIN_SHA=NOT_MERGED; OBSERVED_MAIN_SHA=ce96cf1…;
+VERIFIED_MAIN_SHA=NOT_VERIFIED. Complete product, Formal RC and public release are
+not achieved. No current-source push, CI dispatch, review resolution or merge occurred.
+
+
+## Historical continuation A–M: review package and Browser implementation
 
 This later execution starts at clean `40a6a1c9aca56229eb56b43dce381b709a86462b`,
 tree `616a867512c4281544b8a6113564b34a56c2a611`, on the same branch and writer.
@@ -306,7 +534,9 @@ source ./scripts/use-analytix-cache.sh && cd packages/runtime-go && \
   -run '^TestOfficeSkillHostMaterializationLifecycle$' -count=1 -timeout 2m
 ```
 
-## Remaining P0–P5 and specific gates
+## Historical remaining P0–P5 at 9cf / 40a6 — superseded by later 65ab / 4343 sections
+
+The Browser source-chain gap below records the earlier candidate. SOURCE65ab implements that chain; SOURCE4343 adds the explicit action and child-frame refusal. Actual guest GUI and child-frame capture remain unaccepted. Use the current A–N/P0–P5 table above, not this historical row, to choose new implementation.
 
 | Package | Current remaining work |
 | --- | --- |

@@ -9,11 +9,45 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：PR28 Browser 与证据复核 / 2026-09-21 PDT
+## 当前接续：PR28 A–N 新反例与固定引擎验证 / 2026-09-21 PDT
+
+START `5242782f099f10ddb6af91eb70e8ad5a0944aa1e` clean/ahead57，继续原分支与原writer。
+SOURCE `4343ec436ce5df65ba4f413ed49fabab90825a8c` / tree
+`2e94577ae8d9bac4adabb53a33f7cf9513193aec`；其后文档DELIVERY由本节提交与最终manifest单列。
+[本轮 A–N 实际结果](../qa/pr28-independent-review-execution-2026-09-21.md#current-closure-continuation-an-browser-actions-docx-structure-and-bounded-rust-probes)
+与[产品矩阵](../product-completion.md)是恢复入口。保留全部祖先，不从dde重做。
+
+已定向提交Browser显式选区动作及focused-child拒绝、Rust静态阶段诊断/有界对照、
+DOCX字段/链接结构保护。实际Electron复现旧parent选区被误取；固定Office复现DATE字段
+被setString扁平化，修复后明确unsupported且不导出/提交，保留可取消review。
+新源码/测试18文件+314/-28（生产/契约/配置11+82/-23；测试7+232/-5）。
+本包19/19；64是审查工具自测，32是逐项覆盖的场景规格，均不是全产品通过数。
+
+Browser59/59、panel4/4、Office42/42+controller41/41以及typecheck/lint/build通过，组间不加总。
+Rust原目标1/1和page对照2/2未复现INTERNAL；六次query额度已用，保留初次诊断receipt失败。
+固定Office4案例22断言14通过/8失败：无编辑及编辑后重开中文默认字号10.5→11；
+这是新的未解决保真问题，不能写成完整DOCX或installed验收通过。
+准确源码私有DMG已生成，470395220字节，SHA256
+`200a8772dbfe36fc1212684a7b1bb0d183005b0f03a72892d6ba040c18f63338`。
+签名、DMG完整性和Office35文件校验通过；包真实分类development_dirty_non_publishable
+（当时三份文档dirty），未安装/启动/公证/发布，后续文档commit不把旧artifact改称clean。
+Electron Cookie encryption的独立OS存储边界仍未准入，Go task-Keychain绑定不能替代它。
+
+下一最小工作：沿已有显式/省略字号单变量对照研究原codec/worker保真策略；
+按现有typed owner继续导入pivot/chart局部编辑；补Skills archive identity/trust/stage/generation
+真实权限链；完成图片、Browser及共同主会话的准确候选原生旅程。旧Canvas/图片CAS/
+Write清退/主线程补全有效工作不重做。源码缺口、未运行证据和具体拒绝分别记录。
+
+远端只读观察仍dde Draft，main ce96；本地新SOURCE没有对应CI/CodeQL。原create_tree自动
+审核拒绝范围未知且未解除，不换push/API/ZIP外发。未merge，真正main未验收。
+用户最新目标含条件发布，但现有资源、安装、RC/release gates尚不合格。下一方REVIEW_ONLY，
+原writer未release；无Goal、续跑、新任务或并行writer。下文是历史，不驱动重做已完成能力。
+
+## 历史接续：PR28 Browser 与证据复核 / 2026-09-21 PDT
 
 从 clean `40a6a1c9aca56229eb56b43dce381b709a86462b`、tree
 `616a867512c4281544b8a6113564b34a56c2a611` 继续原分支、原 writer；保留全部祖先。
-[同一 QA 的本轮记录](../qa/pr28-independent-review-execution-2026-09-21.md#current-continuation-am-review-package-and-browser-implementation)
+[同一 QA 的本轮记录](../qa/pr28-independent-review-execution-2026-09-21.md#historical-continuation-am-review-package-and-browser-implementation)
 区分新的16/16+9/9、32工具自测、实际产品测试与固定Electron引擎证据。
 Browser 已新增可信 Main guest/document→选区→Core私有currentness→隐私投影→
 主会话引用链，不再把整个Browser能力称为零实现。并发捕获与完整scope绑定反例已修复。
@@ -219,7 +253,9 @@ blob/模式核验通过。旧未提交候选仍未收到，但用户已取消把
 
 **恢复顺序**：读取当前 Git/GitHub 原 ref/PR 和 comment `5709839864`，以及交付包实际
 commit/tree/manifest，确认真实写入结果。终端 DNS 失败不等于连接器只读；完整出站检查后
-使用受支持的普通 push 或真实单父 Git Data API + `force=false`，一次前移完整一致 tree。
+【历史同步方式说明，非当前准入】本句记录当时的技术路线，不解除其后具体create_tree拒绝。
+受该拒绝影响的源码不得换普通push、GitData/contents API或ZIP外发；当前先依实际拒绝范围及正规审批处置。
+具体准入成立后，由原owner按当前协议普通push原分支，记录准确HEAD/tree并核验新的CI。
 若 API 生成等价 tree 的新 commit，准确记录新 SHA，不能声称原 de709 字节已原样推送。
 没有 ref 前移就没有 push；在新 SHA 收口 CI，不借用 dde 的 51-job 历史成功。
 只有实际动作证明必要通路/合规资源不可用，且不依赖该缺口的工作完成后，才把保存的
@@ -506,5 +542,6 @@ Notion Construction Ledger / ADR / Research（非权威结构化镜像）
 Google Drive formal deliverables（需要时才输出）
 ```
 
-聊天记录可以帮助解释，但不是必需依赖。即使更换会话、Notion 临时不可用或旧线程
-无法访问，只要 GitHub 可读，新线程仍应能从本页和最新 checkpoint 恢复到可施工状态。
+聊天记录可以帮助解释。GitHub可独立恢复的范围仅包括已合法同步的代码、文档和证据。
+未同步的本机65ab/5242及其有效后继，需要原owner的准确本机checkpoint与合法可用证据；
+远端仍是dde时，不得据旧GitHub重建或覆盖较新工作。Notion仅为镜像，不能补足未提供的源码。

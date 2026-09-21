@@ -34,23 +34,61 @@ Core-authorized retrieval, primary-thread auxiliary completion, exact subagent
 budgets, skill discovery/revocation, real pivot generation, the synthetic DOCX
 oracle and bounded PPT geometry/fill remain integrated. Native image acceptance,
 imported pivot/chart editing and the recorded fixed engine/installed journeys remain open.
-The latest continuation from `40a6a1c9a` adds trusted Main guest/document selected-text
-capture, private Core read challenges, privacy projection and same-thread opaque
-references. Focused tests and eight actual fixed-Electron checks support that source
-increment; actual attached-guest product GUI, child-frame capture and Browser-specific
-quick-action UI remain unaccepted. Desktop Skills installation still waits for the
-Go archive authority; its real lifecycle is not proved by filesystem materialization.
-Source checkpoint `65ab0efca8765385dc09d3522ca567d9bffd0f40` also fixes the reproduced WorkspaceStatus
-protected-metadata leak within the existing OS containment owner. See the current
-section of the same QA for exact evidence and remaining A–M rows. Rust's original DuckDB failure and
-current-candidate CodeQL are not closed. Earlier matrices below are historical.
+The continuation from `40a6a1c9a` integrated Main-owned Browser selection capture,
+Core currentness/privacy projection and opaque same-thread references at `65ab0efca`;
+it also repaired the reproduced WorkspaceStatus protected-metadata leak.
+The latest A–N continuation starts at `5242782f0` and delivers SOURCE
+`4343ec436ce5df65ba4f413ed49fabab90825a8c`, tree
+`2e94577ae8d9bac4adabb53a33f7cf9513193aec`. Browser now has an explicit Explain
+selection action through the existing primary-thread submit owner. Focused child
+selection is explicitly unsupported; real Electron demonstrated that the old capture
+could return stale parent text. Passive quote remains non-sending, and held-submit
+revocation preserves drafts/attachments. Actual guest/Core/installed journey remains
+unaccepted. Child-frame capture itself is not implemented.
+
+Fixed Office execution reproduced DATE-field flattening in the old text-range owner.
+The current bounded captured-range guard rejects fields, links and unknown structure
+before mutation, retaining a cancellable review without export/commit. Plain and
+cross-run text remain admitted. Focused worker/controller checks pass. However, the
+actual pinned-engine matrix has14 passing/8 failing assertions: no-op and edited
+export/reopen change default Asian font height10.5→11. Structure checks preserve table
+and hyperlink relationships; complete typography/visual/native fidelity is not accepted.
+A subsequent explicit11-point run-size control remains stable, while the unchanged
+omitted-size fixture reproduces the drift; original/no-op renders were visually
+inspected. This narrows the issue without making the failing matrix pass.
+This new observation supersedes the earlier setString-risk-only hypothesis for fields;
+the font-default drift has no proven setString root cause or implemented repair yet.
+
+Rust's unchanged original CLI target passes once, and two fresh-session page controls
+pass after diagnostic receipt registration was corrected. Six target/query executions
+were used, with no INTERNAL reproduced; this does not close the old main failure.
+Current-candidate CodeQL/remote CI have not been run. Imported pivot/chart editing
+remains a source gap. Desktop Skills archive installation still fails closed until
+real archive trust/identity and Go materialization authority are integrated; filesystem
+materialization tests do not prove that absent install/uninstall route.
+The accurate-source private DMG now builds successfully after preserving and
+repairing one corrupt Go module-cache ZIP through normal checksum-verified download.
+DMG SHA256200a8772dbfe36fc1212684a7b1bb0d183005b0f03a72892d6ba040c18f63338,
+470395220 bytes; signature, DMG integrity and Office35-file content checks pass.
+Its immutable classification remains development_dirty_non_publishable (three
+uncommitted documentation files at build); it is not installed, notarized or released.
+Electron Cookie encryption initializes OS key storage before Core: the current
+non-login Go task-Keychain binding does not supply an admitted Chromium storage
+boundary. That source/admission gap remains separate from the private artifact build.
+
+See the current A–N section of the same QA for all32 scenario dispositions,67 finding
+mappings, exact receipts, failures and remaining P0–P5 scope. Reviewer64 self-tests
+are not product tests;32 specifications are not32 passes. Earlier matrices are history.
 
 At the latest read, main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`;
 PR28 remains OPEN/Draft at `dde784437dc8563e84066629dd57f4a11fd9acc9`.
 Specific outbound and native safety refusals remain separate from the already
-granted local Mac authorization. **The complete A–M request remains partial;
+granted local Mac authorization. **The complete A–N continuation and original A–M/P0–P5 remain partial;
 main merge, main acceptance, full product acceptance and Formal RC are not achieved.**
-Public release is not authorized.
+At the owner-recorded checkpoint, public release had not been authorized or accepted.
+The latest user request now includes final product publication as a conditional delivery goal.
+It does not clear the specific source-sync refusal or qualify existing non-publishable resources;
+publication requires current artifact admission, licenses/notices, exact-candidate acceptance and release-gate evidence.
 
 ## Historical capability matrix before this execution
 
