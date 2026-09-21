@@ -36,6 +36,7 @@ type WriteFileActionContext = {
   get: WriteWorkspaceGet
   cancelExternalSyncAnimation: () => void
   setLastSavedContent: (content: string) => void
+  navigation: { revision: number }
 }
 
 function formatActionError(error: unknown): string {
@@ -57,16 +58,26 @@ export function createWriteFileActions({
   set,
   get,
   cancelExternalSyncAnimation,
-  setLastSavedContent
+  setLastSavedContent,
+  navigation
 }: WriteFileActionContext): WriteFileActions {
-  let navigationRevision = 0
+  const invalidateActiveTarget = (workspaceRoot: string, path: string): void => {
+    const state = get()
+    const activePath = normalizePath(state.activeFilePath ?? '')
+    const targetPath = normalizePath(path)
+    if (normalizePath(state.workspaceRoot) === normalizePath(workspaceRoot) &&
+        activePath && (activePath === targetPath || activePath.startsWith(`${targetPath}/`))) {
+      navigation.revision += 1
+      set({ fileLoading: false })
+    }
+  }
   return {
     initializeWorkspace: async (workspaceRoot) => {
-      const revision = ++navigationRevision
+      const revision = ++navigation.revision
       const normalized = normalizePath(workspaceRoot.trim())
       const previous = get()
       if (previous.workspaceRoot !== normalized && !(await previous.flushSave(previous.workspaceRoot))) return
-      if (revision !== navigationRevision) return
+      if (revision !== navigation.revision) return
       if (!normalized) {
         cancelExternalSyncAnimation()
         setLastSavedContent('')
@@ -80,7 +91,7 @@ export function createWriteFileActions({
       cancelExternalSyncAnimation()
       set({ ...initialState(), workspaceRoot: normalized })
       const root = await get().loadDirectory(normalized)
-      if (!root || revision !== navigationRevision) return
+      if (!root || revision !== navigation.revision) return
       set((state) => ({ rootDirectory: root, expandedDirs: new Set([...state.expandedDirs, root]) }))
       const remembered = readRememberedActiveFile(normalized)
       if (remembered.trim() && isWriteWorkspaceFilePath(remembered)) {
@@ -166,13 +177,13 @@ export function createWriteFileActions({
     },
 
     openWorkspaceHome: async (workspaceRoot) => {
-      const revision = ++navigationRevision
+      const revision = ++navigation.revision
       const root = normalizePath(workspaceRoot || get().workspaceRoot)
       const saved = await get().flushSave(get().workspaceRoot || root)
-      if (!saved || revision !== navigationRevision) return false
+      if (!saved || revision !== navigation.revision) return false
       const session = get().objectSession
       if (session) await window.analytix.objects.request({ action: 'close', sessionId: session.sessionId }).catch(() => undefined)
-      if (revision !== navigationRevision) return false
+      if (revision !== navigation.revision) return false
       cancelExternalSyncAnimation()
       setLastSavedContent('')
       rememberActiveFile(root, null)
@@ -203,17 +214,17 @@ export function createWriteFileActions({
     },
 
     openFile: async (workspaceRoot, path) => {
-      const revision = ++navigationRevision
+      const revision = ++navigation.revision
       cancelExternalSyncAnimation()
       const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
-      if (!saved || revision !== navigationRevision) return
+      if (!saved || revision !== navigation.revision) return
       if (isNativeOfficeFilePath(path)) {
         await useNativeOfficeStore.getState().select(workspaceRoot, path)
         return
       }
       // Switching adapters hides the native view; its protected draft stays owned by Core.
       await window.analytix?.office?.request({ action: 'hide' }).catch(() => undefined)
-      if (revision !== navigationRevision) return
+      if (revision !== navigation.revision) return
       useNativeOfficeStore.setState({target:null,view:null,error:null})
       if (!isWriteWorkspaceFilePath(path)) {
         set({
@@ -227,11 +238,11 @@ export function createWriteFileActions({
         const previous = get()
         if (previous.objectSession && (previous.activeFilePath !== path || previous.workspaceRoot !== workspaceRoot)) {
           await window.analytix.objects.request({ action: 'close', sessionId: previous.objectSession.sessionId }).catch(() => undefined)
-          if (revision !== navigationRevision) return
+          if (revision !== navigation.revision) return
         }
         if (isWriteImageFilePath(path)) {
           const result = await window.analytix.files.readImage({ path, workspaceRoot })
-          if (revision !== navigationRevision) return
+          if (revision !== navigation.revision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -263,7 +274,7 @@ export function createWriteFileActions({
 
         if (isWritePdfFilePath(path)) {
           const result = await window.analytix.files.readPdf({ path, workspaceRoot })
-          if (revision !== navigationRevision) return
+          if (revision !== navigation.revision) return
           if (!result.ok) {
             set({ fileLoading: false, fileError: result.message })
             return
@@ -294,7 +305,7 @@ export function createWriteFileActions({
         }
 
         const result = await openTextObject(workspaceRoot, path)
-        if (revision !== navigationRevision) {
+        if (revision !== navigation.revision) {
           if (!result.legacy && get().objectSession?.sessionId !== result.sessionId) {
             await window.analytix.objects.request({ action: 'close', sessionId: result.sessionId }).catch(() => undefined)
           }
@@ -323,7 +334,7 @@ export function createWriteFileActions({
           quotedSelections: []
         })
       } catch (error) {
-        if (revision !== navigationRevision) return
+        if (revision !== navigation.revision) return
         if (isWriteImageFilePath(path) && isMissingImageIpc(error)) {
           setLastSavedContent('')
           rememberActiveFile(workspaceRoot, path)
@@ -394,6 +405,7 @@ export function createWriteFileActions({
     },
 
     renameEntry: async (workspaceRoot, path, newName) => {
+      invalidateActiveTarget(workspaceRoot, path)
       cancelExternalSyncAnimation()
       let result: Awaited<ReturnType<typeof window.analytix.files.renameEntry>>
       try {
@@ -406,6 +418,7 @@ export function createWriteFileActions({
         set({ fileError: result.message })
         return null
       }
+      invalidateActiveTarget(workspaceRoot, result.previousPath)
       const previousPrefix = `${normalizePath(result.previousPath)}/`
       set((state) => {
         const nextActiveFilePath = state.activeFilePath === result.previousPath
@@ -456,6 +469,7 @@ export function createWriteFileActions({
     },
 
     deleteEntry: async (workspaceRoot, path) => {
+      invalidateActiveTarget(workspaceRoot, path)
       cancelExternalSyncAnimation()
       let result: Awaited<ReturnType<typeof window.analytix.files.deleteEntry>>
       try {
@@ -468,6 +482,7 @@ export function createWriteFileActions({
         set({ fileError: result.message })
         return false
       }
+      invalidateActiveTarget(workspaceRoot, result.path)
       const deletedPath = normalizePath(result.path)
       const currentActiveFilePath = get().activeFilePath
       const activePath = currentActiveFilePath ? normalizePath(currentActiveFilePath) : ''

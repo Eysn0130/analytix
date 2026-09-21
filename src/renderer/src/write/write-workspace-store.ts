@@ -45,6 +45,8 @@ const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
 let fileActionsInFlight = 0
 let shutdownGeneration = 0
+const navigation = { revision: 0 }
+let imageRefreshSequence = 0
 let saveInFlight: Promise<boolean> | null = null
 let lastSavedContent = ''
 let externalSyncTimer: number | null = null
@@ -113,6 +115,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     set,
     get,
     cancelExternalSyncAnimation,
+    navigation,
     setLastSavedContent: (content) => {
       lastSavedContent = content
     }
@@ -272,25 +275,31 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
   syncActiveImageFromDisk: async (workspaceRoot, path) => {
     const snapshot = get()
-    if (!snapshot.activeFilePath || snapshot.activeFileKind !== 'image') return false
+    if (snapshot.shutdownFrozen || !snapshot.activeFilePath || snapshot.activeFileKind !== 'image') return false
+    if (!pathsEqual(workspaceRoot, snapshot.workspaceRoot)) return false
     if (path && !pathsEqual(path, snapshot.activeFilePath)) return false
+    const activePath = snapshot.activeFilePath
+    const revision = navigation.revision
+    const sequence = ++imageRefreshSequence
+    const current = (): boolean => {
+      const latest = get()
+      return revision === navigation.revision && sequence === imageRefreshSequence &&
+        !latest.shutdownFrozen && latest.activeFileKind === 'image' &&
+        pathsEqual(latest.workspaceRoot, workspaceRoot) &&
+        pathsEqual(latest.activeFilePath ?? '', activePath)
+    }
 
     try {
       const result = await window.analytix.files.readImage({
         path: snapshot.activeFilePath,
         workspaceRoot
       })
+      if (!current()) return false
       if (!result.ok) {
-        if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
-          set({ fileError: result.message })
-        }
+        set({ fileError: result.message })
         return false
       }
-
-      const latest = get()
-      if (!latest.activeFilePath || latest.activeFileKind !== 'image' || !pathsEqual(latest.activeFilePath, result.path)) {
-        return false
-      }
+      if (!pathsEqual(snapshot.activeFilePath, result.path)) return false
 
       set({
         imageDataUrl: result.dataUrl,
@@ -303,7 +312,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       return true
     } catch (error) {
       if (isMissingImageIpc(error)) return false
-      if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
+      if (current()) {
         set({ fileError: formatWriteImageLoadError(error) })
       }
       return false
@@ -313,7 +322,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   beginShutdown: () => {
     if (get().shutdownFrozen) throw new Error('Document shutdown is already pending.')
     const generation = ++shutdownGeneration
-    set({ shutdownFrozen: true })
+    navigation.revision += 1
+    set({ shutdownFrozen: true, fileLoading: false })
     let released = false
     const current = () => !released && generation === shutdownGeneration && get().shutdownFrozen
     return {
@@ -527,6 +537,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
   resetWorkspace: () => {
     if (get().shutdownFrozen) return
+    navigation.revision += 1
     cancelExternalSyncAnimation()
     lastSavedContent = ''
     set({ ...initialState(), reviewRecovery: null })

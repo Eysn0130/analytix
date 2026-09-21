@@ -79,7 +79,8 @@ function createHarness(): {
     set,
     get,
     cancelExternalSyncAnimation: vi.fn(),
-    setLastSavedContent: vi.fn()
+    setLastSavedContent: vi.fn(),
+    navigation: { revision: 0 }
   })
   state = { ...state, ...actions }
   return { actions, set, get }
@@ -90,6 +91,7 @@ type FileBridgeTestOverrides = Partial<{
   createWorkspaceFile: Window['analytix']['files']['createFile']
   renameWorkspaceEntry: Window['analytix']['files']['renameEntry']
   deleteWorkspaceEntry: Window['analytix']['files']['deleteEntry']
+  readWorkspaceImage: Window['analytix']['files']['readImage']
   readWorkspacePdf: Window['analytix']['files']['readPdf']
   readWorkspaceFile: Window['analytix']['files']['read']
 }>
@@ -104,6 +106,7 @@ function installDsGui(overrides: FileBridgeTestOverrides): void {
         renameEntry: overrides.renameWorkspaceEntry,
         deleteEntry: overrides.deleteWorkspaceEntry,
         readPdf: overrides.readWorkspacePdf,
+        readImage: overrides.readWorkspaceImage,
         read: overrides.readWorkspaceFile
       }
     } as unknown as Window['analytix']
@@ -116,6 +119,31 @@ afterEach(() => {
 })
 
 describe('write workspace file actions', () => {
+  it.each([
+    ['rename', true], ['rename', false], ['delete', true], ['delete', false]
+  ] as const)('%s only invalidates a pending open when the mutation contains the active target (%s)', async (action, affectsActive) => {
+    let finish!: (value: Awaited<ReturnType<Window['analytix']['files']['readImage']>>) => void
+    const readImage = vi.fn(() => new Promise<Awaited<ReturnType<Window['analytix']['files']['readImage']>>>((resolve) => { finish = resolve }))
+    installDsGui({
+      readWorkspaceImage: readImage,
+      listWorkspaceDirectory: async () => ({ ok: true, root: '/tmp/write', entries: [] }),
+      renameWorkspaceEntry: async ({ path }) => ({ ok: true, previousPath: path, path: '/tmp/write/renamed' }),
+      deleteWorkspaceEntry: async ({ path }) => ({ ok: true, path })
+    })
+    const { actions, set, get } = createHarness()
+    set({ workspaceRoot: '/tmp/write', activeFileKind: 'image', activeFilePath: '/tmp/write/images/old.png' })
+    const opening = actions.openFile('/tmp/write', '/tmp/write/images/new.png')
+    await vi.waitFor(() => expect(readImage).toHaveBeenCalledOnce())
+    const target = affectsActive ? '/tmp/write/images' : '/tmp/write/unrelated'
+    if (action === 'rename') await actions.renameEntry('/tmp/write', target, 'renamed')
+    else await actions.deleteEntry('/tmp/write', target)
+    const activePathAfterMutation = get().activeFilePath
+    finish({ ok: true, path: '/tmp/write/images/new.png', dataUrl: 'fresh', mimeType: 'image/png', size: 5 })
+    await opening
+    expect(get().activeFilePath).toBe(affectsActive ? activePathAfterMutation : '/tmp/write/images/new.png')
+    expect(get().fileLoading).toBe(false)
+  })
+
   it('routes native formats to the controlled Office surface after preserving the text draft', async () => {
     const h = createHarness()
     const flush = vi.fn(async () => true)
