@@ -242,7 +242,12 @@ Module.zetajs.then(zeta => {
   function mutate(operation) {
     requireEditing();
     const before = active.sequence;
-    try { operation(); } finally {
+    try { operation(); } catch {
+      // UNO may change part of a range before throwing. Its state is unknown;
+      // no later command may export or continue editing this native model.
+      active.mutationFailed = true;
+      throw Error('typed-mutation-failed');
+    } finally {
       if (active.sequence === before) { active.sequence++; event('changed', {state:state()}); }
       handles.clear();
     }

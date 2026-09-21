@@ -103,6 +103,27 @@ test('accepted AI text replacement exports and acknowledges only the exact nativ
   expect(w.model.isReadonly()).toBe(true)
 })
 
+test.each(['docx', 'xlsx'])('a partially failed %s text mutation cannot be exported or edited again', kind => {
+  const w = worker('original', kind); w.send('edit')
+  const captured = w.send('captureSelection')
+  w.ranges[1].setString.mockImplementation(() => {
+    w.paragraphs[1] = 'partial native result'
+    w.change()
+    throw Error('synthetic native failure')
+  })
+  const failed = w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'requested result', valueType: 'text'})
+  expect(failed.ok).toBe(false)
+  expect(w.send('export')).toMatchObject({ok: false, error: 'typed-mutation-failed'})
+  expect(failed.error).toBe('typed-mutation-failed')
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
+  const latest = w.send('captureSelection')
+  expect(latest.state.dirty).toBe(true)
+  expect(w.send('replace', {selectionToken: latest.selection.token, expectedChangeSequence: latest.state.changeSequence, text: 'retry', valueType: 'text'})).toMatchObject({ok: false, error: 'typed-mutation-failed'})
+  expect(w.ranges[1].setString).toHaveBeenCalledOnce()
+  expect(w.send('close', {expectedChangeSequence: latest.state.changeSequence, discard: false})).toMatchObject({ok: false, error: 'unsaved-changes'})
+  expect(w.send('close', {expectedChangeSequence: latest.state.changeSequence, discard: true}).ok).toBe(true)
+})
+
 
 test('export layout notifications do not invent another edit and failure restores change tracking',()=>{
   const w=worker();w.send('edit');w.change()
