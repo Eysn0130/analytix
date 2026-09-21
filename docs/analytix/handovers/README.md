@@ -9,7 +9,31 @@ Supersedes: 无；本目录不替代 accepted specs、OpenSpec 或代码
 看到了什么、运行过什么、还缺什么，但不能把历史 PASS 自动继承给新的工作区。
 **本页是跨线程恢复的恒定入口**：不要为每个新会话另建第二套总账。
 
-## 当前接续：本机主开发路线与重新接收 / 2026-09-20 PDT
+## 当前接续：完整性复核与缓存资源上限 / 2026-09-20 PDT
+
+本次起点为 clean `33510c813fc3a93bb98c82ad746476bb9399c987`，tree
+`486b2e3ca654daa7cfe2c31d0110042cde666ff6`，仍在原施工分支；未回退 b15、重做 Canvas
+或重复 R07。ZIP hash 未变，17 个已接收文件逐个与 ZIP 正文比较相同，复用已有安全
+接收及完整阅读回执，不重新展开。下方原 16f95 恢复锚点与 32 个继承提交仍保留。
+
+2026-09-21 03:01:52 UTC 重新读取 main/PR28/rules/checks/reviews，main 仍 ce96、
+PR head 仍 dde、OPEN/Draft/unmerged，两个 filestore threads 未解决；main 64 条检查
+有两项失败、dde 56 条有 CodeQL 一项失败。33510c813 的远端 workflow runs 为 0。
+沿原 PR28 是唯一接续路径，不把 merge-test 当 main。
+
+此次补齐 retrieval owner 的 8 个 LRU 索引与 4 个 active build 上限；clear 后未结束
+的读操作仍占用构建名额。RED 2 fail/9 pass → 两个最终服务测试文件 28 pass；
+新增 canary 验证 retrieval disabled 为零扫描且不进入 runtime intent，enabled 正常读取。
+Node 类型检查及三文件 lint 通过；未新跑 native/GUI/安装/Provider。准确最终 SHA/tree
+从本节所在提交和 Git 获取，完整 P0—P5 裁定见[产品矩阵](../product-completion.md)。
+
+**完整 A—M 未完成，不能把它描述为只差 push。** 三条清退链已完成源码验证；P1—P3
+功能及原生验收、P4 生产关闭/撤权与同主会话补全/Skills 实装验收、P0 安全/Rust 以及
+P5 安装/集成仍待完成。旧具体安全拒绝缺少解除记录只阻断依赖操作，不替其他未实施项
+背书。下一增量应接现有检索/工作区生命周期并验证主动释放与旧请求失效；原生线路
+先取得对应拒绝解除记录再复现，远端源码写入同样不可换接口规避。
+
+### 上轮本机接收与开发路线授权
 
 主路线为本机 Codex Desktop，辅助路线为 ChatGPT + GitHub。用户明确授权在本机
 canonical 工作区修改、构建、测试、Electron GUI、合成 Office/PDF/图片、中文 IME、

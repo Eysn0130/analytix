@@ -1,3 +1,6 @@
+import { mkdtemp, open, readdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
@@ -9,6 +12,11 @@ import {
   type AppSettingsV1
 } from '../../shared/app-settings'
 import type { WriteInlineCompletionRequest } from '../../shared/write-inline-completion'
+import { clearWriteRetrievalCache } from './write-retrieval-service'
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, open: vi.fn(actual.open), readdir: vi.fn(actual.readdir) }
+})
 import {
   buildWriteInlineCompletionPrompt,
   clearWriteInlineCompletionDebugEntries,
@@ -97,6 +105,8 @@ function createRequest(): WriteInlineCompletionRequest {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.clearAllMocks()
+  clearWriteRetrievalCache()
   clearWriteInlineCompletionDebugEntries()
 })
 
@@ -141,7 +151,7 @@ describe('requestWriteInlineCompletion', () => {
     expect(JSON.stringify(debugEntries[0])).not.toContain('# Draft')
   })
 
-  it('sends only key-free intent through the Go runtime and never performs direct provider fetch', async () => {
+  it.each([true, false])('sends key-free runtime intent with retrievalEnabled=%s and never performs direct provider fetch', async (retrievalEnabled) => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     const runtimeRequest = vi.fn(async (path: string, method?: string, body?: string) => {
@@ -170,10 +180,17 @@ describe('requestWriteInlineCompletion', () => {
       throw new Error(`unexpected runtime request ${method ?? 'GET'} ${path} ${body ?? ''}`)
     })
 
-    const settings = createSettings()
+    const settings = createSettings({ retrievalEnabled })
     settings.runtime.baseUrl = 'https://copied-route.invalid/v1'
     settings.provider.proxy = { enabled: true, url: 'socks5://copied-proxy.invalid:1080' }
-    const result = await requestWriteInlineCompletion(settings, createRequest(), runtimeRequest)
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'analytix-inline-retrieval-'))
+    const referencePath = join(workspaceRoot, 'reference.md')
+    await writeFile(referencePath, '# BM25 retrieval\n\nBM25 retrieval SYNTHETIC_CONTEXT_CANARY provides relevant background for this synthetic draft completion.', 'utf8')
+    const request = {
+      ...createRequest(), workspaceRoot, currentFilePath: join(workspaceRoot, 'draft.md'),
+      prefix: '# Draft\n\nBM25 retrieval', preview: { local: 'BM25 retrieval', documentTail: 'BM25 retrieval' }
+    }
+    const result = await requestWriteInlineCompletion(settings, request, runtimeRequest)
 
     expect(result).toMatchObject({
       ok: true,
@@ -183,6 +200,15 @@ describe('requestWriteInlineCompletion', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     const serializedCalls = JSON.stringify(runtimeRequest.mock.calls)
     expect(serializedCalls).not.toMatch(/copied-route|copied-proxy|apiKey|credentialRef|Authorization/)
+    if (retrievalEnabled) {
+      expect(readdir).toHaveBeenCalledExactlyOnceWith(workspaceRoot, { withFileTypes: true })
+      expect(open).toHaveBeenCalledExactlyOnceWith(referencePath, 'r')
+      expect(serializedCalls).toContain('SYNTHETIC_CONTEXT_CANARY')
+    } else {
+      expect(readdir).not.toHaveBeenCalled()
+      expect(open).not.toHaveBeenCalled()
+      expect(serializedCalls).not.toContain('SYNTHETIC_CONTEXT_CANARY')
+    }
     expect(runtimeRequest).toHaveBeenCalledWith(
       '/v1/threads/thr_inline/turns',
       'POST',

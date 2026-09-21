@@ -12,6 +12,9 @@ import { expandHomePath } from './workspace-service'
 import { readWritePdfText, type WritePdfTextPage } from './write-pdf-text-service'
 
 const INDEX_CACHE_TTL_MS = 30_000
+// Each index is already bounded by file/chunk limits; bound their aggregate too.
+const MAX_CACHED_INDEXES = 8
+const MAX_CONCURRENT_INDEX_BUILDS = 4
 const MAX_INDEX_BUILD_MS = 250
 const MAX_ASSISTANT_INDEX_BUILD_MS = 2_500
 const MAX_SCAN_ENTRIES = 8_000
@@ -126,6 +129,8 @@ type QueryModel = {
 const indexCache = new Map<string, WorkspaceIndex>()
 const inFlightIndexCache = new Map<string, Promise<WorkspaceIndex | null>>()
 let indexGeneration = 0
+// Includes invalidated builds until their outstanding filesystem reads settle.
+let activeIndexBuilds = 0
 
 type WorkspaceIndexOptions = {
   includePdf: boolean
@@ -458,19 +463,36 @@ async function loadWorkspaceIndex(
   options: WorkspaceIndexOptions
 ): Promise<WorkspaceIndex | null> {
   const cacheKey = workspaceIndexCacheKey(workspaceRoot, options.includePdf)
+  for (const [key, index] of indexCache) {
+    if (Date.now() - index.builtAt > INDEX_CACHE_TTL_MS) indexCache.delete(key)
+  }
   const cached = indexCache.get(cacheKey)
-  if (cached && Date.now() - cached.builtAt <= INDEX_CACHE_TTL_MS) return cached
+  if (cached) {
+    indexCache.delete(cacheKey)
+    indexCache.set(cacheKey, cached)
+    return cached
+  }
   const existing = inFlightIndexCache.get(cacheKey)
   if (existing) return existing
+  // Retrieval is optional. Do not queue unbounded workspace scans under load;
+  // a later request can retry after an admitted build settles.
+  if (activeIndexBuilds >= MAX_CONCURRENT_INDEX_BUILDS) return null
 
   const generation = indexGeneration
+  activeIndexBuilds += 1
   const build = buildWorkspaceIndex(workspaceRoot, options, () => generation === indexGeneration)
     .then((index) => {
       if (generation !== indexGeneration) return null
+      while (indexCache.size >= MAX_CACHED_INDEXES) {
+        const oldest = indexCache.keys().next().value
+        if (oldest === undefined) break
+        indexCache.delete(oldest)
+      }
       indexCache.set(cacheKey, index)
       return index
     })
     .finally(() => {
+      activeIndexBuilds -= 1
       if (inFlightIndexCache.get(cacheKey) === build) inFlightIndexCache.delete(cacheKey)
     })
 

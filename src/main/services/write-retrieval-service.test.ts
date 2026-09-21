@@ -190,6 +190,65 @@ describe('write retrieval invalidation', () => {
 })
 
 describe('write retrieval service', () => {
+  it('reuses recent workspace indexes and evicts the least recently used index at capacity', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const roots = await Promise.all(Array.from({ length: 9 }, (_, i) => retrievalWorkspace(`WORKSPACE_${i}`)))
+    for (const root of roots.slice(0, 8)) {
+      expect(await retrieveWriteInlineCompletionContext(createRequest(root))).not.toBeNull()
+    }
+    expect(readdir).toHaveBeenCalledTimes(8)
+    await retrieveWriteInlineCompletionContext(createRequest(roots[0]))
+    expect(readdir).toHaveBeenCalledTimes(8)
+    await retrieveWriteInlineCompletionContext(createRequest(roots[8]))
+    await retrieveWriteInlineCompletionContext(createRequest(roots[0]))
+    expect(readdir).toHaveBeenCalledTimes(9)
+    await writeFile(join(roots[1], 'notes.md'), '# BM25 关键词检索\n\nBM25 关键词检索 REBUILT_MARKER is fresh after the least recently used index was evicted.', 'utf8')
+    expect((await retrieveWriteInlineCompletionContext(createRequest(roots[1])))?.snippets[0].text).toContain('REBUILT_MARKER')
+    expect(readdir).toHaveBeenCalledTimes(10)
+  })
+
+  it('bounds active builds across clear and admits a later valid request after the old reads settle', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const roots = await Promise.all(Array.from({ length: 5 }, (_, i) => retrievalWorkspace(`CONCURRENT_${i}`)))
+    const held: Awaited<ReturnType<typeof holdNextIndexRead>>[] = []
+    const pending: ReturnType<typeof retrieveWriteInlineCompletionContext>[] = []
+    try {
+      for (const root of roots.slice(0, 4)) {
+        const read = await holdNextIndexRead()
+        held.push(read)
+        pending.push(retrieveWriteInlineCompletionContext(createRequest(root)))
+        await read.started
+      }
+      // Joining an admitted build must not scan again or consume another slot.
+      const joined = retrieveWriteInlineCompletionContext(createRequest(roots[0]))
+      pending.push(joined)
+      expect(await retrieveWriteInlineCompletionContext(createRequest(roots[4]))).toBeNull()
+      expect(readdir).toHaveBeenCalledTimes(4)
+      clearWriteRetrievalCache()
+      expect(await retrieveWriteInlineCompletionContext(createRequest(roots[4]))).toBeNull()
+      expect(readdir).toHaveBeenCalledTimes(4)
+    } finally {
+      clearWriteRetrievalCache()
+      held.forEach(read => read.release())
+      expect(await Promise.all(pending)).toEqual(pending.map(() => null))
+    }
+    expect(await retrieveWriteInlineCompletionContext(createRequest(roots[4]))).not.toBeNull()
+    expect(readdir).toHaveBeenCalledTimes(5)
+  })
+
+  it('rebuilds expired indexes while preserving cache hits before expiry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const root = await retrievalWorkspace('CACHED_MARKER')
+    const cached = await retrieveWriteInlineCompletionContext(createRequest(root))
+    expect(cached).not.toBeNull()
+    expect(await retrieveWriteInlineCompletionContext(createRequest(root))).toEqual(cached)
+    expect(readdir).toHaveBeenCalledTimes(1)
+    await writeFile(join(root, 'notes.md'), '# BM25 关键词检索\n\nBM25 关键词检索 REFRESHED_MARKER supplies current synthetic reference after the cache TTL.', 'utf8')
+    vi.setSystemTime(Date.now() + 30_001)
+    expect((await retrieveWriteInlineCompletionContext(createRequest(root)))?.snippets[0].text).toContain('REFRESHED_MARKER')
+    expect(readdir).toHaveBeenCalledTimes(2)
+  })
+
   it('tokenizes latin terms and CJK keyword ngrams', () => {
     const tokens = tokenizeWriteRetrievalText('BM25 关键词检索 RAG')
 

@@ -34,11 +34,66 @@ qualification remain separate from this host authorization.
 | Browser / `DevBrowserPanel` | Existing browser capability and lifecycle | Main-thread selection references need navigation/frame/revision identity and text/region anchors; stale/iframe/history cases and Chromium refusal resolution remain. |
 | PDF / file / knowledge | Existing PDF text/page/rect reference, viewport, search/zoom and file surfaces | Preserve these owners; no reproduced rotation bug. Full shared synthetic journey not run. |
 | Skills / installed package host | Installed snapshots, activation and generation binding | Upgrade/revoke/restart/in-flight callback and actual installed-copy discovery/body-loading acceptance remains. No new tool authority follows from reading skill text. |
-| Write / editors and retrieval | Presets, quick actions, retrieval, completion, autosave, conflict review, undo/redo, export snapshots and save barriers retained | Three dead routes removed; cache invalidation races fixed and empty queries avoid scans. Production lifecycle invalidation/bounded retention and runtime inline completion's temporary thread need further work; this batch does not claim the entire migration complete. |
+| Write / editors and retrieval | Presets, quick actions, retrieval, completion, autosave, conflict review, undo/redo, export snapshots and save barriers retained | Three dead routes removed; cache invalidation races fixed, empty queries avoid scans, retained indexes and active builds are bounded. Production lifecycle invalidation/active release and runtime inline completion's temporary thread need further work; this does not complete the migration. |
 | Private installation | Existing darwin-arm64 non-publish wrapper and source-bound resource admission | Old `8365b16ce` DMG is historical. Current-candidate installed native/IME/reopen/Provider evidence absent; SecurityAgent refusal not cleared by Mac authorization. |
 | Integration / security | Original real history preserved | Fresh remote at 2026-09-21 02:42 UTC: PR28 open/draft at dde, main ce96, b15 not in main, b15 remote runs zero. dde CodeQL 37 high and two unresolved path review threads are not closed. No exact-candidate/main CI acceptance. |
 
-### Focused local changes and evidence — 2026-09-20 PDT
+### Completion recheck and bounded retrieval — 2026-09-20 20:06 PDT
+
+**The adopted A—M execution request is not complete.** Its work packages remain:
+
+| Package | Completion assessment | Unfinished work versus actual blocker |
+| --- | --- | --- |
+| P0 baseline/admission/security | Partial | ZIP/extracted bytes and latest local candidate verified; actual main/PR/rules/checks/reviews refreshed. Full CodeQL traces remain unavailable through the recorded connector endpoints; Rust root cause is not repaired. |
+| P1 DOCX/reliable file journey | Not complete | Fixed-engine fidelity reproduction, repair based on that result, and actual proposal/Diff/accept/save/reopen journey remain. Applicable Chromium/SecurityAgent refusal resolution is missing; generic local Mac authority is already available. |
+| P2 image/browser references | Not complete | Versioned region notes and browser selection production chains still require implementation and acceptance. Native/browser acceptance has a specific policy blocker; this does not block every source change. |
+| P3 pivot/PPT native editing | Not complete | Real pivot schema/handler and PPT typed style/geometry/chart changes remain. Static implementation and native acceptance are distinct; do not describe all missing code as environment-blocked. |
+| P4 lifecycle/cleanup | Partial | Three requested cleanup chains are source-verified. Cache invalidation, empty-query avoidance and aggregate bounds are implemented. Workspace/permission lifecycle release, same-thread completion and installed Skills lifecycle acceptance remain. |
+| P5 installation/integration | Not complete | No current-candidate installed acceptance, push, Ready, merge or main acceptance. Specific outbound/native safety refusals are unresolved; candidate CI/product acceptance also remain. |
+
+At 2026-09-21 03:01:52 UTC, actual main remains `ce96cf12581acfa0e19fae7c6aa9c709371012c8`,
+PR28 is OPEN/Draft/unmerged at `dde784437dc8563e84066629dd57f4a11fd9acc9`.
+The full returned check inventories are 64/64 for main (62 success, Rust and
+Development gate failed) and 56/56 for dde (55 success, CodeQL failed with a
+37-high summary). Two filestore review threads remain unresolved. Local start
+candidate `33510c813fc3a93bb98c82ad746476bb9399c987` has zero remote workflow runs.
+These inventories include different workflows; their totals are not a count of
+required gates. The active strict Development ruleset still has no bypass actor.
+
+The recheck reproduces two remaining cache resource defects: old workspaces
+remain cached without a total cap, and new workspace requests can start unlimited
+concurrent index builds. The existing cache owner now retains at most **eight
+indexes**, evicts the least recently used on insertion, and prunes expired entries
+on lookup. It permits at most **four active builds**, counting invalidated builds
+until outstanding reads settle. A same-key request joins its admitted build;
+capacity saturation returns no optional retrieval context without queueing more
+scans, and later requests can succeed. Existing per-index file/chunk budgets,
+clear-generation and promise-identity fences remain. These are owner resource
+bounds, not a measured process-RSS guarantee, eager TTL expiry or complete
+production workspace/revoke disposal. No timer, new authority or dependency was added.
+
+Fresh evidence on `33510c813` plus this change, on the authorized local Mac with
+`source ./scripts/use-analytix-cache.sh` in each shell:
+
+- Original production code with three added cache tests: **2 fail / 9 pass**,
+  exit 1. Both capacity regressions failed; normal cache hit/TTL refresh passed.
+- Final `npm test -- src/main/services/write-retrieval-service.test.ts src/main/services/write-inline-completion-service.test.ts`:
+  **2 files / 28 pass**, exit 0. Enabled/disabled retrieval now runs against a
+  synthetic canary file and fake runtime: enabled reads that file and supplies
+  the canary in runtime intent; disabled performs zero scans/opens and omits it.
+  This verifies the Main-to-runtime intent boundary, not real Go privacy
+  projection or final Provider traffic.
+- `./node_modules/.bin/tsc --noEmit -p tsconfig.node.json` and focused ESLint on
+  these three files: pass, exit 0. `git diff --check`: pass.
+- Previous renderer/build evidence below is inherited for unchanged surfaces;
+  no fresh full build, native engine, GUI, installation or real Provider run.
+
+Five independent judgments remain: **main merged: no; main verified: no;
+complete product acceptance: no; Formal RC: no; public publication: no**.
+No third-party code was adopted. Remaining source work is not all blocked by
+remote writes or native acceptance, and these source checks are not product completion.
+
+### Previous focused local changes and evidence — candidate 33510c813
 
 Retrieval: an invalidation generation prevents a late build from delivering or
 recaching old snippets. An old completion can no longer remove a newer in-flight
