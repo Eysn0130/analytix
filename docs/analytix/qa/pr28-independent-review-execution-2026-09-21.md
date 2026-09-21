@@ -12,9 +12,10 @@ START HEAD `fe65622e5d827637f6a7423ef60dc048fee20d3c`, tree
 `codex/workbench-product-delivery-20260914`. The verified ancestry retains
 `148d188e4f7df71e1cf28bc25bfff988365fa1ea`, `5c2f1b089533b70e3a7623396e9690d2d355aab4`
 and `2ef3f9deb22714b7c05583603bf1e394cce1f06e`. No history was rewritten.
-The source commit containing this receipt is the new checkpoint; the delivery
-manifest records its full HEAD/tree and final dirty state after commit, avoiding
-an impossible self-referential commit hash inside this file.
+Source checkpoint: `9cf3fddbd4ac568d70b4787ef8aebd192d9bd5dc`, tree
+`bd1bbae692ce5d4801f0f3854667670146bbc274`. A subsequent evidence-only correction
+records race counts as 6 top-level/11 including subtests without changing tested
+source. The delivery manifest records the final full HEAD/tree and dirty state.
 
 The uploaded `Analytix-PR28-Independent-Review-2026-09-21.zip` SHA256 is
 `2adc4a541620bb12cea669fa7ae1d6e311b462a3f92f22e2e7b4e16b66f19742`.
@@ -91,7 +92,7 @@ and normal commands rerun; this was not a bypass or a product RED.
   mutation, exact old CAS, v3 replay, two-region persistence/capture, wrong IDs,
   source/revision changes, whole-collection scope revocation and Office v1 fields.
 - `analytix_prod` server multi-region capture/revocation: 1/1 passed, exit0.
-- Go race image application/server group: 6 top-level/6 including subtests passed.
+- Go race image application/server group: 6 top-level/11 including subtests passed.
   The server test process initially sampled only `_dyld_start`, then naturally
   entered and passed its tests; no signing/security change or executor swap.
 - TS contract/Main ACK/reference store/send-time group: 4 files, 78/78.
