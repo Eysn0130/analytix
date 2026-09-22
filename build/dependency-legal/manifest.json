@@ -1,0 +1,2181 @@
+{
+  "schemaVersion": 1,
+  "scope": "Exact dependency license supplements; no execution, signing or release authority",
+  "locks": [
+    {
+      "path": "package-lock.json",
+      "file": "locks/root.json",
+      "sha256": "c1648d325cd265050c69cee07d34c1b464c05dce73ee26bd204a169392a17b77"
+    },
+    {
+      "path": "packages/runtime/package-lock.json",
+      "file": "locks/runtime.json",
+      "sha256": "117617ae1b68a55d374ecffe5d9da3ee4ea666400d7a1e376854aa4bf8801705"
+    }
+  ],
+  "packages": [
+    {
+      "id": "aws-sdk__credential-provider-http-3.972.45",
+      "name": "@aws-sdk/credential-provider-http",
+      "version": "3.972.45",
+      "tarball": "https://registry.npmjs.org/@aws-sdk/credential-provider-http/-/credential-provider-http-3.972.45.tgz",
+      "integrity": "sha512-w9PuOoKCt6+xoESvY+zlV0u3PKQ0mVL259PcsVR6a3S/uYJJHnIi4r1NxdJHEcNldUVRIciltWnFMGBR4YEm3g==",
+      "packageJsonSha256": [
+        "55baacee1e09f487753f69a140fc3416c3325f847798736a914faffb3781c7d0",
+        "2678fcfb706390f3ccdbe3d8b36873b6cf01fa2f4afe2669b7f7539653cf5ab5"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@aws-sdk/credential-provider-http",
+          "resolved": "https://registry.npmmirror.com/@aws-sdk/credential-provider-http/-/credential-provider-http-3.972.45.tgz",
+          "integrity": "sha512-w9PuOoKCt6+xoESvY+zlV0u3PKQ0mVL259PcsVR6a3S/uYJJHnIi4r1NxdJHEcNldUVRIciltWnFMGBR4YEm3g=="
+        }
+      ],
+      "files": {
+        "dist-cjs/fromHttp/checkUrl.js": "39b33ba7d5716da9743ac4b1edcf047ec6944bb7059cbe5815f4ee9e9629688e",
+        "dist-es/fromHttp/checkUrl.js": "1ad18e82cb8bb8077f68d48293ab26cc32380affb4983d429d55e69d4145ce7f",
+        "dist-cjs/fromHttp/fromHttp.browser.js": "854ef41366667cbd0650efae587f72c28b4311168d0c89214285c11d55777618",
+        "dist-es/fromHttp/fromHttp.browser.js": "a7c3d3f5fe6c77bc538ec4f518023c0a3bffcd74b6cfc6159e5bd7381830dd24",
+        "dist-cjs/fromHttp/fromHttp.js": "78e5073d9de82a8cc444f4f9d8ec0f6e1d2648ded2499272d011da42c733e907",
+        "dist-es/fromHttp/fromHttp.js": "cc17d6f51d5566106cad041b2a51b517e88a8c523de0544b17991f70979ebc59",
+        "dist-es/fromHttp/fromHttpTypes.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-cjs/index.browser.js": "82d88c444857d135704e40670a8b307145160f6e0222673759c3fa551aa7a3a1",
+        "dist-es/index.browser.js": "e31f3d67db5d35f94f1749981c3059a7099c5fe9174481d84a1b3cebca96479b",
+        "dist-cjs/index.js": "e22c592509037ef324e39706a3e24ac1e7eae540fe17a36d3605239f52b3db62",
+        "dist-es/index.js": "e40119f17630fb71641e33a6641ccff62a9dba5e266c4c4d18f5af825fddfeeb",
+        "dist-cjs/fromHttp/requestHelpers.js": "22b35cac03f64466399847af56de86cc86eb7fc73eee8276b7cac544ae3f63b2",
+        "dist-es/fromHttp/requestHelpers.js": "dd96c950cc89cdc14b4dbf3a45048a8bbda2e218de5788d80a014b54fda3758f",
+        "dist-cjs/fromHttp/retry-wrapper.js": "5e6025f41c50aee73646d64a25c69d0507312c07374175e9df8e321b6c46d687",
+        "dist-es/fromHttp/retry-wrapper.js": "63b28caeed958e4d45b8466d9c4b6b4ca08d8c18672c53b8db5e7b8cd29c017b",
+        "package.json": "55baacee1e09f487753f69a140fc3416c3325f847798736a914faffb3781c7d0",
+        "README.md": "27ef1d7518b40bb68d188dc925e6499fa5fc403e89b3c44eb8b61554980163e3",
+        "dist-types/fromHttp/checkUrl.d.ts": "a1ccb5329d2f512d4cb9a6b31d360e7acfa4c5a1a432fa21bcd08dde95eb3d9d",
+        "dist-types/ts3.4/fromHttp/checkUrl.d.ts": "59f7147a0a804f834d7f877fc053b1c3d7864bc75ba21243f33c785d5f2ba2d8",
+        "dist-types/fromHttp/fromHttp.browser.d.ts": "4b352232afde0bd01cfb1b96261019d5668037d32e0476c9ba013954643bb5fb",
+        "dist-types/ts3.4/fromHttp/fromHttp.browser.d.ts": "21841dc9c8ddf967f8c78f54c9efcba49010c314484170aa1e7ad305b9276b68",
+        "dist-types/fromHttp/fromHttp.d.ts": "4b352232afde0bd01cfb1b96261019d5668037d32e0476c9ba013954643bb5fb",
+        "dist-types/ts3.4/fromHttp/fromHttp.d.ts": "21841dc9c8ddf967f8c78f54c9efcba49010c314484170aa1e7ad305b9276b68",
+        "dist-types/fromHttp/fromHttpTypes.d.ts": "c2b694d903303007a430acf66980f3b503dbd4e50cf6c183af0daf39c8d79ee8",
+        "dist-types/ts3.4/fromHttp/fromHttpTypes.d.ts": "1a6aaa8441fdb29a8a6b1bfb890dfae92f815beda349a25e31aa4bc16f785261",
+        "dist-types/index.browser.d.ts": "0af4db0f54bf37784977510ac0f4568cd73aac9be137874b70f77a8a5e7ce4b3",
+        "dist-types/ts3.4/index.browser.d.ts": "d161c968cd601fa6d94189a6289f39afe004c51d8b33784eb677bf6c9680b0a2",
+        "dist-types/index.d.ts": "3c10545e61e9428bebdc65fed8d11e09d203afb4745eea11b98be7b218a2aeb1",
+        "dist-types/ts3.4/index.d.ts": "6d7a59c2fde5e2983456b0c0b5f2a63bd271eda245c67b089715972eaa6d2359",
+        "dist-types/fromHttp/requestHelpers.d.ts": "7b878a61af5bb072358d00f2d514c663356f5d007deb504940bddd971db30f5f",
+        "dist-types/ts3.4/fromHttp/requestHelpers.d.ts": "a1b250ba08535319c880fdaa52d8765304d10809b3e427bfafefa5c16966f885",
+        "dist-types/fromHttp/retry-wrapper.d.ts": "ae87125c52a859545013c540dcc4ebd5bcf023c6cf113f13a7bf0f7f037a53cb",
+        "dist-types/ts3.4/fromHttp/retry-wrapper.d.ts": "40e955e2755e06a5c34885a514d3af4ae511a935bc0096e7393d9748dc744323"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "aws-sdk__credential-provider-login-3.972.47",
+      "name": "@aws-sdk/credential-provider-login",
+      "version": "3.972.47",
+      "tarball": "https://registry.npmjs.org/@aws-sdk/credential-provider-login/-/credential-provider-login-3.972.47.tgz",
+      "integrity": "sha512-Iy2ebWVgrZBH05464uJiQYu6HSSiROnwVZptthEFXx2gWjo1ORCxEAFZB5Cr2MdfrSnZ+0QUPkZ1ZpCqpkUrLQ==",
+      "packageJsonSha256": [
+        "d87668b25fadf7a7e84692719c2661629005a28a0a84e3f1cc4515f873547230",
+        "a157085160514c4acd8798fbb054c39522c930ae942358c4a21907fa81190a6b"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@aws-sdk/credential-provider-login",
+          "resolved": "https://registry.npmmirror.com/@aws-sdk/credential-provider-login/-/credential-provider-login-3.972.47.tgz",
+          "integrity": "sha512-Iy2ebWVgrZBH05464uJiQYu6HSSiROnwVZptthEFXx2gWjo1ORCxEAFZB5Cr2MdfrSnZ+0QUPkZ1ZpCqpkUrLQ=="
+        }
+      ],
+      "files": {
+        "dist-es/fromLoginCredentials.js": "039f16925af27d4d2d6c33396358658d474433899e146b136ae89beb0d99a15d",
+        "dist-cjs/index.js": "9aa4c4abe7460651a716134bac17790cb4defa1674a797cb1201bbe5241457be",
+        "dist-es/index.js": "944a120c1f231d5092b810be2831a2e7369a01da4df84c2b22dfb1ee333f19e8",
+        "dist-es/LoginCredentialsFetcher.js": "b44b3fe356825f38a65a6be524408de2e41f995905809a779476ca5494da98aa",
+        "dist-es/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "package.json": "d87668b25fadf7a7e84692719c2661629005a28a0a84e3f1cc4515f873547230",
+        "README.md": "a33261115ded62f80ada337b9ed2193392837a6dd49d3ce89ec81fc48fbe33fd",
+        "dist-types/fromLoginCredentials.d.ts": "6e7c0bbb5440b5759be26355ade8e4fa84bd2e4fcd800087b0bc0485a219e48e",
+        "dist-types/ts3.4/fromLoginCredentials.d.ts": "50efa65a3d040cf273300eeea8b88218afdd35afd1182cf4bb7684915d5139e9",
+        "dist-types/index.d.ts": "c7e1f9e359226585cc44213094841d2e5e1c27857e2d804847874bd843c685b3",
+        "dist-types/ts3.4/index.d.ts": "944a120c1f231d5092b810be2831a2e7369a01da4df84c2b22dfb1ee333f19e8",
+        "dist-types/LoginCredentialsFetcher.d.ts": "a14979abe2d16dd22574e1436d05cced605930eb97624fc8f9ab9413e926bbe7",
+        "dist-types/ts3.4/LoginCredentialsFetcher.d.ts": "388f73d532eba9749b803acfaf7ca0f5d22e44f0df5c48ec2bb3d0dadbd63db4",
+        "dist-types/ts3.4/types.d.ts": "142519224688ba3545560a71701010ce02797f3d01fcaf511425ac8688ba7e63",
+        "dist-types/types.d.ts": "e0f2a44e9312a8be92922f1ad9f33418437cac2ca6a815e732d81a0ed2f2ffba"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "aws-sdk__nested-clients-3.997.15",
+      "name": "@aws-sdk/nested-clients",
+      "version": "3.997.15",
+      "tarball": "https://registry.npmjs.org/@aws-sdk/nested-clients/-/nested-clients-3.997.15.tgz",
+      "integrity": "sha512-Fpri1/PXKMKveORZ7E00VLTlWS5DkfZkW70PUE+bOnpWpAeHAQLoiDHhkzN3kNWbbSsGg64+IZYiq/EZgME3Mg==",
+      "packageJsonSha256": [
+        "9bc3aa68b8ea5bbbb31aa7910314dd407ad740d406cedd0aa3a50db560049e96",
+        "849932720c5e810f5eb9374f359ca4fe1951ef37de92b747cb58fc3c55782cbe"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@aws-sdk/nested-clients",
+          "resolved": "https://registry.npmmirror.com/@aws-sdk/nested-clients/-/nested-clients-3.997.15.tgz",
+          "integrity": "sha512-Fpri1/PXKMKveORZ7E00VLTlWS5DkfZkW70PUE+bOnpWpAeHAQLoiDHhkzN3kNWbbSsGg64+IZYiq/EZgME3Mg=="
+        }
+      ],
+      "files": {
+        "dist-es/submodules/sts/commands/AssumeRoleCommand.js": "ca2ce04f3ee1d556c86f705ceb2eb2ab280a71dfe1e7f9fc552f8c65a5c4fbb6",
+        "dist-es/submodules/sts/commands/AssumeRoleWithWebIdentityCommand.js": "4c58a9582b0542826d17f2e34097c31adee7d7421d68e20074b154d3926939ba",
+        "dist-es/submodules/cognito-identity/endpoint/bdd.js": "cb15e31717a10df9cd25ff91be5d930f702f86f788822d967801af9f84d93377",
+        "dist-es/submodules/signin/endpoint/bdd.js": "c4f5a8c8c6840b2e110135aeff41b9db6713c84974f1f73595854f83f608bc30",
+        "dist-es/submodules/sso-oidc/endpoint/bdd.js": "d263664a4a4a13446f5b9a9b2310e4661923c53b2792d860f46480eb02404efc",
+        "dist-es/submodules/sso/endpoint/bdd.js": "cdb6e92b3c67f5543614ee1333f892f5f57e9b41b0b2566173e428908e1426c9",
+        "dist-es/submodules/sts/endpoint/bdd.js": "4488c3e9efd024b545829bd92fe205faeb5a313ff5e4a451e3538e056b3830a1",
+        "cognito-identity.js": "3469dc002e06eb54f1aadc57dd7ef98d0c849724de9821a61e217b775493e7c1",
+        "dist-es/submodules/cognito-identity/CognitoIdentity.js": "1e71106d99bc8787cb298d81a6ebd45ef71c1169ddcbc36d0e649f8835b6d4d6",
+        "dist-es/submodules/cognito-identity/CognitoIdentityClient.js": "a7a315a303a1ddcf0cf3e4416a1b1368db7e47b995543cf3b5c6b9ddd978fdac",
+        "dist-es/submodules/cognito-identity/models/CognitoIdentityServiceException.js": "8684dace782e0040cc32c12a81e821ba5d146798dbaca4ebfad1825b2d38b8f1",
+        "dist-es/submodules/signin/commands/CreateOAuth2TokenCommand.js": "f322c2b3917f2a670f90c142b4d76636d68ef3f7ad06a1396864097e0e1bd76b",
+        "dist-es/submodules/sso-oidc/commands/CreateTokenCommand.js": "cc3de74aa832c75cfb43b57a4640f2be764346134fab85daebe369a652abde17",
+        "dist-es/submodules/sts/defaultRoleAssumers.js": "3080341a3560a1ecc7c6dc45b18deac11db55cfb8db75457855bcb68081321e3",
+        "dist-es/submodules/sts/defaultStsRoleAssumers.js": "9d6007d06d0873405c23fbc420baaa530e4c38fa4014d4f8690db3f95b5e1f65",
+        "dist-es/submodules/cognito-identity/endpoint/EndpointParameters.js": "c8f186481f822909bfe0e3762a35c04c9ccc72529546a532d7be0fa2d81a518d",
+        "dist-es/submodules/signin/endpoint/EndpointParameters.js": "9fe684a00b59b2721c19294cf472bae13ff3fb76bfd7e6056e5eaf152aec4d82",
+        "dist-es/submodules/sso-oidc/endpoint/EndpointParameters.js": "9735f242587f7326aa3cf5878298463c96f4695ea66c7a1d73f5e0da676ccdba",
+        "dist-es/submodules/sso/endpoint/EndpointParameters.js": "2e8ddced4e19f40bc3866ca3f4e567efd88acc505ccdd3531f04d91d138b13a4",
+        "dist-es/submodules/sts/endpoint/EndpointParameters.js": "f8ad1ff4e80734123ee4b414042e32dcd2165beffcda8816a3d15bfd07bfc701",
+        "dist-es/submodules/cognito-identity/endpoint/endpointResolver.js": "b348b10ade00971a6c9e3de1b9ecedb5388d5f28a411321727f4ad2f84394487",
+        "dist-es/submodules/signin/endpoint/endpointResolver.js": "b348b10ade00971a6c9e3de1b9ecedb5388d5f28a411321727f4ad2f84394487",
+        "dist-es/submodules/sso-oidc/endpoint/endpointResolver.js": "b348b10ade00971a6c9e3de1b9ecedb5388d5f28a411321727f4ad2f84394487",
+        "dist-es/submodules/sso/endpoint/endpointResolver.js": "b348b10ade00971a6c9e3de1b9ecedb5388d5f28a411321727f4ad2f84394487",
+        "dist-es/submodules/sts/endpoint/endpointResolver.js": "85d0f4cfcaab244f8a0e3020a61057327cfbe800e69103c17d64b94b42d0dcb8",
+        "dist-es/submodules/signin/models/enums.js": "0695e8d290c7da38d9396e5a57028a7da3e8db049eb42e73a2a059b73c9b9cf0",
+        "dist-es/submodules/sso-oidc/models/enums.js": "1f110fe96c668e8ed79aaabe7700d8b909db93bef1d90a4865587c8af7266327",
+        "dist-es/submodules/cognito-identity/models/errors.js": "33ffbbc586d7610fe9a7c67f5bed28b21b833fe07920202a7c38185605c0de16",
+        "dist-es/submodules/signin/models/errors.js": "ef8270f87938b071c0b68ababbda4c33c44de3e1cb4e87e50d488160ee9dc585",
+        "dist-es/submodules/sso-oidc/models/errors.js": "a777e0d01869da54bfa62d17af78257841fd2c0d140ccf6e794ef22aa56223a4",
+        "dist-es/submodules/sso/models/errors.js": "bfe45537dc91a45fabf8f5156b80d0bd1d0083fd8e3291c2b4019ad2d9d8c0e7",
+        "dist-es/submodules/sts/models/errors.js": "e981f8ac63d03f2f9afb673f321abeb13e73d388e8a082567cfc69ebed63fca0",
+        "dist-es/submodules/cognito-identity/extensionConfiguration.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/signin/extensionConfiguration.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sso-oidc/extensionConfiguration.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sso/extensionConfiguration.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sts/extensionConfiguration.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/cognito-identity/commands/GetCredentialsForIdentityCommand.js": "63000659692d284051834c1fe982a136459d0d4d7f7e17ef5c1e82bb65532258",
+        "dist-es/submodules/cognito-identity/commands/GetIdCommand.js": "3c7fad3b5007c116d0dcaeff835e9ff00c8f4f8f16ed40b656a1a46ccd044807",
+        "dist-es/submodules/sso/commands/GetRoleCredentialsCommand.js": "5ecc31612b7e0a763560b5ac1a62ea87533a893ffd15d7eb1ecab0f3431b1b9c",
+        "dist-es/submodules/cognito-identity/auth/httpAuthExtensionConfiguration.js": "331902cc5df5060ac9644261de8711ff641d6b91e60b5fcf77d2facc441c8cf6",
+        "dist-es/submodules/signin/auth/httpAuthExtensionConfiguration.js": "331902cc5df5060ac9644261de8711ff641d6b91e60b5fcf77d2facc441c8cf6",
+        "dist-es/submodules/sso-oidc/auth/httpAuthExtensionConfiguration.js": "331902cc5df5060ac9644261de8711ff641d6b91e60b5fcf77d2facc441c8cf6",
+        "dist-es/submodules/sso/auth/httpAuthExtensionConfiguration.js": "331902cc5df5060ac9644261de8711ff641d6b91e60b5fcf77d2facc441c8cf6",
+        "dist-es/submodules/sts/auth/httpAuthExtensionConfiguration.js": "331902cc5df5060ac9644261de8711ff641d6b91e60b5fcf77d2facc441c8cf6",
+        "dist-es/submodules/cognito-identity/auth/httpAuthSchemeProvider.js": "171e3ecc0c713ed9370e4d3a6a4c36375bcc9b2cc1b3c9197b5a328d783ab4c9",
+        "dist-es/submodules/signin/auth/httpAuthSchemeProvider.js": "daef268f7f1f33b262c82bcfdd774aee51b90fe9d9c9f5201bc338a9deacddba",
+        "dist-es/submodules/sso-oidc/auth/httpAuthSchemeProvider.js": "3ee0dc95821605eaf3e89f950264d0da7c7f76ad085a840c871a9adeceffba7d",
+        "dist-es/submodules/sso/auth/httpAuthSchemeProvider.js": "d6af82d86ab113568b4ec8fb0615c00ae3193f35bf3e61aa00a71ff9c0446a99",
+        "dist-es/submodules/sts/auth/httpAuthSchemeProvider.js": "fa95b398817403dd50b7f480e1dad4ca8fa50ab02f6b04dd364e4bbace5a0835",
+        "dist-cjs/index.js": "4bf9a207f0ea5c9ae065bfcaff2afa53cbf6c02c7beb2d9e7ee3c3d06dc0d9f8",
+        "dist-cjs/submodules/cognito-identity/index.js": "5053e2f6c280cf945df8d2082386a6b45bc00cce5298a189773c6b42dd18c83d",
+        "dist-cjs/submodules/signin/index.js": "fd213f6e7edaf3a4b17e47ff992033d9c1096ca487ca7fd6df27e70da3d2ccc7",
+        "dist-cjs/submodules/sso-oidc/index.js": "8470b3693352bbba79ac2755d3fd11dd1c76e98d95479fbd6e2bbc964e9e7fd2",
+        "dist-cjs/submodules/sso/index.js": "58185bb6ef0a67af8e6fa7252758afff3fea286602c1be738c6eb015a5ed5b49",
+        "dist-cjs/submodules/sts/index.js": "b72dc8f79a1df27d819c8c984cd3078a9bae17cfdcf7066a536e5a00cb64c315",
+        "dist-es/index.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/cognito-identity/commands/index.js": "d8b6c71d7de5970f348d171ca1472330360d4323c571dce284a55ef9b89514d3",
+        "dist-es/submodules/cognito-identity/index.js": "ee02a472069c12d6a0535f4515ced178fe1aa92716c841b886717002e65195bf",
+        "dist-es/submodules/signin/commands/index.js": "d9a0aad1508a89c767960bc745fafec0df27d62e2078897f03f2caaef11314f4",
+        "dist-es/submodules/signin/index.js": "5464b390acf0d3d5d4a5c71a7597c3bd23dac497177fe2bd7a40b349efb7a3a2",
+        "dist-es/submodules/sso-oidc/commands/index.js": "68408a182f77a5a894f246dfe7ac82745e12c95d9914e042a7150ecb537f82c2",
+        "dist-es/submodules/sso-oidc/index.js": "58e0567b2c41036d32c0ddd23e8a6efe85ab8c9190744fbd866fecaf96152b4f",
+        "dist-es/submodules/sso/commands/index.js": "c58d3b5cf10a9a4221371dea0a700d4666ecd1fb8f91fe697a5b7d7b71619b86",
+        "dist-es/submodules/sso/index.js": "3fc105b8371d688f834832124ab447d2839cb3cfc3001365e5b8d947da46ac3c",
+        "dist-es/submodules/sts/commands/index.js": "1fa52becf7bd2ca0086f6c724a8c591a6a4f45cb8ae65d98924c34d45ffcb619",
+        "dist-es/submodules/sts/index.js": "ee68fa5ad123ecf7acc55617ed36d19698cfe8e5d0668e6aff5aab4168c33181",
+        "dist-es/submodules/cognito-identity/models/models_0.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/signin/models/models_0.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sso-oidc/models/models_0.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sso/models/models_0.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/sts/models/models_0.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-es/submodules/cognito-identity/runtimeConfig.browser.js": "1c6ec0459bea7c4ae0f125aafb132854e61e690666622489fcce4065f362e80a",
+        "dist-es/submodules/signin/runtimeConfig.browser.js": "04b1c1471ad913b924cb57363684cacd83799310c2346cd542b3ed270f377c5f",
+        "dist-es/submodules/sso-oidc/runtimeConfig.browser.js": "1c6ec0459bea7c4ae0f125aafb132854e61e690666622489fcce4065f362e80a",
+        "dist-es/submodules/sso/runtimeConfig.browser.js": "1c6ec0459bea7c4ae0f125aafb132854e61e690666622489fcce4065f362e80a",
+        "dist-es/submodules/sts/runtimeConfig.browser.js": "04b1c1471ad913b924cb57363684cacd83799310c2346cd542b3ed270f377c5f",
+        "dist-es/submodules/cognito-identity/runtimeConfig.js": "0cd8eb9057b1e1242ebec197aae57161698645808c4560f1ffcf247fac4000e3",
+        "dist-es/submodules/signin/runtimeConfig.js": "0cd8eb9057b1e1242ebec197aae57161698645808c4560f1ffcf247fac4000e3",
+        "dist-es/submodules/sso-oidc/runtimeConfig.js": "0cd8eb9057b1e1242ebec197aae57161698645808c4560f1ffcf247fac4000e3",
+        "dist-es/submodules/sso/runtimeConfig.js": "0cd8eb9057b1e1242ebec197aae57161698645808c4560f1ffcf247fac4000e3",
+        "dist-es/submodules/sts/runtimeConfig.js": "a43b37d392540372b83ebfc31f4406139bebb0fd407147a503f2e966d560545f",
+        "dist-es/submodules/cognito-identity/runtimeConfig.native.js": "20096788532927f7e52f78a7cdf80bc1d9501f018f1cc7326d1220e02145f4d1",
+        "dist-es/submodules/signin/runtimeConfig.native.js": "20096788532927f7e52f78a7cdf80bc1d9501f018f1cc7326d1220e02145f4d1",
+        "dist-es/submodules/sso-oidc/runtimeConfig.native.js": "20096788532927f7e52f78a7cdf80bc1d9501f018f1cc7326d1220e02145f4d1",
+        "dist-es/submodules/sso/runtimeConfig.native.js": "20096788532927f7e52f78a7cdf80bc1d9501f018f1cc7326d1220e02145f4d1",
+        "dist-es/submodules/sts/runtimeConfig.native.js": "20096788532927f7e52f78a7cdf80bc1d9501f018f1cc7326d1220e02145f4d1",
+        "dist-es/submodules/cognito-identity/runtimeConfig.shared.js": "bec3674e9d5b5dd0157983c21c0771ef5060000cd6eee89ec62b2d101343d858",
+        "dist-es/submodules/signin/runtimeConfig.shared.js": "52c431ecb59da5d6c7df927d6108ccc192229b47f5de68b96bf61afb9aed9034",
+        "dist-es/submodules/sso-oidc/runtimeConfig.shared.js": "b43aaeba59489752d823ac65ffc85ae0fc04e431d87a74e029440da0414d112e",
+        "dist-es/submodules/sso/runtimeConfig.shared.js": "2381b1ff3edcc636baf5c8e2dd3b810e2f9c562f1bd4f6a8f2d8675a5817c9f8",
+        "dist-es/submodules/sts/runtimeConfig.shared.js": "9cd8f8bc550d3d51f7bd2df3dcbab4e03931237f0119cb21f79feecb96ac3bef",
+        "dist-es/submodules/cognito-identity/runtimeExtensions.js": "91acbc1e819f62b25b16ae8d717eab8eb748fedc63a656ffcf6ae353cd0b5dbc",
+        "dist-es/submodules/signin/runtimeExtensions.js": "91acbc1e819f62b25b16ae8d717eab8eb748fedc63a656ffcf6ae353cd0b5dbc",
+        "dist-es/submodules/sso-oidc/runtimeExtensions.js": "91acbc1e819f62b25b16ae8d717eab8eb748fedc63a656ffcf6ae353cd0b5dbc",
+        "dist-es/submodules/sso/runtimeExtensions.js": "91acbc1e819f62b25b16ae8d717eab8eb748fedc63a656ffcf6ae353cd0b5dbc",
+        "dist-es/submodules/sts/runtimeExtensions.js": "91acbc1e819f62b25b16ae8d717eab8eb748fedc63a656ffcf6ae353cd0b5dbc",
+        "dist-es/submodules/cognito-identity/schemas/schemas_0.js": "2ad645af9ae4e9e10f668e701a56b7596291ba7f5e552253908a071514f5daeb",
+        "dist-es/submodules/signin/schemas/schemas_0.js": "07077ea1450bbdf7577932367ee0536949ff6df4b4e6a3d5a3d8b0c07def5828",
+        "dist-es/submodules/sso-oidc/schemas/schemas_0.js": "d783a878467745b3e7086ae47bdc3ca4a668d43cd8bc90f869615c22f297bab2",
+        "dist-es/submodules/sso/schemas/schemas_0.js": "699039ab44e7067ae5972f2f636f8fed3f2fca569357f6a2e896dfae40638ba2",
+        "dist-es/submodules/sts/schemas/schemas_0.js": "8ec5cd54cc15a16abca7b99f3ab368e61b4365fdd5b6c9c6a04a135f711869d3",
+        "dist-es/submodules/signin/Signin.js": "590a27d87e1fa718f43ef905734f215c19feec7bccd89c56dd205a85a3dd6b09",
+        "signin.js": "174390745a77ae03f1d63e60ec02401577b3c4d3fbc0da038246f20ffcae7b80",
+        "dist-es/submodules/signin/SigninClient.js": "84048cd8c083393d1fd68fc45ea937396d12c7e87683d2347963c925261a85ba",
+        "dist-es/submodules/signin/models/SigninServiceException.js": "a40fd14467a7f26277150fc3774879484dcfca2fa88f66bbc3aae2c740c46101",
+        "sso-oidc.js": "156e82a784c6d2895620f36ca64c60d34ebbe692e7007b8e110f2461196e5a15",
+        "dist-es/submodules/sso/SSO.js": "71ac2820cb65b89bd60d3eba30e493dc332d4ea3e1862d2c43fe142c0baada62",
+        "sso.js": "727df763bed4f1f51ce69807fb4d3156a1d26650e558f3f7df760333f35490ad",
+        "dist-es/submodules/sso/SSOClient.js": "db44c6ab924f0ca8cb68aaf426bc13ea9d29acb168e3360aa5e32e140f5bcf17",
+        "dist-es/submodules/sso-oidc/SSOOIDC.js": "4d054213691231d719fc7bea4dbc45263073d084ef69fdc9ddca4a19bd498e51",
+        "dist-es/submodules/sso-oidc/SSOOIDCClient.js": "e4e97c4249e3acd0d50ed3cfc751ab301b076a75b8d39cfd91d2aaf1af7f968f",
+        "dist-es/submodules/sso-oidc/models/SSOOIDCServiceException.js": "e13c483fa9c545d54b3bc56d97eb67dead77000ece8be0d1c307f2962ae31a38",
+        "dist-es/submodules/sso/models/SSOServiceException.js": "7ca2f3771f1c706b7de5474eda091e4964cd606fa468a703411b5357fa45094b",
+        "dist-es/submodules/sts/STS.js": "1f82f0f47af3bb22b6efe2d69064494716dcf941de4324e203b1e33e7cd67977",
+        "sts.js": "f08029b2fa110d676126c575d0bb18f268db788a685304e3c30e7bab3b46a9e8",
+        "dist-es/submodules/sts/STSClient.js": "6f0a1dcb689b809a1daf4ece20d0bcfbb9937493ea1bcc4fd727a141fe49b34a",
+        "dist-es/submodules/sts/models/STSServiceException.js": "3bf07f0767c077ef4b715bdd77c23a313953b1a59690d9d0d9c11a799ee038f1",
+        "package.json": "9bc3aa68b8ea5bbbb31aa7910314dd407ad740d406cedd0aa3a50db560049e96",
+        "README.md": "92cdad5ce2f6c085d7b65ee8c701340a75799ae6045f1b526b49a28caad27c30",
+        "dist-types/submodules/sts/commands/AssumeRoleCommand.d.ts": "984324c6cd5584aa5cbde353d2b7394d96cfa5f658b0f62bab10ef7154163dd0",
+        "dist-types/ts3.4/submodules/sts/commands/AssumeRoleCommand.d.ts": "058134bf7bcd46e0e1d4cc03114de1de9219d782220c1c6252f5d508c9add8d2",
+        "dist-types/submodules/sts/commands/AssumeRoleWithWebIdentityCommand.d.ts": "ce324928c5245ce3f8522f2fd3e00fd6e8ee8c477188515d9c1571fdb5b0a1b8",
+        "dist-types/ts3.4/submodules/sts/commands/AssumeRoleWithWebIdentityCommand.d.ts": "30c98444cb8c384481bf244c0de86d69af20cbd9a4450d5775145fafb25e7ba1",
+        "dist-types/submodules/cognito-identity/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/submodules/signin/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/submodules/sso-oidc/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/submodules/sso/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/submodules/sts/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/ts3.4/submodules/cognito-identity/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/ts3.4/submodules/signin/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/ts3.4/submodules/sso-oidc/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/ts3.4/submodules/sso/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "dist-types/ts3.4/submodules/sts/endpoint/bdd.d.ts": "931e2065cbee9695e90c2f6dafc92ce68c3a71f8b2f77de84191df0f376896f4",
+        "cognito-identity.d.ts": "7cbc4ad7828d8be0b2af3f46fcfd6a3d474a3dcf2fbbaa8854e2fd091704aa77",
+        "dist-types/submodules/cognito-identity/CognitoIdentity.d.ts": "1a5fe80fb448c0400b7a42c4ad8bde41e1bfbf0c683c44923328b595bc1fb72d",
+        "dist-types/ts3.4/submodules/cognito-identity/CognitoIdentity.d.ts": "5e65e8f13a8b85da83fd05a6d79fa88ad9a89ff3dda2ddfaef232d605ad6aa66",
+        "dist-types/submodules/cognito-identity/CognitoIdentityClient.d.ts": "e3470e6852165578c7b32474d0bf52616a0e1b1b37d3762614fa90aec9369445",
+        "dist-types/ts3.4/submodules/cognito-identity/CognitoIdentityClient.d.ts": "005c50874c9773ce7934f14a6ef838d7556ea52a5f6efbdf90d02889ae1c29e7",
+        "dist-types/submodules/cognito-identity/models/CognitoIdentityServiceException.d.ts": "a3c4e1e95a79fb7d54e0d741e88d69e628bca0a062c40384fbdc6b03228ece13",
+        "dist-types/ts3.4/submodules/cognito-identity/models/CognitoIdentityServiceException.d.ts": "9039f7cd080827a869990a8e102d53f119f3ba2e733a5f82f7f5a437d6e68f60",
+        "dist-types/submodules/signin/commands/CreateOAuth2TokenCommand.d.ts": "6548e945176b702504df21c8217b1b23c8f689ec42298d08ac16f2479155b192",
+        "dist-types/ts3.4/submodules/signin/commands/CreateOAuth2TokenCommand.d.ts": "0a56a92dfde2c2f769af657720df969801dd22d3b54bd645a45bcca24fd35fce",
+        "dist-types/submodules/sso-oidc/commands/CreateTokenCommand.d.ts": "3ad424e44a64663b5e74e2a9184cabffbae4b267dfc10b64b45408a3558d3e4c",
+        "dist-types/ts3.4/submodules/sso-oidc/commands/CreateTokenCommand.d.ts": "fe2f04f5958babb3ef713e7213f68573ece8f5b556ff2970d47b7c9e9b22673a",
+        "dist-types/submodules/sts/defaultRoleAssumers.d.ts": "04554903320e94aed6abe72f63d7e422e2ad174bcb3aa49ffd840d7e80d0a984",
+        "dist-types/ts3.4/submodules/sts/defaultRoleAssumers.d.ts": "29e8803f51da094e4c11fb944b45e8b83986d698d92c31cd5616b17320637261",
+        "dist-types/submodules/sts/defaultStsRoleAssumers.d.ts": "1ca89cc43b7ad6890470a5baa213b975c657fe78ac6c9ca353180c0824377d5d",
+        "dist-types/ts3.4/submodules/sts/defaultStsRoleAssumers.d.ts": "a0e748428c641fe53ccc9bf2f2952e4b42cc9172b857f514e22ef1fa6a7a30cf",
+        "dist-types/submodules/cognito-identity/endpoint/EndpointParameters.d.ts": "db382b318bc333eb7548cc1f0dcd149794d7e1d4969d54f9586f2533b287b5ac",
+        "dist-types/submodules/signin/endpoint/EndpointParameters.d.ts": "84236d8d439b9e35fbef52a75b4f839d50a9a0f3c7186a6adc04a082713adfff",
+        "dist-types/submodules/sso-oidc/endpoint/EndpointParameters.d.ts": "db382b318bc333eb7548cc1f0dcd149794d7e1d4969d54f9586f2533b287b5ac",
+        "dist-types/submodules/sso/endpoint/EndpointParameters.d.ts": "db382b318bc333eb7548cc1f0dcd149794d7e1d4969d54f9586f2533b287b5ac",
+        "dist-types/submodules/sts/endpoint/EndpointParameters.d.ts": "8a62055c1a71b5519baf10186441fa77f9d6e7d39b120f4c4481c2bd7793d7c9",
+        "dist-types/ts3.4/submodules/cognito-identity/endpoint/EndpointParameters.d.ts": "7d3247d4b42a45c9bfea4b5eed5c0bd4b0d4b5003b23bc24a8f1275814a044bf",
+        "dist-types/ts3.4/submodules/signin/endpoint/EndpointParameters.d.ts": "6e4b219e3630bdf42cc870d3ac2a78d07bfd78232b4e58a72a184bf4bfb770bb",
+        "dist-types/ts3.4/submodules/sso-oidc/endpoint/EndpointParameters.d.ts": "7d3247d4b42a45c9bfea4b5eed5c0bd4b0d4b5003b23bc24a8f1275814a044bf",
+        "dist-types/ts3.4/submodules/sso/endpoint/EndpointParameters.d.ts": "7d3247d4b42a45c9bfea4b5eed5c0bd4b0d4b5003b23bc24a8f1275814a044bf",
+        "dist-types/ts3.4/submodules/sts/endpoint/EndpointParameters.d.ts": "960596468d43f63a9a1f0eafa32622efb4982883e2019714038c34f3211fc605",
+        "dist-types/submodules/cognito-identity/endpoint/endpointResolver.d.ts": "b82b0ed889b5688a674912c9a0efc4667863d3c9ccf9240673c5a30d9fa8116c",
+        "dist-types/submodules/signin/endpoint/endpointResolver.d.ts": "b82b0ed889b5688a674912c9a0efc4667863d3c9ccf9240673c5a30d9fa8116c",
+        "dist-types/submodules/sso-oidc/endpoint/endpointResolver.d.ts": "b82b0ed889b5688a674912c9a0efc4667863d3c9ccf9240673c5a30d9fa8116c",
+        "dist-types/submodules/sso/endpoint/endpointResolver.d.ts": "b82b0ed889b5688a674912c9a0efc4667863d3c9ccf9240673c5a30d9fa8116c",
+        "dist-types/submodules/sts/endpoint/endpointResolver.d.ts": "b82b0ed889b5688a674912c9a0efc4667863d3c9ccf9240673c5a30d9fa8116c",
+        "dist-types/ts3.4/submodules/cognito-identity/endpoint/endpointResolver.d.ts": "b4f9ad303a2311a714cedcfc9badd94069788d50413445cee0839cd62dbdc362",
+        "dist-types/ts3.4/submodules/signin/endpoint/endpointResolver.d.ts": "b4f9ad303a2311a714cedcfc9badd94069788d50413445cee0839cd62dbdc362",
+        "dist-types/ts3.4/submodules/sso-oidc/endpoint/endpointResolver.d.ts": "b4f9ad303a2311a714cedcfc9badd94069788d50413445cee0839cd62dbdc362",
+        "dist-types/ts3.4/submodules/sso/endpoint/endpointResolver.d.ts": "b4f9ad303a2311a714cedcfc9badd94069788d50413445cee0839cd62dbdc362",
+        "dist-types/ts3.4/submodules/sts/endpoint/endpointResolver.d.ts": "b4f9ad303a2311a714cedcfc9badd94069788d50413445cee0839cd62dbdc362",
+        "dist-types/submodules/signin/models/enums.d.ts": "f96bc05de1d406c33dbe1e7c10c22a1713e57ff6e86da7f583f8fbb71bef39a8",
+        "dist-types/submodules/sso-oidc/models/enums.d.ts": "94101f19f85cfa582038665c05c540f52323f7806d834603b01ded02ba037e82",
+        "dist-types/ts3.4/submodules/signin/models/enums.d.ts": "e22f9bf7d7d0e6d36735361ef49647204cc3afad41e751f2c392ab7b647ef9ea",
+        "dist-types/ts3.4/submodules/sso-oidc/models/enums.d.ts": "216b7d7af72095a5b632b3abe0736ab6ff398479841ff1d21747939460a1f908",
+        "dist-types/submodules/cognito-identity/models/errors.d.ts": "c963b07210f476afe23abbe3abe5e9deeab623fb9a800e55fa1fa98beb37a9ce",
+        "dist-types/submodules/signin/models/errors.d.ts": "644cba06cc16f80bdbee687bbe31bd8b87963b7a3c7f1f2a10bf3d9d9586a8f3",
+        "dist-types/submodules/sso-oidc/models/errors.d.ts": "2316f84f64afcb41185233ce28fc39bb1323f206db9453a2f0b91b131882c185",
+        "dist-types/submodules/sso/models/errors.d.ts": "069fe24408ca97497c22018d6cb2a57a88783c5fe202d13fafe4ad6dfa1a8a5c",
+        "dist-types/submodules/sts/models/errors.d.ts": "8991690ecf377f305506314154be8b9e9fd584cec6ce60ecdbaf94f03627ee23",
+        "dist-types/ts3.4/submodules/cognito-identity/models/errors.d.ts": "1a063eaa10b809e617bf61d3ae7f2946da452f87eeac3031fc1e1c40d028a4a0",
+        "dist-types/ts3.4/submodules/signin/models/errors.d.ts": "60fd5373d4bd1e8387b3859e86391be61d2910d70b01ac172f2aa3cccd6417e3",
+        "dist-types/ts3.4/submodules/sso-oidc/models/errors.d.ts": "16fc262a66748cf7467ec3e40789169836afe038416838767941c65c9b9b211b",
+        "dist-types/ts3.4/submodules/sso/models/errors.d.ts": "b459140b31a1fe686f564c99c6318d69270dfd12044d5f8f6d6b7616c0928b71",
+        "dist-types/ts3.4/submodules/sts/models/errors.d.ts": "bf007bb083479644d33bb0da63c727d606e5773a68919dd0204be6f5fb4082a8",
+        "dist-types/submodules/cognito-identity/extensionConfiguration.d.ts": "66cb219790c35af5b53ad71741eebac719e63d372e47f1e10bbc459412147e27",
+        "dist-types/submodules/signin/extensionConfiguration.d.ts": "1860cc3053db9c9a7e84b257fbd2b85a1a65add382f37140590d1ec9e621ba17",
+        "dist-types/submodules/sso-oidc/extensionConfiguration.d.ts": "1ac7773e40c3cce0d479ff4f531145784d8cef368be46c0182d24c48bc1f787c",
+        "dist-types/submodules/sso/extensionConfiguration.d.ts": "3f0bd6a0b8e05914a176e7d66f1dca68b0dea5ee621465ca9b353f6f0f94d8ec",
+        "dist-types/submodules/sts/extensionConfiguration.d.ts": "95c8c436a96e926ff139b92703426ba18276b596bea0a998f82a479181bad5a4",
+        "dist-types/ts3.4/submodules/cognito-identity/extensionConfiguration.d.ts": "3e9102139fed577427eb191de9153b2a6dd6e295c6f33bb9415a41378d718ffd",
+        "dist-types/ts3.4/submodules/signin/extensionConfiguration.d.ts": "e5dde29b72b9ed32378167aeb1ee96b2fa56079cddac715083b484732f0bffd3",
+        "dist-types/ts3.4/submodules/sso-oidc/extensionConfiguration.d.ts": "d516e9a2b0bae776eef6bdf7fff02f4b023ab88fe5b8ae6c9583a74805333859",
+        "dist-types/ts3.4/submodules/sso/extensionConfiguration.d.ts": "846da82530944ce0af8b666a6a3ceacf62015353f52d3dddcaeadcd4c8248841",
+        "dist-types/ts3.4/submodules/sts/extensionConfiguration.d.ts": "64cafb1882b2c976775b3fe46953dffbe5cbc318ca0fbe4131d76676fd22a6d6",
+        "dist-types/submodules/cognito-identity/commands/GetCredentialsForIdentityCommand.d.ts": "4d84bf850df60aa49fb19c82a30fe1ad851dfafb34f3f1077861f32d46028991",
+        "dist-types/ts3.4/submodules/cognito-identity/commands/GetCredentialsForIdentityCommand.d.ts": "5aa1584e515d2cc632df06393620cd4320a95b8d5fffe2e07010b3d924741221",
+        "dist-types/submodules/cognito-identity/commands/GetIdCommand.d.ts": "69e9ad62905cf7884526bd979d031b449374cca6d08d4df7d9c7e0e994f4a533",
+        "dist-types/ts3.4/submodules/cognito-identity/commands/GetIdCommand.d.ts": "b8c698ac5c4edaacd68bc9a55d087661eb90432c899c373a82b645140080c591",
+        "dist-types/submodules/sso/commands/GetRoleCredentialsCommand.d.ts": "a46186abf90162336e356ffa53188bc949081d90eac62d098ba014ba71b7351b",
+        "dist-types/ts3.4/submodules/sso/commands/GetRoleCredentialsCommand.d.ts": "da28212e3044d886657da1dca7b9b1f23a1b3761b8c6571431374d9455ce22d1",
+        "dist-types/submodules/cognito-identity/auth/httpAuthExtensionConfiguration.d.ts": "9cdb379f2eccde100eea3ef5371bad9ac8a9a85ba23405a65b88b00e2c0c3c1c",
+        "dist-types/submodules/signin/auth/httpAuthExtensionConfiguration.d.ts": "a727b26f97cb31a81ab109ad3f1d6294253dc2d485c8326abfd70c6eb1945cd2",
+        "dist-types/submodules/sso-oidc/auth/httpAuthExtensionConfiguration.d.ts": "c83b67f91b470963a7f1bf2d3c856b998f6ae3f73889a53aa76b67b3b596522f",
+        "dist-types/submodules/sso/auth/httpAuthExtensionConfiguration.d.ts": "987da9c96bccfd2074b21d43505b201822e04fc839c832d11a4150807cfa05c0",
+        "dist-types/submodules/sts/auth/httpAuthExtensionConfiguration.d.ts": "27520abeb725457b4e2289adbfab80b32e7f8deba1e82bf0fe8eb7f8fb2adede",
+        "dist-types/ts3.4/submodules/cognito-identity/auth/httpAuthExtensionConfiguration.d.ts": "24d5f80073c182ff0d917f319597cf31eaa1061a5f2c455c879496b518ff07eb",
+        "dist-types/ts3.4/submodules/signin/auth/httpAuthExtensionConfiguration.d.ts": "c976a93ec2f96bd772cf28f32837a04c52f4b9c45ac9169f551b7ac3bb1430d6",
+        "dist-types/ts3.4/submodules/sso-oidc/auth/httpAuthExtensionConfiguration.d.ts": "0cad5bb58fbe754a3367c24849f2ee0eed35bec65813be4276e1d9a6b07befb7",
+        "dist-types/ts3.4/submodules/sso/auth/httpAuthExtensionConfiguration.d.ts": "05cb1a1ed2bb0d75608192eaa140e126d9634433ad8bb248eeb3ab66e75ba106",
+        "dist-types/ts3.4/submodules/sts/auth/httpAuthExtensionConfiguration.d.ts": "84043b82ff8011acfa5f6c8a6dfdc24fb6f7ec308481a0e0752bff55e71ed71c",
+        "dist-types/submodules/cognito-identity/auth/httpAuthSchemeProvider.d.ts": "6683aa39c4889a4d393506a2a532143139980b3596aa630983d7a86c74d53f0e",
+        "dist-types/submodules/signin/auth/httpAuthSchemeProvider.d.ts": "8bb6d0ae72770119eb01f888cb16a01ae8271fcddfab45467b0a9ee59318491d",
+        "dist-types/submodules/sso-oidc/auth/httpAuthSchemeProvider.d.ts": "2207a64465b21d1dac5620bc74fcb5d00756221866f9de3cdda133c243daba10",
+        "dist-types/submodules/sso/auth/httpAuthSchemeProvider.d.ts": "fb3db2574c90844888ac36a986a0218f56dcbec908c5db7fb3615bfd633fd6ba",
+        "dist-types/submodules/sts/auth/httpAuthSchemeProvider.d.ts": "7ff06ab6c7ce16eb4be74ebb36e59027cdec5aff4e687a739101ed01eb5781b8",
+        "dist-types/ts3.4/submodules/cognito-identity/auth/httpAuthSchemeProvider.d.ts": "16d291b44d66e6ea06ee1b0dddf45b30246c8a56d8b85e996b7ad396f9c6f9d2",
+        "dist-types/ts3.4/submodules/signin/auth/httpAuthSchemeProvider.d.ts": "7cd93512dc40ff1800e4ecab244d99f0651e14437b4cee24daab528917a36da5",
+        "dist-types/ts3.4/submodules/sso-oidc/auth/httpAuthSchemeProvider.d.ts": "3015ac50af17dfd3cdf046bcbdbe7ef361cb787b24e1335d9670ffac83ee22e2",
+        "dist-types/ts3.4/submodules/sso/auth/httpAuthSchemeProvider.d.ts": "db23c697e959c22d27ab8d3e09206c5ad803fd59df64ff47a3ad5d3756e470f9",
+        "dist-types/ts3.4/submodules/sts/auth/httpAuthSchemeProvider.d.ts": "cdfc9a8d407ffc7353b74f60d40319ee176008ec9452bc653fd315c9ba39aa21",
+        "dist-types/index.d.ts": "7db58b6bee008e48c6907afff5ecab72f23e7d345ac7f42251e4e96b8037cd35",
+        "dist-types/submodules/cognito-identity/commands/index.d.ts": "d8b6c71d7de5970f348d171ca1472330360d4323c571dce284a55ef9b89514d3",
+        "dist-types/submodules/cognito-identity/index.d.ts": "3c508ce0cd534dc893bfa2f0033a832ddae5a0a039ddaf2f907c9ad96f148000",
+        "dist-types/submodules/signin/commands/index.d.ts": "d9a0aad1508a89c767960bc745fafec0df27d62e2078897f03f2caaef11314f4",
+        "dist-types/submodules/signin/index.d.ts": "1b90c53030a9d77d572c8afdb1e352ed12e86189dc5e4d3a75e352d9de1f21c7",
+        "dist-types/submodules/sso-oidc/commands/index.d.ts": "68408a182f77a5a894f246dfe7ac82745e12c95d9914e042a7150ecb537f82c2",
+        "dist-types/submodules/sso-oidc/index.d.ts": "a02413c5aba19a2a1f630a5e4f9bd2a2e0076acb06843f373225667a98e0846c",
+        "dist-types/submodules/sso/commands/index.d.ts": "c58d3b5cf10a9a4221371dea0a700d4666ecd1fb8f91fe697a5b7d7b71619b86",
+        "dist-types/submodules/sso/index.d.ts": "6adb7b647c79589eef6a03488c6721e6841b9f357c329e9fedafc53a58aa6334",
+        "dist-types/submodules/sts/commands/index.d.ts": "1fa52becf7bd2ca0086f6c724a8c591a6a4f45cb8ae65d98924c34d45ffcb619",
+        "dist-types/submodules/sts/index.d.ts": "e6657b1931298ca34d6e84124862c153d94d81d6bf2f4afcb94a0a3465031b85",
+        "dist-types/ts3.4/index.d.ts": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "dist-types/ts3.4/submodules/cognito-identity/commands/index.d.ts": "d8b6c71d7de5970f348d171ca1472330360d4323c571dce284a55ef9b89514d3",
+        "dist-types/ts3.4/submodules/cognito-identity/index.d.ts": "3be0c67f69c57cdc3a787bb2994564a230a762368c84abb060213356385fa77f",
+        "dist-types/ts3.4/submodules/signin/commands/index.d.ts": "d9a0aad1508a89c767960bc745fafec0df27d62e2078897f03f2caaef11314f4",
+        "dist-types/ts3.4/submodules/signin/index.d.ts": "418a33fbf6738fbe02409f32d2aece3e2e98b1f6d6a24ef4038a5d2f010d0a4b",
+        "dist-types/ts3.4/submodules/sso-oidc/commands/index.d.ts": "68408a182f77a5a894f246dfe7ac82745e12c95d9914e042a7150ecb537f82c2",
+        "dist-types/ts3.4/submodules/sso-oidc/index.d.ts": "51f03a6b3f37475065a7e4dc00ea149e2cee63fa31032990e2ea9833e92cab51",
+        "dist-types/ts3.4/submodules/sso/commands/index.d.ts": "c58d3b5cf10a9a4221371dea0a700d4666ecd1fb8f91fe697a5b7d7b71619b86",
+        "dist-types/ts3.4/submodules/sso/index.d.ts": "4052b382c7e04365205bbbcc5ee1a65bae74397753fcc4ea0d31d1182641198e",
+        "dist-types/ts3.4/submodules/sts/commands/index.d.ts": "1fa52becf7bd2ca0086f6c724a8c591a6a4f45cb8ae65d98924c34d45ffcb619",
+        "dist-types/ts3.4/submodules/sts/index.d.ts": "06d14b8f082d8afe29ec6d7b2b7ea7ef2e93aeb7a14420174022d79f9dab1dc8",
+        "dist-types/submodules/cognito-identity/models/models_0.d.ts": "bf0f9833a80fe4637434a7e5e987fc4020ef9b5022a2aa15b2118e8aeb3a045f",
+        "dist-types/submodules/signin/models/models_0.d.ts": "1f507815d1a0b635d599f1a647c8329fd7b209356155bfc1ff8712e80c83238b",
+        "dist-types/submodules/sso-oidc/models/models_0.d.ts": "2d61e72fd248279f0efab784c870880b722d805b2648f74058cb3acd1c622f40",
+        "dist-types/submodules/sso/models/models_0.d.ts": "250c1f62c95b9c38716ca428ac40b89b73bebce67a44b6c07963934c2259c81e",
+        "dist-types/submodules/sts/models/models_0.d.ts": "f4ed1824ac3c774c281cc624df6626c3280369faa042fb405afbd4adb136ad6f",
+        "dist-types/ts3.4/submodules/cognito-identity/models/models_0.d.ts": "85b4004dd7f98921877b4b13375fdb5bd631be82f1bf139cb3e487f49c8ba2c2",
+        "dist-types/ts3.4/submodules/signin/models/models_0.d.ts": "fe522c82ab40b3038c08b581396e8e88275a0df850077ac8bcbb6ead62c8e36b",
+        "dist-types/ts3.4/submodules/sso-oidc/models/models_0.d.ts": "b460ba0bbc4d1e119cead8388f0ee364ce09b73641f6dfe840947864d4184331",
+        "dist-types/ts3.4/submodules/sso/models/models_0.d.ts": "9749e31bdaf5743e22fb4610fe2dfb2c5fd8fd0c206565809e9faaa578b4a369",
+        "dist-types/ts3.4/submodules/sts/models/models_0.d.ts": "ac60be0f1c8ff4ce6fe18396c1339c3a76717279ff611f16630e2b7e523d673c",
+        "dist-types/submodules/cognito-identity/runtimeConfig.browser.d.ts": "aa4e7d78777d2edeaaa0caa88d9be14720dce3e86dd876910edd91a99e0e4284",
+        "dist-types/submodules/signin/runtimeConfig.browser.d.ts": "1a04ceea37338a0566efe257ceed5d3496d16ff9c0d371504e5805c69ed7b7e2",
+        "dist-types/submodules/sso-oidc/runtimeConfig.browser.d.ts": "4e6321f9feed1e537e60ac2ec485b025bae17c32b911fadf48350552899ced98",
+        "dist-types/submodules/sso/runtimeConfig.browser.d.ts": "bfb98b0985f0683e59cd2ff5528b43ebc7885c0ef532ffad4b5d48a05c807010",
+        "dist-types/submodules/sts/runtimeConfig.browser.d.ts": "10b96cca88999a2395ba8192cbb6d8ee3b2ac93f73d674dcbe54595f64735e8c",
+        "dist-types/ts3.4/submodules/cognito-identity/runtimeConfig.browser.d.ts": "c34ba45a5d8fe1d5ed89a8cedf39faf31407796b07f8f75bbda34b887e3305c1",
+        "dist-types/ts3.4/submodules/signin/runtimeConfig.browser.d.ts": "6a510a732c76530f6cc74cf9c0b1eff10f76d43e3fb174d7314e4883ce8e6ce9",
+        "dist-types/ts3.4/submodules/sso-oidc/runtimeConfig.browser.d.ts": "dd3dbb80d07cf1b0873ea8f322d608eca406448c8b6d4db0b061739748598ea8",
+        "dist-types/ts3.4/submodules/sso/runtimeConfig.browser.d.ts": "ee09c824a617307d634f9fcdc263c22f7d77f6b3e23af4948b6e8583b6ede44a",
+        "dist-types/ts3.4/submodules/sts/runtimeConfig.browser.d.ts": "56b4aea6a771e7ba4fab332f66c33a6d083be6f9fcc76f9bc322e66f9310c877",
+        "dist-types/submodules/cognito-identity/runtimeConfig.d.ts": "d23ae4161f81d4b0899b9545de7fca276a14def3eb4b5349b2d47cecb20bae0b",
+        "dist-types/submodules/signin/runtimeConfig.d.ts": "9a7e434cb07e1f00406cc08c64cdd71fb06609364c120955c10e815c2ed6615b",
+        "dist-types/submodules/sso-oidc/runtimeConfig.d.ts": "df085cfccd75133e2f0d7a4e55ab90870cc468bfbe6c92ade78d491e14c51024",
+        "dist-types/submodules/sso/runtimeConfig.d.ts": "0891b7b61f492c516a8194b67df334dbfc261ba5d7bece5b6c219c0ae3375a73",
+        "dist-types/submodules/sts/runtimeConfig.d.ts": "09d2864ba62346a570472771ae48f43a1f3449ae58cf79804818fa4d4e6757c2",
+        "dist-types/ts3.4/submodules/cognito-identity/runtimeConfig.d.ts": "7807312b418434425796c72b8406acbf89569837c6f315a69bd89f62438b67b4",
+        "dist-types/ts3.4/submodules/signin/runtimeConfig.d.ts": "58e217f3e9ed6925c431f091384926b892ddb7da9d6f793d11fb08b71b07f9e7",
+        "dist-types/ts3.4/submodules/sso-oidc/runtimeConfig.d.ts": "23508ea9ad9453e4105c675388c5566dabc6a1a34825a0661d5f3749218f6bd2",
+        "dist-types/ts3.4/submodules/sso/runtimeConfig.d.ts": "35f9b5b5f6a4ea8dc05245927100a31a78b10a24f052d9afaa6acb39236c5763",
+        "dist-types/ts3.4/submodules/sts/runtimeConfig.d.ts": "2abbd5f8fdd93d71ce132cb0e0a09a6434f27a5ce9e2915100d64806c3a30ed5",
+        "dist-types/submodules/cognito-identity/runtimeConfig.native.d.ts": "235ad273aae8a916b23d165b2bd4d758ab8cc65d9a1abf7b19ef02f1a5e29b87",
+        "dist-types/submodules/signin/runtimeConfig.native.d.ts": "26e8fc9431ab392210b5c72ad6b73cc8608d181878f91834df6362e0840dbca0",
+        "dist-types/submodules/sso-oidc/runtimeConfig.native.d.ts": "0e578ad6f08280f58d6bc483a62fb5da982f1e2c7082e684d0ff0776c3e424ee",
+        "dist-types/submodules/sso/runtimeConfig.native.d.ts": "5f6663699fdcb2c84fd9d9111554498b49361983d4eb1c12fb2bee72771fbf1a",
+        "dist-types/submodules/sts/runtimeConfig.native.d.ts": "d27d3b16135cf8f279deb7e21269aa63ab7403ce2cac6d25261476ad84fa2137",
+        "dist-types/ts3.4/submodules/cognito-identity/runtimeConfig.native.d.ts": "0f2754cc24c6ec8a18bf768994f4a4ba20245b735cde2cffe848cd99f6946e18",
+        "dist-types/ts3.4/submodules/signin/runtimeConfig.native.d.ts": "b5ca991a4b1adc8eb0dbafcc0069b265da87a6089ca545a7af12efddc3284fd7",
+        "dist-types/ts3.4/submodules/sso-oidc/runtimeConfig.native.d.ts": "1d81f07c4ae18d2c7bf198b80692c7f7bb5ced18d1169fb89e8a5c28b3d68099",
+        "dist-types/ts3.4/submodules/sso/runtimeConfig.native.d.ts": "a4aa7d30ee2ffddc4955dbba3628e426b4607d274d901d97d2b489877dd7a030",
+        "dist-types/ts3.4/submodules/sts/runtimeConfig.native.d.ts": "e7b2ab9df79f42855f7d4a9dba1fc0bbe5fcdc8053b08465ac4b1aaf296fc01e",
+        "dist-types/submodules/cognito-identity/runtimeConfig.shared.d.ts": "b497d52100fbc6e29c508fdded3ddda6642ff5ab2a0ed62e673c629a2580e895",
+        "dist-types/submodules/signin/runtimeConfig.shared.d.ts": "e1a7bbf77e8a6136991d71a80e0950ff2322f8e62862c08cb1b8578f2db3ab6b",
+        "dist-types/submodules/sso-oidc/runtimeConfig.shared.d.ts": "6a2896d4fa402cf4071daed18ecf7624ce0334b7785a82073549495eed5bdf14",
+        "dist-types/submodules/sso/runtimeConfig.shared.d.ts": "0fceee093041fdbf92688b6a21aa2f5c60ad4445a14afac82c092104a7e8fd71",
+        "dist-types/submodules/sts/runtimeConfig.shared.d.ts": "3acea26bb7f428ce53dad57d82596ec4c5fdaa81dd0fdbc4c3180756b16122da",
+        "dist-types/ts3.4/submodules/cognito-identity/runtimeConfig.shared.d.ts": "00348a1c182db1b6a9fe55d10859df58f42218871403cc0e1659dbcfa13b4cfe",
+        "dist-types/ts3.4/submodules/signin/runtimeConfig.shared.d.ts": "6c702b4baa91cc6c9567a8c954237ba1a753f57f8a578f756cc989dcd49e3c69",
+        "dist-types/ts3.4/submodules/sso-oidc/runtimeConfig.shared.d.ts": "e941b579a564dfa0e523498e4e1610f183f435d0276fa4d27b4a14d97415ba81",
+        "dist-types/ts3.4/submodules/sso/runtimeConfig.shared.d.ts": "a9025bba42cd3a51dcb418e69312810f9df9ab9e66c336b75c0c679de9e80a8d",
+        "dist-types/ts3.4/submodules/sts/runtimeConfig.shared.d.ts": "181c7ce4deafb0b0ca025c939ebc0aa7c02e1e774d8c622e28b21b82e79f981d",
+        "dist-types/submodules/cognito-identity/runtimeExtensions.d.ts": "cc78ad8b375649f1539090c3a5d905783b0ee4af3732272246118119d797ea57",
+        "dist-types/submodules/signin/runtimeExtensions.d.ts": "07ced9c38fbd94bbb23bcb421c1ec04d8accb40c964b2eed3cb6c523852aded6",
+        "dist-types/submodules/sso-oidc/runtimeExtensions.d.ts": "c604ce58e7a08de2f6ed3350f970a7cc5f49a90470b60514def20cf4652d0ee1",
+        "dist-types/submodules/sso/runtimeExtensions.d.ts": "a907904c1002f012b2b5aa86029f454aab7c1478c150a3339d56bf60237a37c6",
+        "dist-types/submodules/sts/runtimeExtensions.d.ts": "9fb9e0b6e295813c230258b74f55515408168bcf2d5d25bf8c026fa3b7a7d839",
+        "dist-types/ts3.4/submodules/cognito-identity/runtimeExtensions.d.ts": "913d5e583c71e556d6de2fc491a754732fc41fcfd10c43d7a844f3ff2c204015",
+        "dist-types/ts3.4/submodules/signin/runtimeExtensions.d.ts": "c27d2806e9353fe37da524a63030bcd579e63947645c1d1dbb3cb397f76e3ba1",
+        "dist-types/ts3.4/submodules/sso-oidc/runtimeExtensions.d.ts": "379461dc00b3077c15157e0a60bdc3bbcd55fd581e1754fb790875fe3def733b",
+        "dist-types/ts3.4/submodules/sso/runtimeExtensions.d.ts": "4f630b803b2195760f38f7cd164aa1d48862c23162e3058af93a33918318e295",
+        "dist-types/ts3.4/submodules/sts/runtimeExtensions.d.ts": "b1dfd46fd51c88326507340dc030239bd35daf57b5a207f1456782a502dca68b",
+        "dist-types/submodules/cognito-identity/schemas/schemas_0.d.ts": "e1f93dc14d4be8bd52c18ac57df0fd28134b15cd630caf5ca0b3553775fd802c",
+        "dist-types/submodules/signin/schemas/schemas_0.d.ts": "b5f8aca74b0c47162b7ff758511c1c2f8bd45a826eeb3d55e8b4ae2eff02fb64",
+        "dist-types/submodules/sso-oidc/schemas/schemas_0.d.ts": "133e72304cb457bf0828b5b50f2c98195963589e6315f89a233391737dfb0bd7",
+        "dist-types/submodules/sso/schemas/schemas_0.d.ts": "bdc3cdfac3327638f43679500d18cc25068169788b9fc0c82dfd43b3cb0a4db4",
+        "dist-types/submodules/sts/schemas/schemas_0.d.ts": "d93eb79dbe58aae7fa9247a6e35264a090ae5080b9dcd2bbf90ec53d54384d6c",
+        "dist-types/ts3.4/submodules/cognito-identity/schemas/schemas_0.d.ts": "90819890aae87a68ea58c44b73d3ee17208c6e81a9b579e89f480083f75e7e1a",
+        "dist-types/ts3.4/submodules/signin/schemas/schemas_0.d.ts": "6bc7d654d506fe2755c0f09a00d15600a2591dc4d34c4681d0cd320c670c76f4",
+        "dist-types/ts3.4/submodules/sso-oidc/schemas/schemas_0.d.ts": "8ee310a14788e0281b16a95cba7066fd147a8b3ddd9449b92b0bcf748cdd5de2",
+        "dist-types/ts3.4/submodules/sso/schemas/schemas_0.d.ts": "7061bbe145c2b06b8539bf8d307f9951518106b4514eddbc96e520acb1390128",
+        "dist-types/ts3.4/submodules/sts/schemas/schemas_0.d.ts": "a3115a201620375cf4b916b2f0418e97cc39c7813e5642d91972f125a0f3a922",
+        "dist-types/submodules/signin/Signin.d.ts": "23df473b7e28a9239539f36784c16df9fab2d11f2c6dd3f6117ff072c13d026f",
+        "dist-types/ts3.4/submodules/signin/Signin.d.ts": "cbb08dce14b6132da0aa06838f2d0f669270640d17b0f80e0d3c506fb170e541",
+        "signin.d.ts": "21a89b95306a14ba040f48a1c24dd2275f154149e9e40b6706b8f4e01a9c20c3",
+        "dist-types/submodules/signin/SigninClient.d.ts": "5983bc5a9b2a870e5196c3e8085ab79d31c1945d081e3e66eee2e0b932eff17b",
+        "dist-types/ts3.4/submodules/signin/SigninClient.d.ts": "7f32ae05fe40d1ed0fceb18c4e2f28eead218ef29958ebb70e213f1d98baf3d7",
+        "dist-types/submodules/signin/models/SigninServiceException.d.ts": "e37a0dca9903f16fdb2c001feec85cb4aea4dea5484084e96a88bf48f0b3b304",
+        "dist-types/ts3.4/submodules/signin/models/SigninServiceException.d.ts": "6d214c446a1f5eaa3e93aed2c29a2433fe2b942d9f7646f891241c322faf5546",
+        "sso-oidc.d.ts": "1d9858aa18091d23ca38bdb48e0d1368312fc090d0289210a05a914d2f14a793",
+        "dist-types/submodules/sso/SSO.d.ts": "4668219d04eaf773f02eb60ac12b9bb0a4c14b5dba8e05069f6f01ad96a5c367",
+        "dist-types/ts3.4/submodules/sso/SSO.d.ts": "b85c2eb39ce288e72b21f16375d34b31c7ec762b14c22d7fc37f6bf830b24e2f",
+        "sso.d.ts": "e992f4682d2b9477e3ed038d51b396e8f2031af7c2ac90b8d1da9805be0b76d9",
+        "dist-types/submodules/sso/SSOClient.d.ts": "36c6ae58d0b0c48c9859636bc792abdf180d6831f7d6a01deb5f7faef037d996",
+        "dist-types/ts3.4/submodules/sso/SSOClient.d.ts": "83c079e3dab45a62b1157af4bc13dd3815caeae9f0ea5bd92df1695bdf70f782",
+        "dist-types/submodules/sso-oidc/SSOOIDC.d.ts": "7e5c523d429a22bf6427ca01ae07e7ccf6874855b0ce1842e0cfdef4eb631c0b",
+        "dist-types/ts3.4/submodules/sso-oidc/SSOOIDC.d.ts": "2251032a1e65581a7af005f780b797249554c9957b1d5dba8134d0876fdc0732",
+        "dist-types/submodules/sso-oidc/SSOOIDCClient.d.ts": "2723d7cc737093f6eb13f93a63910a20ad63db3bc4ea727a7c1968ddf3de2860",
+        "dist-types/ts3.4/submodules/sso-oidc/SSOOIDCClient.d.ts": "00651605d81245388f6a8312ac97b81d870b98488bb949cfea77ad9df60f2639",
+        "dist-types/submodules/sso-oidc/models/SSOOIDCServiceException.d.ts": "f17154bcb773e9d87af8a8922e8003cfafec3750dac03df529391d784d78e53e",
+        "dist-types/ts3.4/submodules/sso-oidc/models/SSOOIDCServiceException.d.ts": "b65a9314b23f4a4f11f73f79863245fbc1090516940a01a3f15b605919a571a7",
+        "dist-types/submodules/sso/models/SSOServiceException.d.ts": "f99a84ea4959c5c1a15a7dd875af7cd9d7a44499a650d2dd269451fc1a639d04",
+        "dist-types/ts3.4/submodules/sso/models/SSOServiceException.d.ts": "6ad24ea162fd8d2e028c781a51c61616e9f5a5692ce8af7ffdab76d6665d5ce1",
+        "dist-types/submodules/sts/STS.d.ts": "a515ad94f39404776318e2e881ca1f1f34afbe73d0d7e1181f30cf25d99471e9",
+        "dist-types/ts3.4/submodules/sts/STS.d.ts": "f8ef53b1213861b9690e263e95dda78bea6cd3d578b1e4ab49836dfac2bf7798",
+        "sts.d.ts": "61c5842190011544c41a659dc2f269b44acbf348b54509e4462de4d04bb82213",
+        "dist-types/submodules/sts/STSClient.d.ts": "f603743c8a63d9d4e0ee9dd1e3b14fa8b2ab32fdda4e7a8dfda6aeaa98b90a8e",
+        "dist-types/ts3.4/submodules/sts/STSClient.d.ts": "d7230b5bd0fc822ef6c53bd0271a21cc92cd750ae15d5af31020e7f432d84cf9",
+        "dist-types/submodules/sts/models/STSServiceException.d.ts": "a1101c623ef70171238b7f27ebda11975ec202ec3aa2089c751d836b772263c9",
+        "dist-types/ts3.4/submodules/sts/models/STSServiceException.d.ts": "345b7efa74c8e542fafbeb0547f137bb80a3fb3de5799354d75411882d3c08e1"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "computer-use__default-clipboard-provider-4.2.0",
+      "name": "@computer-use/default-clipboard-provider",
+      "version": "4.2.0",
+      "tarball": "https://registry.npmjs.org/@computer-use/default-clipboard-provider/-/default-clipboard-provider-4.2.0.tgz",
+      "integrity": "sha512-oi1MI1EvqPe6pLxgmS1W4xlyhJfQ5aRnL5P0ew1uhH6lgC3eE6+tqZkA9j9fdJnDrDadGvutLTxgb91P6Trmbg==",
+      "packageJsonSha256": [
+        "77dcb63b9f5abd06411bdf48b33ee15d79dccad2a12f9ca6d48286b3e0cc39f4",
+        "458f0303949dbd29d8c600e548f4b073aa75a5ae91f9452618aa99a80c9f53d5"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@computer-use/default-clipboard-provider",
+          "resolved": "https://registry.npmjs.org/@computer-use/default-clipboard-provider/-/default-clipboard-provider-4.2.0.tgz",
+          "integrity": "sha512-oi1MI1EvqPe6pLxgmS1W4xlyhJfQ5aRnL5P0ew1uhH6lgC3eE6+tqZkA9j9fdJnDrDadGvutLTxgb91P6Trmbg=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/@computer-use/default-clipboard-provider",
+          "resolved": "https://registry.npmjs.org/@computer-use/default-clipboard-provider/-/default-clipboard-provider-4.2.0.tgz",
+          "integrity": "sha512-oi1MI1EvqPe6pLxgmS1W4xlyhJfQ5aRnL5P0ew1uhH6lgC3eE6+tqZkA9j9fdJnDrDadGvutLTxgb91P6Trmbg=="
+        }
+      ],
+      "files": {
+        "dist/lib/clipboardy-clipboard.class.js": "c71b166b52ca97f0db8ce127142d2261a67db24b4989049e748d424cdfafa979",
+        "dist/index.js": "cb04ad34ba6103dfb430458e0099d90939e4ab974464adcf507cf20b0a6ab24e",
+        "package.json": "77dcb63b9f5abd06411bdf48b33ee15d79dccad2a12f9ca6d48286b3e0cc39f4",
+        "dist/lib/clipboardy-clipboard.class.js.map": "f3592540042e496720feaf2c3137dc70ad8c7212b938dbd2a58126c760ed924e",
+        "dist/index.js.map": "1c2f768e1469eaded60ab10fd0079fdca04c9157dcb0b15f88b28159a3d85163",
+        "CHANGELOG.md": "94d01b4a1fabee7e131cefd4ce4b6a7abedf3ef2b531feeb5b59b8fd09ce4d51",
+        "dist/lib/clipboardy-clipboard.class.d.ts": "c9dc4b3020487fd8ff8df3da5b74d4e45f5adfc2cc877b5cf38bf811fafa17dc",
+        "dist/index.d.ts": "f514e14f79d9186c653ef8c54b4590e09a42ccd2172277bbc688e870f557b45a"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "computer-use__libnut-4.2.0",
+      "name": "@computer-use/libnut",
+      "version": "4.2.0",
+      "tarball": "https://registry.npmjs.org/@computer-use/libnut/-/libnut-4.2.0.tgz",
+      "integrity": "sha512-QtSDdS5mEgvXhRI17dH/P05gnnUuqVVZlWIrUq0fUSSdWV1VuGCwMvML6zxtWk8IeKn7OAJSw3BQJxa2zz3l6g==",
+      "packageJsonSha256": [
+        "ccf20a46878a94620f2794cc0d484cf00b3ffd473c28596aa14fc0de878cdcbd",
+        "13a6ac0b6f34c4b58a06265e4f0c53d49df794a99b1bf60c52024a6edbc6d88a"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@computer-use/libnut",
+          "resolved": "https://registry.npmjs.org/@computer-use/libnut/-/libnut-4.2.0.tgz",
+          "integrity": "sha512-QtSDdS5mEgvXhRI17dH/P05gnnUuqVVZlWIrUq0fUSSdWV1VuGCwMvML6zxtWk8IeKn7OAJSw3BQJxa2zz3l6g=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/@computer-use/libnut",
+          "resolved": "https://registry.npmjs.org/@computer-use/libnut/-/libnut-4.2.0.tgz",
+          "integrity": "sha512-QtSDdS5mEgvXhRI17dH/P05gnnUuqVVZlWIrUq0fUSSdWV1VuGCwMvML6zxtWk8IeKn7OAJSw3BQJxa2zz3l6g=="
+        }
+      ],
+      "files": {
+        "dist/import_libnut.js": "0ad198af0257f12759de7e034b31b7e9767d883c448c3256f937f0bb20af745b",
+        "dist/index.js": "55c34697d44396be8f047da30c5bbeb02172dd7f81b556147d43bee96836f8a2",
+        "dist/lib/index.js": "7859be4f30ecd8d88d5586bf427c54a0728d029bcb07994fa606a2fc6ce7f12b",
+        "jest.config.js": "9170ba6a742ac60a50e45ae1bc83c734bf1ff17181493f6b0f11cd5c8f42b1b3",
+        "dist/lib/libnut-keyboard.class.js": "772e47efbb1bbd979154c7836ae586d4a35c19cd9e975fabef5a257fbee7cf7a",
+        "dist/lib/libnut-mouse.class.js": "88d45683cd4ef6ad3bc5ef00a35198051bdb09c3142cababf1e1a3111e21a413",
+        "dist/lib/libnut-screen.class.js": "2e74a16ca0656a2c09e11484d5da4c1ddcd31b69126c27394e53791508a62132",
+        "dist/lib/libnut-window.class.js": "d5e740ea05c58e5902b1e075f22d7b19c572a55352fba0ee4e1fb461b3d31fdc",
+        "package.json": "ccf20a46878a94620f2794cc0d484cf00b3ffd473c28596aa14fc0de878cdcbd",
+        "tsconfig.json": "5eb6bc225722555fad863feeacdc950ff506d2eaeeb22e59a9949bfc10aa6b3c",
+        "dist/import_libnut.js.map": "f01cfcafd424d250c727eb5e56a9fd2e6a5c122f4188f69a86b778886789c799",
+        "dist/index.js.map": "c94fa12e4bc76e5ee26d296b869862e696dd5d5285072659cd395a81cc382ed8",
+        "dist/lib/index.js.map": "32d8d87b48d1bcc7dab04ab15543fa6a205c74e4d89294171c97376aedc9e74c",
+        "dist/lib/libnut-keyboard.class.js.map": "f3ab7f5496a7ed3fdad9250d218837265b98838d5665c54d95e7372c325adb3b",
+        "dist/lib/libnut-mouse.class.js.map": "a0b3d78828aa33bff81b119bbb0db710323d42fe163e73335cb1d8397464d58e",
+        "dist/lib/libnut-screen.class.js.map": "fce993b5c87e22068f08b83c00d40b7a1f53b76f35a0eca02f76eb209cdbdd66",
+        "dist/lib/libnut-window.class.js.map": "5032123d4c8bbb71b2262d629b8118f81f3ce8e6616250e09f6f3d66ba1f8628",
+        "README.md": "bf5dffaf366eea3b602e9bbc6675f59efe71ba5753ae4f26e5d032ee4266fb17"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "computer-use__provider-interfaces-4.2.0",
+      "name": "@computer-use/provider-interfaces",
+      "version": "4.2.0",
+      "tarball": "https://registry.npmjs.org/@computer-use/provider-interfaces/-/provider-interfaces-4.2.0.tgz",
+      "integrity": "sha512-IXf4GVnerK26lfqnERLhp+LhR05B+oeTCvTZ7EiVJKcxV0ofD+KZRrRZUg59GOOkKKxsQ+N5TF75F1SPine3xQ==",
+      "packageJsonSha256": [
+        "49da2c1546f5c98fd9250c2fe1debbf111b47afe10f7ddfdb2971179d725631d",
+        "2a8ff996eb8d42eeda37ef7fccdd7b705b0b42b9c29fd8c7c197dc41ecf4db08"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@computer-use/provider-interfaces",
+          "resolved": "https://registry.npmjs.org/@computer-use/provider-interfaces/-/provider-interfaces-4.2.0.tgz",
+          "integrity": "sha512-IXf4GVnerK26lfqnERLhp+LhR05B+oeTCvTZ7EiVJKcxV0ofD+KZRrRZUg59GOOkKKxsQ+N5TF75F1SPine3xQ=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/@computer-use/provider-interfaces",
+          "resolved": "https://registry.npmjs.org/@computer-use/provider-interfaces/-/provider-interfaces-4.2.0.tgz",
+          "integrity": "sha512-IXf4GVnerK26lfqnERLhp+LhR05B+oeTCvTZ7EiVJKcxV0ofD+KZRrRZUg59GOOkKKxsQ+N5TF75F1SPine3xQ=="
+        }
+      ],
+      "files": {
+        "dist/lib/clipboard-provider.interface.js": "8eb0e2b98182bd25bf93de44a1c3c6ee666119c73d0d1101d771e1e2c0215bef",
+        "dist/lib/color-finder.interface.js": "52593007ed3239ecbf84ee4e8b4c30fbab886ddd31725cc9da6fe6a3af8a9052",
+        "dist/lib/data-sink.interface.js": "59edea24b24f26ce064e3134aa732575cc3db5ba82bf40743cc6adc44e7e74e3",
+        "dist/lib/data-source.interface.js": "70bc880b7d22955c7273a9cc7f0cb193fe72b949e60f7c6a5c75576a774ed1fc",
+        "dist/lib/element-inspection-provider.interface.js": "2b392e56a98589d3e5d4d84f2b8c581e017bb9e3af2ae759aa64065c92522e34",
+        "dist/lib/image-finder.interface.js": "ec2a1afc60fe2736828d9c273bfeba3c309df66f818495a53952da858a036bae",
+        "dist/lib/image-processor.interface.js": "cf268af115d037b6c6b3b1a2dc285fb3c7c22ed114a4233fcfb0624f583a4a5b",
+        "dist/lib/image-reader.type.js": "33d077cb98de99c606622bc322be9edf9af3e637696209241f253beb10e64029",
+        "dist/lib/image-writer.type.js": "cc2a4f5604aad79b396fffb9c2c89ee51f306441ba4d2a90ab62b59a74e2f1ca",
+        "dist/index.js": "8cf3db1a83f2803491c453f900d61de110051f66f66dd571b063c4a48241a85e",
+        "dist/lib/index.js": "1b6bb68d74b60ffc42cdd900e5c0787846a3f9b0357e956f4da2c5616d67ca09",
+        "dist/lib/keyboard-provider.interface.js": "c5fd96a028792f25f87af932133773ac0047aa471ca00d8adbfa5bf70e16d80f",
+        "dist/lib/log-provider.interface.js": "dfb485b97ae248577573e098e196f190dce0b7b2581d98f0b089e09090408276",
+        "dist/lib/mouse-provider.interface.js": "e2f3179362e86b869b2bbd0d7d553d1a3885e8b6397175f5bbd296f79dab1dcb",
+        "dist/lib/provider-registry.interface.js": "458d17c2340e202c5451467f1c84b4ebd1602ad682c59f1b5f26e083b4a735d8",
+        "dist/lib/screen-provider.interface.js": "1da889d67fabacb415122b65bce1c1a4237118878a02e0aed874eae6ba54de1b",
+        "dist/lib/text-finder.interface.js": "6ebabe25d77f6d7c77dd41e45042938725d7a5c719afdd5b742b8b3815640e8b",
+        "dist/lib/window-finder.interface.js": "c1486c719334aa0594c2a744573f52ae787b4e17f83c526b7d4a675eeb1da481",
+        "dist/lib/window-provider.interface.js": "5544f58d77822d334a100eb1717b20f30fca8d84df165b2fd86301206a3961d6",
+        "package.json": "49da2c1546f5c98fd9250c2fe1debbf111b47afe10f7ddfdb2971179d725631d",
+        "typedoc.json": "ce32d5598c6e22a53eaf37281286c1060aafad38bfba521af4bfb1ccb3112b99",
+        "dist/lib/clipboard-provider.interface.js.map": "80a9b32994ca8a925064691726b80cd694be74eb1f582c97663a1ccca689493b",
+        "dist/lib/color-finder.interface.js.map": "0da090493f5a7c4837df47c358969ff3586d73da9560844b6aadd910e76bfc6c",
+        "dist/lib/data-sink.interface.js.map": "0e6ce6be50a777b5067b2aeea5a5fb69f28d8a2880608e3c435ecd194714936a",
+        "dist/lib/data-source.interface.js.map": "222d6dd48c40d5eb174ffc2f936ee48e0212b91f761b27b60d981f39dfaba7bc",
+        "dist/lib/element-inspection-provider.interface.js.map": "8cb22adb744216f70d80750ba9c409da42e2c29a76bea6e07ea35a1c0df5e362",
+        "dist/lib/image-finder.interface.js.map": "dd729fd142a701014075bceb46389de3027d459712b96ef9a498a6737ff764ba",
+        "dist/lib/image-processor.interface.js.map": "fa56a946ce14509f1bd529d3b427ff18d1773d1132af391beea596d822bc38da",
+        "dist/lib/image-reader.type.js.map": "4db204434d07ad9da4128e145d878e61e09d47a12c26d57e59a4e5f6aed7ecb9",
+        "dist/lib/image-writer.type.js.map": "75d3f84b6aec1b05f68b8a074a713cf2a91a42ff42ffc1a0bfe95051365c68e7",
+        "dist/index.js.map": "03a23957cf50e146b111ea2c702f8d716fb2aac9705ab8c0fd91262a87141309",
+        "dist/lib/index.js.map": "468797846a410d4034a1b6dc2d174b1bfba0f6f61a8abeea1136b82aaa2285a0",
+        "dist/lib/keyboard-provider.interface.js.map": "54ba3a9f6e262e4467cb5ce1e4da0f5a5a4268483a479ec568234163323b991e",
+        "dist/lib/log-provider.interface.js.map": "79ed889a30d5a001f0d42666020b1151719b98614bbc6f6b87b084306dbf0e39",
+        "dist/lib/mouse-provider.interface.js.map": "68d22010161abb817ac4d527a74ff24b5243f83a4d190984b8aa74f13638af1c",
+        "dist/lib/provider-registry.interface.js.map": "df9cdcea01cf7d682e47d0bfde3074e3ff0410268c3a7ada68c30d61f354a914",
+        "dist/lib/screen-provider.interface.js.map": "4787147b928faa8e3cce18fc4b8cb914fbfb5c913eff8b9bbecc51e64e82e299",
+        "dist/lib/text-finder.interface.js.map": "57d1df0cc1a2e168c1d376f137cecafcbb62f71a15600715a97095008bcd5035",
+        "dist/lib/window-finder.interface.js.map": "8dacd127a0fa9288d745556108b45196f4b8815afb4666fa58e02d1c3f1dd8ac",
+        "dist/lib/window-provider.interface.js.map": "f6791bdae2609a54d683d68b8c4b93469a268bf9634725b3d379e3ee8150a7dc",
+        "CHANGELOG.md": "94d01b4a1fabee7e131cefd4ce4b6a7abedf3ef2b531feeb5b59b8fd09ce4d51",
+        "README.md": "94238dc4500df2b372ebb939b8370727955357344110897ee8f8fb8eb00e9543",
+        "dist/lib/clipboard-provider.interface.d.ts": "a21193c6300dd608f6e2bad11bfe8ac94e503efcc94c21a925d80200988fd6d1",
+        "dist/lib/color-finder.interface.d.ts": "5b1ba5307b2b771aaaca4dad1f1ec23f082ca2f80d96aa6139c11a8d6e27796d",
+        "dist/lib/data-sink.interface.d.ts": "0775aecd90882e2346af17d8a3b64379dd905121d26b1264cbc3c5ed5294477f",
+        "dist/lib/data-source.interface.d.ts": "a3d23e1cbde62534c5913dc18842ae3463c67e5f2583a446223537ae9b456cdd",
+        "dist/lib/element-inspection-provider.interface.d.ts": "0313c6b1236eb2a7505aa2351f7d23e34c7705188835e9d6d493b12265a2628e",
+        "dist/lib/image-finder.interface.d.ts": "a9d2955de05287ab98704cad6a8e7e4dc7e9be5ffbe82788a182629e3b762c8e",
+        "dist/lib/image-processor.interface.d.ts": "9a0a875846141207540e726c1235c0982a42722371a975e6e70df816609349e2",
+        "dist/lib/image-reader.type.d.ts": "e8dbe8b2699d596463e14fd9ea48fd5ed53af1778aae468ab07463eaa4eba0a0",
+        "dist/lib/image-writer.type.d.ts": "96d450adad4ea06972c0ae9a24a258bc97a92ff2ebf856c49c0bd58c8728f2f5",
+        "dist/index.d.ts": "6f308b141358ac799edc3e83e887441852205dc1348310d30b62c69438b93ca0",
+        "dist/lib/index.d.ts": "912af9833c890e941ced6f129a1312d8a4ca9e1a7b2285463a25929ac2269d10",
+        "dist/lib/keyboard-provider.interface.d.ts": "af79b99990086ee620a804cd711e156bd71987a3454c5a0968185a45cd15f082",
+        "dist/lib/log-provider.interface.d.ts": "8ce6962854389431f091a4920eb83d7f3b95931e155dbceb75a2fb4efd68f154",
+        "dist/lib/mouse-provider.interface.d.ts": "f192740fba91e32b10749728eec1f393025131f9a41132aca4c14848db0db80b",
+        "dist/lib/provider-registry.interface.d.ts": "e29b4187311c5daf152c02a2d631f12160e03803301cd4356de9f62b5fd922a1",
+        "dist/lib/screen-provider.interface.d.ts": "78e9d49f916bef5a2b6833b01bab32c3654acdf291ce3b753bf5bbbf0b5cafae",
+        "dist/lib/text-finder.interface.d.ts": "a8bb370af7f5de79c031720a0fb9fb3ce8c9c552cf1f420f3ae80462b9f3646c",
+        "dist/lib/window-finder.interface.d.ts": "bace87509e44306d845f50e773622c13b8eccf61c0bdf3e9126bd91ead000953",
+        "dist/lib/window-provider.interface.d.ts": "6824ad3b72cf2eab0c3a3cf7029920246cee487d36ba8041b438089dece35bcb"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "computer-use__shared-4.2.0",
+      "name": "@computer-use/shared",
+      "version": "4.2.0",
+      "tarball": "https://registry.npmjs.org/@computer-use/shared/-/shared-4.2.0.tgz",
+      "integrity": "sha512-8kYhhKS/icfuV87jKUbbpfim2Qx7KkX2YhhKOk1dI5ijx9qEhwJ7xp4r9UQ2PlPgAVd20aiKohr+hwfVTAje4g==",
+      "packageJsonSha256": [
+        "63492493b523f1d8d2808ea49db4fe077e61374d511f377bbcf4eb86c43053d6",
+        "26a5cd79fbc869787f4ecd96612e390e757287e0550c010edbe1fe55702a5008"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@computer-use/shared",
+          "resolved": "https://registry.npmjs.org/@computer-use/shared/-/shared-4.2.0.tgz",
+          "integrity": "sha512-8kYhhKS/icfuV87jKUbbpfim2Qx7KkX2YhhKOk1dI5ijx9qEhwJ7xp4r9UQ2PlPgAVd20aiKohr+hwfVTAje4g=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/@computer-use/shared",
+          "resolved": "https://registry.npmjs.org/@computer-use/shared/-/shared-4.2.0.tgz",
+          "integrity": "sha512-8kYhhKS/icfuV87jKUbbpfim2Qx7KkX2YhhKOk1dI5ijx9qEhwJ7xp4r9UQ2PlPgAVd20aiKohr+hwfVTAje4g=="
+        }
+      ],
+      "files": {
+        "dist/lib/enums/button.enum.js": "fca04356b35e1770e165d41923ad244cc2b8067c0399379e883ed18702182f88",
+        "dist/lib/enums/colormode.enum.js": "690d6ef0709926ec2c031541caf76ea7c4c2c02e86a25592094623d92da07188",
+        "dist/lib/enums/file-type.enum.js": "49429db02d980e42e228c2b2f1af88093bd55a5af4c34ffe76994444a20be798",
+        "dist/lib/objects/image.class.js": "81175f9b4e9c1199c397963086c36ddb92276153e017c95beb5bd13a4221a7b9",
+        "dist/lib/functions/imageToJimp.function.js": "872c6599f7b9b9f66dc4de9cd4b9b319f683f53f1aef660a1688175c0bde9195",
+        "dist/index.js": "8cf3db1a83f2803491c453f900d61de110051f66f66dd571b063c4a48241a85e",
+        "dist/lib/enums/index.js": "6082caf36a577b4384dfe130830e06d8401d2177456dea391aaad3c7a6084745",
+        "dist/lib/functions/index.js": "2cbccf5fbe728eba69df1a656da01f25c83d76954ef5761628607b36df31535a",
+        "dist/lib/index.js": "fc83c6d8cb79bd7d923bad6c456f3a965684fc650a66401f629d0ec5086f0529",
+        "dist/lib/objects/index.js": "be44f7eac7aa416fdfcd27916d336ff539efaee50f954137d5ec989443e7b826",
+        "dist/lib/types/index.js": "140be098fff820c5d363f02ea456ef747074c98c05330401c733c0dd0d82075a",
+        "dist/lib/enums/key.enum.js": "39193ed5f5daf728d81b563b8276d5607b82318738aa8390edccaafb961133ab",
+        "dist/lib/objects/match-request.class.js": "a4e50183348eca4042e570e550a41f08ac4ca0e810f32835256c6253ec746dd9",
+        "dist/lib/objects/match-result.class.js": "d0d4f15a20e09279a413260ee9ea4d3fe8373d0effe9f3d24ffca78332f6b2eb",
+        "dist/lib/objects/optionalsearchparameters.class.js": "f659b7912981aadd326a77a7506b4ffd9f8027bcee004d875e3a276f2e1c174f",
+        "dist/lib/objects/point.class.js": "ae495a9e54edd6d5daeaff8052363415037f94daeab57910629e636413e54b75",
+        "dist/lib/objects/query.class.js": "885df372c0a04e174ab7d5f7a87816d6f275a194bbf73d7f6a1675477acf3238",
+        "dist/lib/objects/region.class.js": "9dfca723aabc9aeee92f356aacc5e8fc9e9c810dacdffb4e792c909529be6bf3",
+        "dist/lib/objects/rgba.class.js": "5355d3fdd8d9de6e88f06e45b8ae8929763c2829262947ddc877a599b6879e39",
+        "dist/lib/objects/scaled-match-result.class.js": "7b7f6873053eb6849d2e05b0f135314e6c55ea04401bf06558e4fc9b682fa45d",
+        "dist/lib/types/screen.types.js": "3a8c06de1baefc24ec151f6cffc1dac3ff5186f48cd1c292e6ff7cb291e949f8",
+        "dist/lib/objects/size.class.js": "3ff0b47791c5da3ee215439580294618a4de79468fa0421423a734e6fe61a1ee",
+        "dist/lib/types/window-element.interface.js": "a25c2f99cd1f0af1947aadaf90e4c013e3b819c2b033a71a8ce9e44de1f5f55d",
+        "dist/lib/types/window.interface.js": "9354424d3e9b28395a4220ee5c1a08027e1a6c0d3bf7927e4c94c2cd77061b94",
+        "package.json": "63492493b523f1d8d2808ea49db4fe077e61374d511f377bbcf4eb86c43053d6",
+        "typedoc.json": "9d0dd1cc191fa7dc2829d99b776d4de18c094ef34e8eff9e1b4c184468b3f707",
+        "dist/lib/enums/button.enum.js.map": "a38ec2fdf81966547976c38de4305245bbae044b8b953217f26466c4daa02e8c",
+        "dist/lib/enums/colormode.enum.js.map": "ec6dede874003cd0cceed2f093964edcd9291dcfe4d23c034148c793721e41c5",
+        "dist/lib/enums/file-type.enum.js.map": "27fbf97a12c0627f475cd9d6ef94cb717653748b39d95665f33aefcdf7660763",
+        "dist/lib/objects/image.class.js.map": "2d85ae50c8127d6f63987a6f6d6d3b4f4d500f92a858617a07dc99cec2ef801b",
+        "dist/lib/functions/imageToJimp.function.js.map": "1423e41f4ae819c0b8b4a40d605bb7e96ff9a0424ab2c0b486fb022e776e61c9",
+        "dist/index.js.map": "03a23957cf50e146b111ea2c702f8d716fb2aac9705ab8c0fd91262a87141309",
+        "dist/lib/enums/index.js.map": "e432e2ae2bd751adeed53e4ccfae05bc2f3f1123ada9f3bb57a79ddf58a4db31",
+        "dist/lib/functions/index.js.map": "ff36ce83b7167a528f0c8b4a4c34c7da2f22503e078a42e846811dedceecedf0",
+        "dist/lib/index.js.map": "fac4a490e8b605ac38554959f066aa61366314e4adc0f697a0cfc9203e9bf06d",
+        "dist/lib/objects/index.js.map": "75351cf268fcde4be28331d4fd63f2f897ce793b902c54f6974f1ed994dcffff",
+        "dist/lib/types/index.js.map": "4296d6822391b96faebb08ceb1bebe19db566f6a8df148fe28e7d726c03079c0",
+        "dist/lib/enums/key.enum.js.map": "a04a9ced28ad7d8f250776d28600e3eb6a0537eb079142a4576b096cf9f7e9ae",
+        "dist/lib/objects/match-request.class.js.map": "a4c3d571778c69bf85c14cb3b1f5051315d0cc3623e7d099cb3b611bf41b3a45",
+        "dist/lib/objects/match-result.class.js.map": "6eb5b195901223d5aeeaca4dc26f3073a6609bbb485f30f54d0ff17d8b121bae",
+        "dist/lib/objects/optionalsearchparameters.class.js.map": "a51b032cd38b2083b0a4fba34c379427141dbe426ed1bdafb20c1e4573423ddb",
+        "dist/lib/objects/point.class.js.map": "7e7937c6736a5b9970cd63778c7a7614af620fe633f5b77319f7d6b0c32483d6",
+        "dist/lib/objects/query.class.js.map": "1ca88271d1f9f032b43ba75209f75252d773d73bc152acc8a9e6fd2242c46d13",
+        "dist/lib/objects/region.class.js.map": "010daf381f0359da26fcc0ab9e07b43a41c28bb36c165420768441f342c7719b",
+        "dist/lib/objects/rgba.class.js.map": "1353ea4b3f1f2f562b947500d905885009dc65f47304470000d6138862e03451",
+        "dist/lib/objects/scaled-match-result.class.js.map": "73e0cd17c9c42195a726422ad238dedd3b77c9176492f45036f852804834584f",
+        "dist/lib/types/screen.types.js.map": "b19ab7eb28066bd465303ebefe1481d642e7673560fee90e3c50abae5c8287bb",
+        "dist/lib/objects/size.class.js.map": "d629da4da3e9712b7e151b3a0dab9f5afe1ade32ebb32a361e44821652904135",
+        "dist/lib/types/window-element.interface.js.map": "a6139cd2a359266a758214d1ca951bcac5313873b5a5cf9b60885d88ed147f60",
+        "dist/lib/types/window.interface.js.map": "61fd9527043292f70e4b58835fade9ffe99d7ba250094da72fd9489bb203c983",
+        "CHANGELOG.md": "94d01b4a1fabee7e131cefd4ce4b6a7abedf3ef2b531feeb5b59b8fd09ce4d51",
+        "README.md": "32524f84dbac4fc49c93c26ffcc10e120af4166529fee47e333867ff68e85426",
+        "dist/lib/enums/button.enum.d.ts": "8e526d1de77607d59403e9f4594d161ccf7c1d1d36cc2606254c5548448030a1",
+        "dist/lib/enums/colormode.enum.d.ts": "e66d25b9285cc0b215ead4d89cf178cc77fb13d92d09ca3b6cdb24821938daf5",
+        "dist/lib/enums/file-type.enum.d.ts": "bd7d95cd72a3fa5cc1abc7938a4b23a885174204a260620b02ea7c2a9fd1c765",
+        "dist/lib/objects/image.class.d.ts": "49c02f2259daaa99487841c1d571532be9bc04dd83997072bf755834eff8b492",
+        "dist/lib/functions/imageToJimp.function.d.ts": "8932c1ef9b714363240521afa55d0c8dd823a3a62978f4edab360861a42a05ea",
+        "dist/index.d.ts": "6f308b141358ac799edc3e83e887441852205dc1348310d30b62c69438b93ca0",
+        "dist/lib/enums/index.d.ts": "bc2efb6f91a3c33dd80fc2afd1ee52a0907c4c751d9fcd9bdba4bb79355b11cb",
+        "dist/lib/functions/index.d.ts": "0e74bcf671f49e6e595c251a0b6dc2cacf426c2da893411a445d80cb371722e4",
+        "dist/lib/index.d.ts": "29fb9115eb68eaf2517aa10131857dbfb073585a8bb2d661cae6e7b08927ed06",
+        "dist/lib/objects/index.d.ts": "0c94073a09b9fbe194339e679108e71c344440188c8abc06353786be223bc201",
+        "dist/lib/types/index.d.ts": "6496c7eb888bf80b8a8dc17174d41a7f75715566e2a48524fef8d40d13f8141d",
+        "dist/lib/enums/key.enum.d.ts": "58503bacc389ea581b95ee2a1366df1e9728abd5729c382489ac19bc01e9fc09",
+        "dist/lib/objects/match-request.class.d.ts": "493f5dc50d7f2c335189b54c8967e023a2920c9cdd2cb1174f392429f25abac0",
+        "dist/lib/objects/match-result.class.d.ts": "0d5ceec6190809250601f73463e331b035fe2a6ef94cb00d71779e7aecefa59c",
+        "dist/lib/objects/optionalsearchparameters.class.d.ts": "31f84ebbf87ed297e06bdf9b0f441d055f0033115766e321363bc8dccfaa1e47",
+        "dist/lib/objects/point.class.d.ts": "0f97bb6859fdb2c32a7999350eb69986a1afb39f044a10fc49c7515ddd28b7b1",
+        "dist/lib/objects/query.class.d.ts": "f08bb7d1790b1d493af70cb0bc677c54dda2cafb01a1c1a7e6c936d60e04a5e7",
+        "dist/lib/objects/region.class.d.ts": "89a9f5b926b6ac035ca46101a0f3ad5abf79ad7215b065c683451c318312e179",
+        "dist/lib/objects/rgba.class.d.ts": "86282819f1fd0fc4a4cc9985add16a30c405098ebd90c51c9fe22b0b931f3f97",
+        "dist/lib/objects/scaled-match-result.class.d.ts": "2e2b173a6c5f829ae02b37ea0ff3384e0c6bfc39d5f6e161fdb817a14dbadc1f",
+        "dist/lib/types/screen.types.d.ts": "af90fdd594403f5e51078e10df304c89ee8c17a6a47be90caa326cf8af078850",
+        "dist/lib/objects/size.class.d.ts": "42f304595902540a7e95ee80750f3e319c2bed9f0b9b8b9a5835211937117957",
+        "dist/lib/types/window-element.interface.d.ts": "2fce5f5ba107163589381b32f719cb4bed1c050024b6fb857968804d473f70e4",
+        "dist/lib/types/window.interface.d.ts": "76a85dd4fc6b2ada32ced13b0f4543d0a1d40ae10af1f147b0006ff6cfff77b5"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "napi-rs__canvas-darwin-arm64-0.1.100",
+      "name": "@napi-rs/canvas-darwin-arm64",
+      "version": "0.1.100",
+      "tarball": "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-0.1.100.tgz",
+      "integrity": "sha512-2PcswRaC7Ly645DGt88///zuFDhJxJYdKAs1uU3mfk1atYkXufgcgLfBpk6Tm12nCQBaNt1wpybuPZ4qOhTo8A==",
+      "packageJsonSha256": [
+        "612e133d91d7367657657ff68f4bd011e6ce8b167093442e0fe2b5733da74814",
+        "ff9fdd25c2b4d26b2c62c580ce1c0326b5de0f401dd699231d528f28d20da06a"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@napi-rs/canvas-darwin-arm64",
+          "resolved": "https://registry.npmmirror.com/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-0.1.100.tgz",
+          "integrity": "sha512-2PcswRaC7Ly645DGt88///zuFDhJxJYdKAs1uU3mfk1atYkXufgcgLfBpk6Tm12nCQBaNt1wpybuPZ4qOhTo8A=="
+        }
+      ],
+      "files": {
+        "package.json": "612e133d91d7367657657ff68f4bd011e6ce8b167093442e0fe2b5733da74814",
+        "README.md": "5aa2bd4b03c0dca62788c5e83af36ec2cd8f937ca34a4e61e37733b5be4d09a0",
+        "skia.darwin-arm64.node": "a9c429727b4a133e34e60c5ffa7f701541ffe941afa9574abe6273a1648c342d"
+      },
+      "materials": [
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/LICENSE",
+          "sha256": "8802fecf9da4367bc23bcf20b21cc143785fc6c92b152f3fa7fbe6ce08d344d6",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://raw.githubusercontent.com/Brooooooklyn/canvas/db337893b9b53483050ca7b24c6d306e4da06741/LICENSE",
+            "commit": "db337893b9b53483050ca7b24c6d306e4da06741",
+            "path": "LICENSE",
+            "sha256": "8802fecf9da4367bc23bcf20b21cc143785fc6c92b152f3fa7fbe6ce08d344d6",
+            "gitBlob": "e0024071be828a07166aef9825c50a1912f652ac",
+            "suppliedGitEvidence": {
+              "commit": "db337893b9b53483050ca7b24c6d306e4da06741",
+              "gitBlob": "e0024071be828a07166aef9825c50a1912f652ac",
+              "url": "https://github.com/Brooooooklyn/canvas/blob/db337893b9b53483050ca7b24c6d306e4da06741/LICENSE"
+            }
+          }
+        }
+      ],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_native_component_provenance_and_notices_unverified"
+    },
+    {
+      "id": "nodable__entities-2.1.1",
+      "name": "@nodable/entities",
+      "version": "2.1.1",
+      "tarball": "https://registry.npmjs.org/@nodable/entities/-/entities-2.1.1.tgz",
+      "integrity": "sha512-Pig3HxDIoMgjdEH8OCf/dkcTmLFjJRjWuq8jSnklu284/TKOPibSRERmOykiwmyXTtv61mP+44f3GMx0tLAyjg==",
+      "packageJsonSha256": [
+        "3975d688f6b606b72aba3ef2f5b4498bbef6890b270d4f25b6a206bbcf7b3b53",
+        "7ac1422dcd822f670c06febe2dc58aa786d1abf522e3a55058fa3ed82161ce27"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@nodable/entities",
+          "resolved": "https://registry.npmmirror.com/@nodable/entities/-/entities-2.1.1.tgz",
+          "integrity": "sha512-Pig3HxDIoMgjdEH8OCf/dkcTmLFjJRjWuq8jSnklu284/TKOPibSRERmOykiwmyXTtv61mP+44f3GMx0tLAyjg=="
+        }
+      ],
+      "files": {
+        "src/entities.js": "da0695ca178fc6167d576b0d06f45b7ce32f60a4b2839a0026cd1424a5e0f679",
+        "src/EntityDecoder.js": "cf01acfb0194fc32fe6112d13f65885aa3cb755f36ec6de2d1d3cafc5533ea4d",
+        "src/EntityEncoder.js": "9493e54bb1ea661532bf397378c272e59b12800cd69f4663070009f0087fab0d",
+        "src/entityTries.js": "40e90f52cce6863898f889f94ae6049dc6b11eabc5247970b8c7b671d243d32e",
+        "src/index.js": "74782baff73d4aa2fcd38e1197a04e4d75e2ffe9907d1d2c1d51377faea4fc50",
+        "package.json": "3975d688f6b606b72aba3ef2f5b4498bbef6890b270d4f25b6a206bbcf7b3b53",
+        "README.md": "57c1ecfd98f6262d516e66ea0d23697374b7dba3cb030897f3b5f40a38e80873",
+        "src/index.d.ts": "f2baedbcb4cfcd8b68cce342e507857b91e5d4cc0b6dadf4f5d576d7efb6cfae"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "tokenizer__token-0.3.0",
+      "name": "@tokenizer/token",
+      "version": "0.3.0",
+      "tarball": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
+      "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==",
+      "packageJsonSha256": [
+        "a677763aaed22462b4f9df2526b1038cef3a90bc6cf80be27b4e65d0f14472a9",
+        "b823d44457ed52bba528f09dfad54b81847f108cbf5d280b3674561ded022a2e"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/@tokenizer/token",
+          "resolved": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
+          "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/@tokenizer/token",
+          "resolved": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
+          "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="
+        }
+      ],
+      "files": {
+        "package.json": "a677763aaed22462b4f9df2526b1038cef3a90bc6cf80be27b4e65d0f14472a9",
+        "README.md": "a88c936c259cc261d5b37a2433735e9819e01f824bdc26e644d46ccd3055c8d7",
+        "index.d.ts": "e46cf250ea18d419593c3d20e3cab8465158dd7b891a46f30ca382a109a55131"
+      },
+      "materials": [
+        {
+          "file": "materials/tokenizer__token-0.3.0/LICENSE",
+          "sha256": "a88c936c259cc261d5b37a2433735e9819e01f824bdc26e644d46ccd3055c8d7",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "agent-base-6.0.2",
+      "name": "agent-base",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+      "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
+      "packageJsonSha256": [
+        "05daa619e51686fd21d15f987f943f6692c56b9f489f555cbaf42a4263d5c5e8",
+        "1c22afa50ae7fedb6d51d34394cccb31fc4ed27163271d3060355b044a5b5777"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/axios/node_modules/agent-base",
+          "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+          "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ=="
+        }
+      ],
+      "files": {
+        "dist/src/index.js": "13b6d658b492796461358e19fe1de30665ab2efb04c726b82530352cd364d4ac",
+        "dist/src/promisify.js": "7db1e28ac19b38be8cf3edecac66c7084bb00b65f6755a83309bcf10564b5771",
+        "package.json": "05daa619e51686fd21d15f987f943f6692c56b9f489f555cbaf42a4263d5c5e8",
+        "dist/src/index.js.map": "9e206a009216ba513d06c1e3e7e34a2a9cfb96b576c40e26645b4732e4420c85",
+        "dist/src/promisify.js.map": "7954e5478a28182dfa3d4a21f33ff687c6d725b0a2b8eed04633ea57eefba6d9",
+        "README.md": "f1425c3b72330fe4fb2aa5a2fb152e939bdf534692a32b5f0b38f74147b98556",
+        "dist/src/index.d.ts": "27dddbe3a7e8f45bc30547499461c74851580b74556570a4d7daa90ba90e2af0",
+        "src/index.ts": "63b9c52366354393361bbbd40158a3051d39a6e2db4ce564418e01e4ecd1bc64",
+        "dist/src/promisify.d.ts": "b0ec793e363fc425ceba310c8f93d54f90b95e6e3f9e73dcb245b284719d179e",
+        "src/promisify.ts": "b199581471074102ec7b2c89dbbff48249b3c9c9f9261d9fe32a110d76f7a526"
+      },
+      "materials": [
+        {
+          "file": "materials/agent-base-6.0.2/LICENSE",
+          "sha256": "f1425c3b72330fe4fb2aa5a2fb152e939bdf534692a32b5f0b38f74147b98556",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "https-proxy-agent-5.0.1",
+      "name": "https-proxy-agent",
+      "version": "5.0.1",
+      "tarball": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+      "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
+      "packageJsonSha256": [
+        "d41d9127cbed43df8e2d404bfaf41361942a8afeb82eb57ccf8515e04eb33d1d",
+        "5cb594f8198cff9c055f9fd0be3564d1230b4df27a40fe5279772dfdc4da874f"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/axios/node_modules/https-proxy-agent",
+          "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+          "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA=="
+        }
+      ],
+      "files": {
+        "dist/agent.js": "cdf5601776256dee031a1275186c409578ddba5aa441e66c0bea785f81e185e6",
+        "dist/index.js": "7f18e187a92bf3691b1728523ad5863f08ace4d25599535e1471f1f81e90f2cd",
+        "dist/parse-proxy-response.js": "24c1737b73db4c109a4cb184ca768b4e85f6cc6cfcc74ed3836388a995b3e557",
+        "package.json": "d41d9127cbed43df8e2d404bfaf41361942a8afeb82eb57ccf8515e04eb33d1d",
+        "dist/agent.js.map": "d9334573c441d153128eb3401147fdb3ba34ab48fd9fc85e88c2d389b3ce5cd3",
+        "dist/index.js.map": "87ee8e0ed31bf580ee85f91cd0a0a05528a8b3a34336bd7b150d082b412ce82d",
+        "dist/parse-proxy-response.js.map": "57a386a0393252db29cd35ca216a1da4e7a0896871cdc8c9caddec99572bb88b",
+        "README.md": "32f0856d2c43df7d05cca960fdee84e1e38ab545bd7b2186433dfa41aa90a712",
+        "dist/agent.d.ts": "ce0c414305ae2797f220adcd5e83079802d0b9879e62ca476f000b56a5d31adf",
+        "dist/index.d.ts": "67918f0ddd6271a88574dfe495942f4a6e982b9c3c1a2ce14c273f103691394d",
+        "dist/parse-proxy-response.d.ts": "743628d052d2c0370690985b2ea279aa2230b48c7b89db617e8a00fd92b2229e"
+      },
+      "materials": [
+        {
+          "file": "materials/https-proxy-agent-5.0.1/LICENSE",
+          "sha256": "32f0856d2c43df7d05cca960fdee84e1e38ab545bd7b2186433dfa41aa90a712",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "buffer-equal-0.0.1",
+      "name": "buffer-equal",
+      "version": "0.0.1",
+      "tarball": "https://registry.npmjs.org/buffer-equal/-/buffer-equal-0.0.1.tgz",
+      "integrity": "sha512-RgSV6InVQ9ODPdLWJ5UAqBqJBOg370Nz6ZQtRzpt6nUjc8v0St97uJ4PYC6NztqIScrAXafKM3mZPMygSe1ggA==",
+      "packageJsonSha256": [
+        "927e91584afcb396f3b918dacabdc9fd62c57ec1cf25d8a239e938c567cdedee",
+        "9a5aea4342d9df475e7f01c9db5569e46c60a7d44809c0ea6d059df6ed8442f9"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/buffer-equal",
+          "resolved": "https://registry.npmjs.org/buffer-equal/-/buffer-equal-0.0.1.tgz",
+          "integrity": "sha512-RgSV6InVQ9ODPdLWJ5UAqBqJBOg370Nz6ZQtRzpt6nUjc8v0St97uJ4PYC6NztqIScrAXafKM3mZPMygSe1ggA=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/buffer-equal",
+          "resolved": "https://registry.npmjs.org/buffer-equal/-/buffer-equal-0.0.1.tgz",
+          "integrity": "sha512-RgSV6InVQ9ODPdLWJ5UAqBqJBOg370Nz6ZQtRzpt6nUjc8v0St97uJ4PYC6NztqIScrAXafKM3mZPMygSe1ggA=="
+        }
+      ],
+      "files": {
+        "package.json": "927e91584afcb396f3b918dacabdc9fd62c57ec1cf25d8a239e938c567cdedee",
+        "index.js": "9d4c67179eea7a663e31d934ed30c22d98b1254f99bd912ae7d265c1acd14186",
+        ".travis.yml": "8bff2e9022aa04f1838856419c9d4e71d4d483cdaa57b3e628086e2e6960f5c4",
+        "README.markdown": "d3007562ba3088293ae6795dfe8dcb80a9cb93b568125c961fd250ebf6a8d46f",
+        "example/eq.js": "45cec02f9b3b0cadf98dc4dfd9fe17d9c5ee8d5332dcce16ee8931dd75b90ef1",
+        "test/eq.js": "82321815a2a89c715fecac6d9d18ee1f78692806594e96cbf4e76fc912b70a80"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "degenerator-5.0.1",
+      "name": "degenerator",
+      "version": "5.0.1",
+      "tarball": "https://registry.npmjs.org/degenerator/-/degenerator-5.0.1.tgz",
+      "integrity": "sha512-TllpMR/t0M5sqCXfj85i4XaAzxmS5tVA16dqvdkMwGmzI+dXLXnw3J+3Vdv7VKw+ThlTMboK6i9rnZ6Nntj5CQ==",
+      "packageJsonSha256": [
+        "449dfa5f225635dbbbb31d69dafcc1426819c22635fe43011557d575efdc3b4d",
+        "63efb50dc683a0949e2a69016a3f45a6e3619ac2872b6fdf1b77ee6900a08ea4"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/degenerator",
+          "resolved": "https://registry.npmjs.org/degenerator/-/degenerator-5.0.1.tgz",
+          "integrity": "sha512-TllpMR/t0M5sqCXfj85i4XaAzxmS5tVA16dqvdkMwGmzI+dXLXnw3J+3Vdv7VKw+ThlTMboK6i9rnZ6Nntj5CQ=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/degenerator",
+          "resolved": "https://registry.npmjs.org/degenerator/-/degenerator-5.0.1.tgz",
+          "integrity": "sha512-TllpMR/t0M5sqCXfj85i4XaAzxmS5tVA16dqvdkMwGmzI+dXLXnw3J+3Vdv7VKw+ThlTMboK6i9rnZ6Nntj5CQ=="
+        }
+      ],
+      "files": {
+        "dist/compile.js": "c417b690a7767c06223588acc3f2b174670c70b6526d2ce45d807569200c1588",
+        "dist/degenerator.js": "b0aa7819e5275637a2f253f830185dde787c4a5f857ebd8d3fbe5196cceb5b95",
+        "dist/index.js": "8fa57923cd354c8d29251cf0e2729525cb18bc9b7fd9d44722ed50d1f4db679f",
+        "package.json": "449dfa5f225635dbbbb31d69dafcc1426819c22635fe43011557d575efdc3b4d",
+        "dist/compile.d.ts.map": "990dd981f56ba25b901a40dd297230b22d50ea60fafd175b51e13cd27ac8b162",
+        "dist/compile.js.map": "9dfa0e2684fac847eb63f3f0db768966f92e2a32320e0d6fc240d58d251c36fb",
+        "dist/degenerator.d.ts.map": "44c43d9ac865139288ef9e85e9ae768cf3b3c8647089c0063c35640a92b578ef",
+        "dist/degenerator.js.map": "558bf7d5d68de4b2239b10425f34892772f651df7676a64763c1b9a8d95bc095",
+        "dist/index.d.ts.map": "776223c15417171c21a27e0d7416c1478a248282f675463bdf80f3c0b4269684",
+        "dist/index.js.map": "67bebe5f377183c2b0ab2d02637e4f27805031e0e17b7cd519037d0727316aae",
+        "README.md": "72da4948a54a285c3f6d2bc398147dc21ca082316919653dc7c1198dc55a271c",
+        "dist/compile.d.ts": "3c03b8f0f69b4c41faf9e72b08b82d2c337b22276dadc6e1112e22bc2e49968f",
+        "dist/degenerator.d.ts": "bcb6afd8e15e684d76fe45358df3084cdd6a52d1c722feaa84713d8b2d3c2a7d",
+        "dist/index.d.ts": "6f9755efbbb25de09ddd2ecc03a731dc8014a210226ed3201580a8d07a914417"
+      },
+      "materials": [
+        {
+          "file": "materials/degenerator-5.0.1/LICENSE",
+          "sha256": "72da4948a54a285c3f6d2bc398147dc21ca082316919653dc7c1198dc55a271c",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/degenerator/-/degenerator-5.0.1.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-TllpMR/t0M5sqCXfj85i4XaAzxmS5tVA16dqvdkMwGmzI+dXLXnw3J+3Vdv7VKw+ThlTMboK6i9rnZ6Nntj5CQ=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "dom-walk-0.1.2",
+      "name": "dom-walk",
+      "version": "0.1.2",
+      "tarball": "https://registry.npmjs.org/dom-walk/-/dom-walk-0.1.2.tgz",
+      "integrity": "sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w==",
+      "packageJsonSha256": [
+        "e801e7ca178bb7b9204aafb48c9f4a3bbc4e824a2bfde2e156f468443f9a34be",
+        "2e004bfbaff5e39469571d72e0b9c75a98f7b8fde90cf5757e4c0845526f6734"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/dom-walk",
+          "resolved": "https://registry.npmmirror.com/dom-walk/-/dom-walk-0.1.2.tgz",
+          "integrity": "sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/dom-walk",
+          "resolved": "https://registry.npmjs.org/dom-walk/-/dom-walk-0.1.2.tgz",
+          "integrity": "sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w=="
+        }
+      ],
+      "files": {
+        "LICENCE": "19338d17a974d1c747b3f6c618f08975b8908fdebccbc047c0e72b09daf6ddd3",
+        "Makefile": "6959ae93550bcee9e867eb4571c41f3de45156fab9436f736e0c93e1d7b42e13",
+        "example/index.js": "2375467164c9460848c55f5d2e5714bae4dbf09818194ce44f92059d476e6cbc",
+        "index.js": "e564ebf73d7b9883c533fbee030b7a7d97fe8919008d804ed5dbe08dc59d1991",
+        "package.json": "e801e7ca178bb7b9204aafb48c9f4a3bbc4e824a2bfde2e156f468443f9a34be",
+        "README.md": "c5cd87175b55670b060213cf0f5096c8b669987216583a4ebb5097087f8c0eba"
+      },
+      "materials": [
+        {
+          "file": "materials/dom-walk-0.1.2/LICENSE",
+          "sha256": "19338d17a974d1c747b3f6c618f08975b8908fdebccbc047c0e72b09daf6ddd3",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/dom-walk/-/dom-walk-0.1.2.tgz",
+            "path": "package/LICENCE",
+            "integrity": "sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "exif-parser-0.1.12",
+      "name": "exif-parser",
+      "version": "0.1.12",
+      "tarball": "https://registry.npmjs.org/exif-parser/-/exif-parser-0.1.12.tgz",
+      "integrity": "sha512-c2bQfLNbMzLPmzQuOr8fy0csy84WmwnER81W88DzTp9CYNPJ6yzOj2EZAh9pywYpqHnshVLHQJ8WzldAyfY+Iw==",
+      "packageJsonSha256": [
+        "87a58ce48fe7bcff062aba60684ec4413b960a91871f157f9f9028d2810cadc0",
+        "1d85d80d922c878d8e60073d2696b12ead522cd283c773c30a6f5f75ab0d202e"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/exif-parser",
+          "resolved": "https://registry.npmjs.org/exif-parser/-/exif-parser-0.1.12.tgz",
+          "integrity": "sha512-c2bQfLNbMzLPmzQuOr8fy0csy84WmwnER81W88DzTp9CYNPJ6yzOj2EZAh9pywYpqHnshVLHQJ8WzldAyfY+Iw=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/exif-parser",
+          "resolved": "https://registry.npmjs.org/exif-parser/-/exif-parser-0.1.12.tgz",
+          "integrity": "sha512-c2bQfLNbMzLPmzQuOr8fy0csy84WmwnER81W88DzTp9CYNPJ6yzOj2EZAh9pywYpqHnshVLHQJ8WzldAyfY+Iw=="
+        }
+      ],
+      "files": {
+        "package.json": "87a58ce48fe7bcff062aba60684ec4413b960a91871f157f9f9028d2810cadc0",
+        ".npmignore": "51eab0b97095475ec07841b66917158ebfc93cea441d0ce88e16559d61b68f23",
+        "README.md": "51784b88819eb02c755a1f374630acf8092d27f71ecd39abb7e23b1e68d8651f",
+        "browser-global.js": "4a8d2a57ea7c69b9cda01ef9b7c93008d0f555b4c1aaf6eca91ede482ffe33a3",
+        "index.js": "a7b4e49b4b4cd4c6649c254d1fa95911ce99aaf6679ac3131ffc7b3eb1782b79",
+        "cmd/extract-thumbnail.js": "354296cbb9a1e594247aa48d3f78c14160bd1a018e5a9e8f58f677f8ae6ffebe",
+        "cmd/list.js": "e854a219a02569ed0338bf5f8db69446d2365cea690bbf2620dbddfe54375c20",
+        "CHANGELOG.md": "a11363a6c44a885eb2ee457d84594433f59b3e7bc49c8d8089866700f1293b20",
+        "LICENSE.md": "3c58bdcad5b1313456b7cf639574708a84a80ee6bddf1a26f0c5fc4d7ab1830b",
+        "Makefile": "6331e5e028497fd7e58b5c172aee8b7cd64bc91400f58e82791f8f1b0bf2c4e3",
+        "lib/bufferstream.js": "147903d3912347dca0f51023750251bb01046b0db185abe81a3b715e6c895512",
+        "lib/date.js": "83cc8c88ad6da561d05ba26f76dd7b0373b808e6f50174ef882ae7347b297b7f",
+        "lib/dom-bufferstream.js": "2ee595b5fcf177be564ee0c52267264949427d8574e789afeddd1ff8f35de2b5",
+        "lib/exif-tags.js": "43de51462c6fdafe221adec00055cb5750e98d4ca0264933d19d098d8a4c152f",
+        "lib/exif.js": "9a3066717c9cc4a7547bdff7a5dbc13e0d49b47fef21f2d849c28ef0fa8f6ca8",
+        "lib/jpeg.js": "1bc03429e55af128aa52cdf23e6cf491a55dd2824426eb8b5722fdc24ab92ced",
+        "lib/parser.js": "b7a66f7856ac8a9fe8529fdf52c8e5d6586813e5e6c88c3df2382ba3fd55f394",
+        "lib/simplify.js": "c5eb9882e0ececf815d62555b873f4f1aa6c157b80572d05f85215639f4ef4e4",
+        "test/test-date.js": "3ac5da8697d569449b9d99be3745112a3b7572e1f7f2c6a5030531c378bec779",
+        "test/test-exif.js": "40af83fba7fed8c58d3a72fd2ff71bd300bff5f4ec0828e5f803b1c665ccc625",
+        "test/test-jpeg.js": "1ff523c0ef09a9193ed57e2a95996ed1fcf1e13e55a6708775847b65731d432e",
+        "test/test-simplify.js": "042c2cb1c1bb3beb958b179ecb8e262f592cbac3f75769b711ea8ebe4ecd603a",
+        "test/expected-exif-tags.json": "087f3016d69e040b8b7ac3ef3c88155667f105299abf8e0ea86b13dad4957e11",
+        "test/starfish.jpg": "b452b2b6f163d8346ebdc7720895c848ac2d6df9f9f0b66aa5e24c7495ba4fbc",
+        "test/test.jpg": "01074260f1d44288603f3ff82eafde8690f16f1f3ee2336171a9612fe763ca82"
+      },
+      "materials": [
+        {
+          "file": "materials/exif-parser-0.1.12/LICENSE",
+          "sha256": "3c58bdcad5b1313456b7cf639574708a84a80ee6bddf1a26f0c5fc4d7ab1830b",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/exif-parser/-/exif-parser-0.1.12.tgz",
+            "path": "package/LICENSE.md",
+            "integrity": "sha512-c2bQfLNbMzLPmzQuOr8fy0csy84WmwnER81W88DzTp9CYNPJ6yzOj2EZAh9pywYpqHnshVLHQJ8WzldAyfY+Iw==",
+            "suppliedGitEvidence": {
+              "commit": "979c143d748c75cadec336f07cf74036dce54162",
+              "gitBlob": "e8f2aab9fe3262c924c54cc053506257f7fefc16",
+              "url": "https://github.com/bwindels/exif-parser/blob/979c143d748c75cadec336f07cf74036dce54162/LICENSE.md"
+            }
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "hash.js-1.1.7",
+      "name": "hash.js",
+      "version": "1.1.7",
+      "tarball": "https://registry.npmjs.org/hash.js/-/hash.js-1.1.7.tgz",
+      "integrity": "sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==",
+      "packageJsonSha256": [
+        "b97d8c10d1ed1b3355394a6a0cf9846716e39e87d32ee13e7edd56195b9b8950",
+        "9541b1624fed9a53e8251a75a1b352fe09217d0d7383dc7b81f900385803858f"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/hash.js",
+          "resolved": "https://registry.npmjs.org/hash.js/-/hash.js-1.1.7.tgz",
+          "integrity": "sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA=="
+        }
+      ],
+      "files": {
+        "package.json": "b97d8c10d1ed1b3355394a6a0cf9846716e39e87d32ee13e7edd56195b9b8950",
+        ".eslintrc.js": "8e444a9ddb04a399acc2c0572a5d04440627fc520661724fdb2b4f0aa6b899b3",
+        ".travis.yml": "2cb91940f673319c7583c07114cc03fe0f8def2bebf06a42803b068eca737534",
+        "README.md": "5df660fe115c8ddcdb81c5d733c117b94abb706b91c26dac3ab7dc817dd9ba71",
+        "lib/hash.d.ts": "51bd18d47ab67727e72711355e713fa1d1e7d2cb79dd550af7b70308e8b57391",
+        "lib/hash.js": "2c2b7f9979522553acf1722b8d046f280a6364a6ceab10323ababf79247830ef",
+        "lib/hash/common.js": "e7f0b5c30a4fd0630cef07f95c54c96375c11a4666c77e5552251d6fa1409ef3",
+        "lib/hash/hmac.js": "88f1981433aa7bd1d53628ecec6dcb0dcaf72fba02b839398902dfea14e346ad",
+        "lib/hash/ripemd.js": "3f4884df0b5b47b4ba3d8170de1b61b1a0411da3cec3769f6c6eda523ef7e5d4",
+        "lib/hash/sha.js": "304f42a7945c5721bae922599e5a6e83fc47fdac08d540a15ad01fffa37ed161",
+        "lib/hash/sha/1.js": "122290d248cdb95b0d8e272a7bc0d273cae6cd647a69cd5bca44aa29f1030da4",
+        "lib/hash/sha/224.js": "b9479b26609538edca7a0a8631413fc15ceaf72777c4c2c0048489bd794f9aec",
+        "lib/hash/sha/256.js": "1a7ad8ed3c9f3ffa9c40097dcac66eae788c34a1210cbb70c7efbee7c1c07635",
+        "lib/hash/sha/384.js": "9e3230ff7f6dfce3f490156dc71bf99b3fa32a3d4c94b0166d13b5f0e2d769ca",
+        "lib/hash/sha/512.js": "bccd07a74dae7a719c9da801da393970bdb7ad999a0a61bf306cad5f400ca63a",
+        "lib/hash/sha/common.js": "28c0b8add8bc208930f5f9ca6e30844bc6d7eba06700e4fa04adc79d26807185",
+        "lib/hash/utils.js": "a4ca67e804ab52b5459c9c3e5e966043d53fc519213738d00c1de9e4d4d6a6e1",
+        "test/hash-test.js": "ac28ff6eb90a4911b4bf295115eca1705446e95d0fc93ee7dabb61513be6f1f4",
+        "test/hmac-test.js": "e84f19fe6b9fb2d09c646881a9ee83b5a1b258e05160cf14469a703d3f6a8321"
+      },
+      "materials": [
+        {
+          "file": "materials/hash.js-1.1.7/LICENSE",
+          "sha256": "5df660fe115c8ddcdb81c5d733c117b94abb706b91c26dac3ab7dc817dd9ba71",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/hash.js/-/hash.js-1.1.7.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "html-parse-stringify-3.0.1",
+      "name": "html-parse-stringify",
+      "version": "3.0.1",
+      "tarball": "https://registry.npmjs.org/html-parse-stringify/-/html-parse-stringify-3.0.1.tgz",
+      "integrity": "sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg==",
+      "packageJsonSha256": [
+        "40e04992e6d49282566cd9b2eb82747f15831f71c20a69ec791a502162d6818b",
+        "f7e3496b57603348977b0dfbc935dedcb8d6f888ced156881ad1eb983a035d34"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/html-parse-stringify",
+          "resolved": "https://registry.npmmirror.com/html-parse-stringify/-/html-parse-stringify-3.0.1.tgz",
+          "integrity": "sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg=="
+        }
+      ],
+      "files": {
+        "dist/html-parse-stringify.js": "88eb585730b8a9390566e758824fbd56bf0b9dc9d3e21047e4efc15d9b0b50a6",
+        "dist/html-parse-stringify.modern.js": "af1d80f0450b07b7a9e3699954a81d9fd62881130266e9bb7dee2ab2d9dd73c6",
+        "dist/html-parse-stringify.module.js": "338ef156c1264fd5ba13314775df208299b12e0f30ab4809b4e2ed679891bdc7",
+        "dist/html-parse-stringify.umd.js": "b0db5190f8895804747203e45a27b07f6b5626d57717c1ca34ac60fdd78f5794",
+        "package.json": "40e04992e6d49282566cd9b2eb82747f15831f71c20a69ec791a502162d6818b",
+        "dist/html-parse-stringify.js.map": "84533d4f37b39b3be185fe6cb81365fd5fe0f0fce439d002be452c0a1258052d",
+        "dist/html-parse-stringify.modern.js.map": "0fbdb43bc8ccf2ac1c4644daf877572c0c5bc97805cae25e3eecb23afbebfd06",
+        "dist/html-parse-stringify.module.js.map": "15730cf3a8676a4e7de460c76e1f3e07a719f0f1499a07f860b3f6a64ad851b0",
+        "dist/html-parse-stringify.umd.js.map": "73b42c16b48ba983ebd72eb5bb7d89513b6f1be1949eea8bc9d15df9575f50c9",
+        "README.md": "0d993e8258d7e8b40fbe58121912f95b68f0d035f6788000b27bd09d9ae51d0f"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "https-1.0.0",
+      "name": "https",
+      "version": "1.0.0",
+      "tarball": "https://registry.npmjs.org/https/-/https-1.0.0.tgz",
+      "integrity": "sha512-4EC57ddXrkaF0x83Oj8sM6SLQHAWXw90Skqu2M4AEWENZ3F02dFJE/GARA8igO79tcgYqGrD7ae4f5L3um2lgg==",
+      "packageJsonSha256": [
+        "30cc493ed51f008e9e1d0d0730759183294f9d1b39798032ee341dc6a17399f7",
+        "2285e89ef3a8cb06b78b382ceaebc8da06553a5e856b8b7fe92af37aa0ed86cb"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/https",
+          "resolved": "https://registry.npmjs.org/https/-/https-1.0.0.tgz",
+          "integrity": "sha512-4EC57ddXrkaF0x83Oj8sM6SLQHAWXw90Skqu2M4AEWENZ3F02dFJE/GARA8igO79tcgYqGrD7ae4f5L3um2lgg=="
+        }
+      ],
+      "files": {
+        "package.json": "30cc493ed51f008e9e1d0d0730759183294f9d1b39798032ee341dc6a17399f7"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "isarray-1.0.0",
+      "name": "isarray",
+      "version": "1.0.0",
+      "tarball": "https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz",
+      "integrity": "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==",
+      "packageJsonSha256": [
+        "93165ce56e458216c18240cd961a522af5b18e51da06f55d88ac552234455d95",
+        "5062c59991fcf8e16517ed950ae122f3191cd0af1493b2f4d90967e9fe60cf34"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/isarray",
+          "resolved": "https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz",
+          "integrity": "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ=="
+        }
+      ],
+      "files": {
+        "package.json": "93165ce56e458216c18240cd961a522af5b18e51da06f55d88ac552234455d95",
+        ".npmignore": "16d30e4462189fb14dd611bdb708c510630c576a1f35b9383e89a4352da36c97",
+        "README.md": "ff138e683771b187f3629c383db72ee7d632009010a36d08e18e8d2a34222ec7",
+        "index.js": "9b8c691372802da788c9c5f4e1ca2f1ed0b88ab8722176c2aea15e38ec86d249",
+        "test.js": "46997dc4554dd5a554b4883a9c13180c628bb36baadf8f89d2db5861f5239f44",
+        ".travis.yml": "9b9a2cce2d8b28843a1a10647f82300c8403ccde268df5b6abc6c349e5167b34",
+        "Makefile": "928dc8c1df0d6ff86d985f520278a4c83498aa6353ff3d942270aa117397a8d1",
+        "component.json": "f9e5ef95d8e8f65a5dcd3a200b38e5a13461ed95114dac053d908c391c12d731"
+      },
+      "materials": [
+        {
+          "file": "materials/isarray-1.0.0/LICENSE",
+          "sha256": "ff138e683771b187f3629c383db72ee7d632009010a36d08e18e8d2a34222ec7",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "khroma-2.1.0",
+      "name": "khroma",
+      "version": "2.1.0",
+      "tarball": "https://registry.npmjs.org/khroma/-/khroma-2.1.0.tgz",
+      "integrity": "sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw==",
+      "packageJsonSha256": [
+        "0d2145738d3cab828da4c5724b45e0dd2577c0ce84503c956d76897e93fa7de2",
+        "826db05e8aa8b2190321f733b5ee750cf99ae3423d0d5083e3b2b522321706d7"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/khroma",
+          "resolved": "https://registry.npmmirror.com/khroma/-/khroma-2.1.0.tgz",
+          "integrity": "sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw=="
+        }
+      ],
+      "files": {
+        ".editorconfig": "6715499d9486d49ac2d12d5e1d8c81f4d98e1053a52c9b62b48464bd99c545bf",
+        "license": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
+        "dist/methods/adjust_channel.js": "cec6acf3e6234427a35beb8ce5bc4374df2b49653d52da2434fb62248d63bc4e",
+        "dist/methods/adjust.js": "cb3d91c1190c97ceb9a4ef6a77b285b9d7eb58e426802c28781f27d62a223d41",
+        "test/methods/adjust.js": "9b749ac0ae995c0918917d47b8a1784b799878419894693e495d7bf8ef055d0b",
+        "dist/methods/alpha.js": "3ca83ccf6deb31fcfdf65326f5fec8a72890e89ed3b122f7d90cc0ae01c3de3e",
+        "test/methods/alpha.js": "a65e9170894e0d2de2a6414a50c83fda9bb42cde9579650f2b1df260258ff239",
+        "tasks/benchmark.js": "e5ffa50ca37c02df7584341741e947ed858c9e254e7eba57cecde5a908029d7b",
+        "dist/methods/blue.js": "dc3d45bc4c47c9426db0a5b548b9ddfc415361edb89844425267b07490c9e62e",
+        "test/methods/blue.js": "c51a35151c0bb1418e66288edea7ea1ed99fa568f2a8bf0da03450c82f479b9c",
+        "dist/methods/change.js": "196dcda5ad7044129a52a457680efae92e86933a9ff814b6b1594d4f7f87e3bf",
+        "test/methods/change.js": "377f312e9d1c4b4517923bddb1774634716489e08a6131b34cde2593ff406c6f",
+        "dist/methods/channel.js": "881c6e39067b20ef0204cb730d83bb28d65e69aac6d120ab81b713e2305243ee",
+        "dist/utils/channel.js": "6a4c576f50c8bfc211550291865f159c21dee1745b94a14542ec0f39c2d47146",
+        "dist/methods/complement.js": "326431e47ee66201ee5d852ca6e0122d57d73f68f7b5e71770f14aa224cc3370",
+        "test/methods/complement.js": "86e3ff5eefd40dc122a4020e87ff7ecf0898301b8597a61c24c81137ebd9b3f8",
+        "dist/constants.js": "4166c00634b27de54200ab6223e1252dbed596f453344ae8081454c3b643c486",
+        "dist/methods/contrast.js": "8b844da44290f015b24739e8616ebd8f987011baa25ff75ae11935fb8261eea4",
+        "test/methods/contrast.js": "f03156859dee3f1cc90977c10d6fd16657a466c2bb66380a6df4a0bf2ce41b77",
+        "dist/methods/darken.js": "005dda417a76783271cd8149a34f8712465bccc91c17fa6252cea7e766798104",
+        "test/methods/darken.js": "83ac3102c8eed6ace03b9a76d6ff0b909173840be395aa0365f4adafe0113070",
+        "dist/methods/desaturate.js": "53df4a264a9523a8d2d2d123bebe596b3dba0e429a288af94efd794911626f97",
+        "test/methods/desaturate.js": "849c910aa24833e9ece9583f7d090c06ac7d7d889f4eb2ab1f24b1dab8d0e01c",
+        "dist/methods/grayscale.js": "debd27ddf6f6c1bed43023961bd4f642dc084b5e9cd2f426ba867ca0d3221afa",
+        "test/methods/grayscale.js": "26dfe17046e75d15954ac7eeb746dacc9b142a96cfbee06f05c580dca6586113",
+        "dist/methods/green.js": "c817f7355ea3f6a4785b7de05efc795d90ba7e779a213d76043cd469c097f78b",
+        "test/methods/green.js": "7c8239fde577aab3c4585da0e94cacc03a14f50720ce476deae18c23cb94480f",
+        "dist/color/hex.js": "3afcf8941b4d6ad1e613b7d94c26f8965a81239cc0a533912720e65045c99646",
+        "test/color/hex.js": "9117292636b172fa8d4b2b49e1e82b4cfdc4af962759fab4ce49d723a93129de",
+        "test/methods/hex.js": "c3d1d800a74b8ffe08910ac38168d47df1e52fe11013b6a5ec926fc8a9680622",
+        "dist/color/hsl.js": "b6767f0ecac4b46fea44f3c86bddc26335e007363cf5f3bf3eaf0d89f3768d38",
+        "test/color/hsl.js": "b695abbef182592ae64491bb2e8c13e0f2f19932739631ebb0f1e96eb8433bbb",
+        "dist/methods/hsla.js": "eaf454da791cb2c9dea0c78f87e1405b185069bd51aeeba3fbb6313b3de86448",
+        "test/color/hsla.js": "526a645c26ee4f7338ffc523fcf4f0ad9d6b876dd72c2c9f8c5d8addea22d570",
+        "test/methods/hsla.js": "2d4b436392fc92e392ef7a5d484c05162357a32a90f440c50eba6ecde30a4a85",
+        "dist/methods/hue.js": "f8ef4a07c2e45f0cb8c7d4a81af8d84cf38b2d3379f1dc0790d0d3f80d93a121",
+        "test/methods/hue.js": "86670655574acb1ec8ec8db75dcfd6b6d797d62fce8576177416484cc143c8d4",
+        "dist/channels/index.js": "50dc111006608da002e7bd87e2531d5e0d830f88ecb0149d4cbb8ff8b2a96f94",
+        "dist/color/index.js": "b85e469e4d75f419fcf82aa8df4f6ce44e842505af4044404023c312eca5cceb",
+        "dist/index.js": "d680e9b6ce330c535af09ae4d40a3aef6d20af3c525986153ea226b9e99469ac",
+        "dist/methods/index.js": "d2b3b1c4681231ce37f75a7f24855ecb2e935abb7cd3d2694f1b28d97158d737",
+        "dist/utils/index.js": "45efcba4f74f17caac6e8432e6f00c2462c41ead6a9b130a1f5da8bdaec7bc19",
+        "dist/methods/invert.js": "35c4f2ab5b97a708c1f77c4a2ab2c9a1d1c6dd88ae9045ecad4de8d2c485a2e4",
+        "test/methods/invert.js": "77fa21904c8ebb28d09e83719fe1b7d95a33d243d81d5a4d4194e28870a64e35",
+        "dist/methods/is_dark.js": "3030ad5cb6a200b0875b1d9a2fc6092475fb43916150d05e0f8d843b30ae7381",
+        "test/methods/is_dark.js": "4623eba6501c65656caeedc5fc01b9b4229b450ca209d8a09c8e0fc36a828b09",
+        "dist/methods/is_light.js": "57814dbb6553fe5b42ffd20d1b4cf5949c5ba9def10a02b4daff1bf0e4b008b2",
+        "test/methods/is_light.js": "fdcd71f1c224b52470df4771e1770d69df68c645b679098a03631c0380357e97",
+        "dist/methods/is_transparent.js": "ffa4118274f08e22f1f910749f283da4ebb185fb49fc44904eff251136f00793",
+        "test/methods/is_transparent.js": "82da8688dddf5cd222a081ba937682c0d778a96fceaea7b5dc069c73a3138dbf",
+        "dist/methods/is_valid.js": "7fc3e540240030cb8bdaff218d064cf804f7dd9d5d540042c5c86dc3fa7d305e",
+        "test/methods/is_valid.js": "af951282dd92d51865e6fef0ee4d1388217abd9e9426afff7c38f4ab3ad7e639",
+        "dist/color/keyword.js": "3346e2ffc43741b809712bf7b2340814aa3527867e607eac0c5a5db51985aa26",
+        "test/color/keyword.js": "493c7dada3d69c4fca921bf1df9818a5f7d0020a53b47d33f0933fde492cc516",
+        "dist/utils/lang.js": "e5adf6c36fe79f2783e00f054ec830947734ecad28b2770749b622d9626c84f6",
+        "dist/methods/lighten.js": "293ec9233c7be19f9a2555663e9d62b1157e5bca12280d5782a218fcd608cca6",
+        "test/methods/lighten.js": "ddb225a314c9f34ef633dbb258a5dd71de230ce9cf3d77a327d27309bf37f1c4",
+        "dist/methods/lightness.js": "2c904b9aaf2a482a05989f071e95ba9ec681f671b383cc69c02641b8f8326697",
+        "test/methods/lightness.js": "46605b6f72420662d5799fe53d2e09929de10a0efec3a94a62f7cc7a1d3822e8",
+        "dist/methods/luminance.js": "3cfbcdfd73cb2e05176828815cfc14a88ef3d8bf467d664060c2d32e7e931a92",
+        "test/methods/luminance.js": "0b17796937e52f5b362413bd55a4c9897f59f05e1a14900da0697b9d27c9f469",
+        "dist/methods/mix.js": "febb7516c6eb170a769d36d5e2702366b5a787a3e695ca6fa5f1b702049c60ac",
+        "test/methods/mix.js": "9d77474172f880b74b600b67f28a49da6896c944d78acbc63560ef89a8faa81a",
+        "dist/methods/opacify.js": "a6b8d7795bf4a8acccd013fe1374fb59482a6e139108bdf34277359dfff81023",
+        "test/methods/opacify.js": "6fec856048d525441491ccb738faf061598c5b62853c90411f842935ecd36a7c",
+        "dist/methods/red.js": "734813498828df233c3fdf5c6ca6fb3d44a2adfb83bb79edf95bb5489f76a379",
+        "test/methods/red.js": "1282f6e09c5c03c64be0859fad999a7c4c9b7059a274d40c0bb3cdfe8526d8f2",
+        "dist/channels/reusable.js": "18078f69d0d9089a41824a193c00b01e51d97c1a6e1dad2c878d1c8b50f4ce93",
+        "dist/color/rgb.js": "937ffdac1196ae7c05103a15c9f199124c2aa5e32a472613dacf8b3701097e08",
+        "test/color/rgb.js": "267dc7879a69ea67437646d6a889e4fe5abb64bfd9b9835f10ebc2f90b4f33d1",
+        "dist/methods/rgba.js": "02d31f143e8af9b8a8d0c8ae61399f49b1a4af6531be2932e0fa134702734a11",
+        "test/color/rgba.js": "3e188275bea3e7d6bb11d1dcf5247306bf1854f1492f0b17a0057e9867d8db89",
+        "test/methods/rgba.js": "e7537636c21fc0a6e45bef3c0b657aac9f484851f89d78af1ff5422033f2afaf",
+        "dist/methods/saturate.js": "86234aeaef028981bd35bbd2bde3f5378677ad57d7f8c80d6b34a9ce98fc77b2",
+        "test/methods/saturate.js": "32143f6202e71423d5b95e056f22aab183ae7503c746d6fde4d39abb5a78348b",
+        "dist/methods/saturation.js": "d8a521b5d4a847b024486c50ad12404fd5d7f64a62097e9494585c71095fa4b1",
+        "test/methods/saturation.js": "73d7a4cf6dbdc0f0b9ae30e41a37a49ec37c84ff426255dcb8b820bcf1b131e8",
+        "dist/methods/scale.js": "de1e3f16d2efbe9f8989e71659730716dd4e9c2b76474b8bde2359a78c606f33",
+        "test/methods/scale.js": "105208b93b8d2f56b139b4bd3669bf2847450481293380cc762002bd82171540",
+        "dist/methods/to_hex.js": "73d844164783c94e6438e84f726aca1fc68974d172b5123bef98919f498c32e3",
+        "dist/methods/to_hsla.js": "907b16b8e0ff81db25c9d31a4b941a5b7845b2a5281012cbb9647baba47f4737",
+        "dist/methods/to_keyword.js": "f803a90a3f0fac1669797a2fd3987dc430f94e6b535dabcbc483c6ca645c07a7",
+        "dist/methods/to_rgba.js": "4b2aa4005f3e270c93461ea84c7e82dcf740d361ca5b6dfff00b11e39f1391d0",
+        "dist/methods/transparentize.js": "b12a06e8c3ee1d3032d698583a052c507df8ae694b5cb33f389a64a94bb8919f",
+        "test/methods/transparentize.js": "004aeabac8a26a401f2426b65925cea61e856230b1a3dc8b7623ad8411b33b37",
+        "dist/channels/type.js": "1deecd732887a0e019defd9c1ac955fce5b253099195bd23b6889682d7c0928f",
+        "dist/types.js": "890d11a23698a3a51375f14b954a986b103a0a45eb6689675a63529c3b2614ae",
+        "dist/utils/unit.js": "d3716f0c22219657135b217f23ded2c708ba3e944f252217af3d4e2128f5576d",
+        "package.json": "0d2145738d3cab828da4c5724b45e0dd2577c0ce84503c956d76897e93fa7de2",
+        "tsconfig.json": "51464e08a6fd4ad64f99a101d60dfb32aad101edc0036017b8d37de5282b9b71",
+        "readme.md": "2fdee93b3b4411346da6ce5a052b2cd0ca1730af3fce933618bf6cf2967cfd74",
+        "dist/methods/adjust_channel.d.ts": "0c9df3828ee884b6c2b24a712b3b285f6e048c0e0ffd533382cf0e3860853dc6",
+        "src/methods/adjust_channel.ts": "83bf0846e16b9d5b2196ba18069e0e2fd131b343de27e83504acd7575e3b5f8e",
+        "dist/methods/adjust.d.ts": "3fa0c2a8e260416352dd6f27eff81ab168e02d2ad9c4c728a237d084c414f8c7",
+        "src/methods/adjust.ts": "d0a899c3a92b49a12b02574632f7d11b549896449ef0df6adae02bd1965b691e",
+        "dist/methods/alpha.d.ts": "2ed15826b738fedc88fa85fd961fab1b7c3f4e41e3a3d391246fd097b090b540",
+        "src/methods/alpha.ts": "94f082ce3191f7aaa219eea6c4ceb02393e11bb140d86de33acde2fe9294cde6",
+        "dist/methods/blue.d.ts": "e5e5c3264bec3ed3d1f76ff17ca0979b5ec9edd3a78bc6c83b8d2e99fbc2c003",
+        "src/methods/blue.ts": "9786af03d9d8a3b8a91c5cc30ec6ba0552aa6a8a3d550cb202de06c2ffae572d",
+        "dist/methods/change.d.ts": "bb0a2a1f884fd28b4166ee6d9a116fd58fb205d633cd00de70ae1c8e16fa8408",
+        "src/methods/change.ts": "f772cb47374c4f279e3f18c41916b57a3cc025cae74ac93658e3749d6eb1f0a1",
+        "dist/methods/channel.d.ts": "b0f97db6bc991cb0c962876620a21a2ed221314ccb9883a50de4465e427b730f",
+        "dist/utils/channel.d.ts": "48ffe8f08e969e0502d78c6ff6927318a3f81cbe0ea94f8120a6eb18bbacb62a",
+        "src/methods/channel.ts": "c3798405b063d9a866d5d80dc94cae8b22eed1947e65cb65c3b234d88a5433be",
+        "src/utils/channel.ts": "a6cc6f0ab35f36f2693317d5d02302775a0082e66bdc02e49a73f11de5d6ed34",
+        "dist/methods/complement.d.ts": "afff45b0aef18c422c3b0f86959037a1f9e447793e6779133ffef52975e797d7",
+        "src/methods/complement.ts": "ab0073a0822c6ce5012d0a2373fd21cf935a83871e801c85df3f071c736fb059",
+        "dist/constants.d.ts": "b54a1433727a940197034a022a5d3331361ff6082d15444e37dfd3c3a7163360",
+        "src/constants.ts": "c5810dfaf470f2c2618d683bccd6d117a58e64c62c162a8c1dbd11fece677577",
+        "dist/methods/contrast.d.ts": "36429510f434f4663056e106e5e9dab8521214b67d62f085ea02183cd93242e3",
+        "src/methods/contrast.ts": "999c5a1ebebee80311182434f46c74de657a06073fc3c3f1f79e5bddec134acd",
+        "dist/methods/darken.d.ts": "e032042b9356ca4042d6ff52777a56e8b1798f1a03677d7e4721206f0e8d8b7c",
+        "src/methods/darken.ts": "6d2efed9796afb28b792db3e86655cd33c00b0f2f8d30f2a38aa92f5f928ddc8",
+        "dist/methods/desaturate.d.ts": "2aeda8a4c46e38b93a0c1a133b6035ef614545bbc40ce57df4b6c092a9caa989",
+        "src/methods/desaturate.ts": "4adb800b0e65250e79b5d37b68838c9eeb9f51a22ce98cb2a78f9807134aa076",
+        "dist/methods/grayscale.d.ts": "9b3a568ca3ed07ecf903aaaad6b49be45e074eb330d39b92714ca0fd564c5280",
+        "src/methods/grayscale.ts": "42036271e285308b8c5c2e60d2bb21b8aa0164c3cd0d576240c61497d9ad6aaa",
+        "dist/methods/green.d.ts": "dc9117494d7368d897c54bb2f215f5596665a468341c4201c920a0047649be95",
+        "src/methods/green.ts": "2e5ce7ff998a055520544144084c74684cd4aa7bfebd59886bf72bf5460e9b54",
+        "dist/color/hex.d.ts": "154bbabd682bb58e0d625f87c4bd1d11a88b2f662aeae7d19438e1f400ee3af2",
+        "src/color/hex.ts": "6cce403dab79c622d67347a52d0a448c2f8ad264d229aaea5a8420b81776d53e",
+        "dist/color/hsl.d.ts": "e1b954a16703761677a4217e5778d03477550802d24e30f2abc5920800deb953",
+        "src/color/hsl.ts": "401a5dca80bbe8e613323c08767f4b3a99b425927083bf150010dce0bc108547",
+        "dist/methods/hsla.d.ts": "004c56f3417c36cc9abcb2bc3ed52332427c249ed89ba68dd57187da671d769f",
+        "src/methods/hsla.ts": "bc61bfaddfec7cb0adb05b2d5dc162ae5deb0d2443a563ea53108d83493b0ae2",
+        "dist/methods/hue.d.ts": "71b62ba290b846a03ebf1214319e3536f62b212a3edda7b074cd8178c6a888e9",
+        "src/methods/hue.ts": "1ca5be53c27ba5bcd96f16bf46ecc5e6f2084cb7d5147a3bf353ebbcb00bd2e0",
+        "dist/channels/index.d.ts": "60a7b07a2d5260d9de4881f57042c08e7d8ceb1833d508fc94d6498b7f1dae78",
+        "dist/color/index.d.ts": "89d1166be012afb6651bc3445c8e2e8e46d96e2859d3531e33d78c28951f8231",
+        "dist/index.d.ts": "bb22c5de5625aeb9adbf3d0628c28a340f3080911c8475cbd453f9ce844720d6",
+        "dist/methods/index.d.ts": "41e46dd9e8378c5342cb986aeeef8df31e974bc00c73de917d70290827b4d59a",
+        "dist/utils/index.d.ts": "bc9d2920d601d8d0851169475e205e7088a2e09e6ded16667bae31f6f2197f10",
+        "src/channels/index.ts": "b5dfa8b3e866f10658afad939346579ea645630993e362dfc3ad985ca1600d1b",
+        "src/color/index.ts": "6ae47cdc9303dcd6a144f831dbc29a1deb1a4cf9445bd6041e746eb30708361d",
+        "src/index.ts": "e39e5fbb6578c7785fe8a89aa42691ac46fa3303de59baeb02b2b7b14643f945",
+        "src/methods/index.ts": "8fe5e8dd9e2a343c79f05f66c51f127dbb19e3805094d8b18fafdac5f85ff42a",
+        "src/utils/index.ts": "514467c4e0039e34657ef249f51fb376b8661eef693723bad0047067c5623cf2",
+        "dist/methods/invert.d.ts": "32becbd1ba10edeeecd45218034cb7dc31b35a58c82f1ffe84dfa023790dc9ca",
+        "src/methods/invert.ts": "d1e68ced59ae6c43cc20760a77b6047d5174d99f67a6334dac5b4dfc1bd21123",
+        "dist/methods/is_dark.d.ts": "63bbe5eaf4eeadb1dffaf968ac4320892bd737cbbfdcc62c847510e1ea0aaefc",
+        "src/methods/is_dark.ts": "07efdfb5d27911da7892d6febe6c55e059a64684bad28dcc9321011a7e7d4665",
+        "dist/methods/is_light.d.ts": "1adcea1ace12190e2181631c1babe2acf7fa6deb78c9f6d20c7d9d48d21a4565",
+        "src/methods/is_light.ts": "5183cdb8b5462430547bf1dd1a7fc4780f15b1a30da9db4246d952e09f132abf",
+        "dist/methods/is_transparent.d.ts": "029481995d770ef16c8d0ad4e4d1da5a526f0d1dfa0005ead86e893acc7e3c3a",
+        "src/methods/is_transparent.ts": "00c5ff1eb80c0a7db3cd9955493f99b6c31c4dab8a7e7ea6d35c378c3f5b4a7e",
+        "dist/methods/is_valid.d.ts": "ed41af33aa45879de182851272b86c7f99faef8b48ddc66fdb76eb98cdb21158",
+        "src/methods/is_valid.ts": "19b9fd6c42725c2a33469f6c8df2db5e5ffca715f570510699db6d2c2ec01a68",
+        "dist/color/keyword.d.ts": "4114bc32a631f7c09e53a66d6e10d2e652e04d8ecc01a2eb3a185d49d9d0fccb",
+        "src/color/keyword.ts": "2c291a653c7bfa775f812818618de9b6fc353f9cdcb02325c952d2fc323636da",
+        "dist/utils/lang.d.ts": "38f0bb1c0b0e7ccae85ce62ba5633bc3f45c521dea7ee61f4ba01476ac06b5b8",
+        "src/utils/lang.ts": "452f3f24a31bdafa0426fccbafab05902bd0112bcc8ab26b8af62a6f8e47f680",
+        "dist/methods/lighten.d.ts": "edf7fdf8227566e483fa569c336181b0e3a05603e97fa668d60047762c715fe1",
+        "src/methods/lighten.ts": "792152d33b46acb6764c101f331639c80ee3b6e786ec25b4bfd66084333cf091",
+        "dist/methods/lightness.d.ts": "9e24b4d37fbcf690aad5c8f5f8f51924288c0656ebffeeb9af40156da6cc92b7",
+        "src/methods/lightness.ts": "891e3618688c953cf2884ba3d04a997c0ebe10ee0f7ce564643250f670e408d7",
+        "dist/methods/luminance.d.ts": "1760de120432fb41260db2d8933f72ff8ce88e998ea180e4014454c3f2d918d1",
+        "src/methods/luminance.ts": "9528865f48c81278330ee3026f8485f742cd8f34b9d9f3f86129e4faaaad1227",
+        "dist/methods/mix.d.ts": "c688015116075afb63c650e6a262be9fd45d265caffb6a9c49c15fb901c3720e",
+        "src/methods/mix.ts": "bb1e90b3390294917d41ac4ee049f57cc4e3cf4c6807cd0f8d429bf7e1326627",
+        "dist/methods/opacify.d.ts": "443ee1fc5ee5dac5e89028bd981c44059d1bb6f4e665dc5e0ef4db7cfd6d159e",
+        "src/methods/opacify.ts": "97d11b0296c9fbef81797a3a2a9139198210af4393da8599eb0b660c16da4b8b",
+        "dist/methods/red.d.ts": "c40432123469eac65fbf72227c34587379013f263459e4142c076c6c3dabcf50",
+        "src/methods/red.ts": "5e074f3ff6fa7c39fb9325ae21523942bf2416454b2d56c4c8ad98b811c8ec25",
+        "dist/channels/reusable.d.ts": "9d556d195ce8650c9a3a72db7b4fc203febadb0f3137207bce3e426f15e43887",
+        "src/channels/reusable.ts": "ec9abcd85721e8d97ef20db82160a3cd8dc3011b17b4df25e52ecf504e4507c4",
+        "dist/color/rgb.d.ts": "23b9993bfe2af80d170f0f0faff96c199d1a7649a8dd37421878fd3b4115cb60",
+        "src/color/rgb.ts": "c8efde4808e7be226ec2a2650bf71063b3e18070f8191c92640d0dab292e0b8a",
+        "dist/methods/rgba.d.ts": "218d7b0f037977a0efb4177eff79a37b20597ff4bf7340b25b221846a467e163",
+        "src/methods/rgba.ts": "959ec3327cb12d790dd7fe8657d1a81b2d9c2ae96e1ad153ca07472fa5bfe94d",
+        "dist/methods/saturate.d.ts": "0aaf654f0eec02b03554bb953ba403c4530a349aa9a734d575620062dc855850",
+        "src/methods/saturate.ts": "d414e1476d0533691795d354822c23b3c2a3678a33aa4fa2f5b67e492b8a2e6f",
+        "dist/methods/saturation.d.ts": "ed7413c037e3b27d7e375d3bfb8711b900e38935c78b504a98771385360ba937",
+        "src/methods/saturation.ts": "c7e93d0f2b7044feaa1347639fffa7cf6b127dd9484ffa9482e4ddf8d9dde040",
+        "dist/methods/scale.d.ts": "fe87cd18bdcc652688d5a2320bca45b0432f43cd5c51ff7be55a408943477487",
+        "src/methods/scale.ts": "3207d76e4518b6616a3c092f25f5ddbe6288145d4da677214021d26c2a5ad253",
+        "dist/methods/to_hex.d.ts": "4dd103eae0177bbba5a85a6bfcf46e9ab3cd43eae54348261f8b06737f9b58fe",
+        "src/methods/to_hex.ts": "0ae483705d239761e78e0e2b0e3712fe76ad44e26c95d0f7a6b06a461f386297",
+        "dist/methods/to_hsla.d.ts": "f2c6d97132264794284f25a2c509713d0e1bfee6c8fb912e27a21eb7441bef7c",
+        "src/methods/to_hsla.ts": "1f9e6ced2679ea9e5d2d2dab7456a8c7d56714e66b5ccfd0a700063e3c64b565",
+        "dist/methods/to_keyword.d.ts": "5afc8adf876452a33cc592b045220d81633f8fbdc0ce150863dde4810d1966e9",
+        "src/methods/to_keyword.ts": "bff1be9485237f7cd9bf6797b4cf3d958dd140bebecc9b65c1acbd2de0d5b60e",
+        "dist/methods/to_rgba.d.ts": "494f8d7b960c52c059dd743bff805dad5fe5e7731b9b046b5605ba999666156e",
+        "src/methods/to_rgba.ts": "025057c7b65b2b958af38ef03ba2594c4163b95fa6cf3fa48fbdfa0080b441d9",
+        "dist/methods/transparentize.d.ts": "042ac10916875d38e177f4d2c927034607533d07a9ba2e971900c556ab42eb62",
+        "src/methods/transparentize.ts": "d55dcf6ba5a56cbe66159a12c3e2aa75be8442e88b5fbaae34069898bed4ccde",
+        "dist/channels/type.d.ts": "69613578bc74a1109359b150a81ad6fc713c206835c3112af22370a989a4776b",
+        "src/channels/type.ts": "7a9e48fd1c0b0f62049abae807e481a92ac283e4b816905952c37f7cb1244379",
+        "dist/types.d.ts": "8bc584d7c8ca922bf6a3ab7d1729c236705fb04dcda16c34a007431929abb91f",
+        "src/types.ts": "36362c6719814de8ec13121c6bc725bc48d58bf30f7dda769be0c6f6d1bd674b",
+        "dist/utils/unit.d.ts": "74626431f5cefff98b32a3bee3921f5ec060eb7764ae8a76a979bb396c3320e8",
+        "src/utils/unit.ts": "0f0f541be7a9686954bedc536ded5c3bc97f5e3e4a19b4b0db3ee361e70724a0"
+      },
+      "materials": [
+        {
+          "file": "materials/khroma-2.1.0/LICENSE",
+          "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/khroma/-/khroma-2.1.0.tgz",
+            "path": "package/license",
+            "integrity": "sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw==",
+            "suppliedGitEvidence": {
+              "commit": "4968165afb0d3d09be66497e7985a34f7bfe6d42",
+              "gitBlob": "433a5ecd4cb7c687f6a6ec968da740d490b1f776",
+              "url": "https://github.com/fabiospampinato/khroma/blob/4968165afb0d3d09be66497e7985a34f7bfe6d42/license"
+            }
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "lazy-val-1.0.5",
+      "name": "lazy-val",
+      "version": "1.0.5",
+      "tarball": "https://registry.npmjs.org/lazy-val/-/lazy-val-1.0.5.tgz",
+      "integrity": "sha512-0/BnGCCfyUMkBpeDgWihanIAF9JmZhHBgUhEqzvf+adhNGLoP6TaiI5oF8oyb3I45P+PcnrqihSf01M0l0G5+Q==",
+      "packageJsonSha256": [
+        "a5096f95098452cf6fe5c8ac9be8f13f59ab7c9f605ba5ef92c91b2c505744f0",
+        "a6f4140d0187f32d95545835aca38684e18d0fcfbecb51709b0aaa54decd3c0b"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/lazy-val",
+          "resolved": "https://registry.npmmirror.com/lazy-val/-/lazy-val-1.0.5.tgz",
+          "integrity": "sha512-0/BnGCCfyUMkBpeDgWihanIAF9JmZhHBgUhEqzvf+adhNGLoP6TaiI5oF8oyb3I45P+PcnrqihSf01M0l0G5+Q=="
+        }
+      ],
+      "files": {
+        "out/main.js": "358fa8cba70c9140edafa85c0b7b25c7261939480186167e6b3440905f5b47da",
+        "package.json": "a5096f95098452cf6fe5c8ac9be8f13f59ab7c9f605ba5ef92c91b2c505744f0",
+        "out/main.js.map": "aa3e70f08a0ce115832e5324c4b96aa1475a3b8b36728f50091ebd22aa0f6646",
+        "readme.md": "87dd77cd27b045ab279f6f2c99acedaeec6b7c92e296a354bb2687b9f2965438",
+        "out/main.d.ts": "e4bd94e97e08af3a3b8a6b2e85c6b93a690f572c1bffca113681ee7390f53411"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "min-document-2.19.2",
+      "name": "min-document",
+      "version": "2.19.2",
+      "tarball": "https://registry.npmjs.org/min-document/-/min-document-2.19.2.tgz",
+      "integrity": "sha512-8S5I8db/uZN8r9HSLFVWPdJCvYOejMcEC82VIzNUc6Zkklf/d1gg2psfE79/vyhWOj4+J8MtwmoOz3TmvaGu5A==",
+      "packageJsonSha256": [
+        "88c5058c68eaf5acc384c92354d81f1dc04d1d0a8a776c5a0aa59536aa8568a2",
+        "4867f2550bf1cfea81cd4dd6e610a7bf2b5a18e7f70ff997261142b84bc16b78"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/min-document",
+          "resolved": "https://registry.npmmirror.com/min-document/-/min-document-2.19.2.tgz",
+          "integrity": "sha512-8S5I8db/uZN8r9HSLFVWPdJCvYOejMcEC82VIzNUc6Zkklf/d1gg2psfE79/vyhWOj4+J8MtwmoOz3TmvaGu5A=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/min-document",
+          "resolved": "https://registry.npmjs.org/min-document/-/min-document-2.19.2.tgz",
+          "integrity": "sha512-8S5I8db/uZN8r9HSLFVWPdJCvYOejMcEC82VIzNUc6Zkklf/d1gg2psfE79/vyhWOj4+J8MtwmoOz3TmvaGu5A=="
+        }
+      ],
+      "files": {
+        ".jshintrc": "da3531289454b9a256c622c1a74771440d4f0e57092262902cefbc6830ec3a7c",
+        "LICENCE": "950429b35f82e225a613a0638e7933855a4ce05172bd36dc060093ba58793bbe",
+        "test/static/index.html": "3e30fb7712d1c73f87e8d1aa718a0676f3161df32fb666eff9ba914bcd4748f6",
+        "event/add-event-listener.js": "91624bc2d1fb5ded5e666a0493c44a10ba5af491135ea8d8550360fd859fda13",
+        "test/cleanup.js": "a83bd17d2ae7f101f78005faf33c151e59c1ea96d7640d50619b4fe62a7d9214",
+        "event/dispatch-event.js": "c1b44ea82e48933b8a1f57240e228b9feba5c95ad83b450401cfd7e63a2604b4",
+        "document.js": "d4dcc180510d875fc9671a51b2fe734747545506bb992765f6b9f184fe83c06d",
+        "dom-comment.js": "ff2130a1d70fda99b0270dd052c1b675e5da5d3b4e4803d8093ac621b650c830",
+        "dom-element.js": "16a794d3a53570dd7bd43fb1c6db8dc57989af63d014894e15db926d481cd73e",
+        "dom-fragment.js": "2e62a88461c563be8fc75b7827075ad36a281899773fbd207e8c9fb5c67f0fcd",
+        "dom-text.js": "ffa141b65a87bb68bdd14b0a6de52fb525bf31121433c230e05acc7a74251c28",
+        "event.js": "1bc94bf7fa544a5f45f3e2756320cb60fd4eba432f4f773d3b770f36e357ec4b",
+        "index.js": "385e18cdb4ea5bb9b46626720758007433b786f82c5b8598bc5c3a0b8bb0428a",
+        "test/index.js": "6f241ebba11c8d644cd6462fb776f95e4d9e43a39992be0a59e1bf6400541963",
+        "event/remove-event-listener.js": "faf33a879b2581685010e2d6310c60a594d87ee3974d752a6c915db060475a3d",
+        "serialize.js": "8ede3a4d195e88b8d06372978ee39d3667844687c3c2c3c6623e73eca2fb40f8",
+        "test/static/test-adapter.js": "34a78984279dc73fb2ad8e0b1c3fbaa8ef6f7dce6d6b9598d2bfe15df28382a8",
+        "test/test-document.js": "3f7f34f126bee1b4d9003d8a08f1cf54c1705fb85a0bc367689182efc9c22e5d",
+        "test/test-dom-comment.js": "1f8b50ed553f067282e4f8c258495d3cbfe5bee4feebff7bb10c9b43a9bd0886",
+        "test/test-dom-element.js": "0d3067076fd717b4697baaafaad4bbd58b71a68efdc78d80a7e099372e268d85",
+        ".testem.json": "19e6cfae9f1ce6b842a53feca50383a930052b39ab8969c2aa2b083eefbf22f5",
+        "package.json": "88c5058c68eaf5acc384c92354d81f1dc04d1d0a8a776c5a0aa59536aa8568a2",
+        "CONTRIBUTION.md": "c69bd8567064043945875b88b813c7e9b99a7b6980ca3084ebfe1ec70532814b",
+        "README.md": "fe3262357496ede0ee4e817eaf1532551010baa7513a11b1301c0afe8acbe68f",
+        "docs.mli": "513221d2f497c170685a2cf5bbe378912076f616bc6f109f1bf45486071df9cf",
+        ".travis.yml": "fa7faa17c540b6fca3085d160169e5d026779069a7a97c81a853269f14ae019c"
+      },
+      "materials": [
+        {
+          "file": "materials/min-document-2.19.2/LICENSE",
+          "sha256": "950429b35f82e225a613a0638e7933855a4ce05172bd36dc060093ba58793bbe",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/min-document/-/min-document-2.19.2.tgz",
+            "path": "package/LICENCE",
+            "integrity": "sha512-8S5I8db/uZN8r9HSLFVWPdJCvYOejMcEC82VIzNUc6Zkklf/d1gg2psfE79/vyhWOj4+J8MtwmoOz3TmvaGu5A=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "omggif-1.0.10",
+      "name": "omggif",
+      "version": "1.0.10",
+      "tarball": "https://registry.npmjs.org/omggif/-/omggif-1.0.10.tgz",
+      "integrity": "sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw==",
+      "packageJsonSha256": [
+        "983217c91f356a00dd70c89760776ae53414649472596cd3cac101d0908ef2de",
+        "10280090f7b3b1ec06732f643e874af023bd9727ef6a519708aa8887e77a6183"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/omggif",
+          "resolved": "https://registry.npmjs.org/omggif/-/omggif-1.0.10.tgz",
+          "integrity": "sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/omggif",
+          "resolved": "https://registry.npmjs.org/omggif/-/omggif-1.0.10.tgz",
+          "integrity": "sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw=="
+        }
+      ],
+      "files": {
+        "package.json": "983217c91f356a00dd70c89760776ae53414649472596cd3cac101d0908ef2de",
+        "example_node.js": "d674164b13206cd2c84267831f7fb47f0d3686afb130573c7a14711d662bad9b",
+        "omggif.js": "bd898d5b7e43038c7b4c26bf1e1057fe23a44f90312469d802a4e7caf3ae3b12",
+        "plask_viewer.js": "9b9296456c169fd77d3509bc7ecd45e5c0c35adb894e410414ee57c36712b163",
+        "README": "fc7d762e0ebf8720d0a03cf00058aaa3a198347e9651be2f50a25e3b3ec13985"
+      },
+      "materials": [
+        {
+          "file": "materials/omggif-1.0.10/LICENSE",
+          "sha256": "fc7d762e0ebf8720d0a03cf00058aaa3a198347e9651be2f50a25e3b3ec13985",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/omggif/-/omggif-1.0.10.tgz",
+            "path": "package/README",
+            "integrity": "sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "parse-bmfont-ascii-1.0.6",
+      "name": "parse-bmfont-ascii",
+      "version": "1.0.6",
+      "tarball": "https://registry.npmjs.org/parse-bmfont-ascii/-/parse-bmfont-ascii-1.0.6.tgz",
+      "integrity": "sha512-U4RrVsUFCleIOBsIGYOMKjn9PavsGOXxbvYGtMOEfnId0SVNsgehXh1DxUdVPLoxd5mvcEtvmKs2Mmf0Mpa1ZA==",
+      "packageJsonSha256": [
+        "485b9fe416f4fc4f0c4a586f643ede228738227a40c3a94e67c040f20cb598ee",
+        "7e85cda547bcbe45759af3ea9c5840c0fe393a30249a7181c195d961c01c3d09"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/parse-bmfont-ascii",
+          "resolved": "https://registry.npmjs.org/parse-bmfont-ascii/-/parse-bmfont-ascii-1.0.6.tgz",
+          "integrity": "sha512-U4RrVsUFCleIOBsIGYOMKjn9PavsGOXxbvYGtMOEfnId0SVNsgehXh1DxUdVPLoxd5mvcEtvmKs2Mmf0Mpa1ZA=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/parse-bmfont-ascii",
+          "resolved": "https://registry.npmjs.org/parse-bmfont-ascii/-/parse-bmfont-ascii-1.0.6.tgz",
+          "integrity": "sha512-U4RrVsUFCleIOBsIGYOMKjn9PavsGOXxbvYGtMOEfnId0SVNsgehXh1DxUdVPLoxd5mvcEtvmKs2Mmf0Mpa1ZA=="
+        }
+      ],
+      "files": {
+        "package.json": "485b9fe416f4fc4f0c4a586f643ede228738227a40c3a94e67c040f20cb598ee",
+        "README.md": "300e0c6e0ce2cb2efaaaccd7169dea002192270e11e4a642f353689f961886c8",
+        "index.js": "c831a398099d7cc44d5bf928451092fc712933c0d301aa926e8f846acb3914ba"
+      },
+      "materials": [
+        {
+          "file": "materials/parse-bmfont-ascii-1.0.6/LICENSE",
+          "sha256": "59c38e93a395817bc9d674d868af7c062fcea8b37468af8b3f6f075133eb1756",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://raw.githubusercontent.com/mattdesl/parse-bmfont-ascii/5f22b037ae7460f629dd681db23cd9b543a76b06/LICENSE.md",
+            "commit": "5f22b037ae7460f629dd681db23cd9b543a76b06",
+            "path": "LICENSE.md",
+            "sha256": "59c38e93a395817bc9d674d868af7c062fcea8b37468af8b3f6f075133eb1756",
+            "gitBlob": "89a78cf2226fa749c97ead1de544295a53697cbc"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "parse-headers-2.0.6",
+      "name": "parse-headers",
+      "version": "2.0.6",
+      "tarball": "https://registry.npmjs.org/parse-headers/-/parse-headers-2.0.6.tgz",
+      "integrity": "sha512-Tz11t3uKztEW5FEVZnj1ox8GKblWn+PvHY9TmJV5Mll2uHEwRdR/5Li1OlXoECjLYkApdhWy44ocONwXLiKO5A==",
+      "packageJsonSha256": [
+        "6a00b7cf15743d383df0e68e2d5aaa3538ffd33a4c168c6ab560c804213fd502",
+        "146d956bab99077e7bc46fe1ef304122ad03a1124f39936b694cd97e6f7b7f88"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/parse-headers",
+          "resolved": "https://registry.npmjs.org/parse-headers/-/parse-headers-2.0.6.tgz",
+          "integrity": "sha512-Tz11t3uKztEW5FEVZnj1ox8GKblWn+PvHY9TmJV5Mll2uHEwRdR/5Li1OlXoECjLYkApdhWy44ocONwXLiKO5A=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/parse-headers",
+          "resolved": "https://registry.npmjs.org/parse-headers/-/parse-headers-2.0.6.tgz",
+          "integrity": "sha512-Tz11t3uKztEW5FEVZnj1ox8GKblWn+PvHY9TmJV5Mll2uHEwRdR/5Li1OlXoECjLYkApdhWy44ocONwXLiKO5A=="
+        }
+      ],
+      "files": {
+        "LICENCE": "b1c5db90de223cc6ca40bab4ade764220f86c5b0335f56f1ab3baa6e62fe18bd",
+        "example.js": "91f444526dbe132f83e22e0acb5b709a90255378a85f297c9405ab30ee76dda4",
+        "parse-headers.js": "a5bdb10984d8826a29d895e61cb74014431a690df037ccba294c1052b6b7bff8",
+        "test.js": "9cb9347599b28490752fa3fe1f304574988233d11a080aa29ff786fa80de7a3e",
+        "package.json": "6a00b7cf15743d383df0e68e2d5aaa3538ffd33a4c168c6ab560c804213fd502",
+        "readme.md": "70b6a140b3e1fcacbcc3f8d9d7e073cd7e745094829a4f97c09e303e9279a120",
+        "index.d.ts": "be80dd89946061f16930bbc005fed13c08a090fe820d6612a65a0026d718f0ac",
+        ".travis.yml": "723920ff3b612a7188d4084b8b76eb119baec260ff7f4e164a329caaf08e95fd"
+      },
+      "materials": [
+        {
+          "file": "materials/parse-headers-2.0.6/LICENSE",
+          "sha256": "b1c5db90de223cc6ca40bab4ade764220f86c5b0335f56f1ab3baa6e62fe18bd",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/parse-headers/-/parse-headers-2.0.6.tgz",
+            "path": "package/LICENCE",
+            "integrity": "sha512-Tz11t3uKztEW5FEVZnj1ox8GKblWn+PvHY9TmJV5Mll2uHEwRdR/5Li1OlXoECjLYkApdhWy44ocONwXLiKO5A=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "readable-web-to-node-stream-3.0.4",
+      "name": "readable-web-to-node-stream",
+      "version": "3.0.4",
+      "tarball": "https://registry.npmjs.org/readable-web-to-node-stream/-/readable-web-to-node-stream-3.0.4.tgz",
+      "integrity": "sha512-9nX56alTf5bwXQ3ZDipHJhusu9NTQJ/CVPtb/XHAJCXihZeitfJvIRS4GqQ/mfIoOE3IelHMrpayVrosdHBuLw==",
+      "packageJsonSha256": [
+        "3ee3a77f8bf8c288745aec229244cb79b63b9959a9b7c8ee18e326286976bc6e",
+        "aa268f9e8ca870b7b80898b4a610c336fedd5f07da8d41e50dfc3a1b89be98a2"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/readable-web-to-node-stream",
+          "resolved": "https://registry.npmjs.org/readable-web-to-node-stream/-/readable-web-to-node-stream-3.0.4.tgz",
+          "integrity": "sha512-9nX56alTf5bwXQ3ZDipHJhusu9NTQJ/CVPtb/XHAJCXihZeitfJvIRS4GqQ/mfIoOE3IelHMrpayVrosdHBuLw=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/readable-web-to-node-stream",
+          "resolved": "https://registry.npmjs.org/readable-web-to-node-stream/-/readable-web-to-node-stream-3.0.4.tgz",
+          "integrity": "sha512-9nX56alTf5bwXQ3ZDipHJhusu9NTQJ/CVPtb/XHAJCXihZeitfJvIRS4GqQ/mfIoOE3IelHMrpayVrosdHBuLw=="
+        }
+      ],
+      "files": {
+        "lib/index.js": "875a6eea7c0f7ea68b29ceefc560d3538e497346dece52a0dcbdcbfd54161c32",
+        "package.json": "3ee3a77f8bf8c288745aec229244cb79b63b9959a9b7c8ee18e326286976bc6e",
+        "README.md": "b2c484c6da6b02139fac4c1539a9a61347f8ad2a9d580bb27f3c82b75002521f",
+        "lib/index.d.ts": "f5b9b64fdfe510d83259ebfc57649a7cb00f8f2ce72900058c44e6c525a2e5f9"
+      },
+      "materials": [
+        {
+          "file": "materials/readable-web-to-node-stream-3.0.4/LICENSE",
+          "sha256": "b2c484c6da6b02139fac4c1539a9a61347f8ad2a9d580bb27f3c82b75002521f",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/readable-web-to-node-stream/-/readable-web-to-node-stream-3.0.4.tgz",
+            "path": "package/README.md",
+            "integrity": "sha512-9nX56alTf5bwXQ3ZDipHJhusu9NTQJ/CVPtb/XHAJCXihZeitfJvIRS4GqQ/mfIoOE3IelHMrpayVrosdHBuLw=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "tr46-0.0.3",
+      "name": "tr46",
+      "version": "0.0.3",
+      "tarball": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
+      "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==",
+      "packageJsonSha256": [
+        "615087f58ee138fd35c2b414c355b72e36e5919725b8aecc1c34f6a5585b9779",
+        "bb7b622deed9936ada577a7ea52a59cee5162825305a45b1be2278907d899bf1"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/tr46",
+          "resolved": "https://registry.npmmirror.com/tr46/-/tr46-0.0.3.tgz",
+          "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/tr46",
+          "resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
+          "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw=="
+        }
+      ],
+      "files": {
+        "package.json": "615087f58ee138fd35c2b414c355b72e36e5919725b8aecc1c34f6a5585b9779",
+        ".npmignore": "220244e94c71eccaccee66cac3ccd592f503f4a21caabbde6b92d16ce4434ba1",
+        "index.js": "8194f9425ce9ab06ea9aebcd64a85ec064d95d61bb349f8f1c98762ad256638e",
+        "lib/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "lib/mappingTable.json": "b6b39724dca9011113a08d9d6910204062b58169e98952acdfbd19bf2c31bbff"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    },
+    {
+      "id": "type-fest-4.41.0",
+      "name": "type-fest",
+      "version": "4.41.0",
+      "tarball": "https://registry.npmjs.org/type-fest/-/type-fest-4.41.0.tgz",
+      "integrity": "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA==",
+      "packageJsonSha256": [
+        "8c10f8a78aa5d18858b15696cd908cafd118286f11e13c4fdab32ea782160666",
+        "8b798bcb05b911d58449ec590fcdeb092129e1071070168d9c2d91589981ea8f"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/type-fest",
+          "resolved": "https://registry.npmmirror.com/type-fest/-/type-fest-4.41.0.tgz",
+          "integrity": "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA=="
+        }
+      ],
+      "files": {
+        "license-cc0": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+        "license-mit": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+        "package.json": "8c10f8a78aa5d18858b15696cd908cafd118286f11e13c4fdab32ea782160666",
+        "readme.md": "948a0391e53ff1cdac8ddfee7b09c0aad89fd76e3d937b26add8499e15a2a7a9",
+        "source/all-union-fields.d.ts": "f385a078ad649cc24f8c31e4f2e56a5c91445a07f25fbdc4a0a339c964b55679",
+        "source/and.d.ts": "65465a64d5ee2f989ad4cf8db05f875204a9178f36b07a1e4d3a09a39f762e2e",
+        "source/array-indices.d.ts": "380b4fe5dac74984ac6a58a116f7726bede1bdca7cec5362034c0b12971ac9c1",
+        "source/array-slice.d.ts": "c58d6d730e95e67a62ebd7ba324e04bcde907ef6ba0f41922f403097fe54dd78",
+        "source/array-splice.d.ts": "08c027d3d6e294b5607341125d1c4689b4fece03bdb9843bd048515fe496a73e",
+        "source/array-tail.d.ts": "8f9effea32088f37d15858a890e1a7ccf9af8d352d47fea174f6b95448072956",
+        "source/array-values.d.ts": "00de72aa7abede86b016f0b3bfbf767a08b5cff060991b0722d78b594a4c2105",
+        "source/internal/array.d.ts": "cf41091fcbf45daff9aba653406b83d11a3ec163ff9d7a71890035117e733d98",
+        "source/arrayable.d.ts": "956618754d139c7beb3c97df423347433473163d424ff8248af18851dd7d772a",
+        "source/async-return-type.d.ts": "68434152ef6e484df25a9bd0f4c9abdfb0d743f5a39bff2b2dc2a0f94ed5f391",
+        "source/asyncify.d.ts": "ff1731974600a4dad7ec87770e95fc86ca3d329b1ce200032766340f83585e47",
+        "source/basic.d.ts": "130ec22c8432ade59047e0225e552c62a47683d870d44785bee95594c8d65408",
+        "source/camel-case.d.ts": "cba49e77f6c1737f7a3ce9a50b484d21980665fff93c1c64e0ee0b5086ea460a",
+        "source/camel-cased-properties-deep.d.ts": "89d5970d28f207d30938563e567e67395aa8c1789c43029fe03fe1d07893c74c",
+        "source/camel-cased-properties.d.ts": "9c686df0769cca468ebf018749df4330d5ff9414e0d226c1956ebaf45c85ff61",
+        "source/internal/characters.d.ts": "aa514fadda13ad6ddadc2342e835307b962254d994f45a0cb495cc76eca13eff",
+        "source/conditional-except.d.ts": "aa79b64f5b3690c66892f292e63dfe3e84eb678a886df86521f67c109d57a0c5",
+        "source/conditional-keys.d.ts": "b848b40bfeb73dfe2e782c5b7588ef521010a3d595297e69386670cbde6b4d82",
+        "source/conditional-pick-deep.d.ts": "18076e7597cd9baa305cd85406551f28e3450683a699b7152ce7373b6b4a1db7",
+        "source/conditional-pick.d.ts": "a692e092c3b9860c9554698d84baf308ba51fc8f32ddd6646e01a287810b16c6",
+        "source/conditional-simplify.d.ts": "ef4c9ef3ec432ccbf6508f8aa12fbb8b7f4d535c8b484258a3888476de2c6c36",
+        "source/delimiter-case.d.ts": "869e789f7a8abcc769f08ba70b96df561e813a4001b184d3feb8c3d13b095261",
+        "source/delimiter-cased-properties-deep.d.ts": "f321514602994ba6e0ab622ef52debd4e9f64a7b4494c03ee017083dc1965753",
+        "source/delimiter-cased-properties.d.ts": "f829212a0e8e4fd1b079645d4e97e6ec73734dd21aae4dfc921d2958774721d0",
+        "source/distributed-omit.d.ts": "d9720d542df1d7feba0aa80ed11b4584854951f9064232e8d7a76e65dc676136",
+        "source/distributed-pick.d.ts": "d0fb3d0c64beba3b9ab25916cc018150d78ccb4952fac755c53721d9d624ba0d",
+        "source/empty-object.d.ts": "86b484bcf6344a27a9ee19dd5cef1a5afbbd96aeb07708cc6d8b43d7dfa8466c",
+        "source/enforce-optional.d.ts": "952c4a8d2338e19ef26c1c0758815b1de6c082a485f88368f5bece1e555f39d4",
+        "source/entries.d.ts": "e0ef70ca30cdc08f55a9511c51a91415e814f53fcc355b14fc8947d32ce9e1aa",
+        "source/entry.d.ts": "37569cc8f21262ca62ec9d3aa8eb5740f96e1f325fad3d6aa00a19403bd27b96",
+        "source/exact.d.ts": "12aeda564ee3f1d96ac759553d6749534fafeb2e5142ea2867f22ed39f9d3260",
+        "source/except.d.ts": "554962080d3195cae300341a8b472fb0553f354f658344ae181b9aa02d351dbd",
+        "source/find-global-type.d.ts": "a304e0af52f81bd7e6491e890fd480f3dc2cb0541dec3c7bd440dba9fea5c34e",
+        "source/fixed-length-array.d.ts": "31073e7d0e51f33b1456ff2ab7f06546c95e24e11c29d5b39a634bc51f86d914",
+        "source/get.d.ts": "6b5b31af3f5cfcf5635310328f0a3a94f612902024e75dc484eb79123f5b8ebe",
+        "source/global-this.d.ts": "9e5c7463fc0259a38938c9afbdeda92e802cff87560277fd3e385ad24663f214",
+        "source/greater-than-or-equal.d.ts": "0915ce92bb54e905387b7907e98982620cb7143f7b44291974fb2e592602fe00",
+        "source/greater-than.d.ts": "d21c5f692d23afa03113393088bcb1ef90a69272a774950a9f69c58131ac5b7e",
+        "source/has-optional-keys.d.ts": "0a0bf0cb43af5e0ac1703b48325ebc18ad86f6bf796bdbe96a429c0e95ca4486",
+        "source/has-readonly-keys.d.ts": "f08d2151bd91cdaa152532d51af04e29201cfc5d1ea40f8f7cfca0eb4f0b7cf3",
+        "source/has-required-keys.d.ts": "eb31477c87de3309cbe4e9984fa74a052f31581edb89103f8590f01874b4e271",
+        "source/has-writable-keys.d.ts": "b9c889d8a4595d02ebb3d3a72a335900b2fe9e5b5c54965da404379002b4ac44",
+        "source/if-any.d.ts": "d9c6f10eebf03d123396d4fee1efbe88bc967a47655ec040ffe7e94271a34fc7",
+        "source/if-empty-object.d.ts": "ba93f0192c9c30d895bee1141dd0c307b75df16245deef7134ac0152294788cc",
+        "source/if-never.d.ts": "0f2c77683296ca2d0e0bee84f8aa944a05df23bc4c5b5fef31dda757e75f660f",
+        "source/if-null.d.ts": "4f5bbef956920cfd90f2cbffccb3c34f8dfc64faaba368d9d41a46925511b6b0",
+        "source/if-unknown.d.ts": "309586820e31406ed70bb03ea8bca88b7ec15215e82d0aa85392da25d0b68630",
+        "source/includes.d.ts": "d82c245bfb76da44dd573948eca299ff75759b9714f8410468d2d055145a4b64",
+        "index.d.ts": "c253c7ea2877126b1c3311dc70b7664fe4d696cb09215857b9d7ea8b7fdce1f0",
+        "source/internal/index.d.ts": "1f129869a0ee2dcb7ea9a92d6bc8ddf2c2cdaf2d244eec18c3a78efeb5e05c83",
+        "source/int-closed-range.d.ts": "f0f95d40b0b5a485b3b97bd99931230e7bf3cbbe1c692bd4d65c69d0cdd6fa9d",
+        "source/int-range.d.ts": "5faa3d4b828440882a089a3f8514f13067957f6e5e06ec21ddd0bc2395df1c33",
+        "source/invariant-of.d.ts": "c69ecf92a8a9fb3e4019e6c520260e4074dc6cb0044a71909807b8e7cc05bb65",
+        "source/is-any.d.ts": "ce92e662f86a36fc38c5aaa2ec6e6d6eed0bc6cf231bd06a9cb64cc652487550",
+        "source/is-equal.d.ts": "892abbe1081799073183bab5dc771db813938e888cf49eb166f0e0102c0c1473",
+        "source/is-float.d.ts": "3821c8180abb683dcf4ba833760764a79e25bc284dc9b17d32e138c34ada1939",
+        "source/is-integer.d.ts": "0ef2a86ec84da6b2b06f830b441889c5bb8330a313691d4edbe85660afa97c44",
+        "source/is-literal.d.ts": "9d8fc1d9b6b4b94127eec180183683a6ef4735b0e0a770ba9f7e2d98dd571e0c",
+        "source/is-never.d.ts": "4e251317bb109337e4918e5d7bcda7ef2d88f106cac531dcea03f7eee1dd2240",
+        "source/is-null.d.ts": "dd9694eecd70a405490ad23940ccd8979a628f1d26928090a4b05a943ac61714",
+        "source/is-tuple.d.ts": "bd56c2399a7eadccfca7398ca2244830911bdbb95b8ab7076e5a9210e9754696",
+        "source/is-unknown.d.ts": "42ca885a3c8ffdffcd9df252582aef9433438cf545a148e3a5e7568ca8575a56",
+        "source/iterable-element.d.ts": "6addbb18f70100a2de900bace1c800b8d760421cdd33c1d69ee290b71e28003d",
+        "source/join.d.ts": "d2e3a1de4fde9291f9fb3b43672a8975a83e79896466f1af0f50066f78dbf39e",
+        "source/jsonifiable.d.ts": "8dd284442b56814717e70f11ca22f4ea5b35feeca680f475bfcf8f65ba4ba296",
+        "source/jsonify.d.ts": "91bc53a57079cf32e1a10ccf1a1e4a068e9820aa2fc6abc9af6bd6a52f590ffb",
+        "source/kebab-case.d.ts": "392f3eb64f9c0f761eb7a391d9fbef26ffa270351d451d11bd70255664170acc",
+        "source/kebab-cased-properties-deep.d.ts": "cc8734156129aa6230a71987d94bdfac723045459da707b1804ecec321e60937",
+        "source/kebab-cased-properties.d.ts": "5e20af039b2e87736fd7c9e4b47bf143c46918856e78ce21da02a91c25d817e8",
+        "source/keys-of-union.d.ts": "56613f2ebdd34d4527ca1ee969ab7e82333c3183fc715e5667c999396359e478",
+        "source/internal/keys.d.ts": "58d91c410f31f4dd6fa8d50ad10b4ae9a8d1789306e73a5fbe8abea6a593099b",
+        "source/last-array-element.d.ts": "db08c1807e3ae065930d88a3449d926273816d019e6c2a534e82da14e796686d",
+        "source/less-than-or-equal.d.ts": "e37650b39727a6cf036c45a2b6df055e9c69a0afdd6dbab833ab957eb7f1a389",
+        "source/less-than.d.ts": "9dfb317a36a813f4356dc1488e26a36d95e3ac7f38a05fbf9dda97cfd13ef6ea",
+        "source/literal-to-primitive-deep.d.ts": "ceb2c0bc630cca2d0fdd48b0f48915d1e768785efaabf50e31c8399926fee5b1",
+        "source/literal-to-primitive.d.ts": "e79e530a8216ee171b4aca8fc7b99bd37f5e84555cba57dc3de4cd57580ff21a",
+        "source/literal-union.d.ts": "2cbf557a03f80df74106cb7cfb38386db82725b720b859e511bdead881171c32",
+        "source/merge-deep.d.ts": "1a80e164acd9ee4f3e2a919f9a92bfcdb3412d1fe680b15d60e85eadbaa460f8",
+        "source/merge-exclusive.d.ts": "f981ffdbd651f67db134479a5352dac96648ca195f981284e79dc0a1dbc53fd5",
+        "source/merge.d.ts": "6927ceeb41bb451f47593de0180c8ff1be7403965d10dc9147ee8d5c91372fff",
+        "source/multidimensional-array.d.ts": "9ce0473b0fbaf7287afb01b6a91bd38f73a31093e59ee86de1fd3f352f3fc817",
+        "source/multidimensional-readonly-array.d.ts": "6f0d708924c3c4ee64b0fef8f10ad2b4cb87aa70b015eb758848c1ea02db0ed7",
+        "source/non-empty-object.d.ts": "28fa41063a242eafcf51e1a62013fccdd9fd5d6760ded6e3ff5ce10a13c2ab31",
+        "source/non-empty-string.d.ts": "e53a8b6e43f20fa792479f8069c41b1a788a15ffdfd56be1ab8ef46ea01bd43e",
+        "source/non-empty-tuple.d.ts": "77ff2aeb024d9e1679c00705067159c1b98ccac8310987a0bdaf0e38a6ca7333",
+        "source/internal/numeric.d.ts": "3aea7345c25f1060791fc83a6466b889924db87389e5c344fa0c27b75257ebe4",
+        "source/numeric.d.ts": "b2a793bde18962a2e1e0f9fa5dce43dd3e801331d36d3e96a7451727185fb16f",
+        "source/internal/object.d.ts": "fd53e2a54dae7bb3a9c3b061715fff55a0bb3878472d4a93b2da6f0f62262c9f",
+        "source/observable-like.d.ts": "4f24c2781b21b6cd65eede543669327d68a8cf0c6d9cf106a1146b164a7c8ef9",
+        "source/omit-deep.d.ts": "260e6d25185809efc852e9c002600ad8a85f8062fa24801f30bead41de98c609",
+        "source/omit-index-signature.d.ts": "e6804515ba7c8f647e145ecc126138dd9d27d3e6283291d0f50050700066a0ea",
+        "source/opaque.d.ts": "3079a6674bc66ed2d722c1e33b62a5959d7b752c2ec8e44ce6b202c5e107dfc3",
+        "source/optional-keys-of.d.ts": "fca7cd7512b19d38254171fb5e35d2b16ac56710b7915b7801994612953da16c",
+        "source/or.d.ts": "2878f694f7d3a13a88a5e511da7ac084491ca0ddde9539e5dad76737ead9a5a9",
+        "source/override-properties.d.ts": "85d63aaff358e8390b666a6bc68d3f56985f18764ab05f750cb67910f7bccb1a",
+        "source/package-json.d.ts": "ef83477cca76be1c2d0539408c32b0a2118abcd25c9004f197421155a4649c37",
+        "source/partial-deep.d.ts": "b0378c1bc3995a1e7b40528dcd81670b2429d8c1dcc1f8d1dc8f76f33d3fc1b8",
+        "source/partial-on-undefined-deep.d.ts": "db436ca96e762259f14cb74d62089c7ca513f2fc725e7dcfbac0716602547898",
+        "source/pascal-case.d.ts": "bb89466514349b86260efdee9850e497d874e4098334e9b06a146f1e305fca3f",
+        "source/pascal-cased-properties-deep.d.ts": "f7da03d84ce7121bc17adca0af1055021b834e861326462a90dbf6154cf1e106",
+        "source/pascal-cased-properties.d.ts": "fc0ee9d0476dec3d1b37a0f968e371a3d23aac41742bc6706886e1c6ac486749",
+        "source/paths.d.ts": "900d1889110107cea3e40b30217c6e66f19db8683964a57afd9a72ecc821fe21",
+        "source/pick-deep.d.ts": "a2e4333bf0c330ae26b90c68e395ad0a8af06121f1c977979c75c4a5f9f6bc29",
+        "source/pick-index-signature.d.ts": "9420a04edbe321959de3d1aab9fa88b45951a14c22d8a817f75eb4c0a80dba02",
+        "source/primitive.d.ts": "cd51ceafea7762ad639afb3ca5b68e1e4ffeaacaa402d7ef2cae17016e29e098",
+        "source/promisable.d.ts": "03ed68319c97cd4ce8f1c4ded110d9b40b8a283c3242b9fe934ccfa834e45572",
+        "source/readonly-deep.d.ts": "c6843fd4514c67ab4caf76efab7772ceb990fbb1a09085fbcf72b4437a307cf7",
+        "source/readonly-keys-of.d.ts": "dd0cad0db617f71019108686cf5caabcad13888b2ae22f889a4c83210e4ba008",
+        "source/readonly-tuple.d.ts": "4ce53edb8fb1d2f8b2f6814084b773cdf5846f49bf5a426fbe4029327bda95bf",
+        "source/replace.d.ts": "2e3ceed776a470729c084f3a941101d681dd1867babbaf6e1ca055d738dd3878",
+        "source/require-all-or-none.d.ts": "e35738485bf670f13eab658ea34d27ef2b875f3aae8fc00fb783d29e5737786d",
+        "source/require-at-least-one.d.ts": "89cd9ab3944b306e790b148dd0a13ca120daf7379a98729964ea6288a54a1beb",
+        "source/require-exactly-one.d.ts": "019c29de7d44d84684e65bdabb53ee8cc08f28b150ac0083d00e31a8fe2727d8",
+        "source/require-one-or-none.d.ts": "bcd951d1a489d00e432c73760ce7f39adb0ef4e6a9c8ffef5dd7f093325a8377",
+        "source/required-deep.d.ts": "5a0d920468aa4e792285943cadad77bcb312ba2acf1c665e364ada1b1ee56264",
+        "source/required-keys-of.d.ts": "7e43693f6ea74c3866659265e0ce415b4da6ed7fabd2920ad7ea8a5e746c6a94",
+        "source/schema.d.ts": "02687b095a01969e6e300d246c9566a62fa87029ce2c7634439af940f3b09334",
+        "source/screaming-snake-case.d.ts": "6a76e6141ff2fe28e88e63e0d06de686f31184ab68b04ae16f0f92103295cc2a",
+        "source/set-field-type.d.ts": "965759788855797f61506f53e05c613afb95b16002c60a6f8653650317870bc3",
+        "source/set-non-nullable-deep.d.ts": "b6aa8c6f2f5ebfb17126492623691e045468533ec2cc7bd47303ce48de7ab8aa",
+        "source/set-non-nullable.d.ts": "1f0ee5ddb64540632c6f9a5b63e242b06e49dd6472f3f5bd7dfeb96d12543e15",
+        "source/set-optional.d.ts": "07d0370c85ac112aa6f1715dc88bafcee4bcea1483bc6b372be5191d6c1a15c7",
+        "source/set-parameter-type.d.ts": "23195b09849686462875673042a12b7f4cd34b4e27d38e40ca9c408dae8e6656",
+        "source/set-readonly.d.ts": "7fb0164ebb34ead4b1231eca7b691f072acf357773b6044b26ee5d2874c5f296",
+        "source/set-required-deep.d.ts": "cc9bf8080004ee3d8d9ef117c8df0077d6a76b13cb3f55fd3eefbb3e8fcd1e63",
+        "source/set-required.d.ts": "9e4fc88d0f62afc19fa5e8f8c132883378005c278fdb611a34b0d03f5eb6c20c",
+        "source/set-return-type.d.ts": "14be139e0f6d380a3d24aaf9b67972add107bea35cf7f2b1b1febac6553c3ede",
+        "source/shared-union-fields-deep.d.ts": "08599363ef46d2c59043a8aeec3d5e0d87e32e606c7b1acf397e43f8acadc96a",
+        "source/shared-union-fields.d.ts": "f70a315e029dacf595f025d13fa7599e8585d5ccfc44dd386db2aa6596aaf553",
+        "source/simplify-deep.d.ts": "1d953cb875c69aeb1ec8c58298a5226241c6139123b1ff885cedf48ac57b435c",
+        "source/simplify.d.ts": "a8289d1d525cf4a3a2d5a8db6b8e14e19f43d122cc47f8fb6b894b0aa2e2bde6",
+        "source/single-key-object.d.ts": "672c1ebc4fa15a1c9b4911f1c68de2bc889f4d166a68c5be8f1e61f94014e9d8",
+        "source/snake-case.d.ts": "fed8c2c205f973bfb03ef3588750f60c1f20e2362591c30cd2c850213115163b",
+        "source/snake-cased-properties-deep.d.ts": "07bfa278367913dd253117ec68c31205825b2626e1cb4c158f2112e995923ee8",
+        "source/snake-cased-properties.d.ts": "32a2b99a3aacda16747447cc9589e33c363a925d221298273912ecf93155e184",
+        "source/split.d.ts": "f05d5d16d85abe57eb713bc12efefc00675c09016e3292360e2de0790f51fa48",
+        "source/spread.d.ts": "a3cd30ebae3d0217b6b3204245719fc2c2f29d03b626905cac7127e1fb70e79c",
+        "source/string-key-of.d.ts": "f351eaa598ba2046e3078e5480a7533be7051e4db9212bb40f4eeb84279aa24d",
+        "source/string-repeat.d.ts": "3d9fb85cc7089ca54873c9924ff47fcf05d570f3f8a3a2349906d6d953fa2ccf",
+        "source/string-slice.d.ts": "0f5773d0dd61aff22d2e3223be3b4b9c4a8068568918fb29b3f1ba3885cf701f",
+        "source/internal/string.d.ts": "4733c832fb758f546a4246bc62f2e9d68880eb8abf0f08c6bec484decb774dc9",
+        "source/stringified.d.ts": "1848ebe5252ccb5ca1ca4ff52114516bdbbc7512589d6d0839beeea768bfb400",
+        "source/structured-cloneable.d.ts": "c60fd0d7a1ba07631dfae8b757be0bffd5ef329e563f9a213e4a5402351c679f",
+        "source/subtract.d.ts": "c27c5144d294ba5e38f0cd483196f911047500a735490f85f318b4d5eb8ac2cc",
+        "source/sum.d.ts": "d0d03f7d2ba2cf425890e0f35391f1904d0d152c77179ddfc28dfad9d4a09c03",
+        "source/tagged-union.d.ts": "5d6f919e1966d45ea297c2478c1985d213e41e2f9a6789964cdb53669e3f7a6f",
+        "source/tagged.d.ts": "7d8f40a7c4cc81db66ac8eaf88f192996c8a5542c192fdebb7a7f2498c18427d",
+        "source/trim.d.ts": "8504003e88870caa5474ab8bd270f318d0985ba7ede4ee30fe37646768b5362a",
+        "source/tsconfig-json.d.ts": "2c3936b0f811f38ab1a4f0311993bf599c27c2da5750e76aa5dfbed8193c9922",
+        "source/tuple-to-object.d.ts": "f52fb387ac45e7b8cdc98209714c4aedc78d59a70f92e9b5041309b6b53fc880",
+        "source/tuple-to-union.d.ts": "1502a23e43fd7e9976a83195dc4eaf54acaff044687e0988a3bd4f19fc26b02b",
+        "source/internal/tuple.d.ts": "7c0a4d3819fb911cdb5a6759c0195c72b0c54094451949ebaa89ffceadd129ca",
+        "source/internal/type.d.ts": "f2a392b336e55ccbeb8f8a07865c86857f1a5fc55587c1c7d79e4851b0c75c9a",
+        "source/typed-array.d.ts": "1b8357b3fef5be61b5de6d6a4805a534d68fe3e040c11f1944e27d4aec85936a",
+        "source/undefined-on-partial-deep.d.ts": "1410d60fe495685e97ed7ca6ff8ac6552b8c609ebe63bd97e51b7afe3c75b563",
+        "source/union-to-intersection.d.ts": "928f96b9948742cbaec33e1c34c406c127c2dad5906edb7df08e92b963500a41",
+        "source/union-to-tuple.d.ts": "918956b37f3870f02f0659d14bba32f7b0e374fd9c06a241db9da7f5214dcd79",
+        "source/unknown-array.d.ts": "1a67ba5891772a62706335b59a50720d89905196c90719dad7cec9c81c2990e6",
+        "source/unknown-map.d.ts": "e6918b864e3c2f3a7d323f1bb31580412f12ab323f6c3a55fb5dc532c827e26d",
+        "source/unknown-record.d.ts": "ada60ff3698e7fd0c7ed0e4d93286ee28aed87f648f6748e668a57308fde5a67",
+        "source/unknown-set.d.ts": "f65e0341f11f30b47686efab11e1877b1a42cf9b1a232a61077da2bdeee6d83e",
+        "source/value-of.d.ts": "18b86125c67d99150f54225df07349ddd07acde086b55f3eeac1c34c81e424d8",
+        "source/words.d.ts": "0ae9d5bbf4239616d06c50e49fc21512278171c1257a1503028fc4a95ada3ed0",
+        "source/writable-deep.d.ts": "843e98d09268e2b5b9e6ff60487cf68f4643a72c2e55f7c29b35d1091a4ee4e9",
+        "source/writable-keys-of.d.ts": "563573a23a61b147358ddee42f88f887817f0de1fc5dbc4be7603d53cbd467ad",
+        "source/writable.d.ts": "d7735a9ccd17767352ab6e799d76735016209aadd5c038a2fc07a29e7b235f02"
+      },
+      "materials": [
+        {
+          "file": "materials/type-fest-4.41.0/LICENSE",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/type-fest/-/type-fest-4.41.0.tgz",
+            "path": "package/license-mit",
+            "integrity": "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA==",
+            "suppliedGitEvidence": {
+              "commit": "68469722a9521122b6cb40376c4c4544aef28228",
+              "gitBlob": "fa7ceba3eb4a9657a9db7f3ffca4e4e97a9019de",
+              "url": "https://github.com/sindresorhus/type-fest/blob/68469722a9521122b6cb40376c4c4544aef28228/license-mit"
+            }
+          }
+        },
+        {
+          "file": "materials/type-fest-4.41.0/LICENSE-ALTERNATIVE",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/type-fest/-/type-fest-4.41.0.tgz",
+            "path": "package/license-cc0",
+            "integrity": "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "xhr-2.6.0",
+      "name": "xhr",
+      "version": "2.6.0",
+      "tarball": "https://registry.npmjs.org/xhr/-/xhr-2.6.0.tgz",
+      "integrity": "sha512-/eCGLb5rxjx5e3mF1A7s+pLlR6CGyqWN91fv1JgER5mVWg1MZmlhBvy9kjcsOdRk8RrIujotWyJamfyrp+WIcA==",
+      "packageJsonSha256": [
+        "2c2915687823e38795a3dc67ce7e3b96d27ffaf72ed69238c8c9685fd60853ba",
+        "8fa6cd141499ce75d62e2bbc8e268a0ba385d92bac4f27dbf8a9c1cbb9071927"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/xhr",
+          "resolved": "https://registry.npmjs.org/xhr/-/xhr-2.6.0.tgz",
+          "integrity": "sha512-/eCGLb5rxjx5e3mF1A7s+pLlR6CGyqWN91fv1JgER5mVWg1MZmlhBvy9kjcsOdRk8RrIujotWyJamfyrp+WIcA=="
+        },
+        {
+          "lock": "packages/runtime/package-lock.json",
+          "path": "node_modules/xhr",
+          "resolved": "https://registry.npmjs.org/xhr/-/xhr-2.6.0.tgz",
+          "integrity": "sha512-/eCGLb5rxjx5e3mF1A7s+pLlR6CGyqWN91fv1JgER5mVWg1MZmlhBvy9kjcsOdRk8RrIujotWyJamfyrp+WIcA=="
+        }
+      ],
+      "files": {
+        "LICENCE": "19338d17a974d1c747b3f6c618f08975b8908fdebccbc047c0e72b09daf6ddd3",
+        "index.js": "e16ec98b2a554b10cd3afd27926970aea435d3b328ca4a9988ca13569115ba89",
+        "package.json": "2c2915687823e38795a3dc67ce7e3b96d27ffaf72ed69238c8c9685fd60853ba",
+        ".vscode/settings.json": "3ac84ef256f1c1bee2211ac50aa972ee37673ccac8b3464a91590d80a5329191",
+        "CONTRIBUTING.md": "1d412c12be96e67328dbb6f3f70e7d6cdad5547bfee98e820cf419786d18a0db",
+        "README.md": "9011e1916a8e231c3897feca1edfb41ca8cc279c5b7e41f4052d9a24381a4eb1",
+        "index.d.ts": "c2a8408e8cea49f7a0bcef23d8063720749e3a44437ae7e478cdc7e39b2cd28a"
+      },
+      "materials": [
+        {
+          "file": "materials/xhr-2.6.0/LICENSE",
+          "sha256": "19338d17a974d1c747b3f6c618f08975b8908fdebccbc047c0e72b09daf6ddd3",
+          "source": {
+            "kind": "npm-tarball",
+            "url": "https://registry.npmjs.org/xhr/-/xhr-2.6.0.tgz",
+            "path": "package/LICENCE",
+            "integrity": "sha512-/eCGLb5rxjx5e3mF1A7s+pLlR6CGyqWN91fv1JgER5mVWg1MZmlhBvy9kjcsOdRk8RrIujotWyJamfyrp+WIcA=="
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null
+    },
+    {
+      "id": "xml-naming-0.1.0",
+      "name": "xml-naming",
+      "version": "0.1.0",
+      "tarball": "https://registry.npmjs.org/xml-naming/-/xml-naming-0.1.0.tgz",
+      "integrity": "sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==",
+      "packageJsonSha256": [
+        "b69775b228da8fb7f25c98f309bab65a3a27444a2fd6b96f6793ece74be1acdc",
+        "54d279bb487a575982057f9f1687831dcfe24733c05f226911b61b1b39072bbf"
+      ],
+      "bindings": [
+        {
+          "lock": "package-lock.json",
+          "path": "node_modules/xml-naming",
+          "resolved": "https://registry.npmmirror.com/xml-naming/-/xml-naming-0.1.0.tgz",
+          "integrity": "sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw=="
+        }
+      ],
+      "files": {
+        "src/index.js": "ebdaa8d1ac41dbb15c842b0dcb091adb9c13e4a76f33b1537fcddfafb674cf11",
+        "package.json": "b69775b228da8fb7f25c98f309bab65a3a27444a2fd6b96f6793ece74be1acdc",
+        "README.md": "fbb211d0da0ae219c4f7a91c6be497c126fa0c30707181c2e509c25f9471fc5b",
+        "src/index.d.ts": "68eda263d66e01c28bb2a5dd84784ade8d7bf2a7a6f2ee6e7b7fb0251840e2cf"
+      },
+      "materials": [],
+      "selectedLicense": null,
+      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+    }
+  ]
+}

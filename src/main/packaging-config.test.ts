@@ -1421,7 +1421,11 @@ describe('electron-builder Analytix packaging', () => {
     expect(publicRuntimeScripts.length).toBeGreaterThan(0)
     for (const [name, command] of publicRuntimeScripts) {
       expect(`${name}: ${command}`).not.toMatch(legacyRuntimeMarker)
-      expect(command).toContain('scripts/runtime-go-validation-command.mjs')
+      if (name === 'runtime:go:core-stage') {
+        expect(command).toBe('node ./scripts/runtime-go-release-gate.mjs --core-stage --json')
+      } else {
+        expect(command).toContain('scripts/runtime-go-validation-command.mjs')
+      }
     }
   })
 

@@ -240,6 +240,26 @@ SHA-256 is used only where an extracted reference is not a tracked Git object.
   bottom-distance behavior. The historical ambiguous implementation is
   `retired`, not relicensed or reclassified as independent.
 
+## 2026-09-22 — exact dependency legal materials
+
+The existing artifact legal owner now owns the bounded
+[`build/dependency-legal/manifest.json`](../../../build/dependency-legal/manifest.json)
+catalog and its unmodified `materials/` files. This is license/notice supply for
+already locked dependencies, not adoption of another runtime or framework.
+Each source/destination record binds the exact npm archive integrity and file
+digests, root/runtime lock instances, material digest and fixed Git source where
+available. The supplied exif-parser0.1.12, khroma2.1.0, type-fest4.41.0 and
+canvas0.1.100 evidence was independently compared with the downloaded archives;
+the eight supplied Git blob hashes were recomputed successfully.
+
+Reuse mode: unmodified license or complete license-bearing README; no upstream
+implementation copied. Copyright and full terms remain in those materials.
+Sixteen records select the proven MIT branch; type-fest retains CC0 as well.
+Fifteen records remain unresolved, including canvas embedded-component
+provenance/notices. Reviewer: Codex, 2026-09-22. Validation belongs to the existing
+legal reader, exact-content/owner negative tests and the newly built artifact;
+none of this changes signing, publication or source-egress admission.
+
 ## Review Rule
 
 Documentation that says an idea was "absorbed" proves a design relationship,

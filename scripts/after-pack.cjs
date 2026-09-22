@@ -4548,6 +4548,18 @@ async function afterPack(context) {
   stagePrivateOfficeForPack(context, nativeDisposition, repoRoot, worktreeSnapshotAfter)
   const { validateOfficeCodecDirectory } = await import('./build-office-codec.mjs')
   await validateOfficeCodecDirectory(join(unpackedAppRoot(context), 'out', 'office-codec'))
+  // Supply legal inputs before the resource closure and signatures are created.
+  const legal = require('./lib/dependency-legal-evidence.cjs')
+  const legalInputs = legal.materializeLegalEvidence(repoRoot, packedResourcesDir(context))
+  const { createArtifactReaderFromPath } = await import('./artifact-legal-obligations-audit.mjs')
+  const legalReader = createArtifactReaderFromPath(
+    context.electronPlatformName === 'darwin' ? appBundlePath(context) : context.appOutDir
+  )
+  legal.verifyPackagedLegalMaterials(legalReader, legalInputs)
+  legalReader.assertStable?.()
+  if (canonicalJSON(collectPackagedWorktreeSnapshotV1(repoRoot)) !== canonicalJSON(worktreeSnapshotAfter)) {
+    throw new Error('[after-pack] Source inputs changed while materializing legal evidence')
+  }
   const authority = writePackagedBuildAuthorityV2(context, nativeDisposition, {
     repoRoot,
     worktreeSnapshot: worktreeSnapshotAfter,

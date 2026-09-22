@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import {
   closeSync,
   constants,
@@ -26,6 +27,7 @@ export const ARTIFACT_OBLIGATION_CLASSES = Object.freeze({
 })
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const { loadCatalog, verifyEvidence, logicalEntry } = createRequire(import.meta.url)('./lib/dependency-legal-evidence.cjs')
 const ROOT_PACKAGE_ENTRY = 'package.json'
 const ROOT_PACKAGE_LOCK_ENTRY = 'package-lock.json'
 const RUNTIME_PACKAGE_ENTRY = 'packages/runtime/package.json'
@@ -86,6 +88,8 @@ const LICENSE_FILE_NAMES = [
   'LICENSE.BSD',
   'LICENSE.MIT',
   'LICENSE.APACHE2',
+  'LICENCE',
+  'license-mit',
   'license',
   'license.md',
   'license.txt',
@@ -1128,7 +1132,7 @@ function createPackagedAppReader(root, asarPath) {
   }
 }
 
-function createArtifactReaderFromPath(inputPath) {
+export function createArtifactReaderFromPath(inputPath) {
   const path = resolve(String(inputPath || ''))
   let stat
   try {
@@ -1184,12 +1188,11 @@ function licenseValue(packageJson) {
   return ''
 }
 
-function isInternalPackage(name, packageEntry, options = {}) {
+function isInternalPackage(name, options = {}) {
   const explicit = new Set(options.internalPackageNames || [])
   const prefixes = options.internalPackagePrefixes || []
   return explicit.has(name) || prefixes.some((prefix) => name.startsWith(prefix)) ||
-    INTERNAL_PACKAGE_NAME_RE.test(name) ||
-    /^(?:packages|plugins)\//i.test(packageEntry)
+    INTERNAL_PACKAGE_NAME_RE.test(name)
 }
 
 function dependencySource(name, version, internal) {
@@ -1201,12 +1204,12 @@ function findLegalEntry(reader, packageDirectory, names) {
   const entries = reader.entries()
   for (const name of names) {
     const candidate = normalizeEntry(`${packageDirectory}/${name}`)
-    if (entries.includes(candidate)) return `/${candidate}`
+    if (entries.includes(candidate) && reader.read(candidate)?.toString('utf8').trim()) return `/${candidate}`
   }
   const lower = new Map(entries.map((entry) => [entry.toLowerCase(), entry]))
   for (const name of names) {
     const candidate = normalizeEntry(`${packageDirectory}/${name}`).toLowerCase()
-    if (lower.has(candidate)) return `/${lower.get(candidate)}`
+    if (lower.has(candidate) && reader.read(lower.get(candidate))?.toString('utf8').trim()) return `/${lower.get(candidate)}`
   }
   return null
 }
@@ -1217,9 +1220,9 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
   const name = hasNonEmptyString(packageJson?.name) ? packageJson.name.trim() : ''
   const version = hasNonEmptyString(packageJson?.version) ? packageJson.version.trim() : ''
   const declaredLicense = licenseValue(packageJson)
-  const internal = isInternalPackage(name, entry, options)
+  const internal = isInternalPackage(name, options)
   const source = dependencySource(name, version, internal)
-  const licenseFile = findLegalEntry(reader, packageDirectory, LICENSE_FILE_NAMES)
+  let licenseFile = findLegalEntry(reader, packageDirectory, LICENSE_FILE_NAMES)
   const noticeFile = findLegalEntry(reader, packageDirectory, NOTICE_FILE_NAMES)
   let obligationClass = internal
     ? ARTIFACT_OBLIGATION_CLASSES.internalMetadata
@@ -1229,6 +1232,7 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
     ? 'Preserve the complete declared license choice and its texts; this gate does not silently select a governing branch.'
     : 'none; exact artifact license and applicable notice material are present'
   let governingTerm = declaredLicense || 'Declared license metadata is absent; the applicable redistribution term cannot be established.'
+  let supplementalEvidence = null
 
   if (!declaredLicense) {
     status = internal ? 'unverified' : 'blocked'
@@ -1243,6 +1247,29 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
   } else if (!licenseFile) {
     status = 'blocked'
     missingAction = 'Retain the exact package license file in the final artifact and bind it to this dependency instance.'
+  }
+
+  const catalog = options.legalCatalog
+  const record = catalog?.catalog.packages.find(record => {
+    if (record.name === name && record.version === version) return true
+    try {
+      const logical = logicalEntry(reader, entry)
+      return record.bindings.some(binding =>
+        `${binding.lock === 'package-lock.json' ? '' : 'packages/runtime/'}${binding.path}/package.json` === logical)
+    } catch { return false }
+  })
+  if (record) {
+    try {
+      supplementalEvidence = verifyEvidence(reader, entry, record, catalog)
+      governingTerm = supplementalEvidence.selectedLicense
+      licenseFile = supplementalEvidence.licenseFile
+      status = 'passed'
+      missingAction = 'none; exact locked instance and supplemental legal materials verified'
+    } catch (error) {
+      status = 'blocked'
+      missingAction = /^dependency_legal_[a-z_]+$/.test(error.message)
+        ? error.message : 'dependency_legal_evidence_unreadable'
+    }
   }
 
   return {
@@ -1260,7 +1287,8 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
     mandatory: obligationClass === ARTIFACT_OBLIGATION_CLASSES.mandatoryExternal,
     engineeringBlocking: status === 'blocked' && obligationClass === ARTIFACT_OBLIGATION_CLASSES.mandatoryExternal,
     status,
-    declaredLicense: declaredLicense || null
+    declaredLicense: declaredLicense || null,
+    supplementalEvidence
   }
 }
 
@@ -1341,6 +1369,7 @@ function runtimeMetadataEntry(reader, logicalEntry) {
 }
 
 function exactInventory(reader, options = {}) {
+  options = { ...options, legalCatalog: loadCatalog(REPO_ROOT) }
   const entries = exactPackageEntries(reader)
   const dependencyInstances = []
   const parseErrors = []
@@ -1714,6 +1743,8 @@ export const artifactLegalObligationsTestInternals = Object.freeze({
   captureDirectoryInventory,
   createAsarReader,
   createDirectoryReader,
+  createMemoryReader,
+  createArtifactReaderFromPath,
   readStableSingleLinkRegularFile
 })
 
