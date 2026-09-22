@@ -1591,6 +1591,9 @@ function MessageBubbleImpl({
       : null
     return (
       <div className="group/message flex min-w-0 max-w-full flex-col">
+        {block.meta?.factHistoryState === 'retained_snapshot' && block.acceptedFinalProjectionReceipt ? (
+          <div className="mb-1 text-xs text-ds-muted">{t('retainedSnapshotHistory')}</div>
+        ) : null}
         <div className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
           <AssistantMarkdown
             text={block.text}

@@ -231,6 +231,7 @@ export type WebCitationSource = {
 }
 
 export type RuntimeDisclosureMetadata = {
+  factHistoryState?: 'retained_snapshot'
   turnId?: string
   displayText?: string
   delivery?: 'steer'

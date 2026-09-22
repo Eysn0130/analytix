@@ -53,6 +53,10 @@ func ProjectPublicThread(thread map[string]any) (map[string]any, error) {
 }
 
 func projectPublicThreadWithAuthority(thread map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, preservedHistory ...PreservedDerivedHistoryV1) (map[string]any, error) {
+	return projectPublicThreadWithRetainedFactsV1(thread, trusted, caseThreads, currentAuthority, primaryCAS, nil, preservedHistory...)
+}
+
+func projectPublicThreadWithRetainedFactsV1(thread map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, retained map[string]bool, preservedHistory ...PreservedDerivedHistoryV1) (map[string]any, error) {
 	threadID := strings.TrimSpace(contracts.StringField(thread, "id"))
 	caseSensitive, err := domainsecurity.ClassifyCaseSensitiveThread(thread)
 	if err != nil {
@@ -124,7 +128,7 @@ func projectPublicThreadWithAuthority(thread map[string]any, trusted *gateprojec
 	expectedCurrentTurns := map[string]bool{}
 	if currentWorkspaceMatches {
 		for _, record := range trusted.RecordsForThread(threadID) {
-			if samePublicEpoch(currentContext, record.SecurityContext) {
+			if samePublicEpoch(currentContext, record.SecurityContext) || (retained[record.SecurityContext.TurnID] && sameRetainedFactScopeV1(currentContext, record.SecurityContext)) {
 				expectedCurrentTurns[record.SecurityContext.TurnID] = true
 			}
 		}
@@ -221,7 +225,11 @@ func projectPublicThreadWithAuthority(thread map[string]any, trusted *gateprojec
 				return nil, errors.New("case turn lacks its strict primary CAS observation")
 			}
 		}
-		trustedFinal := indexedFinal && currentWorkspaceMatches && samePublicEpoch(currentContext, trustedRecord.SecurityContext)
+		historicalFinal := indexedFinal && retained[turnID] && sameRetainedFactScopeV1(currentContext, trustedRecord.SecurityContext)
+		trustedFinal := indexedFinal && currentWorkspaceMatches && (samePublicEpoch(currentContext, trustedRecord.SecurityContext) || historicalFinal)
+		if trustedFinal && historicalFinal {
+			publicTurn["factHistoryState"] = "retained_snapshot"
+		}
 		var trustedPublicView map[string]any
 		if trustedFinal {
 			delete(expectedCurrentTurns, turnID)
@@ -1123,6 +1131,16 @@ func projectOrdinaryPublicToolResultItem(item map[string]any) map[string]any {
 
 func caseThreadKnown(authority CaseThreadAuthority, threadID string) bool {
 	return authority != nil && authority.IsCaseThread(strings.TrimSpace(threadID))
+}
+
+// Retained snapshot or epoch history inside the same current case is eligible.
+// The caller must also revalidate the exact original witness and current grant.
+func sameRetainedFactScopeV1(current, accepted domainsecurity.TurnSecurityContext) bool {
+	return current.ThreadID == accepted.ThreadID && current.WorkspaceRealPath == accepted.WorkspaceRealPath &&
+		current.TenantID == accepted.TenantID && current.UserID == accepted.UserID && current.CaseID == accepted.CaseID &&
+		current.CaseBindingHash == accepted.CaseBindingHash && domainsecurity.TurnSecurityContextAllowsCaseEvidence(current) &&
+		current.ContextEpoch >= accepted.ContextEpoch &&
+		(current.DatasetSnapshotID != accepted.DatasetSnapshotID || current.ContextEpoch > accepted.ContextEpoch)
 }
 
 func samePublicEpoch(current, accepted domainsecurity.TurnSecurityContext) bool {

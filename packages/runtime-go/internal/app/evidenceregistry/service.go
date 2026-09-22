@@ -642,7 +642,7 @@ func (service *Service) withVerifiedFactFinalWitness(ctx context.Context, record
 	}
 	if record.AcceptedFinal.FactFinalWitnessAdmission.SchemaVersion ==
 		domainevidence.FactFinalWitnessAdmissionSchemaVersionV2 {
-		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historical.Bundle, input, use)
+		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historicalHead, input, use)
 	}
 	if err := domainevidence.ValidateFactFinalWitnessAdmissionExactV1(
 		*record.AcceptedFinal.FactFinalWitnessAdmission, input,
@@ -655,7 +655,7 @@ func (service *Service) withVerifiedFactFinalWitness(ctx context.Context, record
 func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 	ctx context.Context,
 	record domainevidence.PrivateAcceptedFinalRecord,
-	historicalBundle domainevidence.EvidenceAuthorityBundleV1,
+	historicalHead evidenceauthorityport.FreshHead,
 	input domainevidence.FactFinalWitnessAdmissionInputV1,
 	use func() error,
 ) error {
@@ -677,6 +677,26 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 		Observation:               binding,
 		ExpectedDatasetSnapshotID: record.SecurityContext.DatasetSnapshotID,
 	}
+	// Production history uses retained, exact original material without making
+	// the currently selected analytical snapshot every historical fact's owner.
+	if history, ok := service.datasetAuthority.(datasetsnapshotport.HistoricalFactAuthorityV2); ok {
+		return history.WithHistoricalFactSelectionV2(ctx, resolveInput, record.SecurityContext, historicalHead, func(selection datasetsnapshotport.CurrentSelectionV2) error {
+			if len(selection.DatasetIndexPath) == 0 || datasetsnapshotport.ValidateCurrentSelectionDigestV2(selection) != nil {
+				return errors.New("fact final historical dataset selection is invalid")
+			}
+			input.DatasetRootIndex = selection.DatasetIndexPath[0]
+			input.SelectedDatasetIndex = selection.SelectedIndex
+			input.DatasetIndexPath = append([]domainsecurity.DatasetSnapshotIndexV1(nil), selection.DatasetIndexPath...)
+			input.DatasetRecord = selection.Snapshot.Record
+			input.DatasetManifest = selection.Snapshot.Manifest
+			input.FundsProducerContent = selection.Snapshot.FundsProducerContent
+			input.BindingObservation = binding
+			if err := domainevidence.ValidateFactFinalWitnessAdmissionExactV1(*record.AcceptedFinal.FactFinalWitnessAdmission, input); err != nil {
+				return err
+			}
+			return use()
+		})
+	}
 	return service.datasetAuthority.WithCurrentSelectionV2(
 		ctx,
 		resolveInput,
@@ -686,8 +706,8 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 			capability datasetsnapshotport.CurrentSelectionCapabilityV2,
 		) error {
 			if capability == nil ||
-				selection.Head.Bundle.DatasetSnapshotIndexDigest != historicalBundle.DatasetSnapshotIndexDigest ||
-				selection.Head.Bundle.DatasetSnapshotCount != historicalBundle.DatasetSnapshotCount ||
+				selection.Head.Bundle.DatasetSnapshotIndexDigest != historicalHead.Bundle.DatasetSnapshotIndexDigest ||
+				selection.Head.Bundle.DatasetSnapshotCount != historicalHead.Bundle.DatasetSnapshotCount ||
 				len(selection.DatasetIndexPath) == 0 ||
 				datasetsnapshotport.ValidateCurrentSelectionDigestV2(selection) != nil {
 				return errors.New("fact final current dataset selection changed after admission")

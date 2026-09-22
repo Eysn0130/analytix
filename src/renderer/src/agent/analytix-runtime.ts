@@ -581,6 +581,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     )
     if (thread.id !== threadId) throw new Error('Runtime thread response identity mismatch.')
     const turns = Array.isArray(thread.turns) ? thread.turns : []
+    const retainedFactTurns = new Set(turns.filter(turn => turn.factHistoryState === 'retained_snapshot').map(turn => turn.id))
     const caseBound = thread.historyAuthority === 'case_boundary_only_v1'
     const acceptedProjectionByTurn = acceptedFinalProjectionsForTurns(
       turns,
@@ -618,6 +619,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       if (projection?.assistant.id === item.id) {
         return [{
           ...projection.assistant,
+          meta: { ...projection.assistant.meta, ...(retainedFactTurns.has(item.turnId!) ? { factHistoryState: 'retained_snapshot' } : {}) },
           acceptedFinalProjectionReceipt: projection.receipt,
           acceptedFinalProjectionTerminal: projection.terminal
         }]

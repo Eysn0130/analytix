@@ -63,6 +63,14 @@ func TestThreadHandlersRecordErrorMapping(t *testing.T) {
 		strings.Contains(string(recorder.Body.Bytes()), threadapp.ErrPublicProjectionPending.Error()) {
 		t.Fatalf("pending public projection was not mapped to a safe retryable response: code=%d body=%#v", recorder.Code, body)
 	}
+	stub.getErr = errors.Join(threadapp.ErrPublicProjectionPending, errors.New("PRIVATE_RETAINED_MATERIAL_FAILURE"))
+	recorder = httptest.NewRecorder()
+	handler.HandleRecord(recorder, request, "thr_1")
+	body = decodeThreadBody(t, recorder)
+	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "public_projection_pending" || body["turns"] != nil ||
+		strings.Contains(recorder.Body.String(), "PRIVATE_RETAINED_MATERIAL_FAILURE") {
+		t.Fatal("retained authority failure leaked details or a partial batch")
+	}
 	stub.getErr = nil
 
 	recorder = httptest.NewRecorder()

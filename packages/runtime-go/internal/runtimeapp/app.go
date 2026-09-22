@@ -1289,6 +1289,20 @@ func newRuntimeServerHandlerWithRootsModeE(
 	currentCaseAuthority := threadapp.NewCurrentCaseThreadAuthorityValidator(caseThreads, filestore.CaseBindingReader{}, nil)
 	publicProjector := threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(
 		trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report,
+		func(record domainevidence.PrivateAcceptedFinalRecord, current domainsecurity.TurnSecurityContext) error {
+			issuer, ok := evidenceStore.(evidenceregistryport.RecoveredFactFinalWitnessIssuer)
+			if !ok {
+				return errors.New("retained fact witness issuer is unavailable")
+			}
+			return issuer.WithRecoveredFactFinalWitness(ctx, record, func(cap evidenceregistryport.FactFinalWitnessCapability) error {
+				return cap.UseExact(record, func() error {
+					return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+						OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+						Context: current, Workspace: current.WorkspaceRealPath,
+					})
+				})
+			})
+		},
 	)
 	store.SetActiveHistorySourceAdmissionV1(func(source map[string]any) error {
 		if _, err := publicProjector.ProjectThread(source); err != nil {

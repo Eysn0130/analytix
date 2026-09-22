@@ -714,6 +714,7 @@ export type CoreAcceptedFinalPublicViewV2Json = AcceptedFinalPublicViewV2
 export type CoreAcceptedFinalPublicViewJson = AcceptedFinalPublicView
 
 export type CoreTurnJson = {
+  factHistoryState?: 'retained_snapshot'
   id: string
   threadId: string
   status: CoreTurnStatus

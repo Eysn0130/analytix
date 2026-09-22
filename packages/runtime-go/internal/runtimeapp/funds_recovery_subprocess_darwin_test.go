@@ -27,14 +27,20 @@ import (
 // and contacts the still-running independent witness service with a fresh client.
 // Like its parent, this is test composition, not installed-app acceptance.
 type b1RecoveryProcessInput struct {
-	Config      Config
-	HostDataDir string
-	NativePath  string
-	ParentPID   int
-	ThreadID    string
+	Config           Config
+	HostDataDir      string
+	NativePath       string
+	ParentPID        int
+	ThreadID         string
+	TurnID           string
+	FinalDigest      string
+	Account          string
+	AdditionalFinals []b1RecoveryExpectedFinal
+}
+
+type b1RecoveryExpectedFinal struct {
 	TurnID      string
 	FinalDigest string
-	Account     string
 }
 
 func b1AssertFreshProcessRecovery(t *testing.T, input b1RecoveryProcessInput) {
@@ -108,7 +114,8 @@ func TestFundsRecoveryFreshProcessHelper(t *testing.T) {
 	ctx := context.WithValue(context.Background(), bundledFundsHostValidationContextKeyV1{}, dependencies)
 	admitted := false
 	ctx = context.WithValue(ctx, factRecoveryObservationKeyV1{}, func(report factRecoveryObservationV1) {
-		admitted = report.Candidates == 1 && report.Admitted == 1 && report.Held == 0
+		expected := 1 + len(input.AdditionalFinals)
+		admitted = report.Candidates == expected && report.Admitted == expected && report.Held == 0
 	})
 	lease, err := AcquireRuntimePersistenceLease(input.Config)
 	if err != nil {
@@ -131,6 +138,16 @@ func TestFundsRecoveryFreshProcessHelper(t *testing.T) {
 	final, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(turn["acceptedFinalView"])
 	if err != nil || final.AcceptedFinalDigest != input.FinalDigest {
 		t.Fatal("fresh process changed original final identity")
+	}
+	if len(input.AdditionalFinals) != 0 && turn["factHistoryState"] != "retained_snapshot" {
+		t.Fatal("fresh process did not preserve the original snapshot history label")
+	}
+	for _, expected := range input.AdditionalFinals {
+		currentTurn := packagedSourceUnavailableHydrationTurnV1(thread, expected.TurnID)
+		currentFinal, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(currentTurn["acceptedFinalView"])
+		if err != nil || currentFinal.AcceptedFinalDigest != expected.FinalDigest || currentTurn["factHistoryState"] != nil {
+			t.Fatal("fresh process changed current snapshot final identity")
+		}
 	}
 	public, _ := json.Marshal(thread)
 	deliveryAssertPublic(t, public)

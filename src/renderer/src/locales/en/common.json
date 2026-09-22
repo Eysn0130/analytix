@@ -1845,6 +1845,7 @@
   "rewindFileRollbackNotice": "Resending will roll back file changes",
   "rewindBusyError": "Wait for the current turn to finish before rewinding.",
   "rollbackWorkspace": "Rollback commit",
+  "retainedSnapshotHistory": "History from a previous snapshot",
   "rollbackWorkspaceFromAssistantResponse": "Rollback this response's Git commit without rolling back the conversation",
   "rollingBackWorkspace": "Rolling back…",
   "forkResponse": "Fork response",

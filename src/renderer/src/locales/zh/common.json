@@ -1845,6 +1845,7 @@
   "rewindFileRollbackNotice": "重新发送会撤回文件修改",
   "rewindBusyError": "当前回合还在进行，等结束后再回退。",
   "rollbackWorkspace": "回滚提交",
+  "retainedSnapshotHistory": "历史快照记录",
   "rollbackWorkspaceFromAssistantResponse": "只回滚这条回答对应的 Git 提交，不回滚对话",
   "rollingBackWorkspace": "正在回滚…",
   "forkResponse": "分叉回答",

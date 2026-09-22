@@ -1568,6 +1568,7 @@ describe('AnalytixRuntimeProvider', () => {
     const secondDelivery = secondAcceptedFinalDeliveryBatchForRenderer()
     const response = acceptedCaseThreadResponse(record, firstView, firstView) as Record<string, any>
     const firstTurn = response.turns[0] as Record<string, any>
+    firstTurn.factHistoryState = 'retained_snapshot'
     delete firstTurn.acceptedFinal
     delete firstTurn.items.find((item: Record<string, unknown>) => item.kind === 'assistant_text').acceptedFinal
     const secondAssistantEvent = secondDelivery.events[0] as any
@@ -1613,6 +1614,8 @@ describe('AnalytixRuntimeProvider', () => {
       'assistant:item_final_second'
     ])
     const assistants = accepted.blocks.filter((block) => block.kind === 'assistant')
+    expect(assistants[0].meta?.factHistoryState).toBe('retained_snapshot')
+    expect(assistants[1].meta?.factHistoryState).toBeUndefined()
     expect(assistants.map((block) => block.acceptedFinalProjectionReceipt?.batchId)).toEqual([
       firstDelivery.batchId,
       secondDelivery.batchId
