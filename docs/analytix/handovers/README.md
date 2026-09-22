@@ -10,9 +10,19 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 - 保留 SOURCE `0708620e21fc2bd706ba18a377a60824cdb78421`、
   DELIVERY `9c21c0ec911571ddba1c733ac4a828737654e02b` 及其后有效工作。
 - 恢复先核对实际 HEAD/tree/dirty/祖先与适用 AGENTS；不能从远端旧 dde 重建。
-- 下一动作：正式 Core qualification 原 owner 与所有消费者闭环；安装/外部准入受阻时，
-  补 B1 多快照 public history 断言、最小反例与原 owner 修复。已完成 Core profile、
-  单快照 HTTP200、当前原生组件和新 Go 进程恢复不重做。
+- 本轮 Core 资格源码：`69e74fdb6`、`0ce2e92a0`；法律清单 owner 后继至
+  `ac00f1602`。实际签名/安装/Provider/更新数据兼容验收仍未取得。
+- 当前 SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275`，tree
+  `515145582c719a4f18bf2cc0405adcaef0f9797c`；本索引、矩阵与报告随后的文档提交
+  为本轮 DELIVERY，准确 HEAD/tree 见 writer 最终回执并在恢复时重读 Git。
+- 本轮证据：[Core 与多快照闭环](../qa/pr28-release-closure-2026-09-22.md)。
+  B1 完整原生链1776.55秒通过：A1/A2 public GET200及原始 final、历史/当前标识、
+  缺失/篡改503整批拒绝、原字节复原、普通任务连续性、原件不变及新OS进程恢复。
+  既有 accepted-final/compaction crash矩阵 production/race检查124.842秒通过。
+- 下一动作：补齐正式签名/公证与发布信任配置、准确资源许可、获准的正常测试会话
+  和Provider入口，然后构建新的正式Core候选并完成安装/A0/GUI长历史/更新与旧数据
+  恢复验收。Core发行不以未随包分发的Funds整体为前置。已完成Core profile、
+  单快照及本轮多快照源码恢复不重做。
 - 原源码外发 `PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED`；无解除证据不换通道。
   不启用 Goal、自动续跑或并行 writer。私有制品不是正式发行。
 

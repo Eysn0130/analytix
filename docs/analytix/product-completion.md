@@ -7,25 +7,35 @@ Delivery order is owned by the [Operational execution plan](delivery-execution-p
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-Current Core-release/Funds-recovery START is `5fe1ccce13b07128e740c83e1231262480e01015`.
-Core profile SOURCE is `93ffbf6d8`; witnessed recovery owner SOURCE is `38c6d8e3f`;
-the actual-package strict signing inventory repair is `f945192ca`, propagated
-through after-sign at `96e55c817` with focused and real artifact-owner verification.
-The normal96e55 Core DMG build, integrity check and isolated static-copy Go
-reader closure have passed; test-only probe is7fcb11102. All four current native
-components and a clean aac3 full app were subsequently built through normal owners.
-The exact-native CNY chain, same-thread recovery and fresh Go-process recovery pass;
-synthetic Host admission and loopback Provider remain explicit limits. Installed
-GUI and external Provider acceptance remain separate.
-Final integrated SOURCE is `0708620e21fc2bd706ba18a377a60824cdb78421`.
-The existing current-native B1 snapshot/local-display/fault/ordinary-continuity
-regression also passes, but observes two evolved facts held at witness admission;
-it does not establish public multi-snapshot history recovery.
-Source commits `85d261e63` (actual Host admission) and `30d93cbc1` (real Rust vectors)
-retain SOURCE781 and all subsequent work. Exact final source/delivery identities and
-remaining seams are recorded in the
-[Current QA](qa/pr28-independent-review-execution-2026-09-21.md#current-core-release--funds-recovery-from-5fe1).
-Documentation-only commits do not turn service tests into installed-product proof.
+Preserved SOURCE is `0708620e21fc2bd706ba18a377a60824cdb78421`; the retained
+DELIVERY is `9c21c0ec911571ddba1c733ac4a828737654e02b`. The execution plan was
+integrated at `b485a0357`. Formal Core qualification software and its signing,
+Go inspection, formal-evidence, publisher and updater consumers are implemented
+at `69e74fdb6` and `0ce2e92a0`; exact legal inventory corrections follow at
+`c2ef61c4b`, `5a7d2cebc` and `ac00f1602`. Actual signed artifact and installed acceptance remain
+unfulfilled. The private96e55 Core DMG retains its original classification and
+bytes; it is not a package of these new sources.
+
+Multi-snapshot SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` preserves original A1/A2 bindings, applies
+current display permission separately, and retains whole-thread atomicity.
+Dataset order/concurrency/restoration, case A→B→A epoch checks and post-witness
+revocation/cancellation checks pass at their source owners. The final production-tag
+native chain passes1776.55s: actual public GET200 and original A1/A2 digests,
+A1 historical/A2 current labels, missing/corrupt503 with no partial batch,
+exact-byte restoration, ordinary Provider continuity, immutable original stores,
+and fresh OS process recovery/protected local display. Existing accepted-final and
+compaction crash matrices also pass with production tags/race in124.842s. The earlier500 failure and
+all prior failed runs remain recorded. This is synthetic Host/loopback composition,
+not installed or external Provider acceptance.
+The terminal harness now waits at most180seconds after two observed90-second
+harness timeouts with successful completion during cleanup; HTTP remains45seconds.
+These test budgets are not product latency acceptance claims.
+
+The [current execution evidence](qa/pr28-release-closure-2026-09-22.md) records
+exact source/artifact identities, failures, commands, checks and remaining seams.
+The [previous Core and single-snapshot evidence](qa/pr28-independent-review-execution-2026-09-21.md#current-core-release--funds-recovery-from-5fe1)
+remains historical and preserved. No ordinary source/fixture check is installed
+GUI, normal Provider, Developer ID, notarization or public-release proof.
 
 One main conversation must support generation/import → native preview → selection
 and explicit action → annotation/reference → real Diff → explicit acceptance →
@@ -40,8 +50,8 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: actual Core profile, sealed absence contract and Host exclusion are implemented/tested at93ff; the normal96e55 private DMG and isolated-copy closure now pass. Installed GUI, normal Provider, new-process journey and formal release qualification remain outstanding |
-| FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: fresh-witness startup recovery implemented at38c6; original503 counterexample integrated at e177; all four current native components from the clean aac3 app pass the CNY/same-thread/new-Go-process chain. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: private Core profile/absence and96e55 static-copy evidence retained; controlled Core software qualification, exact target metadata and read-only Core formal stage are implemented. Actual Developer ID/publication authority, exact licenses, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
+| FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 
 Core installation and stage release do not depend on unshipped Funds features.
@@ -66,7 +76,7 @@ evidence/display owners; P01–P03 and D01–D04 remain packaging and delivery g
 | P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable; Invoke and actual adapter admission reject activation/generation changes across readiness, pre-effect and completion, including real-store disable-enable/reopen | Remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed. Source tasks remain unfinished, not all blocked on GUI | SOURCE incomplete / installed not run |
 | P4 one conversation / cleanup | Primary conversation, bounded retrieval8 caches/4 builds, completion cancellation and retained history; old three Write routes removed | H01–H08 end-to-end authority/compaction/recovery evidence remains partial. Do not restore second runtime/RAG/Provider or alter independent UI Refresh | SOURCE retained / integration partial |
 | P0 Rust correctness | Fixed3000/10000 ascending/13000 fixture, static stage labels and prior bounded query controls retained | Old main INTERNAL root cause unresolved. COUNT-wrapper source lead differs from target; no new arbitrary reruns or alternative-binary symbols | EVIDENCE_FAILURE / root cause open |
-| P5 desktop storage/install | Private4343 DMG built and integrity checked; current Go task-Keychain binding exists | Electron41.10.3 OSCrypt chooses macOS storage before Core; userData alone does not isolate keychain. Need legitimate storage boundary before actual installed journey; do not disable Cookie encryption | SOURCE_GAP / ENVIRONMENT_LIMIT / installed not run |
+| P5 desktop storage/install | Private4343 DMG built and integrity checked; current Go task-Keychain binding exists | Electron41.10.3 OSCrypt chooses macOS storage before Core; userData alone does not isolate Keychain. Approved normal test session and Provider entry remain unestablished; no invented selector or encryption bypass | ENVIRONMENT_LIMIT / installed not run |
 | P5 integration and release | Original branch/history and single writer retained | Source egress NOT_CLEARED, exact-SHA CI/CodeQL/review, strict gate and applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
 
 ## Evidence limits and release exits
