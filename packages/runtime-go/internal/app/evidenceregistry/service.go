@@ -584,6 +584,10 @@ func (service *Service) VerifyFactFinalWitnessCurrent(
 	ctx context.Context,
 	record domainevidence.PrivateAcceptedFinalRecord,
 ) error {
+	return service.withVerifiedFactFinalWitness(ctx, record, func() error { return nil })
+}
+
+func (service *Service) withVerifiedFactFinalWitness(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, use func() error) error {
 	if service == nil || ctx == nil || service.witnessChain == nil ||
 		domainevidence.ValidatePrivateAcceptedFinalRecord(record) != nil ||
 		domainsecurity.ValidateTurnSecurityContextForCaseFactPublication(record.SecurityContext) != nil ||
@@ -638,14 +642,14 @@ func (service *Service) VerifyFactFinalWitnessCurrent(
 	}
 	if record.AcceptedFinal.FactFinalWitnessAdmission.SchemaVersion ==
 		domainevidence.FactFinalWitnessAdmissionSchemaVersionV2 {
-		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historical.Bundle, input)
+		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historical.Bundle, input, use)
 	}
 	if err := domainevidence.ValidateFactFinalWitnessAdmissionExactV1(
 		*record.AcceptedFinal.FactFinalWitnessAdmission, input,
 	); err != nil {
 		return errors.Join(errors.New("fact final witness admission does not match fresh-chain authority"), err)
 	}
-	return nil
+	return use()
 }
 
 func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
@@ -653,6 +657,7 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 	record domainevidence.PrivateAcceptedFinalRecord,
 	historicalBundle domainevidence.EvidenceAuthorityBundleV1,
 	input domainevidence.FactFinalWitnessAdmissionInputV1,
+	use func() error,
 ) error {
 	if service.datasetAuthority == nil || service.bindingObserver == nil {
 		return errors.New("fact final current dataset replay authority is unavailable")
@@ -707,7 +712,7 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 							err,
 						)
 					}
-					return nil
+					return use()
 				},
 			)
 		},

@@ -1274,6 +1274,18 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err := trustedFinals.SeedTerminalComplete(ctx, terminalProjectionAuthorities); err != nil {
 		return nil, err
 	}
+	startupPhase = "fact-final-witness-recovery"
+	restoreRuntimeFactTerminalsV1(ctx, trustedFinals, terminalRecovery.FactCandidates, evidenceStore,
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord) error {
+			return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+				OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+				Context: record.SecurityContext, Workspace: record.SecurityContext.WorkspaceRealPath,
+			})
+		},
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, authority appturn.FactFinalMutationAuthority) ([]map[string]any, error) {
+			return evidenceapp.LoadVerifiedAcceptedFinalEventsWithAuthority(ctx, finalEventIO, store, record, authority)
+		},
+	)
 	currentCaseAuthority := threadapp.NewCurrentCaseThreadAuthorityValidator(caseThreads, filestore.CaseBindingReader{}, nil)
 	publicProjector := threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(
 		trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report,
