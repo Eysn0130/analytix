@@ -77,6 +77,7 @@
     "runtime:go:preflight": "node ./scripts/runtime-go-validation-command.mjs preflight",
     "runtime:go:rc-control-plane": "node ./scripts/runtime-go-validation-command.mjs rc-control-plane",
     "runtime:go:release-gate": "node ./scripts/runtime-go-validation-command.mjs release-gate",
+    "runtime:go:core-stage": "node ./scripts/runtime-go-release-gate.mjs --core-stage --json",
     "runtime:go:live-evidence": "node ./scripts/runtime-go-validation-command.mjs live-evidence",
     "runtime:go:live-validation": "node ./scripts/runtime-go-validation-command.mjs live-validation",
     "runtime:go:local-validation": "node ./scripts/runtime-go-validation-command.mjs local-validation",

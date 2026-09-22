@@ -417,8 +417,15 @@ names/digests. The signed publication owner rejects mixed Core/Full packages;
 version archive writes use a create-only precondition. `core-v1` denotes the
 unchanged Core data-schema generation, not evidence of an end-to-end upgrade.
 Cross-profile automatic updates are unsupported. Full product formal evidence
-still requires A0 and B1; a separate Core-stage acceptance projection remains a
-source gap and must not be replaced by declaring B1 passed.
+still requires A0 and B1. The same release gate has a separate read-only Core
+stage projection: on a clean source checkout, set `ANALYTIX_EXACT_ARTIFACT_PATH`
+to the exact controlled Core `.app`, then run
+`npm run runtime:go:core-stage -- --formal-evidence-dir <evidence-directory>`.
+It requires the current-source A0 report, the existing whole-artifact legal audit,
+authenticated Core absence, and fresh Developer ID/shared native signature checks.
+It reports B1 as `not_applicable_core`; it does not declare B1 passed or create
+Full product admission, publication authority, or a release receipt. Actual
+installation/Provider/upgrade and external release acceptance are separate evidence.
 
 The Core resource closure excludes the Funds plugin tree, Python data backend,
 all four data-analysis native binaries and their native authority generations,

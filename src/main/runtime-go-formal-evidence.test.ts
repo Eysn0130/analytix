@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   evaluateRuntimeGoFormalEvidence,
+  evaluateRuntimeGoCoreFormalEvidence,
   preflightRuntimeGoFormalEvidence,
   runtimeGoFormalEvidenceContract,
   runtimeGoFormalEvidenceTestInternals
@@ -1256,7 +1257,7 @@ function developmentDisposition(executableBinding: Record<string, unknown>) {
   }
 }
 
-function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
+function writeBundle(a0 = a0Report(), b1 = b1Report(), core = false): string {
   const directory = mkdtempSync(join(tmpdir(), 'analytix-formal-evidence-'))
   temporaryDirectories.push(directory)
   const appOutDir = join(directory, 'package-output')
@@ -1291,7 +1292,7 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
   writeFileSync(appAsarPath, asarFixture({
     'package.json': JSON.stringify({
       name: 'analytix', version: '1.0.0', author: productPackageAuthor,
-      license: 'Apache-2.0'
+      license: 'Apache-2.0', ...(core ? { releaseProfile: 'core' } : {})
     }),
     ...unpackedRuntimeMetadataEntries,
     'node_modules/fixture-dependency/package.json': JSON.stringify({
@@ -1312,6 +1313,7 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
     })
   )
   writeFileSync(join(fundsPluginDirectory, 'mcp', 'server.mjs'), 'export {}\n')
+  if (core) rmSync(fundsPluginDirectory, { recursive: true })
   writeElectronFuseFixture(appPath)
   const context = {
     appOutDir,
@@ -1319,7 +1321,7 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
     arch: 'arm64',
     packager: {
       appInfo: { productFilename: 'analytix' },
-      config: { executableName: 'analytix' },
+      config: { executableName: 'analytix', ...(core ? { extraMetadata: { releaseProfile: 'core' } } : {}) },
       platformSpecificBuildOptions: { executableName: 'analytix' }
     }
   }
@@ -1338,7 +1340,9 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
     worktreeSnapshot,
     targetKey: 'darwin-arm64',
     buildContext: packagedAuthorityContract.collectEffectiveBuilderContextV1(context),
-    nativeDisposition: developmentDisposition(executableBinding),
+    nativeDisposition: core ? { kind: 'core_controlled_release', targetKey: 'darwin-arm64',
+      signingPolicySha256: require('../../scripts/macos-signing-policy.cjs').policyDigest,
+      signingMode: 'developer-id', appleTeamIdentifier: 'TESTTEAM01' } : developmentDisposition(executableBinding),
     artifacts: {
       executable: executableBinding,
       appAsar: {
@@ -1346,7 +1350,7 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
         byteLength: appAsarBytes.length
       },
       runtimeServer: runtimeServerBinding,
-      fundsPlugin: packagedAuthorityContract.collectPackagedFundsPluginIdentityV2(context)
+      fundsPlugin: core ? require('../../scripts/core-package-profile.cjs').ABSENT_FUNDS : packagedAuthorityContract.collectPackagedFundsPluginIdentityV2(context)
     },
     stagedPayload: packagedAuthorityContract.collectStagedPayloadClosureV1(context)
   })
@@ -1363,6 +1367,7 @@ function writeBundle(a0 = a0Report(), b1 = b1Report()): string {
   const appAsarSha256 = sha256(appAsarBytes)
   const snapshotDigest = authority.worktreeSnapshot.snapshotDigest
   if (a0.app && typeof a0.app === 'object') {
+    if (core) (a0.app as Record<string, unknown>).controlledCoreQualification = true
     a0.app.authoritySha256 = authoritySha256
     a0.app.authorityDigest = authority.authorityDigest
     a0.app.executableSha256 = executableSha256
@@ -1472,6 +1477,51 @@ function runReleaseGate(
 }
 
 describe('runtime-go formal evidence admission', () => {
+  test('Core stage consumes only A0 but still requires actual Developer ID and exact Core authority', () => {
+    const directory = writeBundle(a0Report(), b1Report(), true)
+    rmSync(join(directory, runtimeGoFormalEvidenceContract.reportFiles.b1))
+    const result = evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source, bundleDirectory: directory,
+      exactFormalArtifact: exactArtifactsByDirectory.get(directory) })
+    expect(result.reports.a0.lane).toBe('ordinary-a0')
+    expect(result.statuses.b1).toBe('not_applicable_core')
+    expect(result.publicationReceiptIssued).toBe(false)
+    // A synthetic Mach-O is never real Developer ID acceptance. All remaining
+    // source/A0/artifact/absence bindings must nevertheless validate.
+    expect(result.accepted).toBe(false)
+    expect(result.problems).toEqual(['core_formal_developer_id_or_authority_verification_failed'])
+    const notarize = require('../../scripts/mac-notarize.cjs')
+    const original = notarize._internals
+    let checked = false
+    try {
+      // Only this isolated synthetic OS boundary is substituted. The actual
+      // packaged authority, resource closure, A0 validator and legal owner run.
+      notarize._internals = { ...original, verifyDataNativeAfterSign: (_context: unknown, options: unknown) => {
+        expect(options).toEqual({ requireDeveloperID: true, requireSecureTimestamp: true })
+        checked = true
+      } }
+      const qualified = evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source, bundleDirectory: directory,
+        exactFormalArtifact: exactArtifactsByDirectory.get(directory) })
+      expect(checked).toBe(true)
+      expect(qualified.accepted).toBe(true)
+      expect(qualified.problems).toEqual([])
+      expect(qualified.statuses.b1).toBe('not_applicable_core')
+      expect(qualified.publicationReceiptIssued).toBe(false)
+      const a0Path = join(directory, runtimeGoFormalEvidenceContract.reportFiles.a0)
+      const originalReport = readFileSync(a0Path)
+      const alteredReport = JSON.parse(originalReport.toString())
+      alteredReport.app.controlledCoreQualification = false
+      writeFileSync(a0Path, JSON.stringify(alteredReport))
+      expect(evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source, bundleDirectory: directory,
+        exactFormalArtifact: exactArtifactsByDirectory.get(directory) }).problems).toContain('core_formal_exact_artifact_mismatch')
+      writeFileSync(a0Path, originalReport)
+      expect(evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source: { ...source, head: '9'.repeat(40) }, bundleDirectory: directory,
+        exactFormalArtifact: exactArtifactsByDirectory.get(directory) }).accepted).toBe(false)
+    } finally { notarize._internals = original }
+    const full = writeBundle()
+    expect(evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source, bundleDirectory: full,
+      exactFormalArtifact: exactArtifactsByDirectory.get(full) }).problems).toContain('core_formal_qualification_required')
+  })
+
   test('preflights current reports without claiming artifact or formal execution', () => {
     const directory = writeBundle()
     const result = preflightRuntimeGoFormalEvidence({

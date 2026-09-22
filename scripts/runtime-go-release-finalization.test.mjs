@@ -187,6 +187,7 @@ async function routeFixture(config) {
     './runtime-go-rc-receipt.mjs': { ...receiptModule, createReceiptRun: (options) =>
       createReceiptRun({ ...options, cacheRoot: config.cacheRoot, resolveToolchain: () => toolchain }) },
     './runtime-go-formal-evidence.mjs': {
+      evaluateRuntimeGoCoreFormalEvidence: () => { throw Error('full_execution_must_not_use_core_stage') },
       preflightRuntimeGoFormalEvidence: () => { ordering.push('formal-preflight'); return { passed: true } },
       evaluateRuntimeGoFormalEvidence: (input) => {
         ordering.push('formal-ingestion')
