@@ -6,6 +6,9 @@
 
 ## 当前交接与整理入口
 
+- [分阶段交付执行方案](delivery-execution-plan.md) 是唯一长期 Operational 方案；
+  只调整 Core/Funds 交付次序，当前结果由 [产品矩阵](product-completion.md) 承载。
+
 - 主开发及产品执行路线为 **本机 Codex Desktop + canonical Analytix 工作区**；
   **ChatGPT + GitHub** 为辅助开发路线。当前本机授权与验证边界见
   [`development-runbook.md`](development-runbook.md#development-routes)。不默认要求另一台

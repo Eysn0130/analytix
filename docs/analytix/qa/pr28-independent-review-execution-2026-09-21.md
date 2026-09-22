@@ -261,7 +261,11 @@ qualify the case's installed or complete-chain expectation.
 | R-EXACT-ARTIFACT | Four current native components, clean aac3 full app, normal native admission and CNY/new-Go-process chain pass | Synthetic Host admission/loopback remain; packaged runtime/GUI not executed |
 | F-DERIVATION | Original vectors unchanged; aac3 vector-backed identity owner proves same canonical account is one entity and original unsupported spelling is rejected | Full shared-account import/Provider integration remains distinct |
 
-## Current Core/Funds continuation from fd244
+<a id="current-corefunds-continuation-from-fd244"></a>
+
+## Historical Core/Funds continuation from fd244
+
+Historical snapshot only: the current 0708620/9c21 continuation above supersedes this section. Its then-uncommitted WIP and HTTP503 observations remain historical evidence, not the present worktree state.
 
 Status: **partial**, not Core-stage/Funds-stage/product/release qualification.
 START was clean `fd244d4a042cdb9c03d7f07958b052acc120c5a5` on the original branch.
@@ -1044,7 +1048,9 @@ flows, 16,287 flow steps (16,783 flow location records when separately listed
 source/sink endpoints are included), 1,184 ignored-flow warning, 26 Python floating
 point vectors. None is counted as a product test or fresh CodeQL analysis.
 
-## Current review findings and actual changes
+<a id="current-review-findings-and-actual-changes"></a>
+
+## Historical review findings and actual changes — 9cf / 40a6
 
 | Item | Current action and evidence | Limit |
 | --- | --- | --- |

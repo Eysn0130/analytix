@@ -3,6 +3,7 @@
 Status: Operational current matrix, 2026-09-22 PDT. Accepted targets remain in the
 [spec registry](specs/README.md) and scoped OpenSpec requirements. This matrix does
 not shrink the original A–M/P0–P5 outcome or declare product/release acceptance.
+Delivery order is owned by the [Operational execution plan](delivery-execution-plan.md).
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
