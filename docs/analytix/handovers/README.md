@@ -8,24 +8,45 @@ Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
 branch `codex/workbench-product-delivery-20260914`；[Draft PR28](https://github.com/Eysn0130/analytix/pull/28)。
 原 Codex 保持唯一 source writer，未交接。下一方默认 `REVIEW_ONLY`。
 
-本轮 START `d8640957c4c1c69c5ddee4e3a9b017382c088047`，tree
-`2e4576860898320de4805fd5090540c6386ce724`，接收时 clean/ahead61。
-最新 SOURCE `7815634ba5dd9deb4cae9c2cb4478c2bda8718e5`，tree
-`f599a5b65bbb37e2654444929124a0832e06f60e`；保留2f25字号修复与d73文档检查点。
-随后文档 DELIVERY 是包含本页的提交，
-精确 SHA/tree/dirty 在交付 manifest 单列，不把文档提交借作重新运行源码的证据。
-保留148d、fe656、65ab、5242、4343、d864及所有有效后继。
+本轮 Core/Funds START `fd244d4a042cdb9c03d7f07958b052acc120c5a5`，接收时 clean/ahead65。
+保留 SOURCE781、DELIVERYfd244 及全部有效后继。已提交 Host 实际准入修复
+`85d261e63649e234fa99c220baa33410d2463b4c` 与 Rust真实向量测试 `30d93cbc1`。
+已验证 SOURCE `30d93cbc18c482454c975099beb7b99df9981ad7`，tree
+`67bf767a939ff54c34438bb6cd85698b23f595aa`。两个runtimeapp Go文件为未提交的恢复失败反例/WIP，
+不可作为已完成修复。后续文档DELIVERY及dirty哈希在本轮回执；文档提交不等同重新运行代码。
+原 Codex writer 继续持有；不从远端旧 dde 重建。
 
 1. 先核对 canonical 实际 HEAD、tree、branch、dirty 与 writer，保护后继和用户修改。
 2. 阅读适用 AGENTS、[文档地图](../README.md)、[规范登记](../specs/README.md)、
    当前授权范围及实际 owner。查看[当前产品矩阵](../product-completion.md)和
-   [本轮 QA](../qa/pr28-independent-review-execution-2026-09-21.md#current-readiness-continuation-from-d864)。
+   [本轮 QA](../qa/pr28-independent-review-execution-2026-09-21.md#current-corefunds-continuation-from-fd244)。
 3. 再 fresh 读取远端 PR/head/base/main/checks/review。上轮已观察 remote dde、main ce96，
    本地后继未同步，不能用旧远端重建或覆盖它。任何旧 SHA 的绿灯都不自动继承。
 4. 从依赖已满足的缺口继续；未失效证据复用，不重跑全部测试、不重建 Canvas、不恢复第二路线。
 5. canonical 事实提交后才镜像原 Notion 台账；不向镜像写源码、私有原始日志或个人数据。
 
 ## 本轮真实成果与剩余
+
+Core/Funds 新包18成员、17/17 SHA256清单及安全检查通过。先交付Core、再交付同一
+Core上的Funds账户流水，完整产品要求保留；分期已写回既有矩阵/规范，不降低共享门槛。
+
+本轮普通Core生产HTTP/工具/loopback/持久化旅程通过：缺少Funds时15次异步任务收敛，
+含压缩、重开、resume/fork和受保护拒绝。Provider已提交配置、撤权迟到结果、重定向与
+响应上限检查通过。它们都不是Electron/真实远程Provider/安装验收。
+
+新增实际Office/object读计数反例先2fail/2pass，修复后全通过：Host验证后、adapter真正
+准入前的撤权不再读取；准入后效果不承诺回滚，迟到结果仍拒绝。真实签名存储6场景及
+生产模式Host/HTTP检查通过，原781的10边界反例保留。
+
+原合成JSON未改。Rust真实导入/DuckDB/重开验证通过；原不支持输入、非法金额、USD明确
+拒绝，另行派生的A1/B1/A2 CNY样例与原手工期望一致。A1为入13010.01/出1200.60/
+净11809.41/7笔。当前Go加历史原生组件的公共入口已通过首次导入、最终Provider允许事实、Final Gate和
+受保护HTTP原值展示；同会话重开后的GET稳定返回503（重开前GET通过）。现有请求helper
+此前折叠了顶层错误码，因此两次旧失败的具体码未记录。源码存在fact结果被audit-only保留、
+缺少startup batch witness公开准入的缺口；不能删除这条保护来恢复旧结果。下一步先在原
+witness/dataset/terminal/index owner补齐安全恢复，继而做A/B/A与A1/A2。详情见本轮QA。
+
+以下为保留的前轮成果；其候选与scope仍按各自回执，不重新算本轮测试：
 
 固定 DOCX 字号来源审计和两个对照已执行：docDefaults 11pt、段落10.5pt/run11pt覆盖
 均在固定引擎导出重开稳定。原样本无字号声明时，原有11/10.5→11/11损失记录保留。
@@ -40,6 +61,7 @@ analytix_prod定向48叶用例通过；不代表archive安装/uninstall或完整
 
 | 剩余项 | 类型 | 下一最小动作 |
 | --- | --- | --- |
+| Funds事实结果重开后公开恢复 | SOURCE_GAP / observed503 | 既有fresh witness chain、snapshot、case/principal、terminal chain与durable manifest联合准入；保留撤权/过期拒绝，不复发Provider |
 | DOCX非目标内容、关系、页眉/脚注/视觉完整保真及Core文件闭环 | EVIDENCE_NOT_RUN / SOURCE_GAP | 在现有worker/codec/Core CAS链验证候选；保护不能等同全文件已验收 |
 | 导入pivot/chart局部编辑 | SOURCE_GAP | 稳定part/relationship/field身份及固定UNO typed事务；shared-cache、冲突、重开 |
 | Skills远程archive安装、升级、卸载 | SOURCE_GAP | 在原materialization owner接入可核验publisher/registry授权及stage/journal/revoke；hash不自授权 |

@@ -5,7 +5,161 @@ Scope: latest user-adopted readiness continuation A–N, retaining prior A–I/A
 Repository and source writer remain the canonical Analytix checkout and original Codex owner.
 No Goal, scheduled continuation, new independent task, public release or writer transfer was used.
 
-## Current readiness continuation from d864
+## Current Core/Funds continuation from fd244
+
+Status: **partial**, not Core-stage/Funds-stage/product/release qualification.
+START was clean `fd244d4a042cdb9c03d7f07958b052acc120c5a5` on the original branch.
+`7815634ba5dd9deb4cae9c2cb4478c2bda8718e5` and every valid successor are retained.
+The current source includes Host repair `85d261e63649e234fa99c220baa33410d2463b4c`
+and the real Rust-vector integration `30d93cbc18c482454c975099beb7b99df9981ad7`,
+tree `67bf767a939ff54c34438bb6cd85698b23f595aa`. Two runtimeapp Go files remain
+**uncommitted WIP**: the shared B1 composition/test diagnostics and new delivery-vector
+public-chain test. The failing recovery assertion is retained; these files are not
+an accepted product fix and are not included in the documentation DELIVERY commit.
+The user-supplied Core/Funds archive is SHA256
+`c5ae96f09e62374539b82011b4d570055883e6b20690c47fc3cea1a3e1b43d33`:
+18 members, 17/17 manifest hashes, CRC/path/type/link/encryption/size/collision checks
+passed before owner-only extraction. The complete A–N, independent review, worklist
+and fixture instructions were read. Its 16 reference tests were not rerun or counted
+as product evidence. No external upstream code was copied.
+
+### Actual implementation and first failures
+
+The Core ordinary journey uses the existing production `runtimeapp` HTTP composition,
+normal thread/turn/tools, durable stores and loopback Provider. With Funds missing,
+Coding read/edit/local-test, Writing, loopback Research, consumed Skill, ordinary
+stdio MCP, runtime job lifecycle, protected zero-effect refusal, manual compaction,
+fresh composition, history/resume/fork and further ordinary continuation passed.
+There were 15 completed asynchronous operations with zero guard failures. This is
+service composition/reopen evidence, not Electron Main/preload/Renderer, a new OS
+process, GUI installation, normal credential entry or external Provider evidence.
+The MCP entry was built from current source; no dormant Funds JS fallback was enabled.
+
+A new controlled barrier reproduced the Host gap at the real Office/object read
+owner: revocation after Host validation but during adapter readiness still allowed
+one `os.ReadFile`. The existing Host now supplies an invocation-local admission
+callback; the Office adapter invokes it after readiness, locking and strict input
+decode, before dispatch. It rechecks signed materialization, activation revision and
+principal. Missing/failed admission is fail-closed. The original post-effect check
+remains: an already admitted read may occur but its stale success is withheld, with
+no rollback or blind-retry claim. Production files changed in that commit: three;
+all six changed test files retain the original assertions and add the missing seam.
+
+The immutable supplied vectors now enter the actual Rust canonical CSV importer,
+DuckDB materializer and `analyze_account_flows`. Unsupported original identifiers,
+invalid amount and USD are rejected before database output. Separately derived CNY
+A1/B1/A2 controls use different database inodes and producer identities; source and
+snapshot hashes remain unchanged after querying and reopening. A1 gives inflow
+13010.01, outflow1200.60, net11809.41, count7; B1 and A2 match the unchanged reference.
+The derivation excludes unsupported/invalid/repeated observations explicitly and
+maps the two logical subjects sharing one raw account to distinct test accounts.
+It is not product cross-observation deduplication or original-input acceptance.
+The supplied JSON bytes and SHA256 values are preserved in the committed fixture
+[README](../../../tools/analysis_compute/tests/fixtures/core-funds-20260921/README.md).
+
+### Fresh execution receipts (scopes overlap; do not sum)
+
+Host-local evidence root:
+`/Volumes/AnalytixCache/development-v3/evidence/core-funds-20260921-7l9r_3ev`.
+Each named JSON records command/cwd/times/exit, before/after HEAD/tree/dirty-file
+hashes, relevant Go/npm lock hashes and raw-log SHA256. Files are owner-only.
+
+| Receipt | Result | Exact scope / limitation |
+| --- | --- | --- |
+| core-baseline / core-recovery | timeout90s; then pass with5m budget | Existing plan/tool/protected-refusal/ordinary continuation/reopen; no logic fix inferred from the first timeout |
+| core-mcp-build / core-mcp-build-corrected | native esbuild mistakenly run with Node failed; direct binary pass | Current-source schedule stdio MCP entry only |
+| core-ordinary-lifecycle | skipped | Cache volume is removable and cannot own formal synthetic authority configuration; exit0 is not pass |
+| core-ordinary-local-profile | pass,445.74s | Same missing-Funds lifecycle on fresh0700 local synthetic configuration root; no personal credentials/profile/Keychain |
+| core-provider-bounds | pass,4 top-level tests | Actual Registry/Secret Store with isolated synthetic keys: committed endpoint, stale result discard, no redirect credential forwarding, timeout/bytes/models and credential-echo limits; loopback only |
+| host-effect-red | 2pass/2fail | Actual Office/object read counts: pre-admission revoke and disable-enable were wrongly allowed |
+| host-effect-green | partial | Host/Office/filestore passed; signed-store group timed out120s under parallel load; optional saved-package fixture skipped |
+| host-admission-final | pass,serial -p1 | Original10 cases, new4 read-owner cases, missing/failed admission and6 signed-store readiness/admission/completion cases; old revision/reopen/new revision retained |
+| host-production | pass,analytix_prod | Changed Host/Office and protected HTTP/public-error surface; no archive install claim |
+| funds-vectors | fail | Positive test used an invalid case-entity reference alphabet; no production or expected-result change |
+| funds-vectors-valid-ref | pass,2 tests | Real importer/DuckDB/reopen and unsupported-input refusal; Rust1.94.1, pinned duckdb crate1.10504.0 |
+| funds-production-vector | fail | New Go public-chain test omitted the existing compiled development signing policy; Native Owner unavailable before import; not a product arithmetic failure |
+| funds-native-prerequisite | timeout180s | Overall test budget matched the resource-seal verifier's own180s budget; stopped in codesign, not evidence that signature verification passed or that the artifact was corrupt |
+| funds-production-policy | fail,583.09s | With the existing development policy and normal package/component validation: actual import, native result, allowed Provider amounts/count, Final Gate and first protected display passed; thread detail after reopen returned503. One actual preparation and one registry capsule remain; recovery is not accepted |
+| hydration-baseline | pass | Existing11 top-level app/thread hydration tests; they did not reproduce the real composed Funds failure |
+| funds-finite-diagnostic | pass | WIP helper retains only two known thread failure codes and withholds arbitrary code/message/identity; not recovery acceptance |
+
+
+### Actual Funds integration failure and next source owner
+
+The Go probe derives a separate9-row CNY A1 CSV, SHA256
+`39e764977ee70279bd757d8d85947d5f98a3e6f16abdf1bf9975675e39bc4382`.
+It maps subject1/subject2 to the existing isolated numeric synthetic account forms;
+that differs from the Rust controls and is not the original input. Names, memos and
+counterparties remain synthetic source values. It uses existing protected HTTP stage/
+confirm, real Go/Host/native execution, final loopback Provider serialization, actual
+signed preparation/registry capsule/Final Gate, and the protected accepted-slot route.
+Before reopen, assertions observed9 imported rows, inflow1301001/outflow120060 minor
+units, count7 with complete evidence coverage, exactly2 Provider requests, one actual
+preparation, an EvidenceBackedAnswer and exact original account at the typed local sink.
+
+With the normal development signing policy compiled as in `scripts/after-pack.cjs`,
+normal package seals and component authority are still checked. This is **current Go
+plus historical native inputs**, not an accurate-source installation. The retained
+package remains nonpublishable; `native-input-inventory.json` binds the selected
+runtime/data-engine/analysis binaries and authority file observed during diagnostics.
+No new package, launch, signing mutation or Keychain access occurred.
+
+`funds-hydration-diagnostic` failed again after540.67s; the new pre-reopen GET passed,
+but GET of the same thread after reopen returned503. The existing request helper
+hid unrecognized top-level finite codes as `unavailable`; the WIP now preserves only
+`public_projection_pending` and `accepted_final_hydration_unavailable`, still refusing
+arbitrary codes/messages. The exact top-level code of the two recorded failures was
+not captured, so it is not retroactively asserted. Temporary hydration diagnostics
+printed no error labels and were removed; a JSON-roundtrip-only probe passed and
+was excluded from the product diff. Existing hydration tests use boundary-only final
+fixtures, so their pass is not evidence of restored fact-bearing publication.
+
+Current source independently exposes the missing admission seam:
+`app/evidence/final_authority_preflight.go` classifies facts requiring publication
+snapshot proof as audit-only even when their original records survive;
+`runtimeapp/terminal_authority_projection.go` projects only terminal-complete records;
+`app/gateprojection/trusted_final.go` explicitly refuses fact-final seed without startup
+batch witness authority. The exact runtime branch is not inferred solely from503.
+A safe repair must use the existing fresh witness chain, immutable dataset selection,
+current case/principal, complete terminal I/C/P/Daf/Dt and exact durable manifest to
+admit a restored fact result. It must retain stale/revoked/other-case/audit-only refusals
+and batch failure isolation. Merely adding old finals to the index, reusing their old
+signature as current permission, rerunning Provider work or changing the assertion to
+expect503 would bypass the unmet contract. **That source implementation is unfinished.**
+The next bounded work is this recovery admission and its positive/negative integration
+proof, then A/B/A and A1/A2 vectors, before any Funds qualification.
+
+### Accepted worklist mapping and remaining dependencies
+
+| Worklist | Current evidence / remaining gap |
+| --- | --- |
+| S01 | Existing product matrix/spec define Core, Funds account flow and complete product separately; actual artifact profile closure still required |
+| C01,C03,C06,C07 | Ordinary/protected Go lifecycle above; complete Main/preload/Renderer, interactive approvals and installed recovery remain unverified |
+| C02 | Fresh committed-Provider, stale-result, redirect and response-boundary tests pass through Registry/Secret Store with synthetic keys; normal protected credential entry remains unverified |
+| C04 | New actual admission barrier and real signed-store revision/reopen cases pass; cannot infer rollback of an admitted operation |
+| C05 | Existing no-blind-write-retry/receipt reconciliation owner retained; full cancellation and unknown-operation installed journey unproved |
+| F01,F03,F04 | Rust derived-vector layers pass; full Go admission/currentness/Provider/display/recovery are separate seams |
+| F02 | Actual package0.16.16 is host-static-first-party; authority advertises analyze_account_flows, count_case_rows is internal, ordinary MCP disabled; README corrected. Synthetic installation authority is not real installation qualification |
+| F05–F07 | A1 first-run Provider facts/Final Gate/protected HTTP display pass in the current-Go/historical-native diagnostic; same-thread reopen fails503. Fresh startup fact admission, A/B/A, A1/A2, revocation and same-source installed proof remain open |
+| P01,P02,P03_CORE,P03_FUNDS | Core artifact composition, legal normal Chromium storage admission, exact-source native/UI/Provider/installation still open. No personal Keychain access, encryption disabling, identity substitution or new OS account used |
+| D01–D04 | Egress refusal NOT_CLEARED; remote PR dde/main ce96 are not current local CI. No push/merge/main verification/signing/notarization/release |
+
+Actual production route: `runtimeapp` shared evidence/snapshot composition →
+`app/fundscsvadmission`/`app/datasetsnapshot` → Host exact immutable source →
+`nativecomponenthost`/data-engine/Rust account-flow query → typed native evidence
+and Core privacy projection → final Provider HTTP serialization → Final Gate →
+`httpapi.LocalDisplayHandlerV1`/accepted-slot sink → durable reopen. The Rust test
+only covers its named layers; filenames and fixture signatures are not chain proof.
+
+Core-stage does not wait for unshipped Funds or advanced Office. It still lacks an
+actual artifact profile and admitted desktop journey. Full original Office/imported
+pivot/chart/archive lifecycle and numerical/platform gates remain; these source
+gaps are not relabeled as one GUI/egress blocker. No second runtime, install trust,
+Goal, automation, independent task or parallel source writer was created.
+
+<a id="current-readiness-continuation-from-d864"></a>
+
+## Previous readiness continuation from d864
 
 Latest SOURCE is `7815634ba5dd9deb4cae9c2cb4478c2bda8718e5`, tree
 `f599a5b65bbb37e2654444929124a0832e06f60e`. It retains the DOCX checkpoint below

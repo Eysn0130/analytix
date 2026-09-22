@@ -1,7 +1,7 @@
 # Analytix Agent Platform brand and architecture
 
 - Status: Accepted product and architecture target
-- Current as of: 2026-08-26
+- Current as of: 2026-09-21 (stage addendum; prior architecture retained)
 - Applies to: public brand copy, product category, runtime architecture, Privacy Layer, plugin boundaries, and professional capability positioning
 - Accepted scoped requirements: [`../../../openspec/specs/agent-platform-foundation/spec.md`](../../../openspec/specs/agent-platform-foundation/spec.md)
 - Dated research evidence: [`../upstreams/agent-platform-architecture-recheck-2026-08-25.md`](../upstreams/agent-platform-architecture-recheck-2026-08-25.md)
@@ -159,6 +159,26 @@ Future implementation is conformant only when it proves all of the following:
 7. A required plugin isolation boundary that is unavailable closes that plugin lane rather than falling back to unsandboxed execution.
 8. Plugin identity/version/revocation/fault recovery is deterministic and current.
 9. The same formal artifact proves ordinary workflows and sensitive professional workflows; focused source tests do not substitute for product or release acceptance.
+
+### Accepted staged delivery addendum — 2026-09-21
+
+Deliver the ordinary Core journey independently first, then the supported Funds
+account-flow journey on the same verified Core. CORE_STAGE includes ordinary
+projects/threads, Provider configuration, controlled tools/approvals, cancellation,
+terminal persistence/restart and the shared Host/privacy boundaries. The
+FUNDS_ACCOUNT_FLOW_STAGE adds actual import and immutable DuckDB snapshot analysis,
+exact evidence-backed facts, final Provider projection and protected local display
+with recovery and revocation. Neither stage establishes COMPLETE_PRODUCT.
+
+Invariant 9 continues to require one artifact to prove both ordinary and sensitive
+workflows whenever that artifact includes Funds, and for complete-product formal
+acceptance. It does not require unshipped Funds features before an independently
+qualified Core artifact. Exclusion must cover UI, catalog, execution, restore and
+assets through the existing build/manifest owners; hiding a control is insufficient.
+Reachable shared safety and shipped-resource obligations remain applicable. The
+original Office, Browser, Canvas, image, archive and wider Funds targets and all
+applicable acceptance thresholds remain intact. Stage status and implementation
+gaps live in [the existing product matrix](../product-completion.md).
 
 ## 11. Supersession and terminology
 
