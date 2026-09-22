@@ -5,6 +5,7 @@ package runtimeapp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
+	nativecomponentregistry "analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry"
 	packagedbuildauthorityfs "analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
@@ -36,10 +38,7 @@ import (
 // native generation. It does not execute the retained runtime-server or claim
 // that the package contains the current Go source.
 func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
-	path := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
-	if path != rev9RetainedRuntimeServer {
-		t.Fatal("B1 fixed native input is unavailable")
-	}
+	path := b1SelectedNativeInput(t)
 	inspection, err := packagedbuildauthorityfs.InspectPackageV2(context.Background(), path, "darwin", "arm64")
 	if err != nil {
 		t.Fatalf("B1 fixed native package inspection: %v", err)
@@ -59,14 +58,91 @@ func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
 	t.Log("current Go package inspection and normal local-build Owner admission passed; historical native input only")
 }
 
+// A byte-identical installation copy can remove removable-volume I/O from the
+// diagnostic. This does not replace production signature or Owner admission.
+func b1SelectedNativeInput(t *testing.T) string {
+	t.Helper()
+	original := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
+	if original != rev9RetainedRuntimeServer {
+		t.Fatal("B1 fixed native input is unavailable")
+	}
+	selected := os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER")
+	if selected == "" {
+		return original
+	}
+	const suffix = "/Contents/Resources/runtime-go/bin/runtime-server"
+	if !filepath.IsAbs(selected) || filepath.Clean(selected) != selected || !strings.HasSuffix(selected, ".app"+suffix) {
+		t.Fatal("B1 relocated input must be an absolute canonical app runtime path")
+	}
+	resolved, err := filepath.EvalSymlinks(selected)
+	if err != nil || resolved != selected {
+		t.Fatal("B1 relocated input must not traverse symlinks")
+	}
+	originalRoot, selectedRoot := strings.TrimSuffix(original, suffix), strings.TrimSuffix(selected, suffix)
+	anchors := []string{
+		"Contents/MacOS/analytix", "Contents/Info.plist", "Contents/_CodeSignature/CodeResources",
+		"Contents/Resources/app.asar", "Contents/Resources/runtime-go/bin/runtime-server",
+		"Contents/Resources/runtime/analytix-packaged-build-authority.json",
+		"Contents/Resources/runtime/analytix-native-development-build.json",
+		"Contents/Resources/runtime/analytix-import-accelerator",
+		"Contents/Resources/runtime/analytix-cleaning-ops",
+		"Contents/Resources/runtime/analytix-analysis-compute",
+		"Contents/Resources/runtime/analytix-data-engine",
+	}
+	for _, anchor := range anchors {
+		if b1NativeInputDigest(t, filepath.Join(originalRoot, anchor)) != b1NativeInputDigest(t, filepath.Join(selectedRoot, anchor)) {
+			t.Fatalf("B1 relocated historical input changed: %s", anchor)
+		}
+	}
+	t.Log("B1 historical native input relocation: 11 anchors byte-identical; normal signature admission still required")
+	return selected
+}
+
+func b1NativeInputDigest(t *testing.T, path string) [32]byte {
+	t.Helper()
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		t.Fatal("B1 native input anchor is unavailable or not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.Stat()
+	current, currentErr := os.Lstat(path)
+	if err != nil || currentErr != nil || !os.SameFile(before, after) || !os.SameFile(before, current) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("B1 native input anchor changed during comparison")
+	}
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
+}
+
 // The model supplies only a tool request and ordinary text. All evidence,
 // claims, final authority and display bindings must be produced by the live
 // production handler from the real native result.
 func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
-	runtimePath := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
-	if runtimePath != rev9RetainedRuntimeServer {
-		t.Fatal("B1 fixed native input is unavailable")
+	model := &b1PublicChainModel{t: t, expectedCredential: "test-only"}
+	defer model.diagnostics()
+	runB1ProductionPublicChain(t, rev14AccountFlowCSV(), http.HandlerFunc(model.serve), func(config Config, root, workspace, sourcePath, authorityKeyID string, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
+		b1AssertPublicChain(t, config, root, workspace, sourcePath, authorityKeyID, model, sourceEvents, driver)
+	})
+}
+
+// Reuse the same production composition for additional immutable synthetic CSV
+// vectors; callers supply only source/model responses and public-seam assertions.
+func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler, verify func(Config, string, string, string, string, func() []domainplugincapability.FundsSourceReadDecisionEventV1, b1PublicChainDriver)) {
+	t.Helper()
+	trust := nativecomponentregistry.EmbeddedTrust()
+	if trust.SigningMode != "ad-hoc" || trust.SigningPolicySHA256 != "7625f1de94282690dc72ce92f7e42a293437c24fb9f4a725ff82bfec157ecaf3" || trust.ReceiptSHA256 != "" || trust.ManifestSHA256 != "" || trust.TargetKey != "" || trust.AppleTeamIdentifier != "" {
+		t.Fatal("B1 requires the existing compiled development signing policy; no package or receipt trust override")
 	}
+	runtimePath := b1SelectedNativeInput(t)
 	root := workspacetest.New(t)
 	authorityRoot := strings.TrimSpace(os.Getenv("ANALYTIX_TEST_PROFILE_ROOT"))
 	if authorityRoot == "" {
@@ -97,12 +173,10 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	workspace := filepath.Join(root, "synthetic-case")
 	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
 	sourcePath := filepath.Join(workspace, "baseline.csv")
-	if err := os.WriteFile(sourcePath, rev14AccountFlowCSV(), 0o600); err != nil {
+	if err := os.WriteFile(sourcePath, source, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	model := &b1PublicChainModel{t: t, expectedCredential: "test-only"}
-	defer model.diagnostics()
-	provider := httptest.NewServer(http.HandlerFunc(model.serve))
+	provider := httptest.NewServer(model)
 	defer provider.Close()
 	config.BaseURL, config.ProviderID, config.Model = provider.URL+"/v1", "b1-synthetic", "b1-synthetic-model"
 	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "test-only")
@@ -112,7 +186,11 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 		return bundledFundsRuntimeRootsV1(host.config.DataDir)
 	}
 	dependencies.openNativeOwnerForTest = func(dataDir string) (*nativecomponenthost.Owner, error) {
-		return openRev9DarwinHostCandidateForExecutable(dataDir, runtimePath)
+		owner, err := openRev9DarwinHostCandidateForExecutable(dataDir, runtimePath)
+		if err != nil || owner == nil {
+			t.Fatalf("B1 selected native owner prerequisite: %v", err)
+		}
+		return owner, nil
 	}
 	if spec, err := validateBundledFundsHostMaterializationWithDependenciesV1(context.Background(), config, dependencies); err != nil || spec == nil {
 		t.Fatalf("B1 synthetic Host installation admission failed: %v", err)
@@ -122,6 +200,9 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	async := newRuntimeAsyncTurnGuardV1("b1-public-chain")
 	ctx := context.WithValue(context.Background(), bundledFundsHostValidationContextKeyV1{}, dependencies)
 	ctx = context.WithValue(ctx, asyncTurnObservationContextKeyV1{}, async.observe)
+	ctx = context.WithValue(ctx, factRecoveryObservationKeyV1{}, func(report factRecoveryObservationV1) {
+		t.Logf("fact recovery candidates=%d admitted=%d held=%d phase=%s", report.Candidates, report.Admitted, report.Held, report.LastRejectedPhase)
+	})
 	lease, err := AcquireRuntimePersistenceLease(config)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +219,7 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 		shutdownOwnedRuntimeHandler(t, owned)
 		async.assertDrained(t)
 	}()
-	b1AssertPublicChain(t, config, root, workspace, sourcePath, fixture.Authority.KeyID(), model, sourceEvents, b1PublicChainDriver{
+	verify(config, root, workspace, sourcePath, fixture.Authority.KeyID(), sourceEvents, b1PublicChainDriver{
 		baseURL: func() string { return runtime.URL },
 		waitTurn: func(threadID, turnID, phase string) {
 			async.expect(threadID, turnID, phase)
@@ -698,6 +779,12 @@ func b1PublicChainRequestFailure(method, path string, status, expected int, deco
 		phase = "IMPORT_CONFIRM"
 	}
 	code := "unavailable"
+	// Keep finite thread-detail failures distinguishable without echoing bodies,
+	// messages, arbitrary codes or thread identities into diagnostics.
+	switch candidate := contracts.StringField(decoded, "code"); candidate {
+	case "public_projection_pending", "accepted_final_hydration_unavailable":
+		code = candidate
+	}
 	if decoded["schemaVersion"] == float64(1) {
 		nested, _ := decoded["error"].(map[string]any)
 		switch candidate := contracts.StringField(nested, "code"); candidate {
