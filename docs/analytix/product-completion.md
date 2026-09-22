@@ -1,16 +1,29 @@
 # Analytix product completion
 
-Status: Operational current matrix, 2026-09-21 PDT. Accepted targets remain in the
+Status: Operational current matrix, 2026-09-22 PDT. Accepted targets remain in the
 [spec registry](specs/README.md) and scoped OpenSpec requirements. This matrix does
 not shrink the original A–M/P0–P5 outcome or declare product/release acceptance.
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-Current Core/Funds START is `fd244d4a042cdb9c03d7f07958b052acc120c5a5`.
+Current Core-release/Funds-recovery START is `5fe1ccce13b07128e740c83e1231262480e01015`.
+Core profile SOURCE is `93ffbf6d8`; witnessed recovery owner SOURCE is `38c6d8e3f`;
+the actual-package strict signing inventory repair is `f945192ca`, propagated
+through after-sign at `96e55c817` with focused and real artifact-owner verification.
+The normal96e55 Core DMG build, integrity check and isolated static-copy Go
+reader closure have passed; test-only probe is7fcb11102. All four current native
+components and a clean aac3 full app were subsequently built through normal owners.
+The exact-native CNY chain, same-thread recovery and fresh Go-process recovery pass;
+synthetic Host admission and loopback Provider remain explicit limits. Installed
+GUI and external Provider acceptance remain separate.
+Final integrated SOURCE is `0708620e21fc2bd706ba18a377a60824cdb78421`.
+The existing current-native B1 snapshot/local-display/fault/ordinary-continuity
+regression also passes, but observes two evolved facts held at witness admission;
+it does not establish public multi-snapshot history recovery.
 Source commits `85d261e63` (actual Host admission) and `30d93cbc1` (real Rust vectors)
 retain SOURCE781 and all subsequent work. Exact final source/delivery identities and
 remaining seams are recorded in the
-[Current QA](qa/pr28-independent-review-execution-2026-09-21.md#current-corefunds-continuation-from-fd244).
+[Current QA](qa/pr28-independent-review-execution-2026-09-21.md#current-core-release--funds-recovery-from-5fe1).
 Documentation-only commits do not turn service tests into installed-product proof.
 
 One main conversation must support generation/import → native preview → selection
@@ -26,8 +39,8 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | blocked: complete desktop journey and an actual isolated artifact profile are unproved; source/loopback evidence alone is insufficient |
-| FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | blocked: first-run A1 public-chain diagnostic passes through display with historical native inputs; same-thread reopen returns503; safe startup fact admission and same-source installed journey remain open |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: actual Core profile, sealed absence contract and Host exclusion are implemented/tested at93ff; the normal96e55 private DMG and isolated-copy closure now pass. Installed GUI, normal Provider, new-process journey and formal release qualification remain outstanding |
+| FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: fresh-witness startup recovery implemented at38c6; original503 counterexample integrated at e177; all four current native components from the clean aac3 app pass the CNY/same-thread/new-Go-process chain. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 
 Core installation and stage release do not depend on unshipped Funds features.

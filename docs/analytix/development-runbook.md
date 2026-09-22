@@ -422,3 +422,11 @@ Use the cache helper in the same shell. Pin the source commit and inspect the
 actual resulting resource/seal/authority closure before installation. Do not
 launch a GUI across the unresolved Chromium/OS storage admission boundary or
 interpret an ad-hoc Core candidate as a public release.
+
+A clean build worktree does not contain ignored Computer Use native artifacts.
+The existing after-pack owner accepts `ANALYTIX_COMPUTER_USE_PACKAGE_ROOT` for
+that dependency. When reusing a local input, first verify its pinned provenance,
+listed file and adaptation hashes, and signature; supply the package root through
+that entry point and retain the ordinary after-pack validation. A private ad-hoc
+input is not release-qualified. A failed package must be rebuilt through the
+normal lifecycle, not resumed with `--prepackaged` or relabeled as complete.

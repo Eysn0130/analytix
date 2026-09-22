@@ -1,9 +1,265 @@
 # PR28 independent-review continuation — 2026-09-21
 
 Status: Current continuation plus historical execution receipts; not product/release acceptance.
-Scope: latest user-adopted readiness continuation A–N, retaining prior A–I/A–M receipts and the original A–M/P0–P5 outcome.
+Scope: latest user-adopted Core-release/Funds-recovery ten-section continuation, retaining prior A–N/A–I/A–M receipts and the original A–M/P0–P5 outcome.
 Repository and source writer remain the canonical Analytix checkout and original Codex owner.
 No Goal, scheduled continuation, new independent task, public release or writer transfer was used.
+
+## Current Core release / Funds recovery from 5fe1
+
+Status: **local source/artifact recovery delivered; stage qualification partial**.
+This is not stage/product/release qualification. This section
+supersedes the previous continuation's current-state claims while retaining its
+original evidence. Started at `5fe1ccce13b07128e740c83e1231262480e01015` with the two
+original WIP files. The new recovery archive SHA256 is
+`97aad44d244dba41e179c8fd5bbb7f41358c28e694039ef52e1c09779810e876`;
+8 members, 7/7 manifest checks, CRC and bounded safe extraction passed. All ten
+sections, recovery cases and storage rules were read. Original WIP bytes and the
+old 503 receipts remain preserved. Exact WIP readback and restoration instructions
+are recorded both in the private evidence root and the non-removable owner-only
+backup `/Users/sun/analytix-core-recovery-preservation-omrry5gj`.
+
+Final SOURCE is `0708620e21fc2bd706ba18a377a60824cdb78421`, tree
+`bc4f4459ca7a520cf74cd5b0f850f176bacc8130`. Both original WIP files are now in Git;
+the original vector bytes are exactly retained at e177 and the latest version
+adds the new-process assertions. Original backups were read back again successfully.
+SOURCE adds/changes21 production/build files (+545/-39),13 test files (+1039/-19,
+including the preserved WIP) and one runbook file (+31/-0) relative to5fe1.
+The subsequent documentation DELIVERY only updates the four current documentation
+owners; its exact hash/tree and final clean status are recorded in the private
+`delivery.json`, not self-embedded into this commit. No source ZIP was produced.
+
+Core profile SOURCE `93ffbf6d8debf45d51fd25df22e6f5cfa9470365` adds an explicit
+Darwin-arm64 private candidate profile to the existing builder owners. It excludes
+Funds/backend, the four professional native binaries, native receipts and private
+Office/document runtime; it preserves shared Go Core and Office WASM/renderer
+assets, which retain their own license/test obligations. Compiled Go profile,
+sealed authority and exact absence binding prevent a Core package from materializing
+or advertising the old installed Funds source. Full configuration is retained.
+The current profile is deliberately **non-publishable**, not a formal release
+receipt. Formal Core disposition/qualification remains a source/release gap.
+
+Focused profile tests, domain/FS tests, Main typecheck and desktop build passed.
+Packaging and materialization regressions passed 66/66 with serial execution and
+an explicit 30-second case budget after three initial 5-second timeouts and one
+updated exact compiled-flag assertion. Two normal package attempts exposed and
+retained distinct failures: a missing ignored Computer Use native dependency in
+the clean worktree, then the full-only strict signing inventory. The existing
+dependency entry point now receives the hash/provenance/signature-verified private
+input; no helper identity check was removed. SOURCE
+`f945192caeca099ac25052cac7ca139684abe3bc`, tree
+`2a9db9ce404092b72a9af034bf4ae27cd4400527`, repairs the latter in the original signer.
+Core inventory reduction requires the existing bounded canonical authority parser,
+the explicit Core disposition and absence checks before/after signing; full policy
+and native entitlements are unchanged. Two new cases were RED, then the full signing
+suite passed11/11, including real ad-hoc signing. The failed package's real authority
+also passed the new inventory admission read; that is not finished-package proof.
+Tracing its next consumer found the same full-only assumption in after-sign. The
+f945 rebuild was explicitly stopped (recorded SIGTERM), not counted as another
+product test failure or allowed to run into a known rejection. SOURCE
+`96e55c817b54af171c8c874d2af4ace711bc5c75`, tree
+`4512228b52240b2657f63d17158064968698ac83`, propagates the declared inventory through
+the existing after-sign owner. The new Core disposition test was RED then GREEN;
+the12 selected signing/development-boundary regressions passed (94 unrelated
+tests were filtered, not reported passed). A read-only after-sign verification of
+the retained93ff signed output then passed real app/Go signature, hardened runtime,
+empty native entitlements and artifact closure checks. It remains a failed overall
+build, not a completed DMG. The normal clean96e55 rebuild subsequently completed
+with exit0 through afterExtract, fresh Go build, signing, after-sign and DMG generation;
+unchanged f945 desktop outputs were reused. The actual Core1.0.6 Darwin-arm64 DMG
+is330546820 bytes, SHA256
+`ea577ad19ffc1c71204dce1ad003aaa541a7b81ea0bdda13c454741b67475f95`.
+`hdiutil verify` passed. A fresh isolated static copy from the read-only mounted
+DMG passed independent Go `InspectPackageV2` closure verification in2.98seconds,
+including seals, Core source identity, exact zero-Funds binding and excluded paths.
+The asar metadata declares `releaseProfile=core`, name analytix and version1.0.6;
+binary buildinfo records Go1.26.4, analytix_prod and darwin/arm64. Trimmed binary
+buildinfo does not expose ldflags. A separate read-only Mach-O/symbol-table check
+then read the actual Go string global `embeddedReleaseProfile` as `core`, without
+executing the app. Its runtime SHA256 is
+`1ee43e64001401fe8963c776a194b096d6acde33f9766cf4699eca223e3d9055`;
+receipt `core-embedded-profile.json` binds that independent static readback.
+The exact-package Go test is committed as SOURCE
+`7fcb111022dbcd99a6130d96d0de3c2161a8c02c`; it changes tests only, not the packaged
+production source. Artifact classification remains development_clean_non_publishable.
+Static copying is not the completed C-INSTALL journey.
+No installed GUI, normal remote Provider or new-process journey is claimed.
+The prior Chromium/OS storage restriction and source egress refusal remain uncleared.
+
+Funds owner SOURCE `38c6d8e3f7dba76a51bb889d10f805e9f2585333`, tree
+`59fdca0c1679651f7b78b5d80a5a096b37b45ca2`, retains audit-only classification and the original seed guard.
+Existing terminal recovery verifies I/C/P/Daf/Dt and returns eligible originals as
+data, not permission. The registry grants non-serializable, callback-scoped V2
+witnesses using the fresh chain and current dataset. The startup index admits a
+whole thread batch only after event readback and fresh currentness checks, and
+rechecks each insertion behind a visibility lock, rolling back that batch on failure.
+No Provider call, business rerun or durable original rewrite is used for recovery.
+
+Recovery owner packages passed both normal and race-enabled tests, including
+positive fresh registry reopen, changed case, revoked/currentness, event alteration,
+batch rejection, duplicate startup and cancellation/publication boundary cases.
+These use signed fact production owners with a real private registry CAS plus
+synthetic witness/dataset and in-memory terminal stores; they are **not** the full
+runtime/native/installed chain. The original same-thread assertion still requires HTTP 200.
+A frozen diagnostic reached `native_component_host_trust_invalid` before import;
+a narrower probe identified `macOS packaged resource seal is invalid` in the
+historical input. An independent strict/deep signature diagnostic timed out after
+300 seconds; that did not establish signature corruption. The historical app was
+then copied byte-identically to an isolated non-removable local directory. All11
+anchors, including the root resource seal, app.asar, runtime and four native binaries,
+matched before/after copying; the original was retained and nothing was resigned.
+The test now accepts that explicit relocation only after comparing all11 anchors;
+normal production package/signature/Native Owner checks remain mandatory. Admission
+passed in13.84seconds. This supports a cache-volume I/O limitation in that earlier
+attempt, not a waiver of signatures or a source-equivalence claim.
+
+The **original same-thread test is now GREEN** in `funds-recovery-original-chain-cwd`
+(exit0,367.99seconds):9 actual imported rows,7 selected CNY transactions, exact
+1301001/120060 minor-unit totals, two loopback Provider calls/one semantic result,
+real Final Gate and protected source-exact account display. Fresh thread GET200
+passed before reopen; startup observed candidates1/admitted1/held0, and the same
+thread GET200, unchanged final digest, repeated protected display, unchanged
+Provider call count and original CSV hash passed after reopen. The original vector
+test bytes/HTTP200 assertion are unchanged. A first command had the wrong working
+directory and failed to locate the immutable fixture; that is retained separately,
+not a product failure. SOURCE `e177280e4021aae4571d9a1cc64701451036d4a4`, tree
+`d8490b2ed0507ea585497772f62cc3d270a1d846`, integrates both original WIP files after
+the whole-chain pass. Their original byte backups and old503 receipts remain intact.
+The two old503 top-level codes remain unknown; no code is retroactively assigned.
+
+This run uses current Go production owners but explicitly **historical native input**
+(source b07eefb0f5f64e84b0c1cc4f65b24ea5069066fa), synthetic package admission and
+loopback Provider. Two of four native source digests differ from current source.
+It is not current-native, installed-GUI, external-Provider or new-OS-process acceptance.
+
+A separate accurate-current-component run has now passed. The normal
+`build:data-native:development -- --platform darwin --arch arm64` owner rebuilt all
+four native components from the current source closure. Its marker SHA256 is
+`b12b37a35fa24b7c2b7c1e0cf59f44de8953656e106170ce58adea1980e591aa`,
+source-set digest `16baab8befa5d4ae9282900cfb64210ec31c24b94f3ad86c42426373205da777`,
+and build-context digest `e8e5729c84875aac9beaf7552b1fe377baa2057b35a3d823bfd0cf1de4b45f99`.
+The normal Electron builder lifecycle then produced a full private app from clean
+SOURCE `aac3ccef06c8118661a06aa5fc3116ed7e5cd131`, with fresh Go build, native
+materialization, resource seal, signatures and after-sign checks (exit0). No
+`--prepackaged` route was used. All four current native identities are sealed in
+the authority. An isolated non-removable copy preserved all11 recorded anchors
+byte-for-byte. Both inputs remain development/non-publishable; this full app is
+an accurate native test input, not the separate Core DMG.
+
+`funds-current-chain-new-process` passed (exit0): normal package/Native Owner
+admission14.72seconds; the original vector chain plus fresh OS process596.97seconds.
+It retains the original9/7-row, exact amount, safe Provider, Final Gate and typed
+local-display assertions, including pre-reopen and post-reopen GET200. After orderly
+shutdown, a different Go test-process PID acquired a fresh persistence lease,
+reopened the existing real stores and contacted the independent witness service
+with a fresh client. Startup candidates1/admitted1/held0, same thread/final digest,
+typed local original value, unchanged Provider count and unchanged original
+evidence/final store hashes all passed. Only synthetic configuration, paths and
+readback expectations cross the process boundary; no capability, source handle,
+private final or Provider key is serialized. Synthetic package admission is
+reconstructed from a fresh source read rather than a serialized inspection.
+This is **current native plus production Go assembly in a new OS test process**;
+it is not the packaged runtime CLI, Electron GUI or real remote Provider journey.
+Receipts: `funds-current-native-build`, `funds-current-package`,
+`funds-current-native-copy-command` and `funds-current-chain-new-process`.
+
+The existing `TestFundsAccountFlowB1ProductionPublicChain` also passed unchanged
+in its business assertions on this current native input (`funds-current-b1-regressions`,
+exit0,705.41seconds). It covers actual second import/snapshot evolution, stable
+account identity with distinct source lineage, original full/masked slots and
+current exact preview after reopen, missing/corrupt retained material refusing
+both local sinks, exact-byte restoration, unchanged fact stores/Provider count
+during readback, and an ordinary Provider turn while retained material remains
+corrupt. Three async operations drained; five loopback Provider requests/two
+native semantic messages were observed. **Its snapshot-evolved startup held both
+facts at witness admission** (candidates2/admitted0/held2, phase=witness). This test
+does not assert public thread GET after that evolution. Its local-display and
+ordinary-Core success therefore does not prove multi-snapshot public-history
+recovery; that remaining seam must not be reported GREEN or repaired by dropping
+the current-witness/batch guard.
+
+SOURCE0708620 integrates the exact tested current-input/new-process helper bytes
+(three test files,+194/-6). `final-source-binding.json` compares both artifact
+sources with final SOURCE: only five Go test files differ from Core96e55; only
+three Go test files differ from the full aac3 app. Production/build source is
+unchanged. The frozen test executable SHA256 is
+`836df23973a62e5a4a9b954dc81962a83b736168b284691f80242e4d171529a1`;
+its three source hashes match the compiled inputs and committed files. This
+supports reuse of the receipts, not relabeling either artifact's sealed commit.
+
+Ordinary production HTTP asynchronous terminal recovery passed all five cut cases.
+The combined regression command then exhausted its 8-minute total budget during
+next-test persistence fsync; that command is partial, not PASS. The remaining cases
+then passed with an adequate outer budget on the frozen final production-tag binary:
+precommit restart disposition, held/unavailable professional lane with ordinary
+HTTP continuity, eight physical-store safety faults, second restart, corrupt event
+sequence, public-before-closure refusal and legacy audit quarantine. Assertions
+and persistence sync remain intact. These are composition tests, not OS-process QA.
+
+The account identity contract was checked against `case-data-forensics`: the same
+canonical account in one case is one entity; external vector subject labels do
+not themselves authorize separate identities. SOURCE
+`aac3ccef06c8118661a06aa5fc3116ed7e5cd131`, tree
+`5fba4f86b02a1b80e5dfe737acda23dc6e9422b9`, adds a vector-backed owner counterexample.
+It reads and hash-checks the unchanged JSON, verifies two subjects share one raw
+account, retains rejection of the unsupported original spelling, and uses an
+explicit numeric fixture map keyed only by raw account. Both labels resolve to
+one canonical preimage. That case and existing collision, namespace-separation
+and subject-revocation tests passed in `funds-vector-identity-numeric` (exit0).
+An earlier fixture attempted an unsupported alphabetic account and failed; only
+the declared derived fixture was corrected, not product rules or the source JSON.
+This is identity-owner evidence, not a second full import/Provider chain.
+An earlier five-case command emitted package success but its Go parent remained
+in post-test filesystem activity and was terminated; that command remains partial.
+
+Private local receipts (command, before/after source hashes, locks, timestamps,
+exit and log SHA256) live under
+`/Volumes/AnalytixCache/development-v3/evidence/core-release-recovery-gt3x1bjs`.
+No new source ZIP is authorized. Fresh remote read: PR28 open/draft at
+`dde784437dc8563e84066629dd57f4a11fd9acc9`, main
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`; those checks do not cover local changes.
+SOURCE egress remains `PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED`; no push/merge/tag/release.
+The original Codex writer is retained; external continuation remains REVIEW_ONLY.
+The final read still has56 remote checks,55 success and CodeQL failure, on old dde.
+No current-source CI/main verification or public release is claimed.
+
+### Remaining admission and next owner
+
+| Classification | Exact remaining boundary | Next dependency-valid action |
+| --- | --- | --- |
+| SOURCE_GAP | Core profile currently admits private development candidates only; formal Core disposition/qualification is not implemented | Extend the existing formal package/release owner with the accepted Core scope and all shared qualification rules; do not relabel the private DMG |
+| SOURCE_GAP / EVIDENCE_NOT_RUN | Multi-snapshot facts are held by fresh witness; public-history recovery across A1/A2 and Case A/B/A is not proved | Minimize the observed two-fact held inventory at the current dataset/witness owner, retain currentness and thread batch atomicity, then require public GET/history assertions |
+| EVIDENCE_NOT_RUN | Installed Main/preload/Renderer journey,120-turn GUI, real Provider, broader recovered revocation/compaction and fact-specific crash cuts | Execute the applicable seams on an admitted exact candidate; owner/loopback tests do not substitute |
+| ENVIRONMENT_LIMIT | Normal Chromium macOS storage admission and task-authorized Provider credentials are unavailable for this acceptance run | Use the supported normal storage/credential route once legitimately available; no keychain/cookie/identity bypass |
+| EVIDENCE_FAILURE | Old remote CodeQL failure and separately retained full-product defects are not cleared by local component tests | Current-source applicable checks after lawful synchronization; preserve existing full-product scope |
+| SAFETY_NOT_CLEARED | Original create_tree outbound refusal has no verified payload-scope disposition | Obtain normal resolution of that exact refusal before any source transport |
+| OWNER_HANDOFF_NOT_RELEASED | Canonical original Codex remains the writer | External reviewers stay REVIEW_ONLY; no second writer or automation |
+
+MERGED_MAIN, VERIFIED_MAIN, COMPLETE_PRODUCT, FORMAL_RC and PUBLIC_RELEASE remain
+unachieved. Core's missing admission is independent of unshipped Funds features.
+
+### Recovery-package case mapping
+
+The supplied cases are requirements, not test results. `partial` below does not
+qualify the case's installed or complete-chain expectation.
+
+| Case | Current owner evidence | Remaining seam |
+| --- | --- | --- |
+| C-PROFILE | Focused exclusions and actual96e55 private DMG/installed-copy Go reader closure pass | Formal qualification and installed GUI journey |
+| C-ISOLATION | Production runtimeapp ordinary HTTP/recovery remains available with held professional authority; physical faults still refuse | Installed Core and old Funds-history behavior |
+| C-INSTALL, C-LONG-THREAD | Not run | Legally admitted Chromium storage, normal Provider, actual GUI/new process and120-turn scenario |
+| R-VALID | Original same-thread GET200 and current-native/new-Go-process chain pass | Installed app and formal package admission remain distinct |
+| R-FRESH-WITNESS | Nonserializable owner/seed-refusal tests and fresh-process runtime/typed local display pass | Installed package and remote service qualification |
+| R-REVOKED | Owner revoked, before-activation and before-publication cases pass; existing Host revision evidence retained | New revision re-enable through complete recovered flow |
+| R-CASE-SNAPSHOT | Changed-case/expired-capability owner refusals and actual A1/A2 import/local-display lineage pass; evolved startup holds2 facts at witness | Public-history recovery across A1/A2 and Case A/B/A remains unproved; local display is a different seam |
+| R-MISSING-TAMPERED | Event owner refusals and real retained missing/corrupt local-sink refusals/byte restoration pass; ordinary Core remains usable | Full persisted fact fixture with each durable member fault |
+| R-AUDIT-BOUNDARY | Original seed guard retained; legacy quarantine and public-before-closure runtime regressions pass | Mixed persisted fact/boundary inventory in the full chain |
+| R-BATCH-ATOMIC | Private staging, duplicate/mixed rejection and publication cancellation owner checks pass | Multi-record persisted thread failure and public concurrent visibility |
+| R-CONCURRENT | Concurrent duplicate startup owner race test admits exactly once | Simultaneous HTTP GET during complete runtime startup |
+| R-CRASH-CUT | Ordinary terminal restart cuts/second restart pass; fact publication cancellation refuses | Fresh OS process at fact-specific crash cuts |
+| R-PUBLIC-LOCAL | First-run, same-thread and new-Go-process recovery/local display pass on current native | Continued Provider/compaction and installed journey remain |
+| R-EXACT-ARTIFACT | Four current native components, clean aac3 full app, normal native admission and CNY/new-Go-process chain pass | Synthetic Host admission/loopback remain; packaged runtime/GUI not executed |
+| F-DERIVATION | Original vectors unchanged; aac3 vector-backed identity owner proves same canonical account is one entity and original unsupported spelling is rejected | Full shared-account import/Provider integration remains distinct |
 
 ## Current Core/Funds continuation from fd244
 
