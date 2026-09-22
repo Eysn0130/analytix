@@ -1329,6 +1329,17 @@ function packageEntryEndingWith(reader, suffix) {
   ) || null
 }
 
+function runtimeMetadataEntry(reader, logicalEntry) {
+  if (reader.has(logicalEntry)) return logicalEntry
+  // Only the actual ASAR's after-pack directory can supply unindexed runtime
+  // metadata. An unrelated suffix match must not repair a missing owner file.
+  for (const component of reader.components || []) {
+    const candidate = normalizeEntry(`packaged-root/${component.artifactEntry}.unpacked/${logicalEntry}`)
+    if (reader.has(candidate)) return candidate
+  }
+  return null
+}
+
 function exactInventory(reader, options = {}) {
   const entries = exactPackageEntries(reader)
   const dependencyInstances = []
@@ -1377,9 +1388,7 @@ function exactInventory(reader, options = {}) {
       missingAction: `Set the exact packaged product author metadata to ${PRODUCT_PACKAGE_AUTHOR}.`
     })
   }
-  const runtimePackageEntry = reader.has(RUNTIME_PACKAGE_ENTRY)
-    ? RUNTIME_PACKAGE_ENTRY
-    : packageEntryEndingWith(reader, RUNTIME_PACKAGE_ENTRY)
+  const runtimePackageEntry = runtimeMetadataEntry(reader, RUNTIME_PACKAGE_ENTRY)
   const runtimePackage = runtimePackageEntry ? readPackage(reader, runtimePackageEntry) : null
   if (!runtimePackage || licenseValue(runtimePackage) !== PRODUCT_LICENSE_ID) {
     artifactResourceBlockers.push({
@@ -1401,9 +1410,7 @@ function exactInventory(reader, options = {}) {
       missingAction: `Retain readable ${RUNTIME_PACKAGE_ENTRY} metadata with author ${PRODUCT_PACKAGE_AUTHOR}.`
     })
   }
-  const runtimePackageLockEntry = reader.has(RUNTIME_PACKAGE_LOCK_ENTRY)
-    ? RUNTIME_PACKAGE_LOCK_ENTRY
-    : packageEntryEndingWith(reader, RUNTIME_PACKAGE_LOCK_ENTRY)
+  const runtimePackageLockEntry = runtimeMetadataEntry(reader, RUNTIME_PACKAGE_LOCK_ENTRY)
   const runtimePackageLock = runtimePackageLockEntry ? readPackage(reader, runtimePackageLockEntry) : null
   const exactRuntimeLockPackage = runtimePackageLock?.packages?.['']
   if (exactRuntimeLockPackage?.license !== PRODUCT_LICENSE_ID) {

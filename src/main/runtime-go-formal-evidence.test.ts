@@ -1477,6 +1477,17 @@ function runReleaseGate(
 }
 
 describe('runtime-go formal evidence admission', () => {
+  test('unrelated runtime metadata suffixes cannot replace the actual runtime owner files', () => {
+    const entries = runtimeLicenseArtifactEntries()
+    for (const path of ['packages/runtime/package.json', 'packages/runtime/package-lock.json']) {
+      entries[`unrelated/${path}`] = entries[path]
+      delete entries[path]
+    }
+    const result = inspectExactArtifactLegalInventory({ artifact: { entries } })
+    expect(result.mandatoryBlockers.map((entry: any) => entry.code)).toContain('EXACT_ARTIFACT_RUNTIME_LICENSE_METADATA_MISSING_OR_MISMATCHED')
+    expect(result.mandatoryBlockers.map((entry: any) => entry.code)).toContain('EXACT_ARTIFACT_RUNTIME_LOCK_LICENSE_METADATA_MISSING_OR_MISMATCHED')
+  })
+
   test('audits actual after-pack runtime files outside the ASAR index without shadowing indexed entries', () => {
     const directory = writeBundle()
     const app = join(directory, 'package-output', 'analytix.app')
