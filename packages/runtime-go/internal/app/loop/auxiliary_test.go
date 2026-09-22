@@ -35,11 +35,14 @@ func (c *auxiliaryCloser) CloseTurn(ctx context.Context, _ domainsecurity.TurnSe
 }
 
 func TestAuxiliaryProviderRequiresDispatchSettlementAndClosure(t *testing.T) {
-	for _, fault := range []string{"none", "pre", "post", "settlement", "closure", "cancel", "tool", "large", "late"} {
+	for _, fault := range []string{"none", "case", "pre", "post", "settlement", "closure", "cancel", "tool", "large", "late"} {
 		t.Run(fault, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			frozen := newLoopGeneralContextV2(t, "thread", "aux_test", t.TempDir())
+			if fault == "case" {
+				frozen = newLoopCaseContextV2(t, "thread", "aux_test", t.TempDir(), "case-1")
+			}
 			closer := &auxiliaryCloser{}
 			failure := errors.New("synthetic failure")
 			if fault == "closure" {
@@ -105,6 +108,12 @@ func TestAuxiliaryProviderRequiresDispatchSettlementAndClosure(t *testing.T) {
 				}
 			} else if err == nil || text != "" {
 				t.Fatalf("fault %s returned text", fault)
+			}
+			if fault == "case" {
+				if sent != 0 || closer.calls != 0 || settled != 0 || released != 0 {
+					t.Fatal("case authority entered general auxiliary provider or budget closure")
+				}
+				return
 			}
 			if closer.calls != 1 || settled != 1 || released != 1 {
 				t.Fatalf("closure=%d settlement=%d release=%d", closer.calls, settled, released)

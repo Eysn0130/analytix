@@ -1597,7 +1597,7 @@ func TestProductionPublicProjectionUsesCurrentCaseAuthority(t *testing.T) {
 
 func currentCaseProjectionWiringValid(composition *ast.FuncDecl) bool {
 	calls := privateCASMatchingCalls(composition, "threadapp", "NewTrustedPublicProjectorWithPreservedHistoryV1")
-	if len(calls) != 1 || len(calls[0].Args) != 5 {
+	if len(calls) != 1 || len(calls[0].Args) != 6 {
 		return false
 	}
 	for index, name := range []string{"trustedFinals", "caseThreads", "currentCaseAuthority", "acceptedFinalCASReader"} {
@@ -1605,13 +1605,88 @@ func currentCaseProjectionWiringValid(composition *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	return privateCASSelectorMatches(calls[0].Args[4], "reportRestartPreservation", "report")
+	if !privateCASSelectorMatches(calls[0].Args[4], "reportRestartPreservation", "report") {
+		return false
+	}
+	callback, ok := calls[0].Args[5].(*ast.FuncLit)
+	if !ok {
+		return false
+	}
+	// Recovery must re-challenge the original witness and current authority
+	// inside its exact-record capability, not accept a cached startup verdict.
+	for _, owner := range [][3]string{
+		{"issuer", "WithRecoveredFactFinalWitness", "record"},
+		{"cap", "UseExact", "record"},
+		{"turnsecurityapp", "ValidateCurrentInsideExactDatasetCapability", ""},
+	} {
+		calls := privateCASMatchingCalls(&ast.FuncDecl{Body: callback.Body}, owner[0], owner[1])
+		if len(calls) != 1 {
+			return false
+		}
+		call := calls[0]
+		last, ok := callback.Body.List[len(callback.Body.List)-1].(*ast.ReturnStmt)
+		if !ok || len(last.Results) != 1 || last.Results[0] != call {
+			return false
+		}
+		if owner[2] != "" {
+			index := 0
+			if owner[1] == "WithRecoveredFactFinalWitness" {
+				index = 1
+				if len(call.Args) < 1 || privateCASIdent(call.Args[0]) != "ctx" {
+					return false
+				}
+			}
+			if len(call.Args) != index+2 || privateCASIdent(call.Args[index]) != owner[2] {
+				return false
+			}
+			callback, ok = call.Args[index+1].(*ast.FuncLit)
+			if !ok {
+				return false
+			}
+		} else {
+			if len(call.Args) != 1 {
+				return false
+			}
+			input, ok := call.Args[0].(*ast.CompositeLit)
+			if !ok || !privateCASSelectorMatches(input.Type, "turnsecurityapp", "CurrentValidationInput") {
+				return false
+			}
+			fields := map[string]ast.Expr{}
+			for _, field := range input.Elts {
+				if pair, ok := field.(*ast.KeyValueExpr); ok {
+					fields[privateCASIdent(pair.Key)] = pair.Value
+				}
+			}
+			for key, value := range map[string]string{"OperationContext": "ctx", "Identity": "identityAuthority", "RiskAuthority": "threadRiskAuthority", "Context": "current"} {
+				if privateCASIdent(fields[key]) != value {
+					return false
+				}
+			}
+			if !privateCASSelectorMatches(fields["Workspace"], "current", "WorkspaceRealPath") {
+				return false
+			}
+			observer, ok := fields["Observer"].(*ast.CompositeLit)
+			if !ok || !privateCASSelectorMatches(observer.Type, "filestore", "CaseBindingReader") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func TestCurrentCaseProjectionGuardRejectsMissingOrSubstitutedAuthorities(t *testing.T) {
-	valid := "threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report)"
+	witness := `func(record Record, current Context) error {
+		return issuer.WithRecoveredFactFinalWitness(ctx, record, func(cap Capability) error {
+			return cap.UseExact(record, func() error {
+				return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+					OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority, Context: current, Workspace: current.WorkspaceRealPath,
+				})
+			})
+		})
+	}`
+	valid := "threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report, " + witness + ")"
 	candidates := []string{valid, "", valid + "; " + valid}
-	for _, authority := range []string{"trustedFinals", "caseThreads", "currentCaseAuthority", "acceptedFinalCASReader", "reportRestartPreservation.report"} {
+	for _, authority := range []string{"trustedFinals", "caseThreads", "currentCaseAuthority", "acceptedFinalCASReader", "reportRestartPreservation.report", witness, "issuer.WithRecoveredFactFinalWitness", "cap.UseExact", "turnsecurityapp.ValidateCurrentInsideExactDatasetCapability", "identityAuthority", "threadRiskAuthority", "current.WorkspaceRealPath"} {
 		candidates = append(candidates, strings.Replace(valid, authority, "nil", 1))
 	}
 	for index, candidate := range candidates {

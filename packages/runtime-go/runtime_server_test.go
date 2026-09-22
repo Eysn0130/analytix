@@ -4414,7 +4414,10 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 		nil,
 		http.StatusOK,
 	)
-	if workspaceStatus["exists"] != true || workspaceStatus["isGitRepository"] != false || workspaceStatus["isDirty"] != nil {
+	// The production probe now contains metadata reads as well as Git. Hosts
+	// without the protected-process backend must fail closed, not use host Stat.
+	expectWorkspaceExists := runtime.GOOS == "darwin"
+	if workspaceStatus["exists"] != expectWorkspaceExists || workspaceStatus["isGitRepository"] != false || workspaceStatus["isDirty"] != nil {
 		t.Fatalf("workspace status response mismatch: %#v", workspaceStatus)
 	}
 
