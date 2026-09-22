@@ -3644,6 +3644,7 @@ describe('electron-builder Analytix packaging', () => {
       'analytix_prod',
       '-ldflags',
       [
+        `-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedReleaseProfile=full`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedReceiptSHA256=${nativeTrust.receiptSHA256}`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedManifestSHA256=${nativeTrust.manifestSHA256}`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedTargetKey=${nativeTrust.targetKey}`,

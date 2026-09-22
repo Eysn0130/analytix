@@ -332,3 +332,36 @@ func snapshotDigestFixtureV2(snapshot WorktreeSnapshotV1) string {
 func digestFixtureV2(label string) string {
 	return AuthorityFileSHA256V2([]byte(label))
 }
+
+func TestCoreProfileRequiresAbsentFundsAndExactTarget(t *testing.T) {
+	original := authorityFixtureV2(false, ControlledDispositionKindV2)
+	core := original
+	core.NativeDisposition = json.RawMessage(`{"kind":"core_no_professional_components","targetKey":"darwin-arm64"}`)
+	core.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	core.Classification = "development_clean_non_publishable"
+	check := func(t *testing.T, value AuthorityV2, want bool) {
+		t.Helper()
+		value.AuthorityDigest = authorityDigest(value)
+		body, _ := json.Marshal(value)
+		parsed, err := ParseV2(body)
+		if (err == nil) != want {
+			t.Fatalf("core authority acceptance=%v, want=%v", err == nil, want)
+		}
+		if want && (parsed.Core == nil || parsed.Development != nil || parsed.Controlled != nil) {
+			t.Fatal("core disposition promoted to native authority")
+		}
+	}
+	check(t, core, true)
+	mixed := core
+	mixed.Artifacts.FundsPlugin = original.Artifacts.FundsPlugin
+	check(t, mixed, false)
+	absentFull := original
+	absentFull.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	check(t, absentFull, false)
+	unknown := core
+	unknown.NativeDisposition = json.RawMessage(`{"kind":"core_no_professional_components","targetKey":"linux-x64"}`)
+	check(t, unknown, false)
+	published := core
+	published.Publishable = true
+	check(t, published, false)
+}

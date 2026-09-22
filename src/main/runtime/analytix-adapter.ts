@@ -1,3 +1,4 @@
+import { packagedReleaseProfile } from '../release-profile'
 import { app } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -2546,7 +2547,7 @@ async function startGoConformanceSidecarOnce(
     hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1
   }
   let bundledFundsConfigSynced = false
-  const bundledFundsMaterialization = isRuntimeServer
+  const bundledFundsMaterialization = isRuntimeServer && (!app.isPackaged || packagedReleaseProfile(app.getAppPath()) !== 'core')
     ? await settleOptionalRuntimeCapability('bundled_funds', async () => {
         const materialization = await materializeBundledFundsBeforeRuntimeV1({
           appIsPackaged: app.isPackaged,

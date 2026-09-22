@@ -14,6 +14,7 @@ import (
 
 const (
 	ContractV2                     = "analytix.packaged-build-authority/v2"
+	CoreDispositionKindV2          = "core_no_professional_components"
 	DevelopmentDispositionKindV2   = "development_non_publishable"
 	ControlledDispositionKindV2    = "controlled_release_receipt"
 	MaxAuthorityBytesV2            = 256 << 10
@@ -165,7 +166,13 @@ type AuthorityV2 struct {
 	AuthorityDigest          string                    `json:"authorityDigest"`
 }
 
+type CoreDispositionV2 struct {
+	Kind      string `json:"kind"`
+	TargetKey string `json:"targetKey"`
+}
+
 type ParsedAuthorityV2 struct {
+	Core        *CoreDispositionV2
 	Authority   AuthorityV2
 	Controlled  *ControlledReleaseDispositionV2
 	Development *DevelopmentDispositionV2
@@ -207,7 +214,7 @@ func (parsed *ParsedAuthorityV2) validate() error {
 		authority.Publishable || authority.ReleaseEligible || authority.PublicationReceiptIssued ||
 		authority.TargetKey == "" || authority.TargetKey != strings.TrimSpace(authority.TargetKey) ||
 		validateEffectiveBuilderContextV1(authority.BuildContext, authority.TargetKey) != nil ||
-		!validArtifacts(authority.Artifacts) || !sha256Digest(authority.AuthorityDigest) ||
+		!validProfileArtifacts(authority.Artifacts, authority.NativeDisposition) || !sha256Digest(authority.AuthorityDigest) ||
 		validateStagedPayloadClosureV1(authority.StagedPayload) != nil ||
 		authority.AuthorityDigest != authorityDigest(authority) || validateWorktreeSnapshot(authority.WorktreeSnapshot) != nil {
 		return errors.New("packaged build authority is invalid")
@@ -218,6 +225,12 @@ func (parsed *ParsedAuthorityV2) validate() error {
 		return err
 	}
 	switch kind {
+	case CoreDispositionKindV2:
+		var disposition CoreDispositionV2
+		if err := strictNested(authority.NativeDisposition, &disposition); err != nil || disposition.TargetKey != "darwin-arm64" || disposition.TargetKey != authority.TargetKey {
+			return errors.New("packaged core disposition is invalid")
+		}
+		parsed.Core = &disposition
 	case ControlledDispositionKindV2:
 		var disposition ControlledReleaseDispositionV2
 		if err := strictNested(authority.NativeDisposition, &disposition); err != nil ||
@@ -244,6 +257,9 @@ func (parsed *ParsedAuthorityV2) validate() error {
 }
 
 func (parsed ParsedAuthorityV2) DispositionKind() string {
+	if parsed.Core != nil {
+		return CoreDispositionKindV2
+	}
 	if parsed.Controlled != nil {
 		return ControlledDispositionKindV2
 	}
@@ -570,7 +586,7 @@ func teamIdentifier(value string) bool {
 }
 
 func classification(dirty bool, kind string) string {
-	if kind == DevelopmentDispositionKindV2 {
+	if kind == DevelopmentDispositionKindV2 || kind == CoreDispositionKindV2 {
 		if dirty {
 			return "development_dirty_non_publishable"
 		}
@@ -587,4 +603,15 @@ func domainDigest(domain string, body []byte) string {
 	_, _ = hash.Write([]byte(domain))
 	_, _ = hash.Write(body)
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func validProfileArtifacts(value ArtifactBindingsV2, disposition json.RawMessage) bool {
+	kind, err := dispositionKind(disposition)
+	if err != nil {
+		return false
+	}
+	if kind == CoreDispositionKindV2 {
+		return validNative(value.Executable) && validContent(value.AppASAR) && validNative(value.RuntimeServer) && value.FundsPlugin == (FundsPluginArtifactBindingV2{})
+	}
+	return validArtifacts(value)
 }

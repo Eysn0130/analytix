@@ -391,3 +391,34 @@ Verify scripts against the current `package.json` and build configuration
 before editing this page. Add commands only when they are maintained entry
 points. Move date-bound results to evidence documents rather than turning this
 runbook into a pass ledger.
+
+## Core package candidate profile
+
+`npm run dist:mac:arm64:core` selects the explicit `core` profile in the existing
+Electron builder and after-pack owners. The default remains `full`. The current
+Core profile is a local, non-publishable Darwin arm64 candidate path; formal
+release intent is rejected until the Core disposition is qualified by the
+existing signing/publication lifecycle. This is a source implementation, not
+installed acceptance or release approval.
+
+The Core resource closure excludes the Funds plugin tree, Python data backend,
+all four data-analysis native binaries and their native authority generations,
+private Office engine and document-runtime. Both after-pack and the packaged
+Go reader reject unexpected professional payloads; the Go executable binds the
+profile at link time. Main skips Funds materialization, and the Go Host denies
+saved Funds activation before source inspection, catalog advertisement or effects.
+Existing case and installed-plugin state is retained. Case tasks remain subject
+to protected-root and authority checks; ordinary tools do not gain case access.
+
+The same Go Core, Electron/Main/preload/renderer, ordinary tool/terminal lanes,
+Provider Registry/Secret Store, approvals, history, Skills/MCP and ordinary child
+execution remain included. Existing Office codec WASM, document preview and
+renderer code remain packaged: their license and applicable shared checks are
+still required. Excluding the private Office engine does not claim those assets
+or advanced editing have passed qualification. The complete profile and its
+backlog remain intact.
+
+Use the cache helper in the same shell. Pin the source commit and inspect the
+actual resulting resource/seal/authority closure before installation. Do not
+launch a GUI across the unresolved Chromium/OS storage admission boundary or
+interpret an ad-hoc Core candidate as a public release.

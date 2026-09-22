@@ -316,3 +316,8 @@ module.exports = {
     }
   }
 }
+
+// Explicit build profile; the sealed effective builder context binds this choice.
+module.exports = require('./scripts/core-package-profile.cjs').applyReleaseProfile(
+  module.exports, process.env.ANALYTIX_RELEASE_PROFILE || 'full'
+)

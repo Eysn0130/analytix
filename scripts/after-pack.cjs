@@ -1,3 +1,4 @@
+const { CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 const { execFileSync } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
@@ -1551,7 +1552,8 @@ function isDevelopmentNativeDisposition(value) {
 }
 
 function isNativeDisposition(value) {
-  return isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value)
+  return isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value) ||
+    (exactKeys(value, ['kind', 'targetKey']) && value.kind === CORE_DISPOSITION && value.targetKey === 'darwin-arm64')
 }
 
 function normalizeNativeDisposition(value) {
@@ -1572,7 +1574,7 @@ function normalizeNativeDisposition(value) {
 }
 
 function authorityClassification(worktreeSnapshot, nativeDisposition) {
-  if (nativeDisposition.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (nativeDisposition.kind === NATIVE_DISPOSITION_DEVELOPMENT || nativeDisposition.kind === CORE_DISPOSITION) {
     return worktreeSnapshot.dirty
       ? 'development_dirty_non_publishable'
       : 'development_clean_non_publishable'
@@ -1580,6 +1582,12 @@ function authorityClassification(worktreeSnapshot, nativeDisposition) {
   return worktreeSnapshot.dirty
     ? 'controlled_release_dirty_non_publishable'
     : 'controlled_release_clean_candidate_non_publishable'
+}
+
+function validProfileFundsBinding(disposition, binding) {
+  return disposition?.kind === CORE_DISPOSITION
+    ? canonicalJSON(binding) === canonicalJSON(ABSENT_FUNDS)
+    : isFundsPluginArtifactBindingV2(binding)
 }
 
 function isPackagedBuildAuthorityV2(value) {
@@ -1602,7 +1610,7 @@ function isPackagedBuildAuthorityV2(value) {
     !isNativeArtifactBinding(value.artifacts.executable) ||
     !isContentArtifactBinding(value.artifacts.appAsar) ||
     !isNativeArtifactBinding(value.artifacts.runtimeServer) ||
-    !isFundsPluginArtifactBindingV2(value.artifacts.fundsPlugin) ||
+    !validProfileFundsBinding(value.nativeDisposition, value.artifacts.fundsPlugin) ||
     !isStagedPayloadClosureV1(value.stagedPayload) || !isSha256(value.authorityDigest)) {
     return false
   }
@@ -1625,7 +1633,7 @@ function createPackagedBuildAuthorityV2(options) {
     !isNativeArtifactBinding(options.artifacts.executable) ||
     !isContentArtifactBinding(options.artifacts.appAsar) ||
     !isNativeArtifactBinding(options.artifacts.runtimeServer) ||
-    !isFundsPluginArtifactBindingV2(options.artifacts.fundsPlugin) ||
+    !validProfileFundsBinding(nativeDisposition, options.artifacts.fundsPlugin) ||
     !isStagedPayloadClosureV1(options.stagedPayload)) {
     throw new Error('[after-pack] Packaged build authority inputs are invalid')
   }
@@ -1764,6 +1772,7 @@ function removeOwnedTemporaryFile(path, ownership) {
 function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
   const targetKey = packagedTargetKey(context)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
+  if ((nativeDisposition.kind === CORE_DISPOSITION) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== targetKey) {
     throw new Error('[after-pack] Native disposition does not match the packaged authority target')
   }
@@ -1782,6 +1791,9 @@ function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
     if (nativeReceipt.sha256 !== nativeDisposition.receiptSha256) {
       throw new Error('[after-pack] Native receipt changed before packaged authority issuance')
     }
+  } else if (nativeDisposition.kind === CORE_DISPOSITION) {
+    if (!isCoreContext(context)) throw Error('core_profile_authority_mismatch')
+    assertCoreResourcesAbsent(packedResourcesDir(context))
   } else {
     verifyPackagedDevelopmentNativeDisposition(context, nativeDisposition, {
       repoRoot: options.repoRoot,
@@ -2576,6 +2588,11 @@ function sameFundsPluginAdmissionV1(left, right) {
 }
 
 function requireCurrentFundsPluginAdmissionV1(context, expected) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    if (canonicalJSON(expected) !== canonicalJSON({ artifact: ABSENT_FUNDS })) throw Error('core_profile_funds_admission_mismatch')
+    return { artifact: ABSENT_FUNDS }
+  }
   if (!isFundsPluginAdmissionV1(expected)) {
     throw new Error('[after-pack] funds_plugin_admission_changed')
   }
@@ -2597,6 +2614,10 @@ function requireCurrentFundsPluginAdmissionV1(context, expected) {
 // embedded in the signed packaged authority so the later Go materializer
 // cannot bless whatever plugin tree happens to occupy the path at startup.
 function collectPackagedFundsPluginIdentityV2(context) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    return ABSENT_FUNDS
+  }
   const requestedRoot = join(
     packedResourcesDir(context),
     'plugins',
@@ -2676,6 +2697,10 @@ function collectPackagedFundsPluginIdentityV2(context) {
 }
 
 function validateBundledFundsPlugin(context, options = {}) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    return { artifact: ABSENT_FUNDS }
+  }
   const canonicalSourceRoot = join(__dirname, '..', 'plugins', ANALYTIX_FUNDS_PLUGIN_NAME)
   const sourceRoot = options.sourceRoot == null
     ? canonicalSourceRoot
@@ -4040,7 +4065,7 @@ function validateBundledAnalytixRuntime(context, options = {}) {
     }
   }
   assertExists(bundledGoRuntimeServerPath(context), 'Go runtime server binary')
-  for (const name of ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS) {
+  for (const name of (isCoreContext(context) ? [] : ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS)) {
     assertExists(
       bundledDataAnalysisNativeToolPath(context, name),
       `data analysis native tool (${name})`
@@ -4049,7 +4074,10 @@ function validateBundledAnalytixRuntime(context, options = {}) {
   const nativeDisposition = options.nativeDisposition
     ? normalizeNativeDisposition(options.nativeDisposition)
     : null
-  if (nativeDisposition?.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (isCoreContext(context)) {
+    if (nativeDisposition?.kind !== CORE_DISPOSITION) throw Error('core_profile_native_disposition_mismatch')
+    assertCoreResourcesAbsent(resources)
+  } else if (nativeDisposition?.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
     verifyPackagedDevelopmentNativeDisposition(context, nativeDisposition, {
       repoRoot: options.repoRoot,
       verifyCurrentSource: options.verifyCurrentSource,
@@ -4129,7 +4157,7 @@ function validateBundledAnalytixRuntime(context, options = {}) {
   if (normalizePlatform(context.electronPlatformName) !== 'win32') {
     chmodSync(join(root, 'packages/runtime/node_modules/analytix-computer-use/bin/analytix-computer-use'), 0o755)
     chmodSync(bundledOpenComputerUseNativePath(context), 0o755)
-    for (const name of ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS) {
+    for (const name of (isCoreContext(context) ? [] : ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS)) {
       chmodSync(bundledDataAnalysisNativeToolPath(context, name), 0o755)
     }
   }
@@ -4173,6 +4201,7 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
   const goos = goOSForPlatform(context.electronPlatformName)
   const goarch = goArchForTarget(context.arch)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
+  if ((nativeDisposition.kind === CORE_DISPOSITION) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== packagedTargetKey(context)) {
     throw new Error('[after-pack] Exact packaged native disposition is required before building runtime-server')
   }
@@ -4225,6 +4254,7 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
   }
   const ldflags = [
+    `-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedReleaseProfile=${isCoreContext(context) ? 'core' : 'full'}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedReceiptSHA256=${runtimeNativeTrust.receiptSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedManifestSHA256=${runtimeNativeTrust.manifestSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedTargetKey=${runtimeNativeTrust.targetKey}`,
@@ -4464,7 +4494,12 @@ async function afterPack(context) {
   const runtimeDir = join(packedResourcesDir(context), 'runtime')
   const controlledNativeReceiptPresent = pathEntryExists(join(runtimeDir, RECEIPT_FILE_NAME))
   let nativeTrust
-  if (controlledNativeReceiptPresent) {
+  if (isCoreContext(context)) {
+    if (packagedTargetKey(context) !== 'darwin-arm64' || formalPackagedReleaseIntent(process.env) || process.env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD) throw Error('core_profile_candidate_scope_invalid')
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
+    nativeTrust = { kind: CORE_DISPOSITION, targetKey: packagedTargetKey(context) }
+  } else if (controlledNativeReceiptPresent) {
     nativeTrust = verifyPackagedNativeBeforeRuntimeBuild(context)
   } else {
     assertNativePackageQuarantined(context, { allowUnavailable: true })
@@ -4472,11 +4507,11 @@ async function afterPack(context) {
       throw new Error('[after-pack] native_component_release_authority_unavailable')
     }
   }
-  if (!controlledNativeReceiptPresent) {
+  if (!controlledNativeReceiptPresent && !isCoreContext(context)) {
     nativeTrust = materializePackagedDevelopmentNativeComponents(context)
   }
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
-  materializePackagedDocumentRuntime(context, {
+  if (!isCoreContext(context)) materializePackagedDocumentRuntime(context, {
     required: formalPackagedReleaseIntent(process.env)
   })
   const runtimeServer = buildBundledGoRuntimeServer(context, nativeDisposition)

@@ -13,6 +13,11 @@ import (
 	domainauthority "analytix.local/runtime-go/internal/domain/packagedbuildauthority"
 )
 
+// Set only by the canonical package builder; never read from settings or env.
+var embeddedReleaseProfile = "full"
+
+func CoreOnlyBuild() bool { return embeddedReleaseProfile == "core" }
+
 const (
 	authorityRelativePathV2 = "runtime/analytix-packaged-build-authority.json"
 	pluginRelativePathV2    = "plugins/analytix-fund-analysis"
@@ -110,6 +115,9 @@ func InspectPackageV2(ctx context.Context, executablePath, goos, goarch string) 
 	if err != nil {
 		return InspectionV2{}, err
 	}
+	if (parsed.Core != nil) != CoreOnlyBuild() {
+		return InspectionV2{}, errors.New("packaged release profile does not match runtime")
+	}
 	platform, arch, ok := parsed.Target()
 	if !ok || platform != normalizedPlatformV2(goos) || arch != normalizedArchV2(goarch) {
 		return InspectionV2{}, errors.New("packaged build authority target does not match the current runtime")
@@ -153,16 +161,24 @@ func InspectPackageV2(ctx context.Context, executablePath, goos, goarch string) 
 	// package-wide resource seal has succeeded. Its exact tree identity is then
 	// checked against the sealed authority before and after the return barrier.
 	pluginRoot := filepath.Join(resources, filepath.FromSlash(pluginRelativePathV2))
-	if _, err := canonicalDirectoryV2(pluginRoot); err != nil {
-		return InspectionV2{}, ErrPackagedFundsPluginRootUnavailable
-	}
-	pluginIdentity, err := pluginmaterializationfs.InspectPackagedFundsSourceTreeV1(ctx, pluginRoot)
-	if err := classifyFundsPluginInspectionV2(
-		ctx,
-		err,
-		fundsPluginBindingMatchesV2(pluginIdentity, parsed.Authority.Artifacts.FundsPlugin),
-	); err != nil {
-		return InspectionV2{}, err
+	var pluginIdentity pluginmaterializationfs.SourceTreeIdentityV1
+	if parsed.Core != nil {
+		if err := verifyCoreResourcesAbsentV2(resources); err != nil {
+			return InspectionV2{}, err
+		}
+	} else {
+		if _, err := canonicalDirectoryV2(pluginRoot); err != nil {
+			return InspectionV2{}, ErrPackagedFundsPluginRootUnavailable
+		}
+		pluginIdentity, err = pluginmaterializationfs.InspectPackagedFundsSourceTreeV1(ctx, pluginRoot)
+		if err := classifyFundsPluginInspectionV2(
+			ctx,
+			err,
+			fundsPluginBindingMatchesV2(pluginIdentity, parsed.Authority.Artifacts.FundsPlugin),
+		); err != nil {
+			return InspectionV2{}, err
+		}
+
 	}
 	if err := revalidatePackageArtifactsV2(
 		ctx,
@@ -249,6 +265,9 @@ func revalidatePackageArtifactsV2(
 		return errors.New("runtime-server changed after anchor verification")
 	}
 
+	if authority.Core != nil {
+		return verifyCoreResourcesAbsentV2(filepath.Dir(filepath.Dir(paths.pluginRoot)))
+	}
 	secondPlugin, err := pluginmaterializationfs.InspectPackagedFundsSourceTreeV1(ctx, paths.pluginRoot)
 	classificationErr := classifyFundsPluginInspectionV2(
 		ctx,
@@ -427,4 +446,13 @@ func normalizedArchV2(value string) string {
 		return value
 	}
 	return ""
+}
+
+func verifyCoreResourcesAbsentV2(resources string) error {
+	for _, name := range []string{"backend", "plugins/analytix-fund-analysis", "office-private", "runtime/document-runtime", "runtime/native-components", "runtime/analytix-native-development-build.json", "runtime/analytix-native-components-receipt.json", "runtime/analytix-import-accelerator", "runtime/analytix-cleaning-ops", "runtime/analytix-analysis-compute", "runtime/analytix-data-engine"} {
+		if _, err := os.Lstat(filepath.Join(resources, filepath.FromSlash(name))); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("core package contains unexpected professional resources")
+		}
+	}
+	return nil
 }
