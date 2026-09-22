@@ -277,7 +277,7 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 		"finishedAt": now,
 		"items":      []any{summaryItem},
 	}
-	nextTurns := make([]any, 0, 1+len(tailTurns))
+	nextTurns := make([]any, 0, len(tailTurns))
 	if authorizedCase {
 		nextTurns = authorizedCaseCompactionTurns(
 			turns, input.CaseAuthorityTurnIDs, input.GeneralTerminalAuthorities, len(input.ActiveInheritedTurns),

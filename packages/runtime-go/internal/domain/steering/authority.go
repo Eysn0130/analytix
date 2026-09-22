@@ -211,7 +211,7 @@ func validAuthorityMaterialV1(keyID string, publicKey, signature []byte) bool {
 }
 
 func cloneAuthorityMapV1(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input)+3)
+	out := make(map[string]any, len(input))
 	for key, value := range input {
 		out[key] = value
 	}

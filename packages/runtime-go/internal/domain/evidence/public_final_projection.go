@@ -413,8 +413,7 @@ func buildAcceptedFinalPublicViewCoreV2(envelope FinalAnswerEnvelope, record Acc
 
 func acceptedFinalPublicViewCoreV2Digest(core AcceptedFinalPublicViewCoreV2) string {
 	body, _ := json.Marshal(core)
-	payload := make([]byte, 0, len(acceptedFinalPublicViewV2DigestDomain)+len(body))
-	payload = append(payload, acceptedFinalPublicViewV2DigestDomain...)
+	payload := []byte(acceptedFinalPublicViewV2DigestDomain)
 	payload = append(payload, body...)
 	return domainsecurity.SHA256Hex(payload)
 }
