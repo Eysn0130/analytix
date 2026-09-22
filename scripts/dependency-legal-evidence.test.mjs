@@ -98,6 +98,24 @@ test('root and runtime duplicate instances require independent exact owner bindi
   assert.equal(missing.dependencyInstances.filter(row=>row.name==='exif-parser'&&row.engineeringBlocking).length, 2)
 })
 
+test('reviewed computer-use wrappers bind all eight actual instances without admitting native dependencies', () => {
+  for (const name of ['shared', 'provider-interfaces', 'libnut', 'default-clipboard-provider']) {
+    const f = fixture(`@computer-use/${name}`)
+    for (const binding of f.record.bindings) {
+      const prefix = `${binding.lock === 'package-lock.json' ? '' : 'packages/runtime/'}${binding.path}`
+      const entry = `${prefix}/package.json`
+      f.entries[entry] = readFileSync(join(root, entry))
+      for (const file of Object.keys(f.record.files)) f.entries[`${prefix}/${file}`] = readFileSync(join(root, prefix, file))
+      assert.equal(verify({...f, entry}).selectedLicense, 'Apache-2.0')
+    }
+    const wrongVersion = {...f, entry: f.entry.replace(name, 'libnut-darwin')}
+    f.entries[wrongVersion.entry] = f.entries[f.entry]
+    assert.throws(() => verify(wrongVersion), /instance_not_bound/)
+    delete f.entries['dependency-legal/materials/nut-tree-aaca4af3/CHANGES.txt']
+    assert.throws(() => verify(f), /material_changed/)
+  }
+})
+
 test('original-author buffer-equal supplement binds both installations without changing package metadata', () => {
   const f = fixture('buffer-equal')
   const runtime = `packages/runtime/${f.entry}`

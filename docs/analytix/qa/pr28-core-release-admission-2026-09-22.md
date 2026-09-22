@@ -22,6 +22,37 @@ were independently fetched from their fixed original sources and matched.
 Private raw evidence is under the configured cache's
 `evidence/core-admission-20260922/`; it contains no production credentials.
 
+## Subsequent source and CI repair checkpoint
+
+`a61fc3de4d90acdf2fe3bfc6dcf4f7b372208363` was accepted through the original
+GitHub source-review interface and then normally pushed to the original branch.
+`0dae1237594b0bd4c9e55d317b625338fd57d1a9` preserves the exact embedded
+Oniguruma notices. `4d4b6f50a` removes four overflow-prone capacity additions;
+all four affected Go owner packages passed. These commits preserve SOURCE and
+DELIVERY above. None is merged-main or public-release evidence.
+
+The following table retains the earlier research snapshot. Subsequent wrapper
+review resolved its source-binding gap: fixed nut-tree `aaca4af31e6ba6591804aeed981d57df7fc12eb5`
+source files were checked against original Git blob identities; TypeScript 5.3.3
+reproduced all 52 runtime JS files and all 52 maps after the scope substitution.
+44 of 45 declaration files matched exactly. The remaining image declaration
+differs only by a duplicate identical Node type-reference line in local output.
+All eight installed root/runtime instances match their retained catalog pins.
+The original Apache text, four package declarations and an explicit Analytix
+change/provenance notice now enter the existing pre-seal material owner.
+Native platform dependencies and helper assets remain outside this wrapper
+finding. No new packaged blocker total is inferred from it.
+
+Fresh a61 CI exposed stale facade/architecture fixtures and host-dependent
+updater fixtures, in addition to current CodeQL findings. The repairs preserve
+exact facade membership, explicit arm64 Core target checks and original failure
+assertions. The Core-stage public command uses the existing validation wrapper.
+Architecture inventory distinguishes live and recovered witness capabilities
+within their sole registry owner, requires the recovered witness/currentness
+callback, and recognizes the existing general-only provider settlement and
+original-terminal startup projection paths. Targeted results are recorded below
+when complete; prior load-related conformance failures are retained.
+
 ## Source changes and exact research dispositions
 
 Both lockfiles remain unchanged. Every existing root/runtime binding is

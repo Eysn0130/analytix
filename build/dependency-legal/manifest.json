@@ -594,9 +594,90 @@
         "dist/lib/clipboardy-clipboard.class.d.ts": "c9dc4b3020487fd8ff8df3da5b74d4e45f5adfc2cc877b5cf38bf811fafa17dc",
         "dist/index.d.ts": "f514e14f79d9186c653ef8c54b4590e09a42ccd2172277bbc688e870f557b45a"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/nut-tree-aaca4af3/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/nut.js/LICENSE",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/nut.js/LICENSE",
+            "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/default-clipboard-provider.package.json",
+          "sha256": "c878e5df87ac44f597befd74abff6e632a53a86fde8ec29685fa737310d40645",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/providers/clipboardy/package.json",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "providers/clipboardy/package.json",
+            "gitBlob": "8ecdd1b00fd9968e0c4fb3db72532a309f5dbf90"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/CHANGES.txt",
+          "sha256": "80879df4565b01492fb81c0cec9f0fe1530cf60beaf3cccd34c3a15890716f70",
+          "source": {
+            "kind": "analytix-review",
+            "description": "Explicit observed source and publication transformations; not an upstream NOTICE"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+        "path": "providers/clipboardy",
+        "archiveIntegrity": "sha512-oi1MI1EvqPe6pLxgmS1W4xlyhJfQ5aRnL5P0ew1uhH6lgC3eE6+tqZkA9j9fdJnDrDadGvutLTxgb91P6Trmbg==",
+        "compiler": "TypeScript 5.3.3, ES2018/commonjs, sourceMap and declaration enabled; original compiler archive integrity verified",
+        "sourceProjection": "Literal @nut-tree/ to @computer-use/; all runtime JS and source maps exact; declaration-only duplicate Node reference difference recorded in CHANGES.txt",
+        "noticeReview": "Exact source subtree and all pinned package files reviewed; explicit Apache-2.0 package declarations; no separate NOTICE or file-level exception found. Native dependencies and helper assets excluded from this wrapper review.",
+        "originalFiles": [
+          {
+            "path": "providers/clipboardy/.npmignore",
+            "gitBlob": "5874dd07baed4b344d3df21c4a72f17d10b59732",
+            "sha256": "2c34dca8ae2e61ff792a3462450a8fa962e5c4bb53319c923bd28f6044dc05ef"
+          },
+          {
+            "path": "providers/clipboardy/CHANGELOG.md",
+            "gitBlob": "dac609a29dfbf7a67dc0d7a7ec81a1cfade4673c",
+            "sha256": "f565af4ba451b60bb5202e8fb7951bfbb832b8f631d785f72c059eee49a4513b"
+          },
+          {
+            "path": "providers/clipboardy/jest.config.js",
+            "gitBlob": "22c81f1a0c00d01f9241d52aeeb349f2d6eac5bd",
+            "sha256": "a0735ff2f155bcfc7068df23c2d04117d6def34f691371d78ef5f3756a7710bb"
+          },
+          {
+            "path": "providers/clipboardy/.gitignore",
+            "gitBlob": "733cc87c9fb42c16cd42ceb13ac2bd31924a91ba",
+            "sha256": "f824b8a7c1a99541c6a6f41e725408069eec118a15565162de7a688a845b49cd"
+          },
+          {
+            "path": "providers/clipboardy/package.json",
+            "gitBlob": "8ecdd1b00fd9968e0c4fb3db72532a309f5dbf90",
+            "sha256": "c878e5df87ac44f597befd74abff6e632a53a86fde8ec29685fa737310d40645"
+          },
+          {
+            "path": "providers/clipboardy/tsconfig.json",
+            "gitBlob": "74b93491ce3f127d2f97a06d386acd1c22d5b699",
+            "sha256": "ddb5894550773fa06f07e8e7bd9724b844842f6544d47490958aa465e6534bbd"
+          },
+          {
+            "path": "providers/clipboardy/index.ts",
+            "gitBlob": "56bca00b4f2520492da9727658fa56e2b88eb5cb",
+            "sha256": "ddff8aa56ae93c52b9b69e65e429c87e9c75b55d0a1096e721c0001a286c594b"
+          },
+          {
+            "path": "providers/clipboardy/lib/clipboardy-clipboard.class.ts",
+            "gitBlob": "65de0413288109a2b190ff7a2a548f5554ecde4c",
+            "sha256": "f8b6989b29402a943bff3dea7180d22cb1005f2e06c8a4b812e5c1d9eb9dbd71"
+          }
+        ]
+      }
     },
     {
       "id": "computer-use__libnut-4.2.0",
@@ -642,9 +723,120 @@
         "dist/lib/libnut-window.class.js.map": "5032123d4c8bbb71b2262d629b8118f81f3ce8e6616250e09f6f3d66ba1f8628",
         "README.md": "bf5dffaf366eea3b602e9bbc6675f59efe71ba5753ae4f26e5d032ee4266fb17"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/nut-tree-aaca4af3/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/nut.js/LICENSE",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/nut.js/LICENSE",
+            "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/libnut.package.json",
+          "sha256": "957b93cc29d53fa1aba3d20fea3297fdc468a8583c3928f7c7ea8ab2b5440fd6",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/providers/libnut/package.json",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "providers/libnut/package.json",
+            "gitBlob": "1b3ee05cfbd7dec40d60aa41435522e0d14b785f"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/CHANGES.txt",
+          "sha256": "80879df4565b01492fb81c0cec9f0fe1530cf60beaf3cccd34c3a15890716f70",
+          "source": {
+            "kind": "analytix-review",
+            "description": "Explicit observed source and publication transformations; not an upstream NOTICE"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+        "path": "providers/libnut",
+        "archiveIntegrity": "sha512-QtSDdS5mEgvXhRI17dH/P05gnnUuqVVZlWIrUq0fUSSdWV1VuGCwMvML6zxtWk8IeKn7OAJSw3BQJxa2zz3l6g==",
+        "compiler": "TypeScript 5.3.3, ES2018/commonjs, sourceMap and declaration enabled; original compiler archive integrity verified",
+        "sourceProjection": "Literal @nut-tree/ to @computer-use/; all runtime JS and source maps exact; declaration-only duplicate Node reference difference recorded in CHANGES.txt",
+        "noticeReview": "Exact source subtree and all pinned package files reviewed; explicit Apache-2.0 package declarations; no separate NOTICE or file-level exception found. Native dependencies and helper assets excluded from this wrapper review.",
+        "originalFiles": [
+          {
+            "path": "providers/libnut/.npmignore",
+            "gitBlob": "a652264d464a23f517bfccabe4db94aa4ba99694",
+            "sha256": "6b2b8b2dfa5d30cb6ad544cabb6803ee61672ba42348bb1732368619eeca009a"
+          },
+          {
+            "path": "providers/libnut/libnut.d.ts",
+            "gitBlob": "68b6b3212aa5c6bb4d5fe9a364896b72b5c989f1",
+            "sha256": "d91d65c71076257c53393e7965cea64c4285606661db67c65e120b225007a094"
+          },
+          {
+            "path": "providers/libnut/jest.config.js",
+            "gitBlob": "e870b4f246e53d710483fc32f561a0245137b16a",
+            "sha256": "9170ba6a742ac60a50e45ae1bc83c734bf1ff17181493f6b0f11cd5c8f42b1b3"
+          },
+          {
+            "path": "providers/libnut/README.md",
+            "gitBlob": "fff7d0cd88f9d07794387c7c5ae7383868e0c23d",
+            "sha256": "58fb6075aedaa148c26a9cce995a29b1db7dd2158d3d2bac1706c0a4a5d0c3bc"
+          },
+          {
+            "path": "providers/libnut/.gitignore",
+            "gitBlob": "408a718b97bd70c5d12ca5e43baf93a58644d68c",
+            "sha256": "8a25516e0cda5da4f446c8009a1ca6baed548feb83fe9e57497cc8fd76f324f2"
+          },
+          {
+            "path": "providers/libnut/package.json",
+            "gitBlob": "1b3ee05cfbd7dec40d60aa41435522e0d14b785f",
+            "sha256": "957b93cc29d53fa1aba3d20fea3297fdc468a8583c3928f7c7ea8ab2b5440fd6"
+          },
+          {
+            "path": "providers/libnut/tsconfig.json",
+            "gitBlob": "74b93491ce3f127d2f97a06d386acd1c22d5b699",
+            "sha256": "ddb5894550773fa06f07e8e7bd9724b844842f6544d47490958aa465e6534bbd"
+          },
+          {
+            "path": "providers/libnut/import_libnut.ts",
+            "gitBlob": "cfbd2223f686c8c2b1c44bd54c5e2c39e91b9cb9",
+            "sha256": "b97ca94abcd43c66258c4ce16dc366b20934767170c15c4c771d49030f7dc3ba"
+          },
+          {
+            "path": "providers/libnut/index.ts",
+            "gitBlob": "9165582b891fbd971ea203efa6004f6d12e78156",
+            "sha256": "a1f9d65bad2aaa44ab83df3fa534042e0ee4ccb980915980464e0b6c038c33c6"
+          },
+          {
+            "path": "providers/libnut/lib/libnut-window.class.ts",
+            "gitBlob": "1a3ae350555e34d9d9333fcd731285e47a94fba3",
+            "sha256": "2c0cf3d440b11c749e4d2c324738ae5779bc49e5ffb533b9f6d93a4c047b4fab"
+          },
+          {
+            "path": "providers/libnut/lib/libnut-screen.class.ts",
+            "gitBlob": "0a0e74487345da1d57b2dd2eddeaf30e9e7a5999",
+            "sha256": "d329e329fe7fcbc771c56bcc1a496665afb620ed51969220c3eae323c471e06e"
+          },
+          {
+            "path": "providers/libnut/lib/index.ts",
+            "gitBlob": "bbcbb1c1b36ab67c0a8d4c4ceaa6801c3cfacce6",
+            "sha256": "92f6a10b2e2af7579406443595af5788d79411411ce295a7c0300ded96c53d5c"
+          },
+          {
+            "path": "providers/libnut/lib/libnut-keyboard.class.ts",
+            "gitBlob": "b396f6c59d9d042e5842f64b90788234370fa5b2",
+            "sha256": "d25ac0d3b8d77f56be4aa62556c702eb2e318d815c87017d40337eade3000b0b"
+          },
+          {
+            "path": "providers/libnut/lib/libnut-mouse.class.ts",
+            "gitBlob": "374485a999a0a50c0074d8cb495f0eab5197dad1",
+            "sha256": "591c37fcd61b5c5fe2eb47a1724a20c1ce08cb3a883ac49046f353ee7b284298"
+          }
+        ]
+      }
     },
     {
       "id": "computer-use__provider-interfaces-4.2.0",
@@ -733,9 +925,180 @@
         "dist/lib/window-finder.interface.d.ts": "bace87509e44306d845f50e773622c13b8eccf61c0bdf3e9126bd91ead000953",
         "dist/lib/window-provider.interface.d.ts": "6824ad3b72cf2eab0c3a3cf7029920246cee487d36ba8041b438089dece35bcb"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/nut-tree-aaca4af3/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/nut.js/LICENSE",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/nut.js/LICENSE",
+            "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/provider-interfaces.package.json",
+          "sha256": "0e6f9810fef2ad4cf75a685a929f647cf7b0a2998cc5d50c7ad4a456f3773b35",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/provider-interfaces/package.json",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/provider-interfaces/package.json",
+            "gitBlob": "7cb92c53c425083c033ab6e7b64ef8c51fa0f4e1"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/CHANGES.txt",
+          "sha256": "80879df4565b01492fb81c0cec9f0fe1530cf60beaf3cccd34c3a15890716f70",
+          "source": {
+            "kind": "analytix-review",
+            "description": "Explicit observed source and publication transformations; not an upstream NOTICE"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+        "path": "core/provider-interfaces",
+        "archiveIntegrity": "sha512-IXf4GVnerK26lfqnERLhp+LhR05B+oeTCvTZ7EiVJKcxV0ofD+KZRrRZUg59GOOkKKxsQ+N5TF75F1SPine3xQ==",
+        "compiler": "TypeScript 5.3.3, ES2018/commonjs, sourceMap and declaration enabled; original compiler archive integrity verified",
+        "sourceProjection": "Literal @nut-tree/ to @computer-use/; all runtime JS and source maps exact; declaration-only duplicate Node reference difference recorded in CHANGES.txt",
+        "noticeReview": "Exact source subtree and all pinned package files reviewed; explicit Apache-2.0 package declarations; no separate NOTICE or file-level exception found. Native dependencies and helper assets excluded from this wrapper review.",
+        "originalFiles": [
+          {
+            "path": "core/provider-interfaces/.npmignore",
+            "gitBlob": "5874dd07baed4b344d3df21c4a72f17d10b59732",
+            "sha256": "2c34dca8ae2e61ff792a3462450a8fa962e5c4bb53319c923bd28f6044dc05ef"
+          },
+          {
+            "path": "core/provider-interfaces/CHANGELOG.md",
+            "gitBlob": "dac609a29dfbf7a67dc0d7a7ec81a1cfade4673c",
+            "sha256": "f565af4ba451b60bb5202e8fb7951bfbb832b8f631d785f72c059eee49a4513b"
+          },
+          {
+            "path": "core/provider-interfaces/README.md",
+            "gitBlob": "a4f8b0ba0ad7e56dcf5f14fab91ecc684822af98",
+            "sha256": "1e67d02a32ef18b7366961cdd80120c95b4d133121cf5a1eb506e618f683866b"
+          },
+          {
+            "path": "core/provider-interfaces/.gitignore",
+            "gitBlob": "733cc87c9fb42c16cd42ceb13ac2bd31924a91ba",
+            "sha256": "f824b8a7c1a99541c6a6f41e725408069eec118a15565162de7a688a845b49cd"
+          },
+          {
+            "path": "core/provider-interfaces/package.json",
+            "gitBlob": "7cb92c53c425083c033ab6e7b64ef8c51fa0f4e1",
+            "sha256": "0e6f9810fef2ad4cf75a685a929f647cf7b0a2998cc5d50c7ad4a456f3773b35"
+          },
+          {
+            "path": "core/provider-interfaces/typedoc.json",
+            "gitBlob": "b369a23b8cf080bd4b4224f1408ce631488e1f24",
+            "sha256": "ce32d5598c6e22a53eaf37281286c1060aafad38bfba521af4bfb1ccb3112b99"
+          },
+          {
+            "path": "core/provider-interfaces/tsconfig.json",
+            "gitBlob": "74b93491ce3f127d2f97a06d386acd1c22d5b699",
+            "sha256": "ddb5894550773fa06f07e8e7bd9724b844842f6544d47490958aa465e6534bbd"
+          },
+          {
+            "path": "core/provider-interfaces/index.ts",
+            "gitBlob": "f41a696fd204db5a4678c415898736f452ffc0c2",
+            "sha256": "6f308b141358ac799edc3e83e887441852205dc1348310d30b62c69438b93ca0"
+          },
+          {
+            "path": "core/provider-interfaces/lib/text-finder.interface.ts",
+            "gitBlob": "a80f6c0b575cf581264968fff619df86ed8f3ca2",
+            "sha256": "07d439b9c34ad8c1921f6e78df8d70fb75ebc43673a180fbe94cdb2053bbf30a"
+          },
+          {
+            "path": "core/provider-interfaces/lib/data-sink.interface.ts",
+            "gitBlob": "47a0d0e81f7776a31bc478534b4b399faf9a73ff",
+            "sha256": "d7b3bb59f5e35ea16c6cf3949bb27d4acafeaeae3ddd46784794f34125231c28"
+          },
+          {
+            "path": "core/provider-interfaces/lib/color-finder.interface.ts",
+            "gitBlob": "9fda153ae614d83d52d63dc1e721804d18e8b63e",
+            "sha256": "968b2e3deed39f7edd5e294ca41511b477388926f390bf68ca3a12c117aa7712"
+          },
+          {
+            "path": "core/provider-interfaces/lib/image-writer.type.ts",
+            "gitBlob": "a0bf6735b8e4a36ac9c83a835066a0d783efe4be",
+            "sha256": "866d19d7691eab27482104e95fc5ecf78331b51a00c0105e403fa130bc8eaec0"
+          },
+          {
+            "path": "core/provider-interfaces/lib/image-processor.interface.ts",
+            "gitBlob": "4872c7e5dff590ff81f999ea1f344ca42ee1419d",
+            "sha256": "3640971d3ca8047c654b9b864d0e2d8e6a14e34f8b1bc7ae6533da565457e9d7"
+          },
+          {
+            "path": "core/provider-interfaces/lib/element-inspection-provider.interface.ts",
+            "gitBlob": "8e93ed2cd63d6434fbd6c08001a20e3ab660290e",
+            "sha256": "c0a6fa4f143f62cc01fcfacd0293e975bbb48db41d12cb6509a59c2fbc9bbeb8"
+          },
+          {
+            "path": "core/provider-interfaces/lib/window-finder.interface.ts",
+            "gitBlob": "ccda3dd1fe3c29bf6bad6ea37f3c322bd7e561ec",
+            "sha256": "71c2681a57e74b650c867012b97b58db26c23bf3997ea07ff3e678fe72f8f980"
+          },
+          {
+            "path": "core/provider-interfaces/lib/screen-provider.interface.ts",
+            "gitBlob": "b2de5a3d920d1f585a05160405376c87357eeb07",
+            "sha256": "94411e5bb98f64748db07121136902cf2d4aef5ea478c195d451bcdbe467f766"
+          },
+          {
+            "path": "core/provider-interfaces/lib/data-source.interface.ts",
+            "gitBlob": "e2d57f7b109b033477348427c7b9f634cbf745ab",
+            "sha256": "d70d011b1d9340d2556dd5f2cc8b532074b2bd9de7922eeecb04477ea53ba337"
+          },
+          {
+            "path": "core/provider-interfaces/lib/mouse-provider.interface.ts",
+            "gitBlob": "f4e495db8813f2d0f806b60c9e3ea68bb54c4e0e",
+            "sha256": "2861d8afeac6688ebc4398b669893dce2dc8fbb8a95e3052525b3635c984345d"
+          },
+          {
+            "path": "core/provider-interfaces/lib/image-finder.interface.ts",
+            "gitBlob": "d537e23b52f2aef277a46c0ac8c8cc2826cd930e",
+            "sha256": "3f6ed5d2f3c31ee062e01db9afa88d3f89b262d93bca060c5b6fa7fb7799c0f6"
+          },
+          {
+            "path": "core/provider-interfaces/lib/log-provider.interface.ts",
+            "gitBlob": "099d0a6a9c5ada96c2d7671ef0d0247e2547f3d6",
+            "sha256": "424256565363f955b478ab7d8823571f987484639bc108308f272e5487acbafd"
+          },
+          {
+            "path": "core/provider-interfaces/lib/index.ts",
+            "gitBlob": "461c28011153c9a647614934d64763a8121f7ee0",
+            "sha256": "1ef82adc6499a95f1a8d38ff6b4b080fd965264a63af0b1bdd9ae98764a9ce60"
+          },
+          {
+            "path": "core/provider-interfaces/lib/image-reader.type.ts",
+            "gitBlob": "c45b9d2a7a7a3115e0b8200fa40dfdfbd71014ac",
+            "sha256": "085b1993585894acf6857c79dfafaa5c62918a7d0f6a42e24efb0913e8493cb9"
+          },
+          {
+            "path": "core/provider-interfaces/lib/keyboard-provider.interface.ts",
+            "gitBlob": "7291cda1844e2b95c6d5fca6986c10aa57121d66",
+            "sha256": "3ae04d63dd17b8ea5672c4d5b719429b2c7a0cedab724938098d3943132ff687"
+          },
+          {
+            "path": "core/provider-interfaces/lib/window-provider.interface.ts",
+            "gitBlob": "45a2e0185d1b944ada89c7fb54a6a21ec2e91472",
+            "sha256": "9fbbb0740675a90ce94b0eafadb09a5313caca3e69191d5960453e23b5e7af61"
+          },
+          {
+            "path": "core/provider-interfaces/lib/clipboard-provider.interface.ts",
+            "gitBlob": "17c6637a2a1111f539e0031f46066a3e2062b5f6",
+            "sha256": "c93bfd91b8d1a1e4314ada2a189b915c2b377074e602a54d626c03d02f234bed"
+          },
+          {
+            "path": "core/provider-interfaces/lib/provider-registry.interface.ts",
+            "gitBlob": "6b21f0780c7aa16b5993fa45d31aa70fd7a2502a",
+            "sha256": "f164699b60000a1fad0446b6ef8db3766e9d650315b99b2c53c9bd8281ce1ace"
+          }
+        ]
+      }
     },
     {
       "id": "computer-use__shared-4.2.0",
@@ -839,9 +1202,215 @@
         "dist/lib/types/window-element.interface.d.ts": "2fce5f5ba107163589381b32f719cb4bed1c050024b6fb857968804d473f70e4",
         "dist/lib/types/window.interface.d.ts": "76a85dd4fc6b2ada32ced13b0f4543d0a1d40ae10af1f147b0006ff6cfff77b5"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/nut-tree-aaca4af3/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/nut.js/LICENSE",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/nut.js/LICENSE",
+            "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/shared.package.json",
+          "sha256": "f8a2710326cc78ad036f50d68a18baba732e51740375e2daff12152b25b5e3b4",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nut-tree/nut.js/blob/aaca4af31e6ba6591804aeed981d57df7fc12eb5/core/shared/package.json",
+            "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+            "path": "core/shared/package.json",
+            "gitBlob": "eecc6d358e02008674f1ae8d26879691a546db05"
+          }
+        },
+        {
+          "file": "materials/nut-tree-aaca4af3/CHANGES.txt",
+          "sha256": "80879df4565b01492fb81c0cec9f0fe1530cf60beaf3cccd34c3a15890716f70",
+          "source": {
+            "kind": "analytix-review",
+            "description": "Explicit observed source and publication transformations; not an upstream NOTICE"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "aaca4af31e6ba6591804aeed981d57df7fc12eb5",
+        "path": "core/shared",
+        "archiveIntegrity": "sha512-8kYhhKS/icfuV87jKUbbpfim2Qx7KkX2YhhKOk1dI5ijx9qEhwJ7xp4r9UQ2PlPgAVd20aiKohr+hwfVTAje4g==",
+        "compiler": "TypeScript 5.3.3, ES2018/commonjs, sourceMap and declaration enabled; original compiler archive integrity verified",
+        "sourceProjection": "Literal @nut-tree/ to @computer-use/; all runtime JS and source maps exact; declaration-only duplicate Node reference difference recorded in CHANGES.txt",
+        "noticeReview": "Exact source subtree and all pinned package files reviewed; explicit Apache-2.0 package declarations; no separate NOTICE or file-level exception found. Native dependencies and helper assets excluded from this wrapper review.",
+        "originalFiles": [
+          {
+            "path": "core/shared/.npmignore",
+            "gitBlob": "5874dd07baed4b344d3df21c4a72f17d10b59732",
+            "sha256": "2c34dca8ae2e61ff792a3462450a8fa962e5c4bb53319c923bd28f6044dc05ef"
+          },
+          {
+            "path": "core/shared/CHANGELOG.md",
+            "gitBlob": "dac609a29dfbf7a67dc0d7a7ec81a1cfade4673c",
+            "sha256": "f565af4ba451b60bb5202e8fb7951bfbb832b8f631d785f72c059eee49a4513b"
+          },
+          {
+            "path": "core/shared/jest.config.js",
+            "gitBlob": "22c81f1a0c00d01f9241d52aeeb349f2d6eac5bd",
+            "sha256": "a0735ff2f155bcfc7068df23c2d04117d6def34f691371d78ef5f3756a7710bb"
+          },
+          {
+            "path": "core/shared/README.md",
+            "gitBlob": "ee257badaf998801387357e2e6912e555ed50689",
+            "sha256": "3bb4eb89552ce825a8e8dc1e7219fe817895b1f832c26c2a7461625ce7687168"
+          },
+          {
+            "path": "core/shared/.gitignore",
+            "gitBlob": "733cc87c9fb42c16cd42ceb13ac2bd31924a91ba",
+            "sha256": "f824b8a7c1a99541c6a6f41e725408069eec118a15565162de7a688a845b49cd"
+          },
+          {
+            "path": "core/shared/package.json",
+            "gitBlob": "eecc6d358e02008674f1ae8d26879691a546db05",
+            "sha256": "f8a2710326cc78ad036f50d68a18baba732e51740375e2daff12152b25b5e3b4"
+          },
+          {
+            "path": "core/shared/typedoc.json",
+            "gitBlob": "91b350d93f114821c59d5ef6e3006f45144af9c5",
+            "sha256": "9d0dd1cc191fa7dc2829d99b776d4de18c094ef34e8eff9e1b4c184468b3f707"
+          },
+          {
+            "path": "core/shared/tsconfig.json",
+            "gitBlob": "74b93491ce3f127d2f97a06d386acd1c22d5b699",
+            "sha256": "ddb5894550773fa06f07e8e7bd9724b844842f6544d47490958aa465e6534bbd"
+          },
+          {
+            "path": "core/shared/index.ts",
+            "gitBlob": "f41a696fd204db5a4678c415898736f452ffc0c2",
+            "sha256": "6f308b141358ac799edc3e83e887441852205dc1348310d30b62c69438b93ca0"
+          },
+          {
+            "path": "core/shared/lib/index.ts",
+            "gitBlob": "96208823a836145e006c9384a5d9f7b8c99848f2",
+            "sha256": "5bb6d22cdfd485ed5bf221a54cf12c1655dbbeb1d54b96e4fbf266209259ca82"
+          },
+          {
+            "path": "core/shared/lib/types/window.interface.ts",
+            "gitBlob": "e06aa68f0f38619006de6ca60b1858ad7589fb8b",
+            "sha256": "46bfe981db351f0f396276e9b4f05469406b472b02d28e55a6d7012a0e9f22f4"
+          },
+          {
+            "path": "core/shared/lib/types/window-element.interface.ts",
+            "gitBlob": "8a7af311adb4d759358ed098b881835607994a1e",
+            "sha256": "4e2a62f43da43df1a060b6eb4bb6ce66c590985a63c402c0a39584e1441752fb"
+          },
+          {
+            "path": "core/shared/lib/types/index.ts",
+            "gitBlob": "6ec7beabc9697ee5f1f106106167636dcd625939",
+            "sha256": "c92d1fa7fdb0a54f149e6d38b38ce2c39bad6250b50b1652cc01f662a768ec5b"
+          },
+          {
+            "path": "core/shared/lib/types/screen.types.ts",
+            "gitBlob": "865a6c54c942df3c6a27fc1bf5014da7bd565302",
+            "sha256": "6165895580a04fa9547962881f87cb62d1db089c802554c20803db865c65ff05"
+          },
+          {
+            "path": "core/shared/lib/enums/colormode.enum.ts",
+            "gitBlob": "24b7cbcd5040886e2f78b2c2486a4b47f9f719aa",
+            "sha256": "44af6cdfb0a845532382c8fcebe81cc43a0aa7bf5a5e5800e3e97518b90aa44d"
+          },
+          {
+            "path": "core/shared/lib/enums/index.ts",
+            "gitBlob": "a6a2bbd302482bfd4a534ffac5084c0a9fb54e22",
+            "sha256": "bc2efb6f91a3c33dd80fc2afd1ee52a0907c4c751d9fcd9bdba4bb79355b11cb"
+          },
+          {
+            "path": "core/shared/lib/enums/file-type.enum.ts",
+            "gitBlob": "030db70fe4858a4eabc66935188481bcfa3affcb",
+            "sha256": "f1371e8809e3452708f51731601a866789aa873622831c44611a1e3a1f14e678"
+          },
+          {
+            "path": "core/shared/lib/enums/key.enum.ts",
+            "gitBlob": "7686fa545f5a04316728e41ad79d4b5476e9c441",
+            "sha256": "faf8889891d3195f94b2d90a2a4b49a51466710a2f09ea66666081e371ce5313"
+          },
+          {
+            "path": "core/shared/lib/enums/button.enum.ts",
+            "gitBlob": "aebff297914c4fd038311bc5f1344e193e150fd0",
+            "sha256": "a1c16de331805a15c1d842de280ec17760ef85d658e17a816b5d7aeba4fd6e4d"
+          },
+          {
+            "path": "core/shared/lib/objects/optionalsearchparameters.class.ts",
+            "gitBlob": "b5e38301f9b18f48a6dfed4936a99d9d014f6432",
+            "sha256": "5de7299b5396c970f6c1faa6abaaf67303944e7d9bd30933b5e5074ebd5aa9b7"
+          },
+          {
+            "path": "core/shared/lib/objects/match-result.class.ts",
+            "gitBlob": "0523650f07c36d56eedb2ba9d0fe7425915486d3",
+            "sha256": "44b082c2369e775da337c832a5971687f265e32da44010001d3c7cb6be8b5f64"
+          },
+          {
+            "path": "core/shared/lib/objects/size.class.ts",
+            "gitBlob": "3e75f0a8a0b63f58123924390e976387998e67a3",
+            "sha256": "425cb9f8a1e72ef873d3912768fdca7ff184b99c4eee1c75726c85711bf0db39"
+          },
+          {
+            "path": "core/shared/lib/objects/image.class.ts",
+            "gitBlob": "467b56439012525c61cb27557240f3ced7fde92b",
+            "sha256": "966998efe73482e07c9767a8263b16df66ec6f0732985f67e7be478d5a1d8ec8"
+          },
+          {
+            "path": "core/shared/lib/objects/region.class.ts",
+            "gitBlob": "edf154c9d8cf6df2b48ae27f1dedf33a949656bd",
+            "sha256": "52180b74e77b535e868ed5bc6bd86232ae8ba50d7a726f200dcbf104d13b5940"
+          },
+          {
+            "path": "core/shared/lib/objects/scaled-match-result.class.ts",
+            "gitBlob": "e9ca6f8b01cddec87ebe3f1e71d3985c86ffcf9c",
+            "sha256": "97699f78dcc960370e1f35fdea59f35bb455eb1d034dd53423e4f4546de4a152"
+          },
+          {
+            "path": "core/shared/lib/objects/point.class.ts",
+            "gitBlob": "6b45b6b8a86f5ce340f52599ec8fd514b501d26f",
+            "sha256": "6ed2a552201423ee1dd1723a7544ae3a73f0665282ae85661191bfcf95cfbe7d"
+          },
+          {
+            "path": "core/shared/lib/objects/rgba.class.ts",
+            "gitBlob": "8b46c1736834abfa4c6c6f3fcd851c06c3d9cc0d",
+            "sha256": "35a7f550665d237f40be464b518a1f5a3c7cc07c438844d8b34599a8ce68e91e"
+          },
+          {
+            "path": "core/shared/lib/objects/match-request.class.ts",
+            "gitBlob": "655ed58418907cba0aa8db19e94ae75e4c537f3c",
+            "sha256": "40e35bbde25b41f5de92ca393f99a40d5765773e07efd6a0b00a39a0ef149db2"
+          },
+          {
+            "path": "core/shared/lib/objects/index.ts",
+            "gitBlob": "19622da24970e3fbaa50b1afc0627b796eb1cade",
+            "sha256": "0c94073a09b9fbe194339e679108e71c344440188c8abc06353786be223bc201"
+          },
+          {
+            "path": "core/shared/lib/objects/query.class.ts",
+            "gitBlob": "0b68526bce94ff49bfd94bc7693bbb97e5659d8d",
+            "sha256": "822e12e02de6ae8ba047bceb886d9091cefe00831d173fc5fd774b51062d0b25"
+          },
+          {
+            "path": "core/shared/lib/functions/imageToJimp.function.ts",
+            "gitBlob": "30a6a5b7e8e305dec77747123c391787c20998e5",
+            "sha256": "f3d61d2df8c343d260673b1a076bfa3f9a38a68eee0c48fd170f124038a3670a"
+          },
+          {
+            "path": "core/shared/lib/functions/index.ts",
+            "gitBlob": "acb0f1e97f78397ea54ea5bfb414fcad175fa0eb",
+            "sha256": "0e74bcf671f49e6e595c251a0b6dc2cacf426c2da893411a445d80cb371722e4"
+          },
+          {
+            "path": "core/shared/lib/functions/__mocks__/calculator.png",
+            "gitBlob": "8f6cf3cb186e256953d148ed76ee928e0c82ffc8",
+            "sha256": "c744808edeed0c6d40ca06bc199fe2e1771b4e6b0d4298923cb321b24ab06eb7"
+          }
+        ]
+      }
     },
     {
       "id": "napi-rs__canvas-darwin-arm64-0.1.100",
