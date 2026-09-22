@@ -4,8 +4,9 @@ const {
   strictNativeRelativePath
 } = require('./macos-signing-policy.cjs')
 const { lstatSync, realpathSync } = require('node:fs')
-const { join, relative, resolve, sep } = require('node:path')
+const { basename, dirname, join, relative, resolve, sep } = require('node:path')
 const { spawnSync } = require('node:child_process')
+const { CORE_DISPOSITION, releaseProfile, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 
 const NODE_PTY_SPAWN_HELPER_RELATIVE_PATHS = Object.freeze([
   'Contents/MacOS/analytix-node-pty/prebuilds/darwin-arm64/spawn-helper',
@@ -128,13 +129,33 @@ function strictOptionsForFile(options, filePath, defaultOptionsForFile, strictSi
   }
 }
 
-function validateStrictSignedFiles(strictSignedFiles) {
+function validateStrictSignedFiles(strictSignedFiles, profile = 'full') {
+  const expected = releaseProfile(profile) === 'core'
+    ? policy.strictNativeRelativePaths.slice(0, 1)
+    : policy.strictNativeRelativePaths
   if (
-    strictSignedFiles.size !== policy.strictNativeRelativePaths.length ||
-    policy.strictNativeRelativePaths.some((path) => strictSignedFiles.get(path) !== 1)
+    strictSignedFiles.size !== expected.length ||
+    expected.some((path) => strictSignedFiles.get(path) !== 1)
   ) {
     throw new Error('[mac-sign] Strict native code inventory was not signed exactly once')
   }
+}
+
+function validateCoreSigningProfile(options, profile, readAuthority) {
+  if (releaseProfile(profile) !== 'core') return ''
+  if (options.identity !== '-') throw Error('core_profile_signing_authority_mismatch')
+  // The normal after-pack owner has already issued the canonical authority.
+  // Reuse its bounded parser; the environment alone cannot shrink the inventory.
+  readAuthority ||= require('./after-pack.cjs')._internals.readPackagedBuildAuthorityV2
+  const authority = readAuthority({
+    appOutDir: dirname(options.app), electronPlatformName: 'darwin', arch: 'arm64',
+    packager: { appInfo: { productFilename: basename(options.app, '.app') } }
+  })
+  if (authority.nativeDisposition.kind !== CORE_DISPOSITION) {
+    throw Error('core_profile_signing_authority_mismatch')
+  }
+  assertCoreResourcesAbsent(join(options.app, 'Contents', 'Resources'))
+  return authority.authorityDigest
 }
 
 async function signMacApp(options) {
@@ -144,6 +165,8 @@ async function signMacApp(options) {
   if (options.identity !== '-') {
     requireOfficialTeamIdentifier()
   }
+  const profile = releaseProfile(process.env.ANALYTIX_RELEASE_PROFILE)
+  const coreAuthorityDigest = validateCoreSigningProfile(options, profile)
   const nodePtySpawnHelper = signNodePtySpawnHelper(options)
   const priorIgnore = options.ignore == null
     ? []
@@ -174,7 +197,10 @@ async function signMacApp(options) {
   // keeps configuration/unit-test imports free of ambient npx module lookup.
   const { signAsync } = require('@electron/osx-sign')
   await signAsync(options)
-  validateStrictSignedFiles(strictSignedFiles)
+  validateStrictSignedFiles(strictSignedFiles, profile)
+  if (validateCoreSigningProfile(options, profile) !== coreAuthorityDigest) {
+    throw Error('core_profile_signing_authority_changed')
+  }
   verifyNodePtySpawnHelperSignature(nodePtySpawnHelper)
 }
 
@@ -186,5 +212,6 @@ module.exports._internals = {
   signNodePtySpawnHelper,
   verifyNodePtySpawnHelperSignature,
   strictOptionsForFile,
+  validateCoreSigningProfile,
   validateStrictSignedFiles
 }

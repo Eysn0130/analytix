@@ -19,6 +19,36 @@ afterEach(() => {
 })
 
 describe('macOS native-code signing authority', () => {
+  it('requires the exact declared Core inventory without relaxing the full inventory', () => {
+    const runtime = signingPolicy.policy.strictNativeRelativePaths[0]
+    const core = new Map([[runtime, 1]])
+    expect(() => macSign._internals.validateStrictSignedFiles(core, 'core')).not.toThrow()
+    expect(() => macSign._internals.validateStrictSignedFiles(core, 'full')).toThrow(/exactly once/)
+    expect(() => macSign._internals.validateStrictSignedFiles(new Map(), 'core')).toThrow(/exactly once/)
+    expect(() => macSign._internals.validateStrictSignedFiles(new Map([[runtime, 2]]), 'core')).toThrow(/exactly once/)
+    expect(() => macSign._internals.validateStrictSignedFiles(new Map([...core, ['unexpected', 1]]), 'core')).toThrow(/exactly once/)
+    expect(() => macSign._internals.validateStrictSignedFiles(core, 'unknown')).toThrow(/release_profile_invalid/)
+  })
+
+  it('binds Core signing to its parsed authority and rejects unexpected professional resources', () => {
+    const app = join(temporaryRoot(), 'Analytix.app')
+    const resources = join(app, 'Contents/Resources')
+    mkdirSync(resources, { recursive: true })
+    const options = { app, identity: '-' }
+    const readAuthority = vi.fn(() => ({
+      nativeDisposition: { kind: 'core_no_professional_components' }, authorityDigest: 'a'.repeat(64)
+    }))
+    expect(macSign._internals.validateCoreSigningProfile(options, 'core', readAuthority)).toBe('a'.repeat(64))
+    expect(readAuthority).toHaveBeenCalledWith(expect.objectContaining({ arch: 'arm64', electronPlatformName: 'darwin' }))
+    expect(() => macSign._internals.validateCoreSigningProfile(options, 'core', () => ({
+      nativeDisposition: { kind: 'development_local_build' }
+    }))).toThrow(/core_profile_signing_authority_mismatch/)
+    expect(() => macSign._internals.validateCoreSigningProfile({ ...options, identity: 'Developer ID' }, 'core', readAuthority)).toThrow(/core_profile_signing_authority_mismatch/)
+    mkdirSync(join(resources, 'runtime'))
+    symlinkSync(join(resources, 'missing'), join(resources, 'runtime/analytix-data-engine'))
+    expect(() => macSign._internals.validateCoreSigningProfile(options, 'core', readAuthority)).toThrow(/professional_resource_present/)
+  })
+
   it('freezes an empty native entitlement set and the exact executable inventory', () => {
     expect(signingPolicy.policy.strictNativeRelativePaths).toEqual([
       'Contents/Resources/runtime-go/bin/runtime-server',
