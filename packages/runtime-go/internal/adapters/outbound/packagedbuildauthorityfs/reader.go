@@ -3,6 +3,8 @@ package packagedbuildauthorityfs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,6 +17,8 @@ import (
 
 // Set only by the canonical package builder; never read from settings or env.
 var embeddedReleaseProfile = "full"
+
+var embeddedCoreQualification string
 
 func CoreOnlyBuild() bool { return embeddedReleaseProfile == "core" }
 
@@ -117,6 +121,9 @@ func InspectPackageV2(ctx context.Context, executablePath, goos, goarch string) 
 	}
 	if (parsed.Core != nil) != CoreOnlyBuild() {
 		return InspectionV2{}, errors.New("packaged release profile does not match runtime")
+	}
+	if err := validateCompiledCoreQualificationV2(parsed, embeddedCoreQualification); err != nil {
+		return InspectionV2{}, err
 	}
 	platform, arch, ok := parsed.Target()
 	if !ok || platform != normalizedPlatformV2(goos) || arch != normalizedArchV2(goarch) {
@@ -453,6 +460,21 @@ func verifyCoreResourcesAbsentV2(resources string) error {
 		if _, err := os.Lstat(filepath.Join(resources, filepath.FromSlash(name))); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("core package contains unexpected professional resources")
 		}
+	}
+	return nil
+}
+
+func validateCompiledCoreQualificationV2(parsed domainauthority.ParsedAuthorityV2, compiled string) error {
+	if parsed.Core == nil {
+		if compiled != "" {
+			return errors.New("full package cannot carry core qualification")
+		}
+		return nil
+	}
+	formal := parsed.Core.Kind == domainauthority.CoreControlledDispositionKindV2
+	digest := sha256.Sum256(parsed.Authority.NativeDisposition)
+	if formal != (compiled != "") || (formal && hex.EncodeToString(digest[:]) != compiled) {
+		return errors.New("packaged core qualification does not match runtime")
 	}
 	return nil
 }

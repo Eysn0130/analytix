@@ -7,7 +7,7 @@ const {
 const { lstatSync, realpathSync } = require('node:fs')
 const { basename, dirname, join, relative, resolve, sep } = require('node:path')
 const { spawnSync } = require('node:child_process')
-const { CORE_DISPOSITION, releaseProfile, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, releaseProfile, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 
 const NODE_PTY_SPAWN_HELPER_RELATIVE_PATHS = Object.freeze([
   'Contents/MacOS/analytix-node-pty/prebuilds/darwin-arm64/spawn-helper',
@@ -142,7 +142,6 @@ function validateStrictSignedFiles(strictSignedFiles, profile = 'full') {
 
 function validateCoreSigningProfile(options, profile, readAuthority) {
   if (releaseProfile(profile) !== 'core') return ''
-  if (options.identity !== '-') throw Error('core_profile_signing_authority_mismatch')
   // The normal after-pack owner has already issued the canonical authority.
   // Reuse its bounded parser; the environment alone cannot shrink the inventory.
   readAuthority ||= require('./after-pack.cjs')._internals.readPackagedBuildAuthorityV2
@@ -150,7 +149,12 @@ function validateCoreSigningProfile(options, profile, readAuthority) {
     appOutDir: dirname(options.app), electronPlatformName: 'darwin', arch: 'arm64',
     packager: { appInfo: { productFilename: basename(options.app, '.app') } }
   })
-  if (authority.nativeDisposition.kind !== CORE_DISPOSITION) {
+  if (!isCoreDisposition(authority.nativeDisposition) ||
+    (authority.nativeDisposition.kind === CORE_DISPOSITION && options.identity !== '-') ||
+    (authority.nativeDisposition.kind === CORE_CONTROLLED_DISPOSITION &&
+      (options.identity === '-' || authority.nativeDisposition.signingMode !== 'developer-id' ||
+       authority.nativeDisposition.signingPolicySha256 !== require('./macos-signing-policy.cjs').policyDigest ||
+       authority.nativeDisposition.appleTeamIdentifier !== requireOfficialTeamIdentifier()))) {
     throw Error('core_profile_signing_authority_mismatch')
   }
   assertCoreResourcesAbsent(join(options.app, 'Contents', 'Resources'))

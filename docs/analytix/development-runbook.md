@@ -396,10 +396,29 @@ runbook into a pass ledger.
 
 `npm run dist:mac:arm64:core` selects the explicit `core` profile in the existing
 Electron builder and after-pack owners. The default remains `full`. The current
-Core profile is a local, non-publishable Darwin arm64 candidate path; formal
-release intent is rejected until the Core disposition is qualified by the
-existing signing/publication lifecycle. This is a source implementation, not
-installed acceptance or release approval.
+private Core command remains a non-publishable Darwin arm64 candidate path.
+`npm run dist:mac:arm64:core:controlled` selects the existing Developer ID
+signing/notarization owner without the private command's external-state
+isolation. It requires the configured official team and normal authorized
+signing material. The explicit `core_controlled_release` disposition binds
+that team, signing policy, target and compiled Go qualification; it remains
+`controlled_release_clean_candidate_non_publishable` until separate publication
+authority and actual acceptance exist. Missing signing authority fails closed.
+No signing, notarization, installation or stage acceptance is implied by these
+commands existing.
+
+Both commands build DMG plus ZIP and run `scripts/core-update-metadata.cjs`
+after the pinned electron-builder completes. Builder 26.15.3 writes update YAML
+after `afterAllArtifactBuild`, so this operation must remain a postprocessor.
+Core feeds use `core/darwin-arm64/channels/<stable|beta>/latest/`; stable uses
+`latest-mac.yml`, beta uses `beta-mac.yml`. The updater and publisher require
+matching Core identity, channel, compatibility generation, version and artifact
+names/digests. The signed publication owner rejects mixed Core/Full packages;
+version archive writes use a create-only precondition. `core-v1` denotes the
+unchanged Core data-schema generation, not evidence of an end-to-end upgrade.
+Cross-profile automatic updates are unsupported. Full product formal evidence
+still requires A0 and B1; a separate Core-stage acceptance projection remains a
+source gap and must not be replaced by declaring B1 passed.
 
 The Core resource closure excludes the Funds plugin tree, Python data backend,
 all four data-analysis native binaries and their native authority generations,

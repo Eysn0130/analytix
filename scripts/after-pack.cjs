@@ -1,4 +1,4 @@
-const { CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 const { execFileSync } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
@@ -1551,8 +1551,15 @@ function isDevelopmentNativeDisposition(value) {
   })
 }
 
+function isControlledCoreDisposition(value) {
+  return exactKeys(value, ['kind', 'targetKey', 'signingPolicySha256', 'signingMode', 'appleTeamIdentifier']) &&
+    value.kind === CORE_CONTROLLED_DISPOSITION && value.targetKey === 'darwin-arm64' &&
+    isSha256(value.signingPolicySha256) && value.signingMode === 'developer-id' &&
+    /^[A-Z0-9]{10}$/u.test(value.appleTeamIdentifier)
+}
+
 function isNativeDisposition(value) {
-  return isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value) ||
+  return isControlledCoreDisposition(value) || isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value) ||
     (exactKeys(value, ['kind', 'targetKey']) && value.kind === CORE_DISPOSITION && value.targetKey === 'darwin-arm64')
 }
 
@@ -1585,7 +1592,7 @@ function authorityClassification(worktreeSnapshot, nativeDisposition) {
 }
 
 function validProfileFundsBinding(disposition, binding) {
-  return disposition?.kind === CORE_DISPOSITION
+  return isCoreDisposition(disposition)
     ? canonicalJSON(binding) === canonicalJSON(ABSENT_FUNDS)
     : isFundsPluginArtifactBindingV2(binding)
 }
@@ -1772,12 +1779,12 @@ function removeOwnedTemporaryFile(path, ownership) {
 function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
   const targetKey = packagedTargetKey(context)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
-  if ((nativeDisposition.kind === CORE_DISPOSITION) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
+  if (isCoreDisposition(nativeDisposition) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== targetKey) {
     throw new Error('[after-pack] Native disposition does not match the packaged authority target')
   }
   if (formalPackagedReleaseIntent(options.env || process.env) &&
-    nativeDisposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE) {
+    nativeDisposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE && !isControlledCoreDisposition(nativeDisposition)) {
     throw new Error('[after-pack] packaged_development_native_disposition_forbidden_for_release')
   }
   const runtimeDir = join(packedResourcesDir(context), 'runtime')
@@ -1791,7 +1798,7 @@ function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
     if (nativeReceipt.sha256 !== nativeDisposition.receiptSha256) {
       throw new Error('[after-pack] Native receipt changed before packaged authority issuance')
     }
-  } else if (nativeDisposition.kind === CORE_DISPOSITION) {
+  } else if (isCoreDisposition(nativeDisposition)) {
     if (!isCoreContext(context)) throw Error('core_profile_authority_mismatch')
     assertCoreResourcesAbsent(packedResourcesDir(context))
   } else {
@@ -1985,7 +1992,9 @@ function verifyPackagedBuildAuthorityArtifacts(context, authority, options = {})
   const appAsar = hashStableRegularFile(packagedAppAsarPath(context), {
     requireSingleLink: true
   })
-  const fundsPlugin = collectPackagedFundsPluginIdentityV2(context)
+  const fundsPlugin = isCoreDisposition(authority.nativeDisposition)
+    ? (assertCoreResourcesAbsent(packedResourcesDir(context)), ABSENT_FUNDS)
+    : collectPackagedFundsPluginIdentityV2(context)
   const stagedPayload = collectStagedPayloadClosureV1(context)
   const fusePolicy = options.verifyFuses === false ? null : verifyElectronFusePolicyV1(context)
   if (!samePublishedNativeArtifact(authority.artifacts.executable, executable) ||
@@ -4075,7 +4084,7 @@ function validateBundledAnalytixRuntime(context, options = {}) {
     ? normalizeNativeDisposition(options.nativeDisposition)
     : null
   if (isCoreContext(context)) {
-    if (nativeDisposition?.kind !== CORE_DISPOSITION) throw Error('core_profile_native_disposition_mismatch')
+    if (!isCoreDisposition(nativeDisposition)) throw Error('core_profile_native_disposition_mismatch')
     assertCoreResourcesAbsent(resources)
   } else if (nativeDisposition?.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
     verifyPackagedDevelopmentNativeDisposition(context, nativeDisposition, {
@@ -4201,7 +4210,7 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
   const goos = goOSForPlatform(context.electronPlatformName)
   const goarch = goArchForTarget(context.arch)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
-  if ((nativeDisposition.kind === CORE_DISPOSITION) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
+  if (isCoreDisposition(nativeDisposition) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== packagedTargetKey(context)) {
     throw new Error('[after-pack] Exact packaged native disposition is required before building runtime-server')
   }
@@ -4255,6 +4264,7 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
   }
   const ldflags = [
     `-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedReleaseProfile=${isCoreContext(context) ? 'core' : 'full'}`,
+    ...(isControlledCoreDisposition(nativeDisposition) ? [`-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedCoreQualification=${sha256Bytes(JSON.stringify(nativeDisposition))}`] : []),
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedReceiptSHA256=${runtimeNativeTrust.receiptSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedManifestSHA256=${runtimeNativeTrust.manifestSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedTargetKey=${runtimeNativeTrust.targetKey}`,
@@ -4495,10 +4505,14 @@ async function afterPack(context) {
   const controlledNativeReceiptPresent = pathEntryExists(join(runtimeDir, RECEIPT_FILE_NAME))
   let nativeTrust
   if (isCoreContext(context)) {
-    if (packagedTargetKey(context) !== 'darwin-arm64' || formalPackagedReleaseIntent(process.env) || process.env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD) throw Error('core_profile_candidate_scope_invalid')
+    if (packagedTargetKey(context) !== 'darwin-arm64' || process.env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD) throw Error('core_profile_candidate_scope_invalid')
     assertCoreResourcesAbsent(packedResourcesDir(context))
     mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
-    nativeTrust = { kind: CORE_DISPOSITION, targetKey: packagedTargetKey(context) }
+    nativeTrust = formalPackagedReleaseIntent(process.env)
+      ? { kind: CORE_CONTROLLED_DISPOSITION, targetKey: packagedTargetKey(context),
+          signingPolicySha256: macSigningPolicyDigest, signingMode: 'developer-id',
+          appleTeamIdentifier: require('./macos-signing-policy.cjs').requireOfficialTeamIdentifier() }
+      : { kind: CORE_DISPOSITION, targetKey: packagedTargetKey(context) }
   } else if (controlledNativeReceiptPresent) {
     nativeTrust = verifyPackagedNativeBeforeRuntimeBuild(context)
   } else {

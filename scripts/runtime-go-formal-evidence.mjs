@@ -224,7 +224,7 @@ const A0_APP_KEYS = new Set([
   'packagedScheduleStrictEmptyInputSchemaBound',
   'packagedScheduleNonMutatingListImplementationBound',
   'codeSignatureVerified', 'nativeDispositionKind',
-  'developmentNativeDisposition', 'controlledReleaseNativeReceipt',
+  'developmentNativeDisposition', 'controlledReleaseNativeReceipt', 'controlledCoreQualification',
   'worktreeSnapshotBinding', 'bundledRuntimeGoSourcePresent'
 ])
 const B1_ARTIFACT_KEYS = new Set([

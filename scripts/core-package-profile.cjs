@@ -1,6 +1,9 @@
 const { lstatSync } = require('node:fs')
 const { join } = require('node:path')
 
+const CORE_CONTROLLED_DISPOSITION = 'core_controlled_release'
+const isCoreDisposition = value => [CORE_DISPOSITION, CORE_CONTROLLED_DISPOSITION].includes(value?.kind)
+
 const CORE_DISPOSITION = 'core_no_professional_components'
 const ABSENT_FUNDS = Object.freeze({ treeSha256: '', fileCount: 0, manifestSha256: '', entrypointSha256: '', totalBytes: 0 })
 const EXCLUDED_RESOURCES = Object.freeze([
@@ -39,8 +42,13 @@ function applyReleaseProfile(config, profile) {
     config.extraResources = config.extraResources.filter(resource =>
       !['backend', 'plugins/analytix-fund-analysis'].includes(resource.to))
     config.artifactName = config.artifactName.replace('analytix-', 'analytix-core-')
+    const channel = process.env.ANALYTIX_UPDATE_CHANNEL || 'stable'
+    if (!['stable', 'beta'].includes(channel)) throw Error('core_update_channel_invalid')
+    config.extraMetadata.releaseChannel = channel
+    const base = (process.env.ANALYTIX_RELEASE_BASE_URL || 'https://analytix.top/desktop/releases').trim().replace(/\/+$/, '')
+    if (Array.isArray(config.publish)) config.publish = config.publish.map(publisher => ({ ...publisher, url: `${base}/core/darwin-arm64/channels/${channel}/latest/`, channel: channel === 'stable' ? 'latest' : 'beta' }))
   }
   return config
 }
 
-module.exports = { CORE_DISPOSITION, ABSENT_FUNDS, EXCLUDED_RESOURCES, releaseProfile, isCoreContext, assertCoreResourcesAbsent, applyReleaseProfile }
+module.exports = { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, EXCLUDED_RESOURCES, releaseProfile, isCoreContext, assertCoreResourcesAbsent, applyReleaseProfile }

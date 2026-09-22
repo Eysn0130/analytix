@@ -13,23 +13,24 @@ import (
 )
 
 const (
-	ContractV2                     = "analytix.packaged-build-authority/v2"
-	CoreDispositionKindV2          = "core_no_professional_components"
-	DevelopmentDispositionKindV2   = "development_non_publishable"
-	ControlledDispositionKindV2    = "controlled_release_receipt"
-	MaxAuthorityBytesV2            = 256 << 10
-	maxJavaScriptSafeIntegerV2     = int64(9_007_199_254_740_991)
-	authorityDigestDomainV2        = "AnalytixPackagedBuildAuthorityV2\x00"
-	worktreeDigestDomainV1         = "AnalytixPackagedWorktreeSnapshotV1\x00"
-	worktreeSnapshotContractV1     = "analytix.packaged-worktree-snapshot/v1"
-	effectiveBuilderContextV1      = "analytix.electron-builder-effective-context/v1"
-	effectiveBuilderTargetDomain   = "AnalytixElectronBuilderEffectiveTargetV1\x00"
-	effectiveBuilderContextDomain  = "AnalytixElectronBuilderEffectiveContextV1\x00"
-	electronFusePolicyContractV1   = "analytix.electron-fuse-policy/v1"
-	electronFusePolicySHA256V1     = "a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c"
-	stagedPayloadContractV1        = "analytix.packaged-staged-payload/v1"
-	stagedPayloadExclusionSHA256V1 = "21d491819a899a7c12f4366e5c62858c97def101cc69ba92e11a59049baee5cd"
-	worktreeExclusionSHA256V1      = "3f4a6441cb53c9b916c6e3f81eaf7b29a26136ce0700b1b44d3bd5053e1a515b"
+	ContractV2                      = "analytix.packaged-build-authority/v2"
+	CoreControlledDispositionKindV2 = "core_controlled_release"
+	CoreDispositionKindV2           = "core_no_professional_components"
+	DevelopmentDispositionKindV2    = "development_non_publishable"
+	ControlledDispositionKindV2     = "controlled_release_receipt"
+	MaxAuthorityBytesV2             = 256 << 10
+	maxJavaScriptSafeIntegerV2      = int64(9_007_199_254_740_991)
+	authorityDigestDomainV2         = "AnalytixPackagedBuildAuthorityV2\x00"
+	worktreeDigestDomainV1          = "AnalytixPackagedWorktreeSnapshotV1\x00"
+	worktreeSnapshotContractV1      = "analytix.packaged-worktree-snapshot/v1"
+	effectiveBuilderContextV1       = "analytix.electron-builder-effective-context/v1"
+	effectiveBuilderTargetDomain    = "AnalytixElectronBuilderEffectiveTargetV1\x00"
+	effectiveBuilderContextDomain   = "AnalytixElectronBuilderEffectiveContextV1\x00"
+	electronFusePolicyContractV1    = "analytix.electron-fuse-policy/v1"
+	electronFusePolicySHA256V1      = "a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c"
+	stagedPayloadContractV1         = "analytix.packaged-staged-payload/v1"
+	stagedPayloadExclusionSHA256V1  = "21d491819a899a7c12f4366e5c62858c97def101cc69ba92e11a59049baee5cd"
+	worktreeExclusionSHA256V1       = "3f4a6441cb53c9b916c6e3f81eaf7b29a26136ce0700b1b44d3bd5053e1a515b"
 )
 
 var developmentComponentsV2 = [...]struct {
@@ -167,8 +168,11 @@ type AuthorityV2 struct {
 }
 
 type CoreDispositionV2 struct {
-	Kind      string `json:"kind"`
-	TargetKey string `json:"targetKey"`
+	Kind                string `json:"kind"`
+	TargetKey           string `json:"targetKey"`
+	SigningPolicySHA256 string `json:"signingPolicySha256,omitempty"`
+	SigningMode         string `json:"signingMode,omitempty"`
+	AppleTeamIdentifier string `json:"appleTeamIdentifier,omitempty"`
 }
 
 type ParsedAuthorityV2 struct {
@@ -225,10 +229,17 @@ func (parsed *ParsedAuthorityV2) validate() error {
 		return err
 	}
 	switch kind {
-	case CoreDispositionKindV2:
+	case CoreDispositionKindV2, CoreControlledDispositionKindV2:
 		var disposition CoreDispositionV2
 		if err := strictNested(authority.NativeDisposition, &disposition); err != nil || disposition.TargetKey != "darwin-arm64" || disposition.TargetKey != authority.TargetKey {
 			return errors.New("packaged core disposition is invalid")
+		}
+		if kind == CoreControlledDispositionKindV2 {
+			if !sha256Digest(disposition.SigningPolicySHA256) || disposition.SigningMode != "developer-id" || !teamIdentifier(disposition.AppleTeamIdentifier) {
+				return errors.New("packaged controlled core qualification is invalid")
+			}
+		} else if disposition.SigningPolicySHA256 != "" || disposition.SigningMode != "" || disposition.AppleTeamIdentifier != "" {
+			return errors.New("development core cannot carry controlled qualification")
 		}
 		parsed.Core = &disposition
 	case ControlledDispositionKindV2:
@@ -258,7 +269,7 @@ func (parsed *ParsedAuthorityV2) validate() error {
 
 func (parsed ParsedAuthorityV2) DispositionKind() string {
 	if parsed.Core != nil {
-		return CoreDispositionKindV2
+		return parsed.Core.Kind
 	}
 	if parsed.Controlled != nil {
 		return ControlledDispositionKindV2
@@ -610,8 +621,20 @@ func validProfileArtifacts(value ArtifactBindingsV2, disposition json.RawMessage
 	if err != nil {
 		return false
 	}
-	if kind == CoreDispositionKindV2 {
+	if kind == CoreDispositionKindV2 || kind == CoreControlledDispositionKindV2 {
 		return validNative(value.Executable) && validContent(value.AppASAR) && validNative(value.RuntimeServer) && value.FundsPlugin == (FundsPluginArtifactBindingV2{})
 	}
 	return validArtifacts(value)
+}
+
+// DeveloperIDTeam is a signed declaration, not proof of a signature. The OS
+// anchor must verify it against the actual package and compiled qualification.
+func (parsed ParsedAuthorityV2) DeveloperIDTeam() string {
+	if parsed.Core != nil && parsed.Core.Kind == CoreControlledDispositionKindV2 {
+		return parsed.Core.AppleTeamIdentifier
+	}
+	if parsed.Controlled != nil && parsed.Controlled.SigningMode == "developer-id" {
+		return parsed.Controlled.AppleTeamIdentifier
+	}
+	return ""
 }

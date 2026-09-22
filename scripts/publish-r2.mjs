@@ -64,6 +64,12 @@ const PLATFORM_SPECS = {
   }
 }
 
+function publicationPlatformSpec(platform, channel) {
+  const spec = PLATFORM_SPECS[platform]
+  if (!spec || !RELEASE_CHANNELS.includes(channel)) throw Error('release_update_channel_invalid')
+  return { ...spec, updateFile: channel === 'beta' ? spec.updateFile.replace('latest', 'beta') : spec.updateFile }
+}
+
 function usage() {
   console.log(`Usage:
   node scripts/publish-r2.mjs verify --platform mac|win|linux --tag vX.Y.Z --authority receipt.json --public-key release-authority.pub
@@ -562,8 +568,8 @@ function safeFileInDirectory(directory, fileName) {
   return path
 }
 
-async function requiredLocalPublicationFileNames(distDir, platform, expectedVersion) {
-  const spec = PLATFORM_SPECS[platform]
+async function requiredLocalPublicationFileNames(distDir, platform, expectedVersion, channel = 'stable') {
+  const spec = publicationPlatformSpec(platform, channel)
   const entries = await readdir(distDir)
   const updatePath = safeFileInDirectory(distDir, spec.updateFile)
   const updateText = await readFile(updatePath, 'utf8')
@@ -582,8 +588,8 @@ async function requiredLocalPublicationFileNames(distDir, platform, expectedVers
   return required
 }
 
-function expectedTargetKeysForArtifact(platform, fileName, targetKeys) {
-  if (fileName === PLATFORM_SPECS[platform].updateFile) {
+function expectedTargetKeysForArtifact(platform, fileName, targetKeys, channel = 'stable') {
+  if (fileName === publicationPlatformSpec(platform, channel).updateFile) {
     return [...targetKeys].sort()
   }
   if (platform === 'mac') {
@@ -662,7 +668,7 @@ async function verifyReleasePublicationAuthority(options) {
       packaged.classification !== 'controlled_release_clean_candidate_non_publishable' ||
       packaged.publishable !== false || packaged.releaseEligible !== false ||
       packaged.publicationReceiptIssued !== false ||
-      packaged.nativeDisposition?.kind !== 'controlled_release_receipt') {
+      !['controlled_release_receipt', 'core_controlled_release'].includes(packaged.nativeDisposition?.kind)) {
       throw new Error('packaged_build_authority_not_controlled_clean_candidate')
     }
     if (entry.platform === 'mac') {
@@ -676,6 +682,10 @@ async function verifyReleasePublicationAuthority(options) {
     packagedByTarget.set(entry.targetKey, packaged)
   }
 
+  const profiles = new Set([...packagedByTarget.values()].map(value => value.nativeDisposition.kind === 'core_controlled_release' ? 'core' : 'full'))
+  if (profiles.size !== 1) throw Error('release_profile_mix_forbidden')
+  const releaseProfile = [...profiles][0]
+  if (releaseProfile === 'core' && (platforms.length !== 1 || platforms[0] !== 'mac' || packagedByTarget.size !== 1 || !packagedByTarget.has('darwin-arm64'))) throw Error('core_release_target_invalid')
   for (const platform of platforms) {
     const platformAuthorities = authority.packagedBuildAuthorities.filter((entry) => entry.platform === platform)
     if (platformAuthorities.length === 0) throw new Error('packaged_build_authority_missing')
@@ -684,15 +694,21 @@ async function verifyReleasePublicationAuthority(options) {
     const requiredFileNames = await requiredLocalPublicationFileNames(
       distDir,
       platform,
-      authority.tag.slice(1)
+      authority.tag.slice(1), authority.channel
     )
+    if (releaseProfile === 'core') {
+      const metadataPath = safeFileInDirectory(distDir, publicationPlatformSpec(platform, authority.channel).updateFile)
+      const metadata = require('js-yaml').load(readStableRegularFile(metadataPath, { maximumBytes: 1024 * 1024 }).bytes.toString('utf8'))
+      require('./core-update-metadata.cjs').verifyCoreUpdateArtifacts(distDir, metadata, { version: authority.tag.slice(1), channel: authority.channel })
+      if (requiredFileNames.some(name => /\.(dmg|zip)(\.blockmap)?$/.test(name) && !name.startsWith(`analytix-core-${authority.tag.slice(1)}-mac-arm64.`))) throw Error('core_release_mixed_artifact')
+    }
     const artifactEntries = authority.artifacts.filter((entry) => entry.platform === platform)
     const artifactFileNames = artifactEntries.map((entry) => entry.fileName).sort()
     if (canonicalJson(artifactFileNames) !== canonicalJson(requiredFileNames)) {
       throw new Error('release_artifact_receipt_set_mismatch')
     }
     for (const entry of artifactEntries) {
-      const expectedTargets = expectedTargetKeysForArtifact(platform, entry.fileName, targetKeys)
+      const expectedTargets = expectedTargetKeysForArtifact(platform, entry.fileName, targetKeys, authority.channel)
       if (canonicalJson(entry.targetKeys) !== canonicalJson(expectedTargets) ||
         entry.targetKeys.some((targetKey) => !packagedByTarget.has(targetKey))) {
         throw new Error('release_artifact_target_mismatch')
@@ -717,7 +733,7 @@ async function verifyReleasePublicationAuthority(options) {
     }
   }
 
-  return { authority, platforms, authoritySha256: authorityFile.sha256 }
+  return { authority, platforms, releaseProfile, authoritySha256: authorityFile.sha256 }
 }
 
 async function requireReleasePublicationAuthority(flags, options) {
@@ -800,7 +816,7 @@ function classifyDownload(fileName, platform) {
 }
 
 async function collectPlatformRelease({ distDir, platform, tag, channel, config }) {
-  const spec = PLATFORM_SPECS[platform]
+  const spec = publicationPlatformSpec(platform, channel)
   if (!spec) throw new Error(`Unsupported platform: ${platform}`)
 
   const entries = await readdir(distDir)
@@ -895,6 +911,9 @@ async function putObject({ config, key, body, contentType: type, cacheControl, c
     ContentType: type,
     CacheControl: cacheControl
   }
+  // Version archives are immutable, including concurrent uploads. A collision
+  // fails closed; only the separately verified channel pointer is replaceable.
+  if (key.includes('/releases/')) input.IfNoneMatch = '*'
   if (typeof contentLength === 'number') input.ContentLength = contentLength
   await config.client.send(new PutObjectCommand(input))
 }
@@ -936,6 +955,7 @@ async function uploadPlatform({ flags, dryRun }) {
     distDirs: { [platform]: distDir }
   })
   const config = readConfig({ dryRun })
+  if (publicationAuthority.releaseProfile === 'core') config.prefix += '/core/darwin-arm64'
   const release = await collectPlatformRelease({ distDir, platform, tag, channel, config })
   const authorizedArtifacts = new Map(
     publicationAuthority.authority.artifacts
@@ -1040,6 +1060,7 @@ async function promoteRelease({ flags, dryRun }) {
   if (!requestedPlatforms) platforms.push(...publicationAuthority.platforms)
 
   const config = readConfig({ dryRun: false })
+  if (publicationAuthority.releaseProfile === 'core') config.prefix += '/core/darwin-arm64'
   const releaseKeys = await listReleaseKeys(config, tag, channel)
   if (!releaseKeys.length) throw new Error(`No archived R2 objects found for ${tag}`)
 
@@ -1222,6 +1243,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
 }
 
 export {
+  putObject,
   controlledReleaseAuthorityPublicKeySha256,
   RELEASE_PUBLICATION_AUTHORITY_CONTRACT,
   releasePublicationAuthorityDigest,

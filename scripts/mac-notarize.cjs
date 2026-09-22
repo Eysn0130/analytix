@@ -12,7 +12,7 @@ const {
   requireOfficialTeamIdentifier,
   strictNativePathsForProfile
 } = require('./macos-signing-policy.cjs')
-const { CORE_DISPOSITION, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 const {
   NATIVE_DISPOSITION_CONTROLLED_RELEASE,
   NATIVE_DISPOSITION_DEVELOPMENT,
@@ -40,7 +40,7 @@ function assertNativeDispositionSigningBoundary(authority, options = {}) {
     }
     return disposition.kind
   }
-  if (disposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE) {
+  if (disposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE && disposition.kind !== CORE_CONTROLLED_DISPOSITION) {
     throw new Error('[mac-notarize] Native disposition is unsupported')
   }
   if (options.requireDeveloperID === true && disposition.signingMode !== 'developer-id') {
@@ -55,8 +55,14 @@ function verifyDataNativeAfterSign(context, options = {}) {
   const target = nativeTargetContract('darwin', normalizeBuilderArch(context.arch))
   const authority = packagedAuthorityContract.readPackagedBuildAuthorityV2(context)
   const dispositionKind = assertNativeDispositionSigningBoundary(authority, options)
+  if (dispositionKind === CORE_CONTROLLED_DISPOSITION &&
+      (authority.nativeDisposition.signingPolicySha256 !== require('./macos-signing-policy.cjs').policyDigest ||
+       authority.nativeDisposition.appleTeamIdentifier !== requireOfficialTeamIdentifier())) {
+    throw Error('core_profile_signing_authority_mismatch')
+  }
+  if (dispositionKind === CORE_CONTROLLED_DISPOSITION) options = { ...options, requireDeveloperID: true, requireSecureTimestamp: true }
   packagedAuthorityContract.verifyPackagedBuildAuthorityArtifacts(context, authority)
-  if (dispositionKind === CORE_DISPOSITION) {
+  if (isCoreDisposition(authority.nativeDisposition)) {
     assertCoreResourcesAbsent(join(appBundle, 'Contents', 'Resources'))
   } else if (dispositionKind === NATIVE_DISPOSITION_DEVELOPMENT) {
     packagedAuthorityContract.verifyPackagedDevelopmentNativeDisposition(
@@ -82,7 +88,7 @@ function verifyDataNativeAfterSign(context, options = {}) {
     spawnSync: options.spawnSync
   }
   const appSignature = verifyDarwinCodeSignature(appBundle, signatureOptions)
-  for (const relativePath of strictNativePathsForProfile(dispositionKind === CORE_DISPOSITION ? 'core' : 'full')) {
+  for (const relativePath of strictNativePathsForProfile(isCoreDisposition(authority.nativeDisposition) ? 'core' : 'full')) {
     const nativePath = join(appBundle, ...relativePath.split('/'))
     const nativeSignature = verifyDarwinCodeSignature(nativePath, {
       ...signatureOptions,

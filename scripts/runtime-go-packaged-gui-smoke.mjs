@@ -470,7 +470,11 @@ function buildAuthorityEvidence(appPath, target, artifacts, expectedSourceCommit
     JSON.stringify(authority.worktreeSnapshot) === JSON.stringify(currentWorktreeSnapshot)
   let nativeDispositionValid = false
   try {
-    if (authority?.nativeDisposition?.kind === 'controlled_release_receipt') {
+    if (authorityShapeValid && ['core_no_professional_components', 'core_controlled_release'].includes(authority?.nativeDisposition?.kind)) {
+      require('./core-package-profile.cjs').assertCoreResourcesAbsent(dirname(dirname(nativeReceiptPath)))
+      packagedAuthorityContract.verifyPackagedBuildAuthorityArtifacts(packagedAuthorityContext(appPath, target), authority)
+      nativeDispositionValid = !nativeReceiptFile.exists
+    } else if (authority?.nativeDisposition?.kind === 'controlled_release_receipt') {
       const nativeReceipt = nativeReceiptFile.regular
         ? JSON.parse(nativeReceiptFile.content.toString('utf8'))
         : null

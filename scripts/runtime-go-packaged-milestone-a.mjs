@@ -991,6 +991,16 @@ function packagedAuthorityContext(appPath, target) {
   }
 }
 
+function controlledCoreDispositionValid(appPath, target, authority) {
+  if (!packagedAuthorityContract.isPackagedBuildAuthorityV2(authority) ||
+      authority.nativeDisposition.kind !== 'core_controlled_release' || target.key !== 'darwin-arm64') return false
+  try {
+    require('./mac-notarize.cjs')._internals.verifyDataNativeAfterSign(
+      packagedAuthorityContext(appPath, target), { requireDeveloperID: true, requireSecureTimestamp: true })
+    return true
+  } catch { return false }
+}
+
 function controlledNativeDispositionValid(appPath, target, authority) {
   if (authority?.nativeDisposition?.kind !== 'controlled_release_receipt') return false
   const receiptPath = join(runtimeResourcePath(appPath, target), 'analytix-native-components-receipt.json')
@@ -1144,6 +1154,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind: '',
     developmentNativeDisposition: false,
     controlledReleaseNativeReceipt: false,
+    controlledCoreQualification: false,
     worktreeSnapshotBinding: packagedWorktreeSnapshotBindingEvidence(
       currentWorktreeSnapshot,
       null
@@ -1279,6 +1290,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind,
     developmentNativeDisposition,
     controlledReleaseNativeReceipt,
+    controlledCoreQualification: controlledCoreDispositionValid(appPath, target, authority),
     worktreeSnapshotBinding
   }
 }
@@ -13801,10 +13813,10 @@ function commercialReleaseEvidence(artifact, releaseAuthority) {
     ),
     check(
       'controlled-release-native-receipt',
-      artifact?.controlledReleaseNativeReceipt === true,
+      (artifact?.controlledReleaseNativeReceipt === true || artifact?.controlledCoreQualification === true),
       artifact?.developmentNativeDisposition === true
         ? 'development package is valid for Milestone A but requires a controlled native receipt before commercial publication'
-        : 'commercial publication requires the exact packaged controlled native receipt',
+        : 'commercial publication requires the exact controlled Full receipt or Core qualification',
       nativeReceiptStatus
     )
   ]

@@ -365,3 +365,44 @@ func TestCoreProfileRequiresAbsentFundsAndExactTarget(t *testing.T) {
 	published.Publishable = true
 	check(t, published, false)
 }
+
+func TestControlledCoreQualificationIsNotPublication(t *testing.T) {
+	base := authorityFixtureV2(false, ControlledDispositionKindV2)
+	base.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	disposition := CoreDispositionV2{Kind: CoreControlledDispositionKindV2, TargetKey: "darwin-arm64", SigningPolicySHA256: digestFixtureV2("policy"), SigningMode: "developer-id", AppleTeamIdentifier: "TESTTEAM01"}
+	check := func(t *testing.T, d CoreDispositionV2, value AuthorityV2, want bool) {
+		t.Helper()
+		value.NativeDisposition, _ = json.Marshal(d)
+		value.AuthorityDigest = authorityDigest(value)
+		body, _ := json.Marshal(value)
+		parsed, err := ParseV2(body)
+		if (err == nil) != want {
+			t.Fatalf("controlled Core accepted=%v want=%v", err == nil, want)
+		}
+		if want && (parsed.Core == nil || parsed.DeveloperIDTeam() != "TESTTEAM01" || parsed.Controlled != nil || parsed.Authority.Publishable) {
+			t.Fatal("Core qualification crossed authority boundary")
+		}
+	}
+	check(t, disposition, base, true)
+	for _, mutate := range []func(*CoreDispositionV2){
+		func(d *CoreDispositionV2) { d.Kind = "unknown" },
+		func(d *CoreDispositionV2) { d.SigningMode = "ad-hoc" },
+		func(d *CoreDispositionV2) { d.SigningPolicySHA256 = "" },
+		func(d *CoreDispositionV2) { d.AppleTeamIdentifier = "" },
+		func(d *CoreDispositionV2) { d.TargetKey = "darwin-x64" },
+		func(d *CoreDispositionV2) { d.Kind = CoreDispositionKindV2 },
+	} {
+		d := disposition
+		mutate(&d)
+		check(t, d, base, false)
+	}
+	published := base
+	published.Publishable = true
+	check(t, disposition, published, false)
+	development := base
+	development.Classification = "development_clean_non_publishable"
+	check(t, disposition, development, false)
+	mixed := base
+	mixed.Artifacts.FundsPlugin = authorityFixtureV2(false, ControlledDispositionKindV2).Artifacts.FundsPlugin
+	check(t, disposition, mixed, false)
+}
