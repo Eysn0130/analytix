@@ -67,9 +67,38 @@
         "dist-types/fromHttp/retry-wrapper.d.ts": "ae87125c52a859545013c540dcc4ebd5bcf023c6cf113f13a7bf0f7f037a53cb",
         "dist-types/ts3.4/fromHttp/retry-wrapper.d.ts": "40e955e2755e06a5c34885a514d3af4ae511a935bc0096e7393d9748dc744323"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/LICENSE",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/LICENSE",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "LICENSE",
+            "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+          }
+        },
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/credential-provider-http.package.json",
+          "sha256": "9b69ed6a4ab5f259c906b110fd60571b30e90b0984ec57c3226de8005b3146f9",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/packages-internal/credential-provider-http/package.json",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "packages-internal/credential-provider-http/package.json",
+            "gitBlob": "20a84d88a8bb87f548a65706ce755578c87f2388"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+        "archiveIntegrity": "sha512-w9PuOoKCt6+xoESvY+zlV0u3PKQ0mVL259PcsVR6a3S/uYJJHnIi4r1NxdJHEcNldUVRIciltWnFMGBR4YEm3g==",
+        "metadataProjection": "dependencies workspace: prefix removed; all other fields identical",
+        "noticeReview": "No NOTICE or third-party license file in exact package source subtree or archive; embedded attribution markers inspected; dependencies remain separately inventoried."
+      }
     },
     {
       "id": "aws-sdk__credential-provider-login-3.972.47",
@@ -106,9 +135,38 @@
         "dist-types/ts3.4/types.d.ts": "142519224688ba3545560a71701010ce02797f3d01fcaf511425ac8688ba7e63",
         "dist-types/types.d.ts": "e0f2a44e9312a8be92922f1ad9f33418437cac2ca6a815e732d81a0ed2f2ffba"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/LICENSE",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/LICENSE",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "LICENSE",
+            "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+          }
+        },
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/credential-provider-login.package.json",
+          "sha256": "b7bd610b990fda391f373388a2b1ed87250fc24177b3c050fc04b98b3f7829e9",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/packages-internal/credential-provider-login/package.json",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "packages-internal/credential-provider-login/package.json",
+            "gitBlob": "2755fe09bb1d0718b3098ed894749a9e37a64d01"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+        "archiveIntegrity": "sha512-Iy2ebWVgrZBH05464uJiQYu6HSSiROnwVZptthEFXx2gWjo1ORCxEAFZB5Cr2MdfrSnZ+0QUPkZ1ZpCqpkUrLQ==",
+        "metadataProjection": "dependencies workspace: prefix removed; all other fields identical",
+        "noticeReview": "No NOTICE or third-party license file in exact package source subtree or archive; embedded attribution markers inspected; dependencies remain separately inventoried."
+      }
     },
     {
       "id": "aws-sdk__nested-clients-3.997.15",
@@ -469,9 +527,38 @@
         "dist-types/submodules/sts/models/STSServiceException.d.ts": "a1101c623ef70171238b7f27ebda11975ec202ec3aa2089c751d836b772263c9",
         "dist-types/ts3.4/submodules/sts/models/STSServiceException.d.ts": "345b7efa74c8e542fafbeb0547f137bb80a3fb3de5799354d75411882d3c08e1"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/LICENSE",
+          "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/LICENSE",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "LICENSE",
+            "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+          }
+        },
+        {
+          "file": "materials/aws-sdk-js-v3-8aeb92dd/nested-clients.package.json",
+          "sha256": "f8e68d833489c77b0598bfbb3e73c9c0d6e7de9d0339185abeaa28400e49193f",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/aws/aws-sdk-js-v3/blob/8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183/packages-internal/nested-clients/package.json",
+            "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+            "path": "packages-internal/nested-clients/package.json",
+            "gitBlob": "495c3dafa8d84755bdad9b162ce3450c4cb565fc"
+          }
+        }
+      ],
+      "selectedLicense": "Apache-2.0",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "8aeb92dd6ab42e4b59ebb3ad5a7c43b503af0183",
+        "archiveIntegrity": "sha512-Fpri1/PXKMKveORZ7E00VLTlWS5DkfZkW70PUE+bOnpWpAeHAQLoiDHhkzN3kNWbbSsGg64+IZYiq/EZgME3Mg==",
+        "metadataProjection": "dependencies workspace: prefix removed; all other fields identical",
+        "noticeReview": "No NOTICE or third-party license file in exact package source subtree or archive; embedded attribution markers inspected; dependencies remain separately inventoried."
+      }
     },
     {
       "id": "computer-use__default-clipboard-provider-4.2.0",
@@ -796,10 +883,188 @@
               "url": "https://github.com/Brooooooklyn/canvas/blob/db337893b9b53483050ca7b24c6d306e4da06741/LICENSE"
             }
           }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/expat/COPYING",
+          "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/external/github.com/libexpat/libexpat.git/+/6154446fccefbf3ca644894f598969113b0c7bcd/COPYING?format=TEXT",
+            "commit": "6154446fccefbf3ca644894f598969113b0c7bcd",
+            "path": "COPYING"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/freetype/docs/FTL.TXT",
+          "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/freetype2.git/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/docs/FTL.TXT?format=TEXT",
+            "commit": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+            "path": "docs/FTL.TXT"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/freetype/docs/GPLv2.TXT",
+          "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/freetype2.git/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/docs/GPLv2.TXT?format=TEXT",
+            "commit": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+            "path": "docs/GPLv2.TXT"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/freetype/LICENSE.TXT",
+          "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/freetype2.git/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/LICENSE.TXT?format=TEXT",
+            "commit": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+            "path": "LICENSE.TXT"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/harfbuzz/COPYING",
+          "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git/+/9cb1fee51069b206effb4736e443b038d230789d/COPYING?format=TEXT",
+            "commit": "9cb1fee51069b206effb4736e443b038d230789d",
+            "path": "COPYING"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/icu/LICENSE",
+          "sha256": "17510cf7a58b4879b887ec05a45d72cf1b73544dd9ec7e72f20110ed104229ee",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/364118a1d9da24bb5b770ac3d762ac144d6da5a4/LICENSE?format=TEXT",
+            "commit": "364118a1d9da24bb5b770ac3d762ac144d6da5a4",
+            "path": "LICENSE"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libjpeg-turbo/LICENSE.md",
+          "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo.git/+/e14cbfaa85529d47f9f55b0f104a579c1061f9ad/LICENSE.md?format=TEXT",
+            "commit": "e14cbfaa85529d47f9f55b0f104a579c1061f9ad",
+            "path": "LICENSE.md"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libjpeg-turbo/README.ijg",
+          "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo.git/+/e14cbfaa85529d47f9f55b0f104a579c1061f9ad/README.ijg?format=TEXT",
+            "commit": "e14cbfaa85529d47f9f55b0f104a579c1061f9ad",
+            "path": "README.ijg"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libpng/LICENSE",
+          "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://skia.googlesource.com/third_party/libpng.git/+/d5515b5b8be3901aac04e5bd8bd5c89f287bcd33/LICENSE?format=TEXT",
+            "commit": "d5515b5b8be3901aac04e5bd8bd5c89f287bcd33",
+            "path": "LICENSE"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libwebp/COPYING",
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/webm/libwebp.git/+/845d5476a866141ba35ac133f856fa62f0b7445f/COPYING?format=TEXT",
+            "commit": "845d5476a866141ba35ac133f856fa62f0b7445f",
+            "path": "COPYING"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libwebp/PATENTS",
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/webm/libwebp.git/+/845d5476a866141ba35ac133f856fa62f0b7445f/PATENTS?format=TEXT",
+            "commit": "845d5476a866141ba35ac133f856fa62f0b7445f",
+            "path": "PATENTS"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libjxl/LICENSE",
+          "sha256": "8405932022a556380c2d8c272eff154a923feb197233f348ce5f7334fb0a5ede",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/external/gitlab.com/wg1/jpeg-xl.git/+/a205468bc5d3a353fb15dae2398a101dff52f2d3/LICENSE?format=TEXT",
+            "commit": "a205468bc5d3a353fb15dae2398a101dff52f2d3",
+            "path": "LICENSE"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/libjxl/PATENTS",
+          "sha256": "91915f8ae056a68a3c5bdf05d9f6f78bb6903e27a8ca3a8434c9e4ac87300575",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/external/gitlab.com/wg1/jpeg-xl.git/+/a205468bc5d3a353fb15dae2398a101dff52f2d3/PATENTS?format=TEXT",
+            "commit": "a205468bc5d3a353fb15dae2398a101dff52f2d3",
+            "path": "PATENTS"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/brotli/LICENSE",
+          "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://skia.googlesource.com/external/github.com/google/brotli.git/+/6d03dfbedda1615c4cba1211f8d81735575209c8/LICENSE?format=TEXT",
+            "commit": "6d03dfbedda1615c4cba1211f8d81735575209c8",
+            "path": "LICENSE"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/wuffs/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://skia.googlesource.com/external/github.com/google/wuffs-mirror-release-c.git/+/e3f919ccfe3ef542cfc983a82146070258fb57f8/LICENSE?format=TEXT",
+            "commit": "e3f919ccfe3ef542cfc983a82146070258fb57f8",
+            "path": "LICENSE"
+          }
+        },
+        {
+          "file": "materials/napi-rs__canvas-darwin-arm64-0.1.100/skia/zlib/LICENSE",
+          "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/zlib/+/646b7f569718921d7d4b5b8e22572ff6c76f2596/LICENSE?format=TEXT",
+            "commit": "646b7f569718921d7d4b5b8e22572ff6c76f2596",
+            "path": "LICENSE"
+          }
         }
       ],
       "selectedLicense": null,
-      "unresolved": "dependency_legal_native_component_provenance_and_notices_unverified"
+      "unresolved": "dependency_legal_native_component_provenance_and_notices_unverified",
+      "signingTransforms": [
+        {
+          "file": "skia.darwin-arm64.node",
+          "kind": "mach-o-thin64-signature-v1",
+          "arch": "arm64",
+          "sourceSha256": "a9c429727b4a133e34e60c5ffa7f701541ffe941afa9574abe6273a1648c342d",
+          "payloadSha256": "47c41530c8f0aa66fbf6cce8974552b2d3461a8d2147423cc4ac841a67ff6eba",
+          "payloadByteLength": 26093696
+        }
+      ],
+      "componentSourceReview": {
+        "skiaCommit": "fe2718df5f53a681087be6f0539045ca1b4b8c09",
+        "canvasCommit": "db337893b9b53483050ca7b24c6d306e4da06741",
+        "status": "source_materials_only_binary_build_provenance_unverified",
+        "selectedFreeTypeLicense": "FTL",
+        "notApplicable": "x86 NASM code is not the arm64 SIMD source; libavif, GPU Ganesh, system fontconfig and Lua disabled by reviewed build script",
+        "remaining": "Exact prebuilt binary-to-build-input/configuration receipt; enabled FreeType drivers, ICU data, HarfBuzz file exceptions, WOFF2 and JXL transitive component closure. Root licenses alone do not close these obligations."
+      }
     },
     {
       "id": "nodable__entities-2.1.1",
@@ -829,9 +1094,33 @@
         "README.md": "57c1ecfd98f6262d516e66ea0d23697374b7dba3cb030897f3b5f40a38e80873",
         "src/index.d.ts": "f2baedbcb4cfcd8b68cce342e507857b91e5d4cc0b6dadf4f5d576d7efb6cfae"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/nodable__entities-2.1.1/LICENSE",
+          "sha256": "750cb3fb6362804957ef52caaf9b5c824015be44d494637330d7cd8834d31d40",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/nodable/val-parsers/blob/afbd8d507b386e1f7e3f270567b6b7eb0e9c8943/LICENSE",
+            "commit": "afbd8d507b386e1f7e3f270567b6b7eb0e9c8943",
+            "path": "LICENSE",
+            "gitBlob": "561468f111a66df52cc0f1934642bb9fdd22a212"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "afbd8d507b386e1f7e3f270567b6b7eb0e9c8943",
+        "archiveIntegrity": "sha512-Pig3HxDIoMgjdEH8OCf/dkcTmLFjJRjWuq8jSnklu284/TKOPibSRERmOykiwmyXTtv61mP+44f3GMx0tLAyjg==",
+        "metadataProjection": "Exact 2.1.1 package.json and seven of eight archive members match. Published EntityDecoder.js uncomments the already-present MIT-licensed fast path if (str.indexOf('&') === -1) return str; all other bytes match. This declared source delta is not a claim of an identical Git release or a reproducible build.",
+        "sourceDelta": {
+          "file": "src/EntityDecoder.js",
+          "same": false,
+          "archiveSha256": "cf01acfb0194fc32fe6112d13f65885aa3cb755f36ec6de2d1d3cafc5533ea4d",
+          "sourceSha256": "9737d90d395cfa9e5db4150827ef0f90a948a3fd7897b78b4f679b6d6e337216",
+          "gitBlob": "c2aa270adb4e8bd7a02ee53ffa7eaccb308b8a20"
+        }
+      }
     },
     {
       "id": "tokenizer__token-0.3.0",
@@ -1000,9 +1289,26 @@
         "example/eq.js": "45cec02f9b3b0cadf98dc4dfd9fe17d9c5ee8d5332dcce16ee8931dd75b90ef1",
         "test/eq.js": "82321815a2a89c715fecac6d9d18ee1f78692806594e96cbf4e76fc912b70a80"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/buffer-equal-0.0.1/LICENSE",
+          "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/inspect-js/buffer-equal/blob/a7326b2a0b34b98ba0d4d63cb126357175244847/LICENSE",
+            "commit": "a7326b2a0b34b98ba0d4d63cb126357175244847",
+            "path": "LICENSE",
+            "gitBlob": "ee27ba4b4412b0e4a05af5e3d8a005bc6681fdf3"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "a7326b2a0b34b98ba0d4d63cb126357175244847",
+        "archiveIntegrity": "sha512-RgSV6InVQ9ODPdLWJ5UAqBqJBOg370Nz6ZQtRzpt6nUjc8v0St97uJ4PYC6NztqIScrAXafKM3mZPMygSe1ggA==",
+        "metadataProjection": "Original author adds MIT LICENSE; all six 0.0.1 archive members compared. Five identical; package.json differs only by 0.0.2 version. No runtime code changes, no borrowed third-party notice."
+      }
     },
     {
       "id": "degenerator-5.0.1",
@@ -1261,9 +1567,44 @@
         "dist/html-parse-stringify.umd.js.map": "73b42c16b48ba983ebd72eb5bb7d89513b6f1be1949eea8bc9d15df9575f50c9",
         "README.md": "0d993e8258d7e8b40fbe58121912f95b68f0d035f6788000b27bd09d9ae51d0f"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/html-parse-stringify-3.0.1/LICENSE",
+          "sha256": "f51aa7a410f3d3ff9352a5422b76c072588ac76b63861f59447502caeacacc16",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://raw.githubusercontent.com/HenrikJoreteg/html-parse-stringify/a2659e6eac3603ba8b46958e0bd35b337108261f/LICENSE",
+            "commit": "a2659e6eac3603ba8b46958e0bd35b337108261f",
+            "path": "LICENSE",
+            "gitBlob": "91a25ce59977df9bf3de86fb8369299f16445519"
+          }
+        },
+        {
+          "file": "materials/html-parse-stringify-3.0.1/package.json",
+          "sha256": "40e04992e6d49282566cd9b2eb82747f15831f71c20a69ec791a502162d6818b",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://raw.githubusercontent.com/HenrikJoreteg/html-parse-stringify/a2659e6eac3603ba8b46958e0bd35b337108261f/package.json",
+            "commit": "a2659e6eac3603ba8b46958e0bd35b337108261f",
+            "path": "package.json",
+            "gitBlob": "609d8e2dea6c7576d260f88749849337684757f1"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null,
+      "sourceReview": {
+        "archiveIntegrity": "sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg==",
+        "sourceCommit": "ce46022f537ef9b050fac592f9fcc30bf838e5ba",
+        "licenseCommit": "a2659e6eac3603ba8b46958e0bd35b337108261f",
+        "upstreamChange": "The original maintainer adds only LICENSE, resolving issue 61; GitHub compare shows no code or package metadata changes. All four published sourcemap source members match the fixed original source. No dependency upgrade or rebuilt-code claim.",
+        "sourceMembers": {
+          "src/parse-tag.js": "96cada1d9e83d7f1291f0d641ca2c668d5ea4ba70bee6859e0fc5e2260b6093d",
+          "src/parse.js": "4e4f1072ea6a3c76c64b5ba6d648d8eb573693259c4ebb23b3a020d712e21567",
+          "src/stringify.js": "1e538b3032adda78abc0b5cba71e64d60c862c8aa8ff8e53d1e1b0509c97401a",
+          "src/index.js": "f9405b8839f9d6172d84f7c225ab5ef9d264433222ed57406865e998a87fa739"
+        }
+      }
     },
     {
       "id": "https-1.0.0",
@@ -1877,9 +2218,52 @@
         "lib/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "lib/mappingTable.json": "b6b39724dca9011113a08d9d6910204062b58169e98952acdfbd19bf2c31bbff"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/tr46-0.0.3/LICENSE.md",
+          "sha256": "eeed1ca176eebad5c73870e233cfff03981fecd319c969475dfa3633036c336b",
+          "source": {
+            "kind": "pinned-git",
+            "commit": "3a6f29721e7063b9ffd421e461a54beae6170001",
+            "url": "https://github.com/jsdom/tr46/blob/3a6f29721e7063b9ffd421e461a54beae6170001/LICENSE.md",
+            "path": "LICENSE.md"
+          }
+        },
+        {
+          "file": "materials/tr46-0.0.3/UNICODE-LICENSE.txt",
+          "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+          "source": {
+            "kind": "official-license",
+            "url": "https://www.unicode.org/license.txt",
+            "retrieved": "2026-09-22"
+          }
+        },
+        {
+          "file": "materials/tr46-0.0.3/IdnaMappingTable-8.0.0.txt",
+          "sha256": "5e9f5929130b713e698162ac5b60a99ccfb831606686b1c50777cd920b55dee2",
+          "source": {
+            "kind": "official-versioned-data",
+            "url": "https://www.unicode.org/Public/idna/8.0.0/IdnaMappingTable.txt",
+            "retrieved": "2026-09-22"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null,
+      "sourceReview": {
+        "archiveIntegrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==",
+        "sourceCommit": "a8009f9ce80ff5dbe71dd71e203afe4e4c878d28",
+        "licenseCommit": "3a6f29721e7063b9ffd421e461a54beae6170001",
+        "upstreamChange": "Original maintainer adds only MIT LICENSE.md; all non-generated archive members match this fixed source exactly.",
+        "unicodeData": {
+          "version": "8.0.0",
+          "sha256": "5e9f5929130b713e698162ac5b60a99ccfb831606686b1c50777cd920b55dee2",
+          "derivedMappingSha256": "b6b39724dca9011113a08d9d6910204062b58169e98952acdfbd19bf2c31bbff",
+          "verification": "Replayed the original deterministic generator parsing on the fixed official Unicode 8.0.0 input; the generated JSON matches the published mappingTable.json byte-for-byte. Original 1991-2015 header is retained. Current official copyright terms define Public/ computer data files and grant Unicode-3.0 unless overridden; this file points to those terms.",
+          "termsUrl": "https://www.unicode.org/copyright.html"
+        }
+      },
+      "governingExpression": "MIT AND Unicode-3.0"
     },
     {
       "id": "type-fest-4.41.0",
@@ -2173,9 +2557,76 @@
         "README.md": "fbb211d0da0ae219c4f7a91c6be497c126fa0c30707181c2e509c25f9471fc5b",
         "src/index.d.ts": "68eda263d66e01c28bb2a5dd84784ade8d7bf2a7a6f2ee6e7b7fb0251840e2cf"
       },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
+      "materials": [
+        {
+          "file": "materials/xml-naming-0.1.0/LICENSE",
+          "sha256": "8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/NaturalIntelligence/xml-naming/blob/c0afc395948730bed124859d7fc7cccabe0aac8a/LICENSE",
+            "commit": "c0afc395948730bed124859d7fc7cccabe0aac8a",
+            "path": "LICENSE",
+            "gitBlob": "0311839a07c340fb1dfa5eb9b29a42bbd693ff84"
+          }
+        },
+        {
+          "file": "materials/xml-naming-0.1.0/package.json",
+          "sha256": "b69775b228da8fb7f25c98f309bab65a3a27444a2fd6b96f6793ece74be1acdc",
+          "source": {
+            "kind": "pinned-git",
+            "url": "https://github.com/NaturalIntelligence/xml-naming/blob/c0afc395948730bed124859d7fc7cccabe0aac8a/package.json",
+            "commit": "c0afc395948730bed124859d7fc7cccabe0aac8a",
+            "path": "package.json",
+            "gitBlob": "ed43eef838d97955f2c75680410d04f89dd39564"
+          }
+        }
+      ],
+      "selectedLicense": "MIT",
+      "unresolved": null,
+      "sourceReview": {
+        "commit": "c0afc395948730bed124859d7fc7cccabe0aac8a",
+        "archiveIntegrity": "sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==",
+        "metadataProjection": "all archive members match fixed Git blobs",
+        "noticeReview": "All four distributed files match fixed source; no additional notice in archive."
+      }
+    }
+  ],
+  "distributionMaterials": [
+    {
+      "name": "electron",
+      "version": "41.10.3",
+      "platform": "darwin",
+      "arch": "arm64",
+      "packagePath": "node_modules/electron",
+      "resolved": "https://registry.npmjs.org/electron/-/electron-41.10.3.tgz",
+      "integrity": "sha512-MJuSODPw8siv/I8JjhctW/cS/XNldwI4gLRyyWZx6QkoZJUDgbEvitp7IVOnGrHENTQb6Udo+zMpKhFnhlIhdg==",
+      "sourceFile": "node_modules/electron/dist/LICENSE",
+      "file": "materials/electron-41.10.3-darwin-arm64/LICENSE",
+      "sha256": "5154e165bd6c2cc0cfbcd8916498c7abab0497923bafcd5cb07673fe8480087d",
+      "byteLength": 1096,
+      "archive": {
+        "url": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-darwin-arm64.zip",
+        "sha256": "8961cdb57c95c073ff4770bc9309953832f447575f1a91127010f7b4870884b3",
+        "entry": "LICENSE"
+      }
+    },
+    {
+      "name": "electron",
+      "version": "41.10.3",
+      "platform": "darwin",
+      "arch": "arm64",
+      "packagePath": "node_modules/electron",
+      "resolved": "https://registry.npmjs.org/electron/-/electron-41.10.3.tgz",
+      "integrity": "sha512-MJuSODPw8siv/I8JjhctW/cS/XNldwI4gLRyyWZx6QkoZJUDgbEvitp7IVOnGrHENTQb6Udo+zMpKhFnhlIhdg==",
+      "sourceFile": "node_modules/electron/dist/LICENSES.chromium.html",
+      "file": "materials/electron-41.10.3-darwin-arm64/LICENSES.chromium.html",
+      "sha256": "7f7b7dbc738503773824915bc87f754fd9f4c5f8f1d9ac22ed971f55f36e8f29",
+      "byteLength": 19132085,
+      "archive": {
+        "url": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-darwin-arm64.zip",
+        "sha256": "8961cdb57c95c073ff4770bc9309953832f447575f1a91127010f7b4870884b3",
+        "entry": "LICENSES.chromium.html"
+      }
     }
   ]
 }

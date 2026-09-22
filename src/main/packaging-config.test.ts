@@ -1429,6 +1429,17 @@ describe('electron-builder Analytix packaging', () => {
     }
   })
 
+  it('excludes only the metadata-only https dependency while preserving the Node HTTPS implementation', () => {
+    const { base: config } = builderConfigurationFixture()
+    expect(config.files).toContain('!node_modules/https/**')
+    const packageRoot = dirname(require.resolve('https/package.json'))
+    expect(readdirSync(packageRoot)).toEqual(['package.json'])
+    expect(require.resolve('https')).toBe('https')
+    expect(require('https')).toBe(require('node:https'))
+    const pptxSource = readFileSync(require.resolve('pptxgenjs'), 'utf8')
+    expect(pptxSource).toContain("import('node:https')")
+  })
+
   it('keeps packaged Go runtime on a binary-only production boundary', () => {
     expect(runtimeBuildConfig.include).toEqual(expect.arrayContaining([
       'src/index.ts',
@@ -2004,17 +2015,18 @@ describe('electron-builder Analytix packaging', () => {
       `Go declaration v1 conformance failed:\n${goConformance.stdout}\n${goConformance.stderr}`
     ).toBe(0)
 
+    // This read-only gate varies only the declaration. Copy its immutable
+    // source and staged closures once, then replace both declarations with each
+    // independently constructed attack. No gate result is cached or mocked.
+    const sourceRoot = join(conformanceRoot, 'isolated-funds-source')
+    cpSync(canonicalRoot, sourceRoot, { recursive: true })
+    const context = createMacPackContext(conformanceRoot)
+    const stagedRoot = writeBundledFundsPlugin(context, sourceRoot)
     for (const attack of cases) {
-      const root = tempRoot()
-      const context = createMacPackContext(root)
-      const sourceRoot = join(root, 'isolated-funds-source')
-      cpSync(canonicalRoot, sourceRoot, { recursive: true })
-      writeFileSync(
-        join(sourceRoot, '.analytix-plugin', 'package.json'),
-        `${attack.body().trimEnd()}\n`,
-        'utf8'
-      )
-      writeBundledFundsPlugin(context, sourceRoot)
+      const body = `${attack.body().trimEnd()}\n`
+      for (const owner of [sourceRoot, stagedRoot]) {
+        writeFileSync(join(owner, '.analytix-plugin', 'package.json'), body, 'utf8')
+      }
       expect(
         () => afterPack._internals.validateBundledFundsPlugin(context, { sourceRoot }),
         attack.name

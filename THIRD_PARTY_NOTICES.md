@@ -1,5 +1,25 @@
 # Third-party notices
 
+## Packaged Core distribution materials
+
+The macOS arm64 distribution includes the Electron license and complete
+Chromium notices in `Resources/dependency-legal/materials/electron-41.10.3-darwin-arm64/`.
+Exact dependency supplements, including original copyright statements, are
+retained under `Resources/dependency-legal/materials/`; their manifest binds
+the actual versions and installation paths.
+
+The Canvas native dependency uses FreeType code (the FreeType Project,
+https://freetype.org), under the FreeType License alternative. This software is
+based in part on the work of the Independent JPEG Group. The corresponding
+FreeType and JPEG terms, and other collected Skia component terms, are retained
+under `napi-rs__canvas-darwin-arm64-0.1.100/skia/` in that materials directory.
+These acknowledgements do not assert that the native dependency's remaining
+binary build provenance and component obligations have passed release review.
+
+The tr46 dependency includes data derived from Unicode 8.0.0. Its original
+Unicode copyright header and Unicode License v3 accompany its separate MIT
+license under `tr46-0.0.3/` in that materials directory.
+
 ## DeepSeek-Reasonix
 
 MIT License

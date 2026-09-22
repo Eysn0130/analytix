@@ -120,7 +120,7 @@ export const REQUIRED_PRODUCT_LICENSE_SHA256 =
 // generation dependency inventory. Keep this expected digest independent of
 // the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '1cb4aef282d61bc32bc87e6296df30a78d880f21d9af12746a5d3b6b1494cc9b'
+  '47ffc1d5d3b128619f911e0731c60402133cdd6d48439a773cdfdbcefd667d4d'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 
@@ -1261,7 +1261,7 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
   if (record) {
     try {
       supplementalEvidence = verifyEvidence(reader, entry, record, catalog)
-      governingTerm = supplementalEvidence.selectedLicense
+      governingTerm = supplementalEvidence.governingExpression
       licenseFile = supplementalEvidence.licenseFile
       status = 'passed'
       missingAction = 'none; exact locked instance and supplemental legal materials verified'

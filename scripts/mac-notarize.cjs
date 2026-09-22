@@ -249,6 +249,13 @@ exports.default = async function afterSign(context) {
     requireDeveloperID: developerIdSigningEnabled,
     requireSecureTimestamp: developerIdSigningEnabled
   })
+  const legal = require('./lib/dependency-legal-evidence.cjs')
+  const { createArtifactReaderFromPath } = await import('./artifact-legal-obligations-audit.mjs')
+  const legalReader = createArtifactReaderFromPath(appBundle)
+  legal.verifyPackagedLegalMaterials(legalReader, legal.loadCatalog(join(__dirname, '..')), {
+    platform: context.electronPlatformName, arch: normalizeBuilderArch(context.arch)
+  })
+  legalReader.assertStable?.()
 
   if (!creds) {
     console.log('[mac-notarize] Verified signed native payloads; no Apple notary credentials found, skipping notarization.')

@@ -10,7 +10,7 @@ const safePath = value => typeof value === 'string' && value.length > 0 &&
   !value.includes('\\') && !value.includes('\0') && !isAbsolute(value) &&
   value.split('/').every(part => part && part !== '.' && part !== '..')
 
-function readRegular(root, entry) {
+function readRegular(root, entry, maximumBytes = 8 * 1024 * 1024) {
   if (!safePath(entry)) throw Error('dependency_legal_path_invalid')
   let path = resolve(root)
   for (const part of ['', ...entry.split('/')]) {
@@ -19,7 +19,7 @@ function readRegular(root, entry) {
     if (stat.isSymbolicLink()) throw Error('dependency_legal_symlink_rejected')
   }
   const stat = lstatSync(path)
-  if (!stat.isFile() || stat.nlink !== 1 || stat.size > 8 * 1024 * 1024) {
+  if (!stat.isFile() || stat.nlink !== 1 || stat.size > maximumBytes) {
     throw Error('dependency_legal_file_invalid')
   }
   return readFileSync(path)
@@ -48,6 +48,49 @@ function loadCatalog(repoRoot) {
   return { root, bytes, catalog }
 }
 
+// Electron's official distribution supplies the full generated Chromium notice
+// set. Keep its exact pins in source, not a second vendored 19 MB HTML copy.
+function distributionMaterial(repoRoot, material) {
+  const lock = JSON.parse(readRegular(repoRoot, 'package-lock.json')).packages[material.packagePath]
+  const pkg = JSON.parse(readRegular(repoRoot, `${material.packagePath}/package.json`))
+  if (pkg.name !== material.name || pkg.version !== material.version ||
+      lock?.version !== material.version || lock.integrity !== material.integrity ||
+      lock.resolved !== material.resolved) throw Error('dependency_legal_distribution_identity_changed')
+  const bytes = readRegular(repoRoot, material.sourceFile, 32 * 1024 * 1024)
+  if (!bytes.toString('utf8').trim() || bytes.length !== material.byteLength || sha256(bytes) !== material.sha256) {
+    throw Error('dependency_legal_distribution_material_changed')
+  }
+  return bytes
+}
+
+function verifyDistributionMaterials(reader, loaded, options = {}) {
+  if (!loaded.catalog.distributionMaterials?.length) return
+  let platform = options.platform
+  let arch = options.arch
+  if (!platform) {
+    const path = 'packaged-root/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework'
+    if (!reader.has(path)) return // No macOS framework in this reader's scope.
+    const framework = reader.read(path)
+    if (framework.length < 32 || framework.readUInt32LE(0) !== 0xfeedfacf) {
+      throw Error('dependency_legal_distribution_architecture_unknown')
+    }
+    platform = 'darwin'
+    const cpu = framework.readUInt32LE(4)
+    if (cpu !== 0x0100000c && cpu !== 0x01000007) throw Error('dependency_legal_distribution_architecture_unknown')
+    arch = cpu === 0x0100000c ? 'arm64' : 'x64'
+  }
+  const materials = loaded.catalog.distributionMaterials.filter(material => material.platform === platform && material.arch === arch)
+  if (!materials.length) return
+  const prefix = resourcePrefix(reader)
+  if (!reader.read(`${prefix}manifest.json`)?.equals(loaded.bytes)) throw Error('dependency_legal_catalog_changed')
+  for (const material of materials) {
+    const bytes = reader.read(`${prefix}${material.file}`)
+    if (!bytes || bytes.length !== material.byteLength || sha256(bytes) !== material.sha256) {
+      throw Error('dependency_legal_distribution_material_changed')
+    }
+  }
+}
+
 function resourcePrefix(reader) {
   const prefixes = ['', 'packaged-root/Contents/Resources/', 'packaged-root/resources/', 'packaged-root/Resources/']
     .filter(prefix => reader.has(`${prefix}${RESOURCE}/manifest.json`))
@@ -65,7 +108,7 @@ function logicalEntry(reader, entry) {
   throw Error('dependency_legal_instance_owner_invalid')
 }
 
-function verifyPackage(reader, entry, record) {
+function verifyPackage(reader, entry, record, options = {}) {
   const logical = logicalEntry(reader, entry)
   const binding = record.bindings.find(binding =>
     `${binding.lock === 'package-lock.json' ? '' : 'packages/runtime/'}${binding.path}/package.json` === logical)
@@ -77,12 +120,20 @@ function verifyPackage(reader, entry, record) {
   const pkg = JSON.parse(bytes)
   if (pkg.name !== record.name || pkg.version !== record.version) throw Error('dependency_legal_identity_changed')
   const prefix = entry.slice(0, -'package.json'.length)
+  for (const pin of record.signingTransforms || []) {
+    if (!safePath(pin.file) || !reader.has(`${prefix}${pin.file}`)) {
+      throw Error('dependency_legal_native_source_missing')
+    }
+  }
   let count = 0
   for (const file of reader.entries()) {
     if (!file.startsWith(prefix)) continue
     const suffix = file.slice(prefix.length)
     if (suffix.startsWith('node_modules/') || suffix === 'package.json') continue
-    if (!safePath(suffix) || !record.files[suffix] || sha256(reader.read(file)) !== record.files[suffix]) {
+    const content = reader.read(file)
+    const exact = content && sha256(content) === record.files[suffix]
+    if (!safePath(suffix) || !record.files[suffix] ||
+        (!exact && !verifySigningTransformation(content, suffix, record, options))) {
       throw Error('dependency_legal_package_content_changed')
     }
     count++
@@ -90,7 +141,24 @@ function verifyPackage(reader, entry, record) {
   return { binding, fileCount: count }
 }
 
-function verifyEvidence(reader, entry, record, loaded) {
+// Source pins live in the canonical catalog, not in a mutable sidecar receipt.
+// This proves source equivalence only. The existing staged closure, compiled Go
+// authority and after-sign codesign verification still own candidate/signing trust.
+function verifySigningTransformation(bytes, file, record, options) {
+  const pin = record.signingTransforms?.find(pin => pin.file === file)
+  if (options.allowSigned === false || !bytes || !pin ||
+      pin.kind !== 'mach-o-thin64-signature-v1' || pin.arch !== 'arm64' ||
+      pin.sourceSha256 !== record.files[file] || !/^[a-f0-9]{64}$/.test(pin.payloadSha256) ||
+      !Number.isSafeInteger(pin.payloadByteLength) || pin.payloadByteLength <= 0 ||
+      bytes.length < 32 || bytes.readUInt32LE(0) !== 0xfeedfacf ||
+      bytes.readUInt32LE(4) !== 0x0100000c) return false
+  try {
+    const payload = require('../native-component-contract.cjs').nativePayloadIdentity(bytes, 'mach-o')
+    return payload.sha256 === pin.payloadSha256 && payload.size === pin.payloadByteLength
+  } catch { return false }
+}
+
+function verifyBoundSource(reader, entry, record, loaded, options = {}) {
   const prefix = resourcePrefix(reader)
   if (!reader.read(`${prefix}manifest.json`)?.equals(loaded.bytes)) {
     throw Error('dependency_legal_catalog_changed')
@@ -105,25 +173,37 @@ function verifyEvidence(reader, entry, record, loaded) {
           actual.integrity !== binding.integrity) throw Error('dependency_legal_lock_binding_changed')
     }
   }
-  const matched = verifyPackage(reader, entry, record)
+  const matched = verifyPackage(reader, entry, record, options)
   for (const material of record.materials) {
     const bytes = reader.read(`${prefix}${material.file}`)
     if (!bytes || !bytes.toString('utf8').trim() || sha256(bytes) !== material.sha256) {
       throw Error('dependency_legal_material_changed')
     }
   }
+  return matched
+}
+
+function verifyEvidence(reader, entry, record, loaded, options = {}) {
+  const matched = verifyBoundSource(reader, entry, record, loaded, options)
+  const prefix = resourcePrefix(reader)
   if (record.unresolved) throw Error(record.unresolved)
   // Only the explicitly reviewed MIT alternative can supplement an OR term.
   // Unknown compound obligations never become a single-license grant.
   const declared = JSON.parse(reader.read(entry)).license
-  if (record.selectedLicense !== 'MIT' ||
-      (declared && declared !== 'MIT' && declared !== '(MIT OR CC0-1.0)') ||
-      record.materials.length === 0) throw Error('dependency_legal_license_selection_invalid')
+  const selectedMIT = record.selectedLicense === 'MIT' &&
+    (!declared || declared === 'MIT' || declared === '(MIT OR CC0-1.0)')
+  const selectedApache = record.selectedLicense === 'Apache-2.0' && declared === 'Apache-2.0' &&
+    record.sourceReview?.archiveIntegrity === record.integrity &&
+    typeof record.sourceReview?.noticeReview === 'string' && record.sourceReview.noticeReview.length > 0
+  if ((!selectedMIT && !selectedApache) || record.materials.length === 0) {
+    throw Error('dependency_legal_license_selection_invalid')
+  }
   return { ...matched, selectedLicense: record.selectedLicense,
+    governingExpression: record.governingExpression || record.selectedLicense,
     licenseFile: `/${prefix}${record.materials[0].file}`, evidenceId: record.id }
 }
 
-function materializeLegalEvidence(repoRoot, resourcesDir) {
+function materializeLegalEvidence(repoRoot, resourcesDir, options = {}) {
   const loaded = loadCatalog(repoRoot)
   const resources = resolve(resourcesDir)
   if (lstatSync(resources).isSymbolicLink()) throw Error('dependency_legal_destination_invalid')
@@ -155,19 +235,30 @@ function materializeLegalEvidence(repoRoot, resourcesDir) {
       copied.add(material.file)
     }
   }
+  for (const material of loaded.catalog.distributionMaterials || []) {
+    if (material.platform === (options.platform || process.platform) && material.arch === (options.arch || process.arch)) {
+      put(material.file, distributionMaterial(repoRoot, material))
+    }
+  }
   return loaded
 }
 
-function verifyPackagedLegalMaterials(reader, loaded) {
+function verifyPackagedLegalMaterials(reader, loaded, options = {}) {
+  verifyDistributionMaterials(reader, loaded, options)
   const matches = []
   for (const entry of reader.entries().filter(entry => entry.endsWith('/package.json'))) {
     let logical
     try { logical = logicalEntry(reader, entry) } catch { continue }
     const record = loaded.catalog.packages.find(record => record.bindings.some(binding =>
       `${binding.lock === 'package-lock.json' ? '' : 'packages/runtime/'}${binding.path}/package.json` === logical))
-    if (record && !record.unresolved) matches.push(verifyEvidence(reader, entry, record, loaded))
+    if (record && !record.unresolved) matches.push(verifyEvidence(reader, entry, record, loaded, options))
+    // Embedded component obligations may remain blocked, but source mutation
+    // must already fail before sealing and again after signing.
+    else if (record?.signingTransforms?.length) {
+      matches.push(verifyBoundSource(reader, entry, record, loaded, options))
+    }
   }
   return matches
 }
 
-module.exports = { loadCatalog, materializeLegalEvidence, verifyEvidence, verifyPackage, verifyPackagedLegalMaterials, logicalEntry, sha256, RESOURCE }
+module.exports = { loadCatalog, materializeLegalEvidence, verifyEvidence, verifyPackage, verifyPackagedLegalMaterials, verifyDistributionMaterials, logicalEntry, sha256, RESOURCE }

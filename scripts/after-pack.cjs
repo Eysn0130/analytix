@@ -4550,12 +4550,13 @@ async function afterPack(context) {
   await validateOfficeCodecDirectory(join(unpackedAppRoot(context), 'out', 'office-codec'))
   // Supply legal inputs before the resource closure and signatures are created.
   const legal = require('./lib/dependency-legal-evidence.cjs')
-  const legalInputs = legal.materializeLegalEvidence(repoRoot, packedResourcesDir(context))
+  const legalTarget = { platform: context.electronPlatformName, arch: normalizeArch(context.arch) }
+  const legalInputs = legal.materializeLegalEvidence(repoRoot, packedResourcesDir(context), legalTarget)
   const { createArtifactReaderFromPath } = await import('./artifact-legal-obligations-audit.mjs')
   const legalReader = createArtifactReaderFromPath(
     context.electronPlatformName === 'darwin' ? appBundlePath(context) : context.appOutDir
   )
-  legal.verifyPackagedLegalMaterials(legalReader, legalInputs)
+  legal.verifyPackagedLegalMaterials(legalReader, legalInputs, { ...legalTarget, allowSigned: false })
   legalReader.assertStable?.()
   if (canonicalJSON(collectPackagedWorktreeSnapshotV1(repoRoot)) !== canonicalJSON(worktreeSnapshotAfter)) {
     throw new Error('[after-pack] Source inputs changed while materializing legal evidence')

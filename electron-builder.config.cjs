@@ -147,6 +147,9 @@ module.exports = {
     'packages/runtime/package-lock.json',
     'packages/runtime/node_modules/**/*',
     'node_modules/openclaw/LICENSE',
+    // pptxgenjs 4.0.1 imports node:https. Its metadata-only npm "https"
+    // dependency contains no implementation and is not a runtime input.
+    '!node_modules/https/**',
     '!**/*.map',
     '!**/*.d.ts',
     '!**/*.ts',

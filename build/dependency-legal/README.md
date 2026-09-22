@@ -28,13 +28,37 @@ content digest and, where supplied, the separately verified Git blob from the
 output. The MIT alternative of type-fest4.41.0 is explicitly selected and its CC0
 text retained. Unknown AND/WITH terms cannot use this supplement.
 
-Sixteen of the original package records have complete MIT text inputs.
-Fifteen retain explicit unresolved obligations; a root license on canvas does
-not establish the provenance/notices of its native embedded components. Missing
-texts and provenance are not fabricated from a standard license template or a
-sibling version. Review of public material: Codex, 2026-09-22; exact archive and
-Git evidence is retained in the task's private evidence directory. No upstream
-runtime implementation was adopted by this change.
+The 2026-09-22 admission continuation binds the three AWS exact versions to
+Apache-2.0, xml-naming to its exact MIT source, buffer-equal to its original
+author's license-only successor (only the package version differs), and
+html-parse-stringify to its maintainer's license-only commit with unchanged
+3.0.1 source. The entities source has one documented published fast-path
+uncommenting; its remaining files and 2.1.1 metadata match the MIT source.
+These are source/material conclusions, not counts of passed packaged instances.
+
+Canvas uses the existing thin64 Mach-O payload identity implementation: only
+reviewed arm64 source and normalized payload pins can explain signing changes.
+Before sealing, exact archive bytes are required. After signing, the same legal
+owner checks source equivalence alongside the existing signature/payload and
+compiled-authority checks. No mutable sidecar or whole-__LINKEDIT exclusion is
+accepted. The collected Skia dependency texts remain source-only evidence;
+actual embedded build provenance and component obligations are still unresolved.
+
+The macOS arm64 Electron 41.10.3 license and generated Chromium notices are
+copied from the installed distribution, matched to current lock identity and
+independently checked official ZIP bytes. The catalog pins their hashes and
+lengths; the 19 MB generated notice is not vendored into source. The same
+pre-seal/post-sign owners and whole-app reader verify these resources. Other
+platform distributions need their own reviewed pins; this entry claims only
+macOS arm64 coverage.
+
+Missing texts and provenance are never fabricated from a standard template.
+The tr46 mapping table was reproduced byte-for-byte from official Unicode 8.0.0
+data. Its original header and current applicable Unicode-3.0 notice accompany
+the separate original-author MIT text; the audit reports both obligations.
+Review of public materials: Codex, 2026-09-22; exact
+archive and Git evidence stays in the task's private evidence directory.
+No upstream runtime implementation was adopted by this change.
 
 The artifact reader verifies the copied catalog against this canonical input,
 both lockfiles, each actual package owner/path and retained content, and every
