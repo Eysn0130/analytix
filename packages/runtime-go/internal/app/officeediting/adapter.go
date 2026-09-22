@@ -103,9 +103,9 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	if err := a.checkBinding(call.Binding); err != nil {
 		return adapterport.Result{}, err
 	}
-	// The Host owns ValidateCurrent before/after dispatch. Structural validation
-	// here rejects a malformed Host projection; it is not a second authority.
-	if call.ContributionID != "workspace-editor" || identitydomain.ValidatePrincipalV1(call.Principal) != nil {
+	// The Host owns currentness, including admission after local readiness and
+	// lock acquisition. Structural validation is not a second authority.
+	if call.Admit == nil || call.ContributionID != "workspace-editor" || identitydomain.ValidatePrincipalV1(call.Principal) != nil {
 		return adapterport.Result{}, ErrBinding
 	}
 	if !a.available(ctx) {
@@ -129,6 +129,9 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	input, err := jsonstrict.DecodeObject(call.Input, jsonstrict.Options{MaxBytes: limit, MaxDepth: depth, MaxTokens: tokens, MaxStringBytes: stringLimit})
 	if err != nil {
 		return failure(fileport.ErrInvalidInput)
+	}
+	if err := call.Admit(); err != nil {
+		return adapterport.Result{}, ErrUnavailable
 	}
 	switch call.Operation {
 	case "annotation-read", "annotation-write":

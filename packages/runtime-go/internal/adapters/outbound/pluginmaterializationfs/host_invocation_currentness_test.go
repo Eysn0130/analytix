@@ -17,8 +17,8 @@ import (
 )
 
 type currentnessAdapter struct {
-	onReady, onInvoke func()
-	calls             int
+	onReady, onAdmission, onInvoke func()
+	calls                          int
 }
 
 func (a *currentnessAdapter) Readiness(context.Context, adapterport.Binding) (adapterport.Readiness, error) {
@@ -27,7 +27,13 @@ func (a *currentnessAdapter) Readiness(context.Context, adapterport.Binding) (ad
 	}
 	return adapterport.Readiness{Available: true, Operations: []string{"open"}}, nil
 }
-func (a *currentnessAdapter) Invoke(context.Context, adapterport.Call) (adapterport.Result, error) {
+func (a *currentnessAdapter) Invoke(_ context.Context, call adapterport.Call) (adapterport.Result, error) {
+	if a.onAdmission != nil {
+		a.onAdmission()
+	}
+	if err := call.Admit(); err != nil {
+		return adapterport.Result{}, err
+	}
 	a.calls++
 	if a.onInvoke != nil {
 		a.onInvoke()
@@ -36,7 +42,7 @@ func (a *currentnessAdapter) Invoke(context.Context, adapterport.Call) (adapterp
 }
 
 func TestInstalledHostRejectsIndependentActivationAndReopenABA(t *testing.T) {
-	for _, boundary := range []string{"readiness", "completion"} {
+	for _, boundary := range []string{"readiness", "admission", "completion"} {
 		for _, reenable := range []bool{false, true} {
 			name := boundary + "/disable"
 			if reenable {
@@ -104,6 +110,8 @@ func TestInstalledHostRejectsIndependentActivationAndReopenABA(t *testing.T) {
 				}
 				if boundary == "readiness" {
 					adapter.onReady = mutate
+				} else if boundary == "admission" {
+					adapter.onAdmission = mutate
 				} else {
 					adapter.onInvoke = mutate
 				}
@@ -116,10 +124,14 @@ func TestInstalledHostRejectsIndependentActivationAndReopenABA(t *testing.T) {
 				if boundary == "completion" {
 					calls = 2
 				}
-				if err != want || len(result.Output) != 0 || adapter.calls != calls {
+				firstError := want
+				if boundary == "admission" {
+					firstError = hostapp.ErrAdapterUnavailable
+				}
+				if err != firstError || len(result.Output) != 0 || adapter.calls != calls {
 					t.Fatalf("late authority accepted: error=%v calls=%d output=%s", err, adapter.calls, result.Output)
 				}
-				adapter.onReady, adapter.onInvoke = nil, nil
+				adapter.onReady, adapter.onAdmission, adapter.onInvoke = nil, nil, nil
 				restored, err := OpenExistingPackageStoreV1(home, "analytix-canvas")
 				if err != nil {
 					t.Fatal(err)

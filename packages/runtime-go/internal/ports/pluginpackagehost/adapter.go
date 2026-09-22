@@ -30,6 +30,11 @@ type Call struct {
 	ContributionID string
 	Operation      string
 	Input          json.RawMessage
+	// Admit revalidates the captured Host authority after adapter readiness and
+	// lock acquisition, immediately before dispatch to the operation owner. It
+	// is synchronous and invocation-local; never retain it or re-enter the Host.
+	// A later revocation does not roll back an already admitted effect.
+	Admit func() error
 }
 
 type Result struct{ Output json.RawMessage }

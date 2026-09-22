@@ -108,7 +108,7 @@ func TestOfficePresentationApprovalCommitCASRestartUndo(t *testing.T) {
 					t.Helper()
 					body, e := json.Marshal(input)
 					must(e)
-					r, e := adapter.Invoke(ctx, adapterport.Call{Binding: adapterport.Binding{PackageID: "analytix-presentations"}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: op, Input: body})
+					r, e := adapter.Invoke(ctx, adapterport.Call{Admit: func() error { return nil }, Binding: adapterport.Binding{PackageID: "analytix-presentations"}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: op, Input: body})
 					must(e)
 					var out map[string]any
 					must(json.Unmarshal(r.Output, &out))

@@ -92,7 +92,7 @@ func TestOfficeTypedWorkbookApprovalSaveRestartUndo(t *testing.T) {
 				t.Helper()
 				body, e := json.Marshal(input)
 				must(e)
-				result, e := adapter.Invoke(ctx, adapterport.Call{Binding: adapterport.Binding{PackageID: "analytix-spreadsheets"}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: operation, Input: body})
+				result, e := adapter.Invoke(ctx, adapterport.Call{Admit: func() error { return nil }, Binding: adapterport.Binding{PackageID: "analytix-spreadsheets"}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: operation, Input: body})
 				must(e)
 				var out map[string]any
 				must(json.Unmarshal(result.Output, &out))

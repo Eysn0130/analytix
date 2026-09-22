@@ -323,7 +323,7 @@ func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				result, err := adapter.Invoke(context.Background(), adapterport.Call{Binding: adapterport.Binding{PackageID: packageID}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: operation, Input: body})
+				result, err := adapter.Invoke(context.Background(), adapterport.Call{Admit: func() error { return nil }, Binding: adapterport.Binding{PackageID: packageID}, Principal: identity.principal, ContributionID: "workspace-editor", Operation: operation, Input: body})
 				if err != nil {
 					t.Fatal(err)
 				}

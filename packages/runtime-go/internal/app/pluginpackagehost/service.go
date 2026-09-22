@@ -375,7 +375,16 @@ func (s *Service) Invoke(ctx context.Context, request InvokeRequest) (InvokeResu
 	if err := s.validatePrincipal(ctx, principal); err != nil {
 		return InvokeResult{}, err
 	}
-	result, err := registration.Adapter.Invoke(ctx, adapterport.Call{Binding: binding, Principal: principal, ContributionID: request.ContributionID, Operation: request.Operation, Input: append(json.RawMessage(nil), request.Input...)})
+	admit := func() error {
+		if err := s.validatePrincipal(ctx, principal); err != nil {
+			return err
+		}
+		if err := s.validateInvocationState(ctx, registration, current, activation); err != nil {
+			return err
+		}
+		return s.validatePrincipal(ctx, principal)
+	}
+	result, err := registration.Adapter.Invoke(ctx, adapterport.Call{Binding: binding, Principal: principal, ContributionID: request.ContributionID, Operation: request.Operation, Input: append(json.RawMessage(nil), request.Input...), Admit: admit})
 	if err != nil {
 		return InvokeResult{}, ErrAdapterUnavailable
 	}

@@ -53,7 +53,23 @@ func validCall(t *testing.T, operation, input string) adapterport.Call {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return adapterport.Call{Binding: adapterport.Binding{PackageID: "analytix-documents"}, Principal: principal, ContributionID: "workspace-editor", Operation: operation, Input: json.RawMessage(input)}
+	return adapterport.Call{Binding: adapterport.Binding{PackageID: "analytix-documents"}, Principal: principal, ContributionID: "workspace-editor", Operation: operation, Input: json.RawMessage(input), Admit: func() error { return nil }}
+}
+
+func TestOperationRequiresHostAdmission(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		fake := &fakeEditing{}
+		adapter := New("docx", fake, func(context.Context) bool { return true })
+		call := validCall(t, "open-object", goodInput(t, "open-object"))
+		call.Admit = nil
+		if !missing {
+			call.Admit = func() error { return errors.New("SYNTH_PRIVATE_AUTHORITY_FAILURE") }
+		}
+		result, err := adapter.Invoke(context.Background(), call)
+		if err == nil || len(result.Output) != 0 || len(fake.calls) != 0 || strings.Contains(err.Error(), "SYNTH_PRIVATE") {
+			t.Fatal("missing or refused Host admission reached an effect or leaked its error")
+		}
+	}
 }
 func requestBody(t *testing.T, value any) string {
 	t.Helper()
