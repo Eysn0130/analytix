@@ -39,6 +39,9 @@ test('core authority binds absence and rejects full resources or target drift', 
   const core = pack.createPackagedBuildAuthorityV2(input)
   assert.equal(core.classification, 'development_clean_non_publishable')
   assert.equal(pack.isPackagedBuildAuthorityV2(core), true)
+  const afterSign = require('./mac-notarize.cjs')._internals
+  assert.equal(afterSign.assertNativeDispositionSigningBoundary(core), profile.CORE_DISPOSITION)
+  assert.throws(() => afterSign.assertNativeDispositionSigningBoundary(core, { requireDeveloperID: true }), /cannot enter Developer ID or notarization/)
   assert.throws(() => pack.createPackagedBuildAuthorityV2({ ...input, artifacts: original.artifacts }))
   assert.throws(() => pack.createPackagedBuildAuthorityV2({ ...input, nativeDisposition: { ...input.nativeDisposition, targetKey: 'linux-x64' } }))
   assert.throws(() => pack.createPackagedBuildAuthorityV2({ ...original, artifacts: input.artifacts }))

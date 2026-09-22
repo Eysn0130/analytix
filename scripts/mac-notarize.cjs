@@ -9,8 +9,10 @@ const {
 } = require('./native-component-contract.cjs')
 const {
   policy: macSigningPolicy,
-  requireOfficialTeamIdentifier
+  requireOfficialTeamIdentifier,
+  strictNativePathsForProfile
 } = require('./macos-signing-policy.cjs')
+const { CORE_DISPOSITION, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 const {
   NATIVE_DISPOSITION_CONTROLLED_RELEASE,
   NATIVE_DISPOSITION_DEVELOPMENT,
@@ -32,7 +34,7 @@ function assertNativeDispositionSigningBoundary(authority, options = {}) {
     throw new Error('[mac-notarize] Packaged build authority is invalid')
   }
   const disposition = authority.nativeDisposition
-  if (disposition.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (disposition.kind === NATIVE_DISPOSITION_DEVELOPMENT || disposition.kind === CORE_DISPOSITION) {
     if (options.requireDeveloperID === true) {
       throw new Error('[mac-notarize] development_non_publishable cannot enter Developer ID or notarization')
     }
@@ -54,7 +56,9 @@ function verifyDataNativeAfterSign(context, options = {}) {
   const authority = packagedAuthorityContract.readPackagedBuildAuthorityV2(context)
   const dispositionKind = assertNativeDispositionSigningBoundary(authority, options)
   packagedAuthorityContract.verifyPackagedBuildAuthorityArtifacts(context, authority)
-  if (dispositionKind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (dispositionKind === CORE_DISPOSITION) {
+    assertCoreResourcesAbsent(join(appBundle, 'Contents', 'Resources'))
+  } else if (dispositionKind === NATIVE_DISPOSITION_DEVELOPMENT) {
     packagedAuthorityContract.verifyPackagedDevelopmentNativeDisposition(
       context,
       authority.nativeDisposition,
@@ -78,7 +82,7 @@ function verifyDataNativeAfterSign(context, options = {}) {
     spawnSync: options.spawnSync
   }
   const appSignature = verifyDarwinCodeSignature(appBundle, signatureOptions)
-  for (const relativePath of macSigningPolicy.strictNativeRelativePaths) {
+  for (const relativePath of strictNativePathsForProfile(dispositionKind === CORE_DISPOSITION ? 'core' : 'full')) {
     const nativePath = join(appBundle, ...relativePath.split('/'))
     const nativeSignature = verifyDarwinCodeSignature(nativePath, {
       ...signatureOptions,

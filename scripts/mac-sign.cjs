@@ -1,7 +1,8 @@
 const {
   policy,
   requireOfficialTeamIdentifier,
-  strictNativeRelativePath
+  strictNativeRelativePath,
+  strictNativePathsForProfile
 } = require('./macos-signing-policy.cjs')
 const { lstatSync, realpathSync } = require('node:fs')
 const { basename, dirname, join, relative, resolve, sep } = require('node:path')
@@ -130,9 +131,7 @@ function strictOptionsForFile(options, filePath, defaultOptionsForFile, strictSi
 }
 
 function validateStrictSignedFiles(strictSignedFiles, profile = 'full') {
-  const expected = releaseProfile(profile) === 'core'
-    ? policy.strictNativeRelativePaths.slice(0, 1)
-    : policy.strictNativeRelativePaths
+  const expected = strictNativePathsForProfile(profile)
   if (
     strictSignedFiles.size !== expected.length ||
     expected.some((path) => strictSignedFiles.get(path) !== 1)
