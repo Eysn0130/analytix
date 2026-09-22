@@ -12,9 +12,19 @@ DELIVERY is `9c21c0ec911571ddba1c733ac4a828737654e02b`. The execution plan was
 integrated at `b485a0357`. Formal Core qualification software and its signing,
 Go inspection, formal-evidence, publisher and updater consumers are implemented
 at `69e74fdb6` and `0ce2e92a0`; exact legal inventory corrections follow at
-`c2ef61c4b`, `5a7d2cebc` and `ac00f1602`. Actual signed artifact and installed acceptance remain
+`c2ef61c4b`, `5a7d2cebc` and `ac00f1602`. Actual formally qualified artifact and installed acceptance remain
 unfulfilled. The private96e55 Core DMG retains its original classification and
 bytes; it is not a package of these new sources.
+
+Current artifact SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` adds exact
+root/runtime lock and retained-byte legal supplements before sealing. A new clean
+Core1.0.6 private app/DMG/ZIP was built through the normal lifecycle; signed
+resource/Go inspection and DMG/ZIP content equality pass. The new app closes16
+of the old31 license instances;15 remain, plus6 newly recognized runtime copies
+(21 package blockers). Complete embedded native/WASM/font obligations and all
+formal/installed exits remain separate. See the
+[new artifact evidence](qa/pr28-core-artifact-closure-2026-09-22.md).
+This candidate is `development_clean_non_publishable`; it is not a formal release.
 
 Multi-snapshot SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` preserves original A1/A2 bindings, applies
 current display permission separately, and retains whole-thread atomicity.
@@ -31,7 +41,7 @@ The terminal harness now waits at most180seconds after two observed90-second
 harness timeouts with successful completion during cleanup; HTTP remains45seconds.
 These test budgets are not product latency acceptance claims.
 
-The [current execution evidence](qa/pr28-release-closure-2026-09-22.md) records
+The [preserved recovery evidence](qa/pr28-release-closure-2026-09-22.md) records
 exact source/artifact identities, failures, commands, checks and remaining seams.
 The [previous Core and single-snapshot evidence](qa/pr28-independent-review-execution-2026-09-21.md#current-core-release--funds-recovery-from-5fe1)
 remains historical and preserved. No ordinary source/fixture check is installed
@@ -50,7 +60,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: private Core profile/absence and96e55 static-copy evidence retained; controlled Core software qualification, exact target metadata and read-only Core formal stage are implemented. Actual Developer ID/publication authority, exact licenses, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: new55838f047 private Core app/DMG/ZIP and exact source/seal/container checks pass; old31 license instances close16 with15 remaining, plus6 runtime copies. Controlled Core software qualification remains implemented. Complete resource licenses, Developer ID/publication authority, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 

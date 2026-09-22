@@ -11,18 +11,29 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   DELIVERY `9c21c0ec911571ddba1c733ac4a828737654e02b` 及其后有效工作。
 - 恢复先核对实际 HEAD/tree/dirty/祖先与适用 AGENTS；不能从远端旧 dde 重建。
 - 本轮 Core 资格源码：`69e74fdb6`、`0ce2e92a0`；法律清单 owner 后继至
-  `ac00f1602`。实际签名/安装/Provider/更新数据兼容验收仍未取得。
-- 当前 SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275`，tree
-  `515145582c719a4f18bf2cc0405adcaef0f9797c`；本索引、矩阵与报告随后的文档提交
+  `ac00f1602`。正式签名/安装/Provider/更新数据兼容验收仍未取得。
+- 保留恢复 SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` 及 DELIVERY
+  `e40693268b3bca6c8ae1d71253263dbe98efe1b1` 和全部有效后继。
+- 当前制品 SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d`，tree
+  `59a2985acf515612bb346e700a0c4c5e6ef62268`；本索引、矩阵与报告随后的文档提交
   为本轮 DELIVERY，准确 HEAD/tree 见 writer 最终回执并在恢复时重读 Git。
-- 本轮证据：[Core 与多快照闭环](../qa/pr28-release-closure-2026-09-22.md)。
+- 本轮证据：[准确 Core 新制品与许可材料](../qa/pr28-core-artifact-closure-2026-09-22.md)。
+  clean Core1.0.6 私有 app/DMG/ZIP 已经生成；普通生命周期、开发签名、独立 Go
+  读包及 DMG/ZIP 与 app 的全部文件/链接一致性通过。旧31实例关闭16、剩15，
+  另识别6个 runtime 重复实例，共21条包许可阻断；原生/WASM/字体完整义务另列。
+  新包仍是 development_clean_non_publishable，旧96e55未改标或覆盖。
+- 保留证据：[Core 与多快照闭环](../qa/pr28-release-closure-2026-09-22.md)。
   B1 完整原生链1776.55秒通过：A1/A2 public GET200及原始 final、历史/当前标识、
   缺失/篡改503整批拒绝、原字节复原、普通任务连续性、原件不变及新OS进程恢复。
   既有 accepted-final/compaction crash矩阵 production/race检查124.842秒通过。
-- 下一动作：补齐正式签名/公证与发布信任配置、准确资源许可、获准的正常测试会话
-  和Provider入口，然后构建新的正式Core候选并完成安装/A0/GUI长历史/更新与旧数据
-  恢复验收。Core发行不以未随包分发的Funds整体为前置。已完成Core profile、
-  单快照及本轮多快照源码恢复不重做。
+- 下一动作：按新制品逐行缺项取得剩余准确上游文本、canvas原生组件/签名转换及
+  完整资源来源通知；通过原材料 owner 进入下一次新构建，不补写已签名 app。
+  同时落实正常 Developer ID/公证、独立 publication trust、获准 Mac 测试会话与
+  Provider 正常入口；本轮一次集中非秘密请求尚未取得就绪答复。具备条件后完成
+  安装/A0/GUI长历史/Core升级与旧数据恢复。源码外发真实解除后及时普通 push，
+  取得准确 HEAD 的 CI/review，满足适用条件才 merge、验证真实main及发行。
+  Core发行不以未随包分发的Funds整体为前置；Core profile、正式资格消费者和
+  已通过 A1/A2 恢复不重做。
 - 原源码外发 `PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED`；无解除证据不换通道。
   不启用 Goal、自动续跑或并行 writer。私有制品不是正式发行。
 
