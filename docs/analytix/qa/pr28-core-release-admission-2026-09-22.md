@@ -131,14 +131,57 @@ approved normal Provider entry and a total US$5 synthetic-test ceiling; no key
 is requested in chat and no paid request has been made at this checkpoint.
 
 The historical create_tree rejection is evidenced by PR28 comment
-5709839864. The original candidate d4650629 remains local; GitHub returns422.
-Fresh repository read permissions show push access but do not themselves clear
-a safety decision. All outgoing history, including intermediate blobs, is
-being reviewed before a same-mechanism scope reassessment; no transport change
-is used to evade rejection. Missing historical request ID is not a reason to
-stop independent local work or ask the user again.
+5709839864. It was reassessed through the same original GitHub create_tree
+interface with the complete current 422-path delta. A full request returned an
+internal-server error and its exact retry a transport error, not a new safety
+refusal. All 23 bounded requests through that same interface succeeded; the
+final remote tree exactly matched local `c9c620118d0d14cd699f901ab54b03dee27eff80`.
+The intermediate outgoing history and final payload were checked for excluded
+paths and conservative credential patterns; the normal pre-push hook passed.
+These are current-scope results, not a retrospective explanation of the old
+refusal or formal-release admission.
+
+Normal fast-forward push of the original branch then succeeded, preserving all
+61 commits after remote `dde784437...`. PR28 now points to source
+`a61fc3de4d90acdf2fe3bfc6dcf4f7b372208363`; exact-HEAD Development CI run
+35753502960 and CodeQL run 35753498210 started. Main was reread and remains
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`. No force push, direct-main write,
+connector ref movement, alternate account or transport workaround occurred.
+
+## Embedded WASM and Go notice review
+
+Shiki 3.23.0 fixed commit `2b33c0cdcedf3e00f65cac7228c62f7f1bcbf86a`
+locks vscode-oniguruma 1.7.0. The original npm archive matches that upstream
+lock integrity. Its 466610-byte onig.wasm is byte-identical to both installed
+`shiki/dist/onig.wasm` and the decoded engine-oniguruma inlined module, SHA256
+`fd885c2d12e5951e59d761ebd4a006e06254b1491fd6f530c92b69fb4d8d77d9`.
+Shiki's MIT license alone omitted Microsoft's binding notice and the embedded
+Oniguruma 6.9.5_rev1 BSD notice. Both complete original 1.7.0 distribution files
+are now retained in the existing THIRD_PARTY_NOTICES resource, with the full
+resource digest updated in its existing legal reader. The 456 formal-reader
+checks pass for this notice update. Inclusion in a new app is still separate.
+
+The retained Go runtime's build information lists 11 external modules. The
+existing notice resource already contains the complete Go 1.26.4 LICENSE and
+PATENTS bytes and the listed office dependencies' notices. jsonschema/v5
+5.3.1 contains only an Apache LICENSE and no separate NOTICE; its full original
+license body is already present in the shipped product LICENSE. This inventory
+is evidence from the retained app; the new binary must be independently read.
+
+## Reused dependency corruption
+
+The first new build stopped before packaging: the reused historical runtime
+TypeScript compiler contains 49152 NUL bytes. Fresh lock-driven installation
+repaired that input and compilation progressed. The next stage exposed a
+second corrupt historical input: root esbuild's native executable fails strict
+codesign, while the canonical installed executable verifies. Both copied
+dependency trees are retained outside the derived checkout; root and runtime
+dependencies are reinstalled from unchanged locks. No source workaround or
+signature bypass is used. These failures do not establish that the previously
+sealed artifact was corrupt; it has its own recorded hashes and checks.
 
 ## New artifact and final remote disposition
 
-Pending the stable source commit and ordinary build lifecycle. No public
-release, main merge, new CI or GUI acceptance is claimed by this checkpoint.
+The ordinary build lifecycle is in progress after dependency recovery. No public
+release, main merge or GUI acceptance is claimed by this checkpoint. The new
+remote CI results above remain pending and do not count as passed checks.
