@@ -35,8 +35,8 @@ import (
 )
 
 // This test binds current Go composition to an explicitly selected historical
-// native generation. It does not execute the retained runtime-server or claim
-// that the package contains the current Go source.
+// native generation, or an exact clean current package selected explicitly.
+// It does not execute the packaged runtime-server or establish installation QA.
 func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
 	path := b1SelectedNativeInput(t)
 	inspection, err := packagedbuildauthorityfs.InspectPackageV2(context.Background(), path, "darwin", "arm64")
@@ -55,7 +55,7 @@ func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
 	if err := owner.Close(); err != nil {
 		t.Fatalf("B1 fixed native owner closure: %v", err)
 	}
-	t.Log("current Go package inspection and normal local-build Owner admission passed; historical native input only")
+	t.Log("current Go package inspection and normal local-build Owner admission passed; native input identity is recorded separately")
 }
 
 // A byte-identical installation copy can remove removable-volume I/O from the
@@ -65,6 +65,26 @@ func b1SelectedNativeInput(t *testing.T) string {
 	original := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
 	if original != rev9RetainedRuntimeServer {
 		t.Fatal("B1 fixed native input is unavailable")
+	}
+	current := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_RUNTIME_SERVER")
+	expectedSource := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_SOURCE_COMMIT")
+	if current != "" || expectedSource != "" {
+		if len(expectedSource) != 40 || strings.Trim(expectedSource, "0123456789abcdef") != "" || os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER") != "" {
+			t.Fatal("B1 exact current input requires one source identity and no historical relocation")
+		}
+		inspection, err := packagedbuildauthorityfs.InspectPackageV2(context.Background(), current, "darwin", "arm64")
+		if err != nil {
+			t.Fatalf("B1 exact current package inspection: %v", err)
+		}
+		authority := inspection.Authority
+		if authority.Development == nil || authority.Core != nil || authority.Controlled != nil ||
+			authority.Authority.SourceCommit != expectedSource || authority.Authority.WorktreeSnapshot.Dirty ||
+			authority.Authority.Classification != "development_clean_non_publishable" ||
+			inspection.Publishable || inspection.FactToolsEnabled || inspection.PackageAnchor != "macos_nonpublishable_resource_seal" {
+			t.Fatal("B1 exact current input does not match its clean private package contract")
+		}
+		t.Logf("B1 exact clean native package source=%s; synthetic Host admission and loopback only, not installation QA", expectedSource)
+		return current
 	}
 	selected := os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER")
 	if selected == "" {
@@ -214,12 +234,28 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 	}
 	owned := &ownedPersistenceLeaseHandler{Handler: handler, lease: lease}
 	runtime := httptest.NewServer(owned)
+	closed := false
 	defer func() {
+		if closed {
+			return
+		}
 		runtime.Close()
 		shutdownOwnedRuntimeHandler(t, owned)
 		async.assertDrained(t)
 	}()
 	verify(config, root, workspace, sourcePath, fixture.Authority.KeyID(), sourceEvents, b1PublicChainDriver{
+		assertNewProcess: func(threadID, turnID, finalDigest, account string) {
+			runtime.Close()
+			shutdownOwnedRuntimeHandler(t, owned)
+			async.assertDrained(t)
+			closed = true
+			before := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
+			b1AssertFreshProcessRecovery(t, b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, ThreadID: threadID, TurnID: turnID, FinalDigest: finalDigest, Account: account})
+			after := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
+			if before != after {
+				t.Fatal("fresh process changed original evidence/final stores")
+			}
+		},
 		baseURL: func() string { return runtime.URL },
 		waitTurn: func(threadID, turnID, phase string) {
 			async.expect(threadID, turnID, phase)
@@ -249,9 +285,10 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 // The assertions below are shared with the black-box process test. The driver
 // owns transport/lifecycle only; it cannot fabricate product evidence or finals.
 type b1PublicChainDriver struct {
-	baseURL  func() string
-	waitTurn func(threadID, turnID, phase string)
-	reopen   func()
+	assertNewProcess func(threadID, turnID, finalDigest, account string)
+	baseURL          func() string
+	waitTurn         func(threadID, turnID, phase string)
+	reopen           func()
 }
 
 func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePath, authorityKeyID string, model *b1PublicChainModel, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {

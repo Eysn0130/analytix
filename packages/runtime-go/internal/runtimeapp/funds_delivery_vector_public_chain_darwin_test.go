@@ -140,6 +140,13 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			t.Fatal("actual Host source lifecycle was not observed")
 		}
 		t.Log("derived vector: real import -> DuckDB -> Go authority -> final Provider semantic -> Final Gate -> protected local display -> reopen passed")
+		driver.assertNewProcess(threadID, turnID, final.AcceptedFinalDigest, rev14PrivateAccount)
+		mu.Lock()
+		unchanged = calls == beforeCalls
+		mu.Unlock()
+		if !unchanged {
+			t.Fatal("fresh process recovery reissued Provider work")
+		}
 	})
 }
 
