@@ -1477,6 +1477,20 @@ function runReleaseGate(
 }
 
 describe('runtime-go formal evidence admission', () => {
+  test('audits actual after-pack runtime files outside the ASAR index without shadowing indexed entries', () => {
+    const directory = writeBundle()
+    const app = join(directory, 'package-output', 'analytix.app')
+    const staged = join(app, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules', 'after-pack-only')
+    mkdirSync(staged, { recursive: true })
+    writeFileSync(join(staged, 'package.json'), JSON.stringify({ name: 'after-pack-only', version: '1.2.3', license: 'MIT' }))
+    const missing = inspectExactArtifactLegalInventory({ artifact: app })
+    expect(missing.dependencyInstances.find((entry: any) => entry.name === 'after-pack-only')).toMatchObject({ engineeringBlocking: true })
+    writeFileSync(join(staged, 'LICENSE'), 'MIT License\nexact synthetic after-pack dependency\n')
+    const retained = inspectExactArtifactLegalInventory({ artifact: app })
+    expect(retained.dependencyInstances.find((entry: any) => entry.name === 'after-pack-only')).toMatchObject({ engineeringBlocking: false })
+    expect(retained.dependencyInstances.filter((entry: any) => entry.name === 'fixture-dependency')).toHaveLength(1)
+  })
+
   test('Core stage consumes only A0 but still requires actual Developer ID and exact Core authority', () => {
     const directory = writeBundle(a0Report(), b1Report(), true)
     rmSync(join(directory, runtimeGoFormalEvidenceContract.reportFiles.b1))

@@ -1090,8 +1090,12 @@ function createPackagedAppReader(root, asarPath) {
     (entry) => packagedRoot.read(`${unpackedPrefix}${entry}`)
   )
   const rootPrefix = 'packaged-root/'
+  // after-pack stages additional runtime files in app.asar.unpacked. They are
+  // shipped bytes even when no ASAR entry names them. Keep a physical namespace
+  // so they cannot shadow an indexed ASAR entry or borrow its license identity.
   const packagedEntries = packagedRoot.entries().filter((entry) =>
-    entry !== asarEntry && !entry.startsWith(unpackedPrefix)
+    entry !== asarEntry && (!entry.startsWith(unpackedPrefix) ||
+      !asar.has(entry.slice(unpackedPrefix.length)))
   )
   const entries = [
     ...asar.entries(),
@@ -1375,7 +1379,7 @@ function exactInventory(reader, options = {}) {
   }
   const runtimePackageEntry = reader.has(RUNTIME_PACKAGE_ENTRY)
     ? RUNTIME_PACKAGE_ENTRY
-    : null
+    : packageEntryEndingWith(reader, RUNTIME_PACKAGE_ENTRY)
   const runtimePackage = runtimePackageEntry ? readPackage(reader, runtimePackageEntry) : null
   if (!runtimePackage || licenseValue(runtimePackage) !== PRODUCT_LICENSE_ID) {
     artifactResourceBlockers.push({
@@ -1399,7 +1403,7 @@ function exactInventory(reader, options = {}) {
   }
   const runtimePackageLockEntry = reader.has(RUNTIME_PACKAGE_LOCK_ENTRY)
     ? RUNTIME_PACKAGE_LOCK_ENTRY
-    : null
+    : packageEntryEndingWith(reader, RUNTIME_PACKAGE_LOCK_ENTRY)
   const runtimePackageLock = runtimePackageLockEntry ? readPackage(reader, runtimePackageLockEntry) : null
   const exactRuntimeLockPackage = runtimePackageLock?.packages?.['']
   if (exactRuntimeLockPackage?.license !== PRODUCT_LICENSE_ID) {
