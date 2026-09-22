@@ -1130,6 +1130,7 @@
         "canvas",
         "office",
         "packageHost",
+        "browserSelection",
         "objects",
         "settings",
         "account",

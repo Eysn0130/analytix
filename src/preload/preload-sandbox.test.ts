@@ -134,6 +134,7 @@ describe('preload sandbox guard', () => {
       'canvas',
       'office',
       'packageHost',
+      'browserSelection',
       'objects',
       'settings',
       'account',

@@ -1421,12 +1421,11 @@ describe('electron-builder Analytix packaging', () => {
     expect(publicRuntimeScripts.length).toBeGreaterThan(0)
     for (const [name, command] of publicRuntimeScripts) {
       expect(`${name}: ${command}`).not.toMatch(legacyRuntimeMarker)
-      if (name === 'runtime:go:core-stage') {
-        expect(command).toBe('node ./scripts/runtime-go-release-gate.mjs --core-stage --json')
-      } else {
-        expect(command).toContain('scripts/runtime-go-validation-command.mjs')
-      }
+      expect(command).toContain('scripts/runtime-go-validation-command.mjs')
     }
+    expect(rootPackage.scripts['runtime:go:core-stage']).toBe('node ./scripts/runtime-go-validation-command.mjs core-stage --json')
+    expect(readFileSync(join(process.cwd(), 'scripts/runtime-go-validation-command.mjs'), 'utf8'))
+      .toContain("'core-stage': { script: 'runtime-go-release-gate.mjs', args: ['--core-stage'] }")
   })
 
   it('excludes only the metadata-only https dependency while preserving the Node HTTPS implementation', () => {

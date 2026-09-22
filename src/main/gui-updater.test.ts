@@ -18,6 +18,7 @@ let updater: MockUpdater
 let nativeUpdater: EventEmitter
 let originalEnv: NodeJS.ProcessEnv
 let originalPlatform: PropertyDescriptor
+let originalArch: PropertyDescriptor
 let appVersion: string
 let mockedFiles: Map<string, string>
 let showMessageBox: ReturnType<typeof vi.fn>
@@ -40,6 +41,7 @@ function createUpdater(): MockUpdater {
 beforeEach(() => {
   originalEnv = { ...process.env }
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  originalArch = Object.getOwnPropertyDescriptor(process, 'arch')!
   vi.useFakeTimers()
   vi.resetModules()
   updater = createUpdater()
@@ -86,6 +88,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env = originalEnv
   Object.defineProperty(process, 'platform', originalPlatform)
+  Object.defineProperty(process, 'arch', originalArch)
   vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -458,6 +461,7 @@ describe('showPostUpdateReleaseNotes', () => {
 describe('Core update target admission', () => {
   function corePackage() {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true })
     mockedFiles.set('/tmp/analytix-updater-test-app/package.json', JSON.stringify({releaseProfile:'core',buildHints:{macSigningEnabled:true,notarizationEnabled:true}}))
   }
   function metadata() {

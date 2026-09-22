@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
+import { createRequire } from 'node:module'
 import {
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV,
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1,
@@ -322,6 +323,7 @@ describe('main-private desktop external-state isolation', () => {
           if (name.includes('macos-signing-policy')) return { requireOfficialTeamIdentifier: () => { throw new Error('unapproved signing') } }
           if (name.includes('production-mcp-entry-closure-manifest')) return { loadProductionMcpEntryClosureContract: () => ({ files: [] }) }
           if (name.includes('packaged-lifecycle-guard')) return { _internals: { assertNoPrepackagedCommandLine: () => {} } }
+          if (name === './scripts/core-package-profile.cjs') return createRequire(import.meta.url)(join(process.cwd(), name))
           throw new Error('unexpected builder dependency')
         } }
       runInNewContext(builderConfig, context)
@@ -335,11 +337,16 @@ describe('main-private desktop external-state isolation', () => {
     expect(ordinary.env.ANALYTIX_APP_VERSION).toBe('1.2.3')
     expect(ordinary.env[ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]).toBeUndefined()
     expect(JSON.stringify(ordinary.config)).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
-    for (const defaultLaunchSource of [packageJson, releaseScript]) {
+    const scripts = JSON.parse(packageJson).scripts as Record<string, string>
+    const defaultCommands = ['dist', 'dist:mac', 'dist:mac:signed', 'dist:mac:arm64:core:controlled', 'release:all', 'release:mac']
+    for (const name of defaultCommands) expect(scripts[name]).toBeTypeOf('string')
+    for (const defaultLaunchSource of [...defaultCommands.map(name => scripts[name]), releaseScript]) {
       expect(defaultLaunchSource).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
       expect(defaultLaunchSource).not.toContain(
         ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1
       )
     }
+    expect(scripts['dist:mac:arm64:core']).toContain(`${ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV}=${ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1}`)
+    expect(scripts['dist:mac:arm64:core']).not.toContain('ANALYTIX_RELEASE_BUILD=1')
   })
 })
