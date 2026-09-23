@@ -1035,13 +1035,11 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
       const profilePatch = {
         provider: {
           activeProviderId: 'xiaomi',
-          apiKey: ${JSON.stringify(syntheticApiKey)},
           baseUrl: 'https://api.deepseek.com',
           providers: [
             {
               id: 'deepseek',
               name: 'DeepSeek',
-              apiKey: ${JSON.stringify(syntheticApiKey)},
               baseUrl: 'https://api.deepseek.com',
               endpointFormat: 'chat_completions',
               models: ['deepseek-chat']
@@ -1049,7 +1047,6 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
             {
               id: 'xiaomi',
               name: 'Xiaomi',
-              apiKey: ${JSON.stringify(syntheticApiKey)},
               baseUrl: 'https://api.xiaomimimo.com/v1',
               endpointFormat: 'chat_completions',
               models: ['mimo-v2.5', 'mimo-v2.5-pro']
@@ -1061,24 +1058,49 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
           dataDir: ${JSON.stringify(runtimeDataDir)},
           autoStart: true,
           providerId: 'xiaomi',
-          model: 'mimo-v2.5-pro-ultraspeed'
-        }
-      };
-      const compatPatch = {
-        provider: {
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: 'https://api.deepseek.com'
-        },
-        runtime: {
-          port: ${JSON.stringify(runtimePort)},
-          dataDir: ${JSON.stringify(runtimeDataDir)},
-          autoStart: true,
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: 'https://api.deepseek.com',
-          model: 'deepseek-chat'
+          model: 'mimo-v2.5-pro'
         }
       };
       try {
+        const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        if (!before || before.error || !Array.isArray(before.providers)) {
+          throw new Error('synthetic_provider_registry_unavailable');
+        }
+        const connected = await api.providerRegistry.request({
+          schemaVersion: 1,
+          operation: 'connect',
+          expected: {
+            registryRevision: before.registryRevision,
+            registryIncarnation: before.registryIncarnation,
+            providerRevision: '0',
+            providerGeneration: '0',
+            providerIncarnation: '',
+            providerCredentialPurpose: ''
+          },
+          provider: {
+            id: 'xiaomi',
+            kind: 'openai-compatible',
+            endpoint: 'https://api.xiaomimimo.com/v1',
+            proxy: '',
+            models: ['mimo-v2.5', 'mimo-v2.5-pro'],
+            mediaModels: [],
+            selectedModel: 'mimo-v2.5-pro',
+            selectedMediaModel: '',
+            selectedRoutes: []
+          },
+          credential: {
+            kind: 'set',
+            purpose: 'provider-api-key',
+            valueBase64: btoa(${JSON.stringify(syntheticApiKey)})
+          }
+        });
+        if (!connected || connected.error) throw new Error('synthetic_provider_connect_failed');
+        const registry = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        const registered = registry && !registry.error && Array.isArray(registry.providers)
+          ? registry.providers.find((item) => item && item.id === 'xiaomi') : null;
+        if (!registered || registered.credentialConfigured !== true) {
+          throw new Error('synthetic_provider_credential_not_configured');
+        }
         await api.settings.setSettings(profilePatch);
         out.settingsProfilePatchAccepted = true;
         out.settingsPatchMode = 'provider-profile';
@@ -1090,7 +1112,11 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
         out.mimoProviderId = saved && saved.runtime && saved.runtime.providerId || '';
         out.mimoModel = saved && saved.runtime && saved.runtime.model || '';
         out.mimoEndpointFormat = mimo && mimo.endpointFormat || '';
-        out.mimoProviderReady = !!(mimo && mimo.apiKey && mimo.baseUrl);
+        out.mimoProviderReady = !!(mimo && mimo.baseUrl &&
+          registered.credentialConfigured === true &&
+          !Object.hasOwn(saved.provider, 'apiKey') &&
+          !Object.hasOwn(saved.runtime, 'apiKey') &&
+          !Object.hasOwn(mimo, 'apiKey'));
         out.mimoProfileSettingsOk = !!mimo &&
           saved.provider.activeProviderId === 'xiaomi' &&
           out.mimoProviderId === 'xiaomi' &&
@@ -1101,9 +1127,7 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
           out.mimoProviderReady === true;
       } catch (error) {
         out.settingsPatchError = error && (error.stack || error.message) || String(error);
-        await api.settings.setSettings(compatPatch);
-        out.settingsCompatPatchUsed = true;
-        out.settingsPatchMode = 'compat-minimal';
+        return out;
       }
       try {
         await api.runtime.restartRuntime();
@@ -1551,14 +1575,16 @@ async function runActualPackagedSmoke() {
     renderer?.settingsProfilePatchAccepted === true && renderer?.settingsCompatPatchUsed !== true,
     renderer?.settingsCompatPatchUsed === true
       ? `packaged settings bridge only accepted compat-minimal patch: ${summarizeRestartError(renderer.settingsPatchError) || 'provider profile patch was rejected'}`
-      : 'settings bridge must accept provider.activeProviderId plus provider.providers[] profile patches',
+      : renderer?.settingsPatchError
+        ? `Registry credential or key-free settings patch failed: ${summarizeRestartError(renderer.settingsPatchError)}`
+        : 'Registry credential and key-free provider profile settings must persist independently',
     formalInstanceMode || artifactEvidence.blocked ? 'skipped' : 'failed'
   ))
   checks.push(actualCheck(
     'packaged-mimo-profile-settings',
     'Packaged MiMo profile settings',
     renderer?.mimoProfileSettingsOk === true,
-    'packaged settings bridge must preserve Xiaomi/MiMo providerId, model, endpointFormat, and provider profile shape without legacy runtime credentials',
+    'packaged settings bridge must preserve Xiaomi/MiMo metadata while Registry holds the synthetic credential',
     formalInstanceMode || artifactEvidence.blocked ? 'skipped' : 'failed'
   ))
   const restartBlocked = renderer && renderer.restartOk !== true && Boolean(renderer.restartError)
