@@ -15,6 +15,13 @@ const EXCLUDED_RESOURCES = Object.freeze([
     name => [`runtime/analytix-${name}`, `runtime/analytix-${name}.exe`]
   )
 ])
+const CORE_OPTIONAL_ASSET_EXCLUSIONS = Object.freeze([
+  // PDF.js uses browser canvas for its renderer and needs only text extraction in Main.
+  '!node_modules/@napi-rs/canvas/**',
+  '!node_modules/@napi-rs/canvas-*/**',
+  // This is a KaTeX font-build input; runtime styles reference dist/fonts instead.
+  '!node_modules/katex/src/fonts/lib/Extra.otf'
+])
 
 function releaseProfile(value = 'full') {
   if (value !== 'full' && value !== 'core') throw Error('release_profile_invalid')
@@ -35,10 +42,19 @@ function assertCoreResourcesAbsent(resources) {
   }
 }
 
+function assertCoreOptionalAssetsAbsent(reader) {
+  if (reader.entries().some(entry =>
+    /(?:^|\/)node_modules\/@napi-rs\/canvas(?:-[^/]+)?\//.test(entry) ||
+    /(?:^|\/)node_modules\/katex\/src\/fonts\/lib\/Extra\.otf$/.test(entry)
+  )) throw Error('core_optional_asset_present')
+}
+
 function applyReleaseProfile(config, profile) {
   profile = releaseProfile(profile)
   config.extraMetadata = { ...config.extraMetadata, releaseProfile: profile }
   if (profile === 'core') {
+    if (!Array.isArray(config.files)) throw Error('core_profile_files_invalid')
+    config.files = [...config.files, ...CORE_OPTIONAL_ASSET_EXCLUSIONS]
     config.extraResources = config.extraResources.filter(resource =>
       !['backend', 'plugins/analytix-fund-analysis'].includes(resource.to))
     config.artifactName = config.artifactName.replace('analytix-', 'analytix-core-')
@@ -51,4 +67,4 @@ function applyReleaseProfile(config, profile) {
   return config
 }
 
-module.exports = { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, EXCLUDED_RESOURCES, releaseProfile, isCoreContext, assertCoreResourcesAbsent, applyReleaseProfile }
+module.exports = { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, EXCLUDED_RESOURCES, CORE_OPTIONAL_ASSET_EXCLUSIONS, releaseProfile, isCoreContext, assertCoreResourcesAbsent, assertCoreOptionalAssetsAbsent, applyReleaseProfile }
