@@ -793,6 +793,7 @@ function startContractProvider() {
     req.on('end', () => {
       const currentPrompt = currentUserPrompt(raw)
       const parsedBody = parseProviderBody(raw)
+      const currentToolResult = currentTurnHasToolResult(parsedBody)
       requests.push({
         authorizationConfigured: Boolean(req.headers.authorization),
         requestPath: req.url,
@@ -800,21 +801,19 @@ function startContractProvider() {
         bodyContainsInitialPrompt: raw.includes('Run packaged session soak.'),
         bodyContainsToolTimelinePrompt: raw.includes('Run packaged session tool timeline.'),
         bodyContainsToolTimelineFollowup: raw.includes('Run packaged session tool timeline.') &&
-          raw.includes('call_packaged_ls'),
+          currentToolResult,
         bodyContainsMimoPlanPrompt: raw.includes('Run packaged MiMo plan mode.'),
-        bodyContainsMimoPlanResult: raw.includes('call_packaged_mimo_plan') &&
-          raw.includes('.analytixsdd/plan/packaged-mimo.md'),
+        bodyContainsMimoPlanResult: raw.includes('Run packaged MiMo plan mode.') &&
+          currentToolResult,
         bodyContainsAttachmentPrompt: raw.includes('Run packaged session attachment fallback.'),
         bodyContainsAttachmentFilePath: raw.includes('FilePath:') && raw.includes('packaged-attachment.txt'),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
         bodyContainsApprovalDenyPrompt: raw.includes('Run packaged session approval deny.'),
-        bodyContainsApprovalDenyResult: raw.includes('approval_denied') &&
-          raw.includes('call_packaged_approval_deny'),
+        bodyContainsApprovalDenyResult: currentToolResult && raw.includes('approval_denied'),
         bodyContainsApprovalAllowPrompt: raw.includes('Run packaged session approval allow.'),
-        bodyContainsApprovalAllowResult: raw.includes('call_packaged_approval_allow') &&
-          raw.includes('approval-allow.txt'),
+        bodyContainsApprovalAllowResult: currentToolResult && raw.includes('approval-allow.txt'),
         bodyContainsUserInputPrompt: raw.includes('Run packaged session user input.'),
-        bodyContainsUserInputAnswer: raw.includes('call_packaged_user_input') &&
+        bodyContainsUserInputAnswer: currentToolResult &&
           raw.includes('Packaged user input answer'),
         bodyContainsForkPrompt: raw.includes('Continue packaged session soak from fork.'),
         bodyContainsResumePrompt: raw.includes('Continue packaged session soak from resume.'),
@@ -824,7 +823,7 @@ function startContractProvider() {
       const isAttachmentRequest = currentPrompt.includes('Run packaged session attachment fallback.')
       const isToolTimelineRequest = currentPrompt.includes('Run packaged session tool timeline.')
       const isMimoPlanRequest = currentPrompt.includes('Run packaged MiMo plan mode.')
-      if (isToolTimelineRequest && !raw.includes('call_packaged_ls')) {
+      if (isToolTimelineRequest && !currentToolResult) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
           'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_ls","type":"function","function":{"name":"ls","arguments":"{\\"path\\":\\".\\"}"}}]},"finish_reason":"tool_calls"}]}',
@@ -841,7 +840,7 @@ function startContractProvider() {
         ].join('\n\n'))
         return
       }
-      if (isMimoPlanRequest && !raw.includes('call_packaged_mimo_plan')) {
+      if (isMimoPlanRequest && !currentToolResult) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
           'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_mimo_plan","type":"function","function":{"name":"create_plan","arguments":"{\\"markdown\\":\\"# Packaged MiMo plan\\",\\"operation\\":\\"draft\\",\\"source_request\\":\\"Run packaged MiMo plan mode.\\",\\"title\\":\\"Packaged MiMo\\",\\"plan_id\\":\\"packaged-mimo\\",\\"plan_relative_path\\":\\".analytixsdd/plan/packaged-mimo.md\\"}"}}]},"finish_reason":"tool_calls"}]}',
@@ -868,7 +867,7 @@ function startContractProvider() {
         return
       }
       if (currentPrompt.includes('Run packaged session approval deny.')) {
-        if (raw.includes('call_packaged_approval_deny')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
             'data: {"choices":[{"delta":{"content":"packaged approval deny ok"},"finish_reason":"stop"}]}',
@@ -885,7 +884,7 @@ function startContractProvider() {
         return
       }
       if (currentPrompt.includes('Run packaged session approval allow.')) {
-        if (raw.includes('call_packaged_approval_allow')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
             'data: {"choices":[{"delta":{"content":"packaged approval allow ok"},"finish_reason":"stop"}]}',
@@ -902,7 +901,7 @@ function startContractProvider() {
         return
       }
       if (currentPrompt.includes('Run packaged session user input.')) {
-        if (raw.includes('call_packaged_user_input')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
             'data: {"choices":[{"delta":{"content":"packaged user input ok"},"finish_reason":"stop"}]}',
@@ -965,6 +964,18 @@ function currentUserPrompt(raw) {
     return ''
   }
   return ''
+}
+
+function currentTurnHasToolResult(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  let lastUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      lastUserIndex = index
+      break
+    }
+  }
+  return messages.slice(lastUserIndex + 1).some((message) => message?.role === 'tool')
 }
 
 function messageContentText(content) {
