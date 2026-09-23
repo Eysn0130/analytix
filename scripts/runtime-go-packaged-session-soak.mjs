@@ -1662,7 +1662,7 @@ async function runActualPackagedSessionSoak() {
   let contractProvider = null
   let isolatedLoginKeychain = null
   const providerId = 'xiaomi'
-  const model = 'mimo-v2.5-pro-ultraspeed'
+  const model = 'mimo-v2.5-pro'
 
   try {
     if (artifactEvidence.ok) {
