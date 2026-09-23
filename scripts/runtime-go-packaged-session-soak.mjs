@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   readSync,
   rmSync,
   writeFileSync
@@ -806,12 +807,14 @@ function startContractProvider() {
         bodyContainsMimoPlanResult: raw.includes('Run packaged MiMo plan mode.') &&
           currentToolResult,
         bodyContainsAttachmentPrompt: raw.includes('Run packaged session attachment fallback.'),
-        bodyContainsAttachmentFilePath: raw.includes('FilePath:') && raw.includes('packaged-attachment.txt'),
+        bodyContainsAttachmentVirtualPath: raw.includes('FilePath: attachment://'),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
         bodyContainsApprovalDenyPrompt: raw.includes('Run packaged session approval deny.'),
-        bodyContainsApprovalDenyResult: currentToolResult && raw.includes('approval_denied'),
+        bodyContainsApprovalDenyResult: currentToolResult &&
+          raw.includes('Run packaged session approval deny.'),
         bodyContainsApprovalAllowPrompt: raw.includes('Run packaged session approval allow.'),
-        bodyContainsApprovalAllowResult: currentToolResult && raw.includes('approval-allow.txt'),
+        bodyContainsApprovalAllowResult: currentToolResult &&
+          raw.includes('Run packaged session approval allow.'),
         bodyContainsUserInputPrompt: raw.includes('Run packaged session user input.'),
         bodyContainsUserInputAnswer: currentToolResult &&
           raw.includes('Packaged user input answer'),
@@ -878,7 +881,7 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_deny","type":"function","function":{"name":"bash","arguments":"{\\"command\\":\\"printf denied > approval-deny.txt\\"}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_deny","type":"function","function":{"name":"write_file","arguments":"{\\"path\\":\\"approval-deny.txt\\",\\"content\\":\\"denied\\"}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
@@ -895,7 +898,7 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_allow","type":"function","function":{"name":"bash","arguments":"{\\"command\\":\\"printf allowed > approval-allow.txt\\"}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_allow","type":"function","function":{"name":"write_file","arguments":"{\\"path\\":\\"approval-allow.txt\\",\\"content\\":\\"allowed\\"}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
@@ -912,7 +915,7 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_user_input","type":"function","function":{"name":"user_input","arguments":"{\\"prompt\\":\\"Provide packaged session answer\\",\\"fields\\":[{\\"id\\":\\"answer\\",\\"label\\":\\"Answer\\",\\"type\\":\\"text\\"}]}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_user_input","type":"function","function":{"name":"user_input","arguments":"{\\"prompt\\":\\"Provide packaged session answer\\",\\"questions\\":[{\\"question\\":\\"Provide packaged session answer\\",\\"header\\":\\"Answer\\"}]}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
@@ -1606,6 +1609,8 @@ function providerRequestShapeEvidence(requests) {
     mimoPlanPrompt: item.bodyContainsMimoPlanPrompt === true,
     mimoPlanResult: item.bodyContainsMimoPlanResult === true,
     attachmentPrompt: item.bodyContainsAttachmentPrompt === true,
+    attachmentText: item.bodyContainsAttachmentText === true,
+    attachmentVirtualPath: item.bodyContainsAttachmentVirtualPath === true,
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,
     approvalAllowPrompt: item.bodyContainsApprovalAllowPrompt === true,
     userInputPrompt: item.bodyContainsUserInputPrompt === true,
@@ -1709,6 +1714,8 @@ async function runActualPackagedSessionSoak() {
   let runtimePort = 0
   let contractProvider = null
   let isolatedLoginKeychain = null
+  let approvalDenyFileAbsent = false
+  let approvalAllowFileMatches = false
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -1771,7 +1778,16 @@ async function runActualPackagedSessionSoak() {
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
     if (contractProvider) await contractProvider.close()
     isolatedLoginKeychain?.dispose()
-    if (tempHome) rmSync(tempHome, { recursive: true, force: true })
+    if (tempHome) {
+      const workspace = join(tempHome, 'workspace')
+      approvalDenyFileAbsent = !existsSync(join(workspace, 'approval-deny.txt'))
+      try {
+        approvalAllowFileMatches = readFileSync(join(workspace, 'approval-allow.txt'), 'utf8') === 'allowed'
+      } catch {
+        approvalAllowFileMatches = false
+      }
+      rmSync(tempHome, { recursive: true, force: true })
+    }
   }
 
   const providerRequests = contractProvider?.requests || []
@@ -1795,7 +1811,7 @@ async function runActualPackagedSessionSoak() {
   const providerAttachmentFallbackSeen = providerRequests.some((item) =>
     item.bodyContainsAttachmentPrompt &&
     item.bodyContainsAttachmentText &&
-    !item.bodyContainsAttachmentFilePath
+    item.bodyContainsAttachmentVirtualPath
   )
   const providerApprovalDenySeen = providerRequests.some((item) =>
     item.bodyContainsApprovalDenyPrompt &&
@@ -1919,6 +1935,8 @@ async function runActualPackagedSessionSoak() {
       renderer?.userInputRequestedOk === true &&
       renderer?.userInputResolvedOk === true &&
       renderer?.userInputReplayOk === true &&
+      approvalDenyFileAbsent &&
+      approvalAllowFileMatches &&
       providerApprovalDenySeen &&
       providerApprovalAllowSeen &&
       providerUserInputSeen,
@@ -2071,6 +2089,10 @@ async function runActualPackagedSessionSoak() {
       forkPromptSeen: providerForkPromptSeen,
       resumePromptSeen: providerResumePromptSeen,
       historyCarriedToChildOrResume: providerHistorySeen
+    },
+    isolatedWorkspace: {
+      approvalDenyFileAbsent,
+      approvalAllowFileMatches
     },
     redaction: {
       status: secretFinding ? 'failed' : 'passed',
