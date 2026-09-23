@@ -1786,7 +1786,7 @@ async function runActualPackagedSessionSoak() {
       } catch {
         approvalAllowFileMatches = false
       }
-      rmSync(tempHome, { recursive: true, force: true })
+      rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
     }
   }
 
