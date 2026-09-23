@@ -1,4 +1,7 @@
 {
+  "modelProviderRegistryLoading": "Loading saved providers…",
+  "modelProviderRegistryUnavailable": "Saved providers are temporarily unavailable. Your configuration has been kept. Restore system security access, then retry.",
+  "modelProviderRegistryRetry": "Retry connection",
   "providerConnection_official-deepseek": "Official API",
   "providerConnection_local": "Local service",
   "providerConnection_remote": "Remote service",

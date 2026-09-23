@@ -19,8 +19,14 @@ bytes; it is not a package of these new sources.
 Production/QA credential-path audit confirms no ordinary-user second password.
 A subsequent source repair defers onboarding selection until protected validation
 and settings save, checks stored-credential availability on restart, and retains
-configured state on temporary unavailability; focused checks pass. Installed GUI
-verification of this repair remains pending. See the current release-admission report.
+configured state on temporary unavailability; focused checks pass. Installed 8e
+GUI secure Save, stored-credential DeepSeek Flash response, new-process restart
+without API-key re-entry and history/response recovery pass. The initial composer
+kept its prior model until manually selected; a later onboarding handoff fix
+and a Settings Registry-unavailable/retry repair pass 107 focused cases and web
+typecheck, pending a new candidate build. The installed locked-restart check kept
+configuration and recovered through Retry after normal QA Keychain unlock.
+See the current release-admission report.
 
 Current artifact SOURCE is `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
 prior SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` and DELIVERY
@@ -32,15 +38,21 @@ leaves two package blockers (Canvas embedded provenance and lazy-val exact text)
 of the original31 plus6 rows,34 pass,2 block and1 is absent. Embedded native,
 WASM and font obligations remain separate. See the
 [current admission evidence](qa/pr28-core-release-admission-2026-09-22.md).
-The candidate remains `development_clean_non_publishable`.
+The candidate remains `development_clean_non_publishable`. A later clean 8e5142250
+app-only candidate also passes strict signatures and independent installed Go
+inspection (2.36s), with the same two actual package blockers; its 1,705 font/PDF.js
+WASM bytes are bound to the verified archives. No later DMG/ZIP is claimed.
 
 Current-scope source egress was reassessed through the original interface and
-normal pushes reached b2cf1179e. Exact-HEAD Development CI passes all51 jobs;
-CodeQL still reports3 high and PR28 remains Draft/BLOCKED. Main remains
-`ce96cf12581acfa0e19fae7c6aa9c709371012c8`. Approved installed GUI onboarding
-has started, but Save encounters Registry503 and the task Keychain is locked;
-normal unlock failed and retry requires the original password. A separate ten-token official DeepSeek Flash
-request passes; this does not establish installed Provider acceptance.
+normal pushes reached `8e5142250`. Its four CodeQL analyses and gate pass;
+Development CI run35805133381 passed all51 jobs. The earlier b2cf Development CI
+passed all51 jobs and is not a substitute for later HEAD checks. PR28 remains
+Draft/BLOCKED pending review and applicable acceptance. Main remains
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`. The original locked QA profile remains
+preserved after authentication failure. A separate fresh isolated 8e session
+completed normal protected setup and GUI Provider/restart checks, including
+credential-unavailable refusal while locked followed by successful unlock/retry.
+These GUI results are separate from the earlier standalone ten-token HTTPS probe.
 
 Multi-snapshot SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` preserves original A1/A2 bindings, applies
 current display permission separately, and retains whole-thread atomicity.
@@ -102,8 +114,8 @@ evidence/display owners; P01–P03 and D01–D04 remain packaging and delivery g
 | P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable; Invoke and actual adapter admission reject activation/generation changes across readiness, pre-effect and completion, including real-store disable-enable/reopen | Remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed. Source tasks remain unfinished, not all blocked on GUI | SOURCE incomplete / installed not run |
 | P4 one conversation / cleanup | Primary conversation, bounded retrieval8 caches/4 builds, completion cancellation and retained history; old three Write routes removed | H01–H08 end-to-end authority/compaction/recovery evidence remains partial. Do not restore second runtime/RAG/Provider or alter independent UI Refresh | SOURCE retained / integration partial |
 | P0 Rust correctness | Fixed3000/10000 ascending/13000 fixture, static stage labels and prior bounded query controls retained | Old main INTERNAL root cause unresolved. COUNT-wrapper source lead differs from target; no new arbitrary reruns or alternative-binary symbols | EVIDENCE_FAILURE / root cause open |
-| P5 desktop storage/install | New b2cf DMG installed into an isolated app directory; exact copy/signature and independent Go inspection pass; approved isolated GUI reaches onboarding | Normal Save reports Registry503; task Keychain is locked, normal unlock returned authentication failure despite confirmed password entry; original state retained. Direct official DeepSeek probe passes but is separate from installed acceptance. No Keychain replacement or encryption bypass | partial / installed onboarding blocked |
-| P5 integration and release | Original branch/history and single writer retained | Current-scope egress reassessment and normal push pass; b2cf Development CI passes all51 jobs. CodeQL3 high, exact-HEAD review, strict gate and applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
+| P5 desktop storage/install | b2cf container/copy checks retained; later 8e app-only installed signature and Go inspection pass; fresh protected Save, stored-credential response and restart/history recovery pass | Original locked profile retained; later first-run composer-model handoff repair is source-verified and awaits a new build. Full installed tools, long history and upgrade/failure recovery remain outstanding | partial / bounded Provider journey passes |
+| P5 integration and release | Original branch/history and single writer retained; 8e5142250 CodeQL analyses and gate pass | Current-scope egress reassessment and normal push pass; 8e Development CI passed all51 jobs. Exact-HEAD review, applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
 
 ## Evidence limits and release exits
 

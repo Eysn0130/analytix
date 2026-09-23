@@ -134,6 +134,7 @@ export async function completeInitialSetupAfterSave(input: {
   reloadUiSettings: () => Promise<void>
   probeRuntime: (mode?: 'user' | 'background', options?: { restart?: boolean }) => Promise<void>
   openCode: () => Promise<void>
+  selectSavedModel: () => void
   closeInitialSetup: () => void
   getState: () => InitialSetupCompletionState
   setDialogError: (message: string) => void
@@ -159,6 +160,7 @@ export async function completeInitialSetupAfterSave(input: {
     return false
   }
   await input.openCode()
+  input.selectSavedModel()
   input.closeInitialSetup()
   return true
 }
@@ -283,6 +285,9 @@ export function InitialSetupDialog(): ReactElement {
         reloadUiSettings,
         probeRuntime,
         openCode,
+        selectSavedModel: () => useChatStore.getState().setComposerModel(
+          next.runtime.model, next.runtime.providerId
+        ),
         closeInitialSetup,
         getState: useChatStore.getState,
         setDialogError: setError,

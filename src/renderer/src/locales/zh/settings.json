@@ -1,4 +1,7 @@
 {
+  "modelProviderRegistryLoading": "正在读取已保存的供应商…",
+  "modelProviderRegistryUnavailable": "已保存的供应商暂时不可用，原配置已保留。请恢复系统安全访问后重试。",
+  "modelProviderRegistryRetry": "重试连接",
   "providerConnection_official-deepseek": "官方接口",
   "providerConnection_local": "本地服务",
   "providerConnection_remote": "远程服务",

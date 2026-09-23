@@ -730,6 +730,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   const provider = providerFromContext ?? defaultModelProviderSettings()
   const [registrySnapshot, setRegistrySnapshot] = useState<ProviderRegistrySnapshotResult | null>(null)
+  const [registryLoadState, setRegistryLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const registryLoadSequence = useRef(0)
   const [modelProviders, setModelProviders] = useState<ModelProviderProfileV1[]>([])
   const [routingDrafts, setRoutingDrafts] = useState<Record<string, ProviderRegistryRoutingDraft>>({})
   const [selectedProviderId, setSelectedProviderId] = useState<string>('')
@@ -823,6 +825,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const applyRegistrySnapshot = (snapshot: ProviderRegistrySnapshotResult): void => {
+    setRegistryLoadState('ready')
     setRegistrySnapshot(snapshot)
     setModelProviders(snapshot.providers.map(providerProfileFromRegistry))
     setRoutingDrafts(Object.fromEntries(
@@ -855,15 +858,26 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     return result
   }
 
+  const loadRegistry = async (): Promise<void> => {
+    const sequence = ++registryLoadSequence.current
+    setRegistryLoadState('loading')
+    try {
+      const result = await window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' })
+      if (!credentialInputMounted.current || sequence !== registryLoadSequence.current) return
+      if ('error' in result || !('providers' in result)) {
+        setRegistryLoadState('unavailable')
+        return
+      }
+      applyRegistrySnapshot(result)
+    } catch {
+      if (credentialInputMounted.current && sequence === registryLoadSequence.current) {
+        setRegistryLoadState('unavailable')
+      }
+    }
+  }
   useEffect(() => {
-    let cancelled = false
-    void window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' })
-      .then((result) => {
-        if (cancelled || 'error' in result || !('providers' in result)) return
-        applyRegistrySnapshot(result)
-      })
-      .catch(() => undefined)
-    return () => { cancelled = true }
+    void loadRegistry()
+    return () => { registryLoadSequence.current += 1 }
   }, [])
   useEffect(() => {
     const expiries = Object.values(accountObservationStates)
@@ -1833,6 +1847,16 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
 
   return (
     <SettingsCard title={t('providers')}>
+      {registryLoadState !== 'ready' && (
+        <div role={registryLoadState === 'unavailable' ? 'alert' : 'status'} className="mb-4 rounded-xl border border-ds-border bg-ds-card p-3 text-sm text-ds-muted">
+          <p>{t(registryLoadState === 'loading' ? 'modelProviderRegistryLoading' : 'modelProviderRegistryUnavailable')}</p>
+          {registryLoadState === 'unavailable' && (
+            <button type="button" className="mt-2 rounded-lg border border-ds-border px-3 py-1.5 text-ds-ink" onClick={() => { void loadRegistry() }}>
+              {t('modelProviderRegistryRetry')}
+            </button>
+          )}
+        </div>
+      )}
       <SettingRow
         title={t('proxyUrl')}
         description={t('proxyUrlDesc')}
@@ -1879,6 +1903,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={addMenuOpen}
+                  disabled={registryLoadState !== 'ready'}
                   onClick={() => setAddMenuOpen((value) => !value)}
                   className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full border border-ds-border bg-ds-card px-3 text-[12.5px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink"
                 >

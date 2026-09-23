@@ -463,3 +463,112 @@ main-branch disposition was used. All three affected owner packages passed
 (steering 0.520s, event 0.883s, subagent 7.675s), including their existing
 lower/upper/NaN/fraction/negative-zero regressions. Whether this resolves remote
 CodeQL remains subject to analysis of the new pushed HEAD.
+
+### Exact 8e5142250 CodeQL and candidate preparation
+
+The original branch was normally pushed to
+`8e5142250877b733752a755169fae8fcb52e3ef8`. Its four CodeQL analyses
+(Go, JavaScript/TypeScript, Python and Actions) and CodeQL gate all succeeded.
+The receipt is `codeql-8e5142250-pass.json` in this report's local evidence
+directory. This closes the previously reported three findings on that PR HEAD;
+it does not dismiss main-branch findings or establish review/merge acceptance.
+Development CI run `35805133381` subsequently completed: all51 jobs pass on
+exact8e HEAD.
+
+The first app-only packaging attempt at 7f6137a4d failed before signing because
+the detached build checkout lacked the Git-ignored computer-use native assets.
+This was a build-preparation omission, not a credential regression. The failed
+output is preserved and is not an admitted app. The existing runtime-assets
+owner prepared all five exact manifest-pinned assets from canonical storage;
+its verification passed. A minimal real copy fixture through the existing
+after-pack owner also passed before repeating packaging. The copied executable
+SHA-256 is `afc1d155d45645ef65535a2997d06cf0eb23c82cc1d1097b5a8aa32a21bd4e52`.
+The normal app-only build now targets clean 8e5142250; no DMG/ZIP or GUI pass is
+inferred from build progress.
+
+### Additional embedded-asset source evidence
+
+For the completed b2cf1179e artifact only, all 1,703 distributed fonts and the
+two PDF.js WASM files match the exact lock-integrity-verified npm archives.
+`font-pdfjs-exact-archive-binding.json` records each instance and its digest.
+This is byte/source evidence, not a complete legal disposition, and does not
+cover a later artifact without its own comparison.
+
+All 61 KaTeX font files additionally match Git blobs at upstream release commit
+`2c25b47da1dd47714d4610f093325abbfa9e88b2` (`fonts/*` and
+`src/fonts/lib/Extra.otf`). The 20 WOFF variants carry embedded OFL 1.1 and
+copyright/name records; the npm root MIT license alone is therefore not the
+font-notice closure evidence. Exact records are retained in
+`katex-font-source-and-embedded-notices.json`. No font notice was invented or
+replaced, and complete font/material admission remains open.
+
+### Installed 8e5142250 credential journey
+
+The clean app-only build completed. Strict/deep signature verification passed
+for the built and separately installed copy at
+`/Users/sun/Applications/Analytix-Core-QA-8e5142250/analytix.app`.
+The unchanged independent Go package inspector passed in 2.36s against that
+installed runtime and exact source SHA. It remains a private, nonpublishable
+candidate; no new DMG/ZIP or notarization is claimed. Its actual legal audit
+again found 1,174 package instances and the same two package blockers. All
+1,705 font/PDF.js WASM asset bytes also match the archive binding above on this
+new installed candidate (`font-pdfjs-exact-archive-binding-8e5142250.json`).
+
+A separate fresh `core-credential-8e5142250` profile and task Keychain were
+created/unlocked through the existing helper with user-entered protected input.
+The old locked profile was preserved. Electron initially waited for a macOS
+default-Keychain authorization before its window appeared; a process sample
+showed SecItemAdd/AuthorizationCopyRights, before Core startup. The wait later
+cleared, without automated SecurityAgent interaction. This OS interaction is
+separate from the Core task-Keychain and Provider validation paths.
+
+The first GUI Save returned the new credential-unavailable message while the
+task Keychain was confirmed locked. Initialization stayed incomplete. Normal
+protected unlock of this new Keychain succeeded, and retrying the same GUI
+Save completed Core validation and closed onboarding. Credential entry was
+automated through the masked normal UI, not physical-human API-key entry; no
+credential value is retained in this report or its receipts.
+
+The model input was `deepseek-flash`, but the composer initially kept its prior
+`deepseek-v4-flash` selection. Selecting the exact ID through the ordinary model
+menu then sent a synthetic no-tools request and returned exactly `OK` inside
+Analytix. This is actual GUI -> Registry/Core -> stored Secret Store credential
+-> DeepSeek evidence, distinct from the earlier standalone HTTPS probe.
+
+The newly observed model handoff defect is repaired in the original onboarding
+completion owner: after successful required setup, runtime readiness and opening
+Code, apply the saved model through the existing composer-selection action
+before closing the dialog. Preview and failed setup do not change that selection.
+The three affected onboarding/composer suites pass (103 cases), and the web
+typecheck passes. These later source changes are not in the installed 8e app.
+
+The installed 8e app was then normally quit and relaunched with the same
+isolated profile in a new OS process. Onboarding did not reopen, no API key or
+task-Keychain password was re-entered, and `deepseek-flash` remained selected.
+The original `OK` history was recovered. A second no-tools request returned
+exactly `RESTORED`. The two GUI requests and prior standalone request remain
+within the authorized bounded synthetic test scope; no increase to the US$5
+budget or automatic renewal was made. These results are recorded without
+secrets in `credential-gui-results-8e5142250.json`.
+
+### Locked restart recovery and GUI repair checkpoint
+
+The installed8e app was normally quit, its exact QA task Keychain explicitly
+locked, and the app restarted. It retained the configured Provider/model and
+showed temporarily-unavailable recovery rather than onboarding. After normal
+protected unlock, Workbench Retry restored Ready without API-key re-entry.
+Settings had silently swallowed the failed Registry list and appeared empty;
+the owning component now displays a safe unavailable state and retries the
+existing Registry operation without resetting saved configuration.
+
+Together with the validated-model composer handoff, four focused renderer
+suites pass107 tests and web TypeScript checking passes. These source fixes
+are not claimed as installed8e behavior.
+
+The user subsequently authorized ordinary source-development credential reuse
+across tasks through a persistent development authority, while retaining
+explicit isolated task Keychains for release/QA and OS-backed Production
+storage. The existing launcher currently applies task Keychain admission to
+all isolated development profiles; the next implementation addresses that
+calling boundary through existing Registry/Secret Store owners. No persistent
+development bootstrap or new-mode validation is claimed at this checkpoint.

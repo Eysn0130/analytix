@@ -143,7 +143,7 @@ async function enter(input: HTMLInputElement, value: string) {
   })
 }
 
-async function mount() {
+async function mount(expectCredential = true) {
   const form = normalizeAppSettings({
     version: 1, locale: 'en', theme: 'system', uiFontScale: 'small',
     provider: defaultModelProviderSettings(), runtime: defaultAnalytixRuntimeSettings(),
@@ -162,7 +162,7 @@ async function mount() {
     }} />)
   })
   expect(registry.calls.some((call) => call.operation === 'list')).toBe(true)
-  expect(keyInput().type).toBe('password')
+  if (expectCredential) expect(keyInput().type).toBe('password')
 }
 
 async function addDraft() {
@@ -414,4 +414,22 @@ describe('mounted Provider credential lifecycle', () => {
     expect(notices.length).toBe(0)
     expect(patches.length).toBe(0)
   })
+})
+
+it('shows unavailable state and retries without replacing saved providers or credentials', async () => {
+  await unmount()
+  const before = registry.snapshot()
+  registry.failNext('list')
+  await mount(false)
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('modelProviderRegistryUnavailable')
+  expect(registry.snapshot()).toEqual(before)
+  expect(registry.mutations()).toEqual([])
+  expect(patches).toEqual([])
+  await click('modelProviderRegistryRetry')
+  expect(container.querySelector('[role="alert"]')).toBeNull()
+  expect(keyInput().type).toBe('password')
+  expect(keyInput().value).toBe('')
+  expect(registry.snapshot()).toEqual(before)
+  expect(registry.mutations()).toEqual([])
+  expect(patches).toEqual([])
 })
