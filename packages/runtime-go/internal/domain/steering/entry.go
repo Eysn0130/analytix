@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -418,7 +419,10 @@ func exactIntField(record map[string]any, key string) int {
 		return value
 	case float64:
 		if !math.IsNaN(value) && value >= float64(math.MinInt) && value < -float64(math.MinInt) && math.Trunc(value) == value {
-			return int(value)
+			parsed, err := strconv.Atoi(strconv.FormatFloat(value, 'f', 0, 64))
+			if err == nil {
+				return parsed
+			}
 		}
 	}
 	return 0

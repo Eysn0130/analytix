@@ -446,3 +446,20 @@ The original profile and Keychain remain intact and locked, with no Provider
 committed. A fresh candidate must still complete normal protected entry, Save,
 response and restart in its own approved isolated GUI session. Direct HTTPS200
 above remains separate evidence. The temporary DMG mount was cleanly detached.
+
+
+### Subsequent checked conversion checkpoint
+
+Credential repair `7f6137a4d` was normally pushed to the original branch. Its new
+private app is being built with the normal Core owners and `--dir`, before any
+new container packaging or GUI claim. The build checkout is detached at that
+exact source; b2cf artifacts and original profile remain preserved.
+
+For remaining CodeQL alerts 60/73/77, the three float-to-host-int conversions
+now retain their finite/integral/exclusive-upper checks and use the standard
+library's range-checked decimal conversion instead of a narrowing cast. The
+int/int64 input semantics are unchanged. No alert suppression, query change or
+main-branch disposition was used. All three affected owner packages passed
+(steering 0.520s, event 0.883s, subagent 7.675s), including their existing
+lower/upper/NaN/fraction/negative-zero regressions. Whether this resolves remote
+CodeQL remains subject to analysis of the new pushed HEAD.

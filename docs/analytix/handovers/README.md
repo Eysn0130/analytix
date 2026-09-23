@@ -16,7 +16,10 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   `e40693268b3bca6c8ae1d71253263dbe98efe1b1` 和全部有效后继。
 - 保留制品 SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` 与 DELIVERY
   `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` 及全部有效后继。
-- 当前制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
+- 新源码 `7f6137a4d` 已正常 push：生产/QA credential 路径已审计，普通用户默认
+  不需第二密码；新增初始化延后选中、Core 存储凭据可用性检查和 unavailable
+  恢复。针对性检查通过；新 app 正在构建，旧 b2cf 安装版不包含此修复。
+- 当前完成的容器制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
   `d6ca0b5dbd97a2f8eb8cd11aa1ea2beb336bd48c`；准确当前 HEAD/tree 在恢复时重读 Git。
 - 本轮证据：[新制品与发行准入接续](../qa/pr28-core-release-admission-2026-09-22.md)。
   clean Core1.0.6 私有 app/DMG/ZIP 完成；全部8,639文件/链接与独立安装副本
@@ -33,14 +36,16 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   和已通过 A1/A2 恢复不重做。
 - 本机隔离 Mac 验收已获准，安装版已到正常 Provider onboarding。用户输入 Key
   后 Save 报 Registry503；现有任务 Keychain 元数据确认为 locked，正常解锁
-  返回 b1_keychain_pty_failed，复查仍锁定，尚未区分密码/超时/系统拒绝。保留原配置和输入，不替换 Keychain。单独授权的官方
+  第二次正常解锁返回51、无信号、43ms，对应系统认证失败；用户已确认输入原密码，
+  不重复归咎输入，不推断历史创建原因。独立合成新 Keychain 通过同一 helper 的
+  创建/解锁，原配置与 Keychain 保留。单独授权的官方
   DeepSeek `deepseek-flash` 探测 HTTP200、10tokens，证明 Key/模型有效，不能
   替代安装版保存、Agent/工具、重启历史及升级恢复验收。测试总上限 US$5。
 - Developer ID/公证尚未配置；Apple 正常账户入口此前显示 Access Unavailable。
   production publication authority 尚未建立；现有 Keychain 安全存储探测的
   entitlement 缺项保留，不生成明文生产私钥，也不另建发布信任机制。
-- 当前范围源码外发已通过原接口重审，正常 push 已到 b2cf1179e；旧 NOT_CLEARED
-  为历史状态。该 HEAD 的 Development CI 51任务全通过；CodeQL 剩3 high，
+- 当前范围源码外发已通过原接口重审，正常 push 已到7f6137a4d；旧 NOT_CLEARED
+  为历史状态。b2cf 的 Development CI 51任务全通过；后继 HEAD 必须重读 CI；CodeQL 原剩3 high，
   精确 HEAD review 与其余适用门禁未关闭，PR28 仍 Draft/BLOCKED，真实 main
   仍 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。满足条件才 merge、验证 main
   并由合格来源发行；不换传输路径绕过拒绝。

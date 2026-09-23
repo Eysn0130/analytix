@@ -2,6 +2,7 @@ package event
 
 import (
 	"math"
+	"strconv"
 	"strings"
 
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -97,7 +98,10 @@ func generalCompactionNumeric(value any) int {
 		}
 	case float64:
 		if !math.IsNaN(typed) && typed >= float64(math.MinInt) && typed < -float64(math.MinInt) && math.Trunc(typed) == typed {
-			return int(typed)
+			parsed, err := strconv.Atoi(strconv.FormatFloat(typed, 'f', 0, 64))
+			if err == nil {
+				return parsed
+			}
 		}
 	}
 	return -1
