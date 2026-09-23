@@ -1049,6 +1049,21 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
     function parseJSON(response) {
       try { return JSON.parse(response && response.body || '{}'); } catch { return {}; }
     }
+    const replayCursorByThread = new Map();
+    function publicReplayEvents(batch) {
+      return batch.flatMap((event) => event && event.kind === 'general_terminal_batch' &&
+        Array.isArray(event.events) ? event.events : [event]);
+    }
+    async function acknowledgeReplayBatch(threadId, streamId, batch) {
+      if (batch.some((event) => event && event.kind === 'accepted_final_batch')) return false;
+      const maxSeq = batch.reduce((seq, event) =>
+        Number.isSafeInteger(event && event.seq) ? Math.max(seq, event.seq) : seq, 0);
+      if (maxSeq === 0) return true;
+      const acknowledged = await api.runtime.ackSseEvent(streamId, maxSeq).catch(() => false);
+      if (acknowledged) replayCursorByThread.set(threadId,
+        Math.max(replayCursorByThread.get(threadId) || 0, maxSeq));
+      return acknowledged;
+    }
     async function request(path, method, payload) {
       const response = await api.runtime.runtimeRequest(
         path,
@@ -1066,6 +1081,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const events = [];
       const errors = [];
       let settled = false;
+      let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
         const finish = (ok) => {
@@ -1078,18 +1094,21 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
-          events.push(...batch);
-          const serialized = JSON.stringify(events);
-          const ok = serialized.includes('turn_started') &&
-            serialized.includes('assistant_text_delta') &&
-            serialized.includes('usage') &&
-            serialized.includes('turn_completed') &&
-            serialized.includes(expectedText) &&
+          pendingAck = pendingAck.then((ok) => ok && acknowledgeReplayBatch(threadId, streamId, batch));
+          events.push(...publicReplayEvents(batch));
+          const turnEvents = events.filter((event) => event && event.turnId === turnId);
+          const kinds = new Set(turnEvents.map((event) => event.kind));
+          const assistantText = turnEvents.some((event) =>
+            (event.kind === 'assistant_text_delta' &&
+              (event.text || event.delta || '').includes(expectedText)) ||
+            (event.kind === 'item_completed' && event.item &&
+              event.item.kind === 'assistant_text' &&
+              (event.item.text || '').includes(expectedText)));
+          const ok = kinds.has('turn_started') && assistantText &&
+            kinds.has('usage') && kinds.has('turn_completed') &&
             (!requireToolEvents ||
-              (serialized.includes('tool_call_ready') &&
-                serialized.includes('tool_call_started') &&
-                serialized.includes('tool_call_finished'))) &&
-            (serialized.includes('"turnId":"' + turnId + '"') || serialized.includes('"turn_id":"' + turnId + '"'));
+              (kinds.has('tool_call_ready') && kinds.has('tool_call_started') &&
+                kinds.has('tool_call_finished')));
           if (ok) finish(true);
         }));
         unsubscribers.push(api.runtime.onSseError((payload) => {
@@ -1099,22 +1118,24 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         }));
         unsubscribers.push(api.runtime.onSseEnd((payload) => {
           if (!payload || payload.streamId !== streamId) return;
-          const serialized = JSON.stringify(events);
-          finish(serialized.includes('turn_completed') &&
-            serialized.includes(expectedText) &&
-            (!requireToolEvents ||
-              (serialized.includes('tool_call_ready') &&
-                serialized.includes('tool_call_started') &&
-                serialized.includes('tool_call_finished'))));
+          const turnEvents = events.filter((event) => event && event.turnId === turnId);
+          const kinds = new Set(turnEvents.map((event) => event.kind));
+          finish(kinds.has('turn_completed') && turnEvents.some((event) =>
+            event.kind === 'item_completed' && event.item &&
+            event.item.kind === 'assistant_text' &&
+            (event.item.text || '').includes(expectedText)) &&
+            (!requireToolEvents || (kinds.has('tool_call_ready') &&
+              kinds.has('tool_call_started') && kinds.has('tool_call_finished'))));
         }));
       });
-      await api.runtime.startSse(threadId, 0, streamId);
+      await api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId);
       const ok = await waitForReplay;
+      const acked = await pendingAck;
       await api.runtime.stopSse(streamId).catch(() => false);
       for (const unsubscribe of unsubscribers) {
         try { unsubscribe(); } catch {}
       }
-      return { ok, eventCount: events.length, errorCount: errors.length,
+      return { ok: ok && acked, eventCount: events.length, errorCount: errors.length,
         eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))] };
     }
     async function collectGateReplay(threadId, turnId, requiredKind, idField) {
@@ -1122,6 +1143,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const events = [];
       const errors = [];
       let settled = false;
+      let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
         const finish = (result) => {
@@ -1143,7 +1165,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
-          events.push(...batch);
+          pendingAck = pendingAck.then((ok) => ok && acknowledgeReplayBatch(threadId, streamId, batch));
+          events.push(...publicReplayEvents(batch));
           inspect();
         }));
         unsubscribers.push(api.runtime.onSseError((payload) => {
@@ -1157,13 +1180,14 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           if (!settled) finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length });
         }));
       });
-      await api.runtime.startSse(threadId, 0, streamId);
+      await api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId);
       const result = await waitForReplay;
+      const acked = await pendingAck;
       await api.runtime.stopSse(streamId).catch(() => false);
       for (const unsubscribe of unsubscribers) {
         try { unsubscribe(); } catch {}
       }
-      return result;
+      return { ...result, ok: result.ok && acked };
     }
     try {
       if (!api) return out;
@@ -1759,8 +1783,8 @@ async function runActualPackagedSessionSoak() {
   const providerAttachmentPromptSeen = providerRequests.some((item) => item.bodyContainsAttachmentPrompt)
   const providerAttachmentFallbackSeen = providerRequests.some((item) =>
     item.bodyContainsAttachmentPrompt &&
-    item.bodyContainsAttachmentFilePath &&
-    item.bodyContainsAttachmentText
+    item.bodyContainsAttachmentText &&
+    !item.bodyContainsAttachmentFilePath
   )
   const providerApprovalDenySeen = providerRequests.some((item) =>
     item.bodyContainsApprovalDenyPrompt &&
@@ -1833,7 +1857,7 @@ async function runActualPackagedSessionSoak() {
     'packaged-session-sse-replay',
     'Packaged session SSE replay',
     renderer?.sseReplayOk === true,
-    renderer?.error || 'packaged app must replay turn events including assistant delta, usage, and turn_completed',
+    renderer?.error || 'packaged app must replay completed assistant text, usage, and turn_completed for the current turn',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
   checks.push(actualCheck(
@@ -1866,7 +1890,7 @@ async function runActualPackagedSessionSoak() {
       renderer?.attachmentSseReplayOk === true &&
       providerAttachmentPromptSeen &&
       providerAttachmentFallbackSeen,
-    renderer?.error || 'packaged app must upload an attachment, preserve localFilePath, send bounded FilePath text fallback to provider, and replay the turn',
+    renderer?.error || 'packaged app must upload a public document attachment, send bounded text to the provider without a local path, and replay the turn',
     renderer?.mimoPlanReplayOk === true ? 'failed' : 'skipped'
   ))
   checks.push(actualCheck(
@@ -1939,11 +1963,14 @@ async function runActualPackagedSessionSoak() {
         threadCreateOk: renderer.threadCreateOk === true,
         turnCreateOk: renderer.turnCreateOk === true,
         sseReplayOk: renderer.sseReplayOk === true,
+        initialReplay: renderer.initialReplay || null,
         toolTurnOk: renderer.toolTurnOk === true,
         toolTimelineOk: renderer.toolTimelineOk === true,
+        toolReplay: renderer.toolReplay || null,
         mimoPlanThreadOk: renderer.mimoPlanThreadOk === true,
         mimoPlanTurnOk: renderer.mimoPlanTurnOk === true,
         mimoPlanReplayOk: renderer.mimoPlanReplayOk === true,
+        mimoPlanReplay: renderer.mimoPlanReplay || null,
         attachmentUploadOk: renderer.attachmentUploadOk === true,
         attachmentTurnOk: renderer.attachmentTurnOk === true,
         attachmentSseReplayOk: renderer.attachmentSseReplayOk === true,
