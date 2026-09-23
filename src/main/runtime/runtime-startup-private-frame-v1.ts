@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import type { Writable } from 'node:stream'
 import {
   goCompatibleJSONStringifyV1,
@@ -105,9 +106,12 @@ export function encodeRuntimeStartupPrivateFrameV1(
     throw fixedStartupFrameErrorV1()
   }
   const developmentProviderAuthorityDir = input.developmentProviderAuthorityDir
-  if (developmentProviderAuthorityDir !== undefined && (darwinSecretStoreKeychainBinding ||
+  if (developmentProviderAuthorityDir !== undefined && (
+    typeof developmentProviderAuthorityDir !== 'string' || darwinSecretStoreKeychainBinding ||
     !/^\/[A-Za-z0-9._/-]+\/provider-credentials$/.test(developmentProviderAuthorityDir) ||
-    developmentProviderAuthorityDir.includes('/../') || developmentProviderAuthorityDir.length > 1024)) throw fixedStartupFrameErrorV1()
+    posix.normalize(developmentProviderAuthorityDir) !== developmentProviderAuthorityDir ||
+    developmentProviderAuthorityDir.length > 1024
+  )) throw fixedStartupFrameErrorV1()
   if (!authority && !hostScheduleMcpBinding && !darwinSecretStoreKeychainBinding && !developmentProviderAuthorityDir) {
     throw fixedStartupFrameErrorV1()
   }
