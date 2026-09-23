@@ -4262,7 +4262,7 @@ export function sanitizeRuntimeResponse(
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
   const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
-    /^\/v1\/threads\/[^/]+\/fork$/.test(path)
+    (/^\/v1\/threads\/[^/]+\/fork$/.test(path) || (path === '/v1/threads' && method === 'GET'))
   if (packagedForkDiagnostic) {
     console.error('[packaged-fork-schema] ' + JSON.stringify({
       phase: 'response', status: response.status, ok: response.ok

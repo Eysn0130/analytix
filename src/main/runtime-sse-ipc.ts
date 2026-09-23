@@ -519,6 +519,12 @@ export function registerRuntimeSseIpc(options: {
                     break
                   }
                   if (decision.status !== 'emit') {
+                    if (process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1') {
+                      console.error('[packaged-sse-schema] ' + JSON.stringify({
+                        kind: /^event: ([A-Za-z_]+)$/m.exec(block)?.[1] ?? '',
+                        reason: decision.reason
+                      }))
+                    }
                     protocolViolationReason = decision.reason
                     break
                   }

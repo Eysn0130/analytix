@@ -1751,6 +1751,7 @@ async function runActualPackagedSessionSoak() {
   let approvalDenyFileAbsent = false
   let approvalAllowFileMatches = false
   let forkDiagnostic = null
+  let sseDiagnostic = null
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -1816,6 +1817,13 @@ async function runActualPackagedSessionSoak() {
       .slice(0, 8)
       .map((line) => {
         try { return JSON.parse(line.slice(line.indexOf('[packaged-fork-schema] ') + '[packaged-fork-schema] '.length)) }
+        catch { return { parseFailed: true } }
+      })
+    sseDiagnostic = stderr.split(/\r?\n/)
+      .filter((line) => line.includes('[packaged-sse-schema] '))
+      .slice(0, 12)
+      .map((line) => {
+        try { return JSON.parse(line.slice(line.indexOf('[packaged-sse-schema] ') + '[packaged-sse-schema] '.length)) }
         catch { return { parseFailed: true } }
       })
     if (contractProvider) await contractProvider.close()
@@ -2100,6 +2108,7 @@ async function runActualPackagedSessionSoak() {
     checks,
     renderer: rendererEvidence,
     forkDiagnostic,
+    sseDiagnostic,
     launchError: summarizeError(launchError)
   })
   if (secretFinding) {
@@ -2138,6 +2147,7 @@ async function runActualPackagedSessionSoak() {
     },
     renderer: rendererEvidence,
     forkDiagnostic,
+    sseDiagnostic,
     provider: {
       localContractProviderUsed: Boolean(contractProvider),
       externalProviderNetworkCalled: false,
