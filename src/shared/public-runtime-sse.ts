@@ -5,8 +5,10 @@ import {
 } from './public-runtime-content'
 import {
   AcceptedFinalDeliveryBatchV2Schema,
+  ApprovalEvent,
   GeneralTerminalDeliveryBatchV1Schema,
-  PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema
+  PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema,
+  UserInputEvent
 } from '../../packages/runtime/src/contracts/events.js'
 import type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
 import {
@@ -202,13 +204,13 @@ const PUBLIC_EVENT_CONTRACTS: Readonly<Record<string, PublicEventContract>> = {
     'parentThreadId', 'sourceTurnId', 'createdAt', 'pausedAt', 'resumedAt'
   ], validateChildPauseEvent),
   approval_requested: eventContract([
-    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode'
+    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode', 'summary'
   ], validateApprovalEvent),
   approval_resolved: eventContract([
-    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode'
+    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode', 'summary'
   ], validateApprovalEvent),
-  user_input_requested: eventContract(['inputId', 'status'], validateUserInputEvent),
-  user_input_resolved: eventContract(['inputId', 'status'], validateUserInputEvent),
+  user_input_requested: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
+  user_input_resolved: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
   compaction_started: eventContract(['auto'], validateCompactionEvent),
   compaction_completed: eventContract([
     'summary', 'replacedTokens', 'auto', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
@@ -666,17 +668,18 @@ function validateApprovalEvent(event: Record<string, unknown>): boolean {
   const allowed = event.kind === 'approval_requested'
     ? new Set(['pending'])
     : new Set(['allowed', 'denied', 'expired'])
-  return eventHasTurn(event) && isSafePublicId(event.approvalId) && isSafeToolName(event.toolName) &&
+  return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.approvalId) && isSafeToolName(event.toolName) &&
     typeof event.status === 'string' && allowed.has(event.status) &&
-    isOptionalEnum(event.approvalPolicy, APPROVAL_POLICIES) && isOptionalEnum(event.sandboxMode, SANDBOX_MODES)
+    isOptionalEnum(event.approvalPolicy, APPROVAL_POLICIES) && isOptionalEnum(event.sandboxMode, SANDBOX_MODES) &&
+    ApprovalEvent.safeParse(event).success
 }
 
 function validateUserInputEvent(event: Record<string, unknown>): boolean {
   const allowed = event.kind === 'user_input_requested'
     ? new Set(['pending'])
     : new Set(['submitted', 'cancelled'])
-  return eventHasTurn(event) && isSafePublicId(event.inputId) &&
-    typeof event.status === 'string' && allowed.has(event.status)
+  return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.inputId) &&
+    typeof event.status === 'string' && allowed.has(event.status) && UserInputEvent.safeParse(event).success
 }
 
 function validateCompactionEvent(event: Record<string, unknown>): boolean {

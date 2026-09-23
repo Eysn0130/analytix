@@ -909,6 +909,32 @@ describe('public gate item replay', () => {
   })
 })
 
+describe('public gate request event replay', () => {
+  const base = { seq: 171, timestamp: '2026-09-23T00:00:00Z',
+    threadId: 'thread-strict', turnId: 'turn-strict', itemId: 'item-gate' }
+  const events = [
+    { ...base, kind: 'approval_requested', approvalId: 'approval_a1b2c3d4e5f6',
+      toolName: 'write_file', status: 'pending', approvalPolicy: 'on-request',
+      sandboxMode: 'workspace-write', summary: 'Approve write_file' },
+    { ...base, kind: 'user_input_requested', inputId: 'input_a1b2c3d4e5f6',
+      status: 'pending', prompt: 'Choose a path', questions: [
+        { id: 'input_a1b2c3d4e5f6_1', header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+  ]
+
+  it.each(events)('accepts the public $kind event produced by Core', (event) => {
+    expect(isPublicSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 171 })
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, {
+      ...event, continuationReceiptId: 'private'
+    }), event.threadId, new PublicRuntimeEventFilter())).toEqual({
+      status: 'invalid', reason: 'invalid_public_projection'
+    })
+  })
+})
+
 function publicChildLedger(stage = 'background_job_delivery_pending', status = 'pending', callId?: string) {
   const delivery = stage.startsWith('background_job_delivery_')
   const autoContinue = stage.startsWith('background_job_auto_continue_')
