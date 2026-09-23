@@ -1292,6 +1292,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
       const turn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session soak.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1307,6 +1308,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1330,6 +1332,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.mimoPlanThreadOk = !!mimoPlanThreadId;
       const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
         prompt: 'Run packaged MiMo plan mode.',
+        async: true,
         mode: 'plan',
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
@@ -1365,6 +1368,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.attachmentMetadataOk = attachment.localFilePath === attachmentLocalPath;
       const attachmentTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session attachment fallback.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         attachmentIds: [attachmentId],
@@ -1379,6 +1383,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
       const approvalDenyTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval deny.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'always',
@@ -1400,6 +1405,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
       const approvalAllowTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval allow.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'always',
@@ -1421,6 +1427,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
       const userInputTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session user input.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1452,6 +1459,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.forkOk = !!forkId && fork.parentThreadId === threadId;
       const forkTurn = await request('/v1/threads/' + encodeURIComponent(forkId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from fork.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1470,6 +1478,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.resumeOk = resume.session_id === threadId && !!resumeId;
       const resumeTurn = await request('/v1/threads/' + encodeURIComponent(resumeId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from resume.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
