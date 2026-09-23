@@ -7,11 +7,17 @@ import i18n from '../i18n'
 import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
 
 const registryMock = vi.hoisted(() => ({
-  getProvider: vi.fn()
+  getProvider: vi.fn(),
+  checkCredentialReadiness: vi.fn()
 }))
 
 vi.mock('../agent/registry', () => ({
   getProvider: registryMock.getProvider
+}))
+
+vi.mock('../account/local-provider-readiness', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../account/local-provider-readiness')>(),
+  checkLocalProviderReadiness: registryMock.checkCredentialReadiness
 }))
 
 import { createNavigationActions } from './chat-store-navigation-actions'
@@ -102,6 +108,7 @@ describe('chat-store navigation workspace selection', () => {
   beforeEach(() => {
     rendererRuntimeClient.invalidateSettings()
     registryMock.getProvider.mockReset()
+    registryMock.checkCredentialReadiness.mockReset().mockResolvedValue({ kind: 'ready', providerId: 'deepseek' })
   })
 
   afterEach(() => {
@@ -142,6 +149,24 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.runtimeConnection).toBe('ready')
     expect(harness.loadComposerModels).toHaveBeenCalledTimes(1)
     expect(harness.refreshThreads).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps initialization intact when secure storage becomes unavailable after restart', async () => {
+    registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'recovery', message: 'Saved connection unavailable; retry in Settings.' })
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '~/.analytix/default_workspace', runtime: { providerId: 'deepseek', model: 'deepseek-flash' } })) },
+      runtime: { restartRuntime: vi.fn(async () => undefined) }
+    } })
+    const harness = buildHarness({ initialSetupOpen: false, runtimeConnection: 'idle' } as Partial<ChatState>)
+    await harness.actions.probeRuntime('user', { restart: true })
+    expect(harness.state.initialSetupOpen).toBe(false)
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(registryMock.checkCredentialReadiness).toHaveBeenCalledTimes(1)
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'ready', providerId: 'deepseek' })
+    await harness.actions.probeRuntime('user')
+    expect(harness.state.runtimeConnection).toBe('ready')
+    expect(harness.state.initialSetupOpen).toBe(false)
   })
 
   it('keeps projected runtime restart failures safe and actionable in renderer state', async () => {
@@ -349,7 +374,7 @@ describe('chat-store navigation workspace selection', () => {
         route: 'settings',
         initialSetupOpen: false,
         settingsSection: 'providers',
-        error: 'Local Provider recovery is required. Open Settings to review the selected Provider.'
+        error: 'Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.'
       }
     }
   ])('routes a $name without probing the model runtime', async ({ registry, expected }) => {

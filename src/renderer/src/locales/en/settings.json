@@ -779,6 +779,8 @@
   "firstRunTitle": "Set up the essentials before you start chatting.",
   "firstRunSubtitle": "Choose your language and model provider, then add the matching API key.",
   "firstRunProviderLabel": "Model provider",
+  "firstRunModelLabel": "Model",
+  "firstRunSecureStorage": "Your API key is stored securely on this Mac. Saving also checks the Provider connection.",
   "firstRunProviderDeepseekDesc": "deepseek-v4 series",
   "firstRunProviderXiaomiDesc": "MiMo series",
   "firstRunProviderMinimaxDesc": "M series",

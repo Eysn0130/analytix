@@ -82,10 +82,17 @@ function registryHarness(initialProviders: PublicProvider[] = [], selectedProvid
   })
   const request = vi.fn(async (input: ProviderRegistryRequest): Promise<ProviderRegistryResult> => {
     if (input.operation === 'list') return snapshot()
+    if (input.operation === 'probe') return {
+      schemaVersion: 1, registryRevision: String(revision), registryIncarnation: REGISTRY_INCARNATION,
+      providerId: input.providerId, providerRevision: input.expected.providerRevision,
+      providerGeneration: input.expected.providerGeneration, providerIncarnation: input.expected.providerIncarnation,
+      status: 'reachable', code: 200, modelCount: 2, latencyMs: 1
+    }
     if (input.operation === 'connect' || input.operation === 'update') {
       const existing = providers.find((provider) => provider.id === input.provider.id)
       const configured = input.credential.kind === 'set' || existing?.credentialConfigured === true
       revision += 1
+      if (input.operation === 'connect' && !selected && !input.deferSelection) selected = input.provider.id
       providers = [
         ...providers.filter((provider) => provider.id !== input.provider.id),
         {
@@ -500,7 +507,7 @@ describe('credential persistence', () => {
     expect(saveSettings).toHaveBeenCalledTimes(1)
   })
 
-  it('verifies Registry commit and selection before persisting key-free settings', async () => {
+  it('verifies the committed credential and connection before settings and final selection', async () => {
     const drafts = initialSetupDrafts(settings())
     drafts.deepseek = { ...drafts.deepseek, apiKey: 'synthetic-setup-order' }
     const registry = registryHarness()
@@ -526,13 +533,14 @@ describe('credential persistence', () => {
       'registry:list',
       'registry:connect',
       'registry:list',
+      'registry:probe',
+      'settings:save',
       'registry:select',
-      'registry:list',
-      'settings:save'
+      'registry:list'
     ])
   })
 
-  it('does not persist pseudo-complete settings when post-select Registry verification is stale', async () => {
+  it('reports failure when final Registry selection cannot be verified', async () => {
     const drafts = initialSetupDrafts(settings())
     drafts.deepseek = { ...drafts.deepseek, apiKey: 'synthetic-stale-selection' }
     const registry = registryHarness()
@@ -554,7 +562,7 @@ describe('credential persistence', () => {
       requestProviderRegistry,
       saveSettings
     })).rejects.toThrow('Provider selection could not be verified')
-    expect(saveSettings).not.toHaveBeenCalled()
+    expect(saveSettings).toHaveBeenCalledTimes(1)
   })
 
   it('replaces an existing credential without overwriting Registry provider metadata', async () => {
@@ -868,5 +876,48 @@ describe('initialSetupProfileId', () => {
     expect(initialSetupProfileId({ presetId: 'deepseek', mode: 'api' })).toBe('deepseek')
     expect(initialSetupProfileId({ presetId: 'xiaomi', mode: 'token-plan' })).toBe('xiaomi-token-plan')
     expect(initialSetupProfileId({ presetId: 'minimax', mode: 'api' })).toBe('minimax')
+  })
+})
+
+
+describe('initialization completion and recovery boundaries', () => {
+  it('does not select or mark complete when the stored credential fails the Provider probe', async () => {
+    const registry = registryHarness()
+    const drafts = initialSetupDrafts(settings())
+    drafts.deepseek.apiKey = 'synthetic-rejected-key'
+    const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+    const request = vi.fn(async (input: ProviderRegistryRequest): Promise<ProviderRegistryResult> => {
+      const result = await registry.request(input)
+      return input.operation === 'probe' && 'status' in result
+        ? { ...result, status: 'auth_failed', code: 401, modelCount: 0 } : result
+    })
+    await expect(persistInitialSetup({ settings: settings(), drafts,
+      selection: { presetId: 'deepseek', mode: 'api' }, requestProviderRegistry: request, saveSettings
+    })).rejects.toThrow('connection could not be verified')
+    expect(saveSettings).not.toHaveBeenCalled()
+    expect(registry.snapshot().selectedProviderId).toBeUndefined()
+    expect(registry.snapshot().providers[0].credentialConfigured).toBe(true)
+    expect(request.mock.calls.some(([r]) => r.operation === 'disconnect' || r.operation === 'explicit-delete')).toBe(false)
+  })
+
+  it('retains the committed credential after settings failure and retries without a new key', async () => {
+    const registry = registryHarness()
+    const drafts = initialSetupDrafts(settings())
+    drafts.deepseek.apiKey = 'synthetic-retry-key'
+    await expect(persistInitialSetup({ settings: settings(), drafts,
+      selection: { presetId: 'deepseek', mode: 'api', model: 'deepseek-flash' },
+      requestProviderRegistry: registry.request,
+      saveSettings: async () => { throw new Error('synthetic settings write failure') }
+    })).rejects.toThrow('settings write failure')
+    expect(registry.snapshot().selectedProviderId).toBeUndefined()
+    const count = registry.request.mock.calls.length
+    const saved = await persistInitialSetup({ settings: settings(), drafts: initialSetupDrafts(settings()),
+      selection: { presetId: 'deepseek', mode: 'api', model: 'deepseek-flash' },
+      requestProviderRegistry: registry.request, saveSettings: async next => next
+    })
+    expect(saved.runtime.model).toBe('deepseek-flash')
+    expect(registry.snapshot().selectedProviderId).toBe('deepseek')
+    expect(registry.request.mock.calls.slice(count).some(([r]) =>
+      r.operation === 'connect' || r.operation === 'credential-replace')).toBe(false)
   })
 })

@@ -29,6 +29,7 @@ import { isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/wor
 import { buildClawRuntimePrompt } from '@shared/app-settings'
 import { parseRuntimeStatusPublicV1 } from '@shared/analytix-runtime-status'
 import {
+  checkLocalProviderReadiness,
   localProviderRecoveryReadiness,
   resolveLocalProviderReadiness
 } from '../account/local-provider-readiness'
@@ -410,6 +411,13 @@ export function createNavigationActions(
       }
       const p = getProvider()
       await p.connect()
+      const providerReadiness = await checkLocalProviderReadiness(
+        (request) => window.analytix.providerRegistry.request(request)
+      )
+      if (providerReadiness.kind !== 'ready') {
+        throw new Error(providerReadiness.kind === 'recovery'
+          ? providerReadiness.message : 'Choose a Provider in Settings to finish setup.')
+      }
       if (probeGeneration !== runtimeProbeGeneration &&
           probeGeneration !== activeUserRuntimeProbeGeneration) return
       if (mode === 'background' && activeUserRuntimeProbeGeneration !== 0) return

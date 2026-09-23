@@ -71,6 +71,7 @@ type ProviderRegistryService interface {
 	Disconnect(context.Context, providerregistryapp.DisconnectCommand) (domainregistry.Provider, error)
 	ExplicitDelete(context.Context, providerregistryapp.ExplicitDeleteCommand) error
 	Probe(context.Context, providerregistryapp.ProviderOperationCommand) (providerregistryapp.ProviderProbeResult, error)
+	CheckCredential(context.Context, providerregistryapp.ProviderOperationCommand) error
 	DiscoverModels(context.Context, providerregistryapp.ProviderOperationCommand) (domainregistry.Provider, error)
 	ObserveAccount(context.Context, providerregistryapp.ProviderOperationCommand) (providerregistryapp.ProviderAccountObservationResult, error)
 	Recover(context.Context) error
@@ -118,6 +119,7 @@ const (
 	providerRegistryPathDisconnect
 	providerRegistryPathCredential
 	providerRegistryPathProbe
+	providerRegistryPathCredentialCheck
 	providerRegistryPathDiscoverModels
 	providerRegistryPathObserveAccount
 	providerRegistryPathPrivateLegacyMigrationPrepare
@@ -165,10 +167,11 @@ type providerRegistryCredentialRequest struct {
 }
 
 type providerRegistryConnectRequest struct {
-	SchemaVersion int                               `json:"schemaVersion"`
-	Expected      providerRegistryExpectedRequest   `json:"expected"`
-	Provider      domainregistry.ProviderInput      `json:"provider"`
-	Credential    providerRegistryCredentialRequest `json:"credential"`
+	DeferSelection bool                              `json:"deferSelection,omitempty"`
+	SchemaVersion  int                               `json:"schemaVersion"`
+	Expected       providerRegistryExpectedRequest   `json:"expected"`
+	Provider       domainregistry.ProviderInput      `json:"provider"`
+	Credential     providerRegistryCredentialRequest `json:"credential"`
 }
 
 type providerRegistryUpdateRequest struct {
@@ -621,6 +624,12 @@ func (handlers ProviderRegistryHandlers) Handle(w http.ResponseWriter, r *http.R
 			return
 		}
 		handlers.handleProbe(w, r, path.providerID)
+	case providerRegistryPathCredentialCheck:
+		if r.Method != http.MethodPost {
+			writeProviderRegistryFailure(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		handlers.handleCredentialCheck(w, r, path.providerID)
 	case providerRegistryPathDiscoverModels:
 		if r.Method != http.MethodPost {
 			writeProviderRegistryFailure(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -1914,7 +1923,8 @@ func (handlers ProviderRegistryHandlers) handleConnect(w http.ResponseWriter, r 
 		return
 	}
 	provider, err := handlers.Service.Connect(r.Context(), providerregistryapp.ConnectCommand{
-		Expected: expected, Provider: request.Provider, CredentialPurpose: purpose, Credential: credential,
+		DeferSelection: request.DeferSelection,
+		Expected:       expected, Provider: request.Provider, CredentialPurpose: purpose, Credential: credential,
 	})
 	if err != nil {
 		writeProviderRegistryServiceError(w, err)
@@ -2042,6 +2052,34 @@ func (handlers ProviderRegistryHandlers) handleCredentialReplace(w http.Response
 		return
 	}
 	writeProviderRegistryMutation(w, expected, provider)
+}
+
+func (handlers ProviderRegistryHandlers) handleCredentialCheck(w http.ResponseWriter, r *http.Request, providerID string) {
+	_, expected, ok := decodeProviderRegistryExpectedOnly(w, r)
+	if !ok || expected.ProviderCredentialPurpose == "" {
+		if ok {
+			writeProviderRegistryFailure(w, http.StatusBadRequest, "invalid_request")
+		}
+		return
+	}
+	if err := handlers.Service.CheckCredential(r.Context(), providerregistryapp.ProviderOperationCommand{
+		Expected: expected, ProviderID: providerID,
+	}); err != nil {
+		writeProviderRegistryServiceError(w, err)
+		return
+	}
+	writeProviderRegistryJSON(w, http.StatusOK, struct {
+		SchemaVersion       int    `json:"schemaVersion"`
+		RegistryRevision    string `json:"registryRevision"`
+		RegistryIncarnation string `json:"registryIncarnation"`
+		ProviderID          string `json:"providerId"`
+		ProviderRevision    string `json:"providerRevision"`
+		ProviderGeneration  string `json:"providerGeneration"`
+		ProviderIncarnation string `json:"providerIncarnation"`
+		CredentialAvailable bool   `json:"credentialAvailable"`
+	}{1, strconv.FormatUint(expected.RegistryRevision, 10), expected.RegistryIncarnation,
+		providerID, strconv.FormatUint(expected.ProviderRevision, 10),
+		strconv.FormatUint(expected.ProviderGeneration, 10), expected.ProviderIncarnation, true})
 }
 
 func (handlers ProviderRegistryHandlers) handleProbe(w http.ResponseWriter, r *http.Request, providerID string) {
@@ -2351,6 +2389,8 @@ func matchProviderRegistryPath(r *http.Request) (providerRegistryPath, bool) {
 		matched.operation = providerRegistryPathCredential
 	case "probe":
 		matched.operation = providerRegistryPathProbe
+	case "credential-check":
+		matched.operation = providerRegistryPathCredentialCheck
 	case "discover-models":
 		matched.operation = providerRegistryPathDiscoverModels
 	case "account-observation":
@@ -2940,6 +2980,8 @@ func writeProviderRegistryMutation(w http.ResponseWriter, expected domainregistr
 
 func writeProviderRegistryServiceError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, registryport.ErrCredentialUnavailable):
+		writeProviderRegistryFailure(w, http.StatusServiceUnavailable, "credential_unavailable")
 	case errors.Is(err, registryport.ErrInvalidRequest):
 		writeProviderRegistryFailure(w, http.StatusBadRequest, "invalid_request")
 	case errors.Is(err, registryport.ErrConflict):
@@ -2970,6 +3012,8 @@ func writeProviderRegistryFailure(w http.ResponseWriter, status int, code string
 		message = "The provider registry state has changed."
 	case "persistence_failure":
 		message = "The provider registry is temporarily unavailable."
+	case "credential_unavailable":
+		message = "Secure credential storage is temporarily unavailable. Check system security access and retry. Existing settings have been kept."
 	case "verification_failure":
 		message = "The provider registry operation could not be verified."
 	case "request_too_large":

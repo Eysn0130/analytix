@@ -9,6 +9,7 @@ import {
 } from '@shared/app-settings'
 import {
   INITIAL_SETUP_PROVIDER_PRESETS,
+  buildInitialSetupSettings,
   initialSetupAutoWirePlan,
   initialSetupDrafts,
   initialSetupProfileId,
@@ -583,6 +584,21 @@ export function InitialSetupDialog(): ReactElement {
               placeholder="https://"
               className={fieldClass}
             />
+          </div>
+          <div className="space-y-2.5 sm:space-y-3.5">
+            <label htmlFor="initial-setup-model" className={labelClass}>
+              {t('firstRunModelLabel')}
+            </label>
+            <input
+              id="initial-setup-model"
+              type="text"
+              maxLength={256}
+              value={selection.model ?? buildInitialSetupSettings(form, drafts, selection).runtime.model}
+              placeholder={selectedProfileId === 'deepseek' ? 'deepseek-flash' : ''}
+              onChange={(e) => setSelection((current) => ({ ...current, model: e.target.value }))}
+              className={fieldClass}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t('firstRunSecureStorage')}</p>
           </div>
         </div>
 

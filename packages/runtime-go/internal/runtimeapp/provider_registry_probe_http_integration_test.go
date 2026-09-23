@@ -113,6 +113,18 @@ func TestProviderRegistryProbeUsesOnlyCommittedProviderAndProtectedCredential(t 
 	default:
 		t.Fatal("committed loopback Provider was not called")
 	}
+	credentialCheck := httptest.NewRecorder()
+	handler.Handle(credentialCheck, httptest.NewRequest(http.MethodPost,
+		httpapi.ProviderRegistryPathV1+"/providers/"+providerID+"/credential-check", strings.NewReader(expected)))
+	if credentialCheck.Code != http.StatusOK || !strings.Contains(credentialCheck.Body.String(), `"credentialAvailable":true`) ||
+		strings.Contains(credentialCheck.Body.String(), secret) || strings.Contains(credentialCheck.Body.String(), "credentialRef") {
+		t.Fatal("credential availability did not resolve through the composed protected store")
+	}
+	select {
+	case <-requestObserved:
+		t.Fatal("local credential resolution made an external Provider call")
+	default:
+	}
 	for _, required := range []string{
 		`"status":"reachable"`, `"modelCount":2`, `"registryRevision":"1"`,
 		`"providerRevision":"1"`, `"providerGeneration":"1"`,

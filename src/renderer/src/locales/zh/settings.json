@@ -779,6 +779,8 @@
   "firstRunTitle": "开始对话前，先完成这几项基础配置。",
   "firstRunSubtitle": "选择界面语言和模型供应商，再填入对应的 API Key。",
   "firstRunProviderLabel": "模型供应商",
+  "firstRunModelLabel": "模型",
+  "firstRunSecureStorage": "API Key 将安全保存在此 Mac 上；保存时会验证供应商连接。",
   "firstRunProviderDeepseekDesc": "deepseek-v4 系列",
   "firstRunProviderXiaomiDesc": "MiMo 系列",
   "firstRunProviderMinimaxDesc": "M 系列",

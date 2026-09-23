@@ -362,3 +362,87 @@ and [pricing page](https://api-docs.deepseek.com/quick_start/pricing/).
 Installed Save, ordinary Agent/tool execution, restart/history and upgrade/recovery
 acceptance remain incomplete. Developer ID/notarization and production publication
 authority remain unconfigured; this candidate is not formally releasable.
+
+
+## Production credential UX audit and initialization repair
+
+This source checkpoint follows `21f33c99bc29166440d380c818767993691ec933`.
+The installed b2cf1179e app above does not contain this later repair.
+
+### Confirmed paths
+
+- Normal desktop: `desktop-external-state-isolation.ts` defaults to non-isolated;
+  `resolveDarwinSecretStoreKeychainBindingV1` returns null. Runtime composition
+  opens the existing Provider Registry and Secret Store without task options.
+  `master_key_darwin.go` selects the system Keychain authority. Normal users do
+  not create or maintain a separate Analytix Keychain password. API values are
+  encrypted by Secret Store; Registry/settings expose only metadata/references.
+  The existing compatibility file-master-key authority remains in source for
+  previously selected fallback stores or a missing OS command; a locked or
+  denied Keychain does not authorize that fallback. This audit did not exercise
+  or broaden that compatibility route.
+- Development/release QA: `dev-launcher.mjs` explicitly sets isolated-local-v1,
+  isolated home/userData and disabled bootstrap. The main-private startup frame
+  binds the exact task Keychain. `development-keychain.mjs` alone prompts for
+  its independent test password. The runtime does not fall back to login
+  Keychain on isolation failure. Ordinary production packaging does not inject
+  this launcher or turn the QA password prompt into normal onboarding UX.
+- Same credential chain in both: InitialSetupDialog -> typed Registry IPC ->
+  authenticated runtime HTTP -> Go Manager -> Secret Store port/Darwin adapter.
+  No second Registry, plaintext .env, credential copy or replacement Keychain
+  was introduced.
+
+### Actual defects and bounded changes
+
+First setup previously selected the first connected Provider before validating
+its connection or saving nonsecret settings. Registry Connect itself performed
+that implicit selection, which the original renderer fixture failed to model.
+Connect now accepts an explicit deferred-selection intent for onboarding only;
+its existing durable transaction validation/recovery binds that intent. Other
+Connect callers retain the previous default behavior.
+
+Onboarding commits the protected credential, probes through Core using that
+committed reference, saves key-free settings, then publishes and verifies the
+selection. Failed probe/settings writes leave an unselected, recoverable
+credential rather than reporting completion or deleting a prior credential.
+The existing Manager continues to own credential-write/readback rollback.
+Explicitly edited model/endpoint metadata is applied without overwriting other
+Registry metadata on a credential-preserving retry. The dialog displays a model
+field and ordinary secure-storage wording.
+
+Startup previously inferred readiness solely from Registry metadata. A new
+fenced credential-check operation resolves and immediately clears the value
+inside Core, rechecks currentness and returns only availability. Startup/retry
+uses it without external Provider traffic. A locked store preserves configured
+state and offers recovery rather than reopening initial setup. Master-key
+unavailability now has a distinct canonical credential_unavailable failure;
+raw OS errors, paths and credential values remain private. Settings replacement
+continues through the existing owner and invalidates the previous generation.
+
+### Verification and limits
+
+- Focused desktop/IPC/onboarding/legacy-migration/isolation checks: 189 cases;
+  188 initially passed and one existing directory test hit the default 5s host
+  timeout. Unchanged assertions passed on the focused retry with a 30s limit
+  (80 cases including the final onboarding edit). No test was removed.
+- Root web/main typecheck: pass. Existing dev-launcher tests: 12/12 pass.
+- Go Registry domain and HTTP packages: pass. Selected Manager mutation,
+  credential/lock/restart and filesystem crash-recovery checks: pass (56.335s).
+  A broader exploratory selection was interrupted while unrelated legacy
+  filesystem finalization tests were doing fsync; it is not counted as a pass.
+- Production-tag runtime composition test: pass (17.056s), resolving an actual
+  synthetic protected store via the new HTTP operation without a Provider call.
+- Selected Darwin adapter tests: pass (9.330s), covering default authority,
+  explicit task selection, locked refusal, stdin-only initialization, separate
+  process restart and identity replacement refusal. These use synthetic inputs;
+  they do not establish real-user Keychain or installed GUI acceptance.
+
+A second original-Keychain unlock attempt exited 51 without a signal after
+43ms; this matches security's authentication-failure status, not a timeout.
+The user confirmed entering the original password. Its correctness or historical
+creation mismatch is not inferred from the exit code. An independent synthetic
+fresh task fixture created and unlocked through the same helper successfully.
+The original profile and Keychain remain intact and locked, with no Provider
+committed. A fresh candidate must still complete normal protected entry, Save,
+response and restart in its own approved isolated GUI session. Direct HTTPS200
+above remains separate evidence. The temporary DMG mount was cleanly detached.

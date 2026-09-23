@@ -158,6 +158,7 @@ import {
   providerRegistryPortableManifestExportResponseSchemaV1,
   providerRegistryPortableManifestImportResponseSchemaV1,
   providerRegistryProbeResponseSchemaV1,
+  providerRegistryCredentialCheckResponseSchemaV1,
   providerRegistryProviderResponseSchemaV1,
   providerRegistryRecoveredResponseSchemaV1,
   providerRegistrySnapshotResponseSchemaV1
@@ -4068,7 +4069,7 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (path === ANALYTIX_PROVIDER_REGISTRY_RECOVER_PATH && method === 'POST') {
     return [providerRegistryRecoveredResponseSchemaV1]
   }
-  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|probe|discover-models|account-observation))?$/.exec(path)
+  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|credential-check|probe|discover-models|account-observation))?$/.exec(path)
   if (providerRegistryProviderRoute) {
     switch (providerRegistryProviderRoute[1]) {
       case undefined:
@@ -4077,6 +4078,8 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
         return null
       case 'probe':
         return method === 'POST' ? [providerRegistryProbeResponseSchemaV1] : null
+      case 'credential-check':
+        return method === 'POST' ? [providerRegistryCredentialCheckResponseSchemaV1] : null
       case 'account-observation':
         return method === 'POST' ? [providerRegistryAccountObservationResponseSchemaV1] : null
       case 'select':

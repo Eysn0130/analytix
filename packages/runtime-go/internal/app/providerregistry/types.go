@@ -241,6 +241,7 @@ func NewManagerWithFaultRecorder(
 }
 
 type ConnectCommand struct {
+	DeferSelection    bool
 	Expected          domainregistry.ExpectedState
 	Provider          domainregistry.ProviderInput
 	CredentialPurpose secretstoreport.Purpose
@@ -512,7 +513,9 @@ func normalizeSecretError(err error) error {
 		return err
 	case errors.Is(err, secretstoreport.ErrInvalidRequest):
 		return registryport.ErrInvalidRequest
-	case errors.Is(err, secretstoreport.ErrPersistence), errors.Is(err, secretstoreport.ErrMasterKeyUnavailable):
+	case errors.Is(err, secretstoreport.ErrMasterKeyUnavailable):
+		return registryport.ErrCredentialUnavailable
+	case errors.Is(err, secretstoreport.ErrPersistence):
 		return registryport.ErrPersistence
 	default:
 		return registryport.ErrVerification

@@ -16,6 +16,12 @@ at `69e74fdb6` and `0ce2e92a0`; exact legal inventory corrections follow at
 unfulfilled. The private96e55 Core DMG retains its original classification and
 bytes; it is not a package of these new sources.
 
+Production/QA credential-path audit confirms no ordinary-user second password.
+A subsequent source repair defers onboarding selection until protected validation
+and settings save, checks stored-credential availability on restart, and retains
+configured state on temporary unavailability; focused checks pass. Installed GUI
+verification of this repair remains pending. See the current release-admission report.
+
 Current artifact SOURCE is `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
 prior SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` and DELIVERY
 `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` remain ancestors. A clean new
@@ -96,7 +102,7 @@ evidence/display owners; P01–P03 and D01–D04 remain packaging and delivery g
 | P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable; Invoke and actual adapter admission reject activation/generation changes across readiness, pre-effect and completion, including real-store disable-enable/reopen | Remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed. Source tasks remain unfinished, not all blocked on GUI | SOURCE incomplete / installed not run |
 | P4 one conversation / cleanup | Primary conversation, bounded retrieval8 caches/4 builds, completion cancellation and retained history; old three Write routes removed | H01–H08 end-to-end authority/compaction/recovery evidence remains partial. Do not restore second runtime/RAG/Provider or alter independent UI Refresh | SOURCE retained / integration partial |
 | P0 Rust correctness | Fixed3000/10000 ascending/13000 fixture, static stage labels and prior bounded query controls retained | Old main INTERNAL root cause unresolved. COUNT-wrapper source lead differs from target; no new arbitrary reruns or alternative-binary symbols | EVIDENCE_FAILURE / root cause open |
-| P5 desktop storage/install | New b2cf DMG installed into an isolated app directory; exact copy/signature and independent Go inspection pass; approved isolated GUI reaches onboarding | Normal Save reports Registry503; task Keychain is locked, normal unlock failed; original-password entry required. Direct official DeepSeek probe passes but is separate from installed acceptance. No Keychain replacement or encryption bypass | partial / installed onboarding blocked |
+| P5 desktop storage/install | New b2cf DMG installed into an isolated app directory; exact copy/signature and independent Go inspection pass; approved isolated GUI reaches onboarding | Normal Save reports Registry503; task Keychain is locked, normal unlock returned authentication failure despite confirmed password entry; original state retained. Direct official DeepSeek probe passes but is separate from installed acceptance. No Keychain replacement or encryption bypass | partial / installed onboarding blocked |
 | P5 integration and release | Original branch/history and single writer retained | Current-scope egress reassessment and normal push pass; b2cf Development CI passes all51 jobs. CodeQL3 high, exact-HEAD review, strict gate and applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
 
 ## Evidence limits and release exits
