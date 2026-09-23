@@ -139,6 +139,7 @@
     "i18next": "^25.4.2",
     "jimp": "^1.6.1",
     "jszip": "3.10.1",
+    "lazy-val": "file:packages/updater-lazy",
     "lottie-web": "^5.13.0",
     "lucide-react": "^0.544.0",
     "node-pty": "^1.1.0",

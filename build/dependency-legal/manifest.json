@@ -5,7 +5,7 @@
     {
       "path": "package-lock.json",
       "file": "locks/root.json",
-      "sha256": "c1648d325cd265050c69cee07d34c1b464c05dce73ee26bd204a169392a17b77"
+      "sha256": "451b2049661d0305df6f702845f40005976d49b84d553b8a569fdb2db40e8940"
     },
     {
       "path": "packages/runtime/package-lock.json",
@@ -2473,35 +2473,6 @@
       ],
       "selectedLicense": "MIT",
       "unresolved": null
-    },
-    {
-      "id": "lazy-val-1.0.5",
-      "name": "lazy-val",
-      "version": "1.0.5",
-      "tarball": "https://registry.npmjs.org/lazy-val/-/lazy-val-1.0.5.tgz",
-      "integrity": "sha512-0/BnGCCfyUMkBpeDgWihanIAF9JmZhHBgUhEqzvf+adhNGLoP6TaiI5oF8oyb3I45P+PcnrqihSf01M0l0G5+Q==",
-      "packageJsonSha256": [
-        "a5096f95098452cf6fe5c8ac9be8f13f59ab7c9f605ba5ef92c91b2c505744f0",
-        "a6f4140d0187f32d95545835aca38684e18d0fcfbecb51709b0aaa54decd3c0b"
-      ],
-      "bindings": [
-        {
-          "lock": "package-lock.json",
-          "path": "node_modules/lazy-val",
-          "resolved": "https://registry.npmmirror.com/lazy-val/-/lazy-val-1.0.5.tgz",
-          "integrity": "sha512-0/BnGCCfyUMkBpeDgWihanIAF9JmZhHBgUhEqzvf+adhNGLoP6TaiI5oF8oyb3I45P+PcnrqihSf01M0l0G5+Q=="
-        }
-      ],
-      "files": {
-        "out/main.js": "358fa8cba70c9140edafa85c0b7b25c7261939480186167e6b3440905f5b47da",
-        "package.json": "a5096f95098452cf6fe5c8ac9be8f13f59ab7c9f605ba5ef92c91b2c505744f0",
-        "out/main.js.map": "aa3e70f08a0ce115832e5324c4b96aa1475a3b8b36728f50091ebd22aa0f6646",
-        "readme.md": "87dd77cd27b045ab279f6f2c99acedaeec6b7c92e296a354bb2687b9f2965438",
-        "out/main.d.ts": "e4bd94e97e08af3a3b8a6b2e85c6b93a690f572c1bffca113681ee7390f53411"
-      },
-      "materials": [],
-      "selectedLicense": null,
-      "unresolved": "dependency_legal_exact_upstream_text_unavailable"
     },
     {
       "id": "min-document-2.19.2",
