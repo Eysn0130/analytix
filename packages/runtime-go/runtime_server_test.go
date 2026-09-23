@@ -17802,7 +17802,7 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"user_input","arguments":"{\"prompt\":\"Pick a path\",\"questions\":[{\"question\":\"Pick a path\",\"header\":\"Answer\"}]}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
@@ -17827,7 +17827,9 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 		"model":      "input-model",
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{"prompt": "Ask only if needed."}), http.StatusAccepted)
+	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"prompt": "Ask only if needed.", "approvalPolicy": "never", "sandboxMode": "read-only", "disableUserInput": false,
+	}), http.StatusAccepted)
 	if start["status"] != "waiting" || start["pendingKind"] != "user_input" {
 		t.Fatalf("model-called user_input should pause the turn: %#v", start)
 	}

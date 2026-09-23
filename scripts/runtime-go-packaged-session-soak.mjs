@@ -1104,7 +1104,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       }
       return body;
     }
-    async function collectSseReplay(threadId, turnId, expectedText, requireToolEvents) {
+    async function collectSseReplay(threadId, turnId, expectedText, requireToolEvents, terminalReason) {
       const streamId = 'packaged-session-soak-' + Math.random().toString(36).slice(2);
       const events = [];
       const errors = [];
@@ -1132,8 +1132,14 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
             (event.kind === 'item_completed' && event.item &&
               event.item.kind === 'assistant_text' &&
               (event.item.text || '').includes(expectedText)));
-          const ok = kinds.has('turn_started') && assistantText &&
-            kinds.has('usage') && kinds.has('turn_completed') &&
+          const terminal = turnEvents.find((event) => event.kind === 'turn_completed');
+          const terminalMatches = terminalReason
+            ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
+              (event.item.text || '').includes('packaged approval deny ok'))
+            : assistantText && Boolean(terminal);
+          const ok = kinds.has('turn_started') && terminalMatches &&
+            kinds.has('usage') &&
             (!requireToolEvents ||
               (kinds.has('tool_call_ready') && kinds.has('tool_call_started') &&
                 kinds.has('tool_call_finished')));
@@ -1148,10 +1154,16 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           if (!payload || payload.streamId !== streamId) return;
           const turnEvents = events.filter((event) => event && event.turnId === turnId);
           const kinds = new Set(turnEvents.map((event) => event.kind));
-          finish(kinds.has('turn_completed') && turnEvents.some((event) =>
-            event.kind === 'item_completed' && event.item &&
-            event.item.kind === 'assistant_text' &&
-            (event.item.text || '').includes(expectedText)) &&
+          const terminal = turnEvents.find((event) => event.kind === 'turn_completed');
+          const terminalMatches = terminalReason
+            ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
+              (event.item.text || '').includes('packaged approval deny ok'))
+            : Boolean(terminal) && turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item &&
+              event.item.kind === 'assistant_text' &&
+              (event.item.text || '').includes(expectedText));
+          finish(terminalMatches &&
             (!requireToolEvents || (kinds.has('tool_call_ready') &&
               kinds.has('tool_call_started') && kinds.has('tool_call_finished'))));
         }));
@@ -1466,7 +1478,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         });
         out.approvalDenyResolvedOk = approvalDeny.status === 'denied' || approvalDeny.decision === 'deny';
       }
-      const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, 'packaged approval deny ok', false);
+      const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, '', false, 'approval_denied');
       out.approvalDenyNoExecuteOk = approvalDenyReplay.ok === true && approvalDenyReplay.eventCount > 0 && approvalDenyReplay.errorCount === 0;
 
       const approvalAllowTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
