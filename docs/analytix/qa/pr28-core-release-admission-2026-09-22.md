@@ -658,3 +658,31 @@ specific follow-up; no blanket CI retry or gate weakening was used.
 Final source-only checks for this slice: launcher13 pass again; private startup
 frame9 pass including explicit development-directory canonical bytes and malformed
 path refusal; focused changed-file ESLint passes; `git diff --check` passes.
+
+### Statistics CI continuation after development credential closure
+
+The new Linux failure at ff298 occurred while `require_nonempty_query` counted
+an outer wrapper of the same paginated/window query before reading its data.
+`StatsRowsQueryContext` now registers its unchanged query identity and the actual
+number of decoded/written rows through the existing `record_nonempty_range`.
+Zero rows still fail; selected-range preflight, verified snapshot, commit witness,
+worker buffering and temporary-file publish/cleanup remain. Redundant count-page
+execution and its unreachable empty-page fallback were removed. Data SQL,
+3000/10000 ascending assertions, DuckDB version, optimizers and thread settings
+were not changed. Checked usize-to-i64 conversion preserves numeric boundaries.
+
+On this Mac, `cargo test --locked --manifest-path tools/analysis_compute/Cargo.toml
+--test stats_query_cli -- --test-threads=2` passed all95 cases, no skips,388.36s.
+This includes the original output-file case, empty-scope/offset no-file cases,
+exact result/ordering and worker session revalidation. The initial delay was
+before program entry: sampled child processes remained in `_dyld_start` while
+codesign read file data from the cache volume; strict signature verification
+then exited0 and the processes progressed. No security setting was changed.
+This eliminates the redundant failing query path; it does not prove a general
+DuckDB engine defect is fixed. Exact new-HEAD Linux CI remains required.
+
+The packaging source contract was updated to follow `dev` delegating to the
+launcher while still asserting its native/runtime prerequisites; its focused
+case passed. The accepted credential specification now expressly separates
+ordinary source development from explicit credential-isolated QA, matching the
+user-approved change without weakening Production or QA requirements.

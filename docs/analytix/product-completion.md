@@ -54,7 +54,10 @@ WASM bytes are bound to the verified archives. No later DMG/ZIP is claimed.
 
 Current-scope source egress was reassessed through the original interface and
 normal pushes reached `8e5142250`. Its four CodeQL analyses and gate pass;
-Development CI run35805133381 passed all51 jobs. The earlier b2cf Development CI
+Development CI run35805133381 passed all51 jobs. Later ff298 CodeQL also passed,
+but its Rust statistics CLI hit a DuckDB internal error in redundant count-page
+execution. The subsequent existing-owner repair records actual result rows;
+all95 local CLI regressions pass. Exact successor Linux CI remains pending. The earlier b2cf Development CI
 passed all51 jobs and is not a substitute for later HEAD checks. PR28 remains
 Draft/BLOCKED pending review and applicable acceptance. Main remains
 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`. The original locked QA profile remains

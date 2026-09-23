@@ -10,7 +10,8 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   普通开发 Keychain 密码。专项 QA 用 `--isolated-keychain`；包装版拒绝共享开发
   authority。命令见 development-baseline，证据见本轮 admission 报告。
 - `ff2981536` 四项 CodeQL 与 gate 通过；CI35809621946 的 analysis_compute
-  输出文件测试出现 DuckDB 内部错误，不能称为完整 CI 通过；后继须取准确 HEAD。
+  输出文件测试出现 DuckDB 内部错误；后继已移除重复 count-page 查询，复用实际
+  结果行数回执，本机95项 CLI 通过。仍须取得准确后继 Linux CI，不能继承旧绿。
 - 长期执行顺序：[唯一执行方案](../delivery-execution-plan.md)。
 - 唯一当前状态与证据路由：[产品矩阵](../product-completion.md)。
 - 保留 SOURCE `0708620e21fc2bd706ba18a377a60824cdb78421`、

@@ -121,13 +121,10 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         if self.request.uses_pagination() {
             let stage_started = Instant::now();
             let data_sql = self.paginated_data_sql();
-            self.session
-                .require_nonempty_query("stats_rows_page", &data_sql)
-                .context("stats_rows.page_nonempty")?;
             self.diagnostics
                 .record_elapsed("sql.paginated_data_build", stage_started);
             let stage_started = Instant::now();
-            let mut result = query_stats_row_values(
+            let result = query_stats_row_values(
                 self.session.conn(),
                 &data_sql,
                 self.request.group_key,
@@ -137,12 +134,14 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             .context("stats_rows.page_values")?;
             self.diagnostics
                 .record_elapsed("sql.query_rows_values", stage_started);
-            if result.rows.is_empty() && self.request.row_offset > 0 {
-                let stage_started = Instant::now();
-                result.total = crate::scalar_i64(self.session.conn(), &self.count_sql())?;
-                self.diagnostics
-                    .record_elapsed("sql.count_total_fallback", stage_started);
-            }
+            self.session
+                .record_nonempty_range(
+                    "stats_rows_page",
+                    &data_sql,
+                    i64::try_from(result.rows.len())
+                        .context("stats_query_numeric_state_invalid")?,
+                )
+                .context("stats_rows.page_nonempty")?;
             self.diagnostics.finish_total(total_started);
             return Ok(QueryStatsRowsResult {
                 group_key: self.request.group_key.to_string(),
@@ -156,9 +155,6 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
 
         let stage_started = Instant::now();
         let data_sql = self.unpaginated_data_sql();
-        self.session
-            .require_nonempty_query("stats_rows", &data_sql)
-            .context("stats_rows.nonempty")?;
         self.diagnostics
             .record_elapsed("sql.unpaginated_data_build", stage_started);
         let stage_started = Instant::now();
@@ -171,7 +167,11 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         )?;
         self.diagnostics
             .record_elapsed("sql.query_rows_values", stage_started);
-        let total = result.rows.len() as i64;
+        let total =
+            i64::try_from(result.rows.len()).context("stats_query_numeric_state_invalid")?;
+        self.session
+            .record_nonempty_range("stats_rows", &data_sql, total)
+            .context("stats_rows.nonempty")?;
         self.diagnostics.finish_total(total_started);
         Ok(QueryStatsRowsResult {
             group_key: self.request.group_key.to_string(),
@@ -207,16 +207,6 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
         } else {
             self.unpaginated_data_sql()
         };
-        self.session
-            .require_nonempty_query(
-                if self.request.uses_pagination() {
-                    "stats_rows_page"
-                } else {
-                    "stats_rows"
-                },
-                &data_sql,
-            )
-            .context("stats_rows.output_nonempty")?;
         let stage_started = Instant::now();
         writer.write_all(b"\"rows\":")?;
         self.diagnostics
@@ -238,14 +228,7 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             .context("stats_rows.page_output")?;
             self.diagnostics
                 .record_elapsed("sql.query_rows_json_write", stage_started);
-            let mut total = write_result.total;
-            if write_result.row_count == 0 && self.request.row_offset > 0 {
-                let stage_started = Instant::now();
-                total = crate::scalar_i64(self.session.conn(), &self.count_sql())?;
-                self.diagnostics
-                    .record_elapsed("sql.count_total_fallback", stage_started);
-            }
-            (total, write_result)
+            (write_result.total, write_result)
         } else {
             let stage_started = Instant::now();
             self.diagnostics
@@ -262,8 +245,27 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             )?;
             self.diagnostics
                 .record_elapsed("sql.query_rows_json_write", stage_started);
-            (write_result.row_count as i64, write_result)
+            (
+                i64::try_from(write_result.row_count)
+                    .context("stats_query_numeric_state_invalid")?,
+                write_result,
+            )
         };
+        // Bind the receipt to the rows actually read in this verified snapshot.
+        // Counting a wrapper of the same window/page SQL executes a redundant
+        // plan and has failed inside DuckDB before result decoding in Linux CI.
+        self.session
+            .record_nonempty_range(
+                if self.request.uses_pagination() {
+                    "stats_rows_page"
+                } else {
+                    "stats_rows"
+                },
+                &data_sql,
+                i64::try_from(write_result.row_count)
+                    .context("stats_query_numeric_state_invalid")?,
+            )
+            .context("stats_rows.output_nonempty")?;
         let total = require_nonnegative_total(total)?;
         let stage_started = Instant::now();
         if include_status {
@@ -307,10 +309,6 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             &self.sort_expr,
             self.sort_order,
         )
-    }
-
-    fn count_sql(&self) -> String {
-        build_paginated_count_sql(&self.agg_sql, &self.search_where)
     }
 }
 
