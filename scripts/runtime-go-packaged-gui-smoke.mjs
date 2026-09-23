@@ -1061,7 +1061,34 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
           model: 'mimo-v2.5-pro'
         }
       };
+      let saved;
+      let mimo;
       try {
+        await api.settings.setSettings(profilePatch);
+        out.settingsProfilePatchAccepted = true;
+        out.settingsPatchMode = 'provider-profile';
+        saved = await api.settings.getSettings();
+        const providers = Array.isArray(saved && saved.provider && saved.provider.providers)
+          ? saved.provider.providers
+          : [];
+        mimo = providers.find((item) => item && item.id === 'xiaomi') || null;
+        out.mimoProviderId = saved && saved.runtime && saved.runtime.providerId || '';
+        out.mimoModel = saved && saved.runtime && saved.runtime.model || '';
+        out.mimoEndpointFormat = mimo && mimo.endpointFormat || '';
+      } catch (error) {
+        out.settingsPatchError = error && (error.stack || error.message) || String(error);
+        return out;
+      }
+      try {
+        await api.runtime.restartRuntime();
+        out.restartOk = true;
+      } catch (error) {
+        out.restartError = error && (error.stack || error.message) || String(error);
+        return out;
+      }
+      try {
+        // The data-dir patch queues a runtime restart. Bind the synthetic
+        // credential only after the selected profile's runtime is stable.
         const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
         if (!before || before.error || !Array.isArray(before.providers)) {
           throw new Error('synthetic_provider_registry_unavailable');
@@ -1101,19 +1128,7 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
         if (!registered || registered.credentialConfigured !== true) {
           throw new Error('synthetic_provider_credential_not_configured');
         }
-        await api.settings.setSettings(profilePatch);
-        out.settingsProfilePatchAccepted = true;
-        out.settingsPatchMode = 'provider-profile';
-        const saved = await api.settings.getSettings();
-        const providers = Array.isArray(saved && saved.provider && saved.provider.providers)
-          ? saved.provider.providers
-          : [];
-        const mimo = providers.find((item) => item && item.id === 'xiaomi') || null;
-        out.mimoProviderId = saved && saved.runtime && saved.runtime.providerId || '';
-        out.mimoModel = saved && saved.runtime && saved.runtime.model || '';
-        out.mimoEndpointFormat = mimo && mimo.endpointFormat || '';
         out.mimoProviderReady = !!(mimo && mimo.baseUrl &&
-          registered.credentialConfigured === true &&
           !Object.hasOwn(saved.provider, 'apiKey') &&
           !Object.hasOwn(saved.runtime, 'apiKey') &&
           !Object.hasOwn(mimo, 'apiKey'));
@@ -1127,13 +1142,6 @@ function buildRendererExpression({ runtimePort, runtimeDataDir, syntheticApiKey,
           out.mimoProviderReady === true;
       } catch (error) {
         out.settingsPatchError = error && (error.stack || error.message) || String(error);
-        return out;
-      }
-      try {
-        await api.runtime.restartRuntime();
-        out.restartOk = true;
-      } catch (error) {
-        out.restartError = error && (error.stack || error.message) || String(error);
         return out;
       }
       if (out.terminalApiPresent) {
