@@ -2049,6 +2049,84 @@ describe('AnalytixRuntimeProvider', () => {
     )
   })
 
+  it('preserves an explicit Registry model when legacy Settings list older models', async () => {
+    const runtimeRequest = vi.fn(async (path: string, _method?: string, _body?: string) => {
+      if (path === '/v1/threads') {
+        return {
+          ok: true,
+          status: 201,
+          body: JSON.stringify({
+            id: 'thr_1',
+            title: 'Provider thread',
+            workspace: '/tmp/workspace',
+            model: 'deepseek-flash',
+            providerId: 'deepseek',
+            mode: 'agent',
+            status: 'idle',
+            createdAt: '2026-06-20T00:00:00.000Z',
+            updatedAt: '2026-06-20T00:00:00.000Z'
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_1/review') {
+        return {
+          ok: true,
+          status: 202,
+          body: JSON.stringify({
+            threadId: 'thr_1',
+            turnId: 'turn_review',
+            userMessageItemId: 'item_user_review',
+            reviewItemId: 'item_review'
+          })
+        }
+      }
+      return {
+        ok: true,
+        status: 202,
+        body: JSON.stringify({ threadId: 'thr_1', turnId: 'turn_1', userMessageItemId: 'item_user' })
+      }
+    })
+    installDsGui({ runtimeRequest })
+    const provider = new AnalytixRuntimeProvider()
+
+    const thread = await provider.createThread({
+      workspace: '/tmp/workspace',
+      title: 'Provider thread',
+      model: 'deepseek-flash',
+      providerId: 'deepseek'
+    })
+    await provider.sendUserMessage('thr_1', 'hello', { model: 'deepseek-flash', providerId: 'deepseek' })
+    await provider.reviewThread('thr_1', { kind: 'uncommittedChanges' }, {
+      model: 'deepseek-flash',
+      providerId: 'deepseek'
+    })
+
+    expect(thread.providerId).toBe('deepseek')
+    for (const call of runtimeRequest.mock.calls) {
+      expect(JSON.parse(call[2] ?? '{}')).toMatchObject({
+        providerId: 'deepseek', model: 'deepseek-flash'
+      })
+    }
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      1,
+      '/v1/threads',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
+    )
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      2,
+      '/v1/threads/thr_1/turns',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
+    )
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      3,
+      '/v1/threads/thr_1/review',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
+    )
+  })
+
   it('infers the active Xiaomi provider for MiMo plan-mode create and turn requests', async () => {
     const xiaomi = getModelProviderPreset('xiaomi')
     expect(xiaomi).not.toBeNull()

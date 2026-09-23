@@ -209,7 +209,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const APP_USER_MODEL_ID = 'com.analytix.desktop'
 const NATIVE_OAUTH_CALLBACK_PROTOCOL = 'com.analytix.desktop'
 const HIDDEN_START_ARG = '--hidden'
-const desktopExternalState = consumeDesktopExternalStateBoundary(process.env)
+const desktopExternalState = consumeDesktopExternalStateBoundary(process.env, undefined, app.isPackaged)
 configureGoRuntimeDesktopExternalStateBoundary(desktopExternalState)
 const desktopStateHomeRoot = desktopExternalState.isolated
   ? desktopExternalState.stateHomeRoot

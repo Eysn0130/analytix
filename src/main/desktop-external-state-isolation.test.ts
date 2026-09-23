@@ -294,7 +294,7 @@ describe('main-private desktop external-state isolation', () => {
       readFile(join(process.cwd(), 'electron-builder.config.cjs'), 'utf8'),
       readFile(join(process.cwd(), 'scripts/release-mac.sh'), 'utf8')
     ])
-    const boundaryIndex = mainSource.indexOf('consumeDesktopExternalStateBoundary(process.env)')
+    const boundaryIndex = mainSource.indexOf('consumeDesktopExternalStateBoundary(process.env, undefined, app.isPackaged)')
     const firstStartupEffectIndex = mainSource.indexOf('captureOpenComputerUseAgentBaselineV1()')
 
     expect(boundaryIndex).toBeGreaterThanOrEqual(0)
@@ -350,3 +350,15 @@ describe('main-private desktop external-state isolation', () => {
     expect(scripts['dist:mac:arm64:core']).not.toContain('ANALYTIX_RELEASE_BUILD=1')
   })
 })
+
+ it('development authority is explicit, private and rejected by packaged consumers', async () => {
+  const fixture=await isolatedFixture()
+  const root=join(fixture.cacheRoot,'tmp','provider-credentials')
+  await mkdir(root,{mode:0o700})
+  const env={...isolatedEnvironment(fixture),ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR:root}
+  expect(resolveDesktopExternalStateBoundary(env).developmentProviderAuthorityDir).toBe(root)
+  expect(()=>resolveDesktopExternalStateBoundary(env,undefined,true)).toThrow()
+  expect(()=>resolveDesktopExternalStateBoundary({ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR:root})).toThrow()
+  await chmod(root,0o755)
+  expect(()=>resolveDesktopExternalStateBoundary(env)).toThrow()
+ })

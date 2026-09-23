@@ -64,6 +64,19 @@ describe('runtime startup private frame v1', () => {
     }
   })
 
+  it('carries the explicit development directory and rejects malformed authority paths', () => {
+    const root = '/private/development/provider-credentials'
+    const frame = encodeRuntimeStartupPrivateFrameV1({ developmentProviderAuthorityDir: root })
+    expect(frame.subarray(8).toString('utf8')).toBe(JSON.stringify({
+      schemaVersion: 1,
+      purpose: 'analytix.runtime-startup-private-frame/v1',
+      developmentProviderAuthorityDir: root
+    }))
+    for (const invalid of ['relative/provider-credentials', '/private/../provider-credentials', '/private/wrong']) {
+      expect(() => encodeRuntimeStartupPrivateFrameV1({ developmentProviderAuthorityDir: invalid })).toThrow()
+    }
+  })
+
   it('writes exactly one frame and closes private stdin', async () => {
     const stdin = new PassThrough()
     const chunks: Buffer[] = []

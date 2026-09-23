@@ -572,3 +572,89 @@ storage. The existing launcher currently applies task Keychain admission to
 all isolated development profiles; the next implementation addresses that
 calling boundary through existing Registry/Secret Store owners. No persistent
 development bootstrap or new-mode validation is claimed at this checkpoint.
+
+### Persistent ordinary-development credential authority
+
+Candidate: the focused development-credential changes following
+`ff298153699188c6587721c1000bd99a20207cf9`; the commit containing this section
+identifies the delivered source. The earlier checkpoint above is superseded
+for ordinary source development only. Production and explicit QA owners remain.
+
+- Normal `dev` / `dev:fast` now creates private task application state and uses
+  one persistent Registry plus the existing encrypted Secret Store under the
+  private development root. Existing fallback master-key creation, exclusive
+  commit, permissions and readback are reused. There is no new broker, credential
+  database, `.env` secret, or per-task copy of a credential envelope.
+- Explicit `--isolated-keychain` retains the original QA task paths, password,
+  binding and locked failure semantics. Ordinary profiles have a distinct prefix
+  and cannot silently convert retained QA profiles. Ambient credential variables
+  remain filtered. Packaged Electron rejects the development authority, and
+  the packaged Go build without `analytix_dev_credentials` rejects it too.
+- The source-only `runtime-server provider verify --development-authority-dir`
+  entry uses the existing Core Registry, protected credential resolution,
+  currentness fences and Provider adapter. One-time protected stdin bootstrap
+  precedes later input-free verification. The request has no tools or local data,
+  a 30-second limit and 32 output-token cap. Output contains only safe status and
+  usage; `returnedModel` is null because the current adapter does not retain the
+  upstream echo. It must not be substituted with the selected model.
+- Production still uses the normal Darwin authority and encrypted envelope;
+  no ordinary-user second Keychain password was introduced. Consistent formal
+  signing identity remains unverified while Developer ID is unavailable.
+  CI uses synthetic isolated stores, not this host's persistent credential.
+
+Actual authorized DeepSeek development bootstrap passed through Core. A second
+independent process resolved the stored credential without input and passed.
+Each bounded verification used 40 prompt and 27 completion tokens; latency was
+846ms and1206ms. The credential was never written to a repository `.env` or
+retained in an evidence value. Receipts are `development-provider-bootstrap.json`
+and `development-provider-new-process.json` in the existing local evidence root.
+
+Actual source Electron GUI subsequently exposed a separate model-selection bug:
+legacy Settings silently replaced explicit Registry `deepseek-flash` with
+`deepseek-v4-flash`. A regression failed with that exact mismatch before the fix.
+The existing renderer runtime adapter now preserves explicit Registry selections
+for Core validation, retaining legacy inference only when no Provider is explicit.
+All76 adapter tests and web TypeScript checking pass after the repair.
+
+The complete GUI -> Registry/Core -> stored Secret Store credential -> official
+DeepSeek `deepseek-flash` -> GUI chain then passed three observations:
+
+| Journey | Actual result | Credential/password re-entry |
+| --- | --- | --- |
+| Normal development profile | `DEVOK` | None |
+| Quit Electron, run normal launcher again, restart Core | `RESTORED` | None |
+| New ordinary task profile with independent application state | `SHARED` | None |
+
+The prior QA task Keychain was deliberately locked while its app was closed;
+normal development did not unlock or depend on it. New profiles contain neither
+copied credential envelopes nor task Keychains. Both profiles were normally quit
+and retained. These are real source-development GUI results, not newly packaged
+or formal Production acceptance. The earlier source rebuild/reconnect wait was
+Go compilation on the main process, not a credential password prompt.
+
+Focused checks also passed: launcher13; Electron isolation/private-frame/task
+binding22 before the added frame case; renderer readiness/navigation/onboarding63;
+source-cache adapter4; node/web TypeScript; dev-tag Core bootstrap/reopen/new-task,
+replacement and sanitized failure tests99.465s; production-tag development denial
+1.947s; command private-frame/QA checks0.988s; Darwin explicit-file/locked-task/
+authority-selection checks8.429s. Replacement and temporary Provider failure are
+synthetic Registry regressions; no second real API key was requested or invented.
+The actual GUI checks do not claim live GUI replacement with a distinct key.
+
+The bounded no-leak scan checked changed source, new verification receipts and
+both profile logs for the supplied credential's format: zero matches; encrypted
+store files likewise contain no plaintext match and all are0600. Private roots
+are0700. `development-gui-reuse.json` and `development-no-secret-leak.json` retain
+nonsecret results. These checks do not claim a universal secret-scanner audit.
+
+Remote recheck: all four CodeQL analyses and the gate passed for `ff2981536`.
+Development CI35809621946 is not a pass: the Rust `analysis_compute` job failed
+`output_file_cases::query_stats_rows_cli_writes_result_payload_to_output_json`
+with DuckDB `INTERNAL Error: Attempted to access index 0 within vector of size 0`
+at `stats_rows.page_nonempty`; other runtime shards were still running/queued.
+The earlier8e all51-job pass remains historical. This new failure is retained for
+specific follow-up; no blanket CI retry or gate weakening was used.
+
+Final source-only checks for this slice: launcher13 pass again; private startup
+frame9 pass including explicit development-directory canonical bytes and malformed
+path refusal; focused changed-file ESLint passes; `git diff --check` passes.

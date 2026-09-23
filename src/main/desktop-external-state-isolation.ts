@@ -11,6 +11,7 @@ const INVALID_CONFIGURATION =
 const SAFE_ABSOLUTE_TOKEN_PATTERN = /^\/[A-Za-z0-9._/-]+$/u
 
 export type DesktopExternalStateBoundary = Readonly<{
+  developmentProviderAuthorityDir?: string
   isolated: boolean
   isolationRoot: string
   userDataRoot: string
@@ -66,9 +67,12 @@ function strictDescendant(parent: string, candidate: string): boolean {
 
 export function resolveDesktopExternalStateBoundary(
   env: NodeJS.ProcessEnv = process.env,
-  dependencies: DesktopExternalStateBoundaryDependencies = defaultDependencies
+  dependencies: DesktopExternalStateBoundaryDependencies = defaultDependencies,
+  appIsPackaged = false
 ): DesktopExternalStateBoundary {
+  const developmentRoot = env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR
   const requestedMode = env[ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]
+  if (developmentRoot && (appIsPackaged || !requestedMode)) throw invalidConfiguration()
   if (requestedMode === undefined || requestedMode === '') {
     return Object.freeze({
       isolated: false,
@@ -127,7 +131,10 @@ export function resolveDesktopExternalStateBoundary(
   if (env.ANALYTIX_DEV_STATE_ROOT !== undefined &&
     (env.HOME !== stateHomeRoot || !ownerOnlyDirectory(stateHomeRoot, dependencies) ||
       dependencies.realpath(stateHomeRoot) !== stateHomeRoot)) throw invalidConfiguration()
+  if (developmentRoot && (developmentRoot !== resolve(trustedStateRoot, 'provider-credentials') ||
+    !ownerOnlyDirectory(developmentRoot, dependencies) || dependencies.realpath(developmentRoot) !== developmentRoot)) throw invalidConfiguration()
   return Object.freeze({
+    ...(developmentRoot ? { developmentProviderAuthorityDir: developmentRoot } : {}),
     isolated: true,
     isolationRoot: physicalTaskRoot,
     userDataRoot: physicalUserDataRoot,
@@ -137,10 +144,12 @@ export function resolveDesktopExternalStateBoundary(
 
 export function consumeDesktopExternalStateBoundary(
   env: NodeJS.ProcessEnv = process.env,
-  dependencies: DesktopExternalStateBoundaryDependencies = defaultDependencies
+  dependencies: DesktopExternalStateBoundaryDependencies = defaultDependencies,
+  appIsPackaged = false
 ): DesktopExternalStateBoundary {
-  const boundary = resolveDesktopExternalStateBoundary(env, dependencies)
+  const boundary = resolveDesktopExternalStateBoundary(env, dependencies, appIsPackaged)
   delete env[ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]
+  delete env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR
   return boundary
 }
 

@@ -13,8 +13,6 @@ import type {
 } from './types'
 import {
   getAnalytixRuntimeSettings,
-  getModelProviderSettings,
-  normalizeModelProviderId,
   resolveModelProviderRequestSelection,
   type AppSettingsV1
 } from '@shared/app-settings'
@@ -379,12 +377,9 @@ function requestModelSelectionFromSettings(options: {
     return { model, providerId: explicitProviderId || undefined }
   }
   if (explicitProviderId) {
-    const normalizedExplicitProviderId = normalizeModelProviderId(explicitProviderId)
-    const providerKnown = getModelProviderSettings(options.settings).providers
-      .some((provider) => provider.id === normalizedExplicitProviderId)
-    if (!providerKnown) {
-      return { model, providerId: explicitProviderId }
-    }
+    // Explicit selections come from the Core Registry. Legacy Settings may
+    // contain an older model catalog; Core owns validation of this pair.
+    return { model, providerId: explicitProviderId }
   }
   const selection = resolveModelProviderRequestSelection(options.settings, {
     model,

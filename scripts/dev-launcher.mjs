@@ -40,8 +40,9 @@ function entryExists(path) {
 }
 
 export function prepareDevelopmentProfile({ root = repo, env = process.env, profile = 'default', fresh = false,
-  stateRoot = join(homedir(), '.analytix-development') } = {}) {
+  stateRoot = join(homedir(), '.analytix-development'), credentialMode = 'development' } = {}) {
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(profile)) throw new Error('Invalid development profile name.')
+  if (!['development', 'isolated-keychain'].includes(credentialMode)) throw new Error('Invalid credential mode.')
   const cache = env.ANALYTIX_DEV_CACHE_ROOT
   if (!cache || !/^\/[A-Za-z0-9._/-]+$/.test(cache) || resolve(cache) !== cache) {
     throw new Error('A verified ANALYTIX_DEV_CACHE_ROOT is required; source the configured cache helper first.')
@@ -60,7 +61,8 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
   privateDirectory(stateRoot, true)
   const profiles = join(stateRoot, `analytix-dev-${checkout}`)
   privateDirectory(profiles, true)
-  const taskRoot = fresh ? mkdtempSync(join(profiles, 'fresh-')) : join(profiles, `profile-${profile}`)
+  const prefix = credentialMode === 'development' ? 'development-' : ''
+  const taskRoot = fresh ? mkdtempSync(join(profiles, `${prefix}fresh-`)) : join(profiles, `${prefix}profile-${profile}`)
   const created = fresh || !entryExists(taskRoot)
   privateDirectory(taskRoot, created)
   const userData = join(taskRoot, 'user-data')
@@ -90,14 +92,23 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
     ANALYTIX_UPDATE_CHANNEL: 'beta',
     ANALYTIX_UPDATE_FEED_URL: 'https://example.invalid/analytix/development/'
   })
-  const needsKeychain = created
-  return { taskRoot, userData, homeRoot, created, needsKeychain, env: childEnv }
+  if (credentialMode === 'development') {
+    const credentialRoot = join(stateRoot, 'provider-credentials')
+    privateDirectory(credentialRoot, true)
+    childEnv.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR = credentialRoot
+  }
+  const needsKeychain = credentialMode === 'isolated-keychain' && created
+  return { taskRoot, userData, homeRoot, created, needsKeychain, credentialMode, env: childEnv }
 }
 
-// Directory isolation alone is not launch admission. The existing Darwin
-// runtime requires a separately provisioned explicit task Keychain. Never
-// create a placeholder, select the login Keychain, or silently skip binding.
+// Application-state isolation and credential isolation have distinct owners.
+// Explicit QA keeps its original task Keychain; ordinary source development
+// admits only its private shared authority directory.
 export function assertDevelopmentProfileReady(profile) {
+  if (profile.credentialMode === 'development') {
+    privateDirectory(profile.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR)
+    return
+  }
   try {
     const parent = join(profile.taskRoot, 'darwin-secret-store-keychain')
     privateDirectory(parent)
@@ -113,15 +124,17 @@ export function assertDevelopmentProfileReady(profile) {
 }
 
 export function parseDevelopmentArgs(args) {
-  const result = { fast: false, fresh: false, profile: 'default', unlockKeychain: false }
+  const result = { fast: false, fresh: false, profile: 'default', unlockKeychain: false, credentialMode: 'development' }
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--fast') result.fast = true
     else if (args[index] === '--fresh') result.fresh = true
+    else if (args[index] === '--isolated-keychain') result.credentialMode = 'isolated-keychain'
     else if (args[index] === '--unlock-keychain') result.unlockKeychain = true
     else if (args[index] === '--profile' && args[index + 1]) result.profile = args[++index]
-    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --unlock-keychain]')
+    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --isolated-keychain [--unlock-keychain]]')
   }
   if (result.fresh && result.profile !== 'default') throw new Error('Choose --fresh or --profile, not both.')
+  if (result.unlockKeychain && result.credentialMode !== 'isolated-keychain') throw new Error('--unlock-keychain requires --isolated-keychain.')
   return result
 }
 
@@ -142,7 +155,7 @@ export async function launchDevelopment(profile, options, {
     if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
   },
   startApplication = () => {
-    console.log(`[dev] Isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
+    console.log(`[dev] ${profile.credentialMode} credentials; isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
     console.log('[dev] Profile is retained for restart/recovery; this is not packaged or live-Provider acceptance.')
     // Invoke the local executable directly, without routing through dev:fast.
     return spawn(join(repo, 'node_modules/.bin/electron-vite'), ['dev'], {

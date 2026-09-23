@@ -316,16 +316,27 @@ const (
 )
 
 type darwinMasterKeyProvider struct {
-	authorityPath string
-	keychain      *keychainMasterKeyProvider
-	fallback      *fallbackMasterKeyProvider
-	mu            sync.Mutex
+	developmentFile bool
+	authorityPath   string
+	keychain        *keychainMasterKeyProvider
+	fallback        *fallbackMasterKeyProvider
+	mu              sync.Mutex
 }
 
 func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]byte, error) {
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 
+	if provider.developmentFile {
+		authority, err := provider.readAuthority()
+		if errors.Is(err, os.ErrNotExist) {
+			authority, err = provider.selectAuthority(darwinAuthorityFallback)
+		}
+		if err != nil || authority != darwinAuthorityFallback {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+		return provider.fallback.LoadOrCreate(ctx)
+	}
 	authority, err := provider.readAuthority()
 	if err == nil {
 		return provider.loadSelected(ctx, authority)
@@ -459,6 +470,9 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	}
 	directory := filepath.Join(filepath.Dir(storePath), "master-key")
 	bindingPath := filepath.Join(directory, darwinExplicitBindingFile)
+	if options.DevelopmentFileAuthority && !options.empty() {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
 	if !options.empty() {
 		if options.DarwinKeychainDBPath == "" || options.DarwinKeychainBindingDigest == "" ||
 			options.DarwinKeychainSecurityDigest == "" || options.DarwinKeychainAuthorityStorePath == "" ||
@@ -499,7 +513,8 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	return &darwinMasterKeyProvider{
-		authorityPath: filepath.Join(directory, darwinAuthorityFile),
+		developmentFile: options.DevelopmentFileAuthority,
+		authorityPath:   filepath.Join(directory, darwinAuthorityFile),
 		keychain: &keychainMasterKeyProvider{
 			runner: securityCommandRunner{},
 			random: rand.Reader,

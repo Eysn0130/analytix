@@ -71,6 +71,9 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 			commandCtx, args[1:], os.Stdout, defaultBundledFundsMaterializationDependenciesV1(),
 		)
 	}
+	if len(args) > 0 && args[0] == "provider" {
+		return runDevelopmentProviderVerify(args[1:], dependencies.stdin, os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "authority" {
 		return runRuntimeAuthorityCommand(args[1:], os.Stdout, rand.Reader)
 	}
@@ -94,6 +97,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		if err != nil {
 			return err
 		}
+		cli.DevelopmentProviderAuthorityDir = frame.DevelopmentProviderAuthorityDir
 		if frame.ProtectedAuthorityV1 != nil {
 			authority, err := frame.ProtectedAuthorityV1.config()
 			if err != nil {
@@ -465,6 +469,7 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 		AuthorityManifestRoot:                   authority.ManifestRoot,
 		AuthorityCredentialProfileRoot:          authority.CredentialProfileRoot,
 		AuthorityCredentialBundleRoot:           authority.CredentialBundleRoot,
+		DevelopmentProviderAuthorityDir:         cli.DevelopmentProviderAuthorityDir,
 		DarwinSecretStoreKeychainDBPath:         darwinKeychain.DBPath,
 		DarwinSecretStoreKeychainBindingDigest:  darwinKeychain.BindingDigest,
 		DarwinSecretStoreKeychainSecurityDigest: darwinKeychain.SecurityDigest,
@@ -520,32 +525,33 @@ func formalProviderAuditSocketPathV1() string {
 }
 
 type runtimeServerCLIConfig struct {
-	Addr                         string
-	Host                         string
-	DurableTempDir               string
-	RuntimeDurableRoot           string
-	ProductionDurableRoot        string
-	RuntimeToken                 string
-	Insecure                     bool
-	DataDir                      string
-	UserDataDir                  string
-	ProviderID                   string
-	BaseURL                      string
-	Model                        string
-	EndpointFormat               string
-	ModelProvidersJSON           string
-	MCPConfigPath                string
-	MCPConfigJSON                string
-	ModelProxyURL                string
-	MCPProxyURL                  string
-	ApprovalPolicy               string
-	SandboxMode                  string
-	TokenEconomyMode             string
-	HostScheduleMCPServer        *domainmcp.ServerSpec
-	PrivateStartupFrameV1        bool
-	MainOwnedAuthorityV1         *runtimeMainOwnedAuthorityConfigV1
-	MainOwnedAuthorityIdentityV1 *authorityAnchorEnvelopeV1
-	DarwinSecretStoreKeychainV1  *runtimeDarwinSecretStoreKeychainConfigV1
+	Addr                            string
+	Host                            string
+	DurableTempDir                  string
+	RuntimeDurableRoot              string
+	ProductionDurableRoot           string
+	RuntimeToken                    string
+	Insecure                        bool
+	DataDir                         string
+	UserDataDir                     string
+	ProviderID                      string
+	BaseURL                         string
+	Model                           string
+	EndpointFormat                  string
+	ModelProvidersJSON              string
+	MCPConfigPath                   string
+	MCPConfigJSON                   string
+	ModelProxyURL                   string
+	MCPProxyURL                     string
+	ApprovalPolicy                  string
+	SandboxMode                     string
+	TokenEconomyMode                string
+	HostScheduleMCPServer           *domainmcp.ServerSpec
+	PrivateStartupFrameV1           bool
+	MainOwnedAuthorityV1            *runtimeMainOwnedAuthorityConfigV1
+	MainOwnedAuthorityIdentityV1    *authorityAnchorEnvelopeV1
+	DevelopmentProviderAuthorityDir string
+	DarwinSecretStoreKeychainV1     *runtimeDarwinSecretStoreKeychainConfigV1
 }
 
 type runtimeServerLifecycleHandler interface {

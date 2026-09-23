@@ -594,6 +594,8 @@ export function createNavigationActions(
         const fromStorage = readStoredComposerModel(initialPick)
         if (fromStorage) {
           set({ composerModel: fromStorage })
+        } else {
+          set({ composerModel: readiness.model, composerProviderId: readiness.providerId })
         }
         await get().probeRuntime('user')
       } catch (e) {

@@ -45,7 +45,7 @@ describe('local Provider startup readiness', () => {
   it('enters the workspace only for the selected committed usable Provider', () => {
     expect(resolveLocalProviderReadiness(snapshot([provider()], 'deepseek'))).toEqual({
       kind: 'ready',
-      providerId: 'deepseek'
+      providerId: 'deepseek', model: provider().selectedModel
     })
   })
 
@@ -82,6 +82,6 @@ it('checks the committed credential after restart without re-entering or sending
   expect((await checkLocalProviderReadiness(request)).kind).toBe('recovery')
   expect(JSON.stringify(state)).toBe(original)
   locked = false
-  expect(await checkLocalProviderReadiness(request)).toEqual({ kind: 'ready', providerId: 'deepseek' })
+  expect(await checkLocalProviderReadiness(request)).toEqual({ kind: 'ready', providerId: 'deepseek', model: provider().selectedModel })
   expect(request.mock.calls.map(([r]) => r.operation)).toEqual(['list', 'credential-check', 'list', 'credential-check'])
 })

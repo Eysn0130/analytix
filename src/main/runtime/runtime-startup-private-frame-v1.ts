@@ -19,6 +19,7 @@ import {
 const STARTUP_FRAME_ERROR = 'Runtime private startup frame is unavailable.'
 
 export type RuntimeStartupPrivateFrameInputV1 = Readonly<{
+  developmentProviderAuthorityDir?: string
   protectedAuthorityV1?: MainOwnedRuntimeAuthorityEnvelopeV1
   hostScheduleMcpBindingV1?: RuntimeHostScheduleMcpBindingV1
   darwinSecretStoreKeychainBindingV1?: DarwinSecretStoreKeychainBindingV1
@@ -49,8 +50,8 @@ export function selectRuntimeHostScheduleMcpBindingV1(
 /**
  * Encodes the sole closed private startup document accepted by the production
  * Go runtime. Authority, the exact host schedule projection, and the validated
- * Darwin task Keychain binding are the only accepted capabilities; every other
- * expansion remains closed.
+ * Darwin task Keychain binding or explicit source-development credential
+ * directory are the accepted capabilities; unknown fields remain closed.
  */
 export function encodeRuntimeStartupPrivateFrameV1(
   input: RuntimeStartupPrivateFrameInputV1
@@ -63,7 +64,8 @@ export function encodeRuntimeStartupPrivateFrameV1(
   const allowedInputKeys = new Set([
     'hostScheduleMcpBindingV1',
     'protectedAuthorityV1',
-    'darwinSecretStoreKeychainBindingV1'
+    'darwinSecretStoreKeychainBindingV1',
+    'developmentProviderAuthorityDir'
   ])
   if (
     inputKeys.length === 0 || inputKeys.length > allowedInputKeys.size ||
@@ -102,7 +104,11 @@ export function encodeRuntimeStartupPrivateFrameV1(
   } catch {
     throw fixedStartupFrameErrorV1()
   }
-  if (!authority && !hostScheduleMcpBinding && !darwinSecretStoreKeychainBinding) {
+  const developmentProviderAuthorityDir = input.developmentProviderAuthorityDir
+  if (developmentProviderAuthorityDir !== undefined && (darwinSecretStoreKeychainBinding ||
+    !/^\/[A-Za-z0-9._/-]+\/provider-credentials$/.test(developmentProviderAuthorityDir) ||
+    developmentProviderAuthorityDir.includes('/../') || developmentProviderAuthorityDir.length > 1024)) throw fixedStartupFrameErrorV1()
+  if (!authority && !hostScheduleMcpBinding && !darwinSecretStoreKeychainBinding && !developmentProviderAuthorityDir) {
     throw fixedStartupFrameErrorV1()
   }
 
@@ -118,6 +124,7 @@ export function encodeRuntimeStartupPrivateFrameV1(
       ...(darwinSecretStoreKeychainBinding
         ? { darwinSecretStoreKeychainBindingV1: darwinSecretStoreKeychainBinding }
         : {}),
+      ...(developmentProviderAuthorityDir ? { developmentProviderAuthorityDir } : {}),
       ...(hostScheduleMcpBinding
         ? { hostScheduleMcpBindingV1: hostScheduleMcpBinding }
         : {})

@@ -100,6 +100,7 @@ func finishProviderRegistryAuthorityV1(
 	ctx context.Context,
 	registry *providerregistryfs.Store,
 	secrets *secretstore.Store,
+	recoverState ...bool,
 ) (*providerRegistryAuthorityV1, error) {
 	manager, err := providerregistryapp.NewManager(registry, secrets, providerregistryfs.LegacySourceReader{})
 	if err != nil {
@@ -110,6 +111,9 @@ func finishProviderRegistryAuthorityV1(
 		service:  newProviderRegistryOperationsV1(manager),
 		registry: registry,
 		secrets:  secrets,
+	}
+	if len(recoverState) != 0 && !recoverState[0] {
+		return authority, nil
 	}
 	if err := manager.Recover(ctx); err != nil {
 		return nil, errors.Join(errors.New("provider registry recovery failed"), authority.Close())

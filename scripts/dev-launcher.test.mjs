@@ -15,7 +15,7 @@ function fixture(t) {
   const cache = join(root, 'cache')
   mkdirSync(cache, { mode: 0o700 })
   mkdirSync(join(cache, 'tmp'), { mode: 0o700 })
-  return { root, stateRoot: join(root, 'state'), env: { ANALYTIX_DEV_CACHE_ROOT: cache, PATH: process.env.PATH } }
+  return { root, credentialMode: 'isolated-keychain', stateRoot: join(root, 'state'), env: { ANALYTIX_DEV_CACHE_ROOT: cache, PATH: process.env.PATH } }
 }
 
 test('isolated development rejects ambient credentials, live-state and code-injection overrides', t => {
@@ -95,8 +95,8 @@ test('unsafe roots, symlinks, traversal and broadened permissions fail closed', 
 })
 
 test('only explicit development modes are accepted', () => {
-  assert.deepEqual(parseDevelopmentArgs([]), { fast: false, fresh: false, profile: 'default', unlockKeychain: false })
-  assert.deepEqual(parseDevelopmentArgs(['--fast', '--profile', 'recovery']), { fast: true, fresh: false, profile: 'recovery', unlockKeychain: false })
+  assert.deepEqual(parseDevelopmentArgs([]), { fast: false, fresh: false, profile: 'default', unlockKeychain: false, credentialMode: 'development' })
+  assert.deepEqual(parseDevelopmentArgs(['--fast', '--profile', 'recovery']), { fast: true, fresh: false, profile: 'recovery', unlockKeychain: false, credentialMode: 'development' })
   for (const args of [['--env-file', 'private.env'], ['--profile'], ['--fresh', '--profile', 'recovery'], ['--built']]) assert.throws(() => parseDevelopmentArgs(args))
 })
 
@@ -250,4 +250,26 @@ test('launcher reads Core committed identity without adopting replacement or rep
   rmSync(join(profile.homeRoot, '.analytix', 'data', 'private', 'provider-secrets'), { recursive: true })
   mkdirSync(join(profile.homeRoot, '.analytix', 'data', 'private', 'provider-registry'), { mode: 0o700 })
   assert.throws(() => assertCommittedDevelopmentKeychainIdentity(profile), /identity is missing/)
+})
+
+test('ordinary tasks and worktrees share only the development credential authority without Keychain UI', async t => {
+  const f = fixture(t)
+  const first = prepareDevelopmentProfile({ ...f, credentialMode: 'development' })
+  const worktree = join(f.root, 'worktree')
+  mkdirSync(worktree, { mode: 0o700 })
+  const next = prepareDevelopmentProfile({ ...f, root: worktree, profile: 'next', credentialMode: 'development' })
+  assert.notEqual(first.taskRoot, next.taskRoot)
+  assert.equal(first.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR, next.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR)
+  assert.equal(first.needsKeychain, false)
+  assert.equal(next.needsKeychain, false)
+  const forbidden = () => { throw new Error('ordinary development requested Keychain interaction') }
+  await launchDevelopment(next, { fast: true }, {
+    promptPassword: forbidden, prepareKeychain: forbidden,
+    runPrerequisite: () => {}, startApplication: () => ({})
+  })
+  const qa = prepareDevelopmentProfile({ ...f, profile: 'qa' })
+  assert.equal(qa.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR, undefined)
+  assert.equal(qa.needsKeychain, true)
+  assert.throws(() => parseDevelopmentArgs(['--unlock-keychain']))
+  assert.equal(parseDevelopmentArgs(['--isolated-keychain', '--unlock-keychain']).credentialMode, 'isolated-keychain')
 })

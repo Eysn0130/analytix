@@ -28,6 +28,15 @@ typecheck, pending a new candidate build. The installed locked-restart check kep
 configuration and recovered through Retry after normal QA Keychain unlock.
 See the current release-admission report.
 
+The subsequent ordinary-development credential slice reuses one persistent
+protected Registry/Secret Store, independently of private task profiles. Explicit
+QA Keychains remain opt-in and packaged runtimes reject the development authority.
+Actual Core bootstrap, independent-process reuse, GUI response, Electron/Core
+restart response and new-task GUI response pass without API-key or password
+re-entry. A reproduced renderer defect replacing the Registry model with stale
+Settings was repaired. These are source-development results, not a new package.
+The same report records exact tests and remaining replacement/signing limits.
+
 Current artifact SOURCE is `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
 prior SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` and DELIVERY
 `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` remain ancestors. A clean new

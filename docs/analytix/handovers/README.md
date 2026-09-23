@@ -5,6 +5,12 @@ Status: Operational。唯一恢复入口；原 Codex 保持唯一 writer，未�
 Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
 branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/Eysn0130/analytix/pull/28)。
 
+- 普通源码开发现使用持久 development Registry/Secret Store；API Key 已一次
+  bootstrap，Core 及真实 GUI 的重启、新 profile 复用通过，不再索取同一 Key 或
+  普通开发 Keychain 密码。专项 QA 用 `--isolated-keychain`；包装版拒绝共享开发
+  authority。命令见 development-baseline，证据见本轮 admission 报告。
+- `ff2981536` 四项 CodeQL 与 gate 通过；CI35809621946 的 analysis_compute
+  输出文件测试出现 DuckDB 内部错误，不能称为完整 CI 通过；后继须取准确 HEAD。
 - 长期执行顺序：[唯一执行方案](../delivery-execution-plan.md)。
 - 唯一当前状态与证据路由：[产品矩阵](../product-completion.md)。
 - 保留 SOURCE `0708620e21fc2bd706ba18a377a60824cdb78421`、

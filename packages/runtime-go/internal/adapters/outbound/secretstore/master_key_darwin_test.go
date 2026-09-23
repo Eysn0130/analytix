@@ -1482,3 +1482,37 @@ func TestExplicitTaskKeychainUnknownBackupAndAmbiguousRecordArePreserved(t *test
 		})
 	}
 }
+
+func TestDevelopmentFileAuthorityNeverProbesKeychainOrAdoptsKeychainWinner(t *testing.T) {
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(directory, "credentials.v1.json")
+	selected, err := defaultMasterKeyProvider(storePath, Options{DevelopmentFileAuthority: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := selected.(*darwinMasterKeyProvider)
+	provider.keychain = nil // Any accidental Keychain path would panic.
+	first, err := provider.LoadOrCreate(context.Background())
+	if err != nil || len(first) != masterKeySize {
+		t.Fatal("development file initialization failed")
+	}
+	defer clearBytes(first)
+	second, err := provider.LoadOrCreate(context.Background())
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatal("development restart authority changed")
+	}
+	clearBytes(second)
+	if err := os.WriteFile(provider.authorityPath, []byte(darwinAuthorityKeychain), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := provider.LoadOrCreate(context.Background()); err == nil {
+		clearBytes(value)
+		t.Fatal("development replaced an OS-backed authority")
+	}
+	if _, err := defaultMasterKeyProvider(storePath, Options{DevelopmentFileAuthority: true, DarwinKeychainDBPath: "/synthetic/qa.keychain-db"}); err == nil {
+		t.Fatal("mixed QA and development options accepted")
+	}
+}

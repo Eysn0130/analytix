@@ -2,7 +2,7 @@ import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/an
 
 export type LocalProviderReadiness =
   | { kind: 'setup' }
-  | { kind: 'ready'; providerId: string }
+  | { kind: 'ready'; providerId: string; model: string }
   | { kind: 'recovery'; message: string }
 
 const LOCAL_PROVIDER_RECOVERY_MESSAGE =
@@ -56,7 +56,7 @@ export function resolveLocalProviderReadiness(
     return { kind: 'recovery', message: LOCAL_PROVIDER_RECOVERY_MESSAGE }
   }
 
-  return { kind: 'ready', providerId: selected.id }
+  return { kind: 'ready', providerId: selected.id, model: selected.selectedModel }
 }
 
 export function localProviderRecoveryReadiness(): LocalProviderReadiness {

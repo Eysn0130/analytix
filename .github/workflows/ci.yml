@@ -105,6 +105,15 @@ jobs:
           go test -count=1 -p 1 -parallel 2 -timeout 5m \
             ./internal/adapters/outbound/processsandbox \
             ./internal/adapters/outbound/process
+      - name: Verify development credential reuse and production rejection
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          go test -count=1 -timeout 5m -tags analytix_prod,analytix_dev_credentials ./internal/runtimeapp -run '^TestDevelopment'
+          go test -count=1 -timeout 5m -tags analytix_prod ./internal/runtimeapp -run '^TestDevelopmentProviderAuthorityIsolationAndRestart$'
       - name: Execute all macOS integration contracts with synthetic providers
         run: |
           umask 077

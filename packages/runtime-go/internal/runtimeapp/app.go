@@ -189,6 +189,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	originalCreates *runtimeOriginalCreateStartupV1,
 	inheritedChildFloors ...domainpendingwork.ChildIdentityFloorsV1,
 ) (_ http.Handler, resultErr error) {
+	if err := validateDevelopmentProviderAuthority(config); err != nil {
+		return nil, err
+	}
 	startupPhase := "configuration"
 	if simulation {
 		defer func() {
@@ -1618,7 +1621,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 		evidenceapp.ToolEvidenceService{Issuer: evidenceIssuer, Reader: mcpManager},
 	)
 	var providerRegistryAuthority *providerRegistryAuthorityV1
-	if config.DarwinSecretStoreKeychainDBPath == "" &&
+	if config.DevelopmentProviderAuthorityDir != "" {
+		providerRegistryAuthority, err = openDevelopmentProviderAuthority(ctx, config, simulation)
+	} else if config.DarwinSecretStoreKeychainDBPath == "" &&
 		config.DarwinSecretStoreKeychainBindingDigest == "" &&
 		config.DarwinSecretStoreKeychainSecurityDigest == "" {
 		providerRegistryAuthority, err = openProviderRegistryAuthorityV1(ctx, config.DataDir)

@@ -1520,7 +1520,7 @@ type DevGoRuntimeCacheManifestV1 = {
   sourceDigestSha256: string
   toolchainDigestSha256: string
   buildContractDigestSha256: string
-  buildMode: 'go-build-trimpath-analytix-prod-v1'
+  buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1'
   platform: NodeJS.Platform
   arch: string
   binaryName: string
@@ -1586,7 +1586,7 @@ function parseDevGoRuntimeCacheManifestV1(value: unknown): DevGoRuntimeCacheMani
     'toolchainDigestSha256'
   ]
   if (Object.keys(record).sort().join('\n') !== expectedKeys.join('\n')) return null
-  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-v1') return null
+  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-dev-credentials-v1') return null
   if (!isSha256(record.sourceDigestSha256) || !isSha256(record.toolchainDigestSha256) ||
       !isSha256(record.buildContractDigestSha256) || !isSha256(record.binarySha256)) return null
   if (typeof record.platform !== 'string' || typeof record.arch !== 'string' || !record.arch) return null
@@ -1654,7 +1654,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     schemaVersion: 1,
     sourceDigestSha256,
     toolchainDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1',
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1',
     cachePolicy: options.env.ANALYTIX_DEV_CACHE_ROOT ? 'repository-cache-v1' : 'ordinary-v1',
     platform,
     arch,
@@ -1665,7 +1665,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     sourceDigestSha256,
     toolchainDigestSha256,
     buildContractDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1' as const,
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1' as const,
     platform,
     arch,
     binaryName
@@ -1688,7 +1688,7 @@ function ensureDevGoRuntimeServerBinary(options: {
       'build',
       '-trimpath',
       '-tags',
-      'analytix_prod',
+      'analytix_prod,analytix_dev_credentials',
       '-o',
       output,
       './cmd/runtime-server'
@@ -2521,6 +2521,8 @@ async function startGoConformanceSidecarOnce(
     runtimeServer: isRuntimeServer,
     runtimeGoDir
   })
+  const developmentProviderAuthorityDir = desktopExternalStateBoundaryForGoRuntime.developmentProviderAuthorityDir
+  if (developmentProviderAuthorityDir && app.isPackaged) throw new Error('Packaged Analytix rejects development credential authority.')
   const darwinSecretStoreKeychainBindingV1 = isRuntimeServer
     ? resolveDarwinSecretStoreKeychainBindingV1({
         boundary: desktopExternalStateBoundaryForGoRuntime,
@@ -2613,7 +2615,7 @@ async function startGoConformanceSidecarOnce(
       darwinSecretStoreKeychainBindingV1
     )
     hasPrivateStartupFrame = Boolean(
-      mainOwnedAuthority || hostScheduleMcpBindingV1 || darwinSecretStoreKeychainBindingV1
+      mainOwnedAuthority || hostScheduleMcpBindingV1 || darwinSecretStoreKeychainBindingV1 || developmentProviderAuthorityDir
     )
     if (isRuntimeDefault) {
       args.push('--durable-root', durableRoot)
@@ -2665,6 +2667,7 @@ async function startGoConformanceSidecarOnce(
   try {
     if (hasPrivateStartupFrame) {
       await writeRuntimeStartupPrivateFrameV1(child.stdin, {
+        ...(developmentProviderAuthorityDir ? { developmentProviderAuthorityDir } : {}),
         ...(mainOwnedAuthority ? { protectedAuthorityV1: mainOwnedAuthority } : {}),
         ...(darwinSecretStoreKeychainBindingV1
           ? { darwinSecretStoreKeychainBindingV1 }
