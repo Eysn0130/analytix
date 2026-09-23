@@ -835,7 +835,7 @@ function startContractProvider() {
       if (isToolTimelineRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged tool timeline ok"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged tool timeline ok"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":34,"completion_tokens":5,"total_tokens":39,"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":27}}',
           'data: [DONE]'
         ].join('\n\n'))
@@ -852,7 +852,7 @@ function startContractProvider() {
       if (isMimoPlanRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged mimo plan saved"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged mimo plan saved"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":36,"completion_tokens":5,"total_tokens":41,"cached_tokens":8}}',
           'data: [DONE]'
         ].join('\n\n'))
@@ -861,7 +861,7 @@ function startContractProvider() {
       if (isAttachmentRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged attachment fallback ok"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged attachment fallback ok"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":29,"completion_tokens":4,"total_tokens":33,"prompt_cache_hit_tokens":6,"prompt_cache_miss_tokens":23}}',
           'data: [DONE]'
         ].join('\n\n'))
@@ -871,7 +871,7 @@ function startContractProvider() {
         if (raw.includes('call_packaged_approval_deny')) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged approval deny ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged approval deny ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":31,"completion_tokens":4,"total_tokens":35,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -888,7 +888,7 @@ function startContractProvider() {
         if (raw.includes('call_packaged_approval_allow')) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged approval allow ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged approval allow ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":32,"completion_tokens":4,"total_tokens":36,"prompt_cache_hit_tokens":6,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -905,7 +905,7 @@ function startContractProvider() {
         if (raw.includes('call_packaged_user_input')) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged user input ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged user input ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":33,"completion_tokens":4,"total_tokens":37,"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -920,7 +920,7 @@ function startContractProvider() {
       }
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
       res.end([
-        'data: {"choices":[{"delta":{"content":"packaged session soak ok"}}]}',
+        'data: {"choices":[{"delta":{"content":"packaged session soak ok"},"finish_reason":"stop"}]}',
         'data: {"choices":[],"usage":{"prompt_tokens":21,"completion_tokens":4,"total_tokens":25,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":16}}',
         'data: [DONE]'
       ].join('\n\n'))
