@@ -35,6 +35,7 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const goCommand = process.env.GO || 'go'
 const jsonOutput = args.has('--json') || args.has('--dry-run')
 const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
+const actualOnly = args.has('--actual-only')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
 const defaultEvidencePath = 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json'
@@ -1171,12 +1172,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const profilePatch = {
         provider: {
           activeProviderId: ${JSON.stringify(providerId)},
-          apiKey: ${JSON.stringify(syntheticApiKey)},
           baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
           providers: [{
             id: ${JSON.stringify(providerId)},
             name: 'Packaged Session Soak Provider',
-            apiKey: ${JSON.stringify(syntheticApiKey)},
             baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
             endpointFormat: 'chat_completions',
             models: ['mimo-v2.5-pro', 'mimo-v2.5'],
@@ -1217,29 +1216,13 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           model: ${JSON.stringify(model)}
         }
       };
-      const compatPatch = {
-        provider: {
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)}
-        },
-        runtime: {
-          port: ${JSON.stringify(runtimePort)},
-          dataDir: ${JSON.stringify(runtimeDataDir)},
-          autoStart: true,
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
-          model: ${JSON.stringify(model)}
-        }
-      };
       try {
         await api.settings.setSettings(profilePatch);
         out.settingsProfilePatchAccepted = true;
         out.settingsPatchMode = 'provider-profile';
       } catch (error) {
         out.settingsPatchError = error && (error.stack || error.message) || String(error);
-        await api.settings.setSettings(compatPatch);
-        out.settingsCompatPatchUsed = true;
-        out.settingsPatchMode = 'compat-minimal';
+        return out;
       }
       try {
         await api.runtime.restartRuntime();
@@ -1251,6 +1234,50 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const health = await api.runtime.runtimeRequest('/health', 'GET');
       out.healthStatus = health.status;
       out.healthService = JSON.parse(health.body || '{}').service || '';
+      try {
+        const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        if (!before || before.error || !Array.isArray(before.providers)) {
+          throw new Error('synthetic_provider_registry_unavailable');
+        }
+        const connected = await api.providerRegistry.request({
+          schemaVersion: 1,
+          operation: 'connect',
+          expected: {
+            registryRevision: before.registryRevision,
+            registryIncarnation: before.registryIncarnation,
+            providerRevision: '0',
+            providerGeneration: '0',
+            providerIncarnation: '',
+            providerCredentialPurpose: ''
+          },
+          provider: {
+            id: ${JSON.stringify(providerId)},
+            kind: 'openai-compatible',
+            endpoint: ${JSON.stringify(`${providerBaseUrl}/v1`)},
+            proxy: '',
+            models: ['mimo-v2.5-pro', 'mimo-v2.5'],
+            mediaModels: [],
+            selectedModel: 'mimo-v2.5-pro',
+            selectedMediaModel: '',
+            selectedRoutes: []
+          },
+          credential: {
+            kind: 'set',
+            purpose: 'provider-api-key',
+            valueBase64: btoa(${JSON.stringify(syntheticApiKey)})
+          }
+        });
+        if (!connected || connected.error) throw new Error('synthetic_provider_connect_failed');
+        const registry = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        const registered = registry && !registry.error && Array.isArray(registry.providers)
+          ? registry.providers.find((item) => item && item.id === ${JSON.stringify(providerId)}) : null;
+        if (!registered || registered.credentialConfigured !== true) {
+          throw new Error('synthetic_provider_credential_not_configured');
+        }
+      } catch (error) {
+        out.settingsPatchError = error && (error.stack || error.message) || String(error);
+        return out;
+      }
 
       const thread = await request('/v1/threads', 'POST', {
         title: 'Packaged Session Soak',
@@ -2189,10 +2216,13 @@ async function main() {
   // Keep the nested TypeScript validation owner out of the Go test window.
   // Overlap makes a standalone soak faster but can starve the nested Vitest
   // process when this contract itself runs inside the full root suite.
-  const goCheck = await runCheck(commands[0])
-  const checks = [goCheck]
-  if (goCheck.status === 'passed') {
-    checks.push(await runCheck(commands[1]))
+  const checks = []
+  if (!actualOnly) {
+    const goCheck = await runCheck(commands[0])
+    checks.push(goCheck)
+    if (goCheck.status === 'passed') {
+      checks.push(await runCheck(commands[1]))
+    }
   }
   const failed = checks.some((check) => check.status !== 'passed')
 
@@ -2215,9 +2245,11 @@ async function main() {
     checks: []
   }
   const actualRequiredAndFailed = actualPackagedSoak && actual.passed !== true
-  const passed = !skipCommands && !failed && checks.every((item) => item.status === 'passed') && !actualRequiredAndFailed
+  const passed = !skipCommands && !actualOnly && !failed && checks.every((item) => item.status === 'passed') && !actualRequiredAndFailed
   const deterministicChecksFailed = failed || checks.some((item) => item.status === 'failed')
-  const status = passed
+  const status = actualOnly && actual.passed === true
+    ? 'partial'
+    : passed
     ? 'passed'
     : skipCommands
       ? 'skipped'
@@ -2241,6 +2273,7 @@ async function main() {
     status,
     passed,
     soak: {
+      actualOnly,
       deterministicContractOnly: actualPackagedSoak !== true,
       formalInstanceMode,
       secondInstanceStarted: actual.launch?.secondInstanceStarted === true,
