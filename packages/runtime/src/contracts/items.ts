@@ -1221,19 +1221,27 @@ export type ToolProgressTurnItem = z.infer<typeof ToolProgressTurnItem>
 
 export const ApprovalTurnItem = TurnItemBase.extend({
   kind: z.literal('approval'),
-  approvalId: z.string().min(1),
+  approvalId: z.string().min(1).optional(),
   toolName: z.string().min(1),
   summary: z.string(),
   status: z.enum(['pending', 'allowed', 'denied', 'expired'])
+}).superRefine((item, ctx) => {
+  if (item.status === 'pending' && item.approvalId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['approvalId'], message: 'pending approval requires a live handle' })
+  }
 })
 export type ApprovalTurnItem = z.infer<typeof ApprovalTurnItem>
 
 export const UserInputTurnItem = TurnItemBase.extend({
   kind: z.literal('user_input'),
-  inputId: z.string().min(1),
+  inputId: z.string().min(1).optional(),
   prompt: z.string(),
   questions: z.array(UserInputQuestionSchema).default([]),
   status: z.enum(['pending', 'submitted', 'cancelled'])
+}).superRefine((item, ctx) => {
+  if (item.status === 'pending' && item.inputId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['inputId'], message: 'pending user input requires a live handle' })
+  }
 })
 export type UserInputTurnItem = z.infer<typeof UserInputTurnItem>
 

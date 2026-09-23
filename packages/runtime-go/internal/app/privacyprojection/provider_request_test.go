@@ -130,6 +130,13 @@ func TestCaseDelegationProviderCommitmentGrammarIsOrdinaryProjectionStable(t *te
 	}
 }
 
+func TestAttachmentVirtualPathIsOrdinaryProjectionStable(t *testing.T) {
+	const text = "FilePath: attachment://att_0123456789abcdef01234567"
+	if projected := ProjectOrdinaryText(text); projected != text {
+		t.Fatalf("virtual attachment path changed: got=%q want=%q", projected, text)
+	}
+}
+
 func TestProjectProviderRequestMasksAuthorityEntityReferenceForEveryEffect(t *testing.T) {
 	securityContext := providerPrivacyCaseContext(t)
 	reference, err := domaincaseentity.NewReferenceV1FromKeyedDigest(strings.Repeat("a", 64))

@@ -42,6 +42,7 @@ const privateSourceStart = `(?:file://|/(?:Users|Volumes|private|var|tmp|home|ca
 var privateSourceValueStart = regexp.MustCompile(`(?i)^` + privateSourceStart + `[^\s]`)
 var privateSourceLocator = regexp.MustCompile("(?i)https?://[^\\s\"'`<>]+|(^|[\\s\"'`=(:：\\[{,，;；])" + privateSourceStart + "[^\\s\"'`<>{},;，。；！？]+")
 var privateDiffHeader = regexp.MustCompile(`(?im)^((?:---|\+\+\+)[\t ]+)"?[ab]/` + privateSourceStart + `[^\r\n]*`)
+var attachmentVirtualLocator = regexp.MustCompile(`^://att_[0-9a-f]{24}$`)
 var quotedPrivateSourceLocators = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)"` + privateSourceStart + `[^"\r\n]*"`),
 	regexp.MustCompile(`(?i)'` + privateSourceStart + `[^'\r\n]*'`),
@@ -145,6 +146,12 @@ func projectPrivateSourceTextRaw(text string) string {
 	cursor := 0
 	for _, match := range indices {
 		if match[2] < 0 { // A remote URL, not a local source locator.
+			continue
+		}
+		// Attachment authority exposes a synthetic URI, never a local path.
+		// Match its complete closed ID so a suffix cannot evade path masking.
+		if strings.HasSuffix(text[:match[2]], "attachment") &&
+			attachmentVirtualLocator.MatchString(text[match[2]:match[1]]) {
 			continue
 		}
 		out = append(out, text[cursor:match[3]]...)

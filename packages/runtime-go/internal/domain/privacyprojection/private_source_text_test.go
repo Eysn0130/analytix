@@ -29,6 +29,23 @@ func TestPrivateSourceTextProjectsComposerReferenceContents(t *testing.T) {
 	}
 }
 
+func TestPrivateSourceTextPreservesOnlyClosedAttachmentVirtualPath(t *testing.T) {
+	const id = "att_0123456789abcdef01234567"
+	const safe = "FilePath: attachment://" + id
+	if got := ProjectPrivateSourceText(safe); got != safe || ProjectPrivateSourceText(got) != got {
+		t.Fatalf("safe attachment URI changed: %q", got)
+	}
+	for _, unsafe := range []string{
+		"FilePath: attachment://" + id + "/Users/private-owner/source.csv",
+		"FilePath: attachment://" + id + "/suffix",
+		"FilePath: attachment://att_0123456789abcdef0123456g",
+	} {
+		if got := ProjectPrivateSourceText(unsafe); got == unsafe || strings.Contains(got, "/Users/private-owner/source.csv") {
+			t.Fatalf("unsafe attachment-like locator was retained: %q", got)
+		}
+	}
+}
+
 func TestPrivateSourceTextComposerEscapesRequireClosingDelimiter(t *testing.T) {
 	valid := `@[Tool](plugin://report\)part)`
 	if got := ProjectPrivateSourceText(valid); got != valid {

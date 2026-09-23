@@ -795,6 +795,12 @@ function startContractProvider() {
       const currentPrompt = currentUserPrompt(raw)
       const parsedBody = parseProviderBody(raw)
       const currentToolResult = currentTurnHasToolResult(parsedBody)
+      const filePathLine = currentPrompt.split(/\r?\n/).find((line) => line.startsWith('FilePath: '))
+      const filePathValue = filePathLine?.slice('FilePath: '.length).trim() || ''
+      const filePathShape = !filePathLine ? 'absent' : !filePathValue ? 'empty' :
+        filePathValue.startsWith('attachment://') ? 'attachment-virtual' :
+          filePathValue.startsWith('/') ? 'absolute' :
+            filePathValue.startsWith('[') || filePathValue.startsWith('<') ? 'placeholder' : 'other'
       requests.push({
         authorizationConfigured: Boolean(req.headers.authorization),
         requestPath: req.url,
@@ -811,6 +817,9 @@ function startContractProvider() {
         bodyContainsAttachmentEnvelope: raw.includes('[Attached file]'),
         bodyContainsAttachmentProtocol: raw.includes('attachment://'),
         bodyContainsAttachmentFilePathField: raw.includes('FilePath:'),
+        attachmentFilePathShape: filePathShape,
+        attachmentFilePathLength: filePathValue.length,
+        attachmentFilePathFirstCharCode: filePathValue ? filePathValue.charCodeAt(0) : 0,
         bodyContainsAbsoluteFilePath: raw.includes('FilePath: /'),
         bodyContainsRedactedFilePath: raw.includes('FilePath: ['),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
@@ -1179,7 +1188,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           });
           if (!matching) return;
           const id = matching[idField] || matching.itemId || matching.item_id || '';
-          finish({ ok: !!id, id, eventCount: events.length, errorCount: errors.length });
+          const questionId = Array.isArray(matching.questions) &&
+            typeof matching.questions[0]?.id === 'string' ? matching.questions[0].id : '';
+          finish({ ok: !!id, id, questionId,
+            eventCount: events.length, errorCount: errors.length });
         };
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
@@ -1494,9 +1506,9 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const userInputGate = await collectGateReplay(threadId, userInputTurnId, 'user_input_requested', 'inputId');
       out.userInputGate = userInputGate;
       out.userInputRequestedOk = userInputGate.ok === true;
-      if (userInputGate.id) {
+      if (userInputGate.id && userInputGate.questionId) {
         await request('/v1/user-inputs/' + encodeURIComponent(userInputGate.id), 'POST', {
-          answers: [{ id: 'answer', value: 'Packaged user input answer' }]
+          answers: [{ id: userInputGate.questionId, value: 'Packaged user input answer' }]
         });
         out.userInputResolvedOk = true;
       }
@@ -1628,6 +1640,9 @@ function providerRequestShapeEvidence(requests) {
     attachmentEnvelope: item.bodyContainsAttachmentEnvelope === true,
     attachmentProtocol: item.bodyContainsAttachmentProtocol === true,
     attachmentFilePathField: item.bodyContainsAttachmentFilePathField === true,
+    attachmentFilePathShape: item.attachmentFilePathShape,
+    attachmentFilePathLength: item.attachmentFilePathLength,
+    attachmentFilePathFirstCharCode: item.attachmentFilePathFirstCharCode,
     absoluteFilePath: item.bodyContainsAbsoluteFilePath === true,
     redactedFilePath: item.bodyContainsRedactedFilePath === true,
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,

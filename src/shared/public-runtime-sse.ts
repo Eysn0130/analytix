@@ -10,10 +10,12 @@ import {
 } from '../../packages/runtime/src/contracts/events.js'
 import type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
 import {
+  ApprovalTurnItem,
   TaskContinuationSnapshotV1Schema,
   ToolCallTurnItem,
   ToolProgressTurnItem,
-  ToolResultTurnItem
+  ToolResultTurnItem,
+  UserInputTurnItem
 } from '../../packages/runtime/src/contracts/items.js'
 import {
   containsInternalCaseEntityReference,
@@ -481,15 +483,16 @@ function isClosedToolProgressItem(event: Record<string, unknown>, item: Record<s
 }
 
 function isClosedApprovalItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName']) &&
+  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName', 'summary']) &&
     isClosedItemBase(event, item) && item.role === 'tool' && isSafePublicId(item.approvalId) &&
-    isSafeToolName(item.toolName) && new Set(['pending', 'allowed', 'denied', 'expired']).has(String(item.status))
+    isSafeToolName(item.toolName) && ApprovalTurnItem.safeParse(item).success
 }
 
 function isClosedUserInputItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId']) && isClosedItemBase(event, item) &&
+  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId', 'prompt', 'questions']) &&
+    isClosedItemBase(event, item) &&
     item.role === 'system' && isSafePublicId(item.inputId) &&
-    new Set(['pending', 'submitted', 'cancelled']).has(String(item.status))
+    UserInputTurnItem.safeParse(item).success
 }
 
 function isClosedCompactionItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {

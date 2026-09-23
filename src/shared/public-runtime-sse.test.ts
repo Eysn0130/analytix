@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { GeneralTerminalDeliveryBatchV1Schema } from '../../packages/runtime/src/contracts/events'
-import { PublicRuntimeEventFilter } from './public-runtime-content'
+import { isPublicSseIpcPayload, PublicRuntimeEventFilter } from './public-runtime-content'
 import {
+  isClosedPublicRuntimeSseEvent,
   isStrictPublicRuntimeSseEndPayload,
   isStrictPublicRuntimeSseErrorPayload,
   isStrictPublicRuntimeSseIpcPayload,
@@ -879,6 +880,34 @@ describe('public runtime SSE boundary', () => {
   })
 })
 
+describe('public gate item replay', () => {
+  const base = {
+    id: 'item-gate', threadId: 'thread-strict', turnId: 'turn-strict',
+    status: 'pending', createdAt: '2026-09-23T00:00:00Z'
+  }
+  const items = [
+    { ...base, kind: 'approval', role: 'tool', approvalId: 'approval_123456789012',
+      toolName: 'write_file', summary: 'Approve write_file' },
+    { ...base, kind: 'user_input', role: 'system', inputId: 'input_a1b2c3d4e5f6',
+      prompt: 'Choose a path', questions: [{ id: 'input_a1b2c3d4e5f6_1', header: 'Path',
+        question: 'Choose a path', options: [] }] }
+  ]
+
+  it.each(items)('accepts the public $kind item produced by Core', (item) => {
+    const event = { kind: 'item_created', seq: 170, timestamp: item.createdAt,
+      threadId: item.threadId, turnId: item.turnId, itemId: item.id, item }
+    expect(isPublicSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', event), item.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 170 })
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', {
+      ...event, item: { ...item, continuationReceiptId: 'private' }
+    }), item.threadId, new PublicRuntimeEventFilter())).toEqual({
+      status: 'invalid', reason: 'invalid_public_projection'
+    })
+  })
+})
 
 function publicChildLedger(stage = 'background_job_delivery_pending', status = 'pending', callId?: string) {
   const delivery = stage.startsWith('background_job_delivery_')
