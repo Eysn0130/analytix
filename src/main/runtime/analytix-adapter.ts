@@ -4342,6 +4342,9 @@ export function sanitizeRuntimeResponse(
             schemaValid: schemaResult.success,
             issuePaths: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
               .map((issue) => `${issue.path.join('.')}:${issue.code}`),
+            issueKeys: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .filter((issue) => issue.code === 'unrecognized_keys')
+              .flatMap((issue) => issue.keys),
             sanitizerChanged: schemaResult.success &&
               canonicalRuntimeBoundaryValue(sanitizePublicRuntimeValue(schemaResult.data)) !==
                 canonicalRuntimeBoundaryValue(schemaResult.data)

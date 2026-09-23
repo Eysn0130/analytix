@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { URL } from 'node:url'
 import type { AppSettingsV1 } from '../shared/app-settings'
 import { analytixThreadEventsPath } from '../shared/analytix-endpoints'
+import { GeneralTerminalDeliveryBatchV1Schema } from '../../packages/runtime/src/contracts/events'
 import {
   containsPrivateAcceptedFinalAuthority,
   PublicRuntimeEventFilter
@@ -520,10 +521,28 @@ export function registerRuntimeSseIpc(options: {
                   }
                   if (decision.status !== 'emit') {
                     if (process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1') {
-                      console.error('[packaged-sse-schema] ' + JSON.stringify({
-                        kind: /^event: ([A-Za-z_]+)$/m.exec(block)?.[1] ?? '',
-                        reason: decision.reason
-                      }))
+                      const kind = /^event: ([A-Za-z_]+)$/m.exec(block)?.[1] ?? ''
+                      const diagnostic: Record<string, unknown> = { kind, reason: decision.reason }
+                      if (kind === 'general_terminal_batch') {
+                        try {
+                          const dataLine = block.split(/\r?\n/).find((line) => line.startsWith('data: ')) ?? ''
+                          const batch = JSON.parse(dataLine.slice(6)) as Record<string, unknown>
+                          const schema = GeneralTerminalDeliveryBatchV1Schema.safeParse(batch)
+                          const nested = Array.isArray(batch.events) ? batch.events : []
+                          diagnostic.schemaValid = schema.success
+                          diagnostic.issuePaths = schema.success ? [] : schema.error.issues.slice(0, 12)
+                            .map((issue) => `${issue.path.join('.')}:${issue.code}`)
+                          diagnostic.issueKeys = schema.success ? [] : schema.error.issues.slice(0, 12)
+                            .filter((issue) => issue.code === 'unrecognized_keys')
+                            .flatMap((issue) => issue.keys)
+                          diagnostic.verificationReason = generalTerminalDeliveryBatchVerificationV1(batch).reason
+                          diagnostic.nestedKinds = nested.map((event) => event && typeof event === 'object'
+                            ? String((event as Record<string, unknown>).kind ?? '') : '')
+                        } catch {
+                          diagnostic.parseFailed = true
+                        }
+                      }
+                      console.error('[packaged-sse-schema] ' + JSON.stringify(diagnostic))
                     }
                     protocolViolationReason = decision.reason
                     break
