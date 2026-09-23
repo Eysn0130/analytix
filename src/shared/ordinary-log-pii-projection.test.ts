@@ -290,6 +290,20 @@ describe('ordinary log PII projection', () => {
     })).toBe(true)
   })
 
+  it('only treats exact host user-input question IDs as structural outside prose', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+    const item = { kind: 'user_input', role: 'system', status: 'pending', inputId, questions: [question] }
+    expect(containsOrdinaryPublicPII(item)).toBe(false)
+    expect(containsOrdinaryPublicPII({ message: item })).toBe(true)
+    expect(containsOrdinaryPublicPII({ ...item,
+      questions: [{ ...question, id: `other_${'123456789012'}` }]
+    })).toBe(true)
+    expect(containsOrdinaryPublicPII({ ...item,
+      questions: [{ ...question, question: 'account=6222020202020202020' }]
+    })).toBe(true)
+  })
+
   it('keeps every schema-valid closed tool-manifest digest opaque without exempting arbitrary detail text', () => {
     const digest = `ab${'1'.repeat(60)}cd`
     const diagnostic = {

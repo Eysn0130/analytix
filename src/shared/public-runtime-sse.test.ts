@@ -924,6 +924,19 @@ describe('public gate item replay', () => {
       status: 'invalid', reason: 'invalid_public_projection'
     })
   })
+
+  it('replays a host user-input item whose question ID has a numeric digest run', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const item = { ...base, kind: 'user_input', role: 'system', inputId,
+      prompt: 'Choose a path', questions: [
+        { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+    const event = { kind: 'item_created', seq: 170, timestamp: item.createdAt,
+      threadId: item.threadId, turnId: item.turnId, itemId: item.id, item }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', event), item.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 170 })
+  })
 })
 
 describe('public gate request event replay', () => {
@@ -949,6 +962,20 @@ describe('public gate request event replay', () => {
     }), event.threadId, new PublicRuntimeEventFilter())).toEqual({
       status: 'invalid', reason: 'invalid_public_projection'
     })
+  })
+
+  it('keeps an exact host question ID when its opaque digest contains a numeric run', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const event = { ...base, kind: 'user_input_requested', inputId,
+      status: 'pending', prompt: 'Choose a path', questions: [
+        { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 171 })
+
+    const forged = { ...event, questions: [{ ...event.questions[0], id: `other_${'123456789012'}` }] }
+    expect(isClosedPublicRuntimeSseEvent(forged)).toBe(false)
   })
 })
 

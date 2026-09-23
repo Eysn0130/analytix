@@ -116,6 +116,7 @@ const PUBLIC_SCHEMA_DIGEST_KEYS = new Set([
 ])
 const CANONICAL_OPAQUE_DIGEST = /^(?=[a-f0-9]{64}$)(?=.*[a-f])[a-f0-9]{64}$/
 const CANONICAL_SCHEMA_DIGEST = /^[a-f0-9]{64}$/
+const HOST_USER_INPUT_ID = /^input_[a-f0-9]{64}$/
 
 const CASE_ENTITY_REFERENCE_V1 = /cer1_[a-p]{64}/
 const PRIVATE_SOURCE_ROW_REFERENCE_V1 = /srow1_[0-9a-f]{64}/
@@ -268,11 +269,30 @@ export function containsOrdinaryPublicPII(value: unknown): boolean {
   return containsPublicPII(value, false, newPublicPIITraversalState(), 0)
 }
 
+function hostUserInputQuestionsId(
+  record: Record<string, unknown>,
+  key: string,
+  entry: unknown,
+  inheritedText: boolean
+): string | undefined {
+  if (key !== 'questions' || inheritedText || !Array.isArray(entry) ||
+      typeof record.inputId !== 'string' || !HOST_USER_INPUT_ID.test(record.inputId)) return undefined
+  if (record.kind === 'user_input' && record.role === 'system' &&
+      (record.status === 'pending' || record.status === 'submitted' ||
+        record.status === 'cancelled')) return record.inputId
+  if (record.kind === 'user_input_requested' && record.status === 'pending') return record.inputId
+  if (record.kind === 'user_input_resolved' &&
+      (record.status === 'submitted' || record.status === 'cancelled')) return record.inputId
+  return undefined
+}
+
 function containsPublicPII(
   value: unknown,
   inheritedText: boolean,
   state: PublicPIITraversalState,
-  depth: number
+  depth: number,
+  hostInputId?: string,
+  expectedQuestionId?: string
 ): boolean {
   if (!consumePublicPIINode(state, depth)) return true
   if (typeof value === 'string') {
@@ -286,15 +306,22 @@ function containsPublicPII(
   state.active.add(value)
   try {
     if (Array.isArray(value)) {
-      for (const entry of value) {
-        if (containsPublicPII(entry, inheritedText, state, depth + 1)) return true
+      for (const [index, entry] of value.entries()) {
+        if (containsPublicPII(entry, inheritedText, state, depth + 1, undefined,
+          hostInputId === undefined ? undefined : `${hostInputId}_${index + 1}`)) return true
       }
       return false
     }
-    for (const key in value as Record<string, unknown>) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue
-      const entry = (value as Record<string, unknown>)[key]
+    const record = value as Record<string, unknown>
+    for (const key in record) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const entry = record[key]
       const normalized = normalizePublicKey(key)
+      // The Go host derives these correlation IDs from its gate digest. They
+      // are structural only in a closed user-input record outside prose; all
+      // question text and any mismatched ID still receive the ordinary check.
+      if (normalized === 'id' && expectedQuestionId !== undefined &&
+          entry === expectedQuestionId) continue
       if (PUBLIC_OPAQUE_DIGEST_KEYS.has(normalized) &&
           typeof entry === 'string' && CANONICAL_OPAQUE_DIGEST.test(entry)) {
         continue
@@ -310,7 +337,8 @@ function containsPublicPII(
         entry,
         inheritedText || PUBLIC_TEXT_KEYS.has(normalized) || TYPED_PII_KEYS.has(normalized),
         state,
-        depth + 1
+        depth + 1,
+        hostUserInputQuestionsId(record, key, entry, inheritedText)
       )) {
         return true
       }
