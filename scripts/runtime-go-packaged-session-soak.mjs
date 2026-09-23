@@ -20,6 +20,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
+import { createIsolatedDarwinLoginKeychain } from './runtime-go-packaged-milestone-a.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -762,7 +763,7 @@ async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs })
       return await evaluateCdp(
         target.webSocketDebuggerUrl,
         expression,
-        Math.min(20_000, Math.max(1_000, deadline - Date.now()))
+        Math.min(timeoutMs, Math.max(1_000, deadline - Date.now()))
       )
     } catch (error) {
       lastError = error
@@ -1621,6 +1622,7 @@ async function runActualPackagedSessionSoak() {
   let debugPort = 0
   let runtimePort = 0
   let contractProvider = null
+  let isolatedLoginKeychain = null
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro-ultraspeed'
 
@@ -1630,6 +1632,13 @@ async function runActualPackagedSessionSoak() {
       tempHome = mkdtempSync(join(tmpdir(), 'analytix-packaged-session-home-'))
       userDataDir = join(tempHome, '.analytix', 'packaged-session-user-data')
       runtimeDataDir = join(tempHome, '.analytix', 'packaged-session-runtime-data')
+      if (target.platform === 'darwin') {
+        isolatedLoginKeychain = await createIsolatedDarwinLoginKeychain(tempHome)
+        const unlocked = await isolatedLoginKeychain.unlockForLaunch()
+        if (!unlocked.ok || !unlocked.defaultKeychainBound) {
+          throw new Error('isolated_login_keychain_unavailable')
+        }
+      }
       const workspace = join(tempHome, 'workspace')
       debugPort = await getFreePort()
       runtimePort = await getFreePort()
@@ -1670,6 +1679,7 @@ async function runActualPackagedSessionSoak() {
     await stopChild(child)
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
     if (contractProvider) await contractProvider.close()
+    isolatedLoginKeychain?.dispose()
     if (tempHome) rmSync(tempHome, { recursive: true, force: true })
   }
 
