@@ -135,23 +135,17 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 		clearBytes(candidate)
 		return nil, err
 	}
-	arguments := []string{"add-generic-password", "-s", keychainService, "-a", keychainAccount}
-	addInput := encoded
-	if provider.keychainDBPath != "" {
-		arguments = []string{"-i"}
-		addInput, err = explicitDarwinKeychainAddInput(encoded[:len(encoded)-1], provider.keychainDBPath)
-		if err != nil {
-			clearBytes(encoded)
-			clearBytes(candidate)
-			return nil, portsecretstore.ErrMasterKeyUnavailable
-		}
-	} else {
-		arguments = append(arguments, "-w")
+	// security add-generic-password -w without an argv value prompts twice.
+	// Send one bounded command to security -i so the key stays off argv and
+	// the default Keychain path is as non-interactive as the explicit path.
+	addInput, err := darwinKeychainAddInput(encoded[:len(encoded)-1], provider.keychainDBPath)
+	if err != nil {
+		clearBytes(encoded)
+		clearBytes(candidate)
+		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
-	result, addErr := provider.runner.Run(ctx, arguments, addInput)
-	if provider.keychainDBPath != "" {
-		clearBytes(addInput)
-	}
+	result, addErr := provider.runner.Run(ctx, []string{"-i"}, addInput)
+	clearBytes(addInput)
 	clearBytes(encoded)
 	clearBytes(result.stdout)
 	if errors.Is(addErr, errOSCredentialUnavailable) {
@@ -213,8 +207,15 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 }
 
 func explicitDarwinKeychainAddInput(candidateToken []byte, databasePath string) ([]byte, error) {
+	if !darwinSafeTaskKeychainPath(databasePath) {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	return darwinKeychainAddInput(candidateToken, databasePath)
+}
+
+func darwinKeychainAddInput(candidateToken []byte, databasePath string) ([]byte, error) {
 	if len(candidateToken) != base64.StdEncoding.EncodedLen(masterKeySize) ||
-		!darwinSafeTaskKeychainPath(databasePath) {
+		(databasePath != "" && !darwinSafeTaskKeychainPath(databasePath)) {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	decoded := make([]byte, masterKeySize)
@@ -233,8 +234,10 @@ func explicitDarwinKeychainAddInput(candidateToken []byte, databasePath string) 
 	input := make([]byte, 0, len(prefix)+len(candidateToken)+1+len(databasePath)+1)
 	input = append(input, prefix...)
 	input = append(input, candidateToken...)
-	input = append(input, ' ')
-	input = append(input, databasePath...)
+	if databasePath != "" {
+		input = append(input, ' ')
+		input = append(input, databasePath...)
+	}
 	input = append(input, '\n')
 	return input, nil
 }

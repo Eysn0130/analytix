@@ -297,22 +297,13 @@ func TestKeychainInitializationSuppliesSecretOnlyOnStdinAndVerifiesReadback(t *t
 	}
 	assertFindKeychainArguments(t, runner.calls[0])
 	add := runner.calls[1]
-	if len(add.arguments) == 0 || add.arguments[0] != "add-generic-password" {
-		t.Fatalf("add arguments = %v", add.arguments)
+	if !slices.Equal(add.arguments, []string{"-i"}) {
+		t.Fatalf("default Keychain add argv = %v, want only -i", add.arguments)
 	}
-	if add.arguments[len(add.arguments)-1] != "-w" {
-		t.Fatal("Keychain add does not put -w in the final argv position")
-	}
-	for _, argument := range add.arguments {
-		if argument == "-U" {
-			t.Fatal("Keychain add uses forbidden overwrite flag -U")
-		}
-		if strings.Contains(argument, encoded) {
-			t.Fatal("Keychain add leaked the base64 master key into argv")
-		}
-	}
-	if !bytes.Equal(add.stdin, []byte(encoded+"\n")) {
-		t.Fatal("Keychain add did not provide the key through the stdin prompt")
+	wantInteractiveInput := []byte("add-generic-password -s " + keychainService +
+		" -a " + keychainAccount + " -w " + encoded + "\n")
+	if !bytes.Equal(add.stdin, wantInteractiveInput) {
+		t.Fatal("default Keychain add did not supply one bounded private command on stdin")
 	}
 	assertFindKeychainArguments(t, runner.calls[2])
 }
@@ -549,6 +540,32 @@ func TestExplicitTaskKeychainInteractiveAddInputRejectsInvalidTokenPathAndSecond
 				t.Fatalf("error = %v, want unavailable", err)
 			}
 		})
+	}
+}
+
+func TestDefaultKeychainInteractiveAddInputRejectsInvalidToken(t *testing.T) {
+	t.Parallel()
+	validToken := []byte(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, masterKeySize)))
+	input, err := darwinKeychainAddInput(validToken, "")
+	if err != nil {
+		t.Fatalf("valid default Keychain command error = %v", err)
+	}
+	defer clearBytes(input)
+	if bytes.Count(input, []byte{'\n'}) != 1 || input[len(input)-1] != '\n' ||
+		!bytes.HasSuffix(input, append(bytes.Clone(validToken), '\n')) {
+		t.Fatal("default Keychain command is not one bounded input line")
+	}
+	for _, token := range [][]byte{
+		nil,
+		[]byte("YQ=="),
+		append(bytes.Clone(validToken), '\n'),
+		append(bytes.Clone(validToken[:len(validToken)-1]), '\''),
+	} {
+		candidate, err := darwinKeychainAddInput(token, "")
+		clearBytes(candidate)
+		if !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+			t.Fatalf("invalid default Keychain token error = %v, want unavailable", err)
+		}
 	}
 }
 
