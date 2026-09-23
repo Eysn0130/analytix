@@ -1494,6 +1494,37 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('accepts exact user-input resolution responses without opening the generic runtime bridge', () => {
+    const path = '/v1/user-inputs/input_turn_1'
+    const submitted = {
+      inputId: 'input_turn_1',
+      status: 'submitted',
+      answers: [{ id: 'q1', value: 'approved answer' }]
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(submitted)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 200, body: JSON.stringify(submitted) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    const cancelled = { inputId: 'input_turn_1', status: 'cancelled' }
+    expect(sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(cancelled)
+    }, path, null, 'POST')).toEqual({ ok: true, status: 200, body: JSON.stringify(cancelled) })
+
+    for (const invalid of [
+      { ...submitted, privateAuthority: 'not public' },
+      { ...submitted, answers: [{ id: 'q1', value: 'approved answer', privateToken: 'not public' }] }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 200, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
   it('accepts the exact Go resume response and binds it to the requested session', () => {
     const path = '/v1/sessions/thr_original/resume-thread'
     const body = {

@@ -13,3 +13,16 @@ export const ApprovalDecisionResponse = z.object({
   status: z.enum(['allowed', 'denied', 'expired'])
 })
 export type ApprovalDecisionResponse = z.infer<typeof ApprovalDecisionResponse>
+
+export const UserInputResolutionResponse = z.discriminatedUnion('status', [
+  z.object({
+    inputId: z.string().min(1),
+    status: z.literal('submitted'),
+    answers: z.array(z.record(z.string(), z.string()))
+  }).strict(),
+  z.object({
+    inputId: z.string().min(1),
+    status: z.literal('cancelled')
+  }).strict()
+])
+export type UserInputResolutionResponse = z.infer<typeof UserInputResolutionResponse>

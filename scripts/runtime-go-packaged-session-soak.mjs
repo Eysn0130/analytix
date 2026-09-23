@@ -21,7 +21,10 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
-import { createIsolatedDarwinLoginKeychain } from './runtime-go-packaged-milestone-a.mjs'
+import {
+  createIsolatedDarwinLoginKeychain,
+  createIsolatedDarwinTaskKeychain
+} from './runtime-go-packaged-milestone-a.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -1072,10 +1075,24 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       toolTurnId: '',
       forkThreadId: '',
       resumeThreadId: '',
+      stage: 'renderer-ready',
       error: ''
     };
     function parseJSON(response) {
       try { return JSON.parse(response && response.body || '{}'); } catch { return {}; }
+    }
+    async function bounded(promise, label, timeoutMs = 20000) {
+      let timer;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(label + '_timeout')), timeoutMs);
+          })
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
     }
     const replayCursorByThread = new Map();
     function publicReplayEvents(batch) {
@@ -1168,10 +1185,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
               kinds.has('tool_call_started') && kinds.has('tool_call_finished'))));
         }));
       });
-      await api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId);
+      await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId),
+        'start_sse');
       const ok = await waitForReplay;
-      const acked = await pendingAck;
-      await api.runtime.stopSse(streamId).catch(() => false);
+      const acked = await bounded(pendingAck, 'ack_sse');
+      await bounded(api.runtime.stopSse(streamId), 'stop_sse').catch(() => false);
       for (const unsubscribe of unsubscribers) {
         try { unsubscribe(); } catch {}
       }
@@ -1240,6 +1258,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
     }
     try {
       if (!api) return out;
+      out.stage = 'settings-read';
       const initial = await api.settings.getSettings();
       out.settingsOk = !!(initial && initial.runtime && initial.provider);
       out.settingsRuntimeTopLevel = !!(initial && initial.runtime && !initial.agent && !initial.agents && !initial.reasonix);
@@ -1291,6 +1310,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         }
       };
       try {
+        out.stage = 'settings-write';
         await api.settings.setSettings(profilePatch);
         out.settingsProfilePatchAccepted = true;
         out.settingsPatchMode = 'provider-profile';
@@ -1299,6 +1319,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         return out;
       }
       try {
+        out.stage = 'runtime-restart';
         await api.runtime.restartRuntime();
         out.restartOk = true;
       } catch (error) {
@@ -1309,6 +1330,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.healthStatus = health.status;
       out.healthService = JSON.parse(health.body || '{}').service || '';
       try {
+        out.stage = 'registry-connect';
         const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
         if (!before || before.error || !Array.isArray(before.providers)) {
           throw new Error('synthetic_provider_registry_unavailable');
@@ -1353,6 +1375,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         return out;
       }
 
+      out.stage = 'initial-thread-create';
       const thread = await request('/v1/threads', 'POST', {
         title: 'Packaged Session Soak',
         workspace: ${JSON.stringify(workspace)},
@@ -1364,6 +1387,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.initialThreadId = threadId;
       out.threadCreateOk = !!threadId;
 
+      out.stage = 'initial-turn-create';
       const turn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session soak.',
         async: true,
@@ -1377,9 +1401,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.initialTurnId = turnId;
       out.turnCreateOk = !!turnId && (turn.threadId === threadId || turn.thread_id === threadId);
 
+      out.stage = 'initial-sse-replay';
       const replay = await collectSseReplay(threadId, turnId, 'packaged session soak ok', false);
       out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
+      if (!out.sseReplayOk) return out;
 
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
@@ -1593,7 +1619,7 @@ function summarizeError(raw) {
   return text.slice(0, 360)
 }
 
-function smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }) {
+function smokeChildEnv({ tempHome, stateRoot, userDataDir, chromiumTempDir }) {
   const keep = new Set([
     'PATH',
     'SystemRoot',
@@ -1604,6 +1630,7 @@ function smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }) {
     'LANG',
     'LC_ALL',
     'LC_CTYPE',
+    'ANALYTIX_DEV_CACHE_ROOT',
     'ELECTRON_ENABLE_LOGGING'
   ])
   const env = {}
@@ -1620,6 +1647,12 @@ function smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }) {
     TMP: chromiumTempDir,
     ...(process.platform === 'darwin'
       ? { MAC_CHROMIUM_TMPDIR: chromiumTempDir, SHELL: '/bin/zsh' }
+      : {}),
+    ...(process.platform === 'darwin'
+      ? {
+          ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE: 'isolated-local-v1',
+          ANALYTIX_DEV_STATE_ROOT: stateRoot
+        }
       : {}),
     ANALYTIX_USER_DATA_DIR: userDataDir,
     ANALYTIX_RUNTIME_BACKEND: 'go-runtime-default',
@@ -1760,6 +1793,7 @@ async function runActualPackagedSessionSoak() {
   let runtimePort = 0
   let contractProvider = null
   let isolatedLoginKeychain = null
+  let isolatedTaskKeychain = null
   let approvalDenyFileAbsent = false
   let approvalAllowFileMatches = false
   let forkDiagnostic = null
@@ -1771,16 +1805,24 @@ async function runActualPackagedSessionSoak() {
     if (artifactEvidence.ok) {
       contractProvider = await startContractProvider()
       tempHome = mkdtempSync(join(tmpdir(), 'analytix-packaged-session-home-'))
-      userDataDir = join(tempHome, '.analytix', 'packaged-session-user-data')
-      runtimeDataDir = join(tempHome, '.analytix', 'packaged-session-runtime-data')
+      const taskRoot = join(tempHome, '.analytix')
+      const profileHome = join(taskRoot, 'home')
+      userDataDir = join(taskRoot, 'packaged-session-user-data')
+      // The desktop's isolated settings owner selects home/.analytix/data
+      // before renderer settings are available. Keep it separate from userData.
+      runtimeDataDir = join(profileHome, '.analytix', 'data')
       const chromiumTempDir = join(tempHome, 'chromium-tmp')
       const workspace = join(tempHome, 'workspace')
       mkdirSync(dirname(userDataDir), { recursive: true, mode: 0o700 })
       mkdirSync(userDataDir, { mode: 0o700 })
+      mkdirSync(profileHome, { mode: 0o700 })
+      mkdirSync(dirname(runtimeDataDir), { mode: 0o700 })
+      mkdirSync(runtimeDataDir, { mode: 0o700 })
       mkdirSync(chromiumTempDir, { mode: 0o700 })
       mkdirSync(workspace, { mode: 0o700 })
       if (target.platform === 'darwin') {
-        isolatedLoginKeychain = await createIsolatedDarwinLoginKeychain(tempHome)
+        isolatedTaskKeychain = await createIsolatedDarwinTaskKeychain(taskRoot, profileHome)
+        isolatedLoginKeychain = await createIsolatedDarwinLoginKeychain(profileHome)
         const unlocked = await isolatedLoginKeychain.unlockForLaunch()
         if (!unlocked.ok || !unlocked.defaultKeychainBound) {
           throw new Error('isolated_login_keychain_unavailable')
@@ -1792,7 +1834,7 @@ async function runActualPackagedSessionSoak() {
       const syntheticApiKey = `sk-packaged-session-soak-${sha256(`${Date.now()}:${runtimePort}`).slice(0, 24)}`
       child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
         cwd: process.cwd(),
-        env: smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }),
+        env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
         stdio: ['ignore', 'pipe', 'pipe']
       })
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
@@ -1839,6 +1881,7 @@ async function runActualPackagedSessionSoak() {
         catch { return { parseFailed: true } }
       })
     if (contractProvider) await contractProvider.close()
+    isolatedTaskKeychain?.dispose()
     isolatedLoginKeychain?.dispose()
     if (tempHome) {
       const workspace = join(tempHome, 'workspace')

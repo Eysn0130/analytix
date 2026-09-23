@@ -145,7 +145,10 @@ import {
   SteerTurnResponse
 } from '../../../packages/runtime/src/contracts/turns.js'
 import { StartReviewResponse } from '../../../packages/runtime/src/contracts/review.js'
-import { ApprovalDecisionResponse } from '../../../packages/runtime/src/contracts/approvals.js'
+import {
+  ApprovalDecisionResponse,
+  UserInputResolutionResponse
+} from '../../../packages/runtime/src/contracts/approvals.js'
 import {
   DailyUsageResponseSchema,
   ModelUsageResponseSchema,
@@ -4060,6 +4063,9 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (/^\/v1\/threads\/[^/]+\/rewind$/.test(path)) return [RewindThreadResponse]
   if (/^\/v1\/threads\/[^/]+\/review$/.test(path)) return [StartReviewResponse]
   if (/^\/v1\/approvals\/[^/]+$/.test(path)) return [ApprovalDecisionResponse]
+  if (/^\/v1\/user-inputs\/[^/]+$/.test(path) && method === 'POST') {
+    return [UserInputResolutionResponse]
+  }
   if (path === '/v1/usage') {
     return [DailyUsageResponseSchema, ThreadUsageResponseSchema, RuntimeUsageResponseSchema, ModelUsageResponseSchema]
   }

@@ -42,6 +42,7 @@ import {
   coordinateLocalCredentialEntry, readLocalCredentialScanSource, scanLocalCredentialIsolation,
   disposeLocalCredentialScanSource
 } from './lib/local-provider-credential-scan.mjs'
+import { prepareDevelopmentKeychain } from './development-keychain.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -4242,6 +4243,43 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
       if (disposed) return
       password.fill(0)
       retireCreatedKeychain()
+      disposed = true
+    }
+  })
+}
+
+export async function createIsolatedDarwinTaskKeychain(taskRoot, homeRoot) {
+  if (process.platform !== 'darwin' || !isAbsolute(taskRoot) || !isAbsolute(homeRoot)) {
+    throw new Error('isolated_task_keychain_requires_darwin_absolute_root')
+  }
+  const trustedTemp = trustedCacheTempRoot()
+  if (!trustedTemp.ok || realpathSync(taskRoot) !== resolve(taskRoot) ||
+    realpathSync(homeRoot) !== resolve(homeRoot) ||
+    pathIsOutside(trustedTemp.path, taskRoot) || pathIsOutside(taskRoot, homeRoot) ||
+    !ownerOnlyDirectory(taskRoot, true) || !ownerOnlyDirectory(homeRoot, true)) {
+    throw new Error('isolated_task_keychain_root_invalid')
+  }
+  const password = createRandomHexPasswordBuffer()
+  // The shared QA provisioner creates a non-login database and publishes the
+  // exact task binding without changing the default Keychain or search list.
+  // Core validates the binding against its own runtime data on each launch.
+  const profile = { taskRoot, homeRoot }
+  let disposed = false
+  try {
+    await prepareDevelopmentKeychain(profile, password, { create: true })
+  } catch (error) {
+    password.fill(0)
+    disposed = true
+    throw error
+  }
+  return Object.freeze({
+    async unlockForLaunch() {
+      if (disposed) throw new Error('isolated_task_keychain_disposed')
+      await prepareDevelopmentKeychain(profile, password)
+    },
+    dispose() {
+      if (disposed) return
+      password.fill(0)
       disposed = true
     }
   })
