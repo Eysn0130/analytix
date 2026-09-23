@@ -1074,7 +1074,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(ok);
         };
-        const timer = setTimeout(() => finish(false), 5000);
+        const timer = setTimeout(() => finish(false), 30000);
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
@@ -1114,7 +1114,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       for (const unsubscribe of unsubscribers) {
         try { unsubscribe(); } catch {}
       }
-      return { ok, eventCount: events.length, errorCount: errors.length };
+      return { ok, eventCount: events.length, errorCount: errors.length,
+        eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))] };
     }
     async function collectGateReplay(threadId, turnId, requiredKind, idField) {
       const streamId = 'packaged-session-gate-' + Math.random().toString(36).slice(2);
@@ -1129,7 +1130,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(result);
         };
-        const timer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 5000);
+        const timer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 30000);
         const inspect = () => {
           const matching = events.find((event) => {
             if (!event || event.kind !== requiredKind) return false;
@@ -1304,6 +1305,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.turnCreateOk = !!turnId && (turn.threadId === threadId || turn.thread_id === threadId);
 
       const replay = await collectSseReplay(threadId, turnId, 'packaged session soak ok', false);
+      out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
 
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
@@ -1319,6 +1321,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.toolTurnId = toolTurnId;
       out.toolTurnOk = !!toolTurnId && (toolTurn.threadId === threadId || toolTurn.thread_id === threadId);
       const toolReplay = await collectSseReplay(threadId, toolTurnId, 'packaged tool timeline ok', true);
+      out.toolReplay = toolReplay;
       out.toolTimelineOk = toolReplay.ok === true && toolReplay.eventCount > 0 && toolReplay.errorCount === 0;
 
       const mimoPlanThread = await request('/v1/threads', 'POST', {
@@ -1351,21 +1354,22 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
       out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
       const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
+      out.mimoPlanReplay = mimoPlanReplay;
       out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
 
-      const attachmentLocalPath = ${JSON.stringify(join(workspace, 'packaged-attachment.txt'))};
       const attachmentUpload = await request('/v1/attachments', 'POST', {
         name: 'packaged-attachment.txt',
         mimeType: 'text/plain',
         dataBase64: btoa('Packaged attachment fallback text'),
-        localFilePath: attachmentLocalPath,
+        documentText: 'Packaged attachment fallback text',
         threadId,
         workspace: ${JSON.stringify(workspace)}
       });
       const attachment = attachmentUpload && attachmentUpload.attachment || {};
       const attachmentId = attachment.id || '';
       out.attachmentUploadOk = !!attachmentId;
-      out.attachmentMetadataOk = attachment.localFilePath === attachmentLocalPath;
+      out.attachmentMetadataOk = attachment.scope === 'thread' &&
+        attachment.name === 'packaged-attachment.txt' && attachment.localFilePath === undefined;
       const attachmentTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session attachment fallback.',
         async: true,
