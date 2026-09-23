@@ -421,7 +421,7 @@ Acceptance SHALL exercise real Electron development with an isolated profile and
 - **THEN** it uses synthetic credential markers or redacted assertions and contains no real keys, tokens, user data, raw Provider bodies, or copied credential storage
 
 ### Requirement: Isolated Darwin tasks use one safe explicit Keychain binding
-An isolated Darwin task SHALL bind only `<unique isolationRoot>/darwin-secret-store-keychain/analytix-task.keychain-db` through the existing private startup frame and Registry/Secret Store authority. Admission SHALL reject a case-insensitive `login.keychain` substring anywhere in the full input paths, non-canonical tokens, aliases, symlinks, or invalid owner-only filesystem identities before a Security operation. Ordinary non-isolated credential behavior SHALL remain unchanged; this task binding SHALL NOT migrate, reuse, or fall back to a real-user, old task-login, default, or Data Protection Keychain.
+An explicitly credential-isolated Darwin QA or release-admission task SHALL bind only `<unique isolationRoot>/darwin-secret-store-keychain/analytix-task.keychain-db` through the existing private startup frame and Registry/Secret Store authority. Admission SHALL reject a case-insensitive `login.keychain` substring anywhere in the full input paths, non-canonical tokens, aliases, symlinks, or invalid owner-only filesystem identities before a Security operation. Ordinary non-isolated credential behavior SHALL remain unchanged; this task binding SHALL NOT migrate, reuse, or fall back to a real-user, old task-login, default, or Data Protection Keychain.
 
 #### Scenario: A fresh task Keychain is provisioned
 - **WHEN** an authorized isolated task creates its explicit Keychain
@@ -437,3 +437,23 @@ An isolated Darwin task SHALL bind only `<unique isolationRoot>/darwin-secret-st
 - **WHEN** an isolated task cleans its exact owned inventory or reports a failed operation
 - **THEN** cleanup validates identities and drained handles, does not adopt replacement entries on repeat calls, and preserves unknown residual state after partial failure
 - **AND** public failures contain fixed codes and bounded field-difference booleans without paths, secret values, database bytes, or unsafe error bodies; equality of default/search-list configuration does not establish that global Data Protection state was unchanged
+
+
+### Requirement: Ordinary source development reuses one persistent credential authority
+Ordinary source development SHALL keep application state task-local while reusing one private development Provider Registry and the existing encrypted Secret Store independently of task, restart and checkout lifetimes. It SHALL use the existing owner-only fallback master-key authority without an isolated Keychain password, and SHALL NOT copy secret values or credential envelopes into task profiles. This source-only mode is not Production OS-backed storage or release-admission credential isolation.
+
+#### Scenario: A normal development task starts or restarts
+- **WHEN** a normal source launcher opens a private task profile after the authorized one-time credential bootstrap
+- **THEN** Core resolves the existing development credential through the same Registry and Secret Store owners without API-key re-entry or a task-Keychain unlock
+- **AND** the shared authority remains a protected local root, with existing transaction, recovery, currentness and non-disclosure checks
+
+#### Scenario: QA or packaged startup attempts to use shared development credentials
+- **WHEN** an explicit credential-isolated QA launch occurs
+- **THEN** it retains the task-Keychain binding and locked/unavailable behavior and does not receive the shared development authority
+- **WHEN** a packaged app or production runtime receives a development authority option
+- **THEN** it refuses that source-only authority rather than weakening Production storage
+
+#### Scenario: Autonomous development verification runs
+- **WHEN** the bounded development verification entry executes
+- **THEN** it uses Core, Registry, stored credential resolution and the Provider adapter, returning only sanitized status and usage
+- **AND** bootstrap input is accepted only once through protected input; normal reuse does not depend on chat, environment exports, `.env`, logs or evidence containing the credential
