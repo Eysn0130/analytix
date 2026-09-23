@@ -14,28 +14,37 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   `ac00f1602`。正式签名/安装/Provider/更新数据兼容验收仍未取得。
 - 保留恢复 SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` 及 DELIVERY
   `e40693268b3bca6c8ae1d71253263dbe98efe1b1` 和全部有效后继。
-- 当前制品 SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d`，tree
-  `59a2985acf515612bb346e700a0c4c5e6ef62268`；本索引、矩阵与报告随后的文档提交
-  为本轮 DELIVERY，准确 HEAD/tree 见 writer 最终回执并在恢复时重读 Git。
-- 本轮证据：[准确 Core 新制品与许可材料](../qa/pr28-core-artifact-closure-2026-09-22.md)。
-  clean Core1.0.6 私有 app/DMG/ZIP 已经生成；普通生命周期、开发签名、独立 Go
-  读包及 DMG/ZIP 与 app 的全部文件/链接一致性通过。旧31实例关闭16、剩15，
-  另识别6个 runtime 重复实例，共21条包许可阻断；原生/WASM/字体完整义务另列。
-  新包仍是 development_clean_non_publishable，旧96e55未改标或覆盖。
+- 保留制品 SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` 与 DELIVERY
+  `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` 及全部有效后继。
+- 当前制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
+  `d6ca0b5dbd97a2f8eb8cd11aa1ea2beb336bd48c`；准确当前 HEAD/tree 在恢复时重读 Git。
+- 本轮证据：[新制品与发行准入接续](../qa/pr28-core-release-admission-2026-09-22.md)。
+  clean Core1.0.6 私有 app/DMG/ZIP 完成；全部8,639文件/链接与独立安装副本
+  一致，严格签名及 production-tag 独立 Go 读包通过。实际1,174包实例审计中，
+  原31+6行已有34通过、2阻断、1未分发；两个包级缺项是 Canvas 嵌入构建来源
+  与 lazy-val 原始许可全文，原生/WASM/字体完整义务仍另列。
+  新包仍为 development_clean_non_publishable，保留所有旧私有制品。
 - 保留证据：[Core 与多快照闭环](../qa/pr28-release-closure-2026-09-22.md)。
   B1 完整原生链1776.55秒通过：A1/A2 public GET200及原始 final、历史/当前标识、
   缺失/篡改503整批拒绝、原字节复原、普通任务连续性、原件不变及新OS进程恢复。
   既有 accepted-final/compaction crash矩阵 production/race检查124.842秒通过。
-- 下一动作：按新制品逐行缺项取得剩余准确上游文本、canvas原生组件/签名转换及
-  完整资源来源通知；通过原材料 owner 进入下一次新构建，不补写已签名 app。
-  同时落实正常 Developer ID/公证、独立 publication trust、获准 Mac 测试会话与
-  Provider 正常入口；本轮一次集中非秘密请求尚未取得就绪答复。具备条件后完成
-  安装/A0/GUI长历史/Core升级与旧数据恢复。源码外发真实解除后及时普通 push，
-  取得准确 HEAD 的 CI/review，满足适用条件才 merge、验证真实main及发行。
-  Core发行不以未随包分发的Funds整体为前置；Core profile、正式资格消费者和
-  已通过 A1/A2 恢复不重做。
-- 原源码外发 `PAYLOAD_SCOPE_UNKNOWN / NOT_CLEARED`；无解除证据不换通道。
-  不启用 Goal、自动续跑或并行 writer。私有制品不是正式发行。
+- 下一动作：继续剩余许可与嵌入组件来源通知；Canvas 签前/签后可信转换已经
+  通过真实夹具及新制品校验，不重复解决同一问题。Core profile、正式资格消费者
+  和已通过 A1/A2 恢复不重做。
+- 本机隔离 Mac 验收已获准，安装版已到正常 Provider onboarding。用户输入 Key
+  后 Save 报 Registry503；现有任务 Keychain 元数据确认为 locked，正常解锁
+  返回 b1_keychain_pty_failed，复查仍锁定，尚未区分密码/超时/系统拒绝。保留原配置和输入，不替换 Keychain。单独授权的官方
+  DeepSeek `deepseek-flash` 探测 HTTP200、10tokens，证明 Key/模型有效，不能
+  替代安装版保存、Agent/工具、重启历史及升级恢复验收。测试总上限 US$5。
+- Developer ID/公证尚未配置；Apple 正常账户入口此前显示 Access Unavailable。
+  production publication authority 尚未建立；现有 Keychain 安全存储探测的
+  entitlement 缺项保留，不生成明文生产私钥，也不另建发布信任机制。
+- 当前范围源码外发已通过原接口重审，正常 push 已到 b2cf1179e；旧 NOT_CLEARED
+  为历史状态。该 HEAD 的 Development CI 51任务全通过；CodeQL 剩3 high，
+  精确 HEAD review 与其余适用门禁未关闭，PR28 仍 Draft/BLOCKED，真实 main
+  仍 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。满足条件才 merge、验证 main
+  并由合格来源发行；不换传输路径绕过拒绝。
+- 不启用 Goal、自动续跑或并行 writer。私有制品不是正式发行。
 
 ## Historical entry anchors
 

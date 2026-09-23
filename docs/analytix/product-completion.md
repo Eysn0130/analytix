@@ -16,15 +16,25 @@ at `69e74fdb6` and `0ce2e92a0`; exact legal inventory corrections follow at
 unfulfilled. The private96e55 Core DMG retains its original classification and
 bytes; it is not a package of these new sources.
 
-Current artifact SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` adds exact
-root/runtime lock and retained-byte legal supplements before sealing. A new clean
-Core1.0.6 private app/DMG/ZIP was built through the normal lifecycle; signed
-resource/Go inspection and DMG/ZIP content equality pass. The new app closes16
-of the old31 license instances;15 remain, plus6 newly recognized runtime copies
-(21 package blockers). Complete embedded native/WASM/font obligations and all
-formal/installed exits remain separate. See the
-[new artifact evidence](qa/pr28-core-artifact-closure-2026-09-22.md).
-This candidate is `development_clean_non_publishable`; it is not a formal release.
+Current artifact SOURCE is `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
+prior SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` and DELIVERY
+`d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` remain ancestors. A clean new
+Core1.0.6 private app/DMG/ZIP completed the normal lifecycle. All8,639 app files
+and links match the ZIP, DMG and isolated installed copy; strict signature and
+independent production-tag Go inspection pass. The actual1,174-package scan
+leaves two package blockers (Canvas embedded provenance and lazy-val exact text):
+of the original31 plus6 rows,34 pass,2 block and1 is absent. Embedded native,
+WASM and font obligations remain separate. See the
+[current admission evidence](qa/pr28-core-release-admission-2026-09-22.md).
+The candidate remains `development_clean_non_publishable`.
+
+Current-scope source egress was reassessed through the original interface and
+normal pushes reached b2cf1179e. Exact-HEAD Development CI passes all51 jobs;
+CodeQL still reports3 high and PR28 remains Draft/BLOCKED. Main remains
+`ce96cf12581acfa0e19fae7c6aa9c709371012c8`. Approved installed GUI onboarding
+has started, but Save encounters Registry503 and the task Keychain is locked;
+normal unlock failed and retry requires the original password. A separate ten-token official DeepSeek Flash
+request passes; this does not establish installed Provider acceptance.
 
 Multi-snapshot SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` preserves original A1/A2 bindings, applies
 current display permission separately, and retains whole-thread atomicity.
@@ -60,7 +70,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: new55838f047 private Core app/DMG/ZIP and exact source/seal/container checks pass; old31 license instances close16 with15 remaining, plus6 runtime copies. Controlled Core software qualification remains implemented. Complete resource licenses, Developer ID/publication authority, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: newb2cf1179e private Core app/DMG/ZIP and exact source/seal/container/installed-copy checks pass; actual package scan leaves2 blockers, with embedded asset admission separate. Controlled Core software qualification remains implemented. Complete resource licenses, Developer ID/publication authority, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 
@@ -86,8 +96,8 @@ evidence/display owners; P01–P03 and D01–D04 remain packaging and delivery g
 | P4 Skills lifecycle | Existing `pluginpackagehost` and `pluginmaterializationfs`: signed materialization, enable/disable; Invoke and actual adapter admission reject activation/generation changes across readiness, pre-effect and completion, including real-store disable-enable/reopen | Remote archive publisher/registry trust, stage/atomic upgrade/revoke/uninstall/restart chain remains SOURCE_GAP. FormalPackageBinding is not archive authority; desktop install still fails closed. Source tasks remain unfinished, not all blocked on GUI | SOURCE incomplete / installed not run |
 | P4 one conversation / cleanup | Primary conversation, bounded retrieval8 caches/4 builds, completion cancellation and retained history; old three Write routes removed | H01–H08 end-to-end authority/compaction/recovery evidence remains partial. Do not restore second runtime/RAG/Provider or alter independent UI Refresh | SOURCE retained / integration partial |
 | P0 Rust correctness | Fixed3000/10000 ascending/13000 fixture, static stage labels and prior bounded query controls retained | Old main INTERNAL root cause unresolved. COUNT-wrapper source lead differs from target; no new arbitrary reruns or alternative-binary symbols | EVIDENCE_FAILURE / root cause open |
-| P5 desktop storage/install | Private4343 DMG built and integrity checked; current Go task-Keychain binding exists | Electron41.10.3 OSCrypt chooses macOS storage before Core; userData alone does not isolate Keychain. Approved normal test session and Provider entry remain unestablished; no invented selector or encryption bypass | ENVIRONMENT_LIMIT / installed not run |
-| P5 integration and release | Original branch/history and single writer retained | Source egress NOT_CLEARED, exact-SHA CI/CodeQL/review, strict gate and applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
+| P5 desktop storage/install | New b2cf DMG installed into an isolated app directory; exact copy/signature and independent Go inspection pass; approved isolated GUI reaches onboarding | Normal Save reports Registry503; task Keychain is locked, normal unlock failed; original-password entry required. Direct official DeepSeek probe passes but is separate from installed acceptance. No Keychain replacement or encryption bypass | partial / installed onboarding blocked |
+| P5 integration and release | Original branch/history and single writer retained | Current-scope egress reassessment and normal push pass; b2cf Development CI passes all51 jobs. CodeQL3 high, exact-HEAD review, strict gate and applicable extra approval, actual main, native, resource licenses/SBOM/fonts, signing/notarization and release gate remain | All five exits pending |
 
 ## Evidence limits and release exits
 

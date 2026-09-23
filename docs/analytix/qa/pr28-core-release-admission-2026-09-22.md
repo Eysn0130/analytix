@@ -216,3 +216,149 @@ sealed artifact was corrupt; it has its own recorded hashes and checks.
 The ordinary build lifecycle is in progress after dependency recovery. No public
 release, main merge or GUI acceptance is claimed by this checkpoint. The new
 remote CI results above remain pending and do not count as passed checks.
+
+### b2cf1179e source and validation update
+
+SOURCE candidate: `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`, normal push
+completed after a61; Development CI run 35797871384 is for this exact HEAD.
+Canonical worktree was clean when the build copy fast-forwarded to this source.
+No main merge or release occurred.
+
+- Exact wrapper material/instance and real native signing tests: 13/13 passed.
+- Changed authority guards, recovered fact witness and general-only auxiliary
+  provider tests passed in the production-tagged architecture/loop/registry owners.
+- Default workspace endpoint contract passed on macOS (143.109 s). The Linux
+  fixture now expects the existing protected-process backend's fail-closed result;
+  its new remote result remains pending. No host Stat fallback was added.
+- Runtime conformance: 22/22 passed, including the earlier readiness cleanup and
+  actual Go server subset failures, with original timeout budgets.
+- Packaged contract-report file: 88 passed, 7 failed. Five were existing 15 s
+  timeout failures; the other two were nested retirement and runtime-health
+  report failures. All six Go durable-session subchecks passed, but the nested
+  TypeScript retirement owner returned exit 1. These are not reported as passing
+  acceptance. The run overlapped later build activity; its raw log and prior
+  failures are retained in `ci-conformance-uncontended.log` (the filename
+  describes initial scheduling, not a guarantee about the whole run).
+- The repaired build inputs passed TypeScript syntax and esbuild strict-signature
+  checks. Runtime, main, preload and renderer compiled. Normal electron-builder
+  packaging is in progress in `builds/core-admission-b2cf1179e`; no new artifact
+  hashes or blocker totals are asserted until signed output is complete.
+
+
+### Exact-HEAD CI and CodeQL review continuation
+
+Fresh remote results for b2cf1179e: Development workflow 35797871384 completed
+SUCCESS with all 51 jobs passing, including Application tests, both Go package
+jobs, all runtime shards, native macOS contracts and the aggregate Development
+gate. CodeQL admission and review remain separate below.
+
+CodeQL's four language analyses completed. Four capacity-arithmetic findings
+were removed by the production fixes. Of the resulting 19 high PR annotations,
+16 were individually reviewed and dismissed as false positives through the
+normal alert API, with exact source hashes and returned disposition receipts
+in `codeql-b2cf-disposition-receipts.json`:
+
+- Seven integer findings (154–160) conflate uint64 contextEpoch origins with
+  int64/float64 type-switch branches. The current implementations retain host
+  bounds and reject NaN, fractions and the exclusive float upper endpoint.
+- Three hashing findings (83, 109, 110) are integrity or public OAuth
+  configuration/owner fingerprints, not password storage. The corresponding
+  main and PR implementations were checked before repository-wide disposition.
+- Six path findings (31, 140, 141, 145, 146, 161) are workspace/identity metadata
+  checks. The actual content paths retain current authority, semantic workspace
+  containment, protected-root checks, bounded no-follow handles, single-link
+  requirements and readback identity checks as applicable. Workspace status
+  uses OS containment whenever protected roots are configured, with no host
+  Stat fallback after containment failure. Alert 31's main and PR implementations
+  were byte-compared before disposition; the other five are PR-only findings.
+
+A fresh read of check 106981429883 now reports **3 high**, still failure.
+Alerts 60, 73 and 77 remain open: their latest default-branch instances refer
+to ce96cf125, where the old numeric guards are weaker than b2cf1179e. GitHub
+[documents that dismissal affects all branches](https://docs.github.com/en/code-security/how-tos/manage-security-alerts/manage-code-scanning-alerts/resolve-alerts#dismissing-alerts).
+The current PR's false-flow analysis therefore does not justify hiding the
+old main state. No query exclusion, severity reduction, required-check bypass,
+or direct-main mutation was performed. PR28 remains Draft/BLOCKED, with main
+still ce96cf12581acfa0e19fae7c6aa9c709371012c8.
+
+
+### Retained evidence integrity recheck
+
+Reading the prior artifact report exposed 16384 NUL bytes in the old
+`core-artifact-closure-a4yyu5gp/new-core-legal.json`. Its present SHA256 is
+`a65ab7767fc60d97b89921c4ab73625e3aadd257a0c5bf2a19e31db0f860829e`, not
+the recorded `2d6abf5de2571de4cebc372ee326d8ca2021155f1ba83d349aaea3575c4df322`.
+The original is retained without repair. A bounded check of all 15 evidence
+files with recorded hashes found 14 unchanged, including the complete 31-row
+and six-additional-instance disposition table and asset inventory. That intact
+table remains usable for comparison; the damaged JSON does not. This finding
+and the earlier compiler/cache corruption do not establish a cause or that a
+sealed app changed. New artifact conclusions require fresh bytes and checks.
+The exact comparison is retained in `retained-evidence-integrity-recheck.json`.
+
+
+### New b2cf1179e artifact and installed Provider continuation
+
+A clean source snapshot of `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`
+(tree `d6ca0b5dbd97a2f8eb8cd11aa1ea2beb336bd48c`) completed the normal
+`npm run dist:mac:arm64:core` lifecycle. The source snapshot SHA256 is
+`37d0525eec140f10a04d987bcf4c0228edb7f398f9f986561e9b1d07c31d5306`.
+The new build directory is `builds/core-admission-b2cf1179e` under the configured
+cache; the older private candidates remain preserved.
+
+| Fresh artifact | SHA256 |
+| --- | --- |
+| analytix-core-1.0.6-mac-arm64.dmg | 5f6f679f37d4f4b3e3fbbf637d617e6b390bd978a4c91b76ee9a8da83b092759 |
+| analytix-core-1.0.6-mac-arm64.zip | 9ffa9dd2a2e6a1f1ce9ad11f6f63999d183b6eab32b98b863fa264f34943c505 |
+| App reader inventory | 72d42750f0ed954ec237536b9f13caba44a0ff799233e0f9da56ea3bdc504c80 |
+
+The legal reader inspected 1,174 actual package instances. Of the original
+31 plus six additional runtime rows, 34 now pass, two remain blocked, and the
+metadata-only https package is absent from distribution. Specifically within
+the prior 21 blocked rows, 18 now pass, one is absent and two remain blocked.
+These are fresh artifact results, not subtraction based on upstream research.
+The remaining package blockers are Canvas 0.1.100 embedded component/build
+provenance and lazy-val 1.0.5 original license text. Canvas's signed-byte/source
+binding passes before its separate embedded-license refusal. The four wrapper
+research gaps in the earlier table are closed by the subsequent exact material
+binding described above and now verified in the artifact.
+
+Complete resource admission remains blocked independently: the actual inventory
+contains 1,703 font files, three WASM files and 12 native extensions; component
+build provenance, native helpers and other retained asset obligations are not
+waived by the two-package count. `new-core-legal.json`, `new-37-dispositions.json`,
+`new-core-assets.json` and `new-core-inspection-summary.json` retain exact rows.
+
+All 8,639 regular files and symlinks match between the audited app, streamed ZIP
+and read-only mounted DMG, including regular-file permissions. ZIP CRC and DMG
+verification pass. A separate installed copy from the DMG has the same inventory
+and passes strict deep codesign verification. The production-tag independent Go
+`TestConfiguredCorePackageClosure` passes against that installed copy (2.42s).
+It still classifies the app as `development_clean_non_publishable`, with
+publishable and FactTools admission false. See `new-container-verification.json`,
+`installed-copy-receipt.json` and `new-core-go-inspection.log`.
+
+The user-approved isolated Mac session launched that installed app and reached
+normal Provider onboarding. Saving the user-entered DeepSeek credential displayed
+`The provider registry is temporarily unavailable.` The Registry remained at
+revision zero with no committed provider. Read-only Security.framework metadata
+confirmed the existing task Keychain locked and non-writable; this is a candidate
+cause, pending a successful unlock and repeated normal Save. The existing normal
+protected unlock prompt was used, but the PTY helper returned `b1_keychain_pty_failed`.
+A fresh read-only status probe still reported locked. The helper does not expose
+whether failure was password mismatch, timeout or system refusal, so that cause
+is not asserted. No Keychain was replaced or silently selected.
+
+A separately authorized, bounded request to the official DeepSeek HTTPS endpoint
+returned HTTP 200 for `deepseek-flash`, exactly `OK`, and 9 input plus 1 output
+tokens. This verifies that the supplied Key and current V4.1 Flash route work; it
+is not installed Provider/GUI acceptance. The sanitized receipt is
+`deepseek-flash-live-probe.json`. Estimated cost at published peak rates is
+US$0.0000039, within the user's US$5 aggregate cap. No credential value is retained
+in this report, evidence receipt, source or memory. Official model mapping and
+prices were verified at [DeepSeek's release notice](https://api-docs.deepseek.com/news/news260910/)
+and [pricing page](https://api-docs.deepseek.com/quick_start/pricing/).
+
+Installed Save, ordinary Agent/tool execution, restart/history and upgrade/recovery
+acceptance remain incomplete. Developer ID/notarization and production publication
+authority remain unconfigured; this candidate is not formally releasable.
