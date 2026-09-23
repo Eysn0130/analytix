@@ -795,7 +795,7 @@ async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs })
       return await evaluateCdp(
         target.webSocketDebuggerUrl,
         expression,
-        Math.min(60_000, Math.max(1_000, deadline - Date.now()))
+        Math.min(timeoutMs, Math.max(1_000, deadline - Date.now()))
       )
     } catch (error) {
       lastError = error
