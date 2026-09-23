@@ -808,6 +808,8 @@ function startContractProvider() {
           currentToolResult,
         bodyContainsAttachmentPrompt: raw.includes('Run packaged session attachment fallback.'),
         bodyContainsAttachmentVirtualPath: raw.includes('FilePath: attachment://'),
+        bodyContainsAttachmentEnvelope: raw.includes('[Attached file]'),
+        bodyContainsAttachmentProtocol: raw.includes('attachment://'),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
         bodyContainsApprovalDenyPrompt: raw.includes('Run packaged session approval deny.'),
         bodyContainsApprovalDenyResult: currentToolResult &&
@@ -1201,7 +1203,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       for (const unsubscribe of unsubscribers) {
         try { unsubscribe(); } catch {}
       }
-      return { ...result, ok: result.ok && acked };
+      const turnEvents = events.filter((event) => event &&
+        (event.turnId === turnId || event.turn_id === turnId));
+      return { ...result, ok: result.ok && acked,
+        eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))],
+        turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))] };
     }
     try {
       if (!api) return out;
@@ -1435,6 +1441,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const approvalDenyTurnId = approvalDenyTurn.turnId || approvalDenyTurn.turn_id || '';
       out.approvalDenyTurnOk = !!approvalDenyTurnId && (approvalDenyTurn.threadId === threadId || approvalDenyTurn.thread_id === threadId);
       const approvalDenyGate = await collectGateReplay(threadId, approvalDenyTurnId, 'approval_requested', 'approvalId');
+      out.approvalDenyGate = approvalDenyGate;
       out.approvalDenyRequestedOk = approvalDenyGate.ok === true;
       if (approvalDenyGate.id) {
         const approvalDeny = await request('/v1/approvals/' + encodeURIComponent(approvalDenyGate.id), 'POST', {
@@ -1457,6 +1464,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const approvalAllowTurnId = approvalAllowTurn.turnId || approvalAllowTurn.turn_id || '';
       out.approvalAllowTurnOk = !!approvalAllowTurnId && (approvalAllowTurn.threadId === threadId || approvalAllowTurn.thread_id === threadId);
       const approvalAllowGate = await collectGateReplay(threadId, approvalAllowTurnId, 'approval_requested', 'approvalId');
+      out.approvalAllowGate = approvalAllowGate;
       out.approvalAllowRequestedOk = approvalAllowGate.ok === true;
       if (approvalAllowGate.id) {
         const approvalAllow = await request('/v1/approvals/' + encodeURIComponent(approvalAllowGate.id), 'POST', {
@@ -1479,6 +1487,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const userInputTurnId = userInputTurn.turnId || userInputTurn.turn_id || '';
       out.userInputTurnOk = !!userInputTurnId && (userInputTurn.threadId === threadId || userInputTurn.thread_id === threadId);
       const userInputGate = await collectGateReplay(threadId, userInputTurnId, 'user_input_requested', 'inputId');
+      out.userInputGate = userInputGate;
       out.userInputRequestedOk = userInputGate.ok === true;
       if (userInputGate.id) {
         await request('/v1/user-inputs/' + encodeURIComponent(userInputGate.id), 'POST', {
@@ -1611,6 +1620,8 @@ function providerRequestShapeEvidence(requests) {
     attachmentPrompt: item.bodyContainsAttachmentPrompt === true,
     attachmentText: item.bodyContainsAttachmentText === true,
     attachmentVirtualPath: item.bodyContainsAttachmentVirtualPath === true,
+    attachmentEnvelope: item.bodyContainsAttachmentEnvelope === true,
+    attachmentProtocol: item.bodyContainsAttachmentProtocol === true,
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,
     approvalAllowPrompt: item.bodyContainsApprovalAllowPrompt === true,
     userInputPrompt: item.bodyContainsUserInputPrompt === true,
@@ -1716,6 +1727,7 @@ async function runActualPackagedSessionSoak() {
   let isolatedLoginKeychain = null
   let approvalDenyFileAbsent = false
   let approvalAllowFileMatches = false
+  let forkDiagnostic = null
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -1768,6 +1780,32 @@ async function runActualPackagedSessionSoak() {
           renderer.restartError = summarizeError(renderer.restartError)
           renderer.settingsPatchError = summarizeError(renderer.settingsPatchError)
           renderer.error = summarizeError(renderer.error)
+        }
+        if (args.has('--diagnose-fork') && renderer?.error?.includes('/fork returned 502') &&
+            /^thr_[A-Za-z0-9_-]+$/.test(renderer.initialThreadId || '')) {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${runtimePort}/v1/threads/${renderer.initialThreadId}/fork`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ relation: 'fork', title: 'Packaged Session Diagnostic Fork' }),
+                signal: AbortSignal.timeout(5000)
+              }
+            )
+            const body = await response.json()
+            const { ThreadSchema } = await import('../packages/runtime/dist/contracts/threads.js')
+            const parsed = ThreadSchema.strict().safeParse(body)
+            forkDiagnostic = {
+              status: response.status,
+              rootKeys: Object.keys(body).sort(),
+              schemaValid: parsed.success,
+              issuePaths: parsed.success ? [] : parsed.error.issues.slice(0, 20).map((issue) =>
+                `${issue.path.join('.')}:${issue.code}`)
+            }
+          } catch (error) {
+            forkDiagnostic = { error: summarizeError(error) }
+          }
         }
       } catch (error) {
         launchError = error instanceof Error ? error.message : String(error)
@@ -2005,14 +2043,35 @@ async function runActualPackagedSessionSoak() {
         attachmentSseReplayOk: renderer.attachmentSseReplayOk === true,
         attachmentMetadataOk: renderer.attachmentMetadataOk === true,
         approvalDenyTurnOk: renderer.approvalDenyTurnOk === true,
+        approvalDenyGate: renderer.approvalDenyGate && {
+          ok: renderer.approvalDenyGate.ok === true,
+          eventCount: renderer.approvalDenyGate.eventCount,
+          errorCount: renderer.approvalDenyGate.errorCount,
+          eventKinds: renderer.approvalDenyGate.eventKinds,
+          turnEventKinds: renderer.approvalDenyGate.turnEventKinds
+        },
         approvalDenyRequestedOk: renderer.approvalDenyRequestedOk === true,
         approvalDenyResolvedOk: renderer.approvalDenyResolvedOk === true,
         approvalDenyNoExecuteOk: renderer.approvalDenyNoExecuteOk === true,
         approvalAllowTurnOk: renderer.approvalAllowTurnOk === true,
+        approvalAllowGate: renderer.approvalAllowGate && {
+          ok: renderer.approvalAllowGate.ok === true,
+          eventCount: renderer.approvalAllowGate.eventCount,
+          errorCount: renderer.approvalAllowGate.errorCount,
+          eventKinds: renderer.approvalAllowGate.eventKinds,
+          turnEventKinds: renderer.approvalAllowGate.turnEventKinds
+        },
         approvalAllowRequestedOk: renderer.approvalAllowRequestedOk === true,
         approvalAllowResolvedOk: renderer.approvalAllowResolvedOk === true,
         approvalAllowExecutedOk: renderer.approvalAllowExecutedOk === true,
         userInputTurnOk: renderer.userInputTurnOk === true,
+        userInputGate: renderer.userInputGate && {
+          ok: renderer.userInputGate.ok === true,
+          eventCount: renderer.userInputGate.eventCount,
+          errorCount: renderer.userInputGate.errorCount,
+          eventKinds: renderer.userInputGate.eventKinds,
+          turnEventKinds: renderer.userInputGate.turnEventKinds
+        },
         userInputRequestedOk: renderer.userInputRequestedOk === true,
         userInputResolvedOk: renderer.userInputResolvedOk === true,
         userInputReplayOk: renderer.userInputReplayOk === true,
@@ -2033,6 +2092,7 @@ async function runActualPackagedSessionSoak() {
   const secretFinding = firstSecretFinding({
     checks,
     renderer: rendererEvidence,
+    forkDiagnostic,
     launchError: summarizeError(launchError)
   })
   if (secretFinding) {
@@ -2070,6 +2130,7 @@ async function runActualPackagedSessionSoak() {
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
     renderer: rendererEvidence,
+    forkDiagnostic,
     provider: {
       localContractProviderUsed: Boolean(contractProvider),
       externalProviderNetworkCalled: false,
