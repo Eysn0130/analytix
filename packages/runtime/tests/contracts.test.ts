@@ -1126,6 +1126,17 @@ describe('contracts', () => {
     expect(summary.messageCount).toBe(7)
   })
 
+  it('accepts the running-turn marker on derived thread summaries only when true', () => {
+    const summary = {
+      id: 'thr_derived', title: 'Derived thread', workspace: '/tmp/project',
+      model: 'deepseek-chat', mode: 'agent', status: 'idle',
+      createdAt: '2026-09-23T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
+      hasRunningTurn: true
+    }
+    expect(ThreadSummarySchema.safeParse(summary).success).toBe(true)
+    expect(ThreadSummarySchema.safeParse({ ...summary, hasRunningTurn: false }).success).toBe(false)
+  })
+
   it('accepts thread todo contracts and events', () => {
     const todos = ThreadTodoListSchema.parse({
       threadId: 'thr_1',

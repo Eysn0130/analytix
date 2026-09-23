@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GeneralTerminalDeliveryBatchV1Schema } from '../../packages/runtime/src/contracts/events'
+import { GeneralTerminalDeliveryBatchV1Schema, generalTerminalFailureMessageV1 } from '../../packages/runtime/src/contracts/events'
 import { isPublicSseIpcPayload, PublicRuntimeEventFilter } from './public-runtime-content'
 import {
   isClosedPublicRuntimeSseEvent,
@@ -258,6 +258,23 @@ describe('public runtime SSE boundary', () => {
         new PublicRuntimeEventFilter()
       )).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
     }
+  })
+
+  it.each(['approval_denied', 'input_cancelled'])('admits canonical completed %s boundary failure', (reason) => {
+    const batch = generalTerminalBatch()
+    const terminal = (batch.events as Array<Record<string, unknown>>)[2]
+    terminal.terminalReason = reason
+    terminal.code = reason
+    terminal.message = generalTerminalFailureMessageV1(reason)
+    terminal.severity = 'warning'
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(batch).success).toBe(true)
+
+    const forged = generalTerminalBatch()
+    const forgedTerminal = (forged.events as Array<Record<string, unknown>>)[2]
+    forgedTerminal.code = reason
+    forgedTerminal.message = generalTerminalFailureMessageV1(reason)
+    forgedTerminal.severity = 'warning'
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(forged).success).toBe(false)
   })
 
   it('admits the closed typed ordinary result on the atomic general-terminal carrier', () => {

@@ -300,6 +300,7 @@ export const ThreadSummarySchema = ThreadSchema.pick({
   messageCount: z.number().int().nonnegative().optional(),
   turnCount: z.number().int().nonnegative().optional(),
   latestTurnId: z.string().min(1).optional(),
+  hasRunningTurn: z.literal(true).optional(),
   historyAuthority: z.literal('case_boundary_only_v1').optional()
 }).strict()
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>

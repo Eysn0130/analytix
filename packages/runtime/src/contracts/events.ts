@@ -1288,6 +1288,8 @@ export const GeneralTerminalDeliveryBatchV1Schema = z.object({
   if (item?.kind === 'item_completed') {
     const terminalHasFailureProjection = terminal.code !== undefined || terminal.message !== undefined ||
       terminal.error !== undefined || terminal.severity !== undefined || terminal.details !== undefined
+    const completedBoundaryFailure = new Set(['recovery', 'approval_denied', 'input_cancelled'])
+      .has(terminal.terminalReason)
     const errorItemMismatch = item.item.kind === 'error' && (
       item.item.status !== terminal.status || terminal.itemId !== item.itemId ||
       terminal.code !== item.item.code || terminal.message !== item.item.message ||
@@ -1295,7 +1297,8 @@ export const GeneralTerminalDeliveryBatchV1Schema = z.object({
       !sameGeneralTerminalFailureDetailsV1(item.item.details, terminal.details) ||
       (terminal.error !== undefined && terminal.error !== item.item.message)
     )
-    if ((item.item.kind === 'assistant_text' && (terminal.status !== 'completed' || terminalHasFailureProjection)) ||
+    if ((item.item.kind === 'assistant_text' &&
+         (terminal.status !== 'completed' || terminalHasFailureProjection !== completedBoundaryFailure)) ||
         errorItemMismatch ||
         (terminal.itemId !== undefined && terminal.itemId !== item.itemId)) {
       ctx.addIssue({ code: 'custom', path: ['events', 0], message: 'general terminal item profile is mismatched' })
