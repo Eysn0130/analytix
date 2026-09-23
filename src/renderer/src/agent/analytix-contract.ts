@@ -864,15 +864,6 @@ export type CoreMemoryListResponseJson = {
   memories: CoreMemoryRecordJson[]
 }
 
-export type CoreResumeSessionResponseJson = {
-  thread_id?: string
-  threadId?: string
-  session_id?: string
-  sessionId?: string
-  message_count?: number
-  summary?: string
-}
-
 /**
  * Optional plan context attached to a start-turn request. Carries the
  * reserved plan id, workspace root, and relative path the Analytix

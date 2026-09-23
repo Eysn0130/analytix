@@ -73,7 +73,6 @@ import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryListResponseJson,
   CoreMemoryRecordJson,
-  CoreResumeSessionResponseJson,
   CoreRuntimeInfoJson,
   CoreRuntimeEventJson,
   CoreRuntimeSkillsResponseJson,
@@ -113,6 +112,7 @@ import {
 } from '../../../../packages/runtime/src/contracts/items.js'
 import { PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema } from '../../../../packages/runtime/src/contracts/events.js'
 import {
+  ResumeThreadResponse as ResumeThreadResponseSchema,
   ThreadSummaryResponse as ThreadSummaryResponseSchema,
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   ThreadSummaryTaskOutputResponse
@@ -1465,18 +1465,12 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'resume session failed'))
     }
-    const body = readRuntimeJson<CoreResumeSessionResponseJson>(
+    const body = readRuntimeSchema(
       response.body,
-      'runtime returned an invalid resume session response'
+      'runtime returned an invalid resume session response',
+      ResumeThreadResponseSchema
     )
-    const threadId = body.thread_id ?? body.threadId
-    if (!threadId) {
-      throw runtimeErrorToError({
-        code: 'unknown',
-        message: 'resume session returned an invalid response'
-      })
-    }
-    return { threadId, sessionId: body.session_id ?? body.sessionId ?? sessionId }
+    return { threadId: body.thread_id, sessionId: body.session_id }
   }
 
   async subscribeThreadEvents(

@@ -1494,6 +1494,33 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('accepts the exact Go resume response and binds it to the requested session', () => {
+    const path = '/v1/sessions/thr_original/resume-thread'
+    const body = {
+      thread_id: 'thr_resumed',
+      session_id: 'thr_original',
+      message_count: 1,
+      summary: 'resumed'
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 201, body: JSON.stringify(body)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 201, body: JSON.stringify(body) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    for (const invalid of [
+      { ...body, session_id: 'thr_other' },
+      { ...body, privateAuthority: 'not public' }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 201, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
   it('accepts the public rewind response and rejects its private authority turn extension', () => {
     const response = {
       threadId: 'thr_rewind',

@@ -953,7 +953,7 @@ describe('AnalytixRuntimeProvider', () => {
         return { ok: true, status: 201, body: JSON.stringify({ ...threadBody, id: 'thr_fork', forkedFromThreadId: 'thr_surface' }) }
       }
       if (path.includes('/resume-thread')) {
-        return { ok: true, status: 201, body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_surface' }) }
+        return { ok: true, status: 201, body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_surface', message_count: 1, summary: 'resumed' }) }
       }
       if (path === '/v1/threads/thr_surface/summary') {
         return { ok: true, status: 200, body: JSON.stringify(summaryResponse('thr_surface')) }
@@ -1409,7 +1409,7 @@ describe('AnalytixRuntimeProvider', () => {
     const runtimeRequest = vi.fn(async (path: string) => ({
       ok: true, status: 200,
       body: JSON.stringify(path.endsWith('/resume-thread')
-        ? { thread_id: 'thr_case', session_id: 'session_case' } : response)
+        ? { thread_id: 'thr_case', session_id: 'session_case', message_count: 1, summary: 'resumed' } : response)
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -3031,7 +3031,7 @@ describe('AnalytixRuntimeProvider', () => {
         return {
           ok: true,
           status: 201,
-          body: JSON.stringify({ thread_id: 'thr_resumed', session_id: sessionId })
+          body: JSON.stringify({ thread_id: 'thr_resumed', session_id: sessionId, message_count: 1, summary: 'resumed' })
         }
       }
       if (path.endsWith('/rewind')) {
@@ -3144,7 +3144,7 @@ describe('AnalytixRuntimeProvider', () => {
     const runtimeRequest = vi.fn(async () => ({
       ok: true,
       status: 201,
-      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1', message_count: 1, summary: 'resumed' })
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -3164,11 +3164,23 @@ describe('AnalytixRuntimeProvider', () => {
     )
   })
 
+  it('rejects an incomplete resumed session response', async () => {
+    installDsGui({
+      runtimeRequest: vi.fn(async () => ({
+        ok: true,
+        status: 201,
+        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      }))
+    })
+    const provider = new AnalytixRuntimeProvider()
+    await expect(provider.resumeSession('sess_1')).rejects.toThrow('runtime_response_schema_invalid')
+  })
+
   it('passes providerId through resume session requests', async () => {
     const runtimeRequest = vi.fn(async () => ({
       ok: true,
       status: 201,
-      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1', message_count: 1, summary: 'resumed' })
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -3221,7 +3233,7 @@ describe('AnalytixRuntimeProvider', () => {
       return {
         ok: true,
         status: 201,
-        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_mimo' })
+        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_mimo', message_count: 1, summary: 'resumed' })
       }
     })
     installDsGui({ getSettings, runtimeRequest })

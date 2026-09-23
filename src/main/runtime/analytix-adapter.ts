@@ -126,6 +126,7 @@ import {
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   DeleteThreadResponse,
   ListThreadsResponse,
+  ResumeThreadResponse,
   ThreadSchema,
   ThreadTodosResponse
 } from '../../../packages/runtime/src/contracts/threads.js'
@@ -4050,6 +4051,9 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
     return [PublicThreadHTTPResponseV1Schema]
   }
   if (/^\/v1\/threads\/[^/]+\/fork$/.test(path)) return [PublicThreadHTTPResponseV1Schema]
+  if (/^\/v1\/sessions\/[^/]+\/resume-thread$/.test(path) && method === 'POST') {
+    return [ResumeThreadResponse]
+  }
   if (/^\/v1\/threads\/[^/]+\/turns$/.test(path)) return [StartTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/steer$/.test(path)) return [SteerTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/interrupt$/.test(path)) return [InterruptTurnResponse]
@@ -4321,6 +4325,18 @@ export function sanitizeRuntimeResponse(
       }
       const validated = exactRuntimeResponseValueV1(outputSchemas, authorityProjected, pin)
       if (validated === null) {
+        return {
+          ok: false,
+          status: 502,
+          body: JSON.stringify({
+            code: 'runtime_response_schema_invalid',
+            message: 'Runtime response failed schema validation.'
+          })
+        }
+      }
+      const resumedSession = /^\/v1\/sessions\/([^/]+)\/resume-thread$/.exec(path)
+      if (resumedSession && (validated as { session_id?: unknown }).session_id !==
+          decodeClosedRuntimeRouteSegmentV1(resumedSession[1])) {
         return {
           ok: false,
           status: 502,
