@@ -1,11 +1,12 @@
 const { readFileSync, writeFileSync, lstatSync, mkdtempSync, mkdirSync, renameSync, rmSync } = require('node:fs')
-const { join, basename } = require('node:path')
+const { join, basename, resolve } = require('node:path')
 const { createHash } = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 const yaml = require('js-yaml')
 
-function repackCoreZipWithSignatures(root, version) {
+async function repackCoreZipWithSignatures(root, version) {
   if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) throw Error('core_update_version_invalid')
+  root = resolve(root)
   const app = join(root, 'mac-arm64', 'analytix.app')
   const zip = join(root, `analytix-core-${version}-mac-arm64.zip`)
   const appStat = lstatSync(app)
@@ -23,9 +24,14 @@ function repackCoreZipWithSignatures(root, version) {
     execFileSync('ditto', ['-x', '-k', candidate, extracted])
     execFileSync('codesign', ['--verify', '--deep', '--strict', join(extracted, 'analytix.app')])
     execFileSync('unzip', ['-tqq', candidate])
-    const bytes = readFileSync(candidate)
-    const identity = { size: bytes.length, sha512: createHash('sha512').update(bytes).digest('base64') }
+    const blockmap = join(temporary, 'candidate.zip.blockmap')
+    const identity = JSON.parse(execFileSync('npx', [
+      '--yes', '--package', 'electron-builder@26.15.3', '--', 'node',
+      join(__dirname, 'core-update-blockmap.cjs'), candidate, blockmap
+    ], { encoding: 'utf8' }).trim())
+    if (identity.size !== lstatSync(candidate).size) throw Error('core_update_blockmap_size_mismatch')
     renameSync(candidate, zip)
+    renameSync(blockmap, `${zip}.blockmap`)
     return identity
   } finally {
     rmSync(temporary, { recursive: true, force: true })
@@ -76,7 +82,7 @@ async function completeCoreUpdateMetadata(result, repackCoreZip = repackCoreZipW
   const zipName = `analytix-core-${metadata.version}-mac-arm64.zip`
   const zipEntry = metadata.files?.find(file => file?.url === zipName)
   if (!zipEntry || (metadata.path != null && metadata.path !== zipName)) throw Error('core_update_zip_required')
-  const repacked = repackCoreZip(result.outDir, metadata.version)
+  const repacked = await repackCoreZip(result.outDir, metadata.version)
   Object.assign(zipEntry, repacked)
   if (metadata.path === zipName) metadata.sha512 = repacked.sha512
   verifyCoreUpdateArtifacts(result.outDir, metadata, { version: metadata.version, channel })
