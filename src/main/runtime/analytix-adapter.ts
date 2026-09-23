@@ -4261,6 +4261,13 @@ export function sanitizeRuntimeResponse(
 ): { ok: boolean; status: number; body: string } {
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
+  const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    /^\/v1\/threads\/[^/]+\/fork$/.test(path)
+  if (packagedForkDiagnostic) {
+    console.error('[packaged-fork-schema] ' + JSON.stringify({
+      phase: 'response', status: response.status, ok: response.ok
+    }))
+  }
   if (!response.body.trim()) {
     if (response.ok && !runtimeResponseRequiresBody(path)) return response
     return response.ok
@@ -4314,6 +4321,9 @@ export function sanitizeRuntimeResponse(
       }
       const authorityProjected = projectVerifiedAcceptedFinalHTTPValue(parsed, pin)
       if (canonicalRuntimeBoundaryValue(authorityProjected) !== canonicalRuntimeBoundaryValue(parsed)) {
+        if (packagedForkDiagnostic) {
+          console.error('[packaged-fork-schema] ' + JSON.stringify({ phase: 'authority_projection_changed' }))
+        }
         return {
           ok: false,
           status: 502,
@@ -4325,6 +4335,18 @@ export function sanitizeRuntimeResponse(
       }
       const validated = exactRuntimeResponseValueV1(outputSchemas, authorityProjected, pin)
       if (validated === null) {
+        if (packagedForkDiagnostic) {
+          const schemaResult = outputSchemas[0].safeParse(authorityProjected)
+          console.error('[packaged-fork-schema] ' + JSON.stringify({
+            phase: 'exact_validation',
+            schemaValid: schemaResult.success,
+            issuePaths: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .map((issue) => `${issue.path.join('.')}:${issue.code}`),
+            sanitizerChanged: schemaResult.success &&
+              canonicalRuntimeBoundaryValue(sanitizePublicRuntimeValue(schemaResult.data)) !==
+                canonicalRuntimeBoundaryValue(schemaResult.data)
+          }))
+        }
         return {
           ok: false,
           status: 502,

@@ -810,6 +810,9 @@ function startContractProvider() {
         bodyContainsAttachmentVirtualPath: raw.includes('FilePath: attachment://'),
         bodyContainsAttachmentEnvelope: raw.includes('[Attached file]'),
         bodyContainsAttachmentProtocol: raw.includes('attachment://'),
+        bodyContainsAttachmentFilePathField: raw.includes('FilePath:'),
+        bodyContainsAbsoluteFilePath: raw.includes('FilePath: /'),
+        bodyContainsRedactedFilePath: raw.includes('FilePath: ['),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
         bodyContainsApprovalDenyPrompt: raw.includes('Run packaged session approval deny.'),
         bodyContainsApprovalDenyResult: currentToolResult &&
@@ -1207,7 +1210,9 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         (event.turnId === turnId || event.turn_id === turnId));
       return { ...result, ok: result.ok && acked,
         eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))],
-        turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))] };
+        turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))],
+        errorCodes: errors.map((error) =>
+          String(Number(error && error.status || 0)) + ':' + String(error && error.code || '')).slice(0, 4) };
     }
     try {
       if (!api) return out;
@@ -1622,6 +1627,9 @@ function providerRequestShapeEvidence(requests) {
     attachmentVirtualPath: item.bodyContainsAttachmentVirtualPath === true,
     attachmentEnvelope: item.bodyContainsAttachmentEnvelope === true,
     attachmentProtocol: item.bodyContainsAttachmentProtocol === true,
+    attachmentFilePathField: item.bodyContainsAttachmentFilePathField === true,
+    absoluteFilePath: item.bodyContainsAbsoluteFilePath === true,
+    redactedFilePath: item.bodyContainsRedactedFilePath === true,
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,
     approvalAllowPrompt: item.bodyContainsApprovalAllowPrompt === true,
     userInputPrompt: item.bodyContainsUserInputPrompt === true,
@@ -1781,32 +1789,6 @@ async function runActualPackagedSessionSoak() {
           renderer.settingsPatchError = summarizeError(renderer.settingsPatchError)
           renderer.error = summarizeError(renderer.error)
         }
-        if (args.has('--diagnose-fork') && renderer?.error?.includes('/fork returned 502') &&
-            /^thr_[A-Za-z0-9_-]+$/.test(renderer.initialThreadId || '')) {
-          try {
-            const response = await fetch(
-              `http://127.0.0.1:${runtimePort}/v1/threads/${renderer.initialThreadId}/fork`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ relation: 'fork', title: 'Packaged Session Diagnostic Fork' }),
-                signal: AbortSignal.timeout(5000)
-              }
-            )
-            const body = await response.json()
-            const { ThreadSchema } = await import('../packages/runtime/dist/contracts/threads.js')
-            const parsed = ThreadSchema.strict().safeParse(body)
-            forkDiagnostic = {
-              status: response.status,
-              rootKeys: Object.keys(body).sort(),
-              schemaValid: parsed.success,
-              issuePaths: parsed.success ? [] : parsed.error.issues.slice(0, 20).map((issue) =>
-                `${issue.path.join('.')}:${issue.code}`)
-            }
-          } catch (error) {
-            forkDiagnostic = { error: summarizeError(error) }
-          }
-        }
       } catch (error) {
         launchError = error instanceof Error ? error.message : String(error)
       }
@@ -1814,6 +1796,13 @@ async function runActualPackagedSessionSoak() {
   } finally {
     await stopChild(child)
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+    forkDiagnostic = stderr.split(/\r?\n/)
+      .filter((line) => line.includes('[packaged-fork-schema] '))
+      .slice(0, 8)
+      .map((line) => {
+        try { return JSON.parse(line.slice(line.indexOf('[packaged-fork-schema] ') + '[packaged-fork-schema] '.length)) }
+        catch { return { parseFailed: true } }
+      })
     if (contractProvider) await contractProvider.close()
     isolatedLoginKeychain?.dispose()
     if (tempHome) {
@@ -2048,7 +2037,8 @@ async function runActualPackagedSessionSoak() {
           eventCount: renderer.approvalDenyGate.eventCount,
           errorCount: renderer.approvalDenyGate.errorCount,
           eventKinds: renderer.approvalDenyGate.eventKinds,
-          turnEventKinds: renderer.approvalDenyGate.turnEventKinds
+          turnEventKinds: renderer.approvalDenyGate.turnEventKinds,
+          errorCodes: renderer.approvalDenyGate.errorCodes
         },
         approvalDenyRequestedOk: renderer.approvalDenyRequestedOk === true,
         approvalDenyResolvedOk: renderer.approvalDenyResolvedOk === true,
@@ -2059,7 +2049,8 @@ async function runActualPackagedSessionSoak() {
           eventCount: renderer.approvalAllowGate.eventCount,
           errorCount: renderer.approvalAllowGate.errorCount,
           eventKinds: renderer.approvalAllowGate.eventKinds,
-          turnEventKinds: renderer.approvalAllowGate.turnEventKinds
+          turnEventKinds: renderer.approvalAllowGate.turnEventKinds,
+          errorCodes: renderer.approvalAllowGate.errorCodes
         },
         approvalAllowRequestedOk: renderer.approvalAllowRequestedOk === true,
         approvalAllowResolvedOk: renderer.approvalAllowResolvedOk === true,
@@ -2070,7 +2061,8 @@ async function runActualPackagedSessionSoak() {
           eventCount: renderer.userInputGate.eventCount,
           errorCount: renderer.userInputGate.errorCount,
           eventKinds: renderer.userInputGate.eventKinds,
-          turnEventKinds: renderer.userInputGate.turnEventKinds
+          turnEventKinds: renderer.userInputGate.turnEventKinds,
+          errorCodes: renderer.userInputGate.errorCodes
         },
         userInputRequestedOk: renderer.userInputRequestedOk === true,
         userInputResolvedOk: renderer.userInputResolvedOk === true,
