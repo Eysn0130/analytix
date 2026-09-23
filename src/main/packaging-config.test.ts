@@ -1149,7 +1149,10 @@ describe('electron-builder Analytix packaging', () => {
     expect(rootPackage.scripts['build:data-native:development']).toBe(
       'node ./scripts/build-data-analysis-native-tools.cjs --development'
     )
-    expect(rootPackage.scripts.dev).toContain('npm run build:data-native:development')
+    expect(rootPackage.scripts.dev).toBe('node ./scripts/dev-launcher.mjs')
+    // The launcher's executable regression verifies doctor/native/runtime order.
+    expect(readFileSync(resolve(__dirname, '../../scripts/dev-launcher.mjs'), 'utf8'))
+      .toContain("['build:data-native:development', 'build:runtime']")
     expect(rootPackage.scripts['build:data-native:package']).toContain('--all-package-targets')
     expect(rootPackage.scripts['build:data-native:cached']).toBe('node ./scripts/build-windows-release-cache.cjs data-native')
     expect(rootPackage.scripts['build:backend-win-runtime']).toBe('node ./scripts/build-windows-backend-runtime-assets.cjs')
