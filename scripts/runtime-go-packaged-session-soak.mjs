@@ -1477,7 +1477,7 @@ function summarizeError(raw) {
   return text.slice(0, 360)
 }
 
-function smokeChildEnv({ tempHome, userDataDir }) {
+function smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }) {
   const keep = new Set([
     'PATH',
     'SystemRoot',
@@ -1498,6 +1498,13 @@ function smokeChildEnv({ tempHome, userDataDir }) {
   return {
     ...env,
     HOME: tempHome,
+    USERPROFILE: tempHome,
+    TMPDIR: chromiumTempDir,
+    TEMP: chromiumTempDir,
+    TMP: chromiumTempDir,
+    ...(process.platform === 'darwin'
+      ? { MAC_CHROMIUM_TMPDIR: chromiumTempDir, SHELL: '/bin/zsh' }
+      : {}),
     ANALYTIX_USER_DATA_DIR: userDataDir,
     ANALYTIX_RUNTIME_BACKEND: 'go-runtime-default',
     ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK: '1'
@@ -1636,6 +1643,12 @@ async function runActualPackagedSessionSoak() {
       tempHome = mkdtempSync(join(tmpdir(), 'analytix-packaged-session-home-'))
       userDataDir = join(tempHome, '.analytix', 'packaged-session-user-data')
       runtimeDataDir = join(tempHome, '.analytix', 'packaged-session-runtime-data')
+      const chromiumTempDir = join(tempHome, 'chromium-tmp')
+      const workspace = join(tempHome, 'workspace')
+      mkdirSync(dirname(userDataDir), { recursive: true, mode: 0o700 })
+      mkdirSync(userDataDir, { mode: 0o700 })
+      mkdirSync(chromiumTempDir, { mode: 0o700 })
+      mkdirSync(workspace, { mode: 0o700 })
       if (target.platform === 'darwin') {
         isolatedLoginKeychain = await createIsolatedDarwinLoginKeychain(tempHome)
         const unlocked = await isolatedLoginKeychain.unlockForLaunch()
@@ -1643,14 +1656,13 @@ async function runActualPackagedSessionSoak() {
           throw new Error('isolated_login_keychain_unavailable')
         }
       }
-      const workspace = join(tempHome, 'workspace')
       debugPort = await getFreePort()
       runtimePort = await getFreePort()
       while (runtimePort === debugPort) runtimePort = await getFreePort()
       const syntheticApiKey = `sk-packaged-session-soak-${sha256(`${Date.now()}:${runtimePort}`).slice(0, 24)}`
       child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
         cwd: process.cwd(),
-        env: smokeChildEnv({ tempHome, userDataDir }),
+        env: smokeChildEnv({ tempHome, userDataDir, chromiumTempDir }),
         stdio: ['ignore', 'pipe', 'pipe']
       })
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
