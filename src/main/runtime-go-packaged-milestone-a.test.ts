@@ -3358,6 +3358,11 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     mkdirSync(isolatedHome, { mode: 0o700 })
     chmodSync(isolatedHome, 0o700)
     const { createIsolatedDarwinLoginKeychain } = await milestoneModule()
+    const taskKeychain = join(isolatedHome, 'Library', 'Keychains', 'login.keychain')
+    const userDefaultBefore = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(userDefaultBefore.status).toBe(0)
     const controller = await createIsolatedDarwinLoginKeychain(isolatedHome)
     try {
       const created = controller.evidence()
@@ -3399,6 +3404,17 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     } finally {
       controller.dispose()
     }
+    expect(existsSync(`${taskKeychain}-db`)).toBe(false)
+    const searchListAfter = spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    const userDefaultAfter = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(searchListAfter.status).toBe(0)
+    expect(searchListAfter.stdout).not.toContain(taskKeychain)
+    expect(userDefaultAfter.status).toBe(0)
+    expect(userDefaultAfter.stdout).toBe(userDefaultBefore.stdout)
   })
 
   it('keeps the isolated keychain password out of argv, env, files, and reports', () => {

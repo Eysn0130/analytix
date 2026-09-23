@@ -4154,6 +4154,27 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   let unlockCount = 0
   let executableEvidence = null
   let defaultEvidence = { ok: false, observedPathHash: '' }
+  const retireCreatedKeychain = () => {
+    if (!ownerOnlyDirectory(keychainsPath, true) ||
+      !ownerOnlyRegularFile(databasePath) ||
+      realpathSync(databasePath) !== databasePath) {
+      throw new Error('isolated_login_keychain_cleanup_identity_invalid')
+    }
+    // `security create-keychain` also adds this task Keychain to the macOS
+    // search list. Removing only its directory leaves a stale global entry.
+    const result = spawnSync(DARWIN_SECURITY_PATH, ['delete-keychain', requestedPath], {
+      cwd: home,
+      env: isolatedKeychainEnvironment(home),
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 5000,
+      maxBuffer: 4096
+    })
+    if (result.error || result.signal || result.status !== 0 ||
+      existsSync(requestedPath) || existsSync(databasePath)) {
+      throw new Error('isolated_login_keychain_cleanup_failed')
+    }
+  }
   const snapshot = () => Object.freeze({
     ok: !disposed && ownerOnlyRegularFile(databasePath) && defaultEvidence.ok,
     created: ownerOnlyRegularFile(databasePath),
@@ -4194,6 +4215,7 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   } catch (error) {
     password.fill(0)
     disposed = true
+    if (ownerOnlyRegularFile(databasePath)) retireCreatedKeychain()
     throw error
   }
   return Object.freeze({
@@ -4219,6 +4241,7 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
     dispose() {
       if (disposed) return
       password.fill(0)
+      retireCreatedKeychain()
       disposed = true
     }
   })
