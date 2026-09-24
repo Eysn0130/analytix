@@ -689,6 +689,43 @@ async function stopSmokeRuntimeOnPort(port, runtimeDataDir) {
   }
 }
 
+function ownedSmokeRuntimePids(runtimeDataDir) {
+  if (process.platform !== 'darwin' || !runtimeDataDir) return []
+  let pids
+  try {
+    pids = execFileSync('pgrep', ['-f', '/Contents/Resources/runtime-go/bin/runtime-server'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+  } catch {
+    return []
+  }
+  return pids.split(/\r?\n/).map((value) => Number(value.trim())).filter((pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    const command = commandLineForPid(pid)
+    return command.includes('/Contents/Resources/runtime-go/bin/runtime-server ') &&
+      (command.includes(`--data-dir ${runtimeDataDir} `) || command.endsWith(`--data-dir ${runtimeDataDir}`))
+  })
+}
+
+async function stopOwnedSmokeRuntimes(runtimeDataDir) {
+  for (const pid of ownedSmokeRuntimePids(runtimeDataDir)) {
+    try { process.kill(pid, 'SIGTERM') } catch { /* already exited */ }
+  }
+  for (let attempt = 0; attempt < 12 && ownedSmokeRuntimePids(runtimeDataDir).length; attempt += 1) {
+    await sleep(100)
+  }
+  for (const pid of ownedSmokeRuntimePids(runtimeDataDir)) {
+    try { process.kill(pid, 'SIGKILL') } catch { /* already exited */ }
+  }
+  for (let attempt = 0; attempt < 8 && ownedSmokeRuntimePids(runtimeDataDir).length; attempt += 1) {
+    await sleep(100)
+  }
+  if (ownedSmokeRuntimePids(runtimeDataDir).length) {
+    throw new Error('owned packaged runtime did not stop')
+  }
+}
+
 async function waitForDebugTarget(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   let lastError = ''
@@ -1572,7 +1609,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         sandboxMode: 'read-only',
         disableUserInput: true
       });
-      out.forkTurnOk = !!(forkTurn.turnId || forkTurn.turn_id);
+      const forkTurnId = forkTurn.turnId || forkTurn.turn_id || '';
+      out.forkTurnOk = !!forkTurnId;
+      const forkReplay = await collectSseReplay(forkId, forkTurnId, 'packaged session soak ok', false);
+      out.forkReplayOk = forkReplay.ok === true && forkReplay.eventCount > 0 && forkReplay.errorCount === 0;
 
       const resume = await request('/v1/sessions/' + encodeURIComponent(threadId) + '/resume-thread', 'POST', {
         workspace: ${JSON.stringify(workspace)},
@@ -1591,7 +1631,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         sandboxMode: 'read-only',
         disableUserInput: true
       });
-      out.resumeTurnOk = !!(resumeTurn.turnId || resumeTurn.turn_id);
+      const resumeTurnId = resumeTurn.turnId || resumeTurn.turn_id || '';
+      out.resumeTurnOk = !!resumeTurnId;
+      const resumeReplay = await collectSseReplay(resumeId, resumeTurnId, 'packaged session soak ok', false);
+      out.resumeReplayOk = resumeReplay.ok === true && resumeReplay.eventCount > 0 && resumeReplay.errorCount === 0;
 
       const list = await request('/v1/threads?include=side&search=Packaged%20Session%20Soak', 'GET');
       const threads = Array.isArray(list.threads) ? list.threads : [];
@@ -1866,6 +1909,7 @@ async function runActualPackagedSessionSoak() {
   } finally {
     await stopChild(child)
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+    await stopOwnedSmokeRuntimes(runtimeDataDir)
     forkDiagnostic = stderr.split(/\r?\n/)
       .filter((line) => line.includes('[packaged-fork-schema] '))
       .slice(0, 8)
@@ -2051,14 +2095,16 @@ async function runActualPackagedSessionSoak() {
   checks.push(actualCheck(
     'packaged-session-fork',
     'Packaged session fork',
-    renderer?.forkOk === true && renderer?.forkTurnOk === true && providerForkPromptSeen && providerHistorySeen,
+    renderer?.forkOk === true && renderer?.forkTurnOk === true && renderer?.forkReplayOk === true &&
+      providerForkPromptSeen && providerHistorySeen,
     renderer?.error || 'packaged app must fork, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
   checks.push(actualCheck(
     'packaged-session-resume',
     'Packaged session resume',
-    renderer?.resumeOk === true && renderer?.resumeTurnOk === true && providerResumePromptSeen && providerHistorySeen,
+    renderer?.resumeOk === true && renderer?.resumeTurnOk === true && renderer?.resumeReplayOk === true &&
+      providerResumePromptSeen && providerHistorySeen,
     renderer?.error || 'packaged app must resume, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
@@ -2147,8 +2193,10 @@ async function runActualPackagedSessionSoak() {
         userInputReplayOk: renderer.userInputReplayOk === true,
         forkOk: renderer.forkOk === true,
         forkTurnOk: renderer.forkTurnOk === true,
+        forkReplayOk: renderer.forkReplayOk === true,
         resumeOk: renderer.resumeOk === true,
         resumeTurnOk: renderer.resumeTurnOk === true,
+        resumeReplayOk: renderer.resumeReplayOk === true,
         threadListOk: renderer.threadListOk === true,
         usageOk: renderer.usageOk === true,
         initialThreadIdHash: renderer.initialThreadId ? sha256(renderer.initialThreadId) : '',
