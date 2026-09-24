@@ -120,6 +120,13 @@ func (h ThreadHandlers) HandleRecord(w http.ResponseWriter, r *http.Request, thr
 		if h.HydrateAcceptedFinalDelivery != nil {
 			delivery, hydrationErr := h.HydrateAcceptedFinalDelivery(r.Context(), threadID, thread)
 			if hydrationErr != nil {
+				if errors.Is(hydrationErr, threadapp.ErrPublicProjectionPending) {
+					WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
+						"code":    "public_projection_pending",
+						"message": "The thread public projection is finalizing.",
+					})
+					return
+				}
 				if os.Getenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK") == "1" {
 					w.Header().Set("X-Analytix-QA-Hydration-Class", acceptedFinalHydrationQAClass(hydrationErr))
 				}

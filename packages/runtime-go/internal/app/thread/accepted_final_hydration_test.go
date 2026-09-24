@@ -523,14 +523,19 @@ func TestBuildLatestAcceptedFinalHydrationFailsClosedOnTornMissingDuplicateAndRe
 	}
 	torn := base
 	torn.SnapshotLatestSeq--
-	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(torn); err == nil || present || delivery != nil {
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(torn); !errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
 		t.Fatalf("torn frontier produced hydration: present=%t delivery=%#v err=%v", present, delivery, err)
+	}
+	ahead := base
+	ahead.SnapshotLatestSeq++
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(ahead); err == nil || errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
+		t.Fatalf("missing durable events were treated as pending: present=%t delivery=%#v err=%v", present, delivery, err)
 	}
 
 	missing := base
 	missing.SnapshotLatestSeq = 0
 	missing.DurableEvents = nil
-	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(missing); err == nil || present || delivery != nil {
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(missing); err == nil || errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
 		t.Fatalf("missing manifest produced hydration: present=%t delivery=%#v err=%v", present, delivery, err)
 	}
 

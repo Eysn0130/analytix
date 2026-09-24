@@ -150,7 +150,13 @@ func buildAcceptedFinalHydrationProjectionV1(
 	if err != nil {
 		return empty, false, err
 	}
-	if durableLatestSeq != input.SnapshotLatestSeq {
+	if durableLatestSeq > input.SnapshotLatestSeq {
+		return empty, false, errors.Join(
+			ErrPublicProjectionPending,
+			errors.New("accepted final hydration snapshot and event frontier are torn"),
+		)
+	}
+	if durableLatestSeq < input.SnapshotLatestSeq {
 		return empty, false, errors.New("accepted final hydration snapshot and event frontier are torn")
 	}
 	if len(bindings) == 0 && len(manifests) == 0 {

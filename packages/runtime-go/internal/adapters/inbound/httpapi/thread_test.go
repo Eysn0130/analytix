@@ -351,6 +351,31 @@ func TestThreadHandlersPrivateQAHydrationClassDoesNotExposeFailureText(t *testin
 	}
 }
 
+func TestThreadHandlersHydrationFrontierPendingDoesNotAdmitInvalidDelivery(t *testing.T) {
+	stub := &threadServiceStub{thread: map[string]any{
+		"id": "thr_hydration_pending", "latestSeq": float64(1),
+		"turns": []any{map[string]any{"acceptedFinalView": map[string]any{}}},
+	}}
+	handler := ThreadHandlers{
+		Service: stub,
+		HydrateAcceptedFinalDelivery: func(context.Context, string, map[string]any) (threadapp.AcceptedFinalHydrationProjectionV1, error) {
+			return threadapp.AcceptedFinalHydrationProjectionV1{}, errors.Join(
+				threadapp.ErrPublicProjectionPending,
+				errors.New("accepted final hydration snapshot and event frontier are torn"),
+			)
+		},
+	}
+	t.Setenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK", "1")
+	recorder := httptest.NewRecorder()
+	handler.HandleRecord(recorder, httptest.NewRequest(http.MethodGet, "/v1/threads/thr_hydration_pending", nil), "thr_hydration_pending")
+	body := decodeThreadBody(t, recorder)
+	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "public_projection_pending" ||
+		recorder.Header().Get("X-Analytix-QA-Hydration-Class") != "" ||
+		body["acceptedFinalDelivery"] != nil || body["acceptedFinalDeliveries"] != nil {
+		t.Fatalf("torn frontier was admitted or misclassified: status=%d body=%#v", recorder.Code, body)
+	}
+}
+
 func TestThreadHandlersRewindProjectsPublicResponse(t *testing.T) {
 	// The committed mutation carries an internal authority turn. It must not
 	// escape the public RewindThreadResponse contract after the durable cut.
