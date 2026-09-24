@@ -4475,7 +4475,16 @@ export async function runtimeRequestViaHost(
           candidate === 'accepted_final_hydration_unavailable' ||
           candidate === 'internal_error') code = candidate
       } catch { /* Response contents remain private. */ }
-      console.error('[packaged-thread-read] ' + JSON.stringify({ status: res.status, code }))
+      const rawHydrationClass = res.headers.get('X-Analytix-QA-Hydration-Class')
+      const hydrationClass = code === 'accepted_final_hydration_unavailable' && [
+        'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+        'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+        'seal_rejected', 'batch_invalid', 'retained_authority',
+        'authority_mismatch', 'delivery_bound', 'other'
+      ].includes(rawHydrationClass || '') ? rawHydrationClass : null
+      console.error('[packaged-thread-read] ' + JSON.stringify({
+        status: res.status, code, ...(hydrationClass ? { hydrationClass } : {})
+      }))
     }
     return sanitizeRuntimeResponse({
       ok: res.ok,

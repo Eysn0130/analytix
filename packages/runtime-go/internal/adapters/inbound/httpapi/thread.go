@@ -120,6 +120,9 @@ func (h ThreadHandlers) HandleRecord(w http.ResponseWriter, r *http.Request, thr
 		if h.HydrateAcceptedFinalDelivery != nil {
 			delivery, hydrationErr := h.HydrateAcceptedFinalDelivery(r.Context(), threadID, thread)
 			if hydrationErr != nil {
+				if os.Getenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK") == "1" {
+					w.Header().Set("X-Analytix-QA-Hydration-Class", acceptedFinalHydrationQAClass(hydrationErr))
+				}
 				WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
 					"code":    "accepted_final_hydration_unavailable",
 					"message": "accepted-final snapshot authority is unavailable",
@@ -190,6 +193,43 @@ func (h ThreadHandlers) HandleRecord(w http.ResponseWriter, r *http.Request, thr
 		WriteJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 	default:
 		MethodNotAllowed(w)
+	}
+}
+
+// Only fixed categories enter a private packaged-QA response header. The
+// underlying error can contain host details and is never sent to the desktop.
+func acceptedFinalHydrationQAClass(err error) string {
+	if err == nil {
+		return "none"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "snapshot and event frontier are torn"):
+		return "frontier_torn"
+	case strings.Contains(message, "snapshot frontier is invalid"):
+		return "frontier_invalid"
+	case strings.Contains(message, "durable replay is unavailable"):
+		return "durable_replay"
+	case strings.Contains(message, "thread readback is unavailable"):
+		return "thread_readback"
+	case strings.Contains(message, "manifest"):
+		return "manifest_mismatch"
+	case strings.Contains(message, "public projection was rejected"):
+		return "projection_rejected"
+	case strings.Contains(message, "public item") || strings.Contains(message, "public turn"):
+		return "public_slot_mismatch"
+	case strings.Contains(message, "seal was rejected"):
+		return "seal_rejected"
+	case strings.Contains(message, "batch is invalid"):
+		return "batch_invalid"
+	case strings.Contains(message, "retained"):
+		return "retained_authority"
+	case strings.Contains(message, "authority"):
+		return "authority_mismatch"
+	case strings.Contains(message, "bound"):
+		return "delivery_bound"
+	default:
+		return "other"
 	}
 }
 

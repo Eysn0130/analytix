@@ -562,13 +562,25 @@ test('packaged thread-read diagnostics retain only bounded fixed categories', ()
   )
   const result = parse([
     '[packaged-thread-read] {"status":503,"code":"public_projection_pending","message":"PRIVATE_CANARY"}',
+    '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable","hydrationClass":"frontier_torn","message":"PRIVATE_CANARY"}',
+    '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable","hydrationClass":"PRIVATE_CANARY"}',
     '[packaged-thread-read] {"status":503,"code":"PRIVATE_CANARY"}',
     '[packaged-thread-read] invalid PRIVATE_CANARY'
   ].join('\n'))
   assert.deepEqual(JSON.parse(JSON.stringify(result)), [
     { status: 503, code: 'public_projection_pending' },
+    { status: 503, code: 'accepted_final_hydration_unavailable', hydrationClass: 'frontier_torn' },
+    { status: 503, code: 'accepted_final_hydration_unavailable' },
     { status: 503, code: 'unclassified' },
     { status: 0, code: 'unclassified' }
   ])
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/)
+  const bounded = parse([
+    ...Array.from({ length: 12 }, () => '[packaged-thread-read] {"status":503,"code":"public_projection_pending"}'),
+    '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable","hydrationClass":"manifest_mismatch"}'
+  ].join('\n'))
+  assert.equal(bounded.length, 12)
+  assert.deepEqual(JSON.parse(JSON.stringify(bounded.at(-1))), {
+    status: 503, code: 'accepted_final_hydration_unavailable', hydrationClass: 'manifest_mismatch'
+  })
 })

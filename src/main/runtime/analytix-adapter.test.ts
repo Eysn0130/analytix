@@ -2877,6 +2877,40 @@ describe('runtimeRequestViaHost', () => {
     }
   })
 
+  it('records a fixed hydration subtype without exposing the upstream body or header', async () => {
+    let rawHeader = 'frontier_torn'
+    const port = await listen((_req, res) => {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('X-Analytix-QA-Hydration-Class', rawHeader)
+      res.end(JSON.stringify({
+        code: 'accepted_final_hydration_unavailable', message: 'SYNTHETIC_PRIVATE_ERROR'
+      }))
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    try {
+      const request = () => runtimeRequestViaHost(
+        settingsForPort(port), '/v1/threads/thread-a', { method: 'GET' }, async () => undefined
+      )
+      const response = await request()
+      expect(response.status).toBe(503)
+      expect(JSON.parse(response.body).code).toBe('internal_error')
+      expect(logged).toHaveBeenCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable","hydrationClass":"frontier_torn"}'
+      )
+      rawHeader = 'SYNTHETIC_PRIVATE_ERROR'
+      await request()
+      expect(logged).toHaveBeenLastCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable"}'
+      )
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+    } finally {
+      vi.unstubAllEnvs()
+      logged.mockRestore()
+    }
+  })
+
   it('uses settings returned by ensureRuntime when the managed port changes', async () => {
     let seenUrl = ''
     const port = await listen((req, res) => {

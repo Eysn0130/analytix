@@ -2011,15 +2011,22 @@ function summarizeError(raw) {
 function parsePackagedThreadReadDiagnostics(stderr) {
   return String(stderr || '').split(/\r?\n/)
     .filter((line) => line.includes('[packaged-thread-read] '))
-    .slice(0, 12)
+    .slice(-12)
     .map((line) => {
       try {
         const value = JSON.parse(line.slice(line.indexOf('[packaged-thread-read] ') + '[packaged-thread-read] '.length))
+        const hydrationClass = [
+          'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+          'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+          'seal_rejected', 'batch_invalid', 'retained_authority',
+          'authority_mismatch', 'delivery_bound', 'other'
+        ].includes(value.hydrationClass) ? value.hydrationClass : ''
         return {
           status: Number.isInteger(value.status) ? value.status : 0,
           code: ['public_projection_pending', 'accepted_final_hydration_unavailable',
             'internal_error', 'transport_unavailable', 'sanitizer_failed'].includes(value.code)
-            ? value.code : 'unclassified'
+            ? value.code : 'unclassified',
+          ...(hydrationClass ? { hydrationClass } : {})
         }
       } catch { return { status: 0, code: 'unclassified' } }
     })
