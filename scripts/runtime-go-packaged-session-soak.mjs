@@ -908,11 +908,16 @@ async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs })
 
 async function waitForRendererReady({ debugPort, deadline }) {
   const expression = `(async () => {
-    if (document.title !== 'Analytix' || !window.analytix?.runtime?.runtimeRequest) return false;
+    if (document.title !== 'Analytix') return 'title_mismatch';
+    if (!window.analytix?.runtime?.runtimeRequest) return 'runtime_bridge_missing';
     try {
       const response = await window.analytix.runtime.runtimeRequest('/health', 'GET');
-      return response?.status === 200 && JSON.parse(response.body || '{}').service === 'analytix';
-    } catch { return false; }
+      if (response?.status !== 200) return 'health_non_200';
+      try {
+        return JSON.parse(response.body || '{}').service === 'analytix'
+          ? 'ready' : 'health_service_mismatch';
+      } catch { return 'health_invalid_body'; }
+    } catch { return 'health_request_failed'; }
   })()`
   let consecutiveReady = 0
   let readyTarget = ''
@@ -924,12 +929,16 @@ async function waitForRendererReady({ debugPort, deadline }) {
       const evaluationBudget = Math.min(2_000, deadline - Date.now())
       if (evaluationBudget <= 0) break
       const ready = await evaluateCdp(target.webSocketDebuggerUrl, expression, evaluationBudget)
-      if (ready === true) {
+      if (ready === 'ready') {
         consecutiveReady = target.webSocketDebuggerUrl === readyTarget ? consecutiveReady + 1 : 1
         readyTarget = target.webSocketDebuggerUrl
         if (consecutiveReady >= 2) return
       } else {
         consecutiveReady = 0
+        lastFailure = [
+          'title_mismatch', 'runtime_bridge_missing', 'health_non_200',
+          'health_service_mismatch', 'health_invalid_body', 'health_request_failed'
+        ].includes(ready) ? ready : 'unknown'
       }
     } catch (error) {
       consecutiveReady = 0

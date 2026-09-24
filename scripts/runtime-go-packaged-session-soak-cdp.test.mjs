@@ -152,12 +152,21 @@ test('read-only startup probe waits for two healthy observations before mutation
   let probes = 0
   const f = fixture(t, [opened((socket, message) => {
     probes += 1
-    socket.reply({ id: message.id, result: { result: { value: probes >= 2 } } })
+    socket.reply({ id: message.id, result: { result: { value: probes >= 2 ? 'ready' : 'runtime_bridge_missing' } } })
   })])
   await f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 300 })
   assert.equal(probes, 3)
   assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
   assert.equal(f.messages.length, 3)
+})
+test('startup probe reports a fixed bridge phase without remote details', async (t) => {
+  const f = fixture(t, [opened((socket, message) => {
+    socket.reply({ id: message.id, result: { result: { value: 'runtime_bridge_missing' } } })
+  })])
+  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 100 }), 500)
+  assert.equal(result.error?.message, 'cdp_renderer_readiness_timeout')
+  assert.equal(result.error?.cdpPreflightLastFailure, 'runtime_bridge_missing')
+  assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
 })
 test('an unrelated response id is ignored without resending', async (t) => {
   const f = fixture(t, [opened((socket, message) => {
