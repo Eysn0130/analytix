@@ -1494,6 +1494,56 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('admits provider attribution in Core thread usage without losing exact public fields', () => {
+    const counters = {
+      input_tokens: 12,
+      output_tokens: 3,
+      reasoning_tokens: 0,
+      cached_tokens: 2,
+      cache_miss_tokens: 10,
+      total_tokens: 15,
+      cost_usd: 0,
+      cost_cny: 0,
+      price_configured: false,
+      cache_savings_usd: 0,
+      cache_savings_cny: 0,
+      token_economy_savings_tokens: 0,
+      token_economy_savings_usd: 0,
+      token_economy_savings_cny: 0,
+      turns: 1,
+      cache_hit_rate: 2 / 12
+    }
+    const response = {
+      group_by: 'thread',
+      buckets: [{
+        ...counters,
+        thread_id: 'thr_durable_1',
+        provider: 'xiaomi',
+        last_turn_cache_hit_rate: 2 / 12,
+        last_turn_cacheable_hit_rate: 2 / 12,
+        last_turn_total_input_hit_rate: 2 / 12,
+        last_cache_miss_reasons: [],
+        last_cache_suggestions: []
+      }],
+      totals: { ...counters, thread_count: 1 }
+    }
+    const raw = { ok: true, status: 200, body: JSON.stringify(response) }
+    const accepted = sanitizeRuntimeResponse(raw, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET')
+    expect(accepted).toEqual(raw)
+    expect(sanitizeRuntimeResponse(accepted, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET'))
+      .toEqual(raw)
+    const unexpected = {
+      ...response,
+      buckets: [{ ...response.buckets[0], privateAuthority: 'not public' }]
+    }
+    const rejected = sanitizeRuntimeResponse({
+      ...raw,
+      body: JSON.stringify(unexpected)
+    }, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET')
+    expect(rejected).toMatchObject({ ok: false, status: 502 })
+    expect(rejected.body).not.toContain('privateAuthority')
+  })
+
   it('accepts exact user-input resolution responses without opening the generic runtime bridge', () => {
     const path = '/v1/user-inputs/input_turn_1'
     const submitted = {

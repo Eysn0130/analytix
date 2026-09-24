@@ -89,6 +89,7 @@ export const ThreadUsageBucketSchema = DailyUsageCountersSchema.omit({
   thread_count: true
 }).extend({
   thread_id: z.string().min(1),
+  provider: z.string().min(1).optional(),
   /**
    * Cache hit rate of the most recent turn (by completedAt), distinct from the
    * thread-cumulative `cache_hit_rate`. The cumulative rate is dragged down by
