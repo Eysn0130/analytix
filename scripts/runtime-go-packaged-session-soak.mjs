@@ -41,6 +41,11 @@ const jsonOutput = args.has('--json') || args.has('--dry-run')
 const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
 const actualOnly = args.has('--actual-only')
 const forkOnly = args.has('--fork-only')
+const focusedForkStage = argValue('--fork-after', forkOnly ? 'initial' : '')
+if (forkOnly && !['initial', 'tool', 'attachment', 'approval-deny', 'approval-allow', 'user-input'].includes(focusedForkStage)) {
+  throw new Error('unsupported focused fork stage')
+}
+if (!forkOnly && focusedForkStage) throw new Error('--fork-after requires --fork-only')
 const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
@@ -1554,8 +1559,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
       if (!out.sseReplayOk) return out;
-      if (${JSON.stringify(forkOnly)}) {
-        out.stage = 'session-fork';
+      const runFocusedFork = async (stage) => {
+        out.stage = 'session-fork-' + stage;
         const countForkChildren = async () => {
           const listed = await request('/v1/threads?include=side', 'GET');
           return Array.isArray(listed.threads) ? listed.threads.filter((item) =>
@@ -1575,7 +1580,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         out.forkThreadId = fork.id || '';
         out.forkOk = !!out.forkThreadId && fork.parentThreadId === threadId;
         return out;
-      }
+      };
+      if (${JSON.stringify(focusedForkStage)} === 'initial') return await runFocusedFork('initial');
 
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
@@ -1592,39 +1598,45 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const toolReplay = await collectSseReplay(threadId, toolTurnId, 'packaged tool timeline ok', true);
       out.toolReplay = toolReplay;
       out.toolTimelineOk = toolReplay.ok === true && toolReplay.eventCount > 0 && toolReplay.errorCount === 0;
+      if (${JSON.stringify(focusedForkStage)} === 'tool') {
+        if (!out.toolTimelineOk) return out;
+        return await runFocusedFork('tool');
+      }
 
-      const mimoPlanThread = await request('/v1/threads', 'POST', {
-        title: 'Packaged MiMo Plan Soak',
-        workspace: ${JSON.stringify(workspace)},
-        providerId: ${JSON.stringify(providerId)},
-        model: ${JSON.stringify(model)},
-        mode: 'plan'
-      });
-      const mimoPlanThreadId = mimoPlanThread.id || mimoPlanThread.thread_id || '';
-      out.mimoPlanThreadOk = !!mimoPlanThreadId;
-      const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
-        prompt: 'Run packaged MiMo plan mode.',
-        async: true,
-        mode: 'plan',
-        providerId: ${JSON.stringify(providerId)},
-        model: ${JSON.stringify(model)},
-        guiPlan: {
-          operation: 'draft',
-          workspaceRoot: ${JSON.stringify(workspace)},
-          relativePath: '.analytixsdd/plan/packaged-mimo.md',
-          planId: 'packaged-mimo',
-          sourceRequest: 'Run packaged MiMo plan mode.',
-          title: 'Packaged MiMo'
-        },
-        approvalPolicy: 'never',
-        sandboxMode: 'workspace-write',
-        disableUserInput: true
-      });
-      const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
-      out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
-      const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
-      out.mimoPlanReplay = mimoPlanReplay;
-      out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
+      if (!${JSON.stringify(forkOnly)}) {
+        const mimoPlanThread = await request('/v1/threads', 'POST', {
+          title: 'Packaged MiMo Plan Soak',
+          workspace: ${JSON.stringify(workspace)},
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          mode: 'plan'
+        });
+        const mimoPlanThreadId = mimoPlanThread.id || mimoPlanThread.thread_id || '';
+        out.mimoPlanThreadOk = !!mimoPlanThreadId;
+        const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
+          prompt: 'Run packaged MiMo plan mode.',
+          async: true,
+          mode: 'plan',
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          guiPlan: {
+            operation: 'draft',
+            workspaceRoot: ${JSON.stringify(workspace)},
+            relativePath: '.analytixsdd/plan/packaged-mimo.md',
+            planId: 'packaged-mimo',
+            sourceRequest: 'Run packaged MiMo plan mode.',
+            title: 'Packaged MiMo'
+          },
+          approvalPolicy: 'never',
+          sandboxMode: 'workspace-write',
+          disableUserInput: true
+        });
+        const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
+        out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
+        const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
+        out.mimoPlanReplay = mimoPlanReplay;
+        out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
+      }
 
       const attachmentUpload = await request('/v1/attachments', 'POST', {
         name: 'packaged-attachment.txt',
@@ -1653,6 +1665,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.attachmentTurnOk = !!attachmentTurnId && (attachmentTurn.threadId === threadId || attachmentTurn.thread_id === threadId);
       const attachmentReplay = await collectSseReplay(threadId, attachmentTurnId, 'packaged attachment fallback ok', false);
       out.attachmentSseReplayOk = attachmentReplay.ok === true && attachmentReplay.eventCount > 0 && attachmentReplay.errorCount === 0;
+      if (${JSON.stringify(focusedForkStage)} === 'attachment') {
+        if (!out.attachmentSseReplayOk) return out;
+        return await runFocusedFork('attachment');
+      }
 
       const approvalDenyTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval deny.',
@@ -1676,6 +1692,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       }
       const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, '', false, 'approval_denied');
       out.approvalDenyNoExecuteOk = approvalDenyReplay.ok === true && approvalDenyReplay.eventCount > 0 && approvalDenyReplay.errorCount === 0;
+      if (${JSON.stringify(focusedForkStage)} === 'approval-deny') {
+        if (!out.approvalDenyNoExecuteOk) return out;
+        return await runFocusedFork('approval-deny');
+      }
 
       const approvalAllowTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval allow.',
@@ -1699,6 +1719,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       }
       const approvalAllowReplay = await collectSseReplay(threadId, approvalAllowTurnId, 'packaged approval allow ok', false);
       out.approvalAllowExecutedOk = approvalAllowReplay.ok === true && approvalAllowReplay.eventCount > 0 && approvalAllowReplay.errorCount === 0;
+      if (${JSON.stringify(focusedForkStage)} === 'approval-allow') {
+        if (!out.approvalAllowExecutedOk) return out;
+        return await runFocusedFork('approval-allow');
+      }
 
       const userInputTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session user input.',
@@ -1722,6 +1746,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       }
       const userInputReplay = await collectSseReplay(threadId, userInputTurnId, 'packaged user input ok', false);
       out.userInputReplayOk = userInputReplay.ok === true && userInputReplay.eventCount > 0 && userInputReplay.errorCount === 0;
+      if (${JSON.stringify(focusedForkStage)} === 'user-input') {
+        if (!out.userInputReplayOk) return out;
+        return await runFocusedFork('user-input');
+      }
 
       const detail = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
@@ -2443,7 +2471,7 @@ async function runActualPackagedSessionSoak() {
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
     ...(retainDiagnosticProfile ? { diagnostic: {
-      mode: forkOnly ? 'focused_fork' : 'full_session',
+      mode: forkOnly ? `focused_fork_${focusedForkStage}` : 'full_session',
       mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
       isolatedProfilePath: diagnosticProfilePath,
       isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
