@@ -90,3 +90,16 @@ true `main` last directly read here was
 publication authority are future public-distribution conditions, not a global
 block on private QA or ordinary PR checks. This package is neither a public
 beta nor a formal release.
+
+## Later source and CI checkpoint
+
+The `5c68cf6c7` Source baseline job failed one packaged QA transport test:
+after the renderer reported `runtime_bridge_missing`, a final CDP handshake
+consumed the remaining caller deadline and overwrote that more specific
+preflight category. Product waiting and retry budgets were unchanged.
+`e3d60a115` retains the observed renderer phase in this tail-timeout case and
+makes the regression deterministic. On the canonical macOS checkout, both
+scripts pass `node --check`, the focused soak transport suite passes 42/42,
+and `npm run test:baseline` passes 101/101. GitHub Source baseline for exact
+`e3d` passed; the rest of its CI was still running at this checkpoint. This
+is a QA-diagnostic repair, not an additional installed-app acceptance result.

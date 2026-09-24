@@ -8,10 +8,11 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 ## 当前恢复点 — 2026-09-24 PDT
 
 - 最新产品源码与完整私有 app/DMG/ZIP 绑定
-  `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；后继 `18d5f72f5` 只修正
-  并发测试对新错误码的预期。原 `b9666a5af` 及全部有效祖先保留；恢复时先重新
-  读取 HEAD/tree/dirty，不能用本行覆盖更晚提交。准确 `18d` PR CI 在本检查点
-  仍运行；旧 `7b9cb2b4f` 56/56 成功不能继承。PR 仍为 Draft；真正 main
+  `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；后继 `18d5f72f5` 修正
+  并发测试对新错误码的预期，`e3d60a115` 修复 packaged QA 探针的截止时间
+  诊断。原 `b9666a5af` 及全部有效祖先保留；恢复时先重新读取 HEAD/tree/dirty，
+  不能用本行覆盖更晚提交。准确 `e3d` PR Source baseline 已通过，其余 CI
+  在本检查点仍运行；旧 `7b9cb2b4f` 56/56 成功不能继承。PR 仍为 Draft；真正 main
   最后直接核验仍为
   `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，不是 PR 测试合并 SHA。
 - ZIP 交接包的 soak 脚本修复已在原工程集成、测试、定向提交并普通 push；后继补上
@@ -32,7 +33,7 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   [当前安装证据](../qa/pr28-installed-admission-followup-2026-09-24.md)、
   [先前接续](../qa/pr28-installed-continuation-2026-09-24.md)和
   [7b 历史证据](../qa/pr28-installed-closure-2026-09-24.md)。
-- 当前四个出口：`SourceReady=pending`（18d 准确 CI 仍运行）；
+- 当前四个出口：`SourceReady=pending`（e3d 准确 CI 尚未全部结束）；
   `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
   同一最终候选仍需完整安装旅程、正常受保护 Provider、120-turn 实际 GUI、
   Core 升级/数据保全和安装版 PDF 预览等验收；不同会话与 SOURCE 的成功

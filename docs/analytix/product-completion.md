@@ -12,8 +12,10 @@ history before comparing remote state.
 The latest product-code SOURCE on
 `codex/workbench-product-delivery-20260914` is
 `14ab14cb9eb28611b1fd0c526865aee01bed5f95`; the later
-`18d5f72f5c4c0a8d1a54e0c1ac756127c96761c5` changes only a Go test
-expectation. A complete private app/DMG/ZIP is bound to `14ab`. Its installed
+`18d5f72f5c4c0a8d1a54e0c1ac756127c96761c5` changes a Go test
+expectation, and `e3d60a11553f8f7fd8d5f3c9936573e16d23a4e1` repairs a
+packaged QA preflight diagnosis. A complete private app/DMG/ZIP is bound to
+`14ab`. Its installed
 DMG copy passes strict signature, independent Core Go inspection and exact
 artifact legal audit (1,172 instances, zero mandatory engineering blockers).
 Canvas is excluded and the Lazy replacement is present. The package remains
@@ -33,7 +35,7 @@ the [current artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-2
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `pending` for latest `18d5f72f5`: targeted Go tests pass; accurate PR CI was still running at this checkpoint. The `14ab` CI failed an old expected error-code assertion, corrected at `18d`; older green checks do not transfer. |
+| SourceReady | `pending` for latest `e3d60a115`: targeted Go tests, 42 focused soak tests and 101 baseline tests pass locally; its GitHub Source baseline passed, while other exact-HEAD jobs were still running at this checkpoint. The `14ab` CI failed an old expected error-code assertion, corrected at `18d`. The `5c68cf6c7` Source baseline exposed a final-handshake classification race, corrected at `e3d` without raising the product deadline. Older green checks do not transfer. |
 | PrivateCandidateReady | `false`: the `14ab` container has focused tool/approval/user-input, cancellation/fork and new-process passes, but no complete installed journey, normal protected Provider setup/recovery, real 120-turn GUI, Core upgrade/data preservation or installed PDF preview. The old intermittent hydration 503 is not conclusively localized. |
 | MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
