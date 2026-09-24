@@ -1576,6 +1576,30 @@ describe('runtimeRequestViaHost', () => {
     }
   })
 
+  it('accepts committed Go interrupt flags while rejecting extra response fields', () => {
+    const path = '/v1/threads/thr_cancel/turns/turn_cancel/interrupt'
+    const committed = {
+      threadId: 'thr_cancel', turnId: 'turn_cancel', status: 'aborted',
+      discard: false, cancelled: true
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(committed)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 200, body: JSON.stringify(committed) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    for (const invalid of [
+      { ...committed, cancelled: 'true' },
+      { ...committed, privateAuthority: 'not public' }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 200, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected).toMatchObject({ ok: false, status: 502 })
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
   it('accepts the exact Go resume response and binds it to the requested session', () => {
     const path = '/v1/sessions/thr_original/resume-thread'
     const body = {
