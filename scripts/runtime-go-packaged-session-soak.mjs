@@ -40,6 +40,7 @@ const goCommand = process.env.GO || 'go'
 const jsonOutput = args.has('--json') || args.has('--dry-run')
 const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
 const actualOnly = args.has('--actual-only')
+const forkOnly = args.has('--fork-only')
 const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
@@ -1553,6 +1554,28 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
       if (!out.sseReplayOk) return out;
+      if (${JSON.stringify(forkOnly)}) {
+        out.stage = 'session-fork';
+        const countForkChildren = async () => {
+          const listed = await request('/v1/threads?include=side', 'GET');
+          return Array.isArray(listed.threads) ? listed.threads.filter((item) =>
+            item && item.parentThreadId === threadId && item.relation === 'fork').length : -1;
+        };
+        out.forkChildrenBefore = await countForkChildren().catch(() => -1);
+        let fork;
+        try {
+          fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
+            relation: 'fork', title: 'Packaged Session Soak Focused Fork'
+          });
+        } catch (error) {
+          out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+          throw error;
+        }
+        out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+        out.forkThreadId = fork.id || '';
+        out.forkOk = !!out.forkThreadId && fork.parentThreadId === threadId;
+        return out;
+      }
 
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
@@ -2420,6 +2443,7 @@ async function runActualPackagedSessionSoak() {
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
     ...(retainDiagnosticProfile ? { diagnostic: {
+      mode: forkOnly ? 'focused_fork' : 'full_session',
       mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
       isolatedProfilePath: diagnosticProfilePath,
       isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
