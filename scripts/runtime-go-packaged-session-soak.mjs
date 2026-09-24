@@ -2008,6 +2008,23 @@ function summarizeError(raw) {
   return text.slice(0, 360)
 }
 
+function parsePackagedThreadReadDiagnostics(stderr) {
+  return String(stderr || '').split(/\r?\n/)
+    .filter((line) => line.includes('[packaged-thread-read] '))
+    .slice(0, 12)
+    .map((line) => {
+      try {
+        const value = JSON.parse(line.slice(line.indexOf('[packaged-thread-read] ') + '[packaged-thread-read] '.length))
+        return {
+          status: Number.isInteger(value.status) ? value.status : 0,
+          code: ['public_projection_pending', 'accepted_final_hydration_unavailable',
+            'internal_error', 'transport_unavailable', 'sanitizer_failed'].includes(value.code)
+            ? value.code : 'unclassified'
+        }
+      } catch { return { status: 0, code: 'unclassified' } }
+    })
+}
+
 function smokeChildEnv({ tempHome, stateRoot, userDataDir, chromiumTempDir }) {
   const keep = new Set([
     'PATH',
@@ -2187,6 +2204,7 @@ async function runActualPackagedSessionSoak() {
   let approvalAllowFileMatches = false
   let cancelFileAbsent = false
   let forkDiagnostic = null
+  let threadReadDiagnostic = null
   let sseDiagnostic = null
   let diagnosticProfilePath = ''
   let mainPid = 0
@@ -2358,6 +2376,7 @@ async function runActualPackagedSessionSoak() {
         try { return JSON.parse(line.slice(line.indexOf('[packaged-fork-schema] ') + '[packaged-fork-schema] '.length)) }
         catch { return { parseFailed: true } }
       })
+    threadReadDiagnostic = parsePackagedThreadReadDiagnostics(stderr)
     sseDiagnostic = stderr.split(/\r?\n/)
       .filter((line) => line.includes('[packaged-sse-schema] '))
       .slice(0, 12)
@@ -2679,6 +2698,7 @@ async function runActualPackagedSessionSoak() {
     renderer: rendererEvidence,
     relaunch,
     forkDiagnostic,
+    threadReadDiagnostic,
     sseDiagnostic,
     launchError: summarizeError(launchError)
   })
@@ -2739,6 +2759,7 @@ async function runActualPackagedSessionSoak() {
     } } : {}),
     renderer: rendererEvidence,
     forkDiagnostic,
+    threadReadDiagnostic,
     sseDiagnostic,
     provider: {
       localContractProviderUsed: Boolean(contractProvider),

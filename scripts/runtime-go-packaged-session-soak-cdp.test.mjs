@@ -163,7 +163,8 @@ test('startup probe reports a fixed bridge phase without remote details', async 
   const f = fixture(t, [opened((socket, message) => {
     socket.reply({ id: message.id, result: { result: { value: 'runtime_bridge_missing' } } })
   })])
-  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 100 }), 500)
+  // Leave fixture scheduling slack; the product deadline is supplied by the caller.
+  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 300 }), 700)
   assert.equal(result.error?.message, 'cdp_renderer_readiness_timeout')
   assert.equal(result.error?.cdpPreflightLastFailure, 'runtime_bridge_missing')
   assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
@@ -550,4 +551,24 @@ test('relaunch reports a post-write read failure without copying response text o
   assert.equal(result.httpCode, 'projection_unavailable')
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/)
   assert.deepEqual(calls.map(({ method }) => method), ['GET', 'POST', 'GET'])
+})
+
+test('packaged thread-read diagnostics retain only bounded fixed categories', () => {
+  const start = source.indexOf('function parsePackagedThreadReadDiagnostics(')
+  const end = source.indexOf('\nfunction smokeChildEnv(', start)
+  assert.ok(start >= 0 && end > start)
+  const parse = vm.runInNewContext(
+    `${source.slice(start, end)}\nparsePackagedThreadReadDiagnostics`, { JSON, Number, String }
+  )
+  const result = parse([
+    '[packaged-thread-read] {"status":503,"code":"public_projection_pending","message":"PRIVATE_CANARY"}',
+    '[packaged-thread-read] {"status":503,"code":"PRIVATE_CANARY"}',
+    '[packaged-thread-read] invalid PRIVATE_CANARY'
+  ].join('\n'))
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), [
+    { status: 503, code: 'public_projection_pending' },
+    { status: 503, code: 'unclassified' },
+    { status: 0, code: 'unclassified' }
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/)
 })

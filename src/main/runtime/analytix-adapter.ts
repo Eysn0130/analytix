@@ -4455,6 +4455,9 @@ export async function runtimeRequestViaHost(
   if (init.body && !hdrs.has('Content-Type')) {
     hdrs.set('Content-Type', 'application/json')
   }
+  const packagedThreadReadDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    (init.method ?? 'GET').toUpperCase() === 'GET' && /^\/v1\/threads\/[^/]+$/.test(pathNorm)
+  let rawResponseSeen = false
   try {
     const res = await fetch(url, {
       method: init.method ?? 'GET',
@@ -4462,12 +4465,29 @@ export async function runtimeRequestViaHost(
       body: init.body,
       signal: AbortSignal.timeout(init.method === 'POST' ? 60_000 : 15_000)
     })
+    const body = await res.text()
+    rawResponseSeen = true
+    if (packagedThreadReadDiagnostic && !res.ok) {
+      let code = 'unclassified'
+      try {
+        const candidate = (JSON.parse(body) as { code?: unknown }).code
+        if (candidate === 'public_projection_pending' ||
+          candidate === 'accepted_final_hydration_unavailable' ||
+          candidate === 'internal_error') code = candidate
+      } catch { /* Response contents remain private. */ }
+      console.error('[packaged-thread-read] ' + JSON.stringify({ status: res.status, code }))
+    }
     return sanitizeRuntimeResponse({
       ok: res.ok,
       status: res.status,
-      body: await res.text()
+      body
     }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
   } catch {
+    if (packagedThreadReadDiagnostic) {
+      console.error('[packaged-thread-read] ' + JSON.stringify({
+        status: 0, code: rawResponseSeen ? 'sanitizer_failed' : 'transport_unavailable'
+      }))
+    }
     throw new Error(JSON.stringify({
       code: 'runtime_unavailable',
       message: 'The Analytix runtime is unavailable.'

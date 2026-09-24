@@ -2851,6 +2851,32 @@ describe('runtimeRequestViaHost', () => {
     expect(seenAuthorization).toBe('')
   })
 
+  it('records only a fixed upstream thread-read category in packaged QA mode', async () => {
+    const port = await listen((_req, res) => {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({
+        code: 'public_projection_pending', message: 'SYNTHETIC_PRIVATE_ERROR'
+      }))
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    try {
+      const response = await runtimeRequestViaHost(
+        settingsForPort(port), '/v1/threads/thread-a', { method: 'GET' }, async () => undefined
+      )
+      expect(response.status).toBe(503)
+      expect(JSON.parse(response.body).code).toBe('public_projection_pending')
+      expect(logged).toHaveBeenCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"public_projection_pending"}'
+      )
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+    } finally {
+      vi.unstubAllEnvs()
+      logged.mockRestore()
+    }
+  })
+
   it('uses settings returned by ensureRuntime when the managed port changes', async () => {
     let seenUrl = ''
     const port = await listen((req, res) => {
