@@ -121,6 +121,9 @@ describe('presentation-generation-codec', () => {
   it('rejects untrusted image fields and real truncated bytes, and snapshots supplied bytes', async () => {
     const wrong = new Map([['asset-one', { type: 'png', data: PNG.subarray(0, 24) }]])
     await reject(spec(picture()), { images: wrong as Map<string, DocumentDocxImage> })
+    for (const bytes of [Buffer.from('icns00000008'), Buffer.from([0xff, 0x0a, 0x00, 0x00])]) {
+      await reject(spec(picture()), { images: new Map([['asset-one', { type: 'png', data: bytes }]]) })
+    }
     await reject(spec(picture()), { images: new Map([['asset-one', { type: 'png', data: PNG, path: '/private/sentinel.png' }]]) as Map<string, DocumentDocxImage> })
     const original = Buffer.from(PNG)
     const pending = buildPresentationPptxBytes(spec(picture()), { images: new Map([['asset-one', { type: 'png', data: original }]]) })
