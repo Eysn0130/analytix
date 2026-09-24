@@ -315,6 +315,20 @@ test('denied terminal does not excuse a missing turn_started',async(t)=>{
   const f=replayFixture(t,[event('usage'),event('turn_completed',{terminalReason:'approval_denied'})])
   assert.equal((await f.collect('thread-a','turn-a','expected',false,'approval_denied')).ok,false)
 })
+test('cancel replay requires the aborted terminal and usage without a started tool',async(t)=>{
+  const f=replayFixture(t,[event('turn_started'),event('approval_requested'),event('usage'),event('turn_aborted',{terminalReason:'cancel'})])
+  assert.equal((await f.collect('thread-a','turn-a','',false,'cancel')).ok,true)
+})
+test('cancel replay rejects a late tool start or missing usage',async(t)=>{
+  for(const events of [
+    [event('turn_started'),event('usage'),event('tool_call_started'),event('turn_aborted',{terminalReason:'cancel'})],
+    [event('turn_started'),event('turn_aborted',{terminalReason:'cancel'})],
+    [event('turn_started'),event('usage'),event('turn_completed',{terminalReason:'cancel'})]
+  ]){
+    const f=replayFixture(t,events)
+    assert.equal((await f.collect('thread-a','turn-a','',false,'cancel')).ok,false)
+  }
+})
 test('failed SSE startup still disposes owned listeners and stream',async(t)=>{
   const f=replayFixture(t,[],{failStart:true})
   await assert.rejects(f.collect('thread-a','turn-a','expected',false),/synthetic_start_failure/)

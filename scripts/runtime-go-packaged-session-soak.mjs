@@ -44,11 +44,13 @@ const actualOnly = args.has('--actual-only')
 const forkOnly = args.has('--fork-only')
 const focusedForkStage = argValue('--fork-after', forkOnly ? 'initial' : '')
 const relaunchAfterInitial = args.has('--relaunch-after-initial')
+const cancelOnly = args.has('--cancel-only')
 if (forkOnly && !['initial', 'tool', 'attachment', 'approval-deny', 'approval-allow', 'user-input'].includes(focusedForkStage)) {
   throw new Error('unsupported focused fork stage')
 }
 if (!forkOnly && focusedForkStage) throw new Error('--fork-after requires --fork-only')
 if (forkOnly && relaunchAfterInitial) throw new Error('--relaunch-after-initial cannot be combined with --fork-only')
+if (cancelOnly && (forkOnly || relaunchAfterInitial)) throw new Error('--cancel-only requires an independent session')
 const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
@@ -1217,6 +1219,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       approvalAllowRequestedOk: false,
       approvalAllowResolvedOk: false,
       approvalAllowExecutedOk: false,
+      cancelTurnOk: false,
+      cancelGateOk: false,
+      cancelRequestAccepted: false,
+      cancelReplayOk: false,
       userInputTurnOk: false,
       userInputRequestedOk: false,
       userInputResolvedOk: false,
@@ -1313,8 +1319,12 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
             (event.kind === 'item_completed' && event.item &&
               event.item.kind === 'assistant_text' &&
               (event.item.text || '').includes(expectedText)));
-          const terminal = turnEvents.find((event) => event.kind === 'turn_completed');
-          const terminalMatches = terminalReason
+          const terminal = turnEvents.find((event) => event.kind ===
+            (terminalReason === 'cancel' ? 'turn_aborted' : 'turn_completed'));
+          const terminalMatches = terminalReason === 'cancel'
+            ? terminal?.terminalReason === 'cancel' && !turnEvents.some((event) =>
+              event.kind === 'tool_call_started' || event.kind === 'tool_call_finished')
+            : terminalReason
             ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
               event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
               (event.item.text || '').includes('packaged approval deny ok'))
@@ -1335,8 +1345,12 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           if (!payload || payload.streamId !== streamId) return;
           const turnEvents = events.filter((event) => event && event.turnId === turnId);
           const kinds = new Set(turnEvents.map((event) => event.kind));
-          const terminal = turnEvents.find((event) => event.kind === 'turn_completed');
-          const terminalMatches = terminalReason
+          const terminal = turnEvents.find((event) => event.kind ===
+            (terminalReason === 'cancel' ? 'turn_aborted' : 'turn_completed'));
+          const terminalMatches = terminalReason === 'cancel'
+            ? terminal?.terminalReason === 'cancel' && !turnEvents.some((event) =>
+              event.kind === 'tool_call_started' || event.kind === 'tool_call_finished')
+            : terminalReason
             ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
               event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
               (event.item.text || '').includes('packaged approval deny ok'))
@@ -1583,6 +1597,35 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
       if (!out.sseReplayOk) return out;
       if (${JSON.stringify(relaunchAfterInitial)}) return out;
+      if (${JSON.stringify(cancelOnly)}) {
+        out.stage = 'cancel-pending-approval';
+        const cancelTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
+          prompt: 'Run packaged session approval allow.',
+          async: true,
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          approvalPolicy: 'always',
+          sandboxMode: 'workspace-write',
+          disableUserInput: true
+        });
+        const cancelTurnId = cancelTurn.turnId || cancelTurn.turn_id || '';
+        out.cancelTurnOk = !!cancelTurnId &&
+          (cancelTurn.threadId === threadId || cancelTurn.thread_id === threadId);
+        if (!out.cancelTurnOk) return out;
+        const cancelGate = await collectGateReplay(threadId, cancelTurnId, 'approval_requested', 'approvalId');
+        out.cancelGateOk = cancelGate.ok === true && !!cancelGate.id;
+        if (!out.cancelGateOk) return out;
+        out.stage = 'cancel-interrupt';
+        await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns/' +
+          encodeURIComponent(cancelTurnId) + '/interrupt', 'POST', { discard: false });
+        out.cancelRequestAccepted = true;
+        out.stage = 'cancel-terminal-replay';
+        const cancelReplay = await collectSseReplay(threadId, cancelTurnId, '', false, 'cancel');
+        out.cancelReplay = cancelReplay;
+        out.cancelReplayOk = cancelReplay.ok === true &&
+          cancelReplay.eventCount > 0 && cancelReplay.errorCount === 0;
+        return out;
+      }
       const runFocusedFork = async (stage) => {
         out.stage = 'session-fork-' + stage;
         const countForkChildren = async () => {
@@ -2114,6 +2157,7 @@ async function runActualPackagedSessionSoak() {
   let isolatedTaskKeychain = null
   let approvalDenyFileAbsent = false
   let approvalAllowFileMatches = false
+  let cancelFileAbsent = false
   let forkDiagnostic = null
   let sseDiagnostic = null
   let diagnosticProfilePath = ''
@@ -2301,6 +2345,7 @@ async function runActualPackagedSessionSoak() {
     if (tempHome) {
       const workspace = join(tempHome, 'workspace')
       approvalDenyFileAbsent = !existsSync(join(workspace, 'approval-deny.txt'))
+      cancelFileAbsent = !existsSync(join(workspace, 'approval-allow.txt'))
       try {
         approvalAllowFileMatches = readFileSync(join(workspace, 'approval-allow.txt'), 'utf8') === 'allowed'
       } catch {
@@ -2309,7 +2354,7 @@ async function runActualPackagedSessionSoak() {
       if (!cleanupQuiesced || (retainDiagnosticProfile &&
         (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError ||
           (forkOnly && renderer?.forkOk !== true) ||
-          (relaunchAfterInitial && relaunch?.continuationCompleted !== true)))) {
+          (relaunchAfterInitial && relaunch?.continuationCompleted !== true) || cancelOnly))) {
         diagnosticProfilePath = tempHome
       } else {
         rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
@@ -2565,6 +2610,11 @@ async function runActualPackagedSessionSoak() {
         approvalAllowResolvedOk: renderer.approvalAllowResolvedOk === true,
         approvalAllowExecutedOk: renderer.approvalAllowExecutedOk === true,
         approvalAllowReplay: renderer.approvalAllowReplay || null,
+        cancelTurnOk: renderer.cancelTurnOk === true,
+        cancelGateOk: renderer.cancelGateOk === true,
+        cancelRequestAccepted: renderer.cancelRequestAccepted === true,
+        cancelReplayOk: renderer.cancelReplayOk === true,
+        cancelReplay: renderer.cancelReplay || null,
         userInputTurnOk: renderer.userInputTurnOk === true,
         userInputGate: renderer.userInputGate && {
           ok: renderer.userInputGate.ok === true,
@@ -2618,6 +2668,18 @@ async function runActualPackagedSessionSoak() {
     requested: true,
     passed,
     status: passed ? 'passed' : failed.length > 0 ? 'failed' : blocked.length > 0 ? 'live_blocked' : 'skipped',
+    focusedCancel: cancelOnly ? {
+      passed: artifactEvidence.ok && renderer?.cancelTurnOk === true &&
+        renderer?.cancelGateOk === true && renderer?.cancelRequestAccepted === true &&
+        renderer?.cancelReplayOk === true && cancelFileAbsent && cleanupQuiesced &&
+        !launchError && !secretFinding,
+      stage: renderer?.stage || '',
+      approvalPendingBeforeInterrupt: renderer?.cancelGateOk === true,
+      interruptAccepted: renderer?.cancelRequestAccepted === true,
+      terminalReplayComplete: renderer?.cancelReplayOk === true,
+      noToolFileEffect: cancelFileAbsent,
+      cleanupQuiesced
+    } : null,
     app: artifactEvidence,
     launch: {
       actualPackagedAppLaunched: Boolean(renderer),
@@ -2640,7 +2702,8 @@ async function runActualPackagedSessionSoak() {
     },
     ...(retainDiagnosticProfile ? { diagnostic: {
       mode: relaunchAfterInitial ? 'relaunch_after_initial'
-        : forkOnly ? `focused_fork_${focusedForkStage}` : 'full_session',
+        : forkOnly ? `focused_fork_${focusedForkStage}`
+          : cancelOnly ? 'focused_cancel_pending_approval' : 'full_session',
       mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
       isolatedProfilePath: diagnosticProfilePath,
       isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
@@ -2671,7 +2734,8 @@ async function runActualPackagedSessionSoak() {
     },
     isolatedWorkspace: {
       approvalDenyFileAbsent,
-      approvalAllowFileMatches
+      approvalAllowFileMatches,
+      cancelFileAbsent
     },
     redaction: {
       status: secretFinding ? 'failed' : 'passed',
