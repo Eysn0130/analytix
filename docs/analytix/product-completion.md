@@ -19,9 +19,10 @@ artifact legal audit (1,172 instances, zero mandatory engineering blockers).
 Canvas is excluded and the Lazy replacement is present. The package remains
 `development_clean_non_publishable`.
 
-On that same installed DMG copy, focused cancellation, initial fork (child
-count 0→1), and new-process history plus a second completed turn (count 1→2)
-pass in separate isolated synthetic-Provider sessions. The full session
+On that same installed DMG copy, focused cancellation, tool/attachment and
+approval allow/deny, user input, single forks (child count 0→1), and
+new-process history plus a second completed turn (count 1→2) pass in separate
+isolated synthetic-Provider sessions. The full session
 reached four completed turns but exhausted its original 180-second total
 observation window before the later approval/fork/resume stages. It is not a
 full-journey pass. The earlier intermittent accepted-final GET 503 did not
@@ -33,7 +34,7 @@ the [current artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-2
 | Exit | Current status and scope |
 | --- | --- |
 | SourceReady | `pending` for latest `18d5f72f5`: targeted Go tests pass; accurate PR CI was still running at this checkpoint. The `14ab` CI failed an old expected error-code assertion, corrected at `18d`; older green checks do not transfer. |
-| PrivateCandidateReady | `false`: the `14ab` container has focused cancellation/fork/new-process passes, but no complete installed journey, normal protected Provider setup/recovery, real 120-turn GUI, Core upgrade/data preservation or installed PDF preview. The old intermittent hydration 503 is not conclusively localized. |
+| PrivateCandidateReady | `false`: the `14ab` container has focused tool/approval/user-input, cancellation/fork and new-process passes, but no complete installed journey, normal protected Provider setup/recovery, real 120-turn GUI, Core upgrade/data preservation or installed PDF preview. The old intermittent hydration 503 is not conclusively localized. |
 | MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
 

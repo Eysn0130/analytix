@@ -67,6 +67,8 @@ unchanged canonical script bytes. Canonical remained the only product writer.
 | `full-session-dmg-14ab14cb9-v3.json` | Artifact and renderer readiness passed. Eight local Provider requests reached the initial, tool, plan and attachment stages. The protected durable state had four completed turns and one turn aborted during cleanup. The whole 180-second observation window ended before the remaining approval/fork/resume stages; the CDP expression returned `cdp_evaluation_timeout`. This is not 19/19 or a settings/restart failure diagnosis. Cleanup quiesced. |
 | `focused-cancel-dmg-14ab14cb9.json` | Pending approval, accepted interrupt, terminal replay, absence of the tool-file effect and cleanup all passed. |
 | `focused-fork-initial-dmg-14ab14cb9.json` | Settings write, explicit restart, first-turn replay and one fork passed; child count changed 0→1 and cleanup quiesced. This did not reproduce the older fork400. |
+| `focused-fork-approval-allow-dmg-14ab14cb9.json` | Tool timeline and attachment replay, approval denial, approval allowance, the approved tool-file effect and one later fork passed; child count changed 0→1 and cleanup quiesced. |
+| `focused-fork-user-input-dmg-14ab14cb9.json` | Approval allowance, user-input request/response and terminal replay, and one later fork passed; child count changed 0→1 and cleanup quiesced. |
 | `relaunch-dmg-14ab14cb9.json` | First Main quiesced; second Main read old history and created/completed a second turn. Count changed 1→2; final read and cleanup passed. The older intermittent 503 did not recur, so its exact inner cause is not established. |
 
 Focused harness runs print aggregate `FAILED` for stages intentionally skipped
