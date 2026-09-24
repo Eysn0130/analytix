@@ -48,6 +48,7 @@ export const DailyUsageCountersSchema = z.object({
   output_tokens: z.number().int().nonnegative(),
   reasoning_tokens: z.number().int().nonnegative(),
   cached_tokens: z.number().int().nonnegative(),
+  cache_hit_tokens: z.number().int().nonnegative().optional(),
   cache_miss_tokens: z.number().int().nonnegative(),
   total_tokens: z.number().int().nonnegative(),
   cost_usd: z.number().nonnegative(),

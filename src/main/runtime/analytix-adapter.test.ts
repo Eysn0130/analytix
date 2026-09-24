@@ -1500,6 +1500,7 @@ describe('runtimeRequestViaHost', () => {
       output_tokens: 3,
       reasoning_tokens: 0,
       cached_tokens: 2,
+      cache_hit_tokens: 2,
       cache_miss_tokens: 10,
       total_tokens: 15,
       cost_usd: 0,
