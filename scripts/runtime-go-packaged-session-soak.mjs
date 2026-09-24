@@ -1860,6 +1860,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 
 function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
   return `(async () => {
+    let stage = 'bridge';
+    try {
     const api = window.analytix;
     if (!api?.runtime?.runtimeRequest) return { error: 'runtime_bridge_unavailable' };
     const request = async (path, method, payload) => {
@@ -1871,13 +1873,17 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
           const parsed = JSON.parse(response?.body || '{}');
           if (typeof parsed.code === 'string' && /^[a-z0-9_]{1,64}$/.test(parsed.code)) code = parsed.code;
         } catch {}
-        throw new Error('runtime_request_failed status=' + Number(response?.status || 0) + ' code=' + code);
+        const error = new Error('relaunch_http_error');
+        error.httpStatus = Number(response?.status || 0);
+        error.httpCode = code;
+        throw error;
       }
       return JSON.parse(response.body || '{}');
     };
     const threadId = ${JSON.stringify(threadId)};
     const turnId = ${JSON.stringify(turnId)};
     const path = '/v1/threads/' + encodeURIComponent(threadId);
+    stage = 'history-read';
     const before = await request(path, 'GET');
     const sourceTurns = Array.isArray(before.turns) ? before.turns : [];
     const sourceTurn = sourceTurns.find((turn) => turn?.id === turnId);
@@ -1885,6 +1891,7 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
       sourceTurns.filter((turn) => turn?.id === turnId).length === 1;
     if (!historyRecovered) return { historyRecovered: false, continuationCreated: false,
       continuationCompleted: false, beforeTurnCount: sourceTurns.length };
+    stage = 'continuation-post';
     const created = await request(path + '/turns', 'POST', {
       prompt: 'Run packaged session soak after new process.', async: true,
       providerId: ${JSON.stringify(providerId)}, model: ${JSON.stringify(model)},
@@ -1896,6 +1903,7 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
     let continuationCompleted = false;
     let afterTurnCount = sourceTurns.length;
     if (continuationCreated) {
+      stage = 'continuation-read';
       const deadline = Date.now() + 20000;
       while (Date.now() < deadline) {
         const after = await request(path, 'GET');
@@ -1909,6 +1917,14 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
     }
     return { historyRecovered, continuationCreated, continuationCompleted,
       beforeTurnCount: sourceTurns.length, afterTurnCount };
+    } catch (error) {
+      const errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError']
+        .includes(error?.name) ? error.name : 'other';
+      return { error: 'relaunch_step_failed', stage, errorClass,
+        httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : 0,
+        httpCode: typeof error?.httpCode === 'string' && /^[a-z0-9_]{1,64}$/.test(error.httpCode)
+          ? error.httpCode : 'unclassified' };
+    }
   })()`
 }
 
@@ -2228,8 +2244,15 @@ async function runActualPackagedSessionSoak() {
             relaunch.beforeTurnCount = Number(observed.beforeTurnCount || 0)
             relaunch.afterTurnCount = Number(observed.afterTurnCount || 0)
             relaunch.error = observed.error || ''
+            relaunch.stage = observed.stage || ''
+            relaunch.errorClass = observed.errorClass || ''
+            relaunch.httpStatus = Number.isInteger(observed.httpStatus) ? observed.httpStatus : 0
+            relaunch.httpCode = observed.httpCode || ''
           } catch (error) {
             relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+            relaunch.remoteKind = error?.cdpRemoteKind || ''
+            relaunch.protocolCode = error?.cdpProtocolCode ?? null
+            relaunch.exceptionClass = error?.cdpExceptionClass || ''
           }
         }
       } catch (error) {

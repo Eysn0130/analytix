@@ -471,3 +471,26 @@ test('relaunch reads old history before one continuation and observes its termin
   assert.deepEqual(calls.map(({ method }) => method), ['GET', 'POST', 'GET'])
   assert.equal(JSON.parse(calls[1].payload).prompt, 'Run packaged session soak after new process.')
 })
+
+test('relaunch reports a post-write read failure without copying response text or repeating the write', async () => {
+  const calls = []
+  const result = await vm.runInNewContext(relaunchExpression(), {
+    window: { analytix: { runtime: { async runtimeRequest(path, method) {
+      calls.push({ path, method })
+      if (calls.length === 1) return { status: 200, body: JSON.stringify({ id: 'thread-a', turns: [
+        { id: 'turn-a', status: 'completed' }
+      ] }) }
+      if (method === 'POST') return { status: 200, body: JSON.stringify({
+        threadId: 'thread-a', turnId: 'turn-b'
+      }) }
+      return { status: 503, body: '{"code":"projection_unavailable","message":"PRIVATE_CANARY"}' }
+    } } } },
+    JSON, Error, Date, Promise, setTimeout, encodeURIComponent
+  })
+  assert.equal(result.error, 'relaunch_step_failed')
+  assert.equal(result.stage, 'continuation-read')
+  assert.equal(result.httpStatus, 503)
+  assert.equal(result.httpCode, 'projection_unavailable')
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/)
+  assert.deepEqual(calls.map(({ method }) => method), ['GET', 'POST', 'GET'])
+})
