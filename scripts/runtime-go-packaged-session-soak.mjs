@@ -1264,13 +1264,17 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       );
       const body = parseJSON(response);
       if (!response || response.status < 200 || response.status >= 300) {
-        throw new Error(method + ' ' + path + ' returned ' + (response && response.status) + ': ' + String(response && response.body || '').slice(0, 240));
+        const code = typeof body.code === 'string' && /^[a-z0-9_]{1,64}$/.test(body.code)
+          ? body.code : 'unclassified';
+        throw new Error('runtime_request_failed status=' + Number(response && response.status || 0) + ' code=' + code);
       }
       return body;
     }
+    const gateEventsByTurn = new Map();
     async function collectSseReplay(threadId, turnId, expectedText, requireToolEvents, terminalReason) {
       const streamId = 'packaged-session-soak-' + Math.random().toString(36).slice(2);
-      const events = [];
+      const events = gateEventsByTurn.get(turnId) || [];
+      gateEventsByTurn.delete(turnId);
       const errors = [];
       let settled = false;
       let replayTimer;
@@ -1354,6 +1358,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const events = [];
       const errors = [];
       let settled = false;
+      let replayTimer;
       let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
@@ -1363,7 +1368,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(result);
         };
-        const timer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 30000);
+        const timer = replayTimer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 30000);
         const inspect = () => {
           const matching = events.find((event) => {
             if (!event || event.kind !== requiredKind) return false;
@@ -1394,20 +1399,26 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           if (!settled) finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length });
         }));
       });
-      await api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId);
-      const result = await waitForReplay;
-      const acked = await pendingAck;
-      await api.runtime.stopSse(streamId).catch(() => false);
-      for (const unsubscribe of unsubscribers) {
-        try { unsubscribe(); } catch {}
+      try {
+        await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId), 'start_gate_sse');
+        const result = await waitForReplay;
+        const acked = await bounded(pendingAck, 'ack_gate_sse');
+        const turnEvents = events.filter((event) => event &&
+          (event.turnId === turnId || event.turn_id === turnId));
+        if (result.ok && acked) gateEventsByTurn.set(turnId, turnEvents);
+        return { ...result, ok: result.ok && acked,
+          eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))],
+          turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))],
+          errorCodes: errors.map((error) =>
+            String(Number(error && error.status || 0)) + ':' + String(error && error.code || '')).slice(0, 4) };
+      } finally {
+        settled = true;
+        clearTimeout(replayTimer);
+        for (const unsubscribe of unsubscribers) {
+          try { unsubscribe(); } catch {}
+        }
+        await bounded(api.runtime.stopSse(streamId), 'stop_gate_sse').catch(() => false);
       }
-      const turnEvents = events.filter((event) => event &&
-        (event.turnId === turnId || event.turn_id === turnId));
-      return { ...result, ok: result.ok && acked,
-        eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))],
-        turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))],
-        errorCodes: errors.map((error) =>
-          String(Number(error && error.status || 0)) + ':' + String(error && error.code || '')).slice(0, 4) };
     }
     try {
       if (!api) return out;
@@ -1691,6 +1702,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         out.approvalDenyResolvedOk = approvalDeny.status === 'denied' || approvalDeny.decision === 'deny';
       }
       const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, '', false, 'approval_denied');
+      out.approvalDenyReplay = approvalDenyReplay;
       out.approvalDenyNoExecuteOk = approvalDenyReplay.ok === true && approvalDenyReplay.eventCount > 0 && approvalDenyReplay.errorCount === 0;
       if (${JSON.stringify(focusedForkStage)} === 'approval-deny') {
         if (!out.approvalDenyNoExecuteOk) return out;
@@ -1718,6 +1730,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         out.approvalAllowResolvedOk = approvalAllow.status === 'allowed' || approvalAllow.decision === 'allow';
       }
       const approvalAllowReplay = await collectSseReplay(threadId, approvalAllowTurnId, 'packaged approval allow ok', false);
+      out.approvalAllowReplay = approvalAllowReplay;
       out.approvalAllowExecutedOk = approvalAllowReplay.ok === true && approvalAllowReplay.eventCount > 0 && approvalAllowReplay.errorCount === 0;
       if (${JSON.stringify(focusedForkStage)} === 'approval-allow') {
         if (!out.approvalAllowExecutedOk) return out;
@@ -1745,6 +1758,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         out.userInputResolvedOk = true;
       }
       const userInputReplay = await collectSseReplay(threadId, userInputTurnId, 'packaged user input ok', false);
+      out.userInputReplay = userInputReplay;
       out.userInputReplayOk = userInputReplay.ok === true && userInputReplay.eventCount > 0 && userInputReplay.errorCount === 0;
       if (${JSON.stringify(focusedForkStage)} === 'user-input') {
         if (!out.userInputReplayOk) return out;
@@ -2145,7 +2159,8 @@ async function runActualPackagedSessionSoak() {
         approvalAllowFileMatches = false
       }
       if (!cleanupQuiesced || (retainDiagnosticProfile &&
-        (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError))) {
+        (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError ||
+          (forkOnly && renderer?.forkOk !== true)))) {
         diagnosticProfilePath = tempHome
       } else {
         rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
@@ -2387,6 +2402,7 @@ async function runActualPackagedSessionSoak() {
         approvalDenyRequestedOk: renderer.approvalDenyRequestedOk === true,
         approvalDenyResolvedOk: renderer.approvalDenyResolvedOk === true,
         approvalDenyNoExecuteOk: renderer.approvalDenyNoExecuteOk === true,
+        approvalDenyReplay: renderer.approvalDenyReplay || null,
         approvalAllowTurnOk: renderer.approvalAllowTurnOk === true,
         approvalAllowGate: renderer.approvalAllowGate && {
           ok: renderer.approvalAllowGate.ok === true,
@@ -2399,6 +2415,7 @@ async function runActualPackagedSessionSoak() {
         approvalAllowRequestedOk: renderer.approvalAllowRequestedOk === true,
         approvalAllowResolvedOk: renderer.approvalAllowResolvedOk === true,
         approvalAllowExecutedOk: renderer.approvalAllowExecutedOk === true,
+        approvalAllowReplay: renderer.approvalAllowReplay || null,
         userInputTurnOk: renderer.userInputTurnOk === true,
         userInputGate: renderer.userInputGate && {
           ok: renderer.userInputGate.ok === true,
@@ -2411,6 +2428,7 @@ async function runActualPackagedSessionSoak() {
         userInputRequestedOk: renderer.userInputRequestedOk === true,
         userInputResolvedOk: renderer.userInputResolvedOk === true,
         userInputReplayOk: renderer.userInputReplayOk === true,
+        userInputReplay: renderer.userInputReplay || null,
         forkOk: renderer.forkOk === true,
         forkChildrenBefore: Number(renderer.forkChildrenBefore),
         forkChildrenAfter: Number(renderer.forkChildrenAfter),

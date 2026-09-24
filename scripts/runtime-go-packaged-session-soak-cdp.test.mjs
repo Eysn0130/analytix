@@ -282,6 +282,7 @@ function replayFixture(t, events, { failStart = false, failAck = false, ack = tr
   const collect = vm.runInNewContext(`${boundedMatch[0]}\n${replayFunction}\ncollectSseReplay`, {
     api: { runtime }, Promise, Error, Math, Set, Map,
     replayCursorByThread: new Map(), publicReplayEvents: batch => batch,
+    gateEventsByTurn: new Map(),
     acknowledgeReplayBatch: async () => { if (failAck) throw new Error('synthetic_ack_failure'); return ack },
     setTimeout(fn) { const timer=setTimeout(()=>{timers.delete(timer);fn()},20);timers.add(timer);return timer },
     clearTimeout(timer) { timers.delete(timer);clearTimeout(timer) }
@@ -330,4 +331,95 @@ test('failed acknowledgement still disposes owned listeners and stream',async(t)
 test('unacknowledged complete replay remains a failure',async(t)=>{
   const f=replayFixture(t,complete,{ack:false})
   assert.equal((await f.collect('thread-a','turn-a','expected',false)).ok,false)
+})
+
+test('a gate stream and its continuation jointly prove the denied terminal', async (t) => {
+  const gateStart = source.indexOf('    async function collectGateReplay(')
+  const gateEnd = source.indexOf('\n    try {\n      if (!api)', gateStart)
+  assert.ok(gateStart >= 0 && gateEnd > gateStart)
+  const listeners = new Map()
+  const timers = new Set()
+  let stops = 0
+  const subscribe = (name, fn) => { listeners.set(name, fn); return () => listeners.delete(name) }
+  const api = { runtime: {
+    onSseEvent: fn => subscribe('event', fn),
+    onSseError: fn => subscribe('error', fn),
+    onSseEnd: fn => subscribe('end', fn),
+    async ackSseEvent() { return true },
+    async stopSse() { stops++ },
+    async startSse(_thread, _cursor, streamId) {
+      const gate = streamId.startsWith('packaged-session-gate-')
+      listeners.get('event')({ streamId, events: gate
+        ? [event('turn_started', { seq: 1 }), event('approval_requested', { seq: 2, approvalId: 'approval-a' })]
+        : [event('usage', { seq: 3 }), event('turn_completed', { seq: 4, terminalReason: 'approval_denied' })] })
+      listeners.get('end')({ streamId })
+    }
+  } }
+  const context = {
+    api, Promise, Error, Math, Set, Map, Number, String,
+    replayCursorByThread: new Map(), publicReplayEvents: batch => batch,
+    gateEventsByTurn: new Map(),
+    async acknowledgeReplayBatch(_thread, _stream, batch) {
+      const maxSeq = Math.max(...batch.map(item => item.seq))
+      context.replayCursorByThread.set('thread-a', maxSeq)
+      return true
+    },
+    setTimeout(fn) { const timer=setTimeout(()=>{timers.delete(timer);fn()},20);timers.add(timer);return timer },
+    clearTimeout(timer) { timers.delete(timer);clearTimeout(timer) }
+  }
+  const functions = boundedMatch[0] + '\n' + replayFunction + '\n' + source.slice(gateStart, gateEnd)
+  const replay = vm.runInNewContext(`${functions}\n({ collectGateReplay, collectSseReplay })`, context)
+  t.after(() => { for (const timer of timers) clearTimeout(timer) })
+  const gate = await replay.collectGateReplay('thread-a', 'turn-a', 'approval_requested', 'approvalId')
+  assert.equal(gate.ok, true)
+  assert.equal(gate.id, 'approval-a')
+  const final = await replay.collectSseReplay('thread-a', 'turn-a', '', false, 'approval_denied')
+  assert.equal(final.ok, true)
+  assert.equal(stops, 2)
+  assert.equal(listeners.size, 0)
+})
+
+test('failed gate SSE startup releases the stream, listeners, and timer', async (t) => {
+  const gateStart = source.indexOf('    async function collectGateReplay(')
+  const gateEnd = source.indexOf('\n    try {\n      if (!api)', gateStart)
+  const listeners = new Map()
+  const timers = new Set()
+  let stops = 0
+  const runtime = {
+    onSseEvent(fn) { listeners.set('event', fn); return () => listeners.delete('event') },
+    onSseError(fn) { listeners.set('error', fn); return () => listeners.delete('error') },
+    onSseEnd(fn) { listeners.set('end', fn); return () => listeners.delete('end') },
+    async startSse() { throw new Error('synthetic_gate_start_failure') },
+    async stopSse() { stops++ }
+  }
+  const gate = vm.runInNewContext(`${boundedMatch[0]}\n${source.slice(gateStart, gateEnd)}\ncollectGateReplay`, {
+    api: { runtime }, Promise, Error, Math, Set, Map, Number, String,
+    replayCursorByThread: new Map(), gateEventsByTurn: new Map(),
+    publicReplayEvents: batch => batch, acknowledgeReplayBatch: async () => true,
+    setTimeout(fn) { const timer=setTimeout(()=>{timers.delete(timer);fn()},20);timers.add(timer);return timer },
+    clearTimeout(timer) { timers.delete(timer);clearTimeout(timer) }
+  })
+  t.after(() => { for (const timer of timers) clearTimeout(timer) })
+  await assert.rejects(gate('thread-a', 'turn-a', 'approval_requested', 'approvalId'), /synthetic_gate_start_failure/)
+  assert.equal(stops, 1)
+  assert.equal(listeners.size, 0)
+  assert.equal(timers.size, 0)
+})
+
+test('HTTP failure reports a fixed code without response text or a dynamic path', async () => {
+  const requestStart = source.indexOf('    async function request(')
+  const requestEnd = source.indexOf('\n    const gateEventsByTurn', requestStart)
+  assert.ok(requestStart >= 0 && requestEnd > requestStart)
+  const request = vm.runInNewContext(`${source.slice(requestStart, requestEnd)}\nrequest`, {
+    api: { runtime: { runtimeRequest: async () => ({
+      status: 400,
+      body: '{"code":"validation_error","message":"PRIVATE_CANARY dynamic-thread-42"}'
+    }) } },
+    parseJSON: response => JSON.parse(response.body), JSON, Error, Number, String
+  })
+  await assert.rejects(request('/v1/threads/dynamic-thread-42/fork', 'POST', {}), error => {
+    assert.match(error.message, /status=400 code=validation_error/)
+    assert.doesNotMatch(error.message, /PRIVATE_CANARY|dynamic-thread-42/)
+    return true
+  })
 })
