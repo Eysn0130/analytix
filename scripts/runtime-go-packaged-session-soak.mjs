@@ -750,74 +750,125 @@ async function waitForDebugTarget(port, timeoutMs) {
 
 async function evaluateCdp(wsUrl, expression, timeoutMs) {
   if (typeof WebSocket === 'undefined') throw new Error('global WebSocket is unavailable in this Node runtime')
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 0x7fffffff) {
+    throw new Error('cdp_invalid_timeout')
+  }
+  const deadline = Date.now() + timeoutMs
   const ws = new WebSocket(wsUrl)
-  await new Promise((resolve, reject) => {
-    ws.addEventListener('open', resolve, { once: true })
-    ws.addEventListener('error', reject, { once: true })
-  })
   const id = 1
+  // A disconnect after send does not establish whether the expression ran.
+  // This expression writes settings, restarts Core and executes tools: never
+  // replay it just because its response was lost.
+  let commandSent = false
+  let settled = false
+  let timer
+  const listeners = []
+  const listen = (name, listener) => {
+    ws.addEventListener(name, listener)
+    listeners.push([name, listener])
+  }
+  const failure = (code) => Object.assign(new Error(code), {
+    cdpCommandSent: commandSent,
+    cdpOutcome: commandSent ? 'unknown' : 'not_sent'
+  })
   try {
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('CDP Runtime.evaluate timeout')), timeoutMs)
-      ws.addEventListener('message', (event) => {
-        const message = JSON.parse(String(event.data))
-        if (message.id !== id) return
+      const finish = (error, value) => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
-        if (message.error) {
-          reject(new Error(JSON.stringify(message.error)))
+        if (error) reject(error)
+        else resolve(value)
+      }
+      timer = setTimeout(() => finish(failure(
+        commandSent ? 'cdp_evaluation_timeout' : 'cdp_handshake_timeout'
+      )), timeoutMs)
+      listen('error', () => finish(failure('cdp_connection_error')))
+      listen('close', () => finish(failure('cdp_connection_closed')))
+      listen('message', (event) => {
+        if (settled) return
+        let message
+        try { message = JSON.parse(String(event.data)) } catch {
+          finish(failure('cdp_invalid_response'))
           return
         }
-        if (message.result?.exceptionDetails) {
-          reject(new Error(JSON.stringify(message.result.exceptionDetails)))
+        if (!message || typeof message !== 'object') {
+          finish(failure('cdp_invalid_response'))
           return
         }
-        resolve(message.result?.result?.value)
+        if (message.id !== id) return
+        if (message.error || message.result?.exceptionDetails) {
+          // Do not place raw remote exception descriptions or stack frames in
+          // evidence: they may contain paths, arguments or other private data.
+          finish(failure('cdp_evaluation_failed'))
+          return
+        }
+        if (!message.result?.result || typeof message.result.result !== 'object') {
+          finish(failure('cdp_invalid_response'))
+          return
+        }
+        finish(null, message.result.result.value)
       })
-      ws.send(JSON.stringify({
-        id,
-        method: 'Runtime.evaluate',
-        params: {
-          expression,
-          awaitPromise: true,
-          returnByValue: true,
-          timeout: timeoutMs
+      listen('open', () => {
+        if (settled || commandSent) return
+        const remainingMs = deadline - Date.now()
+        if (remainingMs <= 0) {
+          finish(failure('cdp_handshake_timeout'))
+          return
         }
-      }))
+        // Set before send: a thrown/ambiguous send must not become a retry.
+        commandSent = true
+        try {
+          ws.send(JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: {
+              expression,
+              awaitPromise: true,
+              returnByValue: true,
+              timeout: remainingMs
+            }
+          }))
+        } catch {
+          finish(failure('cdp_send_failed'))
+        }
+      })
     })
   } finally {
-    ws.close()
+    clearTimeout(timer)
+    for (const [name, listener] of listeners) ws.removeEventListener(name, listener)
+    try { ws.close() } catch { /* Preserve the original result or refusal. */ }
   }
 }
 
 function isTransientCdpEvaluationError(error) {
-  const text = error instanceof Error ? error.message : String(error || '')
-  return text.includes('Execution context was destroyed') ||
-    text.includes('Cannot find context') ||
-    text.includes('Target closed') ||
-    text.includes('target closed') ||
-    text.includes('WebSocket') ||
-    text.includes('renderer debug target not ready')
+  return error?.cdpCommandSent === false && [
+    'cdp_handshake_timeout', 'cdp_connection_error', 'cdp_connection_closed'
+  ].includes(error.message)
 }
 
 async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs }) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 0x7fffffff) {
+    throw new Error('cdp_invalid_timeout')
+  }
   const deadline = Date.now() + timeoutMs
   let lastError = null
   for (let attempt = 0; Date.now() < deadline; attempt += 1) {
-    const remainingMs = Math.max(250, deadline - Date.now())
+    const remainingMs = deadline - Date.now()
+    // Discovery is read-only and already polls. A failure here must not be
+    // confused with a response lost AFTER a mutating Runtime.evaluate.
+    const target = await waitForDebugTarget(debugPort, remainingMs)
+    const evaluationBudget = deadline - Date.now()
+    if (evaluationBudget <= 0) break
     try {
-      const target = await waitForDebugTarget(debugPort, Math.min(5_000, remainingMs))
-      return await evaluateCdp(
-        target.webSocketDebuggerUrl,
-        expression,
-        Math.min(timeoutMs, Math.max(1_000, deadline - Date.now()))
-      )
+      return await evaluateCdp(target.webSocketDebuggerUrl, expression, evaluationBudget)
     } catch (error) {
       lastError = error
       if (!isTransientCdpEvaluationError(error)) throw error
       await sleep(Math.min(250 + attempt * 100, 1_000, Math.max(0, deadline - Date.now())))
     }
   }
-  throw lastError || new Error('CDP Runtime.evaluate timeout')
+  throw lastError || new Error('cdp_discovery_timeout')
 }
 
 function startContractProvider() {
@@ -1163,6 +1214,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const events = [];
       const errors = [];
       let settled = false;
+      let replayTimer;
       let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
@@ -1172,7 +1224,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(ok);
         };
-        const timer = setTimeout(() => finish(false), 30000);
+        const timer = replayTimer = setTimeout(() => finish(false), 30000);
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
@@ -1217,21 +1269,26 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
               event.kind === 'item_completed' && event.item &&
               event.item.kind === 'assistant_text' &&
               (event.item.text || '').includes(expectedText));
-          finish(terminalMatches &&
+          finish(kinds.has('turn_started') && kinds.has('usage') && terminalMatches &&
             (!requireToolEvents || (kinds.has('tool_call_ready') &&
               kinds.has('tool_call_started') && kinds.has('tool_call_finished'))));
         }));
       });
-      await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId),
-        'start_sse');
-      const ok = await waitForReplay;
-      const acked = await bounded(pendingAck, 'ack_sse');
-      await bounded(api.runtime.stopSse(streamId), 'stop_sse').catch(() => false);
-      for (const unsubscribe of unsubscribers) {
-        try { unsubscribe(); } catch {}
+      try {
+        await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId),
+          'start_sse');
+        const ok = await waitForReplay;
+        const acked = await bounded(pendingAck, 'ack_sse');
+        return { ok: ok && acked, eventCount: events.length, errorCount: errors.length,
+          eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))] };
+      } finally {
+        settled = true;
+        clearTimeout(replayTimer);
+        for (const unsubscribe of unsubscribers) {
+          try { unsubscribe(); } catch {}
+        }
+        await bounded(api.runtime.stopSse(streamId), 'stop_sse').catch(() => false);
       }
-      return { ok: ok && acked, eventCount: events.length, errorCount: errors.length,
-        eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))] };
     }
     async function collectGateReplay(threadId, turnId, requiredKind, idField) {
       const streamId = 'packaged-session-gate-' + Math.random().toString(36).slice(2);
@@ -1348,7 +1405,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       };
       try {
         out.stage = 'settings-write';
-        await api.settings.setSettings(profilePatch);
+        await bounded(api.settings.setSettings(profilePatch), 'settings_write');
         out.settingsProfilePatchAccepted = true;
         out.settingsPatchMode = 'provider-profile';
       } catch (error) {
@@ -1357,7 +1414,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       }
       try {
         out.stage = 'runtime-restart';
-        await api.runtime.restartRuntime();
+        await bounded(api.runtime.restartRuntime(), 'runtime_restart');
         out.restartOk = true;
       } catch (error) {
         out.restartError = error && (error.stack || error.message) || String(error);
@@ -1593,6 +1650,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const detail = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
 
+      out.stage = 'session-fork';
       const fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
         relation: 'fork',
         title: 'Packaged Session Soak Fork'
@@ -1614,6 +1672,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const forkReplay = await collectSseReplay(forkId, forkTurnId, 'packaged session soak ok', false);
       out.forkReplayOk = forkReplay.ok === true && forkReplay.eventCount > 0 && forkReplay.errorCount === 0;
 
+      out.stage = 'session-resume';
       const resume = await request('/v1/sessions/' + encodeURIComponent(threadId) + '/resume-thread', 'POST', {
         workspace: ${JSON.stringify(workspace)},
         model: ${JSON.stringify(model)},
