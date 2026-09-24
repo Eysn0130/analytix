@@ -9,38 +9,37 @@ history before comparing remote state.
 
 ## Current PR28 Core admission — 2026-09-24 PDT
 
-The current private artifact SOURCE is `7b9cb2b4f797c2e22b9cc62fb507a248e03981da`
-on `codex/workbench-product-delivery-20260914`. The old `b2cf1179e`, `8e5142250`,
-`ad5544ec3` and `b9666a5af` results below remain dated history, not current
-blockers. The current app, DMG and ZIP are sealed to the same SOURCE; the DMG and
-ZIP copies contain identical app files, links and modes. The installed DMG copy
-passes strict signature, independent Core Go inspection and exact artifact legal
-audit (1,172 instances, zero mandatory engineering blockers). It remains
-`development_clean_non_publishable`.
+The branch's latest implementation SOURCE is
+`701dea32038a6447ef71198c60c73b6707ad839d` on
+`codex/workbench-product-delivery-20260914`. It has a signed private app-only
+diagnostic build. The latest complete private app/DMG/ZIP is instead bound to
+SOURCE `65a91d0468ce89695aa644e5c1f8b301d8cff25b`. Its installed DMG
+copy passes strict signature, independent Core Go inspection and exact artifact
+legal audit (1,172 instances, zero mandatory engineering blockers). Canvas is
+excluded and the Lazy replacement is present. Both artifacts remain
+`development_clean_non_publishable`; the two SOURCEs are not one candidate.
 
-The installed standalone app passes a synthetic local-Provider session journey
-with settings, explicit runtime restart, tools, approvals, user input, fork,
-resume and usage. The identical DMG copy's full run reached approval allow and
-was canceled by the existing overall observation deadline before fork; no
-fork400 or settings-write/restart failure was observed in that run. This is
-followed by a fresh DMG-copy focused session in which approval allow completed
-and one fork succeeded (child count 0→1). It remains an incomplete full installed
-comparison, not a product failure diagnosis or full
-private admission. See the [current bounded evidence](qa/pr28-installed-closure-2026-09-24.md).
-An additional fresh isolated DMG-copy run started two distinct Main processes
-in sequence: the second read the original completed turn and completed one
-new turn in the same thread under a synthetic local Provider. This proves
-bounded installed new-process history/continuation, not upgrade or normal
-external-Provider recovery.
+The 65a installed sessions passed a focused settings/restart/first-turn/fork
+path, but a separate fresh session timed out on settings write after its
+isolated settings file reflected the patch. Another 65a session recovered old
+history and completed a second turn in a new Main process, yet the final read
+returned 503 through the desktop. Its raw safe error class was not captured.
+The 701 app-only diagnostic added fixed-category logging and passed one fresh
+new-process recovery (old history and a new completed turn, count 1→2); the
+intermittent 503 did not recur and is not proved fixed. Earlier c25 installed
+DMG sessions passed explicit cancellation and approval-allow fork in separate
+focused runs. These checks cannot be added into one final-candidate admission.
+See the [later bounded evidence](qa/pr28-installed-continuation-2026-09-24.md)
+and [7b historical checkpoint](qa/pr28-installed-closure-2026-09-24.md).
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `true` for the exact `7b9cb2b4f` source checks: 56/56 PR checks passed. This does not imply installed product acceptance. |
-| PrivateCandidateReady | `false`: normal installed Provider setup/recovery, explicit cancellation, real 120-turn GUI, Core upgrade/data preservation and installed PDF preview are not all proven on one final candidate. Synthetic local-Provider new-process history/continuation passes. |
-| MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open despite green exact-head CI. |
+| SourceReady | `pending` for latest `701dea320`: targeted local checks pass; accurate PR CI was in progress at this checkpoint. The older 7b 56/56 result does not transfer to a later HEAD. |
+| PrivateCandidateReady | `false`: no one final installed app/container has completed normal Provider setup/recovery, explicit cancellation, real 120-turn GUI, Core upgrade/data preservation and installed PDF preview; intermittent settings/read failures remain unclassified. |
+| MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
 
-The exact private DMG/ZIP are inspectable candidates, not a public beta or
+The 65a private DMG/ZIP are inspectable candidates, not a public beta or
 formal release. Do not repeat the retired 21/2 package-license, historical
 `NOT_CLEARED` or prior-head CI tasks as current blockers.
 
@@ -76,7 +75,7 @@ re-entry. A reproduced renderer defect replacing the Registry model with stale
 Settings was repaired. These are source-development results, not a new package.
 The same report records exact tests and remaining replacement/signing limits.
 
-Current artifact SOURCE is `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
+Historical artifact SOURCE at this checkpoint was `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`;
 prior SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` and DELIVERY
 `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` remain ancestors. A clean new
 Core1.0.6 private app/DMG/ZIP completed the normal lifecycle. All8,639 app files

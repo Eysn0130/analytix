@@ -7,26 +7,31 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 ## 当前恢复点 — 2026-09-24 PDT
 
-- 当前制品 SOURCE `7b9cb2b4f797c2e22b9cc62fb507a248e03981da`，原
-  `b9666a5af` 及全部有效祖先保留；恢复时先重新读取 HEAD/tree/dirty，不能用本行
-  覆盖更晚提交。该 SOURCE 的 PR28 检查有 56/56 成功，PR 仍为 Draft；真正
-  main 仍为 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，不是 PR 测试合并 SHA。
+- 最新实现 SOURCE `701dea32038a6447ef71198c60c73b6707ad839d`，只完成
+  app-only 诊断构建；最新完整私有 app/DMG/ZIP 仍绑定 `65a91d0468ce89695aa644e5c1f8b301d8cff25b`。
+  原 `b9666a5af` 及全部有效祖先保留；恢复时先重新读取 HEAD/tree/dirty，不能用本行
+  覆盖更晚提交。准确 `701` PR CI 在本检查点仍运行；旧 `7b9cb2b4f` 56/56
+  成功不能继承。PR 仍为 Draft；真正 main 最后直接核验仍为
+  `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，不是 PR 测试合并 SHA。
 - ZIP 交接包的 soak 脚本修复已在原工程集成、测试、定向提交并普通 push；后继补上
   安装版定向诊断及审批门事件回放的真实 RED→GREEN 修复。28/3 等窄测和脚本
   通过均不构成 Mac 安装验收。
-- 当前私有 app/DMG/ZIP 的内容、严格签名、独立 Go Core 读包与准确许可审计通过；
+- 65a 完整私有容器的严格签名、独立 Go Core 读包与准确许可审计通过；
   1,172 个实际依赖实例无强制工程阻断，Canvas 未随 Core 分发，Lazy 替代已打包。
-  当前容器和安装证据见[2026-09-24 QA](../qa/pr28-installed-closure-2026-09-24.md)。
-- 独立 app 在合成隔离 Provider 下完成设置、重启、会话、工具、审批、用户输入、
-  fork/resume 和 usage。DMG 安装副本的整段会话到审批允许阶段触及总体观察期限，
-  被测试清理取消，fork 尚未发送；不能据此称 fork400 复现或修复。保留原失败
-  receipt 和 QA profile，先看前后状态，不盲目重播。新的 DMG 安装副本定向会话在
-  审批允许后完成一次 fork，派生数量 0→1。另一 fresh QA 中，两个不同 Main
-  进程顺序运行，第二进程恢复原完成回合并完成一个新回合；本地合成 Provider
-  下的新进程历史/续写通过。仍需显式取消、120-turn 实际 GUI、正常 Provider
-  恢复、Core 升级/数据保全及安装版 PDF 预览等同一候选的真实验收。
-- 当前四个出口：`SourceReady=true`（仅准确源码/CI）；
+  701 只有签名通过的 app-only 诊断构建，不能继承 65a 容器回执。
+- 历史 7b 独立 app 在合成隔离 Provider 下完成设置、重启、会话、工具、审批、
+  用户输入、fork/resume 和 usage；完整 DMG 会话在审批允许时触及观察期限。
+  后继 c25 安装版显式取消及审批后 fork 的定向会话通过。65a 一个 fresh 会话
+  设置写入超时，但设置文件随后包含目标值；另一会话新进程续写完成后最终读回
+  返回 503，原始脱敏类别未捕获。701 app-only 加入固定类别诊断，单次 fresh
+  新进程读回/续写通过，503 未复现，不能声称根因已解决。fork400 未取得准确
+  响应；先核对派生前后状态，不重播写操作。详见
+  [后继安装证据](../qa/pr28-installed-continuation-2026-09-24.md)和
+  [7b 历史证据](../qa/pr28-installed-closure-2026-09-24.md)。
+- 当前四个出口：`SourceReady=pending`（701 准确 CI 仍运行）；
   `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
+  同一最终候选仍需正常 Provider、120-turn 实际 GUI、Core 升级/数据保全和
+  安装版 PDF 预览等验收；此前不同 SOURCE 的成功不能相加放行。
   Developer ID/公证/publication authority 只属于未来公开 macOS 分发；不索取
   原开发 Key/普通开发 Keychain 密码，不增加累计 US$5 预算。
 
@@ -54,7 +59,7 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   不需第二密码；新增初始化延后选中、Core 存储凭据可用性检查和 unavailable
   恢复。针对性检查通过；追加 checked integer 修复后的 `8e5142250` 已 push，
   其四种语言 CodeQL 与 gate 全通过。app-only 构建针对8e；旧 b2cf 不含凭据修复。
-- 当前完成的容器制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
+- 历史容器制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
   `d6ca0b5dbd97a2f8eb8cd11aa1ea2beb336bd48c`；准确当前 HEAD/tree 在恢复时重读 Git。
 - 本轮证据：[新制品与发行准入接续](../qa/pr28-core-release-admission-2026-09-22.md)。
   clean Core1.0.6 私有 app/DMG/ZIP 完成；全部8,639文件/链接与独立安装副本
