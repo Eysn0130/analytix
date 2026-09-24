@@ -942,9 +942,14 @@ async function waitForRendererReady({ debugPort, deadline }) {
       }
     } catch (error) {
       consecutiveReady = 0
-      lastFailure = String(error?.message || '').startsWith('renderer debug target not ready')
+      const failure = String(error?.message || '').startsWith('renderer debug target not ready')
         ? 'cdp_debug_target_unavailable'
         : /^cdp_[a-z_]+$/.test(error?.message || '') ? error.message : 'unknown'
+      // A final connection attempt can consume the caller's remaining budget.
+      // Keep a concrete renderer phase already observed before that tail timeout.
+      if (!(failure === 'cdp_handshake_timeout' && Date.now() >= deadline && lastFailure)) {
+        lastFailure = failure
+      }
     }
     await sleep(Math.min(250, Math.max(0, deadline - Date.now())))
   }

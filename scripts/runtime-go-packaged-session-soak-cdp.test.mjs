@@ -160,9 +160,12 @@ test('read-only startup probe waits for two healthy observations before mutation
   assert.equal(f.messages.length, 3)
 })
 test('startup probe reports a fixed bridge phase without remote details', async (t) => {
-  const f = fixture(t, [opened((socket, message) => {
-    socket.reply({ id: message.id, result: { result: { value: 'runtime_bridge_missing' } } })
-  })])
+  const f = fixture(t, [
+    opened((socket, message) => {
+      socket.reply({ id: message.id, result: { result: { value: 'runtime_bridge_missing' } } })
+    }),
+    {} // The final read-only connection may consume the remaining deadline.
+  ])
   // Leave fixture scheduling slack; the product deadline is supplied by the caller.
   const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 300 }), 700)
   assert.equal(result.error?.message, 'cdp_renderer_readiness_timeout')
