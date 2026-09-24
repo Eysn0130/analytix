@@ -168,6 +168,14 @@ test('startup probe reports a fixed bridge phase without remote details', async 
   assert.equal(result.error?.cdpPreflightLastFailure, 'runtime_bridge_missing')
   assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
 })
+test('startup probe classifies unavailable debug targets without a raw fetch error', async (t) => {
+  const f = fixture(t, [], { discover: async () => {
+    throw new Error('renderer debug target not ready: PRIVATE_CANARY_/synthetic/private')
+  } })
+  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 100 }), 500)
+  assert.equal(result.error?.cdpPreflightLastFailure, 'cdp_debug_target_unavailable')
+  assert.doesNotMatch(String(result.error?.cdpPreflightLastFailure), /PRIVATE_CANARY/)
+})
 test('an unrelated response id is ignored without resending', async (t) => {
   const f = fixture(t, [opened((socket, message) => {
     socket.reply({ id: 99, result: { result: { value: false } } })

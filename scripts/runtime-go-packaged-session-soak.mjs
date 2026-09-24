@@ -942,7 +942,9 @@ async function waitForRendererReady({ debugPort, deadline }) {
       }
     } catch (error) {
       consecutiveReady = 0
-      lastFailure = /^cdp_[a-z_]+$/.test(error?.message || '') ? error.message : 'unknown'
+      lastFailure = String(error?.message || '').startsWith('renderer debug target not ready')
+        ? 'cdp_debug_target_unavailable'
+        : /^cdp_[a-z_]+$/.test(error?.message || '') ? error.message : 'unknown'
     }
     await sleep(Math.min(250, Math.max(0, deadline - Date.now())))
   }
