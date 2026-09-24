@@ -21,6 +21,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import {
   createIsolatedDarwinLoginKeychain,
   createIsolatedDarwinTaskKeychain
@@ -42,10 +43,12 @@ const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
 const actualOnly = args.has('--actual-only')
 const forkOnly = args.has('--fork-only')
 const focusedForkStage = argValue('--fork-after', forkOnly ? 'initial' : '')
+const relaunchAfterInitial = args.has('--relaunch-after-initial')
 if (forkOnly && !['initial', 'tool', 'attachment', 'approval-deny', 'approval-allow', 'user-input'].includes(focusedForkStage)) {
   throw new Error('unsupported focused fork stage')
 }
 if (!forkOnly && focusedForkStage) throw new Error('--fork-after requires --fork-only')
+if (forkOnly && relaunchAfterInitial) throw new Error('--relaunch-after-initial cannot be combined with --fork-only')
 const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
@@ -327,6 +330,15 @@ function firstSecretFinding(value, path = '$') {
 function currentGitCommit() {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: process.cwd(),
+    encoding: 'utf8',
+    stdio: 'pipe'
+  })
+  return result.status === 0 ? String(result.stdout || '').trim() : ''
+}
+
+function harnessGitCommit() {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
     encoding: 'utf8',
     stdio: 'pipe'
   })
@@ -1570,6 +1582,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
       if (!out.sseReplayOk) return out;
+      if (${JSON.stringify(relaunchAfterInitial)}) return out;
       const runFocusedFork = async (stage) => {
         out.stage = 'session-fork-' + stage;
         const countForkChildren = async () => {
@@ -1845,6 +1858,60 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
   })()`
 }
 
+function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
+  return `(async () => {
+    const api = window.analytix;
+    if (!api?.runtime?.runtimeRequest) return { error: 'runtime_bridge_unavailable' };
+    const request = async (path, method, payload) => {
+      const response = await api.runtime.runtimeRequest(path, method || 'GET',
+        payload === undefined ? undefined : JSON.stringify(payload));
+      if (!response || response.status < 200 || response.status >= 300) {
+        let code = 'unclassified';
+        try {
+          const parsed = JSON.parse(response?.body || '{}');
+          if (typeof parsed.code === 'string' && /^[a-z0-9_]{1,64}$/.test(parsed.code)) code = parsed.code;
+        } catch {}
+        throw new Error('runtime_request_failed status=' + Number(response?.status || 0) + ' code=' + code);
+      }
+      return JSON.parse(response.body || '{}');
+    };
+    const threadId = ${JSON.stringify(threadId)};
+    const turnId = ${JSON.stringify(turnId)};
+    const path = '/v1/threads/' + encodeURIComponent(threadId);
+    const before = await request(path, 'GET');
+    const sourceTurns = Array.isArray(before.turns) ? before.turns : [];
+    const sourceTurn = sourceTurns.find((turn) => turn?.id === turnId);
+    const historyRecovered = before.id === threadId && sourceTurn?.status === 'completed' &&
+      sourceTurns.filter((turn) => turn?.id === turnId).length === 1;
+    if (!historyRecovered) return { historyRecovered: false, continuationCreated: false,
+      continuationCompleted: false, beforeTurnCount: sourceTurns.length };
+    const created = await request(path + '/turns', 'POST', {
+      prompt: 'Run packaged session soak after new process.', async: true,
+      providerId: ${JSON.stringify(providerId)}, model: ${JSON.stringify(model)},
+      approvalPolicy: 'never', sandboxMode: 'read-only', disableUserInput: true
+    });
+    const newTurnId = created.turnId || created.turn_id || '';
+    const continuationCreated = !!newTurnId && (created.threadId === threadId ||
+      created.thread_id === threadId);
+    let continuationCompleted = false;
+    let afterTurnCount = sourceTurns.length;
+    if (continuationCreated) {
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        const after = await request(path, 'GET');
+        const turns = Array.isArray(after.turns) ? after.turns : [];
+        afterTurnCount = turns.length;
+        continuationCompleted = turns.some((turn) => turn?.id === newTurnId &&
+          turn.status === 'completed') && turns.filter((turn) => turn?.id === turnId).length === 1;
+        if (continuationCompleted) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    return { historyRecovered, continuationCreated, continuationCompleted,
+      beforeTurnCount: sourceTurns.length, afterTurnCount };
+  })()`
+}
+
 function summarizeError(raw) {
   const text = redactSecrets(String(raw || '')).replace(/\s+/g, ' ').trim()
   if (!text) return ''
@@ -2041,6 +2108,7 @@ async function runActualPackagedSessionSoak() {
   let cleanupError = ''
   let rendererReadinessPassed = false
   let cdpFailure = null
+  let relaunch = null
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -2107,6 +2175,63 @@ async function runActualPackagedSessionSoak() {
           renderer.settingsPatchError = summarizeError(renderer.settingsPatchError)
           renderer.error = summarizeError(renderer.error)
         }
+        if (relaunchAfterInitial && renderer?.sseReplayOk === true &&
+          renderer.initialThreadId && renderer.initialTurnId) {
+          relaunch = { attempted: true, firstMainPid: mainPid, secondMainPid: 0,
+            firstProcessQuiesced: false, secondRendererReady: false,
+            historyRecovered: false, continuationCreated: false,
+            continuationCompleted: false, beforeTurnCount: 0, afterTurnCount: 0,
+            error: '' }
+          try {
+            await stopChild(child)
+            await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+            await stopOwnedSmokeRuntimes(runtimeDataDir)
+            relaunch.firstProcessQuiesced =
+              (child.exitCode !== null || Boolean(child.signalCode)) &&
+              ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
+              !listeningPidsOnPort(runtimePort).some((pid) =>
+                commandLineForPid(pid).includes(runtimeDataDir))
+            if (!relaunch.firstProcessQuiesced) throw new Error('first_process_not_quiesced')
+            await isolatedTaskKeychain?.unlockForLaunch()
+            if (isolatedLoginKeychain) {
+              const unlocked = await isolatedLoginKeychain.unlockForLaunch()
+              if (!unlocked.ok || !unlocked.defaultKeychainBound) {
+                throw new Error('isolated_login_keychain_unavailable')
+              }
+            }
+            debugPort = await getFreePort()
+            while (debugPort === runtimePort) debugPort = await getFreePort()
+            child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
+              cwd: process.cwd(),
+              env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
+              stdio: ['ignore', 'pipe', 'pipe']
+            })
+            relaunch.secondMainPid = child.pid || 0
+            child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+            child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+            await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
+            relaunch.secondRendererReady = true
+            const observed = await evaluateRendererWithRetries({
+              debugPort,
+              expression: buildRelaunchExpression({
+                threadId: renderer.initialThreadId,
+                turnId: renderer.initialTurnId,
+                providerId,
+                model
+              }),
+              timeoutMs: Math.max(1, evaluationDeadline - Date.now())
+            })
+            if (!observed || typeof observed !== 'object') throw new Error('invalid_relaunch_observation')
+            for (const field of ['historyRecovered', 'continuationCreated', 'continuationCompleted']) {
+              relaunch[field] = observed[field] === true
+            }
+            relaunch.beforeTurnCount = Number(observed.beforeTurnCount || 0)
+            relaunch.afterTurnCount = Number(observed.afterTurnCount || 0)
+            relaunch.error = observed.error || ''
+          } catch (error) {
+            relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+          }
+        }
       } catch (error) {
         launchError = error instanceof Error ? error.message : String(error)
         cdpFailure = {
@@ -2160,7 +2285,8 @@ async function runActualPackagedSessionSoak() {
       }
       if (!cleanupQuiesced || (retainDiagnosticProfile &&
         (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError ||
-          (forkOnly && renderer?.forkOk !== true)))) {
+          (forkOnly && renderer?.forkOk !== true) ||
+          (relaunchAfterInitial && relaunch?.continuationCompleted !== true)))) {
         diagnosticProfilePath = tempHome
       } else {
         rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
@@ -2450,6 +2576,7 @@ async function runActualPackagedSessionSoak() {
   const secretFinding = firstSecretFinding({
     checks,
     renderer: rendererEvidence,
+    relaunch,
     forkDiagnostic,
     sseDiagnostic,
     launchError: summarizeError(launchError)
@@ -2489,11 +2616,12 @@ async function runActualPackagedSessionSoak() {
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
     ...(retainDiagnosticProfile ? { diagnostic: {
-      mode: forkOnly ? `focused_fork_${focusedForkStage}` : 'full_session',
+      mode: relaunchAfterInitial ? 'relaunch_after_initial'
+        : forkOnly ? `focused_fork_${focusedForkStage}` : 'full_session',
       mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
       isolatedProfilePath: diagnosticProfilePath,
       isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
-      rendererReadinessPassed, cdpFailure
+      rendererReadinessPassed, cdpFailure, relaunch
     } } : {}),
     renderer: rendererEvidence,
     forkDiagnostic,
@@ -2773,7 +2901,7 @@ async function main() {
     id: 'runtime-go-packaged-session-soak',
     generatedAt: new Date().toISOString(),
     sourceCommit: actualPackagedSoak ? packageSourceCommit : currentGitCommit(),
-    testHarnessCommit: currentGitCommit(),
+    testHarnessCommit: harnessGitCommit(),
     status,
     passed,
     soak: {

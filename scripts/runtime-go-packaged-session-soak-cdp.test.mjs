@@ -423,3 +423,51 @@ test('HTTP failure reports a fixed code without response text or a dynamic path'
     return true
   })
 })
+
+function relaunchExpression() {
+  const start = source.indexOf('function buildRelaunchExpression(')
+  const end = source.indexOf('\nfunction summarizeError(', start)
+  assert.ok(start >= 0 && end > start)
+  const build = vm.runInNewContext(`${source.slice(start, end)}\nbuildRelaunchExpression`, { JSON })
+  return build({ threadId: 'thread-a', turnId: 'turn-a', providerId: 'xiaomi', model: 'mimo-v2.5-pro' })
+}
+
+test('relaunch refuses a continuation when the exact prior turn is absent', async () => {
+  const calls = []
+  const result = await vm.runInNewContext(relaunchExpression(), {
+    window: { analytix: { runtime: { async runtimeRequest(path, method) {
+      calls.push({ path, method })
+      return { status: 200, body: JSON.stringify({ id: 'thread-a', turns: [] }) }
+    } } } },
+    JSON, Error, Date, Promise, setTimeout, encodeURIComponent
+  })
+  assert.equal(result.historyRecovered, false)
+  assert.equal(result.continuationCreated, false)
+  assert.deepEqual(calls, [{ path: '/v1/threads/thread-a', method: 'GET' }])
+})
+
+test('relaunch reads old history before one continuation and observes its terminal state', async () => {
+  const calls = []
+  let reads = 0
+  const result = await vm.runInNewContext(relaunchExpression(), {
+    window: { analytix: { runtime: { async runtimeRequest(path, method, payload) {
+      calls.push({ path, method, payload })
+      if (method === 'POST') return { status: 200, body: JSON.stringify({
+        threadId: 'thread-a', turnId: 'turn-b'
+      }) }
+      reads += 1
+      return { status: 200, body: JSON.stringify({ id: 'thread-a', turns: [
+        { id: 'turn-a', status: 'completed' },
+        ...(reads > 1 ? [{ id: 'turn-b', status: 'completed' }] : [])
+      ] }) }
+    } } } },
+    JSON, Error, Date, Promise, setTimeout, encodeURIComponent
+  })
+  assert.equal(result.historyRecovered, true)
+  assert.equal(result.continuationCreated, true)
+  assert.equal(result.continuationCompleted, true)
+  assert.equal(result.beforeTurnCount, 1)
+  assert.equal(result.afterTurnCount, 2)
+  assert.deepEqual(calls.map(({ method }) => method), ['GET', 'POST', 'GET'])
+  assert.equal(JSON.parse(calls[1].payload).prompt, 'Run packaged session soak after new process.')
+})
