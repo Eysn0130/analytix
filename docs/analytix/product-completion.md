@@ -27,11 +27,16 @@ followed by a fresh DMG-copy focused session in which approval allow completed
 and one fork succeeded (child count 0→1). It remains an incomplete full installed
 comparison, not a product failure diagnosis or full
 private admission. See the [current bounded evidence](qa/pr28-installed-closure-2026-09-24.md).
+An additional fresh isolated DMG-copy run started two distinct Main processes
+in sequence: the second read the original completed turn and completed one
+new turn in the same thread under a synthetic local Provider. This proves
+bounded installed new-process history/continuation, not upgrade or normal
+external-Provider recovery.
 
 | Exit | Current status and scope |
 | --- | --- |
 | SourceReady | `true` for the exact `7b9cb2b4f` source checks: 56/56 PR checks passed. This does not imply installed product acceptance. |
-| PrivateCandidateReady | `false`: normal installed Provider setup, explicit cancellation, real 120-turn GUI, new-process recovery, Core upgrade/data preservation and installed PDF preview are not all proven on one final candidate. |
+| PrivateCandidateReady | `false`: normal installed Provider setup/recovery, explicit cancellation, real 120-turn GUI, Core upgrade/data preservation and installed PDF preview are not all proven on one final candidate. Synthetic local-Provider new-process history/continuation passes. |
 | MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open despite green exact-head CI. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
 

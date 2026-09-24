@@ -22,11 +22,15 @@ following focused commits were made and normally pushed on PR28:
 | `c7b893dad` | Add a single-turn installed fork isolation route. |
 | `31783ad95` | Isolate the first failing completed-turn stage. |
 | `7b9cb2b4f` | Carry already acknowledged gate events into terminal replay; approval-deny regression was red before and green after. |
+| `94c07317d` | Add an installed same-profile new-process history and one-continuation diagnostic. |
+| `287bc24a7` | Return fixed recovery stage/error classes after an ambiguous observation; preserve no-replay behavior. |
 
 The extracted package's 28 function tests and three transport tests were only
 narrow Linux handoff evidence. The canonical Mac ran the script syntax check,
-targeted regression tests (33/33 at the final source), baseline (92/92),
-related lint and existing packaged-session Go contracts. A separate packaging
+targeted regression tests (33/33 at artifact SOURCE), baseline (92/92),
+related lint and existing packaged-session Go contracts. The later recovery
+diagnostic runs pass 36/36 targeted tests; its prior 94/94 baseline and affected
+lint also pass. A separate packaging
 configuration test timed out; its deadline was not increased, and it is not
 treated as an installed acceptance result. PR28's exact `7b9cb2b4f` check
 rollup later completed with 56/56 success, including Development gate and
@@ -75,6 +79,7 @@ they must not be promoted into a public secret-bearing transcript.
 | Standalone installed app, full synthetic journey | 19/19 actual checks pass: settings write, runtime restart, conversation, tool effect, plan, attachment, approval deny/allow, user input, fork and next turn, resume and next turn, list, usage and redaction. The overall report is `partial` only because `--actual-only` skipped source-contract groups. Receipt `full-session-7b9cb2b4f.json`. |
 | DMG installed copy, equivalent full journey | The overall 180 s observation budget ended during approval allow. Main/Go were quiesced by cleanup. Durable events show a completed denial and a newly started approval-allow turn then `turn_aborted(cancel)`; no fork request was sent. This does not reproduce fork400 or establish a settings/restart failure. The original failure and isolated profile are retained in `full-session-dmg-7b9cb2b4f.json`. |
 | DMG installed copy, approval-allow then one fork | In a fresh bounded stage test, settings/restart, text/tool/attachment, approval denial and approval allow complete. The authorized tool effect is present; a single fork succeeds and child count changes 0→1. The stage intentionally skips MiMo, user input, fork continuation and resume, so its overall full-journey gate is false by design. Receipt `focused-fork-approval-allow-dmg-bound-7b9cb2b4f.json`. |
+| DMG installed copy, new-process recovery | A focused test committed one completed turn, stopped the first Main/Go processes, relaunched the same app and isolated profile with a second Main PID, read the original turn, then sent one new turn. `historyRecovered`, `continuationCreated` and `continuationCompleted` are true; thread turn count changed 1→2; cleanup quiesced. This used the local synthetic Provider. Receipt `relaunch-after-initial-classified-7b9cb2b4f.json`. The full-journey gate is false because this mode intentionally skips later stages. |
 
 The earlier installed `fork400` response itself was not recovered with an exact
 safe error category. The current Go `HandleFork` maps most service errors to
@@ -99,12 +104,20 @@ search list still contained only `login.keychain-db`, and the QA profile was
 retained for diagnosis. This is an automation-observation gap, not proof of
 an application preview failure.
 
+The first new-process diagnostic run returned `cdp_evaluation_failed` after
+the second turn. Its retained private thread file already showed both turns
+completed, so it was not reported as product recovery failure. The follow-on
+script preserves fixed observation stage and sanitized error classes without
+replaying a sent turn; its regression is 36/36. The next bounded run returned
+the explicit three true recovery flags above. The exact artifact SOURCE stayed
+`7b9cb2b4f`; the test harness commit for the passing run is `287bc24a7`.
+
 ## Admission at this checkpoint
 
 | Exit | Status | Remaining exact seam |
 | --- | --- | --- |
 | SourceReady | `true` for `7b9cb2b4f` checks | Later HEADs require their own check result. |
-| PrivateCandidateReady | `false` | One final installed candidate still needs normal Provider setup, explicit cancellation, 120-turn real GUI, new-process recovery, Core upgrade/interruption/data preservation and installed PDF preview. The DMG full journey did not finish. |
+| PrivateCandidateReady | `false` | One final installed candidate still needs normal Provider setup/recovery, explicit cancellation, 120-turn real GUI, Core upgrade/interruption/data preservation and installed PDF preview. Synthetic local-Provider new-process recovery passes; the DMG full journey did not finish. |
 | MergeReady | `false` | PR28 is Draft and product acceptance is incomplete. Green CI alone is insufficient. |
 | PublicMacReleaseReady | `false` | The package is private and nonpublishable; Developer ID, notarization and production publication authority are separate future public-release requirements. |
 

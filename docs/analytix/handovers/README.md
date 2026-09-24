@@ -21,8 +21,10 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
   fork/resume 和 usage。DMG 安装副本的整段会话到审批允许阶段触及总体观察期限，
   被测试清理取消，fork 尚未发送；不能据此称 fork400 复现或修复。保留原失败
   receipt 和 QA profile，先看前后状态，不盲目重播。新的 DMG 安装副本定向会话在
-  审批允许后完成一次 fork，派生数量 0→1；仍需取消、120-turn 实际 GUI、
-  新进程恢复、Core 升级/数据保全及安装版 PDF 预览等同一候选的真实验收。
+  审批允许后完成一次 fork，派生数量 0→1。另一 fresh QA 中，两个不同 Main
+  进程顺序运行，第二进程恢复原完成回合并完成一个新回合；本地合成 Provider
+  下的新进程历史/续写通过。仍需显式取消、120-turn 实际 GUI、正常 Provider
+  恢复、Core 升级/数据保全及安装版 PDF 预览等同一候选的真实验收。
 - 当前四个出口：`SourceReady=true`（仅准确源码/CI）；
   `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
   Developer ID/公证/publication authority 只属于未来公开 macOS 分发；不索取
