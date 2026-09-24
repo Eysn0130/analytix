@@ -9,37 +9,35 @@ history before comparing remote state.
 
 ## Current PR28 Core admission — 2026-09-24 PDT
 
-The branch's latest implementation SOURCE is
-`701dea32038a6447ef71198c60c73b6707ad839d` on
-`codex/workbench-product-delivery-20260914`. It has a signed private app-only
-diagnostic build. The latest complete private app/DMG/ZIP is instead bound to
-SOURCE `65a91d0468ce89695aa644e5c1f8b301d8cff25b`. Its installed DMG
-copy passes strict signature, independent Core Go inspection and exact artifact
-legal audit (1,172 instances, zero mandatory engineering blockers). Canvas is
-excluded and the Lazy replacement is present. Both artifacts remain
-`development_clean_non_publishable`; the two SOURCEs are not one candidate.
+The latest product-code SOURCE on
+`codex/workbench-product-delivery-20260914` is
+`14ab14cb9eb28611b1fd0c526865aee01bed5f95`; the later
+`18d5f72f5c4c0a8d1a54e0c1ac756127c96761c5` changes only a Go test
+expectation. A complete private app/DMG/ZIP is bound to `14ab`. Its installed
+DMG copy passes strict signature, independent Core Go inspection and exact
+artifact legal audit (1,172 instances, zero mandatory engineering blockers).
+Canvas is excluded and the Lazy replacement is present. The package remains
+`development_clean_non_publishable`.
 
-The 65a installed sessions passed a focused settings/restart/first-turn/fork
-path, but a separate fresh session timed out on settings write after its
-isolated settings file reflected the patch. Another 65a session recovered old
-history and completed a second turn in a new Main process, yet the final read
-returned 503 through the desktop. Its raw safe error class was not captured.
-The 701 app-only diagnostic added fixed-category logging and passed one fresh
-new-process recovery (old history and a new completed turn, count 1→2); the
-intermittent 503 did not recur and is not proved fixed. Earlier c25 installed
-DMG sessions passed explicit cancellation and approval-allow fork in separate
-focused runs. These checks cannot be added into one final-candidate admission.
-See the [later bounded evidence](qa/pr28-installed-continuation-2026-09-24.md)
-and [7b historical checkpoint](qa/pr28-installed-closure-2026-09-24.md).
+On that same installed DMG copy, focused cancellation, initial fork (child
+count 0→1), and new-process history plus a second completed turn (count 1→2)
+pass in separate isolated synthetic-Provider sessions. The full session
+reached four completed turns but exhausted its original 180-second total
+observation window before the later approval/fork/resume stages. It is not a
+full-journey pass. The earlier intermittent accepted-final GET 503 did not
+recur in the new-process check; its exact inner cause remains unproved. See
+the [current artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-24.md),
+[prior continuation](qa/pr28-installed-continuation-2026-09-24.md), and
+[7b historical checkpoint](qa/pr28-installed-closure-2026-09-24.md).
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `pending` for latest `701dea320`: targeted local checks pass; accurate PR CI was in progress at this checkpoint. The older 7b 56/56 result does not transfer to a later HEAD. |
-| PrivateCandidateReady | `false`: no one final installed app/container has completed normal Provider setup/recovery, explicit cancellation, real 120-turn GUI, Core upgrade/data preservation and installed PDF preview; intermittent settings/read failures remain unclassified. |
+| SourceReady | `pending` for latest `18d5f72f5`: targeted Go tests pass; accurate PR CI was still running at this checkpoint. The `14ab` CI failed an old expected error-code assertion, corrected at `18d`; older green checks do not transfer. |
+| PrivateCandidateReady | `false`: the `14ab` container has focused cancellation/fork/new-process passes, but no complete installed journey, normal protected Provider setup/recovery, real 120-turn GUI, Core upgrade/data preservation or installed PDF preview. The old intermittent hydration 503 is not conclusively localized. |
 | MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
 
-The 65a private DMG/ZIP are inspectable candidates, not a public beta or
+The 14ab private DMG/ZIP are inspectable candidates, not a public beta or
 formal release. Do not repeat the retired 21/2 package-license, historical
 `NOT_CLEARED` or prior-head CI tasks as current blockers.
 
