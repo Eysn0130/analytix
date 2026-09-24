@@ -95,6 +95,21 @@ describe('runtime public error projection', () => {
       message: privateSentinel
     })).toEqual({ code: 'not_found', message: 'The requested resource was not found.' })
 
+    expect(projectPublicRuntimeHTTPError(503, {
+      code: 'public_projection_pending',
+      message: privateSentinel
+    })).toEqual({
+      code: 'public_projection_pending',
+      message: 'The thread public projection is finalizing.'
+    })
+    expect(projectPublicRuntimeHTTPError(500, {
+      code: 'public_projection_pending',
+      message: privateSentinel
+    })).toEqual({
+      code: 'internal_error',
+      message: 'The runtime request could not be completed safely.'
+    })
+
 		expect(projectPublicRuntimeHTTPError(409, {
 			code: 'worktree_isolation_authority_required',
 			message: privateSentinel,

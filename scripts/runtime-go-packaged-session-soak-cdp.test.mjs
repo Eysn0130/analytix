@@ -503,6 +503,30 @@ test('relaunch reads old history before one continuation and observes its termin
   assert.equal(JSON.parse(calls[1].payload).prompt, 'Run packaged session soak after new process.')
 })
 
+test('relaunch waits for a pending public projection using GET only after the committed POST', async () => {
+  const calls = []
+  let reads = 0
+  const result = await vm.runInNewContext(relaunchExpression(), {
+    window: { analytix: { runtime: { async runtimeRequest(path, method) {
+      calls.push({ path, method })
+      if (method === 'POST') return { status: 200, body: JSON.stringify({
+        threadId: 'thread-a', turnId: 'turn-b'
+      }) }
+      reads += 1
+      if (reads === 2) return { status: 503, body: JSON.stringify({ code: 'public_projection_pending' }) }
+      return { status: 200, body: JSON.stringify({ id: 'thread-a', turns: [
+        { id: 'turn-a', status: 'completed' },
+        ...(reads > 2 ? [{ id: 'turn-b', status: 'completed' }] : [])
+      ] }) }
+    } } } },
+    JSON, Error, Date, Promise, setTimeout: (fn) => { fn(); return 0 }, encodeURIComponent
+  })
+  assert.equal(result.historyRecovered, true)
+  assert.equal(result.continuationCreated, true)
+  assert.equal(result.continuationCompleted, true)
+  assert.deepEqual(calls.map(({ method }) => method), ['GET', 'POST', 'GET', 'GET'])
+})
+
 test('relaunch reports a post-write read failure without copying response text or repeating the write', async () => {
   const calls = []
   const result = await vm.runInNewContext(relaunchExpression(), {
@@ -520,6 +544,8 @@ test('relaunch reports a post-write read failure without copying response text o
   })
   assert.equal(result.error, 'relaunch_step_failed')
   assert.equal(result.stage, 'continuation-read')
+  assert.equal(result.historyRecovered, true)
+  assert.equal(result.continuationCreated, true)
   assert.equal(result.httpStatus, 503)
   assert.equal(result.httpCode, 'projection_unavailable')
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/)

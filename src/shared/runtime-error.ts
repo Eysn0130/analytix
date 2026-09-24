@@ -61,6 +61,7 @@ const PUBLIC_HTTP_ERROR_MESSAGES: Readonly<Record<PublicRuntimeHTTPErrorCode, st
   worktree_isolation_authority_required: 'Worktree isolation controls require host-issued durable authority.',
   attachment_authority_unavailable: 'The runtime request could not be completed safely.',
   attachment_upload_unavailable: 'The runtime request could not be completed safely.',
+  public_projection_pending: 'The thread public projection is finalizing.',
   model_modality_unsupported: 'The selected model does not support the requested modality.',
   internal_error: 'The runtime request could not be completed safely.'
 }
@@ -234,6 +235,8 @@ function publicHTTPSpecialCodeMatchesStatus(code: string, status: number): boole
       return status >= 500
     case 'attachment_authority_unavailable':
     case 'attachment_upload_unavailable':
+      return status === 503
+    case 'public_projection_pending':
       return status === 503
     default:
       return false

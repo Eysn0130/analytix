@@ -2163,6 +2163,23 @@ describe('runtimeRequestViaHost', () => {
     expect(await handler({ schemaVersion: 1, operation: 'list' })).toEqual(failure)
   })
 
+  it('preserves only the fixed public projection pending code across both desktop sanitizers', () => {
+    const raw = { ok: false, status: 503, body: JSON.stringify({
+      code: 'public_projection_pending', message: 'SYNTHETIC_PRIVATE_ERROR'
+    }) }
+    const once = sanitizeRuntimeResponse(raw, '/v1/threads/thread-a', null, 'GET')
+    const twice = sanitizeRuntimeResponse(once, '/v1/threads/thread-a', null, 'GET')
+    expect(twice).toEqual({
+      ok: false,
+      status: 503,
+      body: JSON.stringify({
+        code: 'public_projection_pending',
+        message: 'The thread public projection is finalizing.'
+      })
+    })
+    expect(JSON.stringify(twice)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+  })
+
   it('rejects noncanonical Registry errors without exposing their content', async () => {
     for (const body of [
       { schemaVersion: 1, error: { code: 'persistence_failure', message: 'SYNTHETIC_PRIVATE_ERROR' } },

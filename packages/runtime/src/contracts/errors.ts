@@ -23,6 +23,7 @@ export const PUBLIC_RUNTIME_HTTP_ERROR_CODES = [
   'worktree_isolation_authority_required',
   'attachment_authority_unavailable',
   'attachment_upload_unavailable',
+  'public_projection_pending',
   'model_modality_unsupported',
   'internal_error'
 ] as const

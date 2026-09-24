@@ -1915,6 +1915,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
 function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
   return `(async () => {
     let stage = 'bridge';
+    let historyRecovered = false;
+    let continuationCreated = false;
+    let beforeTurnCount = 0;
+    let afterTurnCount = 0;
     try {
     const api = window.analytix;
     if (!api?.runtime?.runtimeRequest) return { error: 'runtime_bridge_unavailable' };
@@ -1934,14 +1938,26 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
       }
       return JSON.parse(response.body || '{}');
     };
+    const readPublicThread = async (path, deadline) => {
+      while (true) {
+        try { return await request(path, 'GET'); }
+        catch (error) {
+          if (error?.httpStatus !== 503 || error?.httpCode !== 'public_projection_pending' ||
+            Date.now() >= deadline) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    };
     const threadId = ${JSON.stringify(threadId)};
     const turnId = ${JSON.stringify(turnId)};
     const path = '/v1/threads/' + encodeURIComponent(threadId);
+    const historyDeadline = Date.now() + 20000;
     stage = 'history-read';
-    const before = await request(path, 'GET');
+    const before = await readPublicThread(path, historyDeadline);
     const sourceTurns = Array.isArray(before.turns) ? before.turns : [];
+    beforeTurnCount = sourceTurns.length;
     const sourceTurn = sourceTurns.find((turn) => turn?.id === turnId);
-    const historyRecovered = before.id === threadId && sourceTurn?.status === 'completed' &&
+    historyRecovered = before.id === threadId && sourceTurn?.status === 'completed' &&
       sourceTurns.filter((turn) => turn?.id === turnId).length === 1;
     if (!historyRecovered) return { historyRecovered: false, continuationCreated: false,
       continuationCompleted: false, beforeTurnCount: sourceTurns.length };
@@ -1952,15 +1968,15 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
       approvalPolicy: 'never', sandboxMode: 'read-only', disableUserInput: true
     });
     const newTurnId = created.turnId || created.turn_id || '';
-    const continuationCreated = !!newTurnId && (created.threadId === threadId ||
+    continuationCreated = !!newTurnId && (created.threadId === threadId ||
       created.thread_id === threadId);
     let continuationCompleted = false;
-    let afterTurnCount = sourceTurns.length;
+    afterTurnCount = sourceTurns.length;
     if (continuationCreated) {
       stage = 'continuation-read';
       const deadline = Date.now() + 20000;
       while (Date.now() < deadline) {
-        const after = await request(path, 'GET');
+        const after = await readPublicThread(path, deadline);
         const turns = Array.isArray(after.turns) ? after.turns : [];
         afterTurnCount = turns.length;
         continuationCompleted = turns.some((turn) => turn?.id === newTurnId &&
@@ -1975,6 +1991,7 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
       const errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError']
         .includes(error?.name) ? error.name : 'other';
       return { error: 'relaunch_step_failed', stage, errorClass,
+        historyRecovered, continuationCreated, beforeTurnCount, afterTurnCount,
         httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : 0,
         httpCode: typeof error?.httpCode === 'string' && /^[a-z0-9_]{1,64}$/.test(error.httpCode)
           ? error.httpCode : 'unclassified' };
