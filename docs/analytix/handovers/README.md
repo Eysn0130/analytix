@@ -5,6 +5,31 @@ Status: Operational。唯一恢复入口；原 Codex 保持唯一 writer，未�
 Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
 branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/Eysn0130/analytix/pull/28)。
 
+## 当前恢复点 — 2026-09-24 PDT
+
+- 当前制品 SOURCE `7b9cb2b4f797c2e22b9cc62fb507a248e03981da`，原
+  `b9666a5af` 及全部有效祖先保留；恢复时先重新读取 HEAD/tree/dirty，不能用本行
+  覆盖更晚提交。该 SOURCE 的 PR28 检查有 56/56 成功，PR 仍为 Draft；真正
+  main 仍为 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，不是 PR 测试合并 SHA。
+- ZIP 交接包的 soak 脚本修复已在原工程集成、测试、定向提交并普通 push；后继补上
+  安装版定向诊断及审批门事件回放的真实 RED→GREEN 修复。28/3 等窄测和脚本
+  通过均不构成 Mac 安装验收。
+- 当前私有 app/DMG/ZIP 的内容、严格签名、独立 Go Core 读包与准确许可审计通过；
+  1,172 个实际依赖实例无强制工程阻断，Canvas 未随 Core 分发，Lazy 替代已打包。
+  当前容器和安装证据见[2026-09-24 QA](../qa/pr28-installed-closure-2026-09-24.md)。
+- 独立 app 在合成隔离 Provider 下完成设置、重启、会话、工具、审批、用户输入、
+  fork/resume 和 usage。DMG 安装副本的整段会话到审批允许阶段触及总体观察期限，
+  被测试清理取消，fork 尚未发送；不能据此称 fork400 复现或修复。保留原失败
+  receipt 和 QA profile，先看前后状态，不盲目重播。新的 DMG 安装副本定向会话在
+  审批允许后完成一次 fork，派生数量 0→1；仍需取消、120-turn 实际 GUI、
+  新进程恢复、Core 升级/数据保全及安装版 PDF 预览等同一候选的真实验收。
+- 当前四个出口：`SourceReady=true`（仅准确源码/CI）；
+  `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
+  Developer ID/公证/publication authority 只属于未来公开 macOS 分发；不索取
+  原开发 Key/普通开发 Keychain 密码，不增加累计 US$5 预算。
+
+## Historical handover entries
+
 - 普通源码开发现使用持久 development Registry/Secret Store；API Key 已一次
   bootstrap，Core 及真实 GUI 的重启、新 profile 复用通过，不再索取同一 Key 或
   普通开发 Keychain 密码。专项 QA 用 `--isolated-keychain`；包装版拒绝共享开发

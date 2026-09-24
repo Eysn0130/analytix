@@ -1,11 +1,45 @@
 # Analytix product completion
 
-Status: Operational current matrix, 2026-09-22 PDT. Accepted targets remain in the
+Status: Operational current matrix, 2026-09-24 PDT. Accepted targets remain in the
 [spec registry](specs/README.md) and scoped OpenSpec requirements. This matrix does
 not shrink the original A–M/P0–P5 outcome or declare product/release acceptance.
 Delivery order is owned by the [Operational execution plan](delivery-execution-plan.md).
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
+
+## Current PR28 Core admission — 2026-09-24 PDT
+
+The current private artifact SOURCE is `7b9cb2b4f797c2e22b9cc62fb507a248e03981da`
+on `codex/workbench-product-delivery-20260914`. The old `b2cf1179e`, `8e5142250`,
+`ad5544ec3` and `b9666a5af` results below remain dated history, not current
+blockers. The current app, DMG and ZIP are sealed to the same SOURCE; the DMG and
+ZIP copies contain identical app files, links and modes. The installed DMG copy
+passes strict signature, independent Core Go inspection and exact artifact legal
+audit (1,172 instances, zero mandatory engineering blockers). It remains
+`development_clean_non_publishable`.
+
+The installed standalone app passes a synthetic local-Provider session journey
+with settings, explicit runtime restart, tools, approvals, user input, fork,
+resume and usage. The identical DMG copy's full run reached approval allow and
+was canceled by the existing overall observation deadline before fork; no
+fork400 or settings-write/restart failure was observed in that run. This is
+followed by a fresh DMG-copy focused session in which approval allow completed
+and one fork succeeded (child count 0→1). It remains an incomplete full installed
+comparison, not a product failure diagnosis or full
+private admission. See the [current bounded evidence](qa/pr28-installed-closure-2026-09-24.md).
+
+| Exit | Current status and scope |
+| --- | --- |
+| SourceReady | `true` for the exact `7b9cb2b4f` source checks: 56/56 PR checks passed. This does not imply installed product acceptance. |
+| PrivateCandidateReady | `false`: normal installed Provider setup, explicit cancellation, real 120-turn GUI, new-process recovery, Core upgrade/data preservation and installed PDF preview are not all proven on one final candidate. |
+| MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open despite green exact-head CI. |
+| PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
+
+The exact private DMG/ZIP are inspectable candidates, not a public beta or
+formal release. Do not repeat the retired 21/2 package-license, historical
+`NOT_CLEARED` or prior-head CI tasks as current blockers.
+
+## Historical checkpoints retained below
 
 Preserved SOURCE is `0708620e21fc2bd706ba18a377a60824cdb78421`; the retained
 DELIVERY is `9c21c0ec911571ddba1c733ac4a828737654e02b`. The execution plan was
