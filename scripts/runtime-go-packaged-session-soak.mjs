@@ -808,7 +808,14 @@ async function evaluateCdp(wsUrl, expression, timeoutMs) {
         if (message.error || message.result?.exceptionDetails) {
           // Do not place raw remote exception descriptions or stack frames in
           // evidence: they may contain paths, arguments or other private data.
-          finish(failure('cdp_evaluation_failed'))
+          const error = failure('cdp_evaluation_failed')
+          error.cdpRemoteKind = message.error ? 'protocol_error' : 'exception'
+          error.cdpProtocolCode = Number.isInteger(message.error?.code)
+            ? message.error.code : null
+          const exceptionClass = message.result?.exceptionDetails?.exception?.className
+          error.cdpExceptionClass = ['SyntaxError', 'TypeError', 'ReferenceError', 'RangeError']
+            .includes(exceptionClass) ? exceptionClass : 'unknown'
+          finish(error)
           return
         }
         if (!message.result?.result || typeof message.result.result !== 'object') {
@@ -877,6 +884,42 @@ async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs })
     }
   }
   throw lastError || new Error('cdp_discovery_timeout')
+}
+
+async function waitForRendererReady({ debugPort, deadline }) {
+  const expression = `(async () => {
+    if (document.title !== 'Analytix' || !window.analytix?.runtime?.runtimeRequest) return false;
+    try {
+      const response = await window.analytix.runtime.runtimeRequest('/health', 'GET');
+      return response?.status === 200 && JSON.parse(response.body || '{}').service === 'analytix';
+    } catch { return false; }
+  })()`
+  let consecutiveReady = 0
+  let readyTarget = ''
+  let lastFailure = ''
+  while (Date.now() < deadline) {
+    const discoveryBudget = Math.min(2_000, deadline - Date.now())
+    try {
+      const target = await waitForDebugTarget(debugPort, discoveryBudget)
+      const evaluationBudget = Math.min(2_000, deadline - Date.now())
+      if (evaluationBudget <= 0) break
+      const ready = await evaluateCdp(target.webSocketDebuggerUrl, expression, evaluationBudget)
+      if (ready === true) {
+        consecutiveReady = target.webSocketDebuggerUrl === readyTarget ? consecutiveReady + 1 : 1
+        readyTarget = target.webSocketDebuggerUrl
+        if (consecutiveReady >= 2) return
+      } else {
+        consecutiveReady = 0
+      }
+    } catch (error) {
+      consecutiveReady = 0
+      lastFailure = /^cdp_[a-z_]+$/.test(error?.message || '') ? error.message : 'unknown'
+    }
+    await sleep(Math.min(250, Math.max(0, deadline - Date.now())))
+  }
+  throw Object.assign(new Error('cdp_renderer_readiness_timeout'), {
+    cdpPreflightLastFailure: lastFailure
+  })
 }
 
 function startContractProvider() {
@@ -1931,6 +1974,8 @@ async function runActualPackagedSessionSoak() {
   let mainStartedAt = ''
   let cleanupQuiesced = false
   let cleanupError = ''
+  let rendererReadinessPassed = false
+  let cdpFailure = null
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -1975,6 +2020,9 @@ async function runActualPackagedSessionSoak() {
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
+        const evaluationDeadline = Date.now() + timeoutMs
+        await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
+        rendererReadinessPassed = true
         renderer = await evaluateRendererWithRetries({
           debugPort,
           expression: buildRendererExpression({
@@ -1986,7 +2034,7 @@ async function runActualPackagedSessionSoak() {
             workspace,
             syntheticApiKey
           }),
-          timeoutMs
+          timeoutMs: Math.max(1, evaluationDeadline - Date.now())
         })
         renderer = renderer && typeof renderer === 'object' ? renderer : null
         if (renderer) {
@@ -1996,6 +2044,12 @@ async function runActualPackagedSessionSoak() {
         }
       } catch (error) {
         launchError = error instanceof Error ? error.message : String(error)
+        cdpFailure = {
+          remoteKind: error?.cdpRemoteKind || '',
+          protocolCode: error?.cdpProtocolCode ?? null,
+          exceptionClass: error?.cdpExceptionClass || '',
+          preflightLastFailure: error?.cdpPreflightLastFailure || ''
+        }
       }
     }
   } finally {
@@ -2368,7 +2422,8 @@ async function runActualPackagedSessionSoak() {
     ...(retainDiagnosticProfile ? { diagnostic: {
       mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
       isolatedProfilePath: diagnosticProfilePath,
-      isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError
+      isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
+      rendererReadinessPassed, cdpFailure
     } } : {}),
     renderer: rendererEvidence,
     forkDiagnostic,

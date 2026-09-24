@@ -48,7 +48,7 @@ function fixture(t, plans, options = {}) {
     }
     close() { this.closed += 1 }
   }
-  const api = vm.runInNewContext(`${functions}\n({ evaluateCdp, evaluateRendererWithRetries })`, {
+  const api = vm.runInNewContext(`${functions}\n({ evaluateCdp, evaluateRendererWithRetries, waitForRendererReady })`, {
     WebSocket: options.noWebSocket ? undefined : Socket,
     Error, Date, Number, JSON, Object, String,
     setTimeout(fn, ms) {
@@ -129,11 +129,35 @@ test('malformed remote JSON settles without an uncaught callback', async (t) => 
 })
 test('remote exception data is not copied into the error receipt', async (t) => {
   const f = fixture(t, [opened((socket, message) => socket.reply({
-    id: message.id, result: { exceptionDetails: { text: 'PRIVATE_CANARY_/synthetic/private' } }
+    id: message.id, result: { exceptionDetails: {
+      text: 'PRIVATE_CANARY_/synthetic/private', exception: { className: 'TypeError' }
+    } }
   }))])
   const result = await outcome(f.evaluateCdp(url, 'mutation()', 100))
   assert.ok(result.error)
   assert.doesNotMatch(String(result.error), /PRIVATE_CANARY/)
+  assert.equal(result.error.cdpRemoteKind, 'exception')
+  assert.equal(result.error.cdpExceptionClass, 'TypeError')
+})
+test('protocol error keeps only its numeric code', async (t) => {
+  const f = fixture(t, [opened((socket, message) => socket.reply({
+    id: message.id, error: { code: -32000, message: 'PRIVATE_CANARY_/synthetic/private' }
+  }))])
+  const result = await outcome(f.evaluateCdp(url, 'mutation()', 100))
+  assert.equal(result.error.cdpRemoteKind, 'protocol_error')
+  assert.equal(result.error.cdpProtocolCode, -32000)
+  assert.doesNotMatch(String(result.error), /PRIVATE_CANARY/)
+})
+test('read-only startup probe waits for two healthy observations before mutation', async (t) => {
+  let probes = 0
+  const f = fixture(t, [opened((socket, message) => {
+    probes += 1
+    socket.reply({ id: message.id, result: { result: { value: probes >= 2 } } })
+  })])
+  await f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 300 })
+  assert.equal(probes, 3)
+  assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
+  assert.equal(f.messages.length, 3)
 })
 test('an unrelated response id is ignored without resending', async (t) => {
   const f = fixture(t, [opened((socket, message) => {
