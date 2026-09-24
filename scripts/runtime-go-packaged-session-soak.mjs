@@ -19,7 +19,7 @@ import http from 'node:http'
 import net from 'node:net'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import process from 'node:process'
 import {
   createIsolatedDarwinLoginKeychain,
@@ -40,6 +40,7 @@ const goCommand = process.env.GO || 'go'
 const jsonOutput = args.has('--json') || args.has('--dry-run')
 const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
 const actualOnly = args.has('--actual-only')
+const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
 const defaultEvidencePath = 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json'
@@ -110,12 +111,19 @@ const evidencePath = argValue(
   process.env.ANALYTIX_RUNTIME_GO_PACKAGED_SOAK_EVIDENCE || defaultEvidencePath
 )
 
+function protectedDiagnosticOutputSelected() {
+  const cacheRoot = process.env.ANALYTIX_DEV_CACHE_ROOT
+  if (!cacheRoot || !rawArgs.some((item) => item === '--output' || item.startsWith('--output='))) return false
+  const evidenceRoot = resolve(cacheRoot, 'evidence')
+  return resolve(process.cwd(), evidencePath).startsWith(evidenceRoot + sep)
+}
+
 function writeEvidenceReport(report) {
   if (noWrite) return
   const absoluteEvidencePath = resolve(process.cwd(), evidencePath)
   report.outputPath = absoluteEvidencePath
-  mkdirSync(dirname(absoluteEvidencePath), { recursive: true })
-  writeFileSync(absoluteEvidencePath, JSON.stringify(report, null, 2), 'utf8')
+  mkdirSync(dirname(absoluteEvidencePath), { recursive: true, mode: 0o700 })
+  writeFileSync(absoluteEvidencePath, JSON.stringify(report, null, 2), { encoding: 'utf8', mode: 0o600 })
 }
 
 function commandText(item) {
@@ -1163,6 +1171,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       toolTurnId: '',
       forkThreadId: '',
       resumeThreadId: '',
+      forkChildrenBefore: -1,
+      forkChildrenAfter: -1,
       stage: 'renderer-ready',
       error: ''
     };
@@ -1651,10 +1661,25 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
 
       out.stage = 'session-fork';
-      const fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
-        relation: 'fork',
-        title: 'Packaged Session Soak Fork'
-      });
+      const countForkChildren = async () => {
+        const listed = await request('/v1/threads?include=side', 'GET');
+        return Array.isArray(listed.threads) ? listed.threads.filter((item) =>
+          item && item.parentThreadId === threadId && item.relation === 'fork').length : -1;
+      };
+      out.forkChildrenBefore = await countForkChildren().catch(() => -1);
+      let fork;
+      try {
+        fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
+          relation: 'fork',
+          title: 'Packaged Session Soak Fork'
+        });
+      } catch (error) {
+        // A failed response can follow a durable create. Observe before any
+        // further mutation; this run must never retry the same fork.
+        out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+        throw error;
+      }
+      out.forkChildrenAfter = await countForkChildren().catch(() => -1);
       const forkId = fork.id || '';
       out.forkThreadId = forkId;
       out.forkOk = !!forkId && fork.parentThreadId === threadId;
@@ -1900,6 +1925,12 @@ async function runActualPackagedSessionSoak() {
   let approvalAllowFileMatches = false
   let forkDiagnostic = null
   let sseDiagnostic = null
+  let diagnosticProfilePath = ''
+  let mainPid = 0
+  let goPidsBeforeCleanup = []
+  let mainStartedAt = ''
+  let cleanupQuiesced = false
+  let cleanupError = ''
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -1934,11 +1965,13 @@ async function runActualPackagedSessionSoak() {
       runtimePort = await getFreePort()
       while (runtimePort === debugPort) runtimePort = await getFreePort()
       const syntheticApiKey = `sk-packaged-session-soak-${sha256(`${Date.now()}:${runtimePort}`).slice(0, 24)}`
+      mainStartedAt = new Date().toISOString()
       child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
         cwd: process.cwd(),
         env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
         stdio: ['ignore', 'pipe', 'pipe']
       })
+      mainPid = child.pid || 0
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
@@ -1966,9 +1999,19 @@ async function runActualPackagedSessionSoak() {
       }
     }
   } finally {
+    goPidsBeforeCleanup = ownedSmokeRuntimePids(runtimeDataDir)
     await stopChild(child)
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
-    await stopOwnedSmokeRuntimes(runtimeDataDir)
+    try {
+      await stopOwnedSmokeRuntimes(runtimeDataDir)
+    } catch (error) {
+      cleanupError = error instanceof Error ? error.message : String(error)
+    }
+    cleanupQuiesced = (!child || child.exitCode !== null || Boolean(child.signalCode)) &&
+      ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
+      !listeningPidsOnPort(runtimePort).some((pid) =>
+        commandLineForPid(pid).includes(runtimeDataDir))
+    if (!cleanupQuiesced) cleanupError ||= 'owned packaged processes did not stop'
     forkDiagnostic = stderr.split(/\r?\n/)
       .filter((line) => line.includes('[packaged-fork-schema] '))
       .slice(0, 8)
@@ -1984,8 +2027,10 @@ async function runActualPackagedSessionSoak() {
         catch { return { parseFailed: true } }
       })
     if (contractProvider) await contractProvider.close()
-    isolatedTaskKeychain?.dispose()
-    isolatedLoginKeychain?.dispose()
+    if (cleanupQuiesced) {
+      isolatedTaskKeychain?.dispose()
+      isolatedLoginKeychain?.dispose()
+    }
     if (tempHome) {
       const workspace = join(tempHome, 'workspace')
       approvalDenyFileAbsent = !existsSync(join(workspace, 'approval-deny.txt'))
@@ -1994,7 +2039,12 @@ async function runActualPackagedSessionSoak() {
       } catch {
         approvalAllowFileMatches = false
       }
-      rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+      if (!cleanupQuiesced || (retainDiagnosticProfile &&
+        (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError))) {
+        diagnosticProfilePath = tempHome
+      } else {
+        rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+      }
     }
   }
 
@@ -2180,6 +2230,12 @@ async function runActualPackagedSessionSoak() {
     providerRequests.every((item) => item.authorizationConfigured === true),
     'local contract provider must receive authorization without recording secret values'
   ))
+  checks.push(actualCheck(
+    'packaged-process-cleanup',
+    'Packaged process cleanup',
+    cleanupQuiesced,
+    cleanupError || 'owned packaged processes must stop before isolated state cleanup'
+  ))
 
   const rendererEvidence = renderer
     ? {
@@ -2251,6 +2307,8 @@ async function runActualPackagedSessionSoak() {
         userInputResolvedOk: renderer.userInputResolvedOk === true,
         userInputReplayOk: renderer.userInputReplayOk === true,
         forkOk: renderer.forkOk === true,
+        forkChildrenBefore: Number(renderer.forkChildrenBefore),
+        forkChildrenAfter: Number(renderer.forkChildrenAfter),
         forkTurnOk: renderer.forkTurnOk === true,
         forkReplayOk: renderer.forkReplayOk === true,
         resumeOk: renderer.resumeOk === true,
@@ -2307,6 +2365,11 @@ async function runActualPackagedSessionSoak() {
       stdoutTailHash: stdout ? sha256(redactSecrets(stdout.slice(-4000))) : '',
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
+    ...(retainDiagnosticProfile ? { diagnostic: {
+      mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
+      isolatedProfilePath: diagnosticProfilePath,
+      isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError
+    } } : {}),
     renderer: rendererEvidence,
     forkDiagnostic,
     sseDiagnostic,
@@ -2526,6 +2589,9 @@ async function runCheck(item) {
 }
 
 async function main() {
+  if (retainDiagnosticProfile && (jsonOutput || noWrite || !protectedDiagnosticOutputSelected())) {
+    throw new Error('retained diagnostic profile requires a protected cache evidence output without JSON stdout')
+  }
   // Keep the nested TypeScript validation owner out of the Go test window.
   // Overlap makes a standalone soak faster but can starve the nested Vitest
   // process when this contract itself runs inside the full root suite.
@@ -2677,7 +2743,7 @@ main().catch((error) => {
       reason: error instanceof Error ? redactSecrets(error.message) : redactSecrets(String(error))
     }]
   }
-  writeEvidenceReport(report)
+  if (!retainDiagnosticProfile || protectedDiagnosticOutputSelected()) writeEvidenceReport(report)
   if (jsonOutput) console.log(JSON.stringify(report, null, 2))
   else console.error(`FAILED ${report.id}: ${report.checks[0].reason}`)
   process.exitCode = 1
