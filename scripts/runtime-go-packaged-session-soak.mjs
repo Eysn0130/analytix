@@ -1260,6 +1260,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       resumeThreadId: '',
       forkChildrenBefore: -1,
       forkChildrenAfter: -1,
+      parentHistoryUnchanged: false,
       stage: 'renderer-ready',
       error: ''
     };
@@ -1908,6 +1909,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const detail = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
       if (!out.threadListOk) return out;
+      const parentTurnsBeforeFork = JSON.stringify(detail.turns);
 
       out.stage = 'session-fork';
       const countForkChildren = async () => {
@@ -1929,12 +1931,18 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         throw error;
       }
       out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+      out.stage = 'fork-parent-history-read';
+      const parentAfterFork = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
+      out.parentHistoryUnchanged = parentAfterFork.id === threadId &&
+        Array.isArray(parentAfterFork.turns) &&
+        JSON.stringify(parentAfterFork.turns) === parentTurnsBeforeFork;
       const forkId = fork.id || '';
       out.forkThreadId = forkId;
       out.forkOk = !!forkId && fork.parentThreadId === threadId &&
         Number.isSafeInteger(out.forkChildrenBefore) && out.forkChildrenBefore >= 0 &&
         Number.isSafeInteger(out.forkChildrenAfter) &&
-        out.forkChildrenAfter === out.forkChildrenBefore + 1;
+        out.forkChildrenAfter === out.forkChildrenBefore + 1 &&
+        out.parentHistoryUnchanged;
       if (!out.forkOk) return out;
       const forkTurn = await request('/v1/threads/' + encodeURIComponent(forkId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from fork.',
@@ -2748,7 +2756,8 @@ async function runActualPackagedSessionSoak() {
   checks.push(actualCheck(
     'packaged-session-fork',
     'Packaged session fork',
-    renderer?.forkOk === true && renderer?.forkTurnOk === true && renderer?.forkReplayOk === true &&
+    renderer?.forkOk === true && renderer?.parentHistoryUnchanged === true &&
+      renderer?.forkTurnOk === true && renderer?.forkReplayOk === true &&
       providerForkPromptSeen && providerHistorySeen,
     renderer?.error || 'packaged app must fork, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
@@ -2861,6 +2870,7 @@ async function runActualPackagedSessionSoak() {
         forkOk: renderer.forkOk === true,
         forkChildrenBefore: Number(renderer.forkChildrenBefore),
         forkChildrenAfter: Number(renderer.forkChildrenAfter),
+        parentHistoryUnchanged: renderer.parentHistoryUnchanged === true,
         forkTurnOk: renderer.forkTurnOk === true,
         forkReplayOk: renderer.forkReplayOk === true,
         resumeOk: renderer.resumeOk === true,

@@ -653,7 +653,10 @@ function rendererJourneyFixture(t, options = {}) {
       session_id: 'source-thread', thread_id: 'source-thread'
     })
     if (path === '/v1/threads/source-thread' && method === 'GET') return response({
-      id: 'source-thread', turns: [...turns.keys()].map((id) => ({ id }))
+      id: 'source-thread', turns: [
+        ...[...turns.keys()].filter((id) => turns.get(id)?.threadId === 'source-thread').map((id) => ({ id })),
+        ...(options.mutateParentAfterFork && childCount > 0 ? [{ id: 'unexpected-parent-turn' }] : [])
+      ]
     })
     if (path.startsWith('/v1/usage?')) return response({
       buckets: [{ thread_id: 'source-thread', total_tokens: 20 }]
@@ -739,6 +742,7 @@ test('actual full renderer expression completes the synthetic dependency journey
     assert.equal(result[field], true, field)
   }
   assert.equal(result.forkChildrenAfter - result.forkChildrenBefore, 1)
+  assert.equal(result.parentHistoryUnchanged, true)
   assert.equal(fixture.calls.filter(({ path, method }) => path.endsWith('/fork') && method === 'POST').length, 1)
   assert.equal(fixture.stoppedStreams, 12)
   assert.ok(Object.values(fixture.listeners).every((set) => set.size === 0))
@@ -767,6 +771,16 @@ test('full and focused fork reject two children and do not continue a child turn
     assert.ok(!fixture.calls.some(({ path, method }) =>
       path === '/v1/threads/fork-1/turns' && method === 'POST'))
   }
+})
+
+test('full journey rejects a fork that changes parent history', async (t) => {
+  const fixture = rendererJourneyFixture(t, { mutateParentAfterFork: true })
+  const result = await fixture.result
+  assert.equal(result.forkChildrenAfter - result.forkChildrenBefore, 1)
+  assert.equal(result.parentHistoryUnchanged, false)
+  assert.equal(result.forkOk, false)
+  assert.ok(!fixture.calls.some(({ path, method }) =>
+    path === '/v1/threads/fork-1/turns' && method === 'POST'))
 })
 
 test('focused fork succeeds with one observed child', async (t) => {
