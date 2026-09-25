@@ -5,6 +5,8 @@ package secretstore
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,6 +16,49 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func windowsPrivateTestRoot(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes, err := privateWindowsSecurityAttributes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		var suffix [16]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(home, "analytix-credential-test-"+hex.EncodeToString(suffix[:]))
+		name, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.CreateDirectory(name, &attributes); errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			continue
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(path); err != nil {
+				t.Error(err)
+			}
+		})
+		handle, err := openPrivateWindowsDirectory(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.CloseHandle(handle); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	t.Fatal("private Windows test root name collision")
+	return ""
+}
 
 func TestDPAPIMasterKeyBlobIsStrictAndVersioned(t *testing.T) {
 	t.Parallel()
@@ -58,7 +103,7 @@ func TestDPAPIMasterKeyBlobIsStrictAndVersioned(t *testing.T) {
 func TestWindowsDefaultMasterKeyProviderUsesDPAPIFile(t *testing.T) {
 	t.Parallel()
 
-	storePath := filepath.Join(t.TempDir(), "credentials.enc.json")
+	storePath := filepath.Join(windowsPrivateTestRoot(t), "credentials.enc.json")
 	provider, err := defaultMasterKeyProvider(storePath, Options{})
 	if err != nil {
 		t.Fatalf("defaultMasterKeyProvider() error = %v", err)
@@ -131,7 +176,7 @@ func TestWindowsPrivateFileHandleValidationRejectsReparseAndNonRegularTargets(t 
 }
 
 func TestWindowsDPAPIMasterKeySurvivesRestartAndRejectsMissingKey(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	storePath := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
 	provider, err := defaultMasterKeyProvider(storePath, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +212,7 @@ func TestWindowsDPAPIMasterKeySurvivesRestartAndRejectsMissingKey(t *testing.T) 
 }
 
 func TestWindowsPrivateReplacementRetainsOwnerDACL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	path := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
 	for _, content := range [][]byte{[]byte("first"), []byte("second")} {
 		if err := writePrivateFileAtomically(path, content, nil); err != nil {
 			t.Fatal(err)
@@ -181,7 +226,7 @@ func TestWindowsPrivateReplacementRetainsOwnerDACL(t *testing.T) {
 }
 
 func TestWindowsPrivateFileRejectsForeignWriterACL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	path := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
 	if err := writePrivateFileAtomically(path, []byte("synthetic-ciphertext"), nil); err != nil {
 		t.Fatal(err)
 	}

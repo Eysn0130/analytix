@@ -14,7 +14,7 @@ import (
 
 func TestWindowsProviderRegistryDPAPISaveRestartAndMissingKeyPreservation(t *testing.T) {
 	ctx := context.Background()
-	dataDir := t.TempDir()
+	dataDir := developmentProviderTestRoot(t)
 	authority, err := openProviderRegistryAuthorityV1(ctx, dataDir)
 	if err != nil {
 		t.Fatal(err)

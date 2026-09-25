@@ -3,22 +3,64 @@ package runtimeapp
 import (
 	provider "analytix.local/runtime-go/internal/provider"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
 
-func TestDevelopmentProviderAuthorityIsolationAndRestart(t *testing.T) {
-	parent, err := filepath.EvalSymlinks(t.TempDir())
+func developmentProviderTestRoot(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		parent, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(parent, 0700); err != nil {
+			t.Fatal(err)
+		}
+		return parent
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Chmod(parent, 0700); err != nil {
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
 		t.Fatal(err)
 	}
+	parent := filepath.Join(home, "analytix-provider-test-"+hex.EncodeToString(suffix[:]))
+	createWindowsDevelopmentTestDirectory(t, parent)
+	t.Cleanup(func() {
+		if err := os.RemoveAll(parent); err != nil {
+			t.Error(err)
+		}
+	})
+	return parent
+}
+
+func createWindowsDevelopmentTestDirectory(t *testing.T, directory string) {
+	t.Helper()
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "scripts", "windows-development-profile.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-File", script,
+		"-Directory", directory, "-Create").CombinedOutput()
+	if err != nil {
+		t.Fatalf("Windows development fixture ACL creation failed: %v: %s", err, output)
+	}
+}
+
+func TestDevelopmentProviderAuthorityIsolationAndRestart(t *testing.T) {
+	parent := developmentProviderTestRoot(t)
 	root := filepath.Join(parent, "provider-credentials")
-	if err = os.Mkdir(root, 0700); err != nil {
+	if runtime.GOOS == "windows" {
+		createWindowsDevelopmentTestDirectory(t, root)
+	} else if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{DevelopmentProviderAuthorityDir: root, DataDir: filepath.Join(parent, "task-a"), UserDataDir: filepath.Join(parent, "ui-a")}
