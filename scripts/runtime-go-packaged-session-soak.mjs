@@ -45,12 +45,16 @@ const forkOnly = args.has('--fork-only')
 const focusedForkStage = argValue('--fork-after', forkOnly ? 'initial' : '')
 const relaunchAfterInitial = args.has('--relaunch-after-initial')
 const cancelOnly = args.has('--cancel-only')
+const segmentedObservation = args.has('--segmented-observation')
 if (forkOnly && !['initial', 'tool', 'attachment', 'approval-deny', 'approval-allow', 'user-input'].includes(focusedForkStage)) {
   throw new Error('unsupported focused fork stage')
 }
 if (!forkOnly && focusedForkStage) throw new Error('--fork-after requires --fork-only')
 if (forkOnly && relaunchAfterInitial) throw new Error('--relaunch-after-initial cannot be combined with --fork-only')
 if (cancelOnly && (forkOnly || relaunchAfterInitial)) throw new Error('--cancel-only requires an independent session')
+if (segmentedObservation && (forkOnly || relaunchAfterInitial || cancelOnly)) {
+  throw new Error('--segmented-observation requires a full session')
+}
 const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
@@ -2002,8 +2006,12 @@ async function readRendererProgress(debugPort, progressToken) {
     const expression = `(() => {
       const value = window.__analytixPackagedSoakProgress;
       if (!value || value.token !== ${JSON.stringify(progressToken)}) return null;
+      const outcome = window.__analytixPackagedSoakOutcome;
+      const matchingOutcome = outcome && outcome.token === value.token ? outcome : null;
       return { stage: value.stage, revision: value.revision,
-        changedAt: value.changedAt };
+        changedAt: value.changedAt,
+        outcomeStatus: matchingOutcome?.status || 'running',
+        result: matchingOutcome?.status === 'complete' ? matchingOutcome.result : null };
     })()`
     const value = await evaluateCdp(target.webSocketDebuggerUrl, expression, 2_000)
     if (!value || typeof value.stage !== 'string' ||
@@ -2011,10 +2019,73 @@ async function readRendererProgress(debugPort, progressToken) {
       !Number.isSafeInteger(value.revision) || value.revision < 0 ||
       !Number.isSafeInteger(value.changedAt)) return { status: 'unavailable' }
     return { status: 'observed', stage: value.stage, revision: value.revision,
-      ageMs: Math.max(0, Math.min(86_400_000, Date.now() - value.changedAt)) }
+      ageMs: Math.max(0, Math.min(86_400_000, Date.now() - value.changedAt)),
+      outcomeStatus: ['running', 'complete', 'rejected'].includes(value.outcomeStatus)
+        ? value.outcomeStatus : 'running',
+      result: value.outcomeStatus === 'complete' && value.result &&
+        typeof value.result === 'object' ? value.result : null }
   } catch {
     return { status: 'unavailable' }
   }
+}
+
+function buildRendererStartExpression(options) {
+  return `(() => {
+    const token = ${JSON.stringify(options.progressToken)};
+    const outcome = { token, status: 'running', result: null };
+    Object.defineProperty(window, '__analytixPackagedSoakOutcome', {
+      value: outcome, configurable: true
+    });
+    Promise.resolve(${buildRendererExpression(options)}).then(
+      (result) => { outcome.result = result; outcome.status = 'complete'; },
+      () => { outcome.status = 'rejected'; }
+    );
+    return { started: true, token };
+  })()`
+}
+
+async function observeRendererJourneyByStage({ debugPort, expression, progressToken, startTimeoutMs }) {
+  // The renderer keeps one mutating journey. Every later CDP call is a read-only
+  // probe bound to its token, so a lost start response never resends writes.
+  let acknowledgement = null
+  let startError = null
+  try {
+    acknowledgement = await evaluateRendererWithRetries({ debugPort, expression,
+      timeoutMs: startTimeoutMs })
+  } catch (error) {
+    if (error?.cdpOutcome !== 'unknown') throw error
+    startError = error
+  }
+  if (acknowledgement && (acknowledgement.started !== true ||
+    acknowledgement.token !== progressToken)) throw new Error('packaged_journey_start_unconfirmed')
+  const deadline = Date.now() + 360_000
+  let missingSince = 0
+  let lastStage = ''
+  while (Date.now() < deadline) {
+    const progress = await readRendererProgress(debugPort, progressToken)
+    if (progress.status === 'observed') {
+      missingSince = 0
+      lastStage = progress.stage
+      if (progress.outcomeStatus === 'complete') {
+        if (!progress.result) throw new Error('packaged_journey_result_missing')
+        return progress.result
+      }
+      if (progress.outcomeStatus === 'rejected') {
+        throw Object.assign(new Error('packaged_journey_rejected'), { packagedStage: lastStage })
+      }
+      if (progress.ageMs > 45_000) {
+        throw Object.assign(new Error('packaged_stage_observation_timeout'), { packagedStage: lastStage })
+      }
+    } else {
+      if (!missingSince) missingSince = Date.now()
+      if (Date.now() - missingSince > 5_000) {
+        throw Object.assign(startError || new Error('packaged_journey_progress_unavailable'),
+          { packagedStage: lastStage })
+      }
+    }
+    await sleep(1_000)
+  }
+  throw Object.assign(new Error('packaged_journey_observation_timeout'), { packagedStage: lastStage })
 }
 
 function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
@@ -2372,23 +2443,18 @@ async function runActualPackagedSessionSoak() {
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
-        const evaluationDeadline = Date.now() + timeoutMs
+        const evaluationDeadline = Date.now() +
+          (segmentedObservation ? Math.min(timeoutMs, 30_000) : timeoutMs)
         await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
         rendererReadinessPassed = true
-        renderer = await evaluateRendererWithRetries({
-          debugPort,
-          expression: buildRendererExpression({
-            providerBaseUrl: contractProvider.url,
-            providerId,
-            model,
-            runtimePort,
-            runtimeDataDir,
-            workspace,
-            syntheticApiKey,
-            progressToken
-          }),
-          timeoutMs: Math.max(1, evaluationDeadline - Date.now())
-        })
+        const journeyOptions = { providerBaseUrl: contractProvider.url, providerId,
+          model, runtimePort, runtimeDataDir, workspace, syntheticApiKey, progressToken }
+        const startTimeoutMs = Math.max(1, evaluationDeadline - Date.now())
+        renderer = segmentedObservation
+          ? await observeRendererJourneyByStage({ debugPort, progressToken,
+            expression: buildRendererStartExpression(journeyOptions), startTimeoutMs })
+          : await evaluateRendererWithRetries({ debugPort,
+            expression: buildRendererExpression(journeyOptions), timeoutMs: startTimeoutMs })
         renderer = renderer && typeof renderer === 'object' ? renderer : null
         if (renderer) {
           renderer.restartError = summarizeError(renderer.restartError)
@@ -2467,6 +2533,7 @@ async function runActualPackagedSessionSoak() {
           exceptionClass: error?.cdpExceptionClass || '',
           preflightLastFailure: error?.cdpPreflightLastFailure || '',
           commandOutcome: error?.cdpOutcome || 'unknown',
+          observedStage: error?.packagedStage || '',
           progress: rendererReadinessPassed
             ? await readRendererProgress(debugPort, progressToken)
             : { status: 'unavailable' }

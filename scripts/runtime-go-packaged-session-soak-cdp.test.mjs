@@ -592,15 +592,20 @@ function rendererJourneyFixture(t, options = {}) {
   const builderStart = source.indexOf('function buildRendererExpression(')
   const builderEnd = source.indexOf('\nfunction buildRelaunchExpression(', builderStart)
   assert.ok(builderStart >= 0 && builderEnd > builderStart)
-  const build = vm.runInNewContext(`${source.slice(builderStart, builderEnd)}\nbuildRendererExpression`, {
+  const builderContext = {
     JSON, String, forkOnly: options.forkOnly === true,
     focusedForkStage: options.forkOnly ? 'initial' : '',
     relaunchAfterInitial: false, cancelOnly: false
-  })
-  const expression = build({ providerBaseUrl: 'http://127.0.0.1:1234',
+  }
+  const build = vm.runInNewContext(`${source.slice(builderStart, builderEnd)}\nbuildRendererExpression`, builderContext)
+  const journeyOptions = { providerBaseUrl: 'http://127.0.0.1:1234',
     providerId: 'synthetic-provider', model: 'synthetic-model', runtimePort: 4321,
     runtimeDataDir: '/synthetic/runtime', workspace: '/synthetic/workspace',
-    syntheticApiKey: 'synthetic-test-key', progressToken: 'synthetic-run' })
+    syntheticApiKey: 'synthetic-test-key', progressToken: 'synthetic-run' }
+  const expression = options.segmented
+    ? vm.runInNewContext(`${source.slice(builderStart, builderEnd)}\nbuildRendererStartExpression`,
+      builderContext)(journeyOptions)
+    : build(journeyOptions)
   const calls = []
   const turns = new Map()
   const latestTurn = new Map()
@@ -820,7 +825,56 @@ test('progress probe reads only the matching run and fixed stage', async () => {
   assert.equal(matching.status, 'observed')
   assert.equal(matching.stage, 'approval-allow-gate')
   assert.equal(matching.revision, 7)
+  assert.equal(matching.outcomeStatus, 'running')
+  window.__analytixPackagedSoakOutcome = {
+    token: 'expected-run', status: 'complete', result: { stage: 'complete' }
+  }
+  const finished = await probe(1234, 'expected-run')
+  assert.equal(finished.outcomeStatus, 'complete')
+  assert.equal(finished.result.stage, 'complete')
   assert.equal((await probe(1234, 'different-run')).status, 'unavailable')
   assert.ok(expressions.every((expression) =>
     !/runtimeRequest|\bPOST\b|startSse|restartRuntime/.test(expression)))
+})
+
+test('segmented start runs one full renderer journey and records its final result', async (t) => {
+  const fixture = rendererJourneyFixture(t, { segmented: true })
+  const acknowledgement = await fixture.result
+  assert.equal(acknowledgement.started, true)
+  assert.equal(acknowledgement.token, 'synthetic-run')
+  for (let i = 0; i < 20 && fixture.window.__analytixPackagedSoakOutcome?.status !== 'complete'; i++) {
+    await pause(5)
+  }
+  assert.equal(fixture.window.__analytixPackagedSoakOutcome.status, 'complete')
+  assert.equal(fixture.window.__analytixPackagedSoakOutcome.result.stage, 'complete')
+  assert.equal(fixture.calls.filter(({ path }) => path.endsWith('/fork')).length, 1)
+  assert.ok(Object.values(fixture.listeners).every((set) => set.size === 0))
+})
+
+test('segmented observer accepts only read-only progress after an ambiguous start', async () => {
+  const start = source.indexOf('async function observeRendererJourneyByStage(')
+  const end = source.indexOf('\nfunction buildRelaunchExpression(', start)
+  assert.ok(start >= 0 && end > start)
+  let sends = 0
+  let reads = 0
+  const observe = vm.runInNewContext(`${source.slice(start, end)}\nobserveRendererJourneyByStage`, {
+    Date, Error,
+    async evaluateRendererWithRetries() {
+      sends++
+      throw Object.assign(new Error('cdp_connection_closed'), { cdpOutcome: 'unknown' })
+    },
+    async readRendererProgress() {
+      reads++
+      return reads === 1
+        ? { status: 'observed', stage: 'tool-sse-replay', ageMs: 50, outcomeStatus: 'running' }
+        : { status: 'observed', stage: 'complete', ageMs: 0,
+          outcomeStatus: 'complete', result: { stage: 'complete' } }
+    },
+    sleep: async () => {}
+  })
+  const result = await observe({ debugPort: 1234, expression: 'synthetic-mutating-start',
+    progressToken: 'run-1', startTimeoutMs: 1000 })
+  assert.equal(result.stage, 'complete')
+  assert.equal(sends, 1)
+  assert.equal(reads, 2)
 })
