@@ -34,7 +34,7 @@ $item = Get-Item -LiteralPath $Directory -Force
 if (-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
   throw 'Development profile directory is a reparse point or non-directory.'
 }
-$actual = Get-Acl -LiteralPath $Directory
+$actual = [System.IO.Directory]::GetAccessControl($Directory)
 if (-not $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Equals($owner) -or
     -not $actual.AreAccessRulesProtected) {
   throw 'Development profile owner or inherited ACL is unsafe.'
