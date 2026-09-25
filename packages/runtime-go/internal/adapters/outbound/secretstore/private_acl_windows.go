@@ -140,11 +140,20 @@ func openPrivateWindowsDirectory(path string) (windows.Handle, error) {
 
 func privateWindowsDirectoryName(path string) bool {
 	switch filepath.Base(path) {
-	case "private", "provider-secrets", "provider-secrets-v2", "master-key":
+	case "private", "provider-registry", "provider-secrets", "provider-secrets-v2", "master-key":
 		return true
 	default:
 		return false
 	}
+}
+
+// EnsurePrivateWindowsDirectory lets the Registry share the same native
+// owner/DACL creation and validation as its sibling Secret Store directory.
+func EnsurePrivateWindowsDirectory(path string) error {
+	if !privateWindowsDirectoryName(path) {
+		return errors.New("private Windows directory name is invalid")
+	}
+	return ensurePrivateStoreDirectory(path)
 }
 
 // ValidateWindowsDevelopmentAuthorityDirectory checks the existing shared
