@@ -1017,7 +1017,12 @@ function startContractProvider() {
         bodyContainsForkPrompt: raw.includes('Continue packaged session soak from fork.'),
         bodyContainsResumePrompt: raw.includes('Continue packaged session soak from resume.'),
         bodyContainsInitialPromptAsHistory: raw.includes('Run packaged session soak.') &&
-          (raw.includes('Continue packaged session soak from fork.') || raw.includes('Continue packaged session soak from resume.'))
+          (raw.includes('Continue packaged session soak from fork.') || raw.includes('Continue packaged session soak from resume.')),
+        bodyContainsGoRecoveryHistory: raw.includes('Run packaged session soak.') &&
+          raw.includes('Run packaged session soak after Go restart.'),
+        bodyContainsRelaunchHistory: raw.includes('Run packaged session soak.') &&
+          raw.includes('Run packaged session soak after Go restart.') &&
+          raw.includes('Run packaged session soak after new process.')
       })
       const isAttachmentRequest = currentPrompt.includes('Run packaged session attachment fallback.')
       const isToolTimelineRequest = currentPrompt.includes('Run packaged session tool timeline.')
@@ -2096,13 +2101,17 @@ async function observeRendererJourneyByStage({ debugPort, expression, progressTo
   throw Object.assign(new Error('packaged_journey_observation_timeout'), { packagedStage: lastStage })
 }
 
-function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
+function buildRelaunchExpression({ threadId, turnId, providerId, model,
+  priorTurnIds = [turnId], prompt = 'Run packaged session soak after new process.',
+  providerEndpoint = '' }) {
   return `(async () => {
     let stage = 'bridge';
     let historyRecovered = false;
     let continuationCreated = false;
+    let credentialAvailable = false;
     let beforeTurnCount = 0;
     let afterTurnCount = 0;
+    let usageIncreased = false;
     try {
     const api = window.analytix;
     if (!api?.runtime?.runtimeRequest) return { error: 'runtime_bridge_unavailable' };
@@ -2133,21 +2142,55 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
       }
     };
     const threadId = ${JSON.stringify(threadId)};
-    const turnId = ${JSON.stringify(turnId)};
+    const priorTurnIds = ${JSON.stringify(priorTurnIds)};
+    if (${JSON.stringify(Boolean(providerEndpoint))}) {
+      stage = 'credential-check';
+      const snapshot = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+      const provider = snapshot?.providers?.find((item) => item?.id === ${JSON.stringify(providerId)});
+      if (snapshot?.error || !provider || provider.endpoint !== ${JSON.stringify(providerEndpoint)} ||
+        provider.credentialConfigured !== true) {
+        return { error: 'provider_binding_unavailable', stage, credentialAvailable: false };
+      }
+      const checked = await api.providerRegistry.request({
+        schemaVersion: 1, operation: 'credential-check',
+        providerId: ${JSON.stringify(providerId)},
+        expected: {
+          registryRevision: snapshot.registryRevision,
+          registryIncarnation: snapshot.registryIncarnation,
+          providerRevision: provider.revision,
+          providerGeneration: provider.generation,
+          providerIncarnation: provider.incarnation,
+          providerCredentialPurpose: provider.credentialPurpose || ''
+        }
+      });
+      if (checked?.error || checked?.credentialAvailable !== true) {
+        return { error: 'credential_unavailable', stage, credentialAvailable: false };
+      }
+      credentialAvailable = true;
+    }
     const path = '/v1/threads/' + encodeURIComponent(threadId);
+    const readUsageTotal = async () => {
+      const usage = await request('/v1/usage?group_by=thread&thread_id=' + encodeURIComponent(threadId), 'GET');
+      const buckets = Array.isArray(usage.buckets) ? usage.buckets : [];
+      return buckets.reduce((total, bucket) => {
+        if (bucket?.thread_id !== threadId && bucket?.threadId !== threadId) return total;
+        return total + Number(bucket.total_tokens || bucket.totalTokens || 0);
+      }, 0);
+    };
     const historyDeadline = Date.now() + 20000;
     stage = 'history-read';
     const before = await readPublicThread(path, historyDeadline);
     const sourceTurns = Array.isArray(before.turns) ? before.turns : [];
     beforeTurnCount = sourceTurns.length;
-    const sourceTurn = sourceTurns.find((turn) => turn?.id === turnId);
-    historyRecovered = before.id === threadId && sourceTurn?.status === 'completed' &&
-      sourceTurns.filter((turn) => turn?.id === turnId).length === 1;
+    historyRecovered = before.id === threadId && sourceTurns.length === priorTurnIds.length &&
+      sourceTurns.every((turn, index) => turn?.id === priorTurnIds[index] && turn.status === 'completed') &&
+      new Set(priorTurnIds).size === priorTurnIds.length;
     if (!historyRecovered) return { historyRecovered: false, continuationCreated: false,
-      continuationCompleted: false, beforeTurnCount: sourceTurns.length };
+      continuationCompleted: false, credentialAvailable, beforeTurnCount: sourceTurns.length };
+    const usageBefore = ${JSON.stringify(Boolean(providerEndpoint))} ? await readUsageTotal() : 0;
     stage = 'continuation-post';
     const created = await request(path + '/turns', 'POST', {
-      prompt: 'Run packaged session soak after new process.', async: true,
+      prompt: ${JSON.stringify(prompt)}, async: true,
       providerId: ${JSON.stringify(providerId)}, model: ${JSON.stringify(model)},
       approvalPolicy: 'never', sandboxMode: 'read-only', disableUserInput: true
     });
@@ -2163,22 +2206,53 @@ function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
         const after = await readPublicThread(path, deadline);
         const turns = Array.isArray(after.turns) ? after.turns : [];
         afterTurnCount = turns.length;
-        continuationCompleted = turns.some((turn) => turn?.id === newTurnId &&
-          turn.status === 'completed') && turns.filter((turn) => turn?.id === turnId).length === 1;
+        continuationCompleted = turns.length === priorTurnIds.length + 1 &&
+          turns.slice(0, -1).every((turn, index) =>
+            turn?.id === priorTurnIds[index] && turn.status === 'completed') &&
+          turns.at(-1)?.id === newTurnId && turns.at(-1)?.status === 'completed';
         if (continuationCompleted) break;
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
+      if (continuationCompleted && ${JSON.stringify(Boolean(providerEndpoint))}) {
+        stage = 'continuation-usage';
+        const usageDeadline = Date.now() + 20000;
+        while (Date.now() < usageDeadline) {
+          usageIncreased = (await readUsageTotal()) > usageBefore;
+          if (usageIncreased) break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
     }
     return { historyRecovered, continuationCreated, continuationCompleted,
+      credentialAvailable, usageIncreased, continuationTurnId: newTurnId,
       beforeTurnCount: sourceTurns.length, afterTurnCount };
     } catch (error) {
       const errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError']
         .includes(error?.name) ? error.name : 'other';
       return { error: 'relaunch_step_failed', stage, errorClass,
-        historyRecovered, continuationCreated, beforeTurnCount, afterTurnCount,
+        historyRecovered, continuationCreated, credentialAvailable, usageIncreased,
+        beforeTurnCount, afterTurnCount,
         httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : 0,
         httpCode: typeof error?.httpCode === 'string' && /^[a-z0-9_]{1,64}$/.test(error.httpCode)
           ? error.httpCode : 'unclassified' };
+    }
+  })()`
+}
+
+function buildGoRestartExpression() {
+  return `(async () => {
+    try {
+      const api = window.analytix;
+      if (!api?.runtime?.restartRuntime || !api?.runtime?.runtimeRequest) {
+        return { restarted: false, error: 'runtime_bridge_unavailable' };
+      }
+      await api.runtime.restartRuntime();
+      const health = await api.runtime.runtimeRequest('/health', 'GET');
+      let service = '';
+      try { service = JSON.parse(health?.body || '{}').service || ''; } catch {}
+      return { restarted: health?.status === 200 && service === 'analytix' };
+    } catch {
+      return { restarted: false, error: 'go_restart_failed' };
     }
   })()`
 }
@@ -2290,6 +2364,8 @@ function providerRequestShapeEvidence(requests) {
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,
     approvalAllowPrompt: item.bodyContainsApprovalAllowPrompt === true,
     userInputPrompt: item.bodyContainsUserInputPrompt === true,
+    goRecoveryHistory: item.bodyContainsGoRecoveryHistory === true,
+    relaunchHistory: item.bodyContainsRelaunchHistory === true,
     forkPrompt: item.bodyContainsForkPrompt === true,
     resumePrompt: item.bodyContainsResumePrompt === true
   }))
@@ -2405,6 +2481,7 @@ async function runActualPackagedSessionSoak() {
   let cleanupError = ''
   let rendererReadinessPassed = false
   let cdpFailure = null
+  let goRecovery = null
   let relaunch = null
   const progressToken = randomUUID()
   const providerId = 'xiaomi'
@@ -2470,66 +2547,130 @@ async function runActualPackagedSessionSoak() {
         }
         if (relaunchAfterInitial && renderer?.sseReplayOk === true &&
           renderer.initialThreadId && renderer.initialTurnId) {
-          relaunch = { attempted: true, firstMainPid: mainPid, secondMainPid: 0,
-            firstProcessQuiesced: false, secondRendererReady: false,
+          goRecovery = { attempted: true, firstGoPid: 0, secondGoPid: 0,
+            restartAcknowledged: false, credentialAvailable: false,
             historyRecovered: false, continuationCreated: false,
-            continuationCompleted: false, beforeTurnCount: 0, afterTurnCount: 0,
-            error: '' }
+            continuationCompleted: false, usageIncreased: false,
+            beforeTurnCount: 0, afterTurnCount: 0,
+            continuationTurnId: '', error: '' }
           try {
-            await stopChild(child)
-            await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
-            await stopOwnedSmokeRuntimes(runtimeDataDir)
-            relaunch.firstProcessQuiesced =
-              (child.exitCode !== null || Boolean(child.signalCode)) &&
-              ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
-              !listeningPidsOnPort(runtimePort).some((pid) =>
-                commandLineForPid(pid).includes(runtimeDataDir))
-            if (!relaunch.firstProcessQuiesced) throw new Error('first_process_not_quiesced')
-            await isolatedTaskKeychain?.unlockForLaunch()
-            if (isolatedLoginKeychain) {
-              const unlocked = await isolatedLoginKeychain.unlockForLaunch()
-              if (!unlocked.ok || !unlocked.defaultKeychainBound) {
-                throw new Error('isolated_login_keychain_unavailable')
-              }
-            }
-            debugPort = await getFreePort()
-            while (debugPort === runtimePort) debugPort = await getFreePort()
-            child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
-              cwd: process.cwd(),
-              env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
-              stdio: ['ignore', 'pipe', 'pipe']
+            const beforeGoPids = ownedSmokeRuntimePids(runtimeDataDir)
+            if (beforeGoPids.length !== 1) throw new Error('first_go_process_not_unique')
+            goRecovery.firstGoPid = beforeGoPids[0]
+            const restarted = await evaluateRendererWithRetries({
+              debugPort, expression: buildGoRestartExpression(),
+              timeoutMs: Math.max(1, evaluationDeadline - Date.now())
             })
-            relaunch.secondMainPid = child.pid || 0
-            child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
-            child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
-            await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
-            relaunch.secondRendererReady = true
+            goRecovery.restartAcknowledged = restarted?.restarted === true
+            if (!goRecovery.restartAcknowledged) throw new Error(restarted?.error || 'go_restart_unconfirmed')
+            const afterGoPids = ownedSmokeRuntimePids(runtimeDataDir)
+            if (afterGoPids.length !== 1 || afterGoPids[0] === goRecovery.firstGoPid) {
+              throw new Error('go_process_identity_unchanged')
+            }
+            goRecovery.secondGoPid = afterGoPids[0]
             const observed = await evaluateRendererWithRetries({
               debugPort,
               expression: buildRelaunchExpression({
                 threadId: renderer.initialThreadId,
                 turnId: renderer.initialTurnId,
-                providerId,
-                model
+                providerId, model,
+                prompt: 'Run packaged session soak after Go restart.',
+                providerEndpoint: `${contractProvider.url}/v1`
               }),
               timeoutMs: Math.max(1, evaluationDeadline - Date.now())
             })
-            if (!observed || typeof observed !== 'object') throw new Error('invalid_relaunch_observation')
-            for (const field of ['historyRecovered', 'continuationCreated', 'continuationCompleted']) {
-              relaunch[field] = observed[field] === true
+            if (!observed || typeof observed !== 'object') throw new Error('invalid_go_recovery_observation')
+            for (const field of ['credentialAvailable', 'historyRecovered', 'continuationCreated',
+              'continuationCompleted', 'usageIncreased']) {
+              goRecovery[field] = observed[field] === true
             }
-            relaunch.beforeTurnCount = Number(observed.beforeTurnCount || 0)
-            relaunch.afterTurnCount = Number(observed.afterTurnCount || 0)
-            relaunch.error = observed.error || ''
-            relaunch.stage = observed.stage || ''
-            relaunch.errorClass = observed.errorClass || ''
-            relaunch.httpStatus = Number.isInteger(observed.httpStatus) ? observed.httpStatus : 0
-            relaunch.httpCode = observed.httpCode || ''
+            goRecovery.beforeTurnCount = Number(observed.beforeTurnCount || 0)
+            goRecovery.afterTurnCount = Number(observed.afterTurnCount || 0)
+            goRecovery.continuationTurnId = observed.continuationTurnId || ''
+            goRecovery.error = observed.error === undefined || observed.error === '' ? '' :
+              typeof observed.error === 'string' && /^[a-z0-9_]{1,64}$/.test(observed.error)
+                ? observed.error : 'unclassified'
+            if (!goRecovery.credentialAvailable || !goRecovery.historyRecovered ||
+              !goRecovery.continuationCreated || !goRecovery.continuationCompleted ||
+              !goRecovery.usageIncreased ||
+              goRecovery.beforeTurnCount !== 1 || goRecovery.afterTurnCount !== 2 ||
+              !goRecovery.continuationTurnId || contractProvider.requests.length !== 2 ||
+              !contractProvider.requests.some((item) => item.bodyContainsGoRecoveryHistory)) {
+              throw new Error(goRecovery.error || 'go_recovery_not_complete')
+            }
           } catch (error) {
-            relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
-            relaunch.remoteKind = error?.cdpRemoteKind || ''
-            relaunch.protocolCode = error?.cdpProtocolCode ?? null
-            relaunch.exceptionClass = error?.cdpExceptionClass || ''
+            goRecovery.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+          }
+          if (goRecovery.error === '' && goRecovery.continuationCompleted) {
+            relaunch = { attempted: true, firstMainPid: mainPid, secondMainPid: 0,
+              firstProcessQuiesced: false, secondRendererReady: false,
+              credentialAvailable: false, historyRecovered: false, continuationCreated: false,
+              continuationCompleted: false, usageIncreased: false,
+              beforeTurnCount: 0, afterTurnCount: 0,
+              error: '' }
+            try {
+              await stopChild(child)
+              await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+              await stopOwnedSmokeRuntimes(runtimeDataDir)
+              relaunch.firstProcessQuiesced =
+                (child.exitCode !== null || Boolean(child.signalCode)) &&
+                ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
+                !listeningPidsOnPort(runtimePort).some((pid) =>
+                  commandLineForPid(pid).includes(runtimeDataDir))
+              if (!relaunch.firstProcessQuiesced) throw new Error('first_process_not_quiesced')
+              await isolatedTaskKeychain?.unlockForLaunch()
+              if (isolatedLoginKeychain) {
+                const unlocked = await isolatedLoginKeychain.unlockForLaunch()
+                if (!unlocked.ok || !unlocked.defaultKeychainBound) {
+                  throw new Error('isolated_login_keychain_unavailable')
+                }
+              }
+              debugPort = await getFreePort()
+              while (debugPort === runtimePort) debugPort = await getFreePort()
+              child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
+                cwd: process.cwd(),
+                env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
+                stdio: ['ignore', 'pipe', 'pipe']
+              })
+              relaunch.secondMainPid = child.pid || 0
+              child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+              child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+              await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
+              relaunch.secondRendererReady = true
+              const observed = await evaluateRendererWithRetries({
+                debugPort,
+                expression: buildRelaunchExpression({
+                  threadId: renderer.initialThreadId,
+                  turnId: goRecovery.continuationTurnId,
+                  priorTurnIds: [renderer.initialTurnId, goRecovery.continuationTurnId],
+                  providerId, model,
+                  providerEndpoint: `${contractProvider.url}/v1`
+                }),
+                timeoutMs: Math.max(1, evaluationDeadline - Date.now())
+              })
+              if (!observed || typeof observed !== 'object') throw new Error('invalid_relaunch_observation')
+              for (const field of ['credentialAvailable', 'historyRecovered', 'continuationCreated',
+                'continuationCompleted', 'usageIncreased']) {
+                relaunch[field] = observed[field] === true
+              }
+              relaunch.beforeTurnCount = Number(observed.beforeTurnCount || 0)
+              relaunch.afterTurnCount = Number(observed.afterTurnCount || 0)
+              relaunch.error = observed.error === undefined || observed.error === '' ? '' :
+                typeof observed.error === 'string' && /^[a-z0-9_]{1,64}$/.test(observed.error)
+                  ? observed.error : 'unclassified'
+              relaunch.stage = typeof observed.stage === 'string' &&
+                /^[a-z0-9_-]{1,64}$/.test(observed.stage) ? observed.stage : ''
+              relaunch.errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError', 'other']
+                .includes(observed.errorClass) ? observed.errorClass : ''
+              relaunch.httpStatus = Number.isInteger(observed.httpStatus) ? observed.httpStatus : 0
+              relaunch.httpCode = typeof observed.httpCode === 'string' &&
+                /^[a-z0-9_]{1,64}$/.test(observed.httpCode) ? observed.httpCode : ''
+            } catch (error) {
+              relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+              relaunch.remoteKind = error?.cdpRemoteKind || ''
+              relaunch.protocolCode = error?.cdpProtocolCode ?? null
+              relaunch.exceptionClass = error?.cdpExceptionClass || ''
+            }
           }
         }
       } catch (error) {
@@ -2636,6 +2777,8 @@ async function runActualPackagedSessionSoak() {
     item.bodyContainsUserInputAnswer
   )
   const providerHistorySeen = providerRequests.some((item) => item.bodyContainsInitialPromptAsHistory)
+  const providerGoRecoveryHistorySeen = providerRequests.some((item) => item.bodyContainsGoRecoveryHistory)
+  const providerRelaunchHistorySeen = providerRequests.some((item) => item.bodyContainsRelaunchHistory)
   checks.push(actualCheck(
     'packaged-app-launch',
     'Packaged app launch',
@@ -2697,7 +2840,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must replay completed assistant text, usage, and turn_completed for the current turn',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-tool-timeline',
     'Packaged session tool timeline',
     renderer?.toolTurnOk === true &&
@@ -2707,7 +2850,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must replay tool_call_ready, tool_call_started, tool_call_finished, usage, and final answer before operator gate',
     renderer?.sseReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-mimo-plan',
     'Packaged MiMo plan mode',
     renderer?.mimoPlanThreadOk === true &&
@@ -2718,7 +2861,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must create a plan-mode turn with Xiaomi/MiMo provider settings, canonicalize the alias model in the provider body, execute create_plan, and replay the tool timeline',
     renderer?.toolTimelineOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-attachment-fallback',
     'Packaged session attachment fallback',
     renderer?.attachmentUploadOk === true &&
@@ -2730,7 +2873,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must upload a public document attachment, send bounded text to the provider without a local path, and replay the turn',
     renderer?.mimoPlanReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-approval-user-input',
     'Packaged session approval and user input',
     renderer?.approvalDenyTurnOk === true &&
@@ -2753,7 +2896,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must show approval/user_input gates only when tools call them, resolve through renderer bridge, and continue the turn',
     renderer?.attachmentSseReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-fork',
     'Packaged session fork',
     renderer?.forkOk === true && renderer?.parentHistoryUnchanged === true &&
@@ -2762,7 +2905,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must fork, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-resume',
     'Packaged session resume',
     renderer?.resumeOk === true && renderer?.resumeTurnOk === true && renderer?.resumeReplayOk === true &&
@@ -2770,12 +2913,40 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must resume, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-thread-list',
     'Packaged session thread list',
     renderer?.threadListOk === true,
     renderer?.error || 'packaged app must list/search source and forked threads',
     renderer?.forkOk === true ? 'failed' : 'skipped'
+  ))
+  const goRecoveryPassed = relaunchAfterInitial && goRecovery?.attempted === true &&
+    goRecovery.restartAcknowledged === true && goRecovery.firstGoPid > 0 &&
+    goRecovery.secondGoPid > 0 && goRecovery.firstGoPid !== goRecovery.secondGoPid &&
+    goRecovery.credentialAvailable === true && goRecovery.historyRecovered === true &&
+    goRecovery.continuationCreated === true && goRecovery.continuationCompleted === true &&
+    goRecovery.usageIncreased === true &&
+    goRecovery.beforeTurnCount === 1 && goRecovery.afterTurnCount === 2 &&
+    providerGoRecoveryHistorySeen
+  if (relaunchAfterInitial) checks.push(actualCheck(
+    'packaged-go-recovery',
+    'Packaged session Go restart recovery',
+    goRecoveryPassed,
+    goRecovery?.error || 'new Go process must read the protected credential and finish one unique continuation'
+  ))
+  const focusedRelaunchPassed = goRecoveryPassed && relaunch?.attempted === true &&
+    relaunch.firstProcessQuiesced === true && relaunch.secondRendererReady === true &&
+    relaunch.firstMainPid > 0 && relaunch.secondMainPid > 0 &&
+    relaunch.firstMainPid !== relaunch.secondMainPid &&
+    relaunch.credentialAvailable === true && relaunch.historyRecovered === true && relaunch.continuationCreated === true &&
+    relaunch.continuationCompleted === true && relaunch.usageIncreased === true &&
+    relaunch.beforeTurnCount === 2 && relaunch.afterTurnCount === 3 &&
+    providerRelaunchHistorySeen && providerRequests.length === 3
+  if (relaunchAfterInitial) checks.push(actualCheck(
+    'packaged-session-relaunch',
+    'Packaged session new Main recovery',
+    focusedRelaunchPassed,
+    relaunch?.error || 'new Main must read the completed turn and finish one unique continuation with the same Provider'
   ))
   checks.push(actualCheck(
     'packaged-session-provider-redaction',
@@ -2901,10 +3072,20 @@ async function runActualPackagedSessionSoak() {
   const failed = checks.filter((item) => item.status === 'failed')
   const blocked = checks.filter((item) => item.status === 'live_blocked')
   const skipped = checks.filter((item) => item.status === 'skipped')
+  const requiredCheckIds = relaunchAfterInitial
+    ? [
+        'packaged-app-artifact', 'packaged-app-launch', 'packaged-renderer-bridge',
+        'packaged-settings-bridge', 'packaged-provider-profile-settings',
+        'packaged-runtime-restart', 'packaged-session-thread-create',
+        'packaged-session-turn-create', 'packaged-session-sse-replay',
+        'packaged-go-recovery', 'packaged-session-relaunch', 'packaged-session-provider-redaction',
+        'packaged-process-cleanup'
+      ]
+    : REQUIRED_ACTUAL_CHECK_IDS
   const passed = failed.length === 0 &&
     blocked.length === 0 &&
     skipped.length === 0 &&
-    REQUIRED_ACTUAL_CHECK_IDS.every((id) => checks.some((item) => item.id === id && item.status === 'passed'))
+    requiredCheckIds.every((id) => checks.some((item) => item.id === id && item.status === 'passed'))
   return {
     requested: true,
     passed,
@@ -2920,6 +3101,33 @@ async function runActualPackagedSessionSoak() {
       terminalReplayComplete: renderer?.cancelReplayOk === true,
       noToolFileEffect: cancelFileAbsent,
       cleanupQuiesced
+    } : null,
+    focusedRelaunch: relaunchAfterInitial ? {
+      passed: focusedRelaunchPassed && cleanupQuiesced && !launchError && !secretFinding,
+      goRestartAcknowledged: goRecovery?.restartAcknowledged === true,
+      firstGoPid: goRecovery?.firstGoPid || 0,
+      secondGoPid: goRecovery?.secondGoPid || 0,
+      goCredentialAvailable: goRecovery?.credentialAvailable === true,
+      goContinuationCompleted: goRecovery?.continuationCompleted === true,
+      goUsageIncreased: goRecovery?.usageIncreased === true,
+      goBeforeTurnCount: goRecovery?.beforeTurnCount || 0,
+      goAfterTurnCount: goRecovery?.afterTurnCount || 0,
+      goError: goRecovery?.error || '',
+      firstMainPid: relaunch?.firstMainPid || 0,
+      secondMainPid: relaunch?.secondMainPid || 0,
+      firstProcessQuiesced: relaunch?.firstProcessQuiesced === true,
+      secondRendererReady: relaunch?.secondRendererReady === true,
+      mainCredentialAvailable: relaunch?.credentialAvailable === true,
+      historyRecovered: relaunch?.historyRecovered === true,
+      continuationCreated: relaunch?.continuationCreated === true,
+      continuationCompleted: relaunch?.continuationCompleted === true,
+      mainUsageIncreased: relaunch?.usageIncreased === true,
+      beforeTurnCount: relaunch?.beforeTurnCount || 0,
+      afterTurnCount: relaunch?.afterTurnCount || 0,
+      providerRequestCount: providerRequests.length,
+      providerGoHistoryObserved: providerGoRecoveryHistorySeen,
+      providerHistoryObserved: providerRelaunchHistorySeen,
+      error: relaunch?.error || ''
     } : null,
     app: artifactEvidence,
     launch: {
@@ -2972,6 +3180,8 @@ async function runActualPackagedSessionSoak() {
       userInputSeen: providerUserInputSeen,
       forkPromptSeen: providerForkPromptSeen,
       resumePromptSeen: providerResumePromptSeen,
+      historyCarriedToGoRecovery: providerGoRecoveryHistorySeen,
+      historyCarriedToRelaunch: providerRelaunchHistorySeen,
       historyCarriedToChildOrResume: providerHistorySeen
     },
     isolatedWorkspace: {

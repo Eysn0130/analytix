@@ -459,13 +459,102 @@ test('HTTP failure reports a fixed code without response text or a dynamic path'
   })
 })
 
-function relaunchExpression() {
+function relaunchExpression(options = {}) {
   const start = source.indexOf('function buildRelaunchExpression(')
   const end = source.indexOf('\nfunction summarizeError(', start)
   assert.ok(start >= 0 && end > start)
   const build = vm.runInNewContext(`${source.slice(start, end)}\nbuildRelaunchExpression`, { JSON })
-  return build({ threadId: 'thread-a', turnId: 'turn-a', providerId: 'xiaomi', model: 'mimo-v2.5-pro' })
+  return build({ threadId: 'thread-a', turnId: 'turn-a', providerId: 'xiaomi', model: 'mimo-v2.5-pro', ...options })
 }
+
+function goRestartExpression() {
+  const start = source.indexOf('function buildGoRestartExpression(')
+  const end = source.indexOf('\nfunction summarizeError(', start)
+  assert.ok(start >= 0 && end > start)
+  const build = vm.runInNewContext(`${source.slice(start, end)}\nbuildGoRestartExpression`, { JSON })
+  return build()
+}
+
+test('short recovery restarts Go once and confirms its new health before any continuation', async () => {
+  let restarts = 0
+  const result = await vm.runInNewContext(goRestartExpression(), {
+    window: { analytix: { runtime: {
+      async restartRuntime() { restarts += 1 },
+      async runtimeRequest(path, method) {
+        assert.equal(restarts, 1)
+        assert.deepEqual([path, method], ['/health', 'GET'])
+        return { status: 200, body: JSON.stringify({ service: 'analytix' }) }
+      }
+    } } }, JSON
+  })
+  assert.equal(restarts, 1)
+  assert.equal(result.restarted, true)
+})
+
+test('short recovery refuses the continuation when the bound credential is unavailable', async () => {
+  const calls = []
+  const result = await vm.runInNewContext(relaunchExpression({
+    providerEndpoint: 'http://127.0.0.1:45558/v1'
+  }), {
+    window: { analytix: {
+      runtime: { async runtimeRequest() { calls.push('runtime'); throw new Error('must not send') } },
+      providerRegistry: { async request(value) {
+        calls.push(value.operation)
+        if (value.operation === 'list') return {
+          registryRevision: '1', registryIncarnation: 'incarnation-a',
+          providers: [{ id: 'xiaomi', endpoint: 'http://127.0.0.1:45558/v1',
+            credentialConfigured: true, revision: '1', generation: '1',
+            incarnation: 'provider-a', credentialPurpose: 'provider-api-key' }]
+        }
+        return { error: { code: 'credential_unavailable' } }
+      } }
+    } }, JSON, Error, Date, Promise, setTimeout, encodeURIComponent
+  })
+  assert.equal(result.error, 'credential_unavailable')
+  assert.equal(result.stage, 'credential-check')
+  assert.deepEqual(calls, ['list', 'credential-check'])
+})
+
+test('new Main keeps both prior turns in order and sends exactly one third turn', async () => {
+  const calls = []
+  let reads = 0
+  let usageReads = 0
+  const result = await vm.runInNewContext(relaunchExpression({
+    turnId: 'turn-b', priorTurnIds: ['turn-a', 'turn-b'],
+    providerEndpoint: 'http://127.0.0.1:45558/v1'
+  }), {
+    window: { analytix: {
+      providerRegistry: { async request(value) {
+        calls.push(value.operation)
+        if (value.operation === 'credential-check') return { credentialAvailable: true }
+        return { registryRevision: '1', registryIncarnation: 'incarnation-a',
+          providers: [{ id: 'xiaomi', endpoint: 'http://127.0.0.1:45558/v1',
+            credentialConfigured: true, revision: '1', generation: '1',
+            incarnation: 'provider-a', credentialPurpose: 'provider-api-key' }] }
+      } },
+      runtime: { async runtimeRequest(path, method) {
+        calls.push(method)
+        if (method === 'POST') return { status: 200, body: JSON.stringify({ threadId: 'thread-a', turnId: 'turn-c' }) }
+        if (path.startsWith('/v1/usage?')) {
+          usageReads += 1
+          return { status: 200, body: JSON.stringify({ buckets: [{ thread_id: 'thread-a',
+            total_tokens: usageReads === 1 ? 25 : 50 }] }) }
+        }
+        reads += 1
+        return { status: 200, body: JSON.stringify({ id: 'thread-a', turns: [
+          { id: 'turn-a', status: 'completed' }, { id: 'turn-b', status: 'completed' },
+          ...(reads > 1 ? [{ id: 'turn-c', status: 'completed' }] : [])
+        ] }) }
+      } }
+    } }, JSON, Error, Date, Promise, setTimeout, encodeURIComponent
+  })
+  assert.equal(result.credentialAvailable, true)
+  assert.equal(result.historyRecovered, true)
+  assert.equal(result.continuationCompleted, true)
+  assert.equal(result.usageIncreased, true)
+  assert.equal(result.continuationTurnId, 'turn-c')
+  assert.deepEqual(calls, ['list', 'credential-check', 'GET', 'GET', 'POST', 'GET', 'GET'])
+})
 
 test('relaunch refuses a continuation when the exact prior turn is absent', async () => {
   const calls = []
