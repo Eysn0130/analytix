@@ -86,7 +86,14 @@ func validateWindowsOwnerAndDACL(handle windows.Handle, private bool) error {
 	}
 	defer token.Close()
 	user, err := token.GetTokenUser()
-	if err != nil || user == nil || user.User.Sid == nil || !owner.Equals(user.User.Sid) {
+	// A non-private ancestor may be owned by Administrators or LocalSystem
+	// (notably the elevated Windows runner's temporary root). Its DACL still
+	// must exclude outside writers. The private subtree always requires the
+	// current user as owner.
+	trustedAncestorOwner := !private && (owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) ||
+		owner.IsWellKnown(windows.WinLocalSystemSid))
+	if err != nil || user == nil || user.User.Sid == nil ||
+		(!owner.Equals(user.User.Sid) && !trustedAncestorOwner) {
 		return errors.New("private Windows owner is not the current user")
 	}
 	dacl, _, err := descriptor.DACL()
@@ -121,7 +128,7 @@ func validateWindowsOwnerAndDACL(handle windows.Handle, private bool) error {
 		}
 		ownerAllowed = ownerAllowed || sid.Equals(owner)
 	}
-	if !ownerAllowed {
+	if private && !ownerAllowed {
 		return errors.New("private Windows DACL does not admit the owner")
 	}
 	return nil
