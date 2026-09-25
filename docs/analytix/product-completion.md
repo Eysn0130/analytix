@@ -11,38 +11,37 @@ history before comparing remote state.
 
 The latest product-code SOURCE on
 `codex/workbench-product-delivery-20260914` is
-`14ab14cb9eb28611b1fd0c526865aee01bed5f95`; later commits through
-`4c1f98d97621733fffd226834a8bb217fac915a4` change tests, packaged QA
-or documents, without changing the product build inputs. A complete private
-app/DMG/ZIP is bound to
-`14ab`. Its installed
-DMG copy passes strict signature, independent Core Go inspection and exact
-artifact legal audit (1,172 instances, zero mandatory engineering blockers).
-Canvas is excluded and the Lazy replacement is present. The package remains
-`development_clean_non_publishable`.
+`f4cf3ef14ab6bd8375830310ea8c5220e46793b2`. Its private Core
+app/DMG/ZIP and installed DMG copy pass container verification, strict ad hoc
+signature verification, independent production-tag Core Go inspection and the
+exact artifact legal audit (1,172 dependency instances; zero mandatory
+engineering blockers). The package remains
+`development_clean_non_publishable`. Exact `f4cf3ef14` Development CI passed
+51/51 jobs and PR28 showed 56/56 successful checks.
 
-On that same installed DMG copy, a repaired and stage-observed continuous
-synthetic-Provider journey now passes 19/19 actual checks, including the
-single fork (child count 0→1) and unchanged parent turn list. Separate
-isolated sessions also passed focused cancellation and new-process history
-with a second completed turn (count 1→2). The earlier 180-second total CDP
-evaluation returned an unknown outcome near the user-input gate; read-only
-stage observation resolved that QA visibility gap without replaying writes or
-changing product deadlines. The earlier intermittent accepted-final GET 503
-did not recur; its exact inner cause remains unproved. See the
-[closure repair checkpoint](qa/pr28-closure-repair-continuation-2026-09-24.md),
-[artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-24.md),
-[prior continuation](qa/pr28-installed-continuation-2026-09-24.md), and
-[7b historical checkpoint](qa/pr28-installed-closure-2026-09-24.md).
+The same installed candidate passes a 19/19 continuous synthetic-Provider
+journey, focused cancellation and a two-page PDF GUI preview. A local synthetic
+Provider produced 120/120 unique completed turns, and the installed GUI showed
+the beginning, middle and end of that history. Post-120 GUI continuation failed
+with `provider_error` after protected credential unavailability following a Go
+restart; new Main-process recovery was not observed. In a separate upgrade
+profile, the old installed Core wrote and read a thread, but the new app blocked
+in macOS Keychain access before its data readback. Normal protected real
+Provider recovery was not run on this candidate. See the
+[current f4 installed checkpoint](qa/pr28-f4-installed-continuation-2026-09-24.md)
+for exact receipts, limits and next observations. The
+[14ab closure repair checkpoint](qa/pr28-closure-repair-continuation-2026-09-24.md)
+and [artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-24.md)
+remain historical for their own source and build.
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `pending`: latest QA-code commit `4c1f98d97` has 52 affected cases and 111 baseline cases passing locally; its GitHub CI was still running at this checkpoint. Re-read checks for the final PR HEAD after this documentation update. Older green checks do not transfer. |
-| PrivateCandidateReady | `false`: the `14ab` container has one continuous installed synthetic-Provider journey and separate cancellation/new-process passes. Normal protected Provider setup/recovery on 14ab, real 120-turn installed GUI, Core upgrade/data preservation and installed PDF preview remain unverified. The old intermittent hydration 503 is not conclusively localized. |
-| MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
-| PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
+| SourceReady | `true` for exact `f4cf3ef14` source checks. A later documentation HEAD must receive its own accurate check before transferring this status. |
+| PrivateCandidateReady | `false`: normal protected Provider recovery, post-120 GUI continuation/new Main recovery, and old→new Core data readback/continuation remain open. PDF and the continuous synthetic journey pass only in their recorded scope. |
+| MergeReady | `false`: PR28 remains Draft and installed acceptance is incomplete. GitHub's `MERGEABLE` response is not this product gate. |
+| PublicMacReleaseReady | `false`: the private artifact is nonpublishable. Developer ID, notarization and publication authority are future public-distribution conditions, not current private QA repairs. |
 
-The 14ab private DMG/ZIP are inspectable candidates, not a public beta or
+The f4 private DMG/ZIP are inspectable QA candidates, not a public beta or
 formal release. Do not repeat the retired 21/2 package-license, historical
 `NOT_CLEARED` or prior-head CI tasks as current blockers.
 
