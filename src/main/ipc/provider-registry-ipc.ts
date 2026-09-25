@@ -169,7 +169,7 @@ const runtimeRequestResultSchema = z.object({
 }).strict()
 
 const runtimeUnavailableEnvelopeSchema = z.object({
-  code: z.literal('fetch_failed'),
+  code: z.union([z.literal('fetch_failed'), z.literal('runtime_unavailable')]),
   message: z.literal('The Analytix runtime is unavailable.')
 }).strict()
 

@@ -1126,24 +1126,25 @@ describe('provider registry IPC', () => {
 
   it('projects the production-shaped runtime transport failure as unavailable', async () => {
     const listRequest = { schemaVersion: 1, operation: 'list' }
-    const productionTransportFailure = createProviderRegistryIpcHandler(vi.fn(async () => ({
-      ok: false,
-      status: 0,
-      body: JSON.stringify({
-        code: 'fetch_failed',
-        message: 'The Analytix runtime is unavailable.'
+    for (const code of ['fetch_failed', 'runtime_unavailable']) {
+      const productionTransportFailure = createProviderRegistryIpcHandler(vi.fn(async () => ({
+        ok: false,
+        status: 0,
+        body: JSON.stringify({ code, message: 'The Analytix runtime is unavailable.' })
+      })))
+      await expect(productionTransportFailure(listRequest)).resolves.toEqual({
+        schemaVersion: 1,
+        error: {
+          code: 'runtime_unavailable',
+          message: 'The provider registry is unavailable.'
+        }
       })
-    })))
-    await expect(productionTransportFailure(listRequest)).resolves.toEqual({
-      schemaVersion: 1,
-      error: {
-        code: 'runtime_unavailable',
-        message: 'The provider registry is unavailable.'
-      }
-    })
+    }
 
     const malformedTransportFailures = [
       { code: 'fetch_failed', message: 'The Analytix runtime is unavailable.', detail: 'raw-provider-body' },
+      { code: 'runtime_unavailable', message: 'The Analytix runtime is unavailable.', detail: 'raw-provider-body' },
+      { code: 'runtime_unavailable', message: 'runtime failed at /private/provider-registry' },
       { code: 'fetch_failed', message: 'runtime failed at /private/provider-registry' },
       { code: 'other_failure', message: 'The Analytix runtime is unavailable.' },
       {
@@ -1162,6 +1163,12 @@ describe('provider registry IPC', () => {
         error: { code: 'invalid_response' }
       })
     }
+    const falseSuccess = createProviderRegistryIpcHandler(vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({ code: 'runtime_unavailable', message: 'The Analytix runtime is unavailable.' })
+    })))
+    await expect(falseSuccess(listRequest)).resolves.toMatchObject({ error: { code: 'invalid_response' } })
   })
 
   it('preserves canonical Go failures while redacting raw and transport failures', async () => {

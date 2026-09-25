@@ -4432,6 +4432,15 @@ export function sanitizeRuntimeResponse(
   }
 }
 
+export function runtimeRequestTimeoutMs(pathAndQuery: string, method: string): number {
+  const path = pathAndQuery.split('?', 1)[0] || '/'
+  const verb = method.trim().toUpperCase()
+  // Credential mutations may wait on the protected task Keychain before Go replies.
+  const providerRegistryMutation = /^\/v1\/provider-registry(?:\/|$)/.test(path) &&
+    (verb === 'PATCH' || verb === 'PUT' || verb === 'DELETE')
+  return verb === 'POST' || providerRegistryMutation ? 60_000 : 15_000
+}
+
 export async function runtimeRequestViaHost(
   settings: AppSettingsV1,
   pathAndQuery: string,
@@ -4463,7 +4472,7 @@ export async function runtimeRequestViaHost(
       method: init.method ?? 'GET',
       headers: hdrs,
       body: init.body,
-      signal: AbortSignal.timeout(init.method === 'POST' ? 60_000 : 15_000)
+      signal: AbortSignal.timeout(runtimeRequestTimeoutMs(pathNorm, init.method ?? 'GET'))
     })
     const body = await res.text()
     rawResponseSeen = true

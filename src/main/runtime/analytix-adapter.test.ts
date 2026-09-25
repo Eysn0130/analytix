@@ -57,6 +57,7 @@ import {
   takeExactGoRuntimeReadyLine,
   verifyWitnessedAuthorityStartupIdentity,
   waitForDesktopPrivateHistoryMigrationV2,
+  runtimeRequestTimeoutMs,
   runtimeRequestViaHost
 } from './analytix-adapter'
 import type {
@@ -1494,6 +1495,15 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('allows protected Provider Registry mutations to finish beyond the ordinary read deadline', () => {
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'PATCH')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek/credential', 'PUT')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'DELETE')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'GET')).toBe(15_000)
+    expect(runtimeRequestTimeoutMs('/v1/threads/thread-a', 'PATCH')).toBe(15_000)
+    expect(runtimeRequestTimeoutMs('/v1/threads', 'POST')).toBe(60_000)
+  })
+
   it('admits provider attribution in Core thread usage without losing exact public fields', () => {
     const counters = {
       input_tokens: 12,
