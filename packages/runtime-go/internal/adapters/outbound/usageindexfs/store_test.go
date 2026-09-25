@@ -131,6 +131,58 @@ func TestStoreTerminalSettlementRebuildsDivergentProjection(t *testing.T) {
 	}
 }
 
+func TestStoreBatchTerminalSettlementReadsCanonicalThreadOnceAndRepairs(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-batch"
+	if err := os.MkdirAll(filepath.Join(root, "threads", threadID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	owner := &sync.Mutex{}
+	events := []map[string]any{
+		usageEvent(threadID, "turn-1", 1, 10, 1),
+		usageEvent(threadID, "turn-2", 2, 15, 2),
+	}
+	var reads atomic.Int32
+	store, err := New(Dependencies{
+		Root: root, Owner: owner,
+		ReadThread: func(string) (map[string]any, error) {
+			reads.Add(1)
+			return map[string]any{"id": threadID, "model": "deepseek"}, nil
+		},
+		LoadEvents: func(string, int) (eventlog.LoadResult, error) {
+			return eventlog.LoadResult{Events: cloneEvents(events)}, nil
+		},
+		PendingUsageEventsOwnerLocked: func(string) []map[string]any { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	reads.Store(0)
+	owner.Lock()
+	err = store.SettleTerminalEventsOwnerLocked(events)
+	owner.Unlock()
+	if err != nil || reads.Load() != 1 {
+		t.Fatalf("batch settlement did not share its canonical read: reads=%d err=%v", reads.Load(), err)
+	}
+	if err := os.Remove(store.ThreadPath(threadID)); err != nil {
+		t.Fatal(err)
+	}
+	owner.Lock()
+	err = store.SettleTerminalEventsOwnerLocked(events)
+	owner.Unlock()
+	if err != nil {
+		t.Fatalf("batch settlement did not repair the derived projection: %v", err)
+	}
+	for _, event := range events {
+		if err := store.VerifyTerminalEvent(event); err != nil {
+			t.Fatalf("batch repair lost an exact terminal usage record: %v", err)
+		}
+	}
+}
+
 func newUsageIndexStoreForTest(
 	t *testing.T,
 	root string,

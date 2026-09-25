@@ -189,8 +189,10 @@ func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (m
 	if err != nil {
 		return nil, err
 	}
-	ordinary := projectTrustedStructuredOrdinaryV1(projected, trustedProjectionThreadRootV1)
-	out, _ := ordinary.(map[string]any)
+	out, err := projectTrustedStructuredThreadV1(projected)
+	if err != nil {
+		return nil, err
+	}
 	if out == nil || !domainstartup.FrozenEventOrderAuthorityStableV1(projected, out) {
 		return nil, errors.New("ordinary public thread privacy projection failed")
 	}
@@ -200,9 +202,44 @@ func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (m
 	if !projectedOrdinaryResultIdentitiesV1(out, trustedProjectionThreadRootV1) {
 		return nil, errors.New("ordinary public result identity changed during projection")
 	}
-	if err := domainevent.ValidatePublicRecord(trustedStructuredValidationViewV1(out, trustedProjectionThreadRootV1)); err != nil {
+	validationView, _ := trustedStructuredValidationViewV1(out, trustedProjectionThreadRootV1).(map[string]any)
+	if validationView == nil {
+		return nil, errors.New("ordinary public thread privacy projection failed")
+	}
+	if err := validatePublicThreadRecordChunksV1(validationView); err != nil {
 		return nil, errors.Join(errors.New("ordinary public thread privacy projection failed"), err)
 	}
+	return out, nil
+}
+
+func projectTrustedStructuredThreadV1(thread map[string]any) (map[string]any, error) {
+	turns, ok := thread["turns"].([]any)
+	if !ok {
+		return nil, errors.New("ordinary public thread turns are invalid")
+	}
+	root := make(map[string]any, len(thread)-1)
+	for key, value := range thread {
+		if key != "turns" {
+			root[key] = value
+		}
+	}
+	out, _ := projectTrustedStructuredOrdinaryV1(root, trustedProjectionThreadRootV1).(map[string]any)
+	if out == nil {
+		return nil, errors.New("ordinary public thread root privacy projection failed")
+	}
+	projectedTurns := make([]any, 0, len(turns))
+	for _, rawTurn := range turns {
+		turn, ok := rawTurn.(map[string]any)
+		if !ok || turn == nil {
+			return nil, errors.New("ordinary public thread turn is invalid")
+		}
+		projected, _ := projectTrustedStructuredOrdinaryV1(turn, trustedProjectionTurnV1).(map[string]any)
+		if projected == nil {
+			return nil, errors.New("ordinary public thread turn privacy projection failed")
+		}
+		projectedTurns = append(projectedTurns, projected)
+	}
+	out["turns"] = projectedTurns
 	return out, nil
 }
 
