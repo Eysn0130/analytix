@@ -33,6 +33,9 @@ type TransactionV1 interface {
 	ObserveEvents(context.Context, string) (ReplaySnapshotV1, error)
 	RecordTerminalBundle(string, string) error
 	SettleTerminalUsage(map[string]any) error
+	// Startup settles a thread's preflighted usage inventory in one canonical
+	// read while the same exclusive transaction is held.
+	SettleTerminalUsageBatch([]map[string]any) error
 }
 
 type Store interface {

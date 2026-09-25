@@ -100,4 +100,22 @@ func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
 			t.Fatalf("turn=%d durable_status=%s", number, contracts.StringField(latest, "status"))
 		}
 	}
+	shutdownOwnedRuntimeHandler(t, handler)
+	handler = nil
+	lease, err = AcquireRuntimePersistenceLease(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err = newRuntimeServerHandlerWithPersistenceLeaseContextE(ctx, config, lease)
+	if err != nil {
+		_ = lease.Close()
+		t.Fatal(err)
+	}
+	handler = &ownedPersistenceLeaseHandler{Handler: inner, lease: lease}
+	status, recovered := request(http.MethodGet, "/v1/threads/"+threadID, nil)
+	recoveredTurns, _ := recovered["turns"].([]any)
+	if status != http.StatusOK || len(recoveredTurns) != 30 {
+		t.Fatalf("restarted_history_status=%d code=%s turn_count=%d", status,
+			contracts.StringField(recovered, "code"), len(recoveredTurns))
+	}
 }
