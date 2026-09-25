@@ -8,36 +8,31 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 ## 当前恢复点 — 2026-09-24 PDT
 
 - 最新产品源码与完整私有 app/DMG/ZIP 绑定
-  `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；后继 `18d5f72f5` 修正
-  并发测试对新错误码的预期，`e3d60a115` 修复 packaged QA 探针的截止时间
-  诊断。原 `b9666a5af` 及全部有效祖先保留；恢复时先重新读取 HEAD/tree/dirty，
-  不能用本行覆盖更晚提交。准确 `e3d` PR Source baseline 已通过，其余 CI
-  在本检查点仍运行；旧 `7b9cb2b4f` 56/56 成功不能继承。PR 仍为 Draft；真正 main
-  最后直接核验仍为
-  `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，不是 PR 测试合并 SHA。
-- ZIP 交接包的 soak 脚本修复已在原工程集成、测试、定向提交并普通 push；后继补上
-  安装版定向诊断及审批门事件回放的真实 RED→GREEN 修复。28/3 等窄测和脚本
-  通过均不构成 Mac 安装验收。
+  `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；当前已推送 QA 后继
+  `4c1f98d97621733fffd226834a8bb217fac915a4`，原 `b9666a5af` 及全部
+  有效祖先保留。恢复时重新读取 HEAD/tree/dirty，不用本行覆盖更晚提交。
+  `4c1` 本机受影响测试 52/52、baseline 111/111，通过；准确后继 CI
+  本检查点仍在运行，旧提交的绿色检查不转移。PR28 仍 Draft；直接读取真正
+  `main` 为 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。
+- 附件 ZIP 全部 13 项通过 SHA256 校验，三个 QA 修复已在原 owner 集成：
+  前置失败停止后续写入、显式保留受保护诊断 profile、fork 恰好新增一个
+  child。后继加入只读分段观察及 fork 前后父历史一致检查；均已定向 commit
+  并普通 push。附件的片段测试与转换器测试不等于源码或安装验收。
 - 14ab 完整私有容器的 DMG 校验、安装副本严格签名、独立 Go Core 读包与
   准确许可审计通过；1,172 个实际依赖实例无强制工程阻断，Canvas 未随 Core
   分发，Lazy 替代已打包。该包仍为 `development_clean_non_publishable`。
-- 历史 7b 独立 app 在合成隔离 Provider 下完成设置、重启、会话、工具、审批、
-  用户输入、fork/resume 和 usage；完整 DMG 会话在审批允许时触及观察期限。
-  后继 c25 安装版显式取消及审批后 fork 的定向会话通过。14ab 同一 DMG 安装
-  副本在分开的 fresh 会话中通过工具/附件、审批、用户输入、显式取消、
-  单次 fork 0→1、新 Main 历史恢复和第二轮完成 1→2；完整会话在四轮完成后
-  触及原有 180 秒总观察期限，后段
-  审批/派生/恢复未完成。更早的 65a 设置写入超时与最终读回 503 保留为历史
-  失败；14ab 503 未复现，不能声称已证明根因。fork400 未取得准确响应；先核对
-  派生前后状态，不重播写操作。详见
-  [当前安装证据](../qa/pr28-installed-admission-followup-2026-09-24.md)、
-  [先前接续](../qa/pr28-installed-continuation-2026-09-24.md)和
-  [7b 历史证据](../qa/pr28-installed-closure-2026-09-24.md)。
-- 当前四个出口：`SourceReady=pending`（e3d 准确 CI 尚未全部结束）；
+- 同一 14ab DMG 安装副本的连续合成 Provider 旅程在 `4c1` QA harness 下
+  19/19 实际检查通过：设置、重启、普通/工具/plan/附件、审批拒绝和允许、
+  用户输入、fork/resume、列表、usage、终态及清理；fork child 0→1，父历史
+  不变。另有同 SOURCE 的定向取消与新进程恢复回执。原 180 秒失败定位到
+  旧 CDP 总观察窗口触及用户输入阶段，旧 fork400/间歇性 503 精确内因仍未
+  证实。见[最新 QA 回执](../qa/pr28-closure-repair-continuation-2026-09-24.md)。
+- 当前四个出口：`SourceReady=pending`（准确后继 CI 尚未全部结束）；
   `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
-  同一最终候选仍需完整安装旅程、正常受保护 Provider、120-turn 实际 GUI、
-  Core 升级/数据保全和安装版 PDF 预览等验收；不同会话与 SOURCE 的成功
-  不能相加放行。
+  14ab 仍缺正常受保护 Provider 恢复、120-turn 安装 GUI、Core 升级/数据
+  保全、安装 PDF 预览的有效回执。Mac Computer Use 对全新隔离 14ab 进程
+  返回 `timeoutReached`，未取得 GUI 树；旧/新 app 顺序启动也未形成可读回的
+  会话 fixture，不能据此放行。
   Developer ID/公证/publication authority 只属于未来公开 macOS 分发；不索取
   原开发 Key/普通开发 Keychain 密码，不增加累计 US$5 预算。
 

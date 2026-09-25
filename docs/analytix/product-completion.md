@@ -11,32 +11,34 @@ history before comparing remote state.
 
 The latest product-code SOURCE on
 `codex/workbench-product-delivery-20260914` is
-`14ab14cb9eb28611b1fd0c526865aee01bed5f95`; the later
-`18d5f72f5c4c0a8d1a54e0c1ac756127c96761c5` changes a Go test
-expectation, and `e3d60a11553f8f7fd8d5f3c9936573e16d23a4e1` repairs a
-packaged QA preflight diagnosis. A complete private app/DMG/ZIP is bound to
+`14ab14cb9eb28611b1fd0c526865aee01bed5f95`; later commits through
+`4c1f98d97621733fffd226834a8bb217fac915a4` change tests, packaged QA
+or documents, without changing the product build inputs. A complete private
+app/DMG/ZIP is bound to
 `14ab`. Its installed
 DMG copy passes strict signature, independent Core Go inspection and exact
 artifact legal audit (1,172 instances, zero mandatory engineering blockers).
 Canvas is excluded and the Lazy replacement is present. The package remains
 `development_clean_non_publishable`.
 
-On that same installed DMG copy, focused cancellation, tool/attachment and
-approval allow/deny, user input, single forks (child count 0→1), and
-new-process history plus a second completed turn (count 1→2) pass in separate
-isolated synthetic-Provider sessions. The full session
-reached four completed turns but exhausted its original 180-second total
-observation window before the later approval/fork/resume stages. It is not a
-full-journey pass. The earlier intermittent accepted-final GET 503 did not
-recur in the new-process check; its exact inner cause remains unproved. See
-the [current artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-24.md),
+On that same installed DMG copy, a repaired and stage-observed continuous
+synthetic-Provider journey now passes 19/19 actual checks, including the
+single fork (child count 0→1) and unchanged parent turn list. Separate
+isolated sessions also passed focused cancellation and new-process history
+with a second completed turn (count 1→2). The earlier 180-second total CDP
+evaluation returned an unknown outcome near the user-input gate; read-only
+stage observation resolved that QA visibility gap without replaying writes or
+changing product deadlines. The earlier intermittent accepted-final GET 503
+did not recur; its exact inner cause remains unproved. See the
+[closure repair checkpoint](qa/pr28-closure-repair-continuation-2026-09-24.md),
+[artifact checkpoint](qa/pr28-installed-admission-followup-2026-09-24.md),
 [prior continuation](qa/pr28-installed-continuation-2026-09-24.md), and
 [7b historical checkpoint](qa/pr28-installed-closure-2026-09-24.md).
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `pending` for latest `e3d60a115`: targeted Go tests, 42 focused soak tests and 101 baseline tests pass locally; its GitHub Source baseline passed, while other exact-HEAD jobs were still running at this checkpoint. The `14ab` CI failed an old expected error-code assertion, corrected at `18d`. The `5c68cf6c7` Source baseline exposed a final-handshake classification race, corrected at `e3d` without raising the product deadline. Older green checks do not transfer. |
-| PrivateCandidateReady | `false`: the `14ab` container has focused tool/approval/user-input, cancellation/fork and new-process passes, but no complete installed journey, normal protected Provider setup/recovery, real 120-turn GUI, Core upgrade/data preservation or installed PDF preview. The old intermittent hydration 503 is not conclusively localized. |
+| SourceReady | `pending`: latest QA-code commit `4c1f98d97` has 52 affected cases and 111 baseline cases passing locally; its GitHub CI was still running at this checkpoint. Re-read checks for the final PR HEAD after this documentation update. Older green checks do not transfer. |
+| PrivateCandidateReady | `false`: the `14ab` container has one continuous installed synthetic-Provider journey and separate cancellation/new-process passes. Normal protected Provider setup/recovery on 14ab, real 120-turn installed GUI, Core upgrade/data preservation and installed PDF preview remain unverified. The old intermittent hydration 503 is not conclusively localized. |
 | MergeReady | `false`: PR28 remains Draft; required product acceptance and final review are open. |
 | PublicMacReleaseReady | `false`: private classification and no Developer ID/notarization/production publication authority. These are future public-distribution conditions, not private-candidate or ordinary PR blockers. |
 
