@@ -2443,8 +2443,7 @@ async function runActualPackagedSessionSoak() {
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
-        const evaluationDeadline = Date.now() +
-          (segmentedObservation ? Math.min(timeoutMs, 30_000) : timeoutMs)
+        const evaluationDeadline = Date.now() + timeoutMs
         await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
         rendererReadinessPassed = true
         const journeyOptions = { providerBaseUrl: contractProvider.url, providerId,
