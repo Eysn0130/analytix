@@ -51,7 +51,7 @@ and disposed of task Keychain handles.
 | B. Cancellation | `focused-cancel-f4cf3ef14.json`: a pending approval was interrupted, terminal replay matched, the intended tool file effect did not occur and cleanup quiesced. Focused mode intentionally does not run the full journey. | Pass for focused installed cancellation. |
 | C. Normal protected Provider recovery | No real Provider credential was copied into the synthetic profile. The earlier real-Provider QA authority was retired with its task Keychain; no new approved unlocked authority was available for this candidate. | Blocked. No normal real-Provider setup/restart claim. |
 | D. 120-turn installed GUI | `long-history-installed-resume-f4cf3ef14.json` records 120/120 completed, ordered unique local synthetic turns. `long-history-installed-gui-f4cf3ef14.json` and early/middle/late screenshots show the installed GUI's 120-turn label, rendered beginning/middle/end and switch-away/back. A new Main-process recovery was not run. Unique GUI turns 121 and 122 each ended `provider_error`, without replay. A protected Registry probe returned `credential_unavailable` after a Go restart; the replacement loopback fixture received zero requests. | Partial. Rendering passes; post-120 continuation and new Main recovery do not. The credential lifecycle is a lead, not a proved product root cause. |
-| E. Core upgrade and data preservation | `upgrade-fixture-f5-to-f4.json` records old installed `f5fd97cfa` writing and reading one completed local synthetic thread, theme, Provider Registry metadata and PDF hash in a fresh isolated profile. Its runner stopped the old Main and launched the `f4cf3ef14` DMG copy in that same profile. The new Main stayed in `SecItemCopyMatching` while macOS `SecurityAgent` was active; no Go process or CDP page became available. The app was stopped without an after-upgrade read or write. | Partial: old-state fixture exists; new-version data preservation and continuation remain unverified. The Keychain access prompt/cause was not resolved by retrying or copying credentials. |
+| E. Core upgrade and data preservation | `upgrade-fixture-f5-to-f4.json` records old installed `f5fd97cfa` writing and reading one completed local synthetic thread, theme, Provider Registry metadata and PDF hash in a fresh isolated profile. Its runner stopped the old Main and launched the `f4cf3ef14` DMG copy in that same profile. The new Main stayed in `SecItemCopyMatching` while macOS `SecurityAgent` was active; no Go process or CDP page became available. The app was stopped without an after-upgrade read or write. | Partial: old-state fixture exists; new-version data preservation and continuation remain unverified. No password was entered or requested from the user. |
 | F. Installed PDF preview | `pdf-installed-gui-f4cf3ef14.json` and two screenshots show an installed GUI opening a two-page generated PDF from Files; both pages rendered, next-page changed 1→2, zoom changed 115→125%, search found one second-page match, and close/reopen returned to page one before navigating to page two again. | Pass for this two-page synthetic PDF fixture only. |
 
 The GUI's normal onboarding Save showed “The provider registry returned an
@@ -62,6 +62,17 @@ not resent. This is a separate observable limitation of that QA session; it
 does not prove data loss or a production Provider failure. The old fork400 and
 intermittent 503 were not reproduced on this candidate, so their exact earlier
 causes remain unproved.
+
+A read-only capture of the task-owned SecurityAgent window is retained as
+`upgrade-new-app-keychain-prompt-f4.png` (SHA-256
+`bee8e9e758abd102751e7255c6453a54a09a2e6e376d859533e538887ba1dcc0`).
+It explicitly asks for the `login` Keychain password before the new app may use
+the `Analytix Safe Storage` item. The runner had rebound an isolated QA login
+Keychain; the prompt was denied and closed after the app stopped. Both private
+apps are ad hoc signed with the same bundle identifier but different code
+directory hashes. A changed access control identity is a plausible cause of
+the prompt, not a proved sole root cause. No Keychain item or access policy was
+modified to bypass it.
 
 ## Admission and next dependency
 

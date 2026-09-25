@@ -26,7 +26,8 @@ the beginning, middle and end of that history. Post-120 GUI continuation failed
 with `provider_error` after protected credential unavailability following a Go
 restart; new Main-process recovery was not observed. In a separate upgrade
 profile, the old installed Core wrote and read a thread, but the new app blocked
-in macOS Keychain access before its data readback. Normal protected real
+in macOS Keychain access before its data readback; the system requested the
+isolated QA login Keychain password. Normal protected real
 Provider recovery was not run on this candidate. See the
 [current f4 installed checkpoint](qa/pr28-f4-installed-continuation-2026-09-24.md)
 for exact receipts, limits and next observations. The
