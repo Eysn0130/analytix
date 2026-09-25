@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1586,5 +1587,62 @@ func TestOrdinaryMacRefusesLegacyKeychainMarkerWithoutReadingIt(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatal("ordinary macOS startup read legacy Keychain")
+	}
+}
+
+func TestExplicitTaskKeychainBindingUsesLimitedLegacyReentryWithoutKeychainRead(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	writer, err := newStore(storePath, fixedMasterKeyProvider{key: bytes.Repeat([]byte{0x67}, masterKeySize)}, allowCredentialConsumer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := writer.Put(context.Background(), "provider-api-key", []byte("synthetic-old-credential"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(filepath.Dir(storePath), "master-key")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binding := darwinExplicitKeychainBindingV2{
+		SchemaVersion: 2, AuthorityDigest: strings.Repeat("a", 64),
+		Security: darwinKeychainSecurityDocumentV1{
+			SchemaVersion: 1, PathDigest: strings.Repeat("b", 64),
+			Device: "1", Inode: "2", Owner: strconv.Itoa(os.Geteuid()), Mode: "600", Links: "1",
+		},
+	}
+	encoded, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingPath := filepath.Join(directory, darwinExplicitBindingFile)
+	if err := os.WriteFile(bindingPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := InspectLegacyKeychainProfile(storePath)
+	if err != nil || profile == nil || profile.ActivePurposes()[ref] != "provider-api-key" {
+		t.Fatalf("explicit legacy binding did not reach limited re-entry: %v", err)
+	}
+	v2Path := filepath.Join(filepath.Dir(filepath.Dir(storePath)), "provider-secrets-v2", "credentials.v2.json")
+	if _, err := defaultMasterKeyProvider(v2Path, Options{LegacyReentryFileAuthority: true}); err != nil {
+		t.Fatalf("explicit legacy binding could not select file re-entry authority: %v", err)
+	}
+	if after, err := os.ReadFile(storePath); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("legacy inventory changed committed ciphertext")
+	}
+	binding.Security.Mode = "644"
+	encoded, err = json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bindingPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectLegacyKeychainProfile(storePath); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatalf("unsafe explicit legacy binding was admitted: %v", err)
 	}
 }

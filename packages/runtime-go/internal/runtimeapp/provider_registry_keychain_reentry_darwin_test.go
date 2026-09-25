@@ -5,9 +5,12 @@ package runtimeapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	providerregistryfs "analytix.local/runtime-go/internal/adapters/outbound/providerregistryfs"
@@ -73,75 +76,112 @@ func TestOrdinaryMacMissingMasterKeyPreservesCommittedCredential(t *testing.T) {
 }
 
 func TestLegacyKeychainProfileReentersWithoutOldMasterKey(t *testing.T) {
-	ctx := context.Background()
-	dataDir := t.TempDir()
-	writeProviderRegistrySyntheticFallbackMasterKeyV1(t, dataDir, 'q')
-	old, err := openProviderRegistryAuthorityV1(ctx, dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior := connectProviderRegistryTestWinnerV1(t, ctx, old.Manager(), "provider-legacy-reentry", "synthetic-old-key")
-	if err := old.Close(); err != nil {
-		t.Fatal(err)
-	}
-	oldSecretPath := filepath.Join(dataDir, "private", "provider-secrets", "credentials.v1.json")
-	before, err := os.ReadFile(oldSecretPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	masterDirectory := filepath.Join(filepath.Dir(oldSecretPath), "master-key")
-	if err := os.WriteFile(filepath.Join(masterDirectory, "authority.v1"), []byte("analytix-master-key-authority:v1:keychain\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(masterDirectory, "master.key")); err != nil {
-		t.Fatal(err)
-	}
+	for _, legacyFormat := range []string{"ordinary-keychain", "explicit-task-binding"} {
+		t.Run(legacyFormat, func(t *testing.T) {
+			ctx := context.Background()
+			dataDir := t.TempDir()
+			writeProviderRegistrySyntheticFallbackMasterKeyV1(t, dataDir, 'q')
+			old, err := openProviderRegistryAuthorityV1(ctx, dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior := connectProviderRegistryTestWinnerV1(t, ctx, old.Manager(), "provider-legacy-reentry", "synthetic-old-key")
+			if err := old.Close(); err != nil {
+				t.Fatal(err)
+			}
+			oldSecretPath := filepath.Join(dataDir, "private", "provider-secrets", "credentials.v1.json")
+			before, err := os.ReadFile(oldSecretPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			masterDirectory := filepath.Join(filepath.Dir(oldSecretPath), "master-key")
+			if legacyFormat == "ordinary-keychain" {
+				if err := os.WriteFile(filepath.Join(masterDirectory, "authority.v1"), []byte("analytix-master-key-authority:v1:keychain\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Remove(filepath.Join(masterDirectory, "authority.v1")); err != nil {
+					t.Fatal(err)
+				}
+				binding := struct {
+					SchemaVersion   int    `json:"schemaVersion"`
+					AuthorityDigest string `json:"authorityDigest"`
+					Security        struct {
+						SchemaVersion int    `json:"schemaVersion"`
+						PathDigest    string `json:"pathDigest"`
+						Device        string `json:"device"`
+						Inode         string `json:"inode"`
+						Owner         string `json:"owner"`
+						Mode          string `json:"mode"`
+						Links         string `json:"links"`
+					} `json:"security"`
+				}{SchemaVersion: 2, AuthorityDigest: strings.Repeat("a", 64)}
+				binding.Security.SchemaVersion = 1
+				binding.Security.PathDigest = strings.Repeat("b", 64)
+				binding.Security.Device = "1"
+				binding.Security.Inode = "2"
+				binding.Security.Owner = strconv.Itoa(os.Geteuid())
+				binding.Security.Mode = "600"
+				binding.Security.Links = "1"
+				encoded, err := json.Marshal(binding)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(masterDirectory, "explicit-task-keychain-binding.v1"), encoded, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Remove(filepath.Join(masterDirectory, "master.key")); err != nil {
+				t.Fatal(err)
+			}
 
-	reentry, err := openProviderRegistryAuthorityV1(ctx, dataDir)
-	if err != nil {
-		t.Fatalf("legacy profile did not reach limited re-entry: %v", err)
-	}
-	snapshot, err := reentry.Manager().Snapshot(ctx)
-	if err != nil || snapshot.Providers[prior.ID].CredentialRef != prior.CredentialRef {
-		t.Fatalf("legacy Registry reference was lost: %v", err)
-	}
-	if after, err := os.ReadFile(oldSecretPath); err != nil || !bytes.Equal(before, after) {
-		t.Fatal("opening legacy profile changed its ciphertext before re-entry")
-	}
-	if err := reentry.Manager().CheckCredential(ctx, providerregistryapp.ProviderOperationCommand{
-		Expected: expectedProviderRegistryStateV1(snapshot, prior.ID), ProviderID: prior.ID,
-	}); !errors.Is(err, registryport.ErrCredentialReentryRequired) {
-		t.Fatalf("legacy credential check did not return visible re-entry status: %v", err)
-	}
-	if _, err := newProviderRegistryExecutionResolverV1(reentry.Manager()).ResolveTurnExecution(ctx, provider.TurnExecutionInput{}); err == nil {
-		t.Fatal("legacy Keychain credential was treated as executable")
-	}
-	mutation, err := secretstoreport.SetCredential([]byte("synthetic-new-key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	winner, err := reentry.Manager().ReplaceCredential(ctx, providerregistryapp.CredentialReplaceCommand{
-		Expected: expectedProviderRegistryStateV1(snapshot, prior.ID), ProviderID: prior.ID,
-		CredentialPurpose: "provider-api-key", Credential: mutation,
-	})
-	if err != nil || winner.CredentialRef == prior.CredentialRef {
-		t.Fatalf("fenced legacy credential replacement failed: %v", err)
-	}
-	if err := reentry.Close(); err != nil {
-		t.Fatal(err)
-	}
-	restarted, err := openProviderRegistryAuthorityV1(ctx, dataDir)
-	if err != nil {
-		t.Fatalf("file-authority restart failed: %v", err)
-	}
-	defer restarted.Close()
-	resolved, err := newProviderRegistryExecutionResolverV1(restarted.Manager()).ResolveTurnExecution(ctx, provider.TurnExecutionInput{})
-	if err != nil || resolved.Config.APIKey != "synthetic-new-key" {
-		t.Fatalf("replacement did not survive restart: %v", err)
-	}
-	retired, err := os.ReadFile(oldSecretPath)
-	if err != nil || bytes.Contains(retired, []byte(prior.CredentialRef)) {
-		t.Fatal("verified replacement did not retire legacy ciphertext reference")
+			reentry, err := openProviderRegistryAuthorityV1(ctx, dataDir)
+			if err != nil {
+				t.Fatalf("legacy profile did not reach limited re-entry: %v", err)
+			}
+			snapshot, err := reentry.Manager().Snapshot(ctx)
+			if err != nil || snapshot.Providers[prior.ID].CredentialRef != prior.CredentialRef {
+				t.Fatalf("legacy Registry reference was lost: %v", err)
+			}
+			if after, err := os.ReadFile(oldSecretPath); err != nil || !bytes.Equal(before, after) {
+				t.Fatal("opening legacy profile changed its ciphertext before re-entry")
+			}
+			if err := reentry.Manager().CheckCredential(ctx, providerregistryapp.ProviderOperationCommand{
+				Expected: expectedProviderRegistryStateV1(snapshot, prior.ID), ProviderID: prior.ID,
+			}); !errors.Is(err, registryport.ErrCredentialReentryRequired) {
+				t.Fatalf("legacy credential check did not return visible re-entry status: %v", err)
+			}
+			if _, err := newProviderRegistryExecutionResolverV1(reentry.Manager()).ResolveTurnExecution(ctx, provider.TurnExecutionInput{}); err == nil {
+				t.Fatal("legacy Keychain credential was treated as executable")
+			}
+			mutation, err := secretstoreport.SetCredential([]byte("synthetic-new-key"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			winner, err := reentry.Manager().ReplaceCredential(ctx, providerregistryapp.CredentialReplaceCommand{
+				Expected: expectedProviderRegistryStateV1(snapshot, prior.ID), ProviderID: prior.ID,
+				CredentialPurpose: "provider-api-key", Credential: mutation,
+			})
+			if err != nil || winner.CredentialRef == prior.CredentialRef {
+				t.Fatalf("fenced legacy credential replacement failed: %v", err)
+			}
+			if err := reentry.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := openProviderRegistryAuthorityV1(ctx, dataDir)
+			if err != nil {
+				t.Fatalf("file-authority restart failed: %v", err)
+			}
+			defer restarted.Close()
+			resolved, err := newProviderRegistryExecutionResolverV1(restarted.Manager()).ResolveTurnExecution(ctx, provider.TurnExecutionInput{})
+			if err != nil || resolved.Config.APIKey != "synthetic-new-key" {
+				t.Fatalf("replacement did not survive restart: %v", err)
+			}
+			retired, err := os.ReadFile(oldSecretPath)
+			if err != nil || bytes.Contains(retired, []byte(prior.CredentialRef)) {
+				t.Fatal("verified replacement did not retire legacy ciphertext reference")
+			}
+		})
 	}
 }
 
