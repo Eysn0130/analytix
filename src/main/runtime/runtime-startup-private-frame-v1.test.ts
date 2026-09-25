@@ -188,9 +188,6 @@ describe('runtime startup private frame v1', () => {
     const deferredSync = body.indexOf(
       'if (!bundledFundsConfigSynced) await syncRuntimeConfig()'
     )
-    const keychainBinding = body.indexOf(
-      'resolveDarwinSecretStoreKeychainBindingV1({'
-    )
     const directBinding = Math.max(
       body.indexOf('hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1'),
       body.indexOf('hostScheduleMcpBindingV1 = syncedConfig.hostScheduleMcpBindingV1')
@@ -203,8 +200,7 @@ describe('runtime startup private frame v1', () => {
     const spawn = body.indexOf('spawn(', frameDecision)
 
     expect(start).toBeGreaterThanOrEqual(0)
-    expect(keychainBinding).toBeGreaterThanOrEqual(0)
-    expect(keychainBinding).toBeLessThan(deferredSync)
+    expect(source).not.toContain('resolveDarwinSecretStoreKeychainBindingV1(')
     expect(bindingReady).toBeGreaterThanOrEqual(0)
     expect(preflight).toBeGreaterThan(bindingReady)
     expect(frameDecision).toBeGreaterThan(preflight)

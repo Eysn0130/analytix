@@ -10,7 +10,7 @@ import (
 )
 
 func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvider, error) {
-	if !options.empty() || storePath == "" || !filepath.IsAbs(storePath) || filepath.Clean(storePath) != storePath {
+	if !options.empty() || options.LegacyReentryFileAuthority || storePath == "" || !filepath.IsAbs(storePath) || filepath.Clean(storePath) != storePath {
 		return nil, portsecretstore.ErrInvalidRequest
 	}
 	return newFallbackMasterKeyProvider(

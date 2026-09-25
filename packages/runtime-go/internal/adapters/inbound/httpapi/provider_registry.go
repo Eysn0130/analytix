@@ -2980,6 +2980,8 @@ func writeProviderRegistryMutation(w http.ResponseWriter, expected domainregistr
 
 func writeProviderRegistryServiceError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, registryport.ErrCredentialReentryRequired):
+		writeProviderRegistryFailure(w, http.StatusServiceUnavailable, "credential_reentry_required")
 	case errors.Is(err, registryport.ErrCredentialUnavailable):
 		writeProviderRegistryFailure(w, http.StatusServiceUnavailable, "credential_unavailable")
 	case errors.Is(err, registryport.ErrInvalidRequest):
@@ -3014,6 +3016,8 @@ func writeProviderRegistryFailure(w http.ResponseWriter, status int, code string
 		message = "The provider registry is temporarily unavailable."
 	case "credential_unavailable":
 		message = "Secure credential storage is temporarily unavailable. Check system security access and retry. Existing settings have been kept."
+	case "credential_reentry_required":
+		message = "This saved credential used the former macOS Keychain authority. Re-enter it in Provider Settings to use the new private store. Existing settings have been kept."
 	case "verification_failure":
 		message = "The provider registry operation could not be verified."
 	case "request_too_large":

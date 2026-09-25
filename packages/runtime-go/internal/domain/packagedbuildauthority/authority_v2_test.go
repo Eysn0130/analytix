@@ -25,10 +25,10 @@ func TestPackagedBuildAuthorityV2AcceptsJavaScriptProducerGolden(t *testing.T) {
 	if parsed.Controlled == nil || parsed.Development != nil {
 		t.Fatalf("JavaScript producer disposition parsed incorrectly: %#v", parsed)
 	}
-	if parsed.Authority.AuthorityDigest != "1103e3fa03b4bd8e7231f82a2669d244bc2ff39727e7601d118c839680807597" {
+	if parsed.Authority.AuthorityDigest != "f310dbe02a258009085562dee8cd293daf2e1f4f69523ca4229af1daf573885b" {
 		t.Fatalf("JavaScript producer authority digest drifted: %q", parsed.Authority.AuthorityDigest)
 	}
-	if parsed.Authority.BuildContext.ContextDigest != "e9ed518d23f5af0dba2ff3f820b31e5ebf0275dc28d0b7c9d37875ab95c7a1c6" {
+	if parsed.Authority.BuildContext.ContextDigest != "a5f878cf3708c5dcd27c8ba8c70564ad7880a1cdf7e2b162a43d8874b21c5163" {
 		t.Fatalf("JavaScript producer build context digest drifted: %q", parsed.Authority.BuildContext.ContextDigest)
 	}
 }

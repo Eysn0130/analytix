@@ -320,6 +320,8 @@ const (
 
 type darwinMasterKeyProvider struct {
 	developmentFile bool
+	ordinaryFile    bool
+	storePath       string
 	authorityPath   string
 	keychain        *keychainMasterKeyProvider
 	fallback        *fallbackMasterKeyProvider
@@ -330,9 +332,23 @@ func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]by
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 
-	if provider.developmentFile {
+	if provider.developmentFile || provider.ordinaryFile {
 		authority, err := provider.readAuthority()
 		if errors.Is(err, os.ErrNotExist) {
+			// A lost marker in a populated profile is not fresh provisioning.
+			// In particular, never create a file key over legacy Keychain
+			// ciphertext after an interrupted upgrade. The existing
+			// development file-authority route retains its prior behavior.
+			if provider.ordinaryFile && provider.storePath != "" {
+				fallbackKey, fallbackErr := provider.fallback.readWithBoundedInitializationWait()
+				clearBytes(fallbackKey)
+				if fallbackErr != nil && !errors.Is(fallbackErr, os.ErrNotExist) {
+					return nil, portsecretstore.ErrMasterKeyUnavailable
+				}
+				if errors.Is(fallbackErr, os.ErrNotExist) && !freshDarwinFileAuthorityProfile(provider.storePath) {
+					return nil, portsecretstore.ErrMasterKeyUnavailable
+				}
+			}
 			authority, err = provider.selectAuthority(darwinAuthorityFallback)
 		}
 		if err != nil || authority != darwinAuthorityFallback {
@@ -386,6 +402,14 @@ func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]by
 	}
 	clearBytes(probedKey)
 	return provider.loadSelected(ctx, winner)
+}
+
+func freshDarwinFileAuthorityProfile(storePath string) bool {
+	// The Registry is created before the first visible Save. Its committed
+	// references are verified by Manager.Recover before any mutation, while the
+	// Secret Store must never mint a new key over existing ciphertext.
+	_, err := os.Lstat(storePath)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func (provider *darwinMasterKeyProvider) loadSelected(ctx context.Context, authority darwinMasterKeyAuthority) ([]byte, error) {
@@ -476,6 +500,16 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	if options.DevelopmentFileAuthority && !options.empty() {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
+	if options.LegacyReentryFileAuthority && (options.DevelopmentFileAuthority || !options.empty() ||
+		filepath.Base(storePath) != "credentials.v2.json" || filepath.Base(filepath.Dir(storePath)) != "provider-secrets-v2") {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	if options.LegacyReentryFileAuthority {
+		legacyPath := filepath.Join(filepath.Dir(filepath.Dir(storePath)), "provider-secrets", "credentials.v1.json")
+		if verifyLegacyKeychainMarker(legacyPath) != nil {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+	}
 	if !options.empty() {
 		if options.DarwinKeychainDBPath == "" || options.DarwinKeychainBindingDigest == "" ||
 			options.DarwinKeychainSecurityDigest == "" || options.DarwinKeychainAuthorityStorePath == "" ||
@@ -517,6 +551,8 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	}
 	return &darwinMasterKeyProvider{
 		developmentFile: options.DevelopmentFileAuthority,
+		ordinaryFile:    !options.DevelopmentFileAuthority,
+		storePath:       storePath,
 		authorityPath:   filepath.Join(directory, darwinAuthorityFile),
 		keychain: &keychainMasterKeyProvider{
 			runner: securityCommandRunner{},

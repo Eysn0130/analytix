@@ -909,6 +909,50 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const activeRegistryProvider = registrySnapshot?.providers.find(
     (item) => item.id === activeProvider?.id
   )
+  const [credentialAvailability, setCredentialAvailability] = useState<{
+    providerId: string
+    revision: string
+    status: 'available' | 'reentry' | 'unavailable'
+  } | null>(null)
+  useEffect(() => {
+    const candidate = registrySnapshot?.providers.find((item) => item.id === selectedProviderId)
+    if (!candidate || candidate.tombstone || !candidate.credentialConfigured || !candidate.credentialPurpose) {
+      setCredentialAvailability(null)
+      return
+    }
+    let current = true
+    setCredentialAvailability(null)
+    const expected = {
+      registryRevision: registrySnapshot!.registryRevision,
+      registryIncarnation: registrySnapshot!.registryIncarnation,
+      providerRevision: candidate.revision,
+      providerGeneration: candidate.generation,
+      providerIncarnation: candidate.incarnation,
+      providerCredentialPurpose: candidate.credentialPurpose
+    }
+    void window.analytix.providerRegistry.request({
+      schemaVersion: 1, operation: 'credential-check', providerId: candidate.id, expected
+    }).then((result) => {
+      if (!current) return
+      const status = 'error' in result
+        ? result.error.code === 'credential_reentry_required' ? 'reentry' : 'unavailable'
+        : 'credentialAvailable' in result && result.credentialAvailable === true &&
+          result.providerId === candidate.id && result.registryRevision === expected.registryRevision &&
+          result.registryIncarnation === expected.registryIncarnation &&
+          result.providerRevision === expected.providerRevision &&
+          result.providerGeneration === expected.providerGeneration &&
+          result.providerIncarnation === expected.providerIncarnation
+          ? 'available' : 'unavailable'
+      setCredentialAvailability({ providerId: candidate.id, revision: candidate.revision, status })
+    }).catch(() => {
+      if (current) setCredentialAvailability({ providerId: candidate.id, revision: candidate.revision, status: 'unavailable' })
+    })
+    return () => { current = false }
+  }, [registrySnapshot, selectedProviderId])
+  const activeCredentialReentryRequired = credentialAvailability !== null &&
+    credentialAvailability.providerId === activeRegistryProvider?.id &&
+    credentialAvailability.revision === activeRegistryProvider?.revision &&
+    credentialAvailability.status === 'reentry'
   const canConfigureAccountObservation = Boolean(
     activeRegistryProvider && !activeRegistryProvider.tombstone &&
     !getModelProviderPreset(activeRegistryProvider.id) && !tokenPlanPresetForProfileId(activeRegistryProvider.id)
@@ -1772,6 +1816,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
           {isDraft ? <ProviderBadge tone="warning">{t('modelProviderDraftBadge')}</ProviderBadge> : null}
           {inUse ? <ProviderBadge tone="accent">{t('modelProviderInUse')}</ProviderBadge> : null}
           {!isDraft && missingKey ? <ProviderBadge tone="warning">{t('modelProviderMissingKey')}</ProviderBadge> : null}
+          {!isDraft && selected && activeCredentialReentryRequired
+            ? <ProviderBadge tone="warning">{t('modelProviderApiKeyReentryBadge')}</ProviderBadge> : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-ds-faint">
           <span>{t('modelProviderModelCount', { total: providerModelCount(item) })}</span>
@@ -1969,6 +2015,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     ) : null}
                     {activeRegistryProvider && !activeRegistryProvider.tombstone &&
                     activeRegistryProvider.credentialConfigured &&
+                    !activeCredentialReentryRequired &&
                     registrySnapshot?.selectedProviderId !== activeRegistryProvider.id ? (
                       <button
                         type="button"
@@ -2053,18 +2100,22 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         }}
                         visible={showApiKey}
                         onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
-                        placeholder={t(activeRegistryProvider?.credentialConfigured === true
-                          ? 'modelProviderApiKeySavedPlaceholder'
-                          : 'modelProviderApiKeyPlaceholder')}
+                        placeholder={t(activeCredentialReentryRequired
+                          ? 'modelProviderApiKeyReentryPlaceholder'
+                          : activeRegistryProvider?.credentialConfigured === true
+                            ? 'modelProviderApiKeySavedPlaceholder'
+                            : 'modelProviderApiKeyPlaceholder')}
                         autoComplete="off"
                         showLabel={t('showSecret')}
                         hideLabel={t('hideSecret')}
                       />
                     </div>
-                    {activeRegistryProvider?.credentialConfigured === true ? (
-                      <span className="text-[12px] font-normal text-ds-muted">
-                        {t('modelProviderApiKeySavedHint')}
+                    {activeCredentialReentryRequired ? (
+                      <span role="alert" className="text-[12px] font-normal text-amber-700 dark:text-amber-300">
+                        {t('modelProviderApiKeyReentryHint')}
                       </span>
+                    ) : activeRegistryProvider?.credentialConfigured === true ? (
+                      <span className="text-[12px] font-normal text-ds-muted">{t('modelProviderApiKeySavedHint')}</span>
                     ) : null}
                   </label>
                   <label className={fieldLabelClass}>

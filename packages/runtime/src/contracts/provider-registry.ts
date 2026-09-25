@@ -1001,6 +1001,7 @@ export const PROVIDER_REGISTRY_FAILURE_MESSAGES_V1 = {
   conflict: 'The provider registry state has changed.',
   persistence_failure: 'The provider registry is temporarily unavailable.',
   credential_unavailable: 'Secure credential storage is temporarily unavailable. Check system security access and retry. Existing settings have been kept.',
+  credential_reentry_required: 'This saved credential used the former macOS Keychain authority. Re-enter it in Provider Settings to use the new private store. Existing settings have been kept.',
   verification_failure: 'The provider registry operation could not be verified.',
   request_too_large: 'The provider registry request is too large.',
   unauthorized: 'Provider registry authentication is required.',

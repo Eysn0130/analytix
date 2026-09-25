@@ -22,10 +22,6 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import {
-  createIsolatedDarwinLoginKeychain,
-  createIsolatedDarwinTaskKeychain
-} from './runtime-go-packaged-milestone-a.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -2465,8 +2461,6 @@ async function runActualPackagedSessionSoak() {
   let debugPort = 0
   let runtimePort = 0
   let contractProvider = null
-  let isolatedLoginKeychain = null
-  let isolatedTaskKeychain = null
   let approvalDenyFileAbsent = false
   let approvalAllowFileMatches = false
   let cancelFileAbsent = false
@@ -2506,14 +2500,6 @@ async function runActualPackagedSessionSoak() {
       mkdirSync(runtimeDataDir, { mode: 0o700 })
       mkdirSync(chromiumTempDir, { mode: 0o700 })
       mkdirSync(workspace, { mode: 0o700 })
-      if (target.platform === 'darwin') {
-        isolatedTaskKeychain = await createIsolatedDarwinTaskKeychain(taskRoot, profileHome)
-        isolatedLoginKeychain = await createIsolatedDarwinLoginKeychain(profileHome)
-        const unlocked = await isolatedLoginKeychain.unlockForLaunch()
-        if (!unlocked.ok || !unlocked.defaultKeychainBound) {
-          throw new Error('isolated_login_keychain_unavailable')
-        }
-      }
       debugPort = await getFreePort()
       runtimePort = await getFreePort()
       while (runtimePort === debugPort) runtimePort = await getFreePort()
@@ -2618,13 +2604,6 @@ async function runActualPackagedSessionSoak() {
                 !listeningPidsOnPort(runtimePort).some((pid) =>
                   commandLineForPid(pid).includes(runtimeDataDir))
               if (!relaunch.firstProcessQuiesced) throw new Error('first_process_not_quiesced')
-              await isolatedTaskKeychain?.unlockForLaunch()
-              if (isolatedLoginKeychain) {
-                const unlocked = await isolatedLoginKeychain.unlockForLaunch()
-                if (!unlocked.ok || !unlocked.defaultKeychainBound) {
-                  throw new Error('isolated_login_keychain_unavailable')
-                }
-              }
               debugPort = await getFreePort()
               while (debugPort === runtimePort) debugPort = await getFreePort()
               child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
@@ -2718,10 +2697,6 @@ async function runActualPackagedSessionSoak() {
         catch { return { parseFailed: true } }
       })
     if (contractProvider) await contractProvider.close()
-    if (cleanupQuiesced) {
-      isolatedTaskKeychain?.dispose()
-      isolatedLoginKeychain?.dispose()
-    }
     if (tempHome) {
       const workspace = join(tempHome, 'workspace')
       approvalDenyFileAbsent = !existsSync(join(workspace, 'approval-deny.txt'))

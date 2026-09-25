@@ -83,12 +83,33 @@ func (record FaultRecorderFunc) Observe(point FaultPoint) error { return record(
 type Manager struct {
 	registry                   registryport.Store
 	secrets                    secretstoreport.RegistryStore
+	legacyReentryRefs          map[secretstoreport.CredentialRef]secretstoreport.Purpose
 	faults                     FaultRecorder
 	legacySource               registryport.LegacySourceReader
 	sourceAuthorityMu          sync.Mutex
 	sourceAuthorityChallenges  map[string]legacyMigrationSourceAuthorityChallenge
 	protectedRecoveryMu        sync.Mutex
 	protectedRecoveryConfirmed map[string]struct{}
+}
+
+// PermitLegacyReentryRefs is set only by startup after inspecting the exact
+// owner-protected legacy Keychain envelope inventory. It permits recovery to
+// retain those committed references as unavailable until a fenced UI replace.
+// It never makes an unavailable credential executable.
+func (manager *Manager) PermitLegacyReentryRefs(refs map[secretstoreport.CredentialRef]secretstoreport.Purpose) error {
+	if manager == nil || manager.legacyReentryRefs != nil {
+		return registryport.ErrInvalidRequest
+	}
+	copyRefs := make(map[secretstoreport.CredentialRef]secretstoreport.Purpose, len(refs))
+	for ref, purpose := range refs {
+		normalized, err := secretstoreport.NormalizePurpose(string(purpose))
+		if secretstoreport.ValidateCredentialRef(ref) != nil || err != nil || normalized != purpose {
+			return registryport.ErrInvalidRequest
+		}
+		copyRefs[ref] = purpose
+	}
+	manager.legacyReentryRefs = copyRefs
+	return nil
 }
 
 // ExecutionResolution is a single bounded read of the selected committed
@@ -513,6 +534,8 @@ func normalizeSecretError(err error) error {
 		return err
 	case errors.Is(err, secretstoreport.ErrInvalidRequest):
 		return registryport.ErrInvalidRequest
+	case errors.Is(err, secretstoreport.ErrLegacyReentryRequired):
+		return registryport.ErrCredentialReentryRequired
 	case errors.Is(err, secretstoreport.ErrMasterKeyUnavailable):
 		return registryport.ErrCredentialUnavailable
 	case errors.Is(err, secretstoreport.ErrPersistence):

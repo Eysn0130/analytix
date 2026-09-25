@@ -12,7 +12,7 @@ import {
   normalizeAppSettings
 } from '@shared/app-settings'
 import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/analytix-api'
-import { providerRegistryRequestSchemaV1, providerRegistryResultSchemaV1 } from '../../../../packages/runtime/src/contracts/provider-registry.js'
+import { PROVIDER_REGISTRY_FAILURE_MESSAGES_V1, providerRegistryRequestSchemaV1, providerRegistryResultSchemaV1 } from '../../../../packages/runtime/src/contracts/provider-registry.js'
 import { ProvidersSettingsSection } from './settings-section-providers'
 import { useChatStore } from '../store/chat-store'
 
@@ -48,6 +48,7 @@ function registryFixture() {
   let revision = 1
   const calls: ProviderRegistryRequest[] = []
   let failure: ProviderRegistryRequest['operation'] | null = null
+  let legacyReentryRequired = false
   const gates: Array<{ operation: ProviderRegistryRequest['operation']; entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }> = []
   const snapshot = (): Snapshot => ({
     schemaVersion: 1, registryRevision: String(revision), registryIncarnation,
@@ -62,6 +63,20 @@ function registryFixture() {
       result = { schemaVersion: 1, error: { code: 'runtime_unavailable', message: 'The provider registry is unavailable.' } }
     } else if (input.operation === 'list') {
       result = snapshot()
+    } else if (input.operation === 'credential-check') {
+      if (legacyReentryRequired) {
+        result = { schemaVersion: 1, error: {
+          code: 'credential_reentry_required', message: PROVIDER_REGISTRY_FAILURE_MESSAGES_V1.credential_reentry_required
+        } }
+      } else {
+        const current = providers.find((entry) => entry.id === input.providerId)!
+        result = {
+          schemaVersion: 1, registryRevision: String(revision), registryIncarnation,
+          providerId: current.id, providerRevision: current.revision,
+          providerGeneration: current.generation, providerIncarnation: current.incarnation,
+          credentialAvailable: true
+        }
+      }
     } else if (input.operation === 'credential-replace' || input.operation === 'connect' || input.operation === 'update') {
       expect(input.expected.registryRevision === String(revision)).toBe(true)
       expect(input.expected.registryIncarnation === registryIncarnation).toBe(true)
@@ -82,6 +97,7 @@ function registryFixture() {
         credentialConfigured: true, credentialPurpose: 'provider-api-key'
       }
       providers = [...providers.filter((entry) => entry.id !== id), next].sort((left, right) => left.id.localeCompare(right.id))
+      if (input.operation === 'credential-replace') legacyReentryRequired = false
       result = { schemaVersion: 1, registryRevision: String(revision), registryIncarnation, provider: structuredClone(next) }
     } else if (input.operation === 'select') {
       expect(input.expected.registryRevision === String(revision)).toBe(true)
@@ -111,7 +127,8 @@ function registryFixture() {
       gates.push(gate)
       return gate
     },
-    mutations: () => calls.filter((call) => call.operation !== 'list')
+    requireLegacyReentry() { legacyReentryRequired = true },
+    mutations: () => calls.filter((call) => call.operation !== 'list' && call.operation !== 'credential-check')
   }
 }
 
@@ -123,7 +140,7 @@ let patches: unknown[]
 const originalNotice = useChatStore.getState().showTopNotice
 
 function keyInput(): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"], input[placeholder="modelProviderApiKeySavedPlaceholder"]')
+  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"], input[placeholder="modelProviderApiKeySavedPlaceholder"], input[placeholder="modelProviderApiKeyReentryPlaceholder"]')
   expect(Boolean(input)).toBe(true)
   return input!
 }
@@ -232,6 +249,23 @@ afterEach(async () => {
 })
 
 describe('mounted Provider credential lifecycle', () => {
+  it('shows a key-free legacy re-entry notice and clears it after fenced replacement', async () => {
+    registry.requireLegacyReentry()
+    const beforeChecks = registry.calls.filter((call) => call.operation === 'credential-check').length
+    await unmount()
+    await mount()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(registry.calls.filter((call) => call.operation === 'credential-check').length).toBeGreaterThan(beforeChecks)
+    expect(container.textContent).toContain('modelProviderApiKeyReentryHint')
+    expect(keyInput().placeholder).toBe('modelProviderApiKeyReentryPlaceholder')
+    expect(keyInput().value).toBe('')
+    await enter(keyInput(), firstInput)
+    await click('modelProviderSaveChanges')
+    expect(registry.mutations().at(-1)?.operation).toBe('credential-replace')
+    expect(container.textContent).not.toContain('modelProviderApiKeyReentryHint')
+    expect(keyInput().value).toBe('')
+  })
+
   it('shows committed credential state after remount without restoring the secret into the input', async () => {
     expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
     expect(container.textContent).toContain('modelProviderApiKeySavedHint')

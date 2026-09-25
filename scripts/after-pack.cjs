@@ -754,7 +754,7 @@ function collectEffectiveBuilderContextV1(context) {
     ),
     target,
     fusePolicyContract: ELECTRON_FUSE_POLICY_V1_CONTRACT,
-    fusePolicySha256: electronFusePolicyV1Digest()
+    fusePolicySha256: electronFusePolicyV1Digest(normalizePlatform(context.electronPlatformName))
   }
   return {
     ...withoutDigest,
@@ -772,7 +772,7 @@ function isEffectiveBuilderContextV1(value) {
   ]) || value.schemaVersion !== 1 || value.contract !== EFFECTIVE_BUILDER_CONTEXT_CONTRACT ||
     !isSha256(value.effectiveConfigSha256) ||
     value.fusePolicyContract !== ELECTRON_FUSE_POLICY_V1_CONTRACT ||
-    value.fusePolicySha256 !== electronFusePolicyV1Digest() || !isSha256(value.contextDigest) ||
+    value.fusePolicySha256 !== electronFusePolicyV1Digest(value.target?.platform) || !isSha256(value.contextDigest) ||
     !exactKeys(value.target, ['key', 'platform', 'arch', 'targets', 'digest']) ||
     typeof value.target.key !== 'string' || !value.target.key ||
     !['darwin', 'win32', 'linux'].includes(value.target.platform) ||
@@ -1376,7 +1376,9 @@ function verifyElectronV8SnapshotInventoryV1(context) {
 
 function verifyElectronFusePolicyV1(context) {
   verifyElectronV8SnapshotInventoryV1(context)
-  const frameworkTarget = normalizePlatform(context.electronPlatformName) === 'darwin'
+  const platform = normalizePlatform(context.electronPlatformName)
+  const policy = electronFusePolicyV1(platform)
+  const frameworkTarget = platform === 'darwin'
     ? canonicalElectronFrameworkFuseTargetV1(context)
     : null
   const fuseFilePath = frameworkTarget?.path || electronFuseFilePath(context)
@@ -1411,7 +1413,7 @@ function verifyElectronFusePolicyV1(context) {
       throw new Error('[after-pack] Electron FuseV1 wire length is invalid')
     }
     for (let index = 0; index < ELECTRON_FUSE_V1_WIRE_LENGTH; index += 1) {
-      const enabled = ELECTRON_FUSE_POLICY_V1[index]
+      const enabled = policy[index]
       const expected = enabled ? ELECTRON_FUSE_STATE_ENABLED : ELECTRON_FUSE_STATE_DISABLED
       if (typeof enabled !== 'boolean' || stable.content[wireOffset + 2 + index] !== expected) {
         throw new Error(`[after-pack] Electron FuseV1 policy mismatch at wire index ${index}`)
@@ -1420,7 +1422,7 @@ function verifyElectronFusePolicyV1(context) {
   }
   return {
     contract: ELECTRON_FUSE_POLICY_V1_CONTRACT,
-    policySha256: electronFusePolicyV1Digest(),
+    policySha256: electronFusePolicyV1Digest(platform),
     wireCount: sentinelOffsets.length
   }
 }
@@ -1437,7 +1439,7 @@ async function applyElectronFusePolicyV1(context) {
   const resetAdHocDarwinSignature = normalizePlatform(context.electronPlatformName) === 'darwin' &&
     goArchForTarget(context.arch) === 'arm64'
   const mutatedWireCount = await flipFuses(appBundlePath(context), {
-    ...electronFusePolicyV1(),
+    ...electronFusePolicyV1(normalizePlatform(context.electronPlatformName)),
     resetAdHocDarwinSignature
   })
   const verified = verifyElectronFusePolicyV1(context)

@@ -87,9 +87,6 @@ import {
   selectRuntimeHostScheduleMcpBindingV1,
   writeRuntimeStartupPrivateFrameV1
 } from './runtime-startup-private-frame-v1'
-import {
-  resolveDarwinSecretStoreKeychainBindingV1
-} from './darwin-secret-store-keychain-binding-v1'
 import { isAnalytixHealthResponseBody } from '../analytix-health'
 import {
   TaskJobKillResponseV1Schema,
@@ -1870,10 +1867,6 @@ export async function migrateDesktopPrivateHistoryBeforeStartV2(
     runtimeServer: true,
     runtimeGoDir: getGoRuntimeDir()
   })
-  resolveDarwinSecretStoreKeychainBindingV1({
-    boundary: desktopExternalStateBoundaryForGoRuntime,
-    dataDir
-  })
   const child = spawn(
     launchTarget.command,
     [...launchTarget.argsPrefix, ...buildDesktopPrivateHistoryMigrationArgsV2(dataDir, userDataDir)],
@@ -2527,12 +2520,6 @@ async function startGoConformanceSidecarOnce(
   })
   const developmentProviderAuthorityDir = desktopExternalStateBoundaryForGoRuntime.developmentProviderAuthorityDir
   if (developmentProviderAuthorityDir && app.isPackaged) throw new Error('Packaged Analytix rejects development credential authority.')
-  const darwinSecretStoreKeychainBindingV1 = isRuntimeServer
-    ? resolveDarwinSecretStoreKeychainBindingV1({
-        boundary: desktopExternalStateBoundaryForGoRuntime,
-        dataDir
-      })
-    : null
   if (launchTarget.mode === 'go-run-source' && !existsSync(join(runtimeGoDir, 'go.mod'))) {
     throw new Error(`Go runtime source is missing at ${runtimeGoDir}`)
   }
@@ -2615,11 +2602,10 @@ async function startGoConformanceSidecarOnce(
     if (!bundledFundsConfigSynced) await syncRuntimeConfig()
     hostScheduleMcpBindingV1 = selectRuntimeHostScheduleMcpBindingV1(
       mainOwnedAuthority,
-      hostScheduleMcpBindingV1,
-      darwinSecretStoreKeychainBindingV1
+      hostScheduleMcpBindingV1
     )
     hasPrivateStartupFrame = Boolean(
-      mainOwnedAuthority || hostScheduleMcpBindingV1 || darwinSecretStoreKeychainBindingV1 || developmentProviderAuthorityDir
+      mainOwnedAuthority || hostScheduleMcpBindingV1 || developmentProviderAuthorityDir
     )
     if (isRuntimeDefault) {
       args.push('--durable-root', durableRoot)
@@ -2673,9 +2659,6 @@ async function startGoConformanceSidecarOnce(
       await writeRuntimeStartupPrivateFrameV1(child.stdin, {
         ...(developmentProviderAuthorityDir ? { developmentProviderAuthorityDir } : {}),
         ...(mainOwnedAuthority ? { protectedAuthorityV1: mainOwnedAuthority } : {}),
-        ...(darwinSecretStoreKeychainBindingV1
-          ? { darwinSecretStoreKeychainBindingV1 }
-          : {}),
         ...(hostScheduleMcpBindingV1 ? { hostScheduleMcpBindingV1 } : {})
       })
     }

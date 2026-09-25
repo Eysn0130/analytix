@@ -9,7 +9,7 @@ import (
 
 const developmentProviderAuthorityEnabled = true
 
-func developmentProviderDirectoryOwned(info os.FileInfo) bool {
+func developmentProviderDirectorySecure(_ string, info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && uint64(stat.Uid) == uint64(os.Getuid())
+	return ok && uint64(stat.Uid) == uint64(os.Getuid()) && info.Mode().Perm() == 0700
 }

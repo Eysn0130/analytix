@@ -1975,7 +1975,7 @@ func (service *recordingProviderRegistryHTTPService) CheckCredential(_ context.C
 
 func TestProviderRegistryHTTPCredentialCheckReturnsOnlyFencedAvailability(t *testing.T) {
 	body := `{"schemaVersion":1,"expected":{"registryRevision":"4","registryIncarnation":"inc_` + strings.Repeat("a", 43) + `","providerRevision":"2","providerGeneration":"1","providerIncarnation":"inc_` + strings.Repeat("b", 43) + `","providerCredentialPurpose":"provider-api-key"}}`
-	for _, err := range []error{nil, registryport.ErrCredentialUnavailable, registryport.ErrConflict} {
+	for _, err := range []error{nil, registryport.ErrCredentialUnavailable, registryport.ErrCredentialReentryRequired, registryport.ErrConflict} {
 		service := &recordingProviderRegistryHTTPService{err: err}
 		recorder := httptest.NewRecorder()
 		ProviderRegistryHandlers{Service: service}.Handle(recorder, httptest.NewRequest(http.MethodPost, ProviderRegistryPathV1+"/providers/provider-alpha/credential-check", strings.NewReader(body)))
@@ -1986,6 +1986,10 @@ func TestProviderRegistryHTTPCredentialCheckReturnsOnlyFencedAvailability(t *tes
 		if err == nil {
 			if recorder.Code != 200 || !strings.Contains(recorder.Body.String(), `"credentialAvailable":true`) {
 				t.Fatalf("available = %d %s", recorder.Code, recorder.Body.String())
+			}
+		} else if errors.Is(err, registryport.ErrCredentialReentryRequired) {
+			if recorder.Code != 503 || !strings.Contains(recorder.Body.String(), `"code":"credential_reentry_required"`) {
+				t.Fatal("legacy re-entry was not distinguished from damaged storage")
 			}
 		} else if errors.Is(err, registryport.ErrCredentialUnavailable) {
 			if recorder.Code != 503 || !strings.Contains(recorder.Body.String(), `"code":"credential_unavailable"`) {

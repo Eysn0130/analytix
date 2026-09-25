@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve, sep, win32 } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
 import { createRequire } from 'node:module'
@@ -92,6 +92,45 @@ const launch: ClawScheduleMcpLaunchConfig = {
 }
 
 describe('main-private desktop external-state isolation', () => {
+  it('accepts only canonical Windows profile paths with native private-directory admission', () => {
+    const stateRoot = 'C:\\AnalytixDevelopment'
+    const cacheRoot = win32.join(stateRoot, 'build-cache')
+    const taskRoot = win32.join(stateRoot, 'analytix-dev-checkout', 'development-profile-default')
+    const userDataRoot = win32.join(taskRoot, 'user-data')
+    const homeRoot = win32.join(taskRoot, 'home')
+    const developmentRoot = win32.join(stateRoot, 'provider-credentials')
+    const env = {
+      ANALYTIX_DEV_CACHE_ROOT: cacheRoot,
+      ANALYTIX_DEV_STATE_ROOT: stateRoot,
+      ANALYTIX_USER_DATA_DIR: userDataRoot,
+      ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR: developmentRoot,
+      HOME: homeRoot,
+      [ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]:
+        ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1
+    }
+    const privateDirectory = vi.fn((_path: string) => true)
+    const dependencies = {
+      lstat: vi.fn(() => { throw new Error('Windows must use native ACL validation') }),
+      realpath: (path: string) => path,
+      ownerUID: () => null,
+      windowsPrivateDirectory: privateDirectory
+    }
+
+    expect(resolveDesktopExternalStateBoundary(env, dependencies, false, 'win32')).toMatchObject({
+      isolated: true,
+      isolationRoot: taskRoot,
+      userDataRoot,
+      stateHomeRoot: homeRoot,
+      developmentProviderAuthorityDir: developmentRoot
+    })
+    expect(privateDirectory).toHaveBeenCalledWith(developmentRoot)
+    privateDirectory.mockImplementation((path: string) => path !== developmentRoot)
+    expect(() => resolveDesktopExternalStateBoundary(env, dependencies, false, 'win32')).toThrow()
+    privateDirectory.mockImplementation(() => true)
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, ANALYTIX_USER_DATA_DIR: `${userDataRoot}\\..\\user-data` }, dependencies, false, 'win32')).toThrow()
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, ANALYTIX_DEV_STATE_ROOT: 'D:\\AnalytixDevelopment' }, dependencies, false, 'win32')).toThrow()
+  })
+
   it('separates retained state from build cache without accepting a different state owner', async () => {
     const fixture = await isolatedFixture()
     const stateRoot = join(fixture.cacheRoot, '..', 'protected-state')

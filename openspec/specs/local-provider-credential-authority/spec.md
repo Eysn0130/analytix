@@ -42,6 +42,25 @@ The Secret Store SHALL keep encrypted credential bytes separate from key-free Re
 - **WHEN** the Secret Store cannot authenticate or decrypt a committed credential
 - **THEN** the affected credential operation fails closed without overwriting metadata, ciphertext, or another usable credential
 
+### Requirement: Ordinary Provider credentials recover without macOS Keychain access
+On macOS, ordinary fresh profiles SHALL keep the Secret Store master key in the application's private, owner-only per-user data directory and SHALL NOT read, create, or probe a system Keychain item for ordinary Provider startup, save, execution, restart, or update. The credential envelope, key-free Registry, and mutation fences remain separate. An owner-only file protects against other operating-system users; it does not prevent a process or Agent tool running as the same user from reading the master key and ciphertext. The product SHALL describe that boundary accurately. On Windows the ordinary per-user DPAPI master-key backend remains the supported silent recovery path.
+
+#### Scenario: A fresh macOS user saves a Provider key
+- **WHEN** the user enters the key once through onboarding or Provider Settings in a fresh profile
+- **THEN** the encrypted credential and owner-only master key are committed under that profile's private data directory
+- **AND** ordinary app and runtime restarts and a compatible update recover the selected Provider without another key entry or Keychain access
+
+#### Scenario: A legacy macOS profile has only a Keychain master key
+- **WHEN** a new version opens a profile whose committed Provider credentials depend on the legacy Keychain authority
+- **THEN** it preserves the legacy Registry and encrypted store and presents a limited, key-free credential-unavailable state that permits visible in-product re-entry
+- **AND** it never silently reads the legacy Keychain or treats an unavailable credential as executable
+- **AND** a revision-fenced replacement or explicit deletion retires the affected legacy reference only after the successor is durably committed and verified; an interruption preserves a recoverable prior state and never exposes an unverified successor
+- **AND** subsequent ordinary restarts and updates use the new file authority without another entry
+
+#### Scenario: A file authority is damaged or ambiguous
+- **WHEN** the master-key file, authority marker, envelope, permissions, ownership, or migration state is missing, malformed, inconsistent, or unreadable
+- **THEN** startup or the affected credential operation fails closed without creating a replacement key over existing ciphertext or erasing the prior data
+
 ### Requirement: Registry mutations are crash-safe and concurrency-safe
 Every credential-bearing Registry mutation and background credential refresh SHALL use revision compare-and-set plus generation/incarnation fencing, a durable prepare record, an atomic commit decision, and idempotent recovery. The Registry SHALL preserve the last committed usable credential until a successor or explicit deletion is committed and verified.
 

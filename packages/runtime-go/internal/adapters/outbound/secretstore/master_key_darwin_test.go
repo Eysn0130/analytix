@@ -1533,3 +1533,58 @@ func TestDevelopmentFileAuthorityNeverProbesKeychainOrAdoptsKeychainWinner(t *te
 		t.Fatal("mixed QA and development options accepted")
 	}
 }
+
+func TestOrdinaryMacFileAuthorityRecoversWithoutKeychainProbe(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	first, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := first.(*darwinMasterKeyProvider)
+	runner := &scriptedKeychainRunner{}
+	selected.keychain.runner = runner
+	key, err := selected.LoadOrCreate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clearBytes(key)
+	if len(runner.calls) != 0 {
+		t.Fatal("ordinary macOS authority probed Keychain")
+	}
+	info, err := os.Stat(filepath.Join(filepath.Dir(storePath), "master-key", "master.key"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("ordinary master key is not owner-only: info=%v err=%v", info, err)
+	}
+	restarted, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := restarted.LoadOrCreate(context.Background())
+	if err != nil || !bytes.Equal(key, restored) {
+		t.Fatalf("ordinary restart did not recover file authority: %v", err)
+	}
+	clearBytes(restored)
+}
+
+func TestOrdinaryMacRefusesLegacyKeychainMarkerWithoutReadingIt(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	directory := filepath.Join(filepath.Dir(storePath), "master-key")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, darwinAuthorityFile), []byte(darwinAuthorityKeychain), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptedKeychainRunner{}
+	selected.(*darwinMasterKeyProvider).keychain.runner = runner
+	if _, err := selected.LoadOrCreate(context.Background()); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatalf("legacy Keychain marker was accepted without re-entry: %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatal("ordinary macOS startup read legacy Keychain")
+	}
+}

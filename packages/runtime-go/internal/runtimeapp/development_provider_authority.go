@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	providerregistryfs "analytix.local/runtime-go/internal/adapters/outbound/providerregistryfs"
@@ -27,7 +28,13 @@ func openDevelopmentProviderAuthority(ctx context.Context, config Config, simula
 		return nil, err
 	}
 	root := config.DevelopmentProviderAuthorityDir
-	secrets, err := secretstore.NewWithOptions(filepath.Join(root, "private", "provider-secrets", providerRegistrySecretStoreFileV1), providerRegistrySecretAuthorizerV1{}, secretstore.Options{DevelopmentFileAuthority: true})
+	options := secretstore.Options{DevelopmentFileAuthority: true}
+	if runtime.GOOS == "windows" {
+		// Windows source development shares the same Registry/Secret Store owner,
+		// with its existing CurrentUser DPAPI master-key backend.
+		options = secretstore.Options{}
+	}
+	secrets, err := secretstore.NewWithOptions(filepath.Join(root, "private", "provider-secrets", providerRegistrySecretStoreFileV1), providerRegistrySecretAuthorizerV1{}, options)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +58,7 @@ func validateDevelopmentProviderAuthority(config Config) error {
 	for _, path := range []string{root, filepath.Dir(root)} {
 		info, err := os.Lstat(path)
 		real, realErr := filepath.EvalSymlinks(path)
-		if err != nil || realErr != nil || real != path || !info.IsDir() || info.Mode().Perm() != 0700 || !developmentProviderDirectoryOwned(info) {
+		if err != nil || realErr != nil || real != path || !info.IsDir() || !developmentProviderDirectorySecure(path, info) {
 			return invalid
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -60,6 +61,11 @@ func TestDevelopmentProviderAuthorityIsolationAndRestart(t *testing.T) {
 		t.Fatal("QA and shared development authorities mixed")
 	}
 	cfg.DarwinSecretStoreKeychainDBPath = ""
+	if runtime.GOOS == "windows" {
+		// os.Chmod does not change a Windows DACL. Native ACL rejection is
+		// exercised by the Windows Secret Store tests.
+		return
+	}
 	if err = os.Chmod(root, 0755); err != nil {
 		t.Fatal(err)
 	}

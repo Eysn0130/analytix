@@ -85,3 +85,19 @@ it('checks the committed credential after restart without re-entering or sending
   expect(await checkLocalProviderReadiness(request)).toEqual({ kind: 'ready', providerId: 'deepseek', model: provider().selectedModel })
   expect(request.mock.calls.map(([r]) => r.operation)).toEqual(['list', 'credential-check', 'list', 'credential-check'])
 })
+
+it('directs a legacy Keychain credential to Settings without exposing private details', async () => {
+  const state = snapshot([provider()], 'deepseek')
+  const request = vi.fn(async (input: import('@shared/analytix-api').ProviderRegistryRequest): Promise<ProviderRegistryResult> => {
+    if (input.operation === 'list') return state
+    if (input.operation !== 'credential-check') throw new Error('unexpected mutation or network probe')
+    return { schemaVersion: 1, error: {
+      code: 'credential_reentry_required', message: 'private detail must not be shown'
+    } }
+  })
+  const readiness = await checkLocalProviderReadiness(request)
+  expect(readiness.kind).toBe('recovery')
+  expect(JSON.stringify(readiness)).toContain('re-entered once in Settings')
+  expect(JSON.stringify(readiness)).not.toContain('private detail')
+  expect(request.mock.calls.map(([r]) => r.operation)).toEqual(['list', 'credential-check'])
+})

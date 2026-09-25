@@ -162,6 +162,10 @@ func (manager *Manager) verifyCommittedSnapshot(ctx context.Context, state domai
 		})
 		if err != nil {
 			clear(plaintext)
+			if errors.Is(err, secretstoreport.ErrMasterKeyUnavailable) &&
+				manager.legacyReentryRefs[secretstoreport.CredentialRef(provider.CredentialRef)] == secretstoreport.Purpose(provider.CredentialPurpose) {
+				continue
+			}
 			return normalizeSecretError(err)
 		}
 		if len(plaintext) == 0 {
@@ -1629,6 +1633,8 @@ func normalizeManagerError(err error) error {
 		return registryport.ErrNotFound
 	case errors.Is(err, registryport.ErrVerification):
 		return registryport.ErrVerification
+	case errors.Is(err, registryport.ErrCredentialReentryRequired):
+		return registryport.ErrCredentialReentryRequired
 	case errors.Is(err, registryport.ErrCredentialUnavailable):
 		return registryport.ErrCredentialUnavailable
 	case errors.Is(err, errProtectedRecoveryNotFound):

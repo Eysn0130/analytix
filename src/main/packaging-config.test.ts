@@ -945,7 +945,7 @@ describe('electron-builder Analytix packaging', () => {
 
     expect(golden).toBe(`${JSON.stringify(authority)}\n`)
     expect(authority.authorityDigest).toBe(
-      '1103e3fa03b4bd8e7231f82a2669d244bc2ff39727e7601d118c839680807597'
+      'f310dbe02a258009085562dee8cd293daf2e1f4f69523ca4229af1daf573885b'
     )
   })
 
@@ -986,7 +986,7 @@ describe('electron-builder Analytix packaging', () => {
     expect(defaultConfig).not.toHaveProperty('electronFuses')
     expect(electronFusePolicy.ELECTRON_FUSE_POLICY_V1).toEqual({
       0: true,
-      1: true,
+      1: false,
       2: false,
       3: false,
       4: true,
@@ -998,6 +998,10 @@ describe('electron-builder Analytix packaging', () => {
       strictlyRequireAllFuses: true
     })
     expect(electronFusePolicy.electronFusePolicyV1Digest()).toBe(
+      '1e571ce1c5701dc2596824cb0737c2e9e5b6a6e77ce64e9db37f693cbe825083'
+    )
+    expect(electronFusePolicy.electronFusePolicyV1('win32')[1]).toBe(true)
+    expect(electronFusePolicy.electronFusePolicyV1Digest('win32')).toBe(
       'a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c'
     )
     expect(rootPackage.devDependencies['@electron/fuses']).toBe('2.1.3')

@@ -27,7 +27,8 @@ const (
 	effectiveBuilderTargetDomain    = "AnalytixElectronBuilderEffectiveTargetV1\x00"
 	effectiveBuilderContextDomain   = "AnalytixElectronBuilderEffectiveContextV1\x00"
 	electronFusePolicyContractV1    = "analytix.electron-fuse-policy/v1"
-	electronFusePolicySHA256V1      = "a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c"
+	electronFusePolicySHA256V1      = "1e571ce1c5701dc2596824cb0737c2e9e5b6a6e77ce64e9db37f693cbe825083"
+	electronFusePolicyOtherSHA256V1 = "a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c"
 	stagedPayloadContractV1         = "analytix.packaged-staged-payload/v1"
 	stagedPayloadExclusionSHA256V1  = "21d491819a899a7c12f4366e5c62858c97def101cc69ba92e11a59049baee5cd"
 	worktreeExclusionSHA256V1       = "3f4a6441cb53c9b916c6e3f81eaf7b29a26136ce0700b1b44d3bd5053e1a515b"
@@ -339,10 +340,14 @@ func authorityDigest(authority AuthorityV2) string {
 }
 
 func validateEffectiveBuilderContextV1(value EffectiveBuilderContextV1, targetKey string) error {
+	expectedFusePolicy := electronFusePolicyOtherSHA256V1
+	if strings.HasPrefix(targetKey, "darwin-") {
+		expectedFusePolicy = electronFusePolicySHA256V1
+	}
 	if value.SchemaVersion != 1 || value.Contract != effectiveBuilderContextV1 ||
 		!sha256Digest(value.EffectiveConfigSHA256) ||
 		value.FusePolicyContract != electronFusePolicyContractV1 ||
-		value.FusePolicySHA256 != electronFusePolicySHA256V1 || !sha256Digest(value.ContextDigest) ||
+		value.FusePolicySHA256 != expectedFusePolicy || !sha256Digest(value.ContextDigest) ||
 		validateEffectiveBuilderTargetV1(value.Target, targetKey) != nil {
 		return errors.New("packaged effective builder context is invalid")
 	}

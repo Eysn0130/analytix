@@ -626,7 +626,7 @@ export function DevBrowserPanel({
             key={`webview:${previewInstanceNonce}`}
             ref={webviewRef}
             src={activeUrl}
-            partition="persist:analytix-dev-browser"
+            partition="persist:analytix-dev-browser-v2"
             webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
             className="flex h-full w-full bg-white"
           />

@@ -29,7 +29,7 @@ import analytixAppIconPng from '../asset/brand/analytix-app-icon-512.png?url'
 import analytixMacIconPng from '../asset/brand/analytix-app-icon-1024.png?url'
 import { appIdentityIconSource, createAppIcon, prepareTrayIcon } from './app-icon'
 import { configureLinuxWaylandImeSwitches } from './app-command-line'
-import { APP_DISPLAY_NAME, configureAppIdentity } from './app-identity'
+import { APP_DISPLAY_NAME, configureAppIdentity, configureMacChromiumSessionData } from './app-identity'
 import {
   inspectLegacyMigrationRequirement,
   issueElectronLegacySingletonAuthority,
@@ -379,6 +379,8 @@ if (!runningClawScheduleMcpServer) {
     app.setPath('userData', intendedUserDataPath)
   }
 }
+
+if (!runningClawScheduleMcpServer && legacyMigrationReady) configureMacChromiumSessionData()
 
 configureLinuxWaylandImeSwitches()
 

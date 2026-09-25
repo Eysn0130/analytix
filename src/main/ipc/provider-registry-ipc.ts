@@ -181,6 +181,7 @@ const providerRegistryFailureStatuses: Record<Exclude<ProviderRegistryFailureCod
   conflict: 409,
   persistence_failure: 503,
   credential_unavailable: 503,
+  credential_reentry_required: 503,
   verification_failure: 500,
   request_too_large: 413,
   unauthorized: 401
@@ -880,6 +881,7 @@ function parseProtectedRecoveryResponse(
         return protectedRecoveryFailure('conflict')
       case 'persistence_failure':
       case 'credential_unavailable':
+      case 'credential_reentry_required':
         return protectedRecoveryFailure('runtime_unavailable')
       case 'verification_failure':
         return protectedRecoveryFailure('verification_failure')

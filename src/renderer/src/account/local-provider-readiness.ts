@@ -7,6 +7,8 @@ export type LocalProviderReadiness =
 
 const LOCAL_PROVIDER_RECOVERY_MESSAGE =
   'Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.'
+const LOCAL_PROVIDER_REENTRY_MESSAGE =
+  'This saved Provider credential needs to be re-entered once in Settings after the storage change. Your configuration has been kept.'
 
 // Listing references classifies setup vs recovery; it does not prove that the
 // OS-backed credential is accessible in this process. No network probe runs here.
@@ -29,6 +31,9 @@ export async function checkLocalProviderReadiness(
     const result = await request({
       schemaVersion: 1, operation: 'credential-check', providerId: provider.id, expected
     })
+    if ('error' in result && result.error.code === 'credential_reentry_required') {
+      return { kind: 'recovery', message: LOCAL_PROVIDER_REENTRY_MESSAGE }
+    }
     if ('credentialAvailable' in result && result.credentialAvailable === true &&
       result.providerId === provider.id && result.registryRevision === expected.registryRevision &&
       result.registryIncarnation === expected.registryIncarnation &&

@@ -32,8 +32,9 @@ var (
 )
 
 type dpapiMasterKeyProvider struct {
-	path string
-	mu   sync.Mutex
+	path      string
+	storePath string
+	mu        sync.Mutex
 }
 
 func (provider *dpapiMasterKeyProvider) LoadOrCreate(context.Context) ([]byte, error) {
@@ -45,6 +46,9 @@ func (provider *dpapiMasterKeyProvider) LoadOrCreate(context.Context) ([]byte, e
 		return key, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	if _, err := os.Lstat(provider.storePath); err == nil || !errors.Is(err, os.ErrNotExist) {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	if err := ensurePrivateStoreDirectory(filepath.Dir(provider.path)); err != nil {
@@ -86,8 +90,8 @@ func (provider *dpapiMasterKeyProvider) LoadOrCreate(context.Context) ([]byte, e
 }
 
 func (provider *dpapiMasterKeyProvider) createExclusive(blob []byte) (bool, error) {
-	file, err := os.OpenFile(provider.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	file, err := createPrivateWindowsFile(provider.path)
+	if errors.Is(err, os.ErrExist) || errors.Is(err, windows.ERROR_FILE_EXISTS) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return false, nil
 	}
 	if err != nil {
@@ -217,7 +221,11 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	if options.DevelopmentFileAuthority || !options.empty() || storePath == "" || !filepath.IsAbs(storePath) || filepath.Clean(storePath) != storePath {
 		return nil, portsecretstore.ErrInvalidRequest
 	}
+	if err := ensurePrivateStoreDirectory(filepath.Dir(storePath)); err != nil {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
 	return &dpapiMasterKeyProvider{
-		path: filepath.Join(filepath.Dir(storePath), "master-key", "master-key.dpapi"),
+		path:      filepath.Join(filepath.Dir(storePath), "master-key", "master-key.dpapi"),
+		storePath: storePath,
 	}, nil
 }
