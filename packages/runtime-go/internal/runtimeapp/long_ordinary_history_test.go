@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,8 +20,13 @@ import (
 
 // Exercises the production Registry, terminal CAS, public GET, and the
 // per-record projection boundary beyond the former 26-turn failure point.
+// Reopened handlers must also continue once with the existing credential and
+// preserve that new turn through another recovery. This is not an OS-process
+// or installed Electron/Keychain acceptance test.
 func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
+	var providerRequests atomic.Int64
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerRequests.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"LOCAL QA OK\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3,\"total_tokens\":11}}\n\ndata: [DONE]\n\n"))
 	}))
@@ -64,8 +71,26 @@ func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
 		t.Fatalf("thread_create_status=%d code=%s", status, contracts.StringField(created, "code"))
 	}
 	threadID := contracts.StringField(created, "id")
-	for number := 1; number <= 30; number++ {
-		prompt := "PR28 isolated long history fixture"
+	turnIDs := make([]string, 0, 31)
+	assertHistory := func(detail map[string]any) {
+		t.Helper()
+		turns, ok := detail["turns"].([]any)
+		if contracts.StringField(detail, "id") != threadID || !ok || len(turns) != len(turnIDs) {
+			t.Fatalf("history_identity_or_count_invalid count=%d expected=%d", len(turns), len(turnIDs))
+		}
+		seen := make(map[string]bool, len(turns))
+		for index, raw := range turns {
+			turn, ok := raw.(map[string]any)
+			id := contracts.StringField(turn, "id")
+			if !ok || id == "" || seen[id] || id != turnIDs[index] || contracts.StringField(turn, "status") != "completed" {
+				t.Fatalf("history_order_identity_or_status_invalid index=%d", index)
+			}
+			seen[id] = true
+		}
+	}
+	completeTurn := func(number int) {
+		t.Helper()
+		prompt := fmt.Sprintf("PR28 isolated long history fixture %d", number)
 		status, started := request(http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{"prompt": prompt, "async": true, "providerId": config.ProviderID, "model": config.Model, "approvalPolicy": "never", "sandboxMode": "read-only", "disableUserInput": true})
 		if status != http.StatusAccepted {
 			readStatus, readback := request(http.MethodGet, "/v1/threads/"+threadID, nil)
@@ -76,6 +101,7 @@ func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
 		if turnID == "" {
 			t.Fatalf("turn=%d missing_id", number)
 		}
+		turnIDs = append(turnIDs, turnID)
 		var finish server.AsyncTurnObservationV1
 		deadline := time.After(20 * time.Second)
 		for finish.Stage != "finished" {
@@ -95,10 +121,10 @@ func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
 				finish.CompletionErrorClass, finish.CompletionDetailClass, finish.FailureRecordErrorClass, finish.FailureRecordDetailClass,
 				status, contracts.StringField(detail, "code"), len(turns))
 		}
-		latest, _ := turns[len(turns)-1].(map[string]any)
-		if contracts.StringField(latest, "status") != "completed" {
-			t.Fatalf("turn=%d durable_status=%s", number, contracts.StringField(latest, "status"))
-		}
+		assertHistory(detail)
+	}
+	for number := 1; number <= 30; number++ {
+		completeTurn(number)
 	}
 	shutdownOwnedRuntimeHandler(t, handler)
 	handler = nil
@@ -113,9 +139,34 @@ func TestLongOrdinaryHistoryRunsThroughProtectedRuntime(t *testing.T) {
 	}
 	handler = &ownedPersistenceLeaseHandler{Handler: inner, lease: lease}
 	status, recovered := request(http.MethodGet, "/v1/threads/"+threadID, nil)
-	recoveredTurns, _ := recovered["turns"].([]any)
-	if status != http.StatusOK || len(recoveredTurns) != 30 {
-		t.Fatalf("restarted_history_status=%d code=%s turn_count=%d", status,
-			contracts.StringField(recovered, "code"), len(recoveredTurns))
+	if status != http.StatusOK {
+		t.Fatalf("restarted_history_status=%d code=%s", status, contracts.StringField(recovered, "code"))
 	}
+	assertHistory(recovered)
+
+	// Do not reseed the Registry or replay a failed POST. The same protected
+	// authority must service one unique continuation after handler recovery.
+	requestsBeforeContinuation := providerRequests.Load()
+	completeTurn(31)
+	if providerRequests.Load() != requestsBeforeContinuation+1 {
+		t.Fatal("restarted_continuation_provider_request_count_invalid")
+	}
+
+	shutdownOwnedRuntimeHandler(t, handler)
+	handler = nil
+	lease, err = AcquireRuntimePersistenceLease(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err = newRuntimeServerHandlerWithPersistenceLeaseContextE(ctx, config, lease)
+	if err != nil {
+		_ = lease.Close()
+		t.Fatal(err)
+	}
+	handler = &ownedPersistenceLeaseHandler{Handler: inner, lease: lease}
+	status, recovered = request(http.MethodGet, "/v1/threads/"+threadID, nil)
+	if status != http.StatusOK {
+		t.Fatalf("continued_history_recovery_status=%d code=%s", status, contracts.StringField(recovered, "code"))
+	}
+	assertHistory(recovered)
 }
