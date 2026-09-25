@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { assertDevelopmentProfileReady, launchDevelopment, prepareDevelopmentProfile } from './dev-launcher.mjs'
 
 test('Windows source profiles retain a shared DPAPI authority without Keychain interaction', { skip: process.platform !== 'win32' }, async t => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'analytix-windows-dev-')))
+  const root = join(homedir(), `analytix-windows-dev-${randomBytes(12).toString('hex')}`)
+  const script = fileURLToPath(new URL('./windows-development-profile.ps1', import.meta.url))
+  const created = spawnSync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-File', script, '-Directory', root, '-Create'
+  ], { stdio: 'ignore', windowsHide: true, timeout: 10000 })
+  assert.equal(created.status, 0, 'Windows owner-only fixture creation failed')
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const stateRoot = join(root, 'state')
   const first = prepareDevelopmentProfile({ root, stateRoot, env: { PATH: process.env.PATH } })
