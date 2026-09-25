@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
@@ -1184,7 +1184,7 @@ function messageContentText(content) {
   }).filter(Boolean).join('\n')
 }
 
-function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePort, runtimeDataDir, workspace, syntheticApiKey }) {
+function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePort, runtimeDataDir, workspace, syntheticApiKey, progressToken }) {
   const legacyKunAlias = String.fromCharCode(107, 117, 110)
   const legacyEngineAlias = String.fromCharCode(114, 101, 97, 115, 111, 110, 105, 120)
   return `(async () => {
@@ -1259,6 +1259,22 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       stage: 'renderer-ready',
       error: ''
     };
+    // This fixed-category snapshot remains readable when the mutating CDP
+    // evaluation loses its response. It never contains prompts or credentials.
+    const progress = { token: ${JSON.stringify(progressToken)}, stage: out.stage,
+      revision: 0, changedAt: Date.now() };
+    Object.defineProperty(out, 'stage', {
+      enumerable: true,
+      get() { return progress.stage; },
+      set(value) {
+        progress.stage = value;
+        progress.revision += 1;
+        progress.changedAt = Date.now();
+      }
+    });
+    Object.defineProperty(window, '__analytixPackagedSoakProgress', {
+      value: progress, configurable: true
+    });
     function parseJSON(response) {
       try { return JSON.parse(response && response.body || '{}'); } catch { return {}; }
     }
@@ -1468,6 +1484,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const initial = await api.settings.getSettings();
       out.settingsOk = !!(initial && initial.runtime && initial.provider);
       out.settingsRuntimeTopLevel = !!(initial && initial.runtime && !initial.agent && !initial.agents && !initial.reasonix);
+      if (!out.settingsOk || !out.settingsRuntimeTopLevel) return out;
       const profilePatch = {
         provider: {
           activeProviderId: ${JSON.stringify(providerId)},
@@ -1532,9 +1549,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         out.restartError = error && (error.stack || error.message) || String(error);
         return out;
       }
+      out.stage = 'runtime-health';
       const health = await api.runtime.runtimeRequest('/health', 'GET');
       out.healthStatus = health.status;
       out.healthService = JSON.parse(health.body || '{}').service || '';
+      if (out.healthStatus !== 200 || out.healthService !== 'analytix') return out;
       try {
         out.stage = 'registry-connect';
         const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
@@ -1592,6 +1611,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const threadId = thread.id || thread.thread_id || '';
       out.initialThreadId = threadId;
       out.threadCreateOk = !!threadId;
+      if (!out.threadCreateOk) return out;
 
       out.stage = 'initial-turn-create';
       const turn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
@@ -1606,6 +1626,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const turnId = turn.turnId || turn.turn_id || '';
       out.initialTurnId = turnId;
       out.turnCreateOk = !!turnId && (turn.threadId === threadId || turn.thread_id === threadId);
+      if (!out.turnCreateOk) return out;
 
       out.stage = 'initial-sse-replay';
       const replay = await collectSseReplay(threadId, turnId, 'packaged session soak ok', false);
@@ -1661,11 +1682,15 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         }
         out.forkChildrenAfter = await countForkChildren().catch(() => -1);
         out.forkThreadId = fork.id || '';
-        out.forkOk = !!out.forkThreadId && fork.parentThreadId === threadId;
+        out.forkOk = !!out.forkThreadId && fork.parentThreadId === threadId &&
+          Number.isSafeInteger(out.forkChildrenBefore) && out.forkChildrenBefore >= 0 &&
+          Number.isSafeInteger(out.forkChildrenAfter) &&
+          out.forkChildrenAfter === out.forkChildrenBefore + 1;
         return out;
       };
       if (${JSON.stringify(focusedForkStage)} === 'initial') return await runFocusedFork('initial');
 
+      out.stage = 'tool-turn-create';
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
         async: true,
@@ -1678,15 +1703,19 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const toolTurnId = toolTurn.turnId || toolTurn.turn_id || '';
       out.toolTurnId = toolTurnId;
       out.toolTurnOk = !!toolTurnId && (toolTurn.threadId === threadId || toolTurn.thread_id === threadId);
+      if (!out.toolTurnOk) return out;
+      out.stage = 'tool-sse-replay';
       const toolReplay = await collectSseReplay(threadId, toolTurnId, 'packaged tool timeline ok', true);
       out.toolReplay = toolReplay;
       out.toolTimelineOk = toolReplay.ok === true && toolReplay.eventCount > 0 && toolReplay.errorCount === 0;
+      if (!out.toolTimelineOk) return out;
       if (${JSON.stringify(focusedForkStage)} === 'tool') {
         if (!out.toolTimelineOk) return out;
         return await runFocusedFork('tool');
       }
 
       if (!${JSON.stringify(forkOnly)}) {
+        out.stage = 'plan-thread-create';
         const mimoPlanThread = await request('/v1/threads', 'POST', {
           title: 'Packaged MiMo Plan Soak',
           workspace: ${JSON.stringify(workspace)},
@@ -1696,6 +1725,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         });
         const mimoPlanThreadId = mimoPlanThread.id || mimoPlanThread.thread_id || '';
         out.mimoPlanThreadOk = !!mimoPlanThreadId;
+        if (!out.mimoPlanThreadOk) return out;
+        out.stage = 'plan-turn-create';
         const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
           prompt: 'Run packaged MiMo plan mode.',
           async: true,
@@ -1716,11 +1747,15 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         });
         const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
         out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
+        if (!out.mimoPlanTurnOk) return out;
+        out.stage = 'plan-sse-replay';
         const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
         out.mimoPlanReplay = mimoPlanReplay;
         out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
+        if (!out.mimoPlanReplayOk) return out;
       }
 
+      out.stage = 'attachment-upload';
       const attachmentUpload = await request('/v1/attachments', 'POST', {
         name: 'packaged-attachment.txt',
         mimeType: 'text/plain',
@@ -1734,6 +1769,8 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.attachmentUploadOk = !!attachmentId;
       out.attachmentMetadataOk = attachment.scope === 'thread' &&
         attachment.name === 'packaged-attachment.txt' && attachment.localFilePath === undefined;
+      if (!out.attachmentUploadOk || !out.attachmentMetadataOk) return out;
+      out.stage = 'attachment-turn-create';
       const attachmentTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session attachment fallback.',
         async: true,
@@ -1746,13 +1783,17 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const attachmentTurnId = attachmentTurn.turnId || attachmentTurn.turn_id || '';
       out.attachmentTurnOk = !!attachmentTurnId && (attachmentTurn.threadId === threadId || attachmentTurn.thread_id === threadId);
+      if (!out.attachmentTurnOk) return out;
+      out.stage = 'attachment-sse-replay';
       const attachmentReplay = await collectSseReplay(threadId, attachmentTurnId, 'packaged attachment fallback ok', false);
       out.attachmentSseReplayOk = attachmentReplay.ok === true && attachmentReplay.eventCount > 0 && attachmentReplay.errorCount === 0;
+      if (!out.attachmentSseReplayOk) return out;
       if (${JSON.stringify(focusedForkStage)} === 'attachment') {
         if (!out.attachmentSseReplayOk) return out;
         return await runFocusedFork('attachment');
       }
 
+      out.stage = 'approval-deny-turn-create';
       const approvalDenyTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval deny.',
         async: true,
@@ -1764,23 +1805,31 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const approvalDenyTurnId = approvalDenyTurn.turnId || approvalDenyTurn.turn_id || '';
       out.approvalDenyTurnOk = !!approvalDenyTurnId && (approvalDenyTurn.threadId === threadId || approvalDenyTurn.thread_id === threadId);
+      if (!out.approvalDenyTurnOk) return out;
+      out.stage = 'approval-deny-gate';
       const approvalDenyGate = await collectGateReplay(threadId, approvalDenyTurnId, 'approval_requested', 'approvalId');
       out.approvalDenyGate = approvalDenyGate;
       out.approvalDenyRequestedOk = approvalDenyGate.ok === true;
+      if (!out.approvalDenyRequestedOk || !approvalDenyGate.id) return out;
       if (approvalDenyGate.id) {
+        out.stage = 'approval-deny-decision';
         const approvalDeny = await request('/v1/approvals/' + encodeURIComponent(approvalDenyGate.id), 'POST', {
           decision: 'deny'
         });
         out.approvalDenyResolvedOk = approvalDeny.status === 'denied' || approvalDeny.decision === 'deny';
+        if (!out.approvalDenyResolvedOk) return out;
       }
+      out.stage = 'approval-deny-sse-replay';
       const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, '', false, 'approval_denied');
       out.approvalDenyReplay = approvalDenyReplay;
       out.approvalDenyNoExecuteOk = approvalDenyReplay.ok === true && approvalDenyReplay.eventCount > 0 && approvalDenyReplay.errorCount === 0;
+      if (!out.approvalDenyNoExecuteOk) return out;
       if (${JSON.stringify(focusedForkStage)} === 'approval-deny') {
         if (!out.approvalDenyNoExecuteOk) return out;
         return await runFocusedFork('approval-deny');
       }
 
+      out.stage = 'approval-allow-turn-create';
       const approvalAllowTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval allow.',
         async: true,
@@ -1792,23 +1841,31 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const approvalAllowTurnId = approvalAllowTurn.turnId || approvalAllowTurn.turn_id || '';
       out.approvalAllowTurnOk = !!approvalAllowTurnId && (approvalAllowTurn.threadId === threadId || approvalAllowTurn.thread_id === threadId);
+      if (!out.approvalAllowTurnOk) return out;
+      out.stage = 'approval-allow-gate';
       const approvalAllowGate = await collectGateReplay(threadId, approvalAllowTurnId, 'approval_requested', 'approvalId');
       out.approvalAllowGate = approvalAllowGate;
       out.approvalAllowRequestedOk = approvalAllowGate.ok === true;
+      if (!out.approvalAllowRequestedOk || !approvalAllowGate.id) return out;
       if (approvalAllowGate.id) {
+        out.stage = 'approval-allow-decision';
         const approvalAllow = await request('/v1/approvals/' + encodeURIComponent(approvalAllowGate.id), 'POST', {
           decision: 'allow'
         });
         out.approvalAllowResolvedOk = approvalAllow.status === 'allowed' || approvalAllow.decision === 'allow';
+        if (!out.approvalAllowResolvedOk) return out;
       }
+      out.stage = 'approval-allow-sse-replay';
       const approvalAllowReplay = await collectSseReplay(threadId, approvalAllowTurnId, 'packaged approval allow ok', false);
       out.approvalAllowReplay = approvalAllowReplay;
       out.approvalAllowExecutedOk = approvalAllowReplay.ok === true && approvalAllowReplay.eventCount > 0 && approvalAllowReplay.errorCount === 0;
+      if (!out.approvalAllowExecutedOk) return out;
       if (${JSON.stringify(focusedForkStage)} === 'approval-allow') {
         if (!out.approvalAllowExecutedOk) return out;
         return await runFocusedFork('approval-allow');
       }
 
+      out.stage = 'user-input-turn-create';
       const userInputTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session user input.',
         async: true,
@@ -1820,25 +1877,33 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const userInputTurnId = userInputTurn.turnId || userInputTurn.turn_id || '';
       out.userInputTurnOk = !!userInputTurnId && (userInputTurn.threadId === threadId || userInputTurn.thread_id === threadId);
+      if (!out.userInputTurnOk) return out;
+      out.stage = 'user-input-gate';
       const userInputGate = await collectGateReplay(threadId, userInputTurnId, 'user_input_requested', 'inputId');
       out.userInputGate = userInputGate;
       out.userInputRequestedOk = userInputGate.ok === true;
+      if (!out.userInputRequestedOk || !userInputGate.id || !userInputGate.questionId) return out;
       if (userInputGate.id && userInputGate.questionId) {
+        out.stage = 'user-input-answer';
         await request('/v1/user-inputs/' + encodeURIComponent(userInputGate.id), 'POST', {
           answers: [{ id: userInputGate.questionId, value: 'Packaged user input answer' }]
         });
         out.userInputResolvedOk = true;
       }
+      out.stage = 'user-input-sse-replay';
       const userInputReplay = await collectSseReplay(threadId, userInputTurnId, 'packaged user input ok', false);
       out.userInputReplay = userInputReplay;
       out.userInputReplayOk = userInputReplay.ok === true && userInputReplay.eventCount > 0 && userInputReplay.errorCount === 0;
+      if (!out.userInputReplayOk) return out;
       if (${JSON.stringify(focusedForkStage)} === 'user-input') {
         if (!out.userInputReplayOk) return out;
         return await runFocusedFork('user-input');
       }
 
+      out.stage = 'thread-detail';
       const detail = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
+      if (!out.threadListOk) return out;
 
       out.stage = 'session-fork';
       const countForkChildren = async () => {
@@ -1862,7 +1927,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       out.forkChildrenAfter = await countForkChildren().catch(() => -1);
       const forkId = fork.id || '';
       out.forkThreadId = forkId;
-      out.forkOk = !!forkId && fork.parentThreadId === threadId;
+      out.forkOk = !!forkId && fork.parentThreadId === threadId &&
+        Number.isSafeInteger(out.forkChildrenBefore) && out.forkChildrenBefore >= 0 &&
+        Number.isSafeInteger(out.forkChildrenAfter) &&
+        out.forkChildrenAfter === out.forkChildrenBefore + 1;
+      if (!out.forkOk) return out;
       const forkTurn = await request('/v1/threads/' + encodeURIComponent(forkId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from fork.',
         async: true,
@@ -1874,8 +1943,11 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const forkTurnId = forkTurn.turnId || forkTurn.turn_id || '';
       out.forkTurnOk = !!forkTurnId;
+      if (!out.forkTurnOk) return out;
+      out.stage = 'fork-sse-replay';
       const forkReplay = await collectSseReplay(forkId, forkTurnId, 'packaged session soak ok', false);
       out.forkReplayOk = forkReplay.ok === true && forkReplay.eventCount > 0 && forkReplay.errorCount === 0;
+      if (!out.forkReplayOk) return out;
 
       out.stage = 'session-resume';
       const resume = await request('/v1/sessions/' + encodeURIComponent(threadId) + '/resume-thread', 'POST', {
@@ -1886,6 +1958,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const resumeId = resume.thread_id || resume.threadId || '';
       out.resumeThreadId = resumeId;
       out.resumeOk = resume.session_id === threadId && !!resumeId;
+      if (!out.resumeOk) return out;
       const resumeTurn = await request('/v1/threads/' + encodeURIComponent(resumeId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from resume.',
         async: true,
@@ -1897,9 +1970,13 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const resumeTurnId = resumeTurn.turnId || resumeTurn.turn_id || '';
       out.resumeTurnOk = !!resumeTurnId;
+      if (!out.resumeTurnOk) return out;
+      out.stage = 'resume-sse-replay';
       const resumeReplay = await collectSseReplay(resumeId, resumeTurnId, 'packaged session soak ok', false);
       out.resumeReplayOk = resumeReplay.ok === true && resumeReplay.eventCount > 0 && resumeReplay.errorCount === 0;
+      if (!out.resumeReplayOk) return out;
 
+      out.stage = 'thread-list-and-usage';
       const list = await request('/v1/threads?include=side&search=Packaged%20Session%20Soak', 'GET');
       const threads = Array.isArray(list.threads) ? list.threads : [];
       out.threadListOk = out.threadListOk && threads.some((item) => item && item.id === threadId) &&
@@ -1910,11 +1987,34 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         const total = Number(bucket && (bucket.total_tokens || bucket.totalTokens || 0));
         return bucket && (bucket.thread_id === threadId || bucket.threadId === threadId) && total > 0;
       });
+      if (!out.threadListOk || !out.usageOk) return out;
+      out.stage = 'complete';
     } catch (error) {
       out.error = error && (error.stack || error.message) || String(error);
     }
     return out;
   })()`
+}
+
+async function readRendererProgress(debugPort, progressToken) {
+  try {
+    const target = await waitForDebugTarget(debugPort, 2_000)
+    const expression = `(() => {
+      const value = window.__analytixPackagedSoakProgress;
+      if (!value || value.token !== ${JSON.stringify(progressToken)}) return null;
+      return { stage: value.stage, revision: value.revision,
+        changedAt: value.changedAt };
+    })()`
+    const value = await evaluateCdp(target.webSocketDebuggerUrl, expression, 2_000)
+    if (!value || typeof value.stage !== 'string' ||
+      !/^[a-z0-9-]{1,64}$/.test(value.stage) ||
+      !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+      !Number.isSafeInteger(value.changedAt)) return { status: 'unavailable' }
+    return { status: 'observed', stage: value.stage, revision: value.revision,
+      ageMs: Math.max(0, Math.min(86_400_000, Date.now() - value.changedAt)) }
+  } catch {
+    return { status: 'unavailable' }
+  }
 }
 
 function buildRelaunchExpression({ threadId, turnId, providerId, model }) {
@@ -2227,6 +2327,7 @@ async function runActualPackagedSessionSoak() {
   let rendererReadinessPassed = false
   let cdpFailure = null
   let relaunch = null
+  const progressToken = randomUUID()
   const providerId = 'xiaomi'
   const model = 'mimo-v2.5-pro'
 
@@ -2283,7 +2384,8 @@ async function runActualPackagedSessionSoak() {
             runtimePort,
             runtimeDataDir,
             workspace,
-            syntheticApiKey
+            syntheticApiKey,
+            progressToken
           }),
           timeoutMs: Math.max(1, evaluationDeadline - Date.now())
         })
@@ -2363,7 +2465,11 @@ async function runActualPackagedSessionSoak() {
           remoteKind: error?.cdpRemoteKind || '',
           protocolCode: error?.cdpProtocolCode ?? null,
           exceptionClass: error?.cdpExceptionClass || '',
-          preflightLastFailure: error?.cdpPreflightLastFailure || ''
+          preflightLastFailure: error?.cdpPreflightLastFailure || '',
+          commandOutcome: error?.cdpOutcome || 'unknown',
+          progress: rendererReadinessPassed
+            ? await readRendererProgress(debugPort, progressToken)
+            : { status: 'unavailable' }
         }
       }
     }
@@ -2410,10 +2516,9 @@ async function runActualPackagedSessionSoak() {
       } catch {
         approvalAllowFileMatches = false
       }
-      if (!cleanupQuiesced || (retainDiagnosticProfile &&
-        (launchError || renderer?.error || renderer?.settingsPatchError || renderer?.restartError ||
-          (forkOnly && renderer?.forkOk !== true) ||
-          (relaunchAfterInitial && relaunch?.continuationCompleted !== true) || cancelOnly))) {
+      // Explicit protected-QA retention must also cover failed boolean checks
+      // and successful diagnostic runs, not just exceptions or focused modes.
+      if (!cleanupQuiesced || retainDiagnosticProfile) {
         diagnosticProfilePath = tempHome
       } else {
         rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })

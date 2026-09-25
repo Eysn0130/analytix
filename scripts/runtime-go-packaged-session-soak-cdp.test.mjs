@@ -587,3 +587,240 @@ test('packaged thread-read diagnostics retain only bounded fixed categories', ()
     status: 503, code: 'accepted_final_hydration_unavailable', hydrationClass: 'manifest_mismatch'
   })
 })
+
+function rendererJourneyFixture(t, options = {}) {
+  const builderStart = source.indexOf('function buildRendererExpression(')
+  const builderEnd = source.indexOf('\nfunction buildRelaunchExpression(', builderStart)
+  assert.ok(builderStart >= 0 && builderEnd > builderStart)
+  const build = vm.runInNewContext(`${source.slice(builderStart, builderEnd)}\nbuildRendererExpression`, {
+    JSON, String, forkOnly: options.forkOnly === true,
+    focusedForkStage: options.forkOnly ? 'initial' : '',
+    relaunchAfterInitial: false, cancelOnly: false
+  })
+  const expression = build({ providerBaseUrl: 'http://127.0.0.1:1234',
+    providerId: 'synthetic-provider', model: 'synthetic-model', runtimePort: 4321,
+    runtimeDataDir: '/synthetic/runtime', workspace: '/synthetic/workspace',
+    syntheticApiKey: 'synthetic-test-key', progressToken: 'synthetic-run' })
+  const calls = []
+  const turns = new Map()
+  const latestTurn = new Map()
+  const listeners = { events: new Set(), errors: new Set(), ends: new Set() }
+  const timers = new Set()
+  let registryLists = 0
+  let childCount = 0
+  let stoppedStreams = 0
+  const response = (value, status = 200) => ({ status, body: JSON.stringify(value) })
+  const runtimeRequest = async (path, method = 'GET', raw) => {
+    const payload = raw ? JSON.parse(raw) : null
+    calls.push({ path, method, payload })
+    if (path === '/health') return response({ service: 'analytix' })
+    if (path === '/v1/threads' && method === 'POST') {
+      if (options.failInitialThread && payload.mode === 'agent') return response({})
+      return response({ id: payload.mode === 'plan' ? 'plan-thread' : 'source-thread' })
+    }
+    if (path === '/v1/attachments' && method === 'POST') return response({
+      attachment: { id: 'attachment-1', scope: 'thread', name: 'packaged-attachment.txt' }
+    })
+    if (path === '/v1/threads?include=side') return response({
+      threads: Array.from({ length: childCount }, (_, i) => ({
+        id: `fork-${i + 1}`, parentThreadId: 'source-thread', relation: 'fork'
+      }))
+    })
+    if (path.startsWith('/v1/threads?include=side&search=')) return response({
+      threads: [{ id: 'source-thread' }, { id: 'fork-1' }]
+    })
+    if (path.endsWith('/fork') && method === 'POST') {
+      childCount += options.forkChildrenAdded ?? 1
+      return response({ id: 'fork-1', parentThreadId: 'source-thread' })
+    }
+    if (path.endsWith('/turns') && method === 'POST') {
+      const threadId = path.split('/')[3]
+      const turnId = `turn-${turns.size + 1}`
+      turns.set(turnId, { threadId, prompt: payload.prompt })
+      latestTurn.set(threadId, turnId)
+      return response({ threadId, turnId })
+    }
+    if (path.startsWith('/v1/approvals/') && method === 'POST') return response({
+      status: payload.decision === 'deny' ? 'denied' : 'allowed'
+    })
+    if (path.startsWith('/v1/user-inputs/') && method === 'POST') return response({})
+    if (path.endsWith('/resume-thread') && method === 'POST') return response({
+      session_id: 'source-thread', thread_id: 'source-thread'
+    })
+    if (path === '/v1/threads/source-thread' && method === 'GET') return response({
+      id: 'source-thread', turns: [...turns.keys()].map((id) => ({ id }))
+    })
+    if (path.startsWith('/v1/usage?')) return response({
+      buckets: [{ thread_id: 'source-thread', total_tokens: 20 }]
+    })
+    return response({ code: 'synthetic_route_missing' }, 404)
+  }
+  const subscribe = (kind, fn) => { listeners[kind].add(fn); return () => listeners[kind].delete(fn) }
+  const startSse = async (threadId, _cursor, streamId) => {
+    const turnId = latestTurn.get(threadId)
+    const prompt = turns.get(turnId)?.prompt || ''
+    const event = (kind, extra = {}) => ({ kind, turnId, ...extra })
+    let events
+    if (streamId.includes('-gate-')) {
+      events = [event('turn_started'), prompt.includes('user input')
+        ? event('user_input_requested', { inputId: 'input-1', questions: [{ id: 'question-1' }] })
+        : event('approval_requested', { approvalId: 'approval-1' })]
+    } else {
+      const denied = prompt.includes('approval deny')
+      const text = prompt.includes('tool timeline') ? 'packaged tool timeline ok'
+        : prompt.includes('MiMo plan') ? 'packaged mimo plan saved'
+          : prompt.includes('attachment fallback') ? 'packaged attachment fallback ok'
+            : prompt.includes('approval allow') ? 'packaged approval allow ok'
+              : prompt.includes('user input') ? 'packaged user input ok'
+                : 'packaged session soak ok'
+      events = [event('turn_started'), event('usage'),
+        ...(prompt.includes('tool timeline') || prompt.includes('MiMo plan')
+          ? [event('tool_call_ready'), event('tool_call_started'), event('tool_call_finished')] : []),
+        ...(!denied ? [event('item_completed', { item: { kind: 'assistant_text',
+          text: options.failToolReplay && prompt.includes('tool timeline') ? 'wrong text' : text } })] : []),
+        event('turn_completed', denied ? { terminalReason: 'approval_denied' } : {})]
+    }
+    for (const fn of listeners.events) fn({ streamId, events })
+    for (const fn of listeners.ends) fn({ streamId })
+  }
+  const api = {
+    settings: {
+      getSettings: async () => ({ runtime: {}, provider: {} }),
+      setSettings: async () => {}
+    },
+    runtime: {
+      runtimeRequest, startSse,
+      onSseEvent: fn => subscribe('events', fn),
+      onSseError: fn => subscribe('errors', fn),
+      onSseEnd: fn => subscribe('ends', fn),
+      ackSseEvent: async () => true,
+      stopSse: async () => { stoppedStreams++ },
+      restartRuntime: async () => {}
+    },
+    providerRegistry: { request: async (request) => {
+      if (request.operation === 'connect') return {}
+      registryLists++
+      return { providers: registryLists > 1
+        ? [{ id: 'synthetic-provider', credentialConfigured: true }] : [] }
+    } }
+  }
+  const window = { analytix: api }
+  const result = vm.runInNewContext(expression, {
+    window, document: { title: 'Analytix' },
+    location: { href: 'app://synthetic' }, JSON, Promise, Date, Math, Map, Set,
+    Number, String, Object, Error, encodeURIComponent, btoa,
+    setTimeout(fn, ms) {
+      const timer = setTimeout(() => { timers.delete(timer); fn() }, ms)
+      timers.add(timer)
+      return timer
+    },
+    clearTimeout(timer) { timers.delete(timer); clearTimeout(timer) }
+  })
+  t.after(() => { for (const timer of timers) clearTimeout(timer) })
+  return { result, calls, listeners, timers, window,
+    get stoppedStreams() { return stoppedStreams } }
+}
+
+test('actual full renderer expression completes the synthetic dependency journey', async (t) => {
+  const fixture = rendererJourneyFixture(t)
+  const result = await fixture.result
+  assert.equal(result.error, '')
+  assert.equal(result.stage, 'complete')
+  assert.equal(fixture.window.__analytixPackagedSoakProgress.stage, 'complete')
+  assert.equal(fixture.window.__analytixPackagedSoakProgress.token, 'synthetic-run')
+  for (const field of ['toolTimelineOk', 'mimoPlanReplayOk', 'attachmentSseReplayOk',
+    'approvalDenyNoExecuteOk', 'approvalAllowExecutedOk', 'userInputReplayOk',
+    'forkOk', 'forkReplayOk', 'resumeOk', 'resumeReplayOk', 'threadListOk', 'usageOk']) {
+    assert.equal(result[field], true, field)
+  }
+  assert.equal(result.forkChildrenAfter - result.forkChildrenBefore, 1)
+  assert.equal(fixture.calls.filter(({ path, method }) => path.endsWith('/fork') && method === 'POST').length, 1)
+  assert.equal(fixture.stoppedStreams, 12)
+  assert.ok(Object.values(fixture.listeners).every((set) => set.size === 0))
+  assert.equal(fixture.timers.size, 0)
+})
+
+test('failed tool replay in full mode stops before plan or attachment writes', async (t) => {
+  const fixture = rendererJourneyFixture(t, { failToolReplay: true })
+  const result = await fixture.result
+  assert.equal(result.stage, 'tool-sse-replay')
+  assert.equal(fixture.window.__analytixPackagedSoakProgress.stage, 'tool-sse-replay')
+  assert.equal(result.toolTimelineOk, false)
+  assert.equal(fixture.calls.filter(({ method }) => method === 'POST').length, 3)
+  assert.ok(!fixture.calls.some(({ path }) => path === '/v1/attachments' || path.endsWith('/fork')))
+  assert.ok(Object.values(fixture.listeners).every((set) => set.size === 0))
+  assert.equal(fixture.timers.size, 0)
+})
+
+test('full and focused fork reject two children and do not continue a child turn', async (t) => {
+  for (const forkOnly of [false, true]) {
+    const fixture = rendererJourneyFixture(t, { forkOnly, forkChildrenAdded: 2 })
+    const result = await fixture.result
+    assert.equal(result.forkChildrenBefore, 0)
+    assert.equal(result.forkChildrenAfter, 2)
+    assert.equal(result.forkOk, false)
+    assert.ok(!fixture.calls.some(({ path, method }) =>
+      path === '/v1/threads/fork-1/turns' && method === 'POST'))
+  }
+})
+
+test('focused fork succeeds with one observed child', async (t) => {
+  const fixture = rendererJourneyFixture(t, { forkOnly: true })
+  const result = await fixture.result
+  assert.equal(result.forkOk, true)
+  assert.equal(result.forkChildrenBefore, 0)
+  assert.equal(result.forkChildrenAfter, 1)
+  assert.equal(fixture.calls.filter(({ path }) => path.endsWith('/fork')).length, 1)
+})
+
+test('missing initial thread id stops before a turn write', async (t) => {
+  const fixture = rendererJourneyFixture(t, { failInitialThread: true })
+  const result = await fixture.result
+  assert.equal(result.threadCreateOk, false)
+  assert.ok(!fixture.calls.some(({ path }) => path.endsWith('/turns')))
+})
+
+test('explicit diagnostic retention preserves a quiesced full-mode profile', () => {
+  const start = source.indexOf('    if (tempHome) {', source.indexOf('async function runActualPackagedSoak('))
+  const end = source.indexOf('\n  }\n\n  const providerRequests', start)
+  assert.ok(start >= 0 && end > start)
+  const cleanup = source.slice(start, end)
+  for (const retainDiagnosticProfile of [false, true]) {
+    const removed = []
+    const result = vm.runInNewContext(`(() => { let diagnosticProfilePath = ''; ${cleanup}
+      return diagnosticProfilePath; })()`, {
+      tempHome: '/synthetic/profile', cleanupQuiesced: true, retainDiagnosticProfile,
+      join: (...parts) => parts.join('/'), existsSync: () => false,
+      readFileSync: () => { throw new Error('absent') },
+      rmSync: path => removed.push(path)
+    })
+    assert.equal(result, retainDiagnosticProfile ? '/synthetic/profile' : '')
+    assert.deepEqual(removed, retainDiagnosticProfile ? [] : ['/synthetic/profile'])
+  }
+})
+
+test('progress probe reads only the matching run and fixed stage', async () => {
+  const start = source.indexOf('async function readRendererProgress(')
+  const end = source.indexOf('\nfunction buildRelaunchExpression(', start)
+  assert.ok(start >= 0 && end > start)
+  const window = { __analytixPackagedSoakProgress: {
+    token: 'expected-run', stage: 'approval-allow-gate', revision: 7,
+    changedAt: Date.now() - 100
+  } }
+  const expressions = []
+  const probe = vm.runInNewContext(`${source.slice(start, end)}\nreadRendererProgress`, {
+    JSON, Date, Number,
+    waitForDebugTarget: async () => ({ webSocketDebuggerUrl: 'ws://synthetic' }),
+    evaluateCdp: async (_url, expression) => {
+      expressions.push(expression)
+      return vm.runInNewContext(expression, { window })
+    }
+  })
+  const matching = await probe(1234, 'expected-run')
+  assert.equal(matching.status, 'observed')
+  assert.equal(matching.stage, 'approval-allow-gate')
+  assert.equal(matching.revision, 7)
+  assert.equal((await probe(1234, 'different-run')).status, 'unavailable')
+  assert.ok(expressions.every((expression) =>
+    !/runtimeRequest|\bPOST\b|startSse|restartRuntime/.test(expression)))
+})
