@@ -1198,7 +1198,7 @@ function writeElectronFuseFixture(appPath: string): void {
   const snapshotRoot = join(versionRoot, 'Resources')
   mkdirSync(snapshotRoot, { recursive: true })
   const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii')
-  const fuseWire = Buffer.from([1, 9, 0x31, 0x31, 0x30, 0x30, 0x31, 0x31, 0x30, 0x30, 0x31])
+  const fuseWire = Buffer.from([1, 9, 0x31, 0x30, 0x30, 0x30, 0x31, 0x31, 0x30, 0x30, 0x31])
   writeFileSync(frameworkBinary, Buffer.concat([sentinel, fuseWire]))
   writeFileSync(join(snapshotRoot, 'v8_context_snapshot.arm64.bin'), 'v8-snapshot')
   symlinkSync('A', join(frameworkRoot, 'Versions', 'Current'))
