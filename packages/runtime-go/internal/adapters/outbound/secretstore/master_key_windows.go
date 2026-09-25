@@ -221,7 +221,9 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	if options.DevelopmentFileAuthority || !options.empty() || storePath == "" || !filepath.IsAbs(storePath) || filepath.Clean(storePath) != storePath {
 		return nil, portsecretstore.ErrInvalidRequest
 	}
-	if err := ensurePrivateStoreDirectory(filepath.Dir(storePath)); err != nil {
+	// Backend selection is also used during semantic planning. Directory
+	// creation belongs to the first committed read/write, not construction.
+	if err := validatePrivateWindowsPath(storePath); err != nil {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	return &dpapiMasterKeyProvider{
