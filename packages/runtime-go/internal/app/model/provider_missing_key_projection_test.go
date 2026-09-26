@@ -26,7 +26,7 @@ func TestMissingProviderKeyErrorCarriesOnlyFixedAdmissionReason(t *testing.T) {
 			}
 			set := NewRuntimeProviderConfigSet(domainmodel.RuntimeProviderConfigInput{ModelProvidersJSON: string(encoded)})
 			_, err = set.ResolveTurnExecution(TurnExecutionInput{})
-			if !errors.Is(err, ErrMissingProviderKey) || err.Error() != "provider configuration error: apiKey is required" {
+			if !errors.Is(err, ErrMissingProviderKey) || err.Error() != "provider configuration error: credential is required" {
 				t.Fatal("missing-key source did not return its fixed admission diagnostic")
 			}
 			if strings.Contains(err.Error(), unrelatedCredential) || strings.Contains(err.Error(), providerID) {

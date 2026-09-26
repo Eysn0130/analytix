@@ -20,7 +20,7 @@ var ErrUnsupportedReasoningEffort = errors.New("provider reasoning effort is uns
 
 // Missing credentials are a fixed admission failure. Do not interpolate a
 // user-configured identity into an error that can enter durable failure records.
-var ErrMissingProviderKey = errors.New("provider configuration error: apiKey is required")
+var ErrMissingProviderKey = errors.New("provider configuration error: credential is required")
 
 type RuntimeProviderConfigSet struct {
 	defaultProviderID     string
