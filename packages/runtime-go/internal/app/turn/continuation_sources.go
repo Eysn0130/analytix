@@ -97,7 +97,7 @@ func ReadTaskContinuationSourceV1(thread map[string]any, current domainsecurity.
 	if domainsecurity.ValidateTurnSecurityContextForExecution(current) != nil || !domainsecurity.TurnSecurityContextIsGeneral(current) || current.ThreadID != stringField(thread, "id") || current.WorkspaceRealPath != stringField(thread, "workspace") {
 		return nil, errors.New("task history source is unavailable in the current scope")
 	}
-	if !domainsecurity.IsSHA256Hex(reference) || offset < 0 || limit < 1 || limit > 16000 {
+	if (!domainsecurity.IsSHA256Hex(reference) && !threaddomain.ValidContinuationProviderReferenceV1(reference)) || offset < 0 || limit < 1 || limit > 16000 {
 		return nil, errors.New("task history read bounds are invalid")
 	}
 	history, err := continuationUserHistoryV1(thread)
@@ -114,7 +114,7 @@ func ReadTaskContinuationSourceV1(thread map[string]any, current domainsecurity.
 		}
 	}
 	for _, source := range history.Sources {
-		if source.Reference != reference {
+		if source.Reference != reference && threaddomain.ContinuationProviderReferenceV1(source.Reference) != reference {
 			continue
 		}
 		runes := []rune(source.Text)
@@ -125,7 +125,7 @@ func ReadTaskContinuationSourceV1(thread map[string]any, current domainsecurity.
 		if end > len(runes) {
 			end = len(runes)
 		}
-		return map[string]any{"version": history.Version, "reference": source.Reference, "digest": source.Digest, "text": string(runes[offset:end]), "offset": offset, "nextOffset": end, "totalRunes": utf8.RuneCountInString(source.Text), "complete": end == len(runes), "authority": "original_user_history_not_execution_permission"}, nil
+		return map[string]any{"version": history.Version, "reference": reference, "sourceCommitment": threaddomain.ContinuationProviderReferenceV1(source.Digest), "text": string(runes[offset:end]), "offset": offset, "nextOffset": end, "totalRunes": utf8.RuneCountInString(source.Text), "complete": end == len(runes), "authority": "original_user_history_not_execution_permission"}, nil
 	}
 	return nil, errors.New("task history reference is unavailable in the current scope")
 }

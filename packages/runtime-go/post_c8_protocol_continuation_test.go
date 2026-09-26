@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
@@ -67,7 +68,7 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 				if ok {
 					var snapshot map[string]any
 					if json.Unmarshal([]byte(payload), &snapshot) == nil {
-						if digest := stringField(snapshot, "sourceSnapshotDigest"); len(digest) == 64 {
+						if digest := stringField(snapshot, "sourceSnapshotReference"); domainthread.ValidContinuationProviderReferenceV1(digest) {
 							compactionDigests[digest] = true
 						}
 						history, _ := snapshot["userHistory"].(map[string]any)
@@ -92,7 +93,7 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 			}
 			source, _ := sources[index].(map[string]any)
 			ref := stringField(source, "reference")
-			if len(ref) != 64 {
+			if !domainthread.ValidContinuationProviderReferenceV1(ref) {
 				failure = "source reference is not resolvable"
 				emitText("Invalid source reference.")
 				return

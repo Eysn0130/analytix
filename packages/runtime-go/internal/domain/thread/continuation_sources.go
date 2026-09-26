@@ -53,14 +53,43 @@ func (history *ContinuationUserHistoryV1) Validate() error {
 	return nil
 }
 
+// ContinuationProviderReferenceV1 is a stable, domain-separated selector for
+// an existing local digest. Its letter-only body cannot collide with decimal
+// PII detection. It grants no authority; reads still resolve against the current
+// thread/principal/workspace. Persisted sealed references stay unchanged.
+func ContinuationProviderReferenceV1(digest string) string {
+	if !isContinuationSHA256V1(digest) {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("analytix.continuation-provider-reference/v1\x00" + digest))
+	body := make([]byte, 64)
+	for i, value := range sum {
+		body[2*i] = 'a' + value>>4
+		body[2*i+1] = 'a' + value&15
+	}
+	return "hist1_" + string(body)
+}
+
+func ValidContinuationProviderReferenceV1(value string) bool {
+	if len(value) != 70 || !strings.HasPrefix(value, "hist1_") {
+		return false
+	}
+	for _, ch := range value[6:] {
+		if ch < 'a' || ch > 'p' {
+			return false
+		}
+	}
+	return true
+}
+
 // ProviderContinuationMapV1 leaves persisted sealed snapshots unchanged. Large
 // sources become bounded references for the scope-checked read_task_history
 // tool; they are never silently truncated to a supposed complete constraint.
 func ProviderContinuationMapV1(snapshot TaskContinuationSnapshotV1) map[string]any {
 	out := TaskContinuationSnapshotMapV1(snapshot)
 	delete(out, "stateDigest")
-	out["sourceSnapshotDigest"] = snapshot.StateDigest
-	out["projectionVersion"] = "provider-continuation-view.v1"
+	out["sourceSnapshotReference"] = ContinuationProviderReferenceV1(snapshot.StateDigest)
+	out["projectionVersion"] = "provider-continuation-view.v2"
 	if snapshot.UserHistory == nil {
 		return out
 	}
@@ -68,13 +97,14 @@ func ProviderContinuationMapV1(snapshot TaskContinuationSnapshotV1) map[string]a
 	for _, source := range snapshot.UserHistory.Sources {
 		bytes += len(source.Text)
 	}
-	if bytes <= ContinuationInlineBudgetBytes {
-		return out
-	}
 	refs := make([]map[string]any, 0, len(snapshot.UserHistory.Sources))
 	for _, source := range snapshot.UserHistory.Sources {
-		refs = append(refs, map[string]any{"reference": source.Reference, "digest": source.Digest, "runes": utf8.RuneCountInString(source.Text)})
+		ref := map[string]any{"reference": ContinuationProviderReferenceV1(source.Reference), "sourceCommitment": ContinuationProviderReferenceV1(source.Digest), "runes": utf8.RuneCountInString(source.Text)}
+		if bytes <= ContinuationInlineBudgetBytes {
+			ref["text"] = source.Text
+		}
+		refs = append(refs, ref)
 	}
-	out["userHistory"] = map[string]any{"version": snapshot.UserHistory.Version, "scopeDigest": snapshot.UserHistory.ScopeDigest, "sources": refs, "readTool": "read_task_history", "chronological": true}
+	out["userHistory"] = map[string]any{"version": snapshot.UserHistory.Version, "scopeCommitment": ContinuationProviderReferenceV1(snapshot.UserHistory.ScopeDigest), "sources": refs, "readTool": "read_task_history", "chronological": true}
 	return out
 }

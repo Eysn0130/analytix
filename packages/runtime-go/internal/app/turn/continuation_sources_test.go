@@ -50,7 +50,11 @@ func TestContinuationUserSourcesRepeatedCompactionReadbackAndRevision(t *testing
 	if strings.Contains(string(projected), "large original user context") || !strings.Contains(string(projected), "read_task_history") {
 		t.Fatal("large source was inlined or became unreadable")
 	}
-	ref := snapshot.UserHistory.Sources[0].Reference
+	legacyRef := snapshot.UserHistory.Sources[0].Reference
+	ref := threaddomain.ContinuationProviderReferenceV1(legacyRef)
+	if _, err := ReadTaskContinuationSourceV1(reopened, scope, legacyRef, 0, 80); err != nil {
+		t.Fatal("legacy sealed reference unreadable", err)
+	}
 	page, err := ReadTaskContinuationSourceV1(reopened, scope, ref, 0, 80)
 	if err != nil || !strings.HasPrefix(page["text"].(string), "Only modify A.txt") || page["complete"] != false {
 		t.Fatal("budgeted source read failed", err)
