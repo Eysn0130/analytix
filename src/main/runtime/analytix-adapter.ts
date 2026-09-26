@@ -1,4 +1,5 @@
 import { packagedReleaseProfile } from '../release-profile'
+import { createRuntimePublicationTraceReceiver } from '../services/thread-trace-service'
 import { app } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -2650,7 +2651,12 @@ async function startGoConformanceSidecarOnce(
   goSidecarRuntimeToken = runtimeToken
   goSidecarFinalPublicationAuthorityPin = null
   const launchGeneration = ++goSidecarGeneration
-  child.stderr?.on('data', (chunk) => appendGoStderrTail(String(chunk)))
+  const publicationTrace = createRuntimePublicationTraceReceiver(app.getPath('userData'), child.pid ?? 0, launchGeneration)
+  child.stderr?.on('data', (chunk) => {
+    appendGoStderrTail(String(chunk))
+    publicationTrace.write(chunk)
+  })
+  child.once('close', () => publicationTrace.close())
   const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })
   let readyPayloadReceived = false
 

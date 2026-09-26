@@ -290,7 +290,11 @@ describe('thread event sink binding', () => {
       expect(terminalTraces().map((event) => event.name)).toEqual([
         'thread.terminal.renderer_committed', 'thread.terminal.next_frame'
       ])
-      expect(terminalTraces()[0]?.data).toEqual({ lastSeq: 22, acceptedFinal })
+      expect(terminalTraces()[0]?.data).toEqual({
+        lastSeq: 22, acceptedFinal,
+        monotonicMs: expect.any(Number), timeOrigin: performance.timeOrigin
+      })
+      expect(terminalTraces()[0]?.data?.monotonicMs).toBeGreaterThanOrEqual(0)
       expect(JSON.stringify(terminalTraces())).not.toContain('ordinary general guidance')
     } finally {
       vi.unstubAllGlobals()
