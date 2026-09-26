@@ -327,9 +327,9 @@ func (s *DurableEventSessionStore) LoadEventsSinceContext(ctx context.Context, t
 }
 
 // LoadPublicEventsSince expands a cursor that lands inside an accepted-final
-// manifest back to the manifest's first event. The SSE adapter then emits the
-// manifest as one transport batch and advances the public cursor only to its
-// final sequence.
+// or ordinary general terminal manifest back to the manifest's first event.
+// The SSE adapter then emits the manifest as one transport batch and advances
+// the public cursor only to its final sequence.
 func (s *DurableEventSessionStore) LoadPublicEventsSince(threadID string, afterSeq int) (DurableLoadEventsResult, error) {
 	return s.LoadPublicEventsSinceContext(context.Background(), threadID, afterSeq)
 }
@@ -343,7 +343,7 @@ func (s *DurableEventSessionStore) LoadPublicEventsSinceContext(ctx context.Cont
 		result.Events = nil
 		return result, errors.New("public event replay contains invalid durable records")
 	}
-	filtered, err := domainevent.AcceptedFinalReplayEventsAfter(result.Events, afterSeq)
+	filtered, err := domainevent.AtomicTerminalReplayEventsAfter(result.Events, afterSeq)
 	if err != nil {
 		result.Events = nil
 		return result, err
