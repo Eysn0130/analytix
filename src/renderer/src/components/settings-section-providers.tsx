@@ -141,6 +141,7 @@ function endpointFormatForRegistryKind(kind: string): ModelEndpointFormat {
       return 'responses'
     case 'anthropic-compatible':
     case 'anthropic-messages':
+    case 'deepseek-messages':
     case 'messages':
       return 'messages'
     case 'custom-endpoint':
@@ -195,6 +196,7 @@ export function providerProfileFromRegistry(provider: ProviderRegistryPublicProv
     name: catalog?.name ?? provider.id,
     baseUrl: provider.endpoint,
     endpointFormat: endpointFormatForRegistryKind(provider.kind),
+    ...(provider.kind === 'deepseek-messages' ? { registryKind: 'deepseek-messages' as const } : {}),
     models: [...provider.models],
     modelProfiles: Object.fromEntries(provider.models.flatMap((model) => {
       const profile = catalog?.modelProfiles[model]
@@ -2175,9 +2177,10 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     {t('modelProviderEndpointFormat')}
                     <select
                       className={selectControlClass}
-                      value={activeProvider.endpointFormat}
+                      value={activeProvider.registryKind ?? activeProvider.endpointFormat}
                       onChange={(e) => updateModelProvider(activeProvider.id, {
-                        endpointFormat: e.target.value as ModelEndpointFormat
+                        endpointFormat: e.target.value === 'deepseek-messages' ? 'messages' : e.target.value as ModelEndpointFormat,
+                        registryKind: e.target.value === 'deepseek-messages' ? 'deepseek-messages' : undefined
                       })}
                     >
                       {MODEL_ENDPOINT_FORMATS.map((format) => (
@@ -2185,6 +2188,9 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                           {t(MODEL_ENDPOINT_FORMAT_LABEL_KEYS[format])}
                         </option>
                       ))}
+                      <option value="deepseek-messages">
+                        {t('providerModelReasoningProtocolDeepseekMessages')}
+                      </option>
                     </select>
                   </label>
                   {activeProvider.endpointFormat === 'custom_endpoint' ? (

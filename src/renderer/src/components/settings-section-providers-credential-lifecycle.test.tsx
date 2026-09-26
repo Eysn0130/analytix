@@ -217,6 +217,27 @@ async function unmount() {
   root = null
 }
 
+it('saves the native Messages choice through Registry and restores it in a fresh settings view', async () => {
+  const endpoint = (): HTMLSelectElement => {
+    const label = [...container.querySelectorAll('label')].find(node => node.textContent?.startsWith('modelProviderEndpointFormat'))
+    expect(label?.querySelector('select')).not.toBeNull()
+    return label!.querySelector('select')!
+  }
+  await act(async () => {
+    endpoint().value = 'deepseek-messages'
+    endpoint().dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await click('modelProviderSaveChanges')
+  expect(registry.snapshot().providers[0]?.kind).toBe('deepseek-messages')
+  expect(registry.calls.find(call => call.operation === 'update')).toMatchObject({
+    provider: { kind: 'deepseek-messages' }, credential: { kind: 'keep' }
+  })
+  expect(patches.some(patch => Object.prototype.hasOwnProperty.call(patch, 'provider'))).toBe(false)
+  await unmount()
+  await mount()
+  expect(endpoint().value).toBe('deepseek-messages')
+})
+
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('fetch', () => { throw new Error('Unexpected fixture network') })

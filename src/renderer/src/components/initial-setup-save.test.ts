@@ -667,6 +667,32 @@ describe('credential persistence', () => {
     expect(registry.request.mock.calls.map(([request]) => request.operation)).toEqual(['list'])
   })
 
+  it('persists and leaves native Messages through the Registry without replacing credentials', async () => {
+    const profile = getModelProviderSettings(settings()).providers.find((item) => item.id === 'deepseek')!
+    const native = { ...profile, endpointFormat: 'messages' as const, registryKind: 'deepseek-messages' as const }
+    const existing = publicProvider(profile.id, true, {
+      kind: 'anthropic-compatible', endpoint: profile.baseUrl, models: profile.models,
+      selectedModel: profile.models[0]
+    })
+    const registry = registryHarness([existing], existing.id)
+    const saved = await persistProviderSettingsDraft({
+      profile: native, selectedModel: profile.models[0]!, credentialDraft: '', requestProviderRegistry: registry.request
+    })
+    expect(saved.provider?.kind).toBe('deepseek-messages')
+    const kept = await persistProviderSettingsDraft({
+      profile: native, selectedModel: profile.models[0]!, credentialDraft: '', requestProviderRegistry: registry.request
+    })
+    expect(kept.provider?.kind).toBe('deepseek-messages')
+    const generic = await persistProviderSettingsDraft({
+      profile: { ...native, registryKind: undefined }, selectedModel: profile.models[0]!,
+      credentialDraft: '', requestProviderRegistry: registry.request
+    })
+    expect(generic.provider?.kind).toBe('anthropic-compatible')
+    const updates = registry.request.mock.calls.map(([request]) => request).filter(request => request.operation === 'update')
+    expect(updates).toHaveLength(2)
+    expect(updates.map(request => request.credential)).toEqual([{ kind: 'keep' }, { kind: 'keep' }])
+  })
+
   it('updates Registry metadata with credential keep and treats masked input as write-only no-op', async () => {
     const profile = getModelProviderSettings(settings()).providers.find((item) => item.id === 'deepseek')!
     const committedInput = providerRegistryInput(profile, profile.models[0] ?? '', '')

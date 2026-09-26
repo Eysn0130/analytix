@@ -232,6 +232,9 @@ function registrySnapshot(result: ProviderRegistryResult): ProviderRegistrySnaps
 }
 
 function registryProviderKind(profile: ModelProviderProfileV1): string {
+  if (profile.endpointFormat === 'messages' && profile.registryKind === 'deepseek-messages') {
+    return 'deepseek-messages'
+  }
   switch (profile.endpointFormat) {
     case 'responses': return 'openai-responses'
     case 'messages': return 'anthropic-compatible'
@@ -247,6 +250,7 @@ function registryProviderEndpointFormat(kind: string): ModelProviderProfileV1['e
       return 'responses'
     case 'anthropic-compatible':
     case 'anthropic-messages':
+    case 'deepseek-messages':
     case 'messages':
       return 'messages'
     case 'custom-endpoint':
@@ -359,7 +363,8 @@ async function syncProviderCredential(input: {
       oauthBinding: existing?.oauthBinding,
       accountObservation: existing?.accountObservation
     }),
-    ...(existing && registryProviderEndpointFormat(existing.kind) === input.profile.endpointFormat
+    ...(existing && existing.kind !== 'deepseek-messages' && input.profile.registryKind !== 'deepseek-messages' &&
+      registryProviderEndpointFormat(existing.kind) === input.profile.endpointFormat
       ? { kind: existing.kind }
       : {})
   }

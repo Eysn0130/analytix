@@ -419,7 +419,7 @@ func allProviderRegistryDigitsV1(value string) bool {
 
 func providerRegistryUsesAnthropicCredentialV1(kind string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(kind))
-	return normalized == "anthropic-compatible" || normalized == "anthropic-messages" || normalized == "messages"
+	return normalized == "anthropic-compatible" || normalized == "anthropic-messages" || normalized == "deepseek-messages" || normalized == "messages"
 }
 
 func parseProviderRegistryModelsV1(body []byte) ([]string, bool) {

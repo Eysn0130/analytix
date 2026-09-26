@@ -207,6 +207,8 @@ export type ModelProviderProfileV1 = {
   name: string
   baseUrl: string
   endpointFormat: ModelEndpointFormat
+  /** Non-secret Registry projection; persisted through Registry Save, not UI settings. */
+  registryKind?: 'deepseek-messages'
   models: string[]
   modelProfiles: Record<string, ModelProviderModelProfileV1>
   price?: ModelProviderPricingV1
