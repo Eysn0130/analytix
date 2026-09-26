@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
+import * as fsPromises from 'node:fs/promises'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dispatchRequest } from '../src/server-test-support/http-server.js'
 import { CapabilityRegistry } from '../src/tool-test-support/tool/capability-registry.js'
 import { buildTaskJobToolProviders } from '../src/tool-test-support/tool/task-job-tool-provider.js'
@@ -26,6 +27,11 @@ import {
 import { runPlannerExecutorCoordinator } from '../src/delegation-test-support/planner-executor-coordinator.js'
 import type { ToolHostContext, ToolHostResult } from '../src/ports/tool-host.js'
 import { buildHarness, readJson } from './http-server-test-harness.js'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, writeFile: vi.fn(actual.writeFile) }
+})
 
 const contractUrl = new URL(
   '../src/conformance/fixtures/task-job-orchestration-contract.json',
@@ -103,6 +109,31 @@ describe('task/background/planner orchestration contract', () => {
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('keeps the prior job readable while a replacement write is incomplete', async () => {
+    const store = new FileTaskJobStore(dir)
+    const record = TaskJobRecordSchema.parse({
+      id: 'job_atomic', kind: 'task', parentThreadId: 'thr_atomic',
+      parentTurnId: 'turn_atomic', status: 'running',
+      createdAt: '2026-09-26T00:00:00.000Z', updatedAt: '2026-09-26T00:00:00.000Z'
+    })
+    await store.upsert(record)
+    const { writeFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let intermediateReads = 0
+    const write = vi.spyOn(fsPromises, 'writeFile').mockImplementation(async (path, data, options) => {
+      await writeFile(path, '', options)
+      expect(await store.load(record.id)).toEqual(record)
+      intermediateReads += 1
+      await writeFile(path, data, options)
+    })
+    try {
+      await store.upsert({ ...record, status: 'completed', result: 'completed once' })
+      expect(intermediateReads).toBe(1)
+      expect(await store.load(record.id)).toEqual({ ...record, status: 'completed', result: 'completed once' })
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it('pins foreground, background, wait/output/kill, parallel, planner, and transcript contracts', async () => {

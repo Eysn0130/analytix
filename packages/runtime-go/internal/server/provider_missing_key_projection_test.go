@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"analytix.local/runtime-go/internal/app/model"
 	provider "analytix.local/runtime-go/internal/provider"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
@@ -58,7 +60,7 @@ func TestMissingProviderKeySourceIsClosedAcrossDurableSSERecoveryAndModel(t *tes
 	stderr := captureRuntimeStderrForTest(t, func() {
 		_, _ = handler.startRuntimeTurn(context.Background(), threadID, startRuntimeTurnRequest{Prompt: prompt})
 	})
-	if resolver.sourceError == nil || resolver.sourceError.Error() != "provider configuration error: apiKey is required for provider "+identityCanary {
+	if !errors.Is(resolver.sourceError, model.ErrMissingProviderKey) || resolver.sourceError.Error() != "provider configuration error: credential is required" {
 		t.Fatal("real missing-key source was not reached")
 	}
 	if transport.calls != 0 {
