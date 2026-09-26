@@ -56,6 +56,7 @@ const textInputClass =
 const MODEL_LIST_PAGE_SIZE = 8
 
 const REASONING_PROTOCOL_LABEL_KEYS: Record<ModelReasoningRequestProtocol, string> = {
+  'deepseek-messages': 'providerModelReasoningProtocolDeepseekMessages',
   'deepseek-chat-completions': 'providerModelReasoningProtocolDeepseek',
   'glm-chat-completions': 'providerModelReasoningProtocolGlm',
   'mimo-chat-completions': 'providerModelReasoningProtocolMimo',

@@ -48,6 +48,16 @@ func TestWorkspaceReadUsesCurrentCoreAuthorityWithoutHistory(t *testing.T) {
 	if err != nil || len(snapshot.Files) != 1 || string(snapshot.Files[0].Content) != "SYNTHETIC_READ_CANARY" {
 		t.Fatalf("authorized snapshot missing: %v", err)
 	}
+	// A previously authorized snapshot is not a content cache. Reusing the
+	// same binding after a file edit must read fresh bytes before the later
+	// revocation check below refuses any data.
+	if err := os.WriteFile(filepath.Join(scope.Workspace, "reference.md"), []byte("SYNTHETIC_CHANGED_CONTENT"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := service.Read(ctx, request)
+	if err != nil || len(changed.Files) != 1 || string(changed.Files[0].Content) != "SYNTHETIC_CHANGED_CONTENT" {
+		t.Fatal("workspace reader reused stale content", err)
+	}
 	after, err := p.handler.store.GetThread(scope.ThreadID)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("read changed thread/history")

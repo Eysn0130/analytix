@@ -60,7 +60,7 @@ function formatMoneyValue(value: number): string {
 }
 
 export function formatUnconfiguredCost(locale = fallbackLocale()): string {
-  return isChineseLocale(locale) ? '价格未配置' : 'Not configured'
+  return isChineseLocale(locale) ? '费用未知' : 'Cost unavailable'
 }
 
 export function formatCost(
@@ -77,12 +77,11 @@ export function formatCost(
     return isChineseLocale(locale) ? '￥0.0000' : '$0.0000'
   }
   if (!hasUsd && !hasCny) return formatUnconfiguredCost(locale)
-  if (isChineseLocale(locale)) {
-    const value = cnyValue ?? (usdValue ?? 0) * 7.2
-    return `￥${formatMoneyValue(value)}`
-  }
-  if (usdValue != null) return `$${formatMoneyValue(usdValue)}`
-  return `￥${formatMoneyValue(cnyValue ?? 0)}`
+  const usd = usdValue == null ? null : `$${formatMoneyValue(usdValue)}`
+  const cny = cnyValue == null ? null : `￥${formatMoneyValue(cnyValue)}`
+  // Different currencies are separate estimates, never a fixed FX conversion.
+  return (isChineseLocale(locale) ? [cny, usd] : [usd, cny]).filter(Boolean).join(' + ')
+
 }
 
 export function formatPercent(value: number | null): string {

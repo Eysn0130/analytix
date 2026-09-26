@@ -1264,7 +1264,29 @@ const TaskContinuationTodoV1Schema = z.object({
   }
 })
 
+const ContinuationUserHistoryV1Schema = z.object({
+  version: z.literal('continuation-user-history.v1'),
+  scopeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  sources: z.array(z.object({
+    reference: z.string().regex(/^[a-f0-9]{64}$/),
+    text: z.string().min(1).max(1 << 20),
+    digest: z.string().regex(/^[a-f0-9]{64}$/)
+  }).strict()).max(256)
+}).strict().superRefine((history, ctx) => {
+  const refs = new Set<string>()
+  let bytes = 0
+  for (const source of history.sources) {
+    bytes += new TextEncoder().encode(source.text).byteLength
+    if (refs.has(source.reference) || !source.text.trim()) {
+      ctx.addIssue({ code: 'custom', message: 'continuation user source must be unique and nonempty' })
+    }
+    refs.add(source.reference)
+  }
+  if (bytes > 1 << 20) ctx.addIssue({ code: 'custom', message: 'continuation source budget exceeded' })
+})
+
 export const TaskContinuationSnapshotV1Schema = z.object({
+  userHistory: ContinuationUserHistoryV1Schema.optional(),
   schemaVersion: z.literal(1),
   goal: z.object({
     goalId: z.string().min(1),

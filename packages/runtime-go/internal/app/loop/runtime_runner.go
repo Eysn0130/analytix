@@ -354,7 +354,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		input.ProviderConfig.EndpointFormat,
 		input.ProviderCustomRequestShape,
 	)
-	deepSeekPrivateProtocol := privateProtocolKind == "deepseek-chat-completions"
+	deepSeekPrivateProtocol := (privateProtocolKind == "deepseek-chat-completions" || privateProtocolKind == "deepseek-messages")
 	configuredReasoningProtocol := strings.TrimSpace(input.ProviderConfig.ReasoningProtocol)
 	privateProtocolSafeHistoryRequired :=
 		deepSeekPrivateProtocol ||
@@ -469,6 +469,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		}
 		return &slot, nil
 	}
+	var lastToolSettledAt time.Time
 	finishCandidateBoundary := func(
 		candidateText string,
 		candidateResult domainmodel.Result,
@@ -519,13 +520,19 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				return RuntimeAgentLoopResult{}, true, nil
 			}
 		}
+		projectionStartedAt := time.Now()
 		ordinaryResult, err := compileOrdinaryCandidate(currentProviderStep, candidateText)
 		if err != nil {
 			releaseCandidateTerminal()
 			return RuntimeAgentLoopResult{AssistantText: candidateText, LastResult: candidateResult}, false,
 				WrapHostBoundaryFailure(HostCandidateProjectionFailure, err)
 		}
+		lastDependencyAt := candidateResult.HostTiming.FinishedAt
+		if lastToolSettledAt.After(lastDependencyAt) {
+			lastDependencyAt = lastToolSettledAt
+		}
 		return RuntimeAgentLoopResult{
+			LastDependencyAt: lastDependencyAt, CandidateProjectionStartedAt: projectionStartedAt, CandidateProjectionReadyAt: time.Now(),
 			AssistantText: candidateText, LastResult: candidateResult,
 			ReportDeliveryCompleted:  reportDeliveryCompleted || candidateReportDeliveryCompleted,
 			CandidateUsesCaseData:    currentProviderStep.UsesCaseDataAuthority(),
@@ -643,7 +650,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			privateProtocolKind = appmodel.PrivateProtocolReasoningKindForProvider(
 				input.ProviderConfig, input.ProviderConfig.EndpointFormat, input.ProviderCustomRequestShape,
 			)
-			deepSeekPrivateProtocol = privateProtocolKind == "deepseek-chat-completions"
+			deepSeekPrivateProtocol = (privateProtocolKind == "deepseek-chat-completions" || privateProtocolKind == "deepseek-messages")
 			configuredReasoningProtocol = strings.TrimSpace(input.ProviderConfig.ReasoningProtocol)
 			privateProtocolSafeHistoryRequired = deepSeekPrivateProtocol ||
 				appmodel.PrivateProtocolRequired(configuredReasoningProtocol, input.Effort)
@@ -1259,6 +1266,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			},
 			Driver: deps.ToolDriver,
 		})
+		lastToolSettledAt = time.Now()
 		if err != nil && toolStep.providerCorrectableToolName != "" {
 			var failure TurnFailureError
 			if errors.As(err, &failure) && strings.TrimSpace(failure.Code) == "validation_error" {

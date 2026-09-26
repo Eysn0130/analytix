@@ -86,6 +86,7 @@ import {
 import {
   createThreadTraceEvent,
   isThreadTraceEnabled,
+  registerTerminalDOMTrace,
   PersistedThreadTraceSink
 } from '../thread/tracing/thread-performance-trace'
 
@@ -1288,16 +1289,16 @@ export function buildThreadEventSink(
   const loadThreadDetail = binding.getThreadDetail ?? ((threadId: string) => getProvider().getThreadDetail(threadId))
   const traceSink = new PersistedThreadTraceSink()
   const traceThreadId = (): string | undefined => boundThreadId || get().activeThreadId || undefined
-  const recordTerminalCommit = (threadId: string | null | undefined, lastSeq: number, acceptedFinal: boolean): void => {
+  const recordTerminalCommit = (threadId: string | null | undefined, lastSeq: number, acceptedFinal: boolean, turnId?: string | null): void => {
     if (!threadId || !isThreadTraceEnabled()) return
     traceSink.record(createThreadTraceEvent('thread.terminal.renderer_committed', {
-      threadId, data: { lastSeq, acceptedFinal }
+      threadId, turnId: turnId || undefined, data: { lastSeq, acceptedFinal, monotonicMs: performance.now(), timeOrigin: performance.timeOrigin }
     }))
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       window.requestAnimationFrame(() => {
         if (get().activeThreadId !== threadId) return
         traceSink.record(createThreadTraceEvent('thread.terminal.next_frame', {
-          threadId, data: { lastSeq, acceptedFinal }
+          threadId, turnId: turnId || undefined, data: { lastSeq, acceptedFinal }
         }))
       })
     }
@@ -2324,6 +2325,9 @@ export function buildThreadEventSink(
         delete watchTurnCompletion[batch.threadId]
         const unreadThreadIds = { ...state.unreadThreadIds }
         delete unreadThreadIds[batch.threadId]
+        if (batch.terminalItem?.kind === 'assistant') {
+          registerTerminalDOMTrace(batch.threadId, batch.terminalItem.id, batch.lastSeq, false, batch.turnId)
+        }
         committed = true
         return {
           ...timing,
@@ -2344,7 +2348,7 @@ export function buildThreadEventSink(
       })
       if (!committed) return reject('general terminal delivery could not be committed atomically')
 
-      recordTerminalCommit(batch.threadId, batch.lastSeq, false)
+      recordTerminalCommit(batch.threadId, batch.lastSeq, false, batch.turnId)
 
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
@@ -2500,6 +2504,7 @@ export function buildThreadEventSink(
         delete watchTurnCompletion[batch.threadId]
         const unreadThreadIds = { ...state.unreadThreadIds }
         delete unreadThreadIds[batch.threadId]
+        registerTerminalDOMTrace(batch.threadId, batch.assistant.id, batch.lastSeq, true, batch.turnId)
         committed = true
         return {
           ...timing,
@@ -2522,7 +2527,7 @@ export function buildThreadEventSink(
         return reject('accepted-final delivery could not be committed atomically')
       }
 
-      recordTerminalCommit(batch.threadId, batch.lastSeq, true)
+      recordTerminalCommit(batch.threadId, batch.lastSeq, true, batch.turnId)
 
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
@@ -2605,7 +2610,7 @@ export function buildThreadEventSink(
       })
       if (!reconciled) return
 
-      recordTerminalCommit(completedThreadId, eventSeq ?? get().lastSeq, false)
+      recordTerminalCommit(completedThreadId, eventSeq ?? get().lastSeq, false, completedTurnId)
 
       const settledState = get()
       const pendingMirror = takePendingClawFeishuMirror(completedTurnId)

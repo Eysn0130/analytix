@@ -225,6 +225,10 @@ func TestSanitizePublicValueDropsLegacyEmptyReasoningEffort(t *testing.T) {
 
 func TestReasoningMetadataKeysCannotSmugglePrivateContent(t *testing.T) {
 	values := []map[string]any{
+		{"kind": "pipeline_stage", "details": map[string]any{"firstReasoningLatencyMs": "PRIVATE_REASONING_SENTINEL"}},
+		{"kind": "pipeline_stage", "details": map[string]any{"firstReasoningLatencyMs": map[string]any{"value": "PRIVATE_REASONING_SENTINEL"}}},
+		{"kind": "pipeline_stage", "details": map[string]any{"firstReasoningLatencyMs": float64(-1)}},
+		{"kind": "pipeline_stage", "details": map[string]any{"firstReasoningLatencyMs": float64(1.5)}},
 		{"kind": "usage", "usage": map[string]any{"reasoningTokens": "PRIVATE_REASONING_SENTINEL"}},
 		{"kind": "usage", "usage": map[string]any{"reasoningTokens": map[string]any{"value": "PRIVATE_REASONING_SENTINEL"}}},
 		{"kind": "usage", "usage": map[string]any{"reasoningTokens": float64(1.5)}},
@@ -240,6 +244,19 @@ func TestReasoningMetadataKeysCannotSmugglePrivateContent(t *testing.T) {
 		}
 		if public, ok := SanitizePublicValue(value, false); ok || public != nil {
 			t.Fatalf("invalid reasoning metadata crossed public sanitation: %#v", public)
+		}
+	}
+}
+
+func TestHostFirstReasoningLatencyRemainsPublicNumericMetadata(t *testing.T) {
+	for _, latency := range []any{int64(0), float64(17)} {
+		event := map[string]any{"kind": "pipeline_stage", "stage": "response_received", "details": map[string]any{"firstReasoningLatencyMs": latency}}
+		if err := ValidatePublicRecord(event); err != nil {
+			t.Fatalf("host latency rejected: %v", err)
+		}
+		public, ok := SanitizePublicValue(event, false)
+		if !ok || public.(map[string]any)["details"].(map[string]any)["firstReasoningLatencyMs"] != latency {
+			t.Fatal("host latency was dropped")
 		}
 	}
 }

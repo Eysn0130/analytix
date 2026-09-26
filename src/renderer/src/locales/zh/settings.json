@@ -316,6 +316,7 @@
   "providerModelEndpointFormatLabel": "请求格式（端点）",
   "providerModelEndpointInherit": "继承供应商（{{format}}）",
   "providerModelEndpointFormatHint": "仅为该模型单独覆盖请求格式。当同一供应商里部分模型走 chat completions、另一些走 Anthropic Messages 或 OpenAI Responses 时使用（如 OpenCode Go）。除非某个模型确实需要不同格式，否则保持「继承」即可。",
+  "providerModelReasoningProtocolDeepseekMessages": "DeepSeek Messages",
   "providerModelReasoningProtocolDeepseek": "DeepSeek 风格（reasoning_effort）",
   "providerModelReasoningProtocolGlm": "GLM 风格（thinking）",
   "providerModelReasoningProtocolMimo": "小米 MiMo 风格",

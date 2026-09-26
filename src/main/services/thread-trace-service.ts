@@ -55,9 +55,10 @@ const THREAD_TRACE_DATA_KEYS = {
     'codeBlockChars',
     'deferred'
   ],
-  'thread.terminal.verified': ['lastSeq', 'verificationMs', 'acceptedFinal'],
-  'thread.terminal.ipc_sent': ['lastSeq', 'acceptedFinal'],
-  'thread.terminal.renderer_committed': ['lastSeq', 'acceptedFinal'],
+  'thread.terminal.verified': ['lastSeq', 'verificationMs', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.ipc_sent': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.renderer_committed': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.dom_committed': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin', 'storeToDomMs', 'documentVisible'],
   'thread.terminal.next_frame': ['lastSeq', 'acceptedFinal']
 } as const satisfies Record<ThreadTraceEventName, readonly string[]>
 
@@ -94,10 +95,12 @@ function projectThreadTraceEvent(event: ThreadTraceEventPayload): ThreadTraceEve
     }
   }
   const threadId = threadTraceRef(event.threadId)
+  const turnId = threadTraceRef(event.turnId)
   return {
     name: event.name,
     timestamp: event.timestamp,
     ...(threadId ? { threadId } : {}),
+    ...(turnId ? { turnId } : {}),
     ...(Object.keys(data).length > 0 ? { data } : {})
   }
 }

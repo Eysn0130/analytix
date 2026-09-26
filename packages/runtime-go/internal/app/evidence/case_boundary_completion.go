@@ -599,6 +599,7 @@ func (finalizer *casePublicationFinalizer) persistPrivateFinalV1(
 	); err != nil {
 		return err
 	}
+	result.Persistence.Timing.DeliverableAt = time.Now()
 	result.useCaseLongitudinalAcceptedSlotsV1 = useCaseLongitudinalAcceptedSlotsV1
 	return nil
 }

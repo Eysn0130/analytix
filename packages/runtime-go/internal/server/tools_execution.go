@@ -139,6 +139,23 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return executeGrepRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "web_fetch":
 		return h.executeWebFetchRuntimeTool(ctx, pending, args)
+	case "read_task_history":
+		thread, err := h.store.GetThread(pending.ThreadID)
+		if err != nil {
+			return map[string]any{"code": "task_history_unavailable", "executed": false}, true
+		}
+		offset, limit := 0, 4000
+		if value, ok := args["offset"].(float64); ok {
+			offset = int(value)
+		}
+		if value, ok := args["limit"].(float64); ok {
+			limit = int(value)
+		}
+		output, err := appturn.ReadTaskContinuationSourceV1(thread, pending.SecurityContext, stringField(args, "reference"), offset, limit)
+		if err != nil {
+			return map[string]any{"code": "task_history_unavailable", "executed": false}, true
+		}
+		return output, false
 	case "get_goal":
 		return h.executeRuntimeGetGoalTool(pending)
 	case "create_goal":

@@ -147,22 +147,26 @@ type PipelineStage struct {
 }
 
 type Usage struct {
-	PromptTokens     int     `json:"promptTokens"`
-	CompletionTokens int     `json:"completionTokens"`
-	ReasoningTokens  int     `json:"reasoningTokens"`
-	TotalTokens      int     `json:"totalTokens"`
-	CacheHitTokens   int     `json:"cacheHitTokens"`
-	CacheMissTokens  int     `json:"cacheMissTokens"`
-	CacheHitRate     float64 `json:"cacheHitRate"`
-	HasCacheHit      bool    `json:"-"`
-	HasCacheMiss     bool    `json:"-"`
-	FinishReason     string  `json:"finishReason,omitempty"`
-	CostUSD          float64 `json:"costUsd,omitempty"`
-	CostCNY          float64 `json:"costCny,omitempty"`
-	CacheSavingsUSD  float64 `json:"cacheSavingsUsd,omitempty"`
-	CacheSavingsCNY  float64 `json:"cacheSavingsCny,omitempty"`
-	Currency         string  `json:"currency,omitempty"`
-	PriceConfigured  bool    `json:"priceConfigured,omitempty"`
+	MessagesInput       domaincache.MessagesInputV1 `json:"-"`
+	UsagePresenceKnown  bool                        `json:"-"`
+	HasPromptTokens     bool                        `json:"-"`
+	HasCompletionTokens bool                        `json:"-"`
+	PromptTokens        int                         `json:"promptTokens"`
+	CompletionTokens    int                         `json:"completionTokens"`
+	ReasoningTokens     int                         `json:"reasoningTokens"`
+	TotalTokens         int                         `json:"totalTokens"`
+	CacheHitTokens      int                         `json:"cacheHitTokens"`
+	CacheMissTokens     int                         `json:"cacheMissTokens"`
+	CacheHitRate        float64                     `json:"cacheHitRate"`
+	HasCacheHit         bool                        `json:"-"`
+	HasCacheMiss        bool                        `json:"-"`
+	FinishReason        string                      `json:"finishReason,omitempty"`
+	CostUSD             float64                     `json:"costUsd,omitempty"`
+	CostCNY             float64                     `json:"costCny,omitempty"`
+	CacheSavingsUSD     float64                     `json:"cacheSavingsUsd,omitempty"`
+	CacheSavingsCNY     float64                     `json:"cacheSavingsCny,omitempty"`
+	Currency            string                      `json:"currency,omitempty"`
+	PriceConfigured     bool                        `json:"priceConfigured,omitempty"`
 }
 
 func (u Usage) HasCacheTelemetry() bool {
@@ -194,42 +198,55 @@ type Chunk struct {
 }
 
 type ChunkTrace struct {
+	ProviderResponseModel     string
 	ProviderRequestSentAt     time.Time
 	ProviderResponseHeadersAt time.Time
 	ProviderRawSSEChunkAt     time.Time
+	ProviderLastRawSSEChunkAt time.Time
 	ProviderChunkParsedAt     time.Time
 	LoopChunkCallbackAt       time.Time
 }
 
 type PrefixShape struct {
-	SystemHash         string   `json:"systemHash"`
-	ToolsHash          string   `json:"toolsHash"`
-	PrefixHash         string   `json:"prefixHash"`
-	PrefixItemsHash    string   `json:"prefixItemsHash"`
-	ToolSchemaTokens   int      `json:"toolSchemaTokens"`
-	ToolCount          int      `json:"toolCount,omitempty"`
-	ToolSourcesHash    string   `json:"toolSourcesHash,omitempty"`
-	ToolSourceIDs      []string `json:"toolSourceIds,omitempty"`
-	Route              string   `json:"route,omitempty"`
-	Provider           string   `json:"provider"`
-	ProviderID         string   `json:"providerId"`
-	EndpointFormat     string   `json:"endpointFormat"`
-	Model              string   `json:"model"`
-	DynamicStateLeaked bool     `json:"dynamicStateLeaked"`
+	SystemHash       string   `json:"systemHash"`
+	ToolsHash        string   `json:"toolsHash"`
+	PrefixHash       string   `json:"prefixHash"`
+	PrefixItemsHash  string   `json:"prefixItemsHash"`
+	ToolSchemaTokens int      `json:"toolSchemaTokens"`
+	ToolCount        int      `json:"toolCount,omitempty"`
+	ToolSourcesHash  string   `json:"toolSourcesHash,omitempty"`
+	ToolSourceIDs    []string `json:"toolSourceIds,omitempty"`
+	Route            string   `json:"route,omitempty"`
+	Provider         string   `json:"provider"`
+	ProviderID       string   `json:"providerId"`
+	EndpointFormat   string   `json:"endpointFormat"`
+	Model            string   `json:"model"`
+	// Deprecated: old serialized records may contain this boolean. No current
+	// producer performs a dynamic-state check; false is not evidence of safety.
+	DynamicStateLeaked  bool   `json:"dynamicStateLeaked,omitempty"`
+	DynamicStateCheck   string `json:"dynamicStateCheck,omitempty"`
+	ToolSchemaEstimator string `json:"toolSchemaEstimator,omitempty"`
+}
+
+// ProviderTiming is process-local Host observation. It is never signed or persisted.
+type ProviderTiming struct {
+	StartedAt, FirstContentAt, LastContentAt, FirstTextAt, LastTextAt, FinishBoundaryAt, FinishedAt time.Time
 }
 
 type Result struct {
-	ProviderID           string      `json:"providerId"`
-	Family               string      `json:"family"`
-	EndpointFormat       string      `json:"endpointFormat"`
-	RequestURL           string      `json:"requestUrl"`
-	RequestBodyFields    []string    `json:"requestBodyFields"`
-	Chunks               []Chunk     `json:"chunks"`
-	Usage                Usage       `json:"usage"`
-	PrefixShape          PrefixShape `json:"prefixShape"`
-	StreamCompleted      bool        `json:"streamCompleted"`
-	FirstTokenLatencyMs  int64       `json:"firstTokenLatencyMs,omitempty"`
-	HasFirstTokenLatency bool        `json:"-"`
+	ResponseObservedModel string         `json:"-"`
+	HostTiming            ProviderTiming `json:"-"`
+	ProviderID            string         `json:"providerId"`
+	Family                string         `json:"family"`
+	EndpointFormat        string         `json:"endpointFormat"`
+	RequestURL            string         `json:"requestUrl"`
+	RequestBodyFields     []string       `json:"requestBodyFields"`
+	Chunks                []Chunk        `json:"chunks"`
+	Usage                 Usage          `json:"usage"`
+	PrefixShape           PrefixShape    `json:"prefixShape"`
+	StreamCompleted       bool           `json:"streamCompleted"`
+	FirstTokenLatencyMs   int64          `json:"firstTokenLatencyMs,omitempty"`
+	HasFirstTokenLatency  bool           `json:"-"`
 	// These host-observed timings distinguish private reasoning and raw text
 	// from an authorized final answer. They are never provider output fields.
 	FirstReasoningLatencyMs  int64 `json:"-"`

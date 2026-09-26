@@ -32,7 +32,7 @@ func TestThinkSplitterCarriesFirstRawContentTimestampToAtomicText(t *testing.T) 
 	}
 	chunks, err := splitter.flushChunks()
 	if err != nil || len(chunks) != 1 || chunks[0].Text != "onetwo" ||
-		!chunks[0].Trace.ProviderRawSSEChunkAt.Equal(firstRaw) {
+		!chunks[0].Trace.ProviderRawSSEChunkAt.Equal(firstRaw) || !chunks[0].Trace.ProviderLastRawSSEChunkAt.Equal(firstRaw.Add(time.Second)) {
 		t.Fatalf("atomic text lost first raw trace: chunks=%#v err=%v", chunks, err)
 	}
 }
@@ -620,7 +620,7 @@ func TestParseAnthropicMessagesSSEUsageAndToolCall(t *testing.T) {
 		`data: {"type":"message_start","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":3,"cache_read_input_tokens":2}}}`,
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"lookup","input":{"query":"weather"}}}`,
 		`data: {"type":"content_block_stop","index":0}`,
-		`data: {"type":"message_delta","usage":{"output_tokens":4}}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}`,
 		`data: {"type":"message_stop"}`,
 	}, "\n\n")))
 	if err != nil {
@@ -633,6 +633,35 @@ func TestParseAnthropicMessagesSSEUsageAndToolCall(t *testing.T) {
 	if usage.PromptTokens != 10 || usage.CompletionTokens != 4 || usage.TotalTokens != 14 ||
 		usage.CacheHitTokens != 2 || usage.CacheMissTokens != 8 || !usage.HasCacheTelemetry() {
 		t.Fatalf("unexpected Anthropic usage: %#v", usage)
+	}
+}
+
+func TestMessagesTerminalReasonAndCumulativeUsage(t *testing.T) {
+	for _, reason := range []string{"end_turn", "max_tokens", "unknown", ""} {
+		t.Run(reason, func(t *testing.T) {
+			lines := []string{
+				`data: {"type":"message_start","message":{"usage":{"input_tokens":3,"cache_read_input_tokens":0,"cache_creation_input_tokens":2}}}`,
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"bounded synthetic answer"}}`,
+				`data: {"type":"message_delta","usage":{"output_tokens":2}}`,
+				`data: {"type":"message_delta","delta":{"stop_reason":"` + reason + `"},"usage":{"output_tokens":5}}`,
+				`data: {"type":"message_stop"}`,
+			}
+			chunks, usage, err := ParseSSE("messages", strings.NewReader(strings.Join(lines, "\n\n")))
+			if reason != "end_turn" {
+				if err == nil {
+					t.Fatal("incomplete/unknown terminal succeeded")
+				}
+				for _, chunk := range chunks {
+					if chunk.Kind == ChunkDone {
+						t.Fatal("failed stream emitted success")
+					}
+				}
+				return
+			}
+			if err != nil || usage.CompletionTokens != 5 || usage.PromptTokens != 5 || usage.FinishReason != "stop" || !usage.HasCacheHit || usage.CacheHitTokens != 0 {
+				t.Fatalf("cumulative or known-zero usage lost: %+v %v", usage, err)
+			}
+		})
 	}
 }
 
@@ -686,4 +715,55 @@ func sameChunkKindSlice(actual []string, expected []string) bool {
 		}
 	}
 	return true
+}
+
+func TestMessagesUsageSnapshotsKeepUnknownZeroAndInterruptedCountersDistinct(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial, terminal string
+		known, wantError        bool
+	}{
+		{"missing buckets", `"input_tokens":8`, `data: {"type":"message_stop"}`, false, false},
+		{"explicit zero", `"input_tokens":8,"cache_read_input_tokens":0,"cache_creation_input_tokens":0`, `data: {"type":"message_stop"}`, true, false},
+		{"interrupted after usage", `"input_tokens":8,"cache_read_input_tokens":0,"cache_creation_input_tokens":0`, `data: {"type":"error","error":{"message":"PRIVATE MUST NOT ECHO"}}`, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := strings.Join([]string{`data: {"type":"message_start","message":{"model":"reported-model","usage":{` + tc.initial + `}}}`, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"public"}}`, `data: {"type":"message_delta","usage":{"output_tokens":3}}`, `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`, tc.terminal}, "\n\n")
+			chunks, u, err := ParseSSEWithCallback("messages", strings.NewReader(payload), nil)
+			if (err != nil) != tc.wantError || u.CompletionTokens != 7 || !u.HasCompletionTokens || u.HasPromptTokens != tc.known || !u.MessagesInput.Uncached.Known || u.MessagesInput.Read.Known != tc.known {
+				t.Fatalf("snapshot distinction lost: usage=%#v error=%v", u, err)
+			}
+			if err != nil && strings.Contains(err.Error(), "PRIVATE") {
+				t.Fatal("provider error body escaped")
+			}
+			if !tc.wantError && chunks[len(chunks)-1].Trace.ProviderResponseModel != "reported-model" {
+				t.Fatal("response model observation missing")
+			}
+		})
+	}
+}
+
+func TestMessagesInterleavedToolBlocksFlushOnlyCompletedIndex(t *testing.T) {
+	payload := strings.Join([]string{
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"first","name":"read","input":{}}}`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"second","name":"read","input":{}}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"A\"}"}}`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"B\"}"}}`,
+		`data: {"type":"content_block_stop","index":1}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		`data: {"type":"message_stop"}`}, "\n\n")
+	chunks, _, err := ParseSSEWithCallback("messages", strings.NewReader(payload), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []Chunk
+	for _, chunk := range chunks {
+		if chunk.Kind == ChunkToolCall {
+			calls = append(calls, chunk)
+		}
+	}
+	if len(calls) != 2 || calls[0].ToolCall.ID != "first" || calls[1].ToolCall.ID != "second" {
+		t.Fatalf("interleaved tool identity/order lost: %#v", calls)
+	}
 }

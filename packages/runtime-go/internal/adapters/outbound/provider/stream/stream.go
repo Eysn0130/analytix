@@ -9,6 +9,7 @@ import (
 	"time"
 
 	providerusage "analytix.local/runtime-go/internal/adapters/outbound/provider/usage"
+	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
@@ -62,6 +63,8 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 	usagePending := false
 	toolCalls := newToolCallAccumulator()
 	completed := false
+	responseModel := ""
+	modelInspected := false
 	terminalFinishReason := ""
 	thinkingTags := ThinkSplitter{}
 	completeAtBoundary := func(rawSSEChunkAt time.Time, parsedAt time.Time) error {
@@ -99,7 +102,7 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 			}
 			usagePending = false
 		}
-		if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkDone}, rawSSEChunkAt, parsedAt), onChunk); err != nil {
+		if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}, rawSSEChunkAt, parsedAt), onChunk); err != nil {
 			return err
 		}
 		completed = true
@@ -123,6 +126,10 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 				return chunks, usage, err
 			}
 			break
+		}
+		if !modelInspected {
+			responseModel = responseModelFromEnvelope(data)
+			modelInspected = true
 		}
 		observePayload(onPayload, PayloadObservationControl)
 		itemChunks, itemUsage, ok, finishReason, observation, err := parseOpenAIChatSSEPayloadAtObserved(data, toolCalls, &thinkingTags, rawSSEChunkAt)
@@ -202,6 +209,7 @@ type ThinkSplitter struct {
 	decoder            *domainreasoningmarkup.Decoder
 	parseErr           error
 	firstRawSSEChunkAt time.Time
+	lastRawSSEChunkAt  time.Time
 	finished           bool
 }
 
@@ -217,6 +225,9 @@ func (t *ThinkSplitter) push(value string, rawSSEChunkAt time.Time) error {
 	}
 	if t.firstRawSSEChunkAt.IsZero() && !rawSSEChunkAt.IsZero() {
 		t.firstRawSSEChunkAt = rawSSEChunkAt
+	}
+	if value != "" && !rawSSEChunkAt.IsZero() {
+		t.lastRawSSEChunkAt = rawSSEChunkAt
 	}
 	if err := t.decoder.Push(value); err != nil {
 		t.parseErr = err
@@ -246,7 +257,7 @@ func (t *ThinkSplitter) flushChunks() ([]Chunk, error) {
 	return []Chunk{{
 		Kind:  ChunkText,
 		Text:  outcome.PublicText,
-		Trace: domainmodel.ChunkTrace{ProviderRawSSEChunkAt: t.firstRawSSEChunkAt},
+		Trace: domainmodel.ChunkTrace{ProviderRawSSEChunkAt: t.firstRawSSEChunkAt, ProviderLastRawSSEChunkAt: t.lastRawSSEChunkAt},
 	}}, nil
 }
 
@@ -418,7 +429,7 @@ func (a *ToolCallAccumulator) flush() ([]Chunk, error) {
 			args = "{}"
 		}
 		var arguments map[string]json.RawMessage
-		if !json.Valid([]byte(args)) || json.Unmarshal([]byte(args), &arguments) != nil || arguments == nil {
+		if json.Unmarshal([]byte(args), &arguments) != nil || arguments == nil {
 			return nil, domainfailure.NewError(domainfailure.CodeProviderToolArgumentsInvalid, nil)
 		}
 		chunks = append(chunks, Chunk{Kind: ChunkToolCall, ToolCall: ToolCall{
@@ -429,6 +440,28 @@ func (a *ToolCallAccumulator) flush() ([]Chunk, error) {
 	}
 	a.order = nil
 	a.byKey = map[int]*partialToolCall{}
+	return chunks, nil
+}
+
+// Each Messages block closes independently; a slow interleaved block must not
+// be parsed prematurely when another block stops.
+func (a *ToolCallAccumulator) flushIndex(index int) ([]Chunk, error) {
+	item := a.byKey[index]
+	if item == nil {
+		return nil, nil
+	}
+	single := &ToolCallAccumulator{order: []int{index}, byKey: map[int]*partialToolCall{index: item}}
+	chunks, err := single.flush()
+	if err != nil {
+		return nil, err
+	}
+	delete(a.byKey, index)
+	for i, key := range a.order {
+		if key == index {
+			a.order = append(a.order[:i], a.order[i+1:]...)
+			break
+		}
+	}
 	return chunks, nil
 }
 
@@ -610,11 +643,29 @@ func parseAnthropicProviderSSE(body io.Reader) ([]Chunk, Usage, error) {
 
 func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation)) ([]Chunk, Usage, error) {
 	chunks := []Chunk{}
-	usage := Usage{}
+	usage := Usage{UsagePresenceKnown: true}
 	inTok, outTok, cacheCreate, cacheRead := 0, 0, 0, 0
-	hasCacheTelemetry := false
+	hasInput, hasOutput, hasCreate, hasRead := false, false, false, false
 	toolCalls := newToolCallAccumulator()
 	completed := false
+	stopReason := ""
+	responseModel := ""
+	hasToolCalls := false
+	updateUsage := func() error {
+		if inTok < 0 || outTok < 0 || cacheCreate < 0 || cacheRead < 0 || inTok > int(^uint(0)>>1)-cacheCreate || inTok+cacheCreate > int(^uint(0)>>1)-cacheRead || inTok+cacheCreate+cacheRead > int(^uint(0)>>1)-outTok {
+			return domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
+		}
+		known := hasInput && hasCreate && hasRead
+		prompt, hit, miss := inTok+cacheCreate+cacheRead, 0, 0
+		if known {
+			hit, miss = cacheRead, inTok+cacheCreate
+		}
+		usage = providerUsage(prompt, outTok, prompt+outTok, 0, hit, miss, known)
+		usage.FinishReason = domainmodel.NormalizeFinishReason(stopReason)
+		usage.UsagePresenceKnown, usage.HasPromptTokens, usage.HasCompletionTokens = true, known, hasOutput
+		usage.MessagesInput = domaincache.MessagesInputV1{SchemaVersion: "messages-input.v1", Uncached: domaincache.TokenCountV1{Known: hasInput, Value: uint64(inTok)}, Read: domaincache.TokenCountV1{Known: hasRead, Value: uint64(cacheRead)}, Created: domaincache.TokenCountV1{Known: hasCreate, Value: uint64(cacheCreate)}}
+		return nil
+	}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -622,6 +673,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
+		rawAt := time.Now()
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" {
 			continue
@@ -630,8 +682,10 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		var payload struct {
 			Type    string `json:"type"`
 			Message *struct {
+				Model string `json:"model"`
 				Usage *struct {
-					InputTokens              int  `json:"input_tokens"`
+					InputTokens              *int `json:"input_tokens"`
+					OutputTokens             *int `json:"output_tokens"`
 					CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 					CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 				} `json:"usage"`
@@ -642,22 +696,27 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 				Thinking    string `json:"thinking"`
 				Signature   string `json:"signature"`
 				PartialJSON string `json:"partial_json"`
+				StopReason  string `json:"stop_reason"`
 			} `json:"delta"`
 			Usage *struct {
-				OutputTokens int `json:"output_tokens"`
+				OutputTokens *int `json:"output_tokens"`
 			} `json:"usage"`
 			Index        int `json:"index"`
 			ContentBlock *struct {
-				Type     string          `json:"type"`
-				ID       string          `json:"id"`
-				Name     string          `json:"name"`
-				Input    json.RawMessage `json:"input"`
-				Text     string          `json:"text"`
-				Thinking string          `json:"thinking"`
+				Type      string          `json:"type"`
+				ID        string          `json:"id"`
+				Name      string          `json:"name"`
+				Input     json.RawMessage `json:"input"`
+				Text      string          `json:"text"`
+				Thinking  string          `json:"thinking"`
+				Signature string          `json:"signature"`
 			} `json:"content_block"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
-			return nil, Usage{}, err
+			return chunks, usage, err
+		}
+		if completed && payload.Type != "ping" {
+			return chunks, usage, domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
 		}
 		deltaType := ""
 		deltaValue := ""
@@ -673,20 +732,53 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		}
 		observePayload(onPayload, observeAnthropicPayload(payload.Type, deltaType, deltaValue, contentBlockType, contentBlockValue))
 		switch payload.Type {
+		case "error":
+			return chunks, usage, domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
 		case "message_start":
+			if payload.Message != nil {
+				responseModel = boundedResponseModel(payload.Message.Model)
+			}
 			if payload.Message != nil && payload.Message.Usage != nil {
-				inTok = payload.Message.Usage.InputTokens
+				if payload.Message.Usage.InputTokens != nil {
+					inTok = *payload.Message.Usage.InputTokens
+					hasInput = true
+				}
+				if payload.Message.Usage.OutputTokens != nil {
+					outTok = *payload.Message.Usage.OutputTokens
+					hasOutput = true
+				}
 				if payload.Message.Usage.CacheCreationInputTokens != nil {
 					cacheCreate = *payload.Message.Usage.CacheCreationInputTokens
-					hasCacheTelemetry = true
+					hasCreate = true
 				}
 				if payload.Message.Usage.CacheReadInputTokens != nil {
 					cacheRead = *payload.Message.Usage.CacheReadInputTokens
-					hasCacheTelemetry = true
+					hasRead = true
 				}
 			}
+			if err := updateUsage(); err != nil {
+				return chunks, usage, err
+			}
 		case "content_block_start":
+			if payload.ContentBlock != nil {
+				block := payload.ContentBlock
+				var initial []Chunk
+				switch block.Type {
+				case "text":
+					if block.Text != "" {
+						initial = []Chunk{{Kind: ChunkText, Text: block.Text}}
+					}
+				case "thinking":
+					if block.Thinking != "" || block.Signature != "" {
+						initial = []Chunk{{Kind: ChunkReasoning, Text: block.Thinking, Signature: block.Signature}}
+					}
+				}
+				if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(initial, rawAt, time.Now()), onChunk); err != nil {
+					return chunks, usage, err
+				}
+			}
 			if payload.ContentBlock != nil && payload.ContentBlock.Type == "tool_use" {
+				hasToolCalls = true
 				args := ""
 				if len(payload.ContentBlock.Input) > 0 {
 					rawInput := strings.TrimSpace(string(payload.ContentBlock.Input))
@@ -695,73 +787,90 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 					}
 				}
 				if err := appendProviderChunks(&chunks, toolCalls.add(payload.Index, payload.ContentBlock.ID, payload.ContentBlock.Name, args), onChunk); err != nil {
-					return nil, Usage{}, err
+					return chunks, usage, err
 				}
 			}
 		case "content_block_delta":
 			if payload.Delta != nil {
 				switch payload.Delta.Type {
 				case "text_delta":
-					if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkText, Text: payload.Delta.Text}, onChunk); err != nil {
-						return nil, Usage{}, err
+					if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkText, Text: payload.Delta.Text}, rawAt, time.Now()), onChunk); err != nil {
+						return chunks, usage, err
 					}
 				case "thinking_delta":
-					if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkReasoning, Text: payload.Delta.Thinking}, onChunk); err != nil {
-						return nil, Usage{}, err
+					if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkReasoning, Text: payload.Delta.Thinking}, rawAt, time.Now()), onChunk); err != nil {
+						return chunks, usage, err
 					}
 				case "signature_delta":
 					if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkReasoning, Signature: payload.Delta.Signature}, onChunk); err != nil {
-						return nil, Usage{}, err
+						return chunks, usage, err
 					}
 				case "input_json_delta":
 					if err := appendProviderChunks(&chunks, toolCalls.add(payload.Index, "", "", payload.Delta.PartialJSON), onChunk); err != nil {
-						return nil, Usage{}, err
+						return chunks, usage, err
 					}
 				}
 			}
 		case "content_block_stop":
-			flushed, err := toolCalls.flush()
+			flushed, err := toolCalls.flushIndex(payload.Index)
 			if err != nil {
 				return chunks, usage, err
 			}
 			if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
-				return nil, Usage{}, err
+				return chunks, usage, err
 			}
 		case "message_delta":
-			if payload.Usage != nil {
-				outTok = payload.Usage.OutputTokens
+			if payload.Delta != nil && payload.Delta.StopReason != "" {
+				stopReason = payload.Delta.StopReason
+			}
+			if payload.Usage != nil && payload.Usage.OutputTokens != nil {
+				hasOutput = true
+				outTok = *payload.Usage.OutputTokens
+			}
+			if err := updateUsage(); err != nil {
+				return chunks, usage, err
 			}
 		case "message_stop":
+			if inTok < 0 || outTok < 0 || cacheCreate < 0 || cacheRead < 0 {
+				return chunks, usage, domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
+			}
+			if stopReason == "" {
+				return chunks, usage, domainfailure.NewError(domainfailure.CodeProviderStreamInterrupted, nil)
+			}
+			if err := openAIChatTerminalFinishReasonError(stopReason); err != nil {
+				usage.FinishReason = domainmodel.NormalizeFinishReason(stopReason)
+				return chunks, usage, err
+			}
+			if err := openAIChatTerminalToolCallError(stopReason, hasToolCalls); err != nil {
+				return chunks, usage, err
+			}
 			flushed, err := toolCalls.flush()
 			if err != nil {
 				return chunks, usage, err
 			}
 			if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
-				return nil, Usage{}, err
+				return chunks, usage, err
 			}
-			prompt := inTok + cacheCreate + cacheRead
-			miss := 0
-			if hasCacheTelemetry {
-				miss = inTok + cacheCreate
+			if err := updateUsage(); err != nil {
+				return chunks, usage, err
 			}
-			usage = providerUsage(prompt, outTok, prompt+outTok, 0, cacheRead, miss, hasCacheTelemetry)
 			if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkUsage, Usage: usage}, onChunk); err != nil {
-				return nil, Usage{}, err
+				return chunks, usage, err
 			}
-			if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkDone}, onChunk); err != nil {
-				return nil, Usage{}, err
+			if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}, rawAt, time.Now()), onChunk); err != nil {
+				return chunks, usage, err
 			}
 			completed = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, Usage{}, err
+		return chunks, usage, err
 	}
 	if !completed {
 		if toolCalls.hasPending() {
-			return nil, Usage{}, fmt.Errorf("provider messages stream ended before completing tool calls: %w", io.ErrUnexpectedEOF)
+			return chunks, usage, fmt.Errorf("provider messages stream ended before completing tool calls: %w", io.ErrUnexpectedEOF)
 		}
-		return nil, Usage{}, fmt.Errorf("provider messages stream ended before completion: %w", io.ErrUnexpectedEOF)
+		return chunks, usage, fmt.Errorf("provider messages stream ended before completion: %w", io.ErrUnexpectedEOF)
 	}
 	return chunks, usage, nil
 }
@@ -1091,4 +1200,33 @@ func ParseOpenAISSEPayload(data string) ([]Chunk, Usage, bool, error) {
 
 func ParseAnthropicSSEPayload(data string) ([]Chunk, Usage, bool, error) {
 	return parseAnthropicSSEPayload(data)
+}
+
+// Provider model echoes are diagnostics, never Registry or execution authority.
+// Retain only a bounded protocol identifier; never arbitrary response prose.
+func boundedResponseModel(value string) string {
+	if len(value) == 0 || len(value) > 128 {
+		return ""
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._:/-", c)) {
+			return ""
+		}
+	}
+	return value
+}
+func responseModelFromEnvelope(data string) string {
+	var envelope struct {
+		Model    string `json:"model"`
+		Response *struct {
+			Model string `json:"model"`
+		} `json:"response"`
+	}
+	if json.Unmarshal([]byte(data), &envelope) != nil {
+		return ""
+	}
+	if envelope.Response != nil {
+		return boundedResponseModel(envelope.Response.Model)
+	}
+	return boundedResponseModel(envelope.Model)
 }

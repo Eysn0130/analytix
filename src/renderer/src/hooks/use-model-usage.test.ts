@@ -120,9 +120,9 @@ describe('model usage helpers', () => {
         active_days: 1
       }
     })
-    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Not configured')
-    expect(formatCost(unpriced.days[0]?.costUsd, 'zh-CN', unpriced.days[0]?.costCny, unpriced.days[0]?.priceConfigured)).toBe('价格未配置')
-    expect(formatCost(unpriced.totals.costUsd, 'en', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('Not configured')
+    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Cost unavailable')
+    expect(formatCost(unpriced.days[0]?.costUsd, 'zh-CN', unpriced.days[0]?.costCny, unpriced.days[0]?.priceConfigured)).toBe('费用未知')
+    expect(formatCost(unpriced.totals.costUsd, 'en', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('Cost unavailable')
 
     const freeConfigured = normalizeModelUsageResponse({
       group_by: 'model',

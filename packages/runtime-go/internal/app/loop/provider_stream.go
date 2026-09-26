@@ -334,6 +334,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			releaseAttempt = release
 		}
 		attemptOutput := ProviderStreamOutput{}
+		var reasoningBuffer strings.Builder
 		publicTextDecoder := domainreasoningmarkup.NewDecoder()
 		var reasoningMarkupErr error
 		request := input.Request
@@ -455,6 +456,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		outputBytes := 0
 		var outputBytesErr error
 		providerStartedAt := time.Now()
+		hostTiming := domainmodel.ProviderTiming{StartedAt: providerStartedAt}
 		firstTokenLatencyMs := int64(-1)
 		firstReasoningLatencyMs := int64(-1)
 		firstRawTextLatencyMs := int64(-1)
@@ -488,6 +490,36 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			if chunk.Trace.LoopChunkCallbackAt.IsZero() {
 				chunk.Trace.LoopChunkCallbackAt = time.Now()
 			}
+			first, last := chunk.Trace.ProviderRawSSEChunkAt, chunk.Trace.ProviderLastRawSSEChunkAt
+			if first.IsZero() {
+				first = chunk.Trace.LoopChunkCallbackAt
+			}
+			if last.IsZero() {
+				last = first
+			}
+			if first.Before(providerStartedAt) || first.After(chunk.Trace.LoopChunkCallbackAt) {
+				first = chunk.Trace.LoopChunkCallbackAt
+			}
+			if last.Before(first) || last.After(chunk.Trace.LoopChunkCallbackAt) {
+				last = chunk.Trace.LoopChunkCallbackAt
+			}
+			if (chunk.Kind == domainmodel.ChunkText || chunk.Kind == domainmodel.ChunkReasoning) && chunk.Text != "" {
+				if hostTiming.FirstContentAt.IsZero() || first.Before(hostTiming.FirstContentAt) {
+					hostTiming.FirstContentAt = first
+				}
+				if last.After(hostTiming.LastContentAt) {
+					hostTiming.LastContentAt = last
+				}
+				if chunk.Kind == domainmodel.ChunkText {
+					if hostTiming.FirstTextAt.IsZero() {
+						hostTiming.FirstTextAt = first
+					}
+					hostTiming.LastTextAt = last
+				}
+			}
+			if chunk.Kind == domainmodel.ChunkDone {
+				hostTiming.FinishBoundaryAt = chunk.Trace.LoopChunkCallbackAt
+			}
 			switch chunk.Kind {
 			case domainmodel.ChunkReasoning:
 				if chunk.Text != "" {
@@ -496,7 +528,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 						firstReasoningLatencyMs = providerFirstTokenLatencyMillis(providerStartedAt, chunk.Trace.ProviderRawSSEChunkAt, time.Now())
 					}
 					attemptOutput.StreamedDeltas = true
-					attemptOutput.Reasoning += chunk.Text
+					reasoningBuffer.WriteString(chunk.Text)
 				}
 				if chunk.Signature != "" {
 					attemptOutput.ReasoningSignature = chunk.Signature
@@ -536,7 +568,9 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				// callback boundary, so discard both its text candidate and its
 				// private reasoning before accepting replacement bytes.
 				attemptOutput.Text = ""
-				attemptOutput.Reasoning = ""
+				reasoningBuffer.Reset()
+				// Discarded bytes are not a dependency of the replacement candidate.
+				hostTiming = domainmodel.ProviderTiming{StartedAt: providerStartedAt}
 				attemptOutput.ReasoningSignature = ""
 				attemptOutput.StreamedDeltas = false
 				publicTextDecoder = domainreasoningmarkup.NewDecoder()
@@ -600,6 +634,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			}
 		}
 		result, streamErr := input.Provider.Stream(attemptCtx, request)
+		hostTiming.FinishedAt = time.Now()
 		if input.Callbacks.AfterProviderAttempt != nil {
 			if callbackErr := input.Callbacks.AfterProviderAttempt(attempt, streamErr); callbackErr != nil {
 				streamErr = errors.Join(streamErr, ProviderStreamCallbackError{Err: callbackErr})
@@ -725,6 +760,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			return ProviderStreamOutput{Result: cancelledResult}, errors.Join(streamErr, ProviderStreamCallbackError{Err: attemptErr})
 		}
 		releaseAttempt()
+		result.HostTiming = hostTiming
 		result.DurationMs = time.Since(providerStartedAt).Milliseconds()
 		result.HasDuration = true
 		if firstTokenLatencyMs >= 0 {
@@ -742,6 +778,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			result.FirstRawTextLatencyMs = firstRawTextLatencyMs
 			result.HasFirstRawTextLatency = true
 		}
+		attemptOutput.Reasoning = reasoningBuffer.String()
 		attemptOutput.Result = result
 		output = attemptOutput
 		err = streamErr

@@ -683,6 +683,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 	result := loopResult.LastResult
 	cacheDiagnostics := h.runtimeCacheDiagnostics(threadID, input.SecurityContext, result)
 	var completionRecord appturn.CompletionRecord
+	var publicationTiming appturn.PublicationTiming
 	var changed bool
 	status := ""
 	terminalReferenceKind := ""
@@ -728,6 +729,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 		); err != nil {
 			return nil, err
 		}
+		publicationTiming = accepted.Persistence.Timing
 		completionRecord = accepted.Persistence.CompletionRecord
 		changed, status = accepted.Persistence.Changed, accepted.Persistence.Status
 		terminalReferenceKind = appgoal.TerminalReferenceAcceptedFinal
@@ -749,6 +751,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 			if commitErr != nil {
 				return nil, apploop.WrapHostBoundaryFailure(apploop.HostCandidatePublicationFailure, commitErr)
 			}
+			publicationTiming = committed.Timing
 			completionRecord, changed, status = committed.CompletionRecord, committed.Changed, committed.Status
 			terminalReferenceDigest = committed.CASBinding.BindingDigest
 		} else {
@@ -777,6 +780,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 			return map[string]any{"status": status}, nil
 		}
 	}
+	recordRuntimePublicationTrace(threadID, turnID, loopResult, terminalEnteredAt, publicationTiming)
 	if releaseCandidateTerminal != nil {
 		releaseCandidateTerminal()
 	}

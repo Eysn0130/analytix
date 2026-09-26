@@ -1560,6 +1560,7 @@ export const threadTraceEventPayloadSchema = z
     name: z.enum(THREAD_TRACE_EVENT_NAMES),
     timestamp: z.number().int().nonnegative(),
     threadId: optionalTrimmedString(MAX_ID_LENGTH),
+    turnId: optionalTrimmedString(MAX_ID_LENGTH),
     data: z
       .record(
         z.string().trim().min(1).max(64),

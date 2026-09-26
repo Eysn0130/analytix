@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"errors"
+	"time"
 
 	"analytix.local/runtime-go/internal/contracts"
 	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
@@ -14,9 +15,12 @@ import (
 const RuntimeCandidateInputClassOrdinaryOnly = "ordinary_only"
 
 type RuntimeAgentLoopResult struct {
-	AssistantText        string
-	LastResult           domainmodel.Result
-	TerminalRecoveryKind RuntimeTerminalRecoveryKind
+	LastDependencyAt             time.Time `json:"-"`
+	CandidateProjectionStartedAt time.Time `json:"-"`
+	CandidateProjectionReadyAt   time.Time `json:"-"`
+	AssistantText                string
+	LastResult                   domainmodel.Result
+	TerminalRecoveryKind         RuntimeTerminalRecoveryKind
 	// CaseSourceUnavailable is host-owned sticky state. It records that a
 	// protected case-data step was unavailable even when independent ordinary
 	// work was allowed to continue. The final evidence gate consumes it; it is

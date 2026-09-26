@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +22,7 @@ import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
 import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
+import { observeTerminalDOMCommit } from '../../thread/tracing/thread-performance-trace'
 import { AcceptedSlotDisplay, acceptedFinalHasLocalDisplaySlots } from './AcceptedSlotDisplay'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
 import { ModelMetaTag, WritePromptMetaDisclosure } from './message-timeline-cards'
@@ -1581,6 +1582,13 @@ function MessageBubbleImpl({
 }): ReactElement {
   const { t, i18n } = useTranslation('common')
   const resolveApproval = useChatStore((s) => s.resolveApproval)
+  const traceThreadId = useChatStore((s) => s.activeThreadId)
+  const answerRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    answerRef.current?.removeAttribute('data-terminal-trace-seq')
+    if (block.kind !== 'assistant' || block.id === 'live-assistant' || !answerRef.current) return
+    if (traceThreadId) observeTerminalDOMCommit(traceThreadId, block.id, answerRef.current)
+  }, [block, traceThreadId])
   if (block.kind === 'user') {
     return <UserMessageBubble block={block} />
   }
@@ -1594,7 +1602,7 @@ function MessageBubbleImpl({
         {block.meta?.factHistoryState === 'retained_snapshot' && block.acceptedFinalProjectionReceipt ? (
           <div className="mb-1 text-xs text-ds-muted">{t('retainedSnapshotHistory')}</div>
         ) : null}
-        <div className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
+        <div ref={answerRef} className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
           <AssistantMarkdown
             text={block.text}
             streaming={streaming}

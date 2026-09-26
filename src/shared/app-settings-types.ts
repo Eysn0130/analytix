@@ -144,6 +144,7 @@ export type ModelReasoningEffort = (typeof MODEL_REASONING_EFFORTS)[number]
 export const MODEL_REASONING_REQUEST_PROTOCOLS = [
   'none',
   'deepseek-chat-completions',
+  'deepseek-messages',
   'glm-chat-completions',
   'mimo-chat-completions',
   'openai-responses',

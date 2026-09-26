@@ -316,6 +316,7 @@
   "providerModelEndpointFormatLabel": "Request format (endpoint)",
   "providerModelEndpointInherit": "Inherit from provider ({{format}})",
   "providerModelEndpointFormatHint": "Override the wire format for this model only. Use it when one provider serves some models over chat completions and others over Anthropic Messages or OpenAI Responses (e.g. OpenCode Go). Leave on \"Inherit\" unless a specific model needs a different format.",
+  "providerModelReasoningProtocolDeepseekMessages": "DeepSeek Messages",
   "providerModelReasoningProtocolDeepseek": "DeepSeek style (reasoning_effort)",
   "providerModelReasoningProtocolGlm": "GLM style (thinking)",
   "providerModelReasoningProtocolMimo": "Xiaomi MiMo style",

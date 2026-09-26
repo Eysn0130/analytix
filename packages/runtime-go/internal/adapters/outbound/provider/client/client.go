@@ -34,6 +34,8 @@ const DefaultStreamIdleTimeout = 120 * time.Second
 const DefaultStreamMaxReconnects = 3
 
 type HTTPProviderClient struct {
+	// Configure once in Core composition. Nil preserves the no-extra-egress baseline.
+	StableUserIDConsent StableProviderUserIDConsent
 	HTTP                *http.Client
 	StreamIdleTimeout   time.Duration
 	MaxStreamReconnects int
@@ -441,6 +443,9 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 			err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageRequestBuild, 0,
 		)
 	}
+	if err := c.attachConsentedProviderUserID(ctx, &request, endpoint, body); err != nil {
+		return domainmodel.Result{}, withProviderFailureContextV1(err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageRequestBuild, 0)
+	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return domainmodel.Result{}, withProviderFailureContextV1(
@@ -655,6 +660,12 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 		payloadObserved = true
 		outputObservation = outputObservation.MergeV1(observation)
 	})
+	responseModel := ""
+	for _, chunk := range chunks {
+		if chunk.Kind == domainmodel.ChunkDone {
+			responseModel = chunk.Trace.ProviderResponseModel
+		}
+	}
 	retryUnsafeOutput := outputObservation.RetryUnsafeV1()
 	if bodyReader.Stalled() {
 		err = fmt.Errorf("provider stream stalled: no data for %s: %w", bodyReader.Timeout(), firstNonNilError(err, io.ErrUnexpectedEOF))
@@ -668,28 +679,30 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 		}
 		usage = providerusage.ApplyPricing(usage, request.Pricing)
 		return domainmodel.Result{
-			ProviderID:        request.ProviderID,
-			Family:            request.Family,
-			EndpointFormat:    request.EndpointFormat,
-			RequestURL:        endpoint,
-			RequestBodyFields: sortedMapKeys(body),
-			Chunks:            chunks,
-			Usage:             usage,
-			PrefixShape:       appmodel.CapturePrefixShape(request),
-			StreamCompleted:   hasChunkKind(chunks, domainmodel.ChunkDone),
+			ResponseObservedModel: responseModel,
+			ProviderID:            request.ProviderID,
+			Family:                request.Family,
+			EndpointFormat:        request.EndpointFormat,
+			RequestURL:            endpoint,
+			RequestBodyFields:     sortedMapKeys(body),
+			Chunks:                chunks,
+			Usage:                 usage,
+			PrefixShape:           appmodel.CapturePrefixShape(request),
+			StreamCompleted:       hasChunkKind(chunks, domainmodel.ChunkDone),
 		}, retryUnsafeOutput, dispatchState, err
 	}
 	usage = providerusage.ApplyPricing(usage, request.Pricing)
 	return domainmodel.Result{
-		ProviderID:        request.ProviderID,
-		Family:            request.Family,
-		EndpointFormat:    request.EndpointFormat,
-		RequestURL:        endpoint,
-		RequestBodyFields: sortedMapKeys(body),
-		Chunks:            chunks,
-		Usage:             usage,
-		PrefixShape:       appmodel.CapturePrefixShape(request),
-		StreamCompleted:   hasChunkKind(chunks, domainmodel.ChunkDone),
+		ResponseObservedModel: responseModel,
+		ProviderID:            request.ProviderID,
+		Family:                request.Family,
+		EndpointFormat:        request.EndpointFormat,
+		RequestURL:            endpoint,
+		RequestBodyFields:     sortedMapKeys(body),
+		Chunks:                chunks,
+		Usage:                 usage,
+		PrefixShape:           appmodel.CapturePrefixShape(request),
+		StreamCompleted:       hasChunkKind(chunks, domainmodel.ChunkDone),
 	}, retryUnsafeOutput, dispatchState, nil
 }
 

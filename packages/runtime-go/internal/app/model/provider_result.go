@@ -7,6 +7,7 @@ import domainmodel "analytix.local/runtime-go/internal/domain/model"
 // fields, timing, model identity, and prefix metadata are diagnostic input,
 // never publication or persistence authority.
 func NormalizeProviderResult(request domainmodel.Request, result domainmodel.Result) domainmodel.Result {
+	result.HostTiming = domainmodel.ProviderTiming{}
 	result.ProviderID = request.ProviderID
 	result.Family = request.Family
 	result.EndpointFormat = request.EndpointFormat

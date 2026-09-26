@@ -262,12 +262,13 @@ export function registerRuntimeSseIpc(options: {
     threadId: string,
     lastSeq: number,
     acceptedFinal: boolean,
-    verificationMs?: number
+    verificationMs?: number,
+    turnId?: string
   ): void => {
     try {
       options.recordThreadTrace?.(sanitizeThreadTraceEvent({
-        name, timestamp: Date.now(), threadId,
-        data: { lastSeq, acceptedFinal, ...(verificationMs === undefined ? {} : { verificationMs }) }
+        name, timestamp: Date.now(), threadId, turnId,
+        data: { lastSeq, acceptedFinal, monotonicMs: performance.now(), timeOrigin: performance.timeOrigin, ...(verificationMs === undefined ? {} : { verificationMs }) }
       }))
     } catch {
       // Optional diagnostics cannot interrupt verified delivery or its ACK.
@@ -458,7 +459,8 @@ export function registerRuntimeSseIpc(options: {
               for (const delivered of batch) {
                 if (delivered.kind !== 'accepted_final_batch' && delivered.kind !== 'general_terminal_batch') continue
                 recordTerminalTrace('thread.terminal.ipc_sent', state.threadId, batchMaxSeq,
-                  delivered.kind === 'accepted_final_batch')
+                  delivered.kind === 'accepted_final_batch', undefined,
+                  typeof delivered.turnId === 'string' ? delivered.turnId : undefined)
               }
               state.deliveredSinceSeq = batchMaxSeq
               state.deliveredAckSeqs.add(batchMaxSeq)
@@ -486,7 +488,7 @@ export function registerRuntimeSseIpc(options: {
                   return false
                 }
                 recordTerminalTrace('thread.terminal.verified', state.threadId, accepted.lastSeq, true,
-                  performance.now() - verificationStartedAt)
+                  performance.now() - verificationStartedAt, accepted.batch.turnId as string)
                 state.requiredAcceptedFinalAck = {
                   seq: accepted.lastSeq,
                   batchId: accepted.batch.batchId as string,
@@ -509,7 +511,7 @@ export function registerRuntimeSseIpc(options: {
                   return false
                 }
                 recordTerminalTrace('thread.terminal.verified', state.threadId, verified.lastSeq, false,
-                  performance.now() - verificationStartedAt)
+                  performance.now() - verificationStartedAt, verified.batch.turnId as string)
                 // Ordinary terminal delivery is also an indivisible transport
                 // unit. It has no evidence/fact authority, but mixing it with
                 // progress would make the preload reject the whole IPC payload

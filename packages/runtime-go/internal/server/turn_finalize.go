@@ -23,16 +23,27 @@ func (h *runtimeServerHandler) runtimeCacheDiagnostics(threadID string, security
 	}
 	current, observed := appusage.NewPrefixBaseline(securityContext, result.PrefixShape)
 	previous := provider.PrefixShape{}
+	var inputDiagnostics map[string]any
+	if count := len(result.CacheObservations); count > 0 {
+		shape := result.CacheObservations[count-1].Shape
+		if shape.Validate() == nil {
+			current.WireShape = shape
+		}
+	}
 	if observed {
 		h.mu.Lock()
 		if h.cachePrefixShapes == nil {
 			h.cachePrefixShapes = make(map[string]appusage.PrefixBaseline)
 		}
 		previous = appusage.ComparablePrefix(h.cachePrefixShapes[threadID], current)
+		inputDiagnostics = appusage.ComparableModelInput(h.cachePrefixShapes[threadID], current)
 		h.cachePrefixShapes[threadID] = current
 		h.mu.Unlock()
 	}
 	diagnostics := provider.RuntimeCacheDiagnosticsWithPrevious(previous, result)
+	for key, value := range inputDiagnostics {
+		diagnostics[key] = value
+	}
 	for key, value := range appusage.ProviderAttemptDiagnostics(result.CacheObservations) {
 		diagnostics[key] = value
 	}
@@ -101,6 +112,7 @@ func (h *runtimeServerHandler) finalizeRuntimeTurnAfterLoop(ctx context.Context,
 		return err
 	}
 	var finalizedCase *evidenceapp.PersistCaseBoundaryResult
+	var publicationTiming appturn.PublicationTiming
 	input := evidenceapp.PersistContinuationInput{
 		Finalizer: h.caseFinalizer, Store: h.store, Pending: pending, LoopResult: loopResult, TerminalReason: reason,
 		CacheDiagnostics: h.runtimeCacheDiagnostics(pending.ThreadID, pending.SecurityContext, loopResult.LastResult),
@@ -119,11 +131,22 @@ func (h *runtimeServerHandler) finalizeRuntimeTurnAfterLoop(ctx context.Context,
 			if persistErr == nil {
 				copy := result
 				finalizedCase = &copy
+				publicationTiming = result.Persistence.Timing
 			}
 			return result, persistErr
 		},
-		FinalizeGeneral: h.runtimePublicationAuthority().FinalizeCurrentGeneralAfterLoop, GeneralOperationContext: candidateContext,
+		FinalizeGeneral: func(ctx context.Context, general appturn.FinalizeAfterLoopInput) error {
+			general.Timing = &publicationTiming
+			return h.runtimePublicationAuthority().FinalizeCurrentGeneralAfterLoop(ctx, general)
+		}, GeneralOperationContext: candidateContext,
 	}
+	defer func() {
+		// A fixed failure/cancellation terminal is not a successful candidate
+		// publication, even when its durable terminal record was committed.
+		if appturn.GeneralTerminalReasonAllowsCandidateV1(string(input.TerminalReason)) {
+			recordRuntimePublicationTrace(pending.ThreadID, pending.TurnID, loopResult, terminalEnteredAt, publicationTiming)
+		}
+	}()
 	if apploop.CasePublicationRequired(pending.SecurityContext) {
 		err := evidenceapp.PersistContinuation(hostContext, input)
 		if errors.Is(err, context.Canceled) && h.runtimeControl().TurnInterruptReserved(pending.ThreadID, pending.TurnID) {

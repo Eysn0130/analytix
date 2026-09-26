@@ -242,6 +242,17 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 				input.Request.DisableUserInput, stepScope, input.SubagentDepth > 0, planActive, step.Prompt,
 				h.runtimeGoalToolsActive(input.ThreadID, step.Prompt, stepScope), advertisements,
 			)
+			if len(schemas) == 0 && input.SubagentDepth == 0 && input.DelegatedToolManifest == nil &&
+				step.OrdinaryEffect() && appmodel.ContinuationSourceReferencesRequiredV1(input.Thread) {
+				// Do not widen a delegated or explicit tool scope to make history
+				// convenient. This narrow read is still guarded at execution.
+				for _, schema := range toolcatalogapp.BuiltinToolSchemas(toolcatalogapp.BuiltinToolSchemaInput{}) {
+					if schema.Name == "read_task_history" {
+						schemas = toolcatalogapp.FilterToolSchemas([]domainmodel.ToolSchema{schema}, stepScope)
+						break
+					}
+				}
+			}
 			schemas = toolcatalogapp.SecurityScopedToolSchemas(input.SecurityContext, input.SubagentDepth, schemas)
 			advertisements, schemas, _ = privacyprojectionapp.ProviderCatalogForLogicalEffectV1(
 				step.LogicalEffect, advertisements, schemas,

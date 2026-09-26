@@ -676,7 +676,7 @@ func isPrivateReasoningKey(normalizedKey string) bool {
 // name alone is never enough to classify provider-originated bytes as public.
 func validPublicReasoningMetadataV1(normalizedKey string, value any) (recognized bool, valid bool) {
 	switch normalizedKey {
-	case "reasoningtokens":
+	case "reasoningtokens", "firstreasoninglatencyms":
 		return true, nonNegativeIntegerMetadataV1(value)
 	case "reasoningtoken", "reasoningdurationms", "reasoningstartedat", "reasoningfinishedat":
 		return true, false

@@ -3487,7 +3487,7 @@ async function main() {
   if (!reportOnly && !passed) process.exitCode = 1
 }
 
-main().catch((error) => {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => {
   const report = {
     schemaVersion: 1,
     id: 'runtime-go-packaged-session-soak',
@@ -3514,4 +3514,12 @@ main().catch((error) => {
   if (jsonOutput) console.log(JSON.stringify(report, null, 2))
   else console.error(`FAILED ${report.id}: ${report.checks[0].reason}`)
   process.exitCode = 1
+})
+
+// Reuse the installed-product lifecycle in bounded acceptance drivers without
+// triggering the CLI or duplicating authority checks and profile isolation.
+export const packagedSessionAcceptance = Object.freeze({
+  getFreePort, smokeChildEnv, packagedAppArtifactEvidence, resolveExecutablePath,
+  stopChild, stopOwnedSmokeRuntimes, ownedSmokeRuntimePids,
+  waitForRendererReady, evaluateCdp, waitForDebugTarget, buildGoRestartExpression
 })

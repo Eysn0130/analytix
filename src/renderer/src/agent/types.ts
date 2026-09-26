@@ -291,6 +291,17 @@ export type RuntimeProviderErrorDiagnosticsMetadata = {
 
 /** Renderer-safe cache telemetry: hashes, counters and booleans only. */
 export type RuntimeCacheDiagnosticsMetadata = {
+  dynamicStateCheck?: 'not_checked'
+  toolSchemaEstimator?: 'utf8_bytes_div4'
+  responseModelObservation?: 'not_reported' | 'matches_resolved' | 'differs_resolved'
+  modelInputComparable?: boolean
+  modelInputFirstDifference?: 'unavailable' | 'none' | 'system' | 'tools' | 'history' | 'current' | 'ordering'
+  modelInputComparablePrefixBytes?: number
+  providerAttemptCount?: number
+  providerCostKnownAttemptCount?: number
+  providerKnownCostUsdNanos?: number
+  providerKnownCostCnyNanos?: number
+  providerCostEstimateComplete?: boolean
   prefixHash?: string
   prefixChanged?: boolean
   toolSourceChanged?: boolean

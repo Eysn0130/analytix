@@ -655,7 +655,7 @@ func TestParseAnthropicToolUseStream(t *testing.T) {
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\""}}`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":":\"Shanghai\"}"}}`,
 		`data: {"type":"content_block_stop","index":0}`,
-		`data: {"type":"message_delta","usage":{"output_tokens":2}}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}`,
 		`data: {"type":"message_stop"}`,
 	}, "\n\n")))
 	if err != nil {
@@ -1481,7 +1481,7 @@ func TestHTTPProviderClientParsesCustomFullEndpointStreamsByPath(t *testing.T) {
 			_, _ = w.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":4}}}` + "\n\n"))
 			_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n"))
 			_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"custom messages ok"}}` + "\n\n"))
-			_, _ = w.Write([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}` + "\n\n"))
+			_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}` + "\n\n"))
 			_, _ = w.Write([]byte(`data: {"type":"message_stop"}` + "\n\n"))
 		}))
 		defer server.Close()

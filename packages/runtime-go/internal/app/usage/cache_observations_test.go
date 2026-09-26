@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
 )
 
 func TestProviderAttemptDiagnosticsAggregatesEverySettledAttempt(t *testing.T) {
@@ -77,5 +79,28 @@ func cacheObservationFixture(attempt uint32, status domaincache.ProviderCallStat
 			ReasoningTokens: domaincache.TokenCountV1{},
 		},
 		SettledAt: settledAt,
+	}
+}
+
+func TestProviderAttemptCostsIncludeFailureRetryAndCancellationWithoutMixingCurrencies(t *testing.T) {
+	first := cacheObservationFixture(1, domaincache.ProviderCallStatusFailed, 20, 80, "2026-07-13T00:00:00Z", "2026-07-13T00:00:01Z")
+	second := cacheObservationFixture(2, domaincache.ProviderCallStatusSucceeded, 80, 20, "2026-07-13T00:00:01Z", "2026-07-13T00:00:02Z")
+	third := cacheObservationFixture(3, domaincache.ProviderCallStatusCancelled, 0, 0, "2026-07-13T00:00:02Z", "2026-07-13T00:00:03Z")
+	first.Usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: "USD", NanoUnits: 12}
+	second.Usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: "CNY", NanoUnits: 30}
+	observations := []domaincache.ProviderCallObservationV1{first, second, third, second}
+	d := ProviderAttemptDiagnostics(observations)
+	if d["providerAttemptCount"] != uint64(3) || d["providerCostKnownAttemptCount"] != uint64(2) || d["providerCostEstimateComplete"] != false || d["providerKnownCostUsdNanos"] != uint64(12) || d["providerKnownCostCnyNanos"] != uint64(30) {
+		t.Fatalf("cost accounting drift: %#v", d)
+	}
+	projected := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{CostUSD: 999, PriceConfigured: true}, d).PublicUsageMap()
+	if projected["priceConfigured"] != false || projected["costUsd"] == 999 {
+		t.Fatalf("unknown attempt exposed last-attempt cost as total: %#v", projected)
+	}
+	third.Usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: "USD", NanoUnits: 0}
+	d = ProviderAttemptDiagnostics([]domaincache.ProviderCallObservationV1{first, second, third})
+	projected = domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{}, d).PublicUsageMap()
+	if projected["priceConfigured"] != true || projected["costUsd"] != float64(12)/1e9 || projected["costCny"] != float64(30)/1e9 {
+		t.Fatalf("known total unavailable: %#v", projected)
 	}
 }

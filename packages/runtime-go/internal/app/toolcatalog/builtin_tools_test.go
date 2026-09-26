@@ -10,7 +10,7 @@ import (
 
 func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T) {
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: true, WebFetch: true, NativeSelections: true})
-	if len(tools) != 20 {
+	if len(tools) != 21 {
 		t.Fatalf("builtin schema count drifted: %d", len(tools))
 	}
 	seen := map[string]bool{}
@@ -20,7 +20,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		}
 		seen[tool.Name] = true
 	}
-	for _, name := range []string{"native_selection_read", "native_selection_propose", "read", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
+	for _, name := range []string{"native_selection_read", "native_selection_propose", "read_task_history", "read", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
 		if !seen[name] {
 			t.Fatalf("missing builtin tool schema %s", name)
 		}
@@ -29,7 +29,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		t.Fatalf("foreground bash schema should allow background when configured")
 	}
 	foregroundOnly := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: false, WebFetch: false, NativeSelections: true})
-	if len(foregroundOnly) != 19 {
+	if len(foregroundOnly) != 20 {
 		t.Fatalf("foreground-only schema count drifted: %d", len(foregroundOnly))
 	}
 	if schemaHasProperty(t, schemaByName(t, foregroundOnly, "bash"), "run_in_background") {

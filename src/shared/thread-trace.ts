@@ -12,6 +12,7 @@ export const THREAD_TRACE_EVENT_NAMES = [
   'thread.terminal.verified',
   'thread.terminal.ipc_sent',
   'thread.terminal.renderer_committed',
+  'thread.terminal.dom_committed',
   'thread.terminal.next_frame'
 ] as const
 
@@ -22,6 +23,7 @@ export type ThreadTraceEventPayload = {
   name: ThreadTraceEventName
   timestamp: number
   threadId?: string
+  turnId?: string
   data?: Record<string, ThreadTraceDataValue>
 }
 
@@ -29,6 +31,7 @@ export function sanitizeThreadTraceEvent(input: {
   name: ThreadTraceEventName
   timestamp: number
   threadId?: string
+  turnId?: string
   data?: Record<string, unknown>
 }): ThreadTraceEventPayload {
   const data: Record<string, ThreadTraceDataValue> = {}
@@ -44,6 +47,7 @@ export function sanitizeThreadTraceEvent(input: {
     name: input.name,
     timestamp: input.timestamp,
     ...(input.threadId ? { threadId: input.threadId.slice(0, 256) } : {}),
+    ...(input.turnId ? { turnId: input.turnId.slice(0, 256) } : {}),
     ...(Object.keys(data).length > 0 ? { data } : {})
   }
 }

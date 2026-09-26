@@ -1121,13 +1121,21 @@ function normalizeCacheDiagnostics(value: CoreCacheDiagnosticsJson | undefined):
     const digest = rendererSha256(value[key])
     if (digest) normalized[key] = digest
   }
-  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported'] as const) {
+  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported', 'modelInputComparable', 'providerCostEstimateComplete'] as const) {
     const flag = rendererBoolean(value[key])
     if (flag !== undefined) normalized[key] = flag
   }
-  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens'] as const) {
+  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
     const count = rendererNumber(value[key])
     if (count !== undefined) normalized[key] = count
+  }
+  if (value.dynamicStateCheck === 'not_checked') normalized.dynamicStateCheck = value.dynamicStateCheck
+  if (value.toolSchemaEstimator === 'utf8_bytes_div4') normalized.toolSchemaEstimator = value.toolSchemaEstimator
+  if (value.responseModelObservation === 'not_reported' || value.responseModelObservation === 'matches_resolved' || value.responseModelObservation === 'differs_resolved') {
+    normalized.responseModelObservation = value.responseModelObservation
+  }
+  if (value.modelInputFirstDifference === 'unavailable' || value.modelInputFirstDifference === 'none' || value.modelInputFirstDifference === 'system' || value.modelInputFirstDifference === 'tools' || value.modelInputFirstDifference === 'history' || value.modelInputFirstDifference === 'current' || value.modelInputFirstDifference === 'ordering') {
+    normalized.modelInputFirstDifference = value.modelInputFirstDifference
   }
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }

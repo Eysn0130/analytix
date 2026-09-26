@@ -6,7 +6,8 @@ import {
   generalTerminalProjectionBatchFromRuntime,
   mergeChatBlocks,
   RUNTIME_EVENT_KINDS_COVERED_BY_RENDERER,
-  threadFromCore
+  threadFromCore,
+  usageFromCore
 } from './analytix-mapper'
 import { RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
 import { CORE_RUNTIME_EVENT_KINDS } from './analytix-contract'
@@ -3960,4 +3961,21 @@ describe('tool presentation inference', () => {
       meta: { turnId: 'turn_1' }
     })
   })
+})
+
+
+it('keeps closed cache observation and cost coverage without treating legacy false as a check', () => {
+  const usage = usageFromCore({ promptTokens: 2, completionTokens: 1, totalTokens: 3 }, {
+    cacheDiagnostics: {
+      dynamicStateCheck: 'not_checked', toolSchemaEstimator: 'utf8_bytes_div4',
+      responseModelObservation: 'differs_resolved', modelInputComparable: true,
+      modelInputFirstDifference: 'tools', modelInputComparablePrefixBytes: 12,
+      providerAttemptCount: 3, providerCostKnownAttemptCount: 2,
+      providerKnownCostUsdNanos: 12, providerKnownCostCnyNanos: 30,
+      providerCostEstimateComplete: false
+    }
+  })
+  expect(usage.cacheDiagnostics).toMatchObject({dynamicStateCheck: 'not_checked', responseModelObservation: 'differs_resolved', modelInputFirstDifference: 'tools', providerCostEstimateComplete: false, providerAttemptCount: 3})
+  const legacy = usageFromCore({}, {cacheDiagnostics: {dynamicStateLeaked: false, dynamicStateCheck: 'checked', responseModelObservation: 'PRIVATE', modelInputFirstDifference: 'PRIVATE'} as never})
+  expect(legacy.cacheDiagnostics).toBeUndefined()
 })

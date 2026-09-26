@@ -8,6 +8,7 @@ import (
 	provideranthropic "analytix.local/runtime-go/internal/adapters/outbound/provider/anthropic"
 	provideropenai "analytix.local/runtime-go/internal/adapters/outbound/provider/openai"
 	providerresponses "analytix.local/runtime-go/internal/adapters/outbound/provider/responses"
+	providerschema "analytix.local/runtime-go/internal/adapters/outbound/provider/schema"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
 
@@ -33,6 +34,10 @@ func BuildHTTPRequest(request domainmodel.Request) (PreparedHTTPRequest, error) 
 	format := request.EndpointFormat
 	if format == "" {
 		format = "chat_completions"
+	}
+	if providerschema.NormalizeReasoningProtocol(request.ReasoningProtocol) == "deepseek-messages" && format != "messages" &&
+		!(format == "custom_endpoint" && CustomEndpointRequestShape(request.BaseURL) == "messages") {
+		return PreparedHTTPRequest{}, errors.New("DeepSeek Messages requires a Messages endpoint")
 	}
 	apiKey := strings.TrimSpace(request.APIKey)
 	if apiKey == "" {

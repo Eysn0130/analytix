@@ -155,7 +155,7 @@ func validMCPToolParameters(parameters json.RawMessage) bool {
 
 func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
-	case "read", "read_file", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list":
+	case "read", "read_file", "read_task_history", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list":
 		return true
 	default:
 		return MCPToolServerID(toolName) != "" && mcpAvailable && mcpToolReadOnly
@@ -164,7 +164,7 @@ func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) 
 
 func HostAuthorizesReadOnly(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
-	case "read", "read_file", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
+	case "read", "read_file", "read_task_history", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
 		"wait", "list_jobs", "bash_output", "native_selection_read":
 		return true
 	default:
