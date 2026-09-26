@@ -979,6 +979,7 @@ async function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
 
 let runtimeEnsurePromise: Promise<AppSettingsV1> | null = null
 let runtimeEnsureFingerprint: string | null = null
+let runtimeReadyFingerprint: string | null = null
 let runtimeRestartPromise: Promise<void> | null = null
 let runtimeSettingsApplyPromise: Promise<void> | null = null
 let lastAppliedSettings: AppSettingsV1 | null = null
@@ -1015,6 +1016,7 @@ function noteRuntimeHealthy(
 }
 
 function handleUnexpectedAnalytixExit(info: AnalytixUnexpectedExitInfo): void {
+  runtimeReadyFingerprint = null
   terminalPtyController?.disposeAll()
   void superviseAnalytixCrash(info).catch((error: unknown) => {
     logError(
@@ -1165,6 +1167,7 @@ function queueRuntimeSettingsApply(
   lastAppliedSettings = next
   const startupConfigChanged = runtimeStartupConfigChanged(anchor, next)
   if (!startupConfigChanged) return runtimeSettingsApplyPromise
+  runtimeReadyFingerprint = null
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
@@ -1192,6 +1195,7 @@ function queueRuntimeSettingsApply(
 
 function queueRuntimeMcpConfigApply(settings: AppSettingsV1): void {
   lastAppliedSettings = settings
+  runtimeReadyFingerprint = null
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
@@ -1255,6 +1259,12 @@ async function ensureRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
       /* fall through to retry with the current settings */
     }
   }
+  await waitForQueuedRuntimeSettingsApply()
+  // The watchdog owns ongoing liveness. Re-probing the thread list before
+  // every request can reject a new send during an unrelated terminal write.
+  if (runtimeReadyFingerprint === fingerprint && analytixRuntimeAdapter.isChildRunning()) {
+    return settings
+  }
   const task = ensureRuntimeOnce(settings)
   let trackedTask: Promise<AppSettingsV1>
   trackedTask = task.finally(() => {
@@ -1274,7 +1284,9 @@ async function ensureRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
 
 async function ensureRuntimeOnce(settings: AppSettingsV1): Promise<AppSettingsV1> {
   await waitForQueuedRuntimeSettingsApply()
-  return ensureAnalytixRuntime(settings)
+  const ensured = await ensureAnalytixRuntime(settings)
+  runtimeReadyFingerprint = runtimeFingerprint(ensured)
+  return ensured
 }
 
 async function resolveManagedAnalytixLaunchSettings(
@@ -1348,6 +1360,7 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
 }
 
 async function restartRuntime(settings: AppSettingsV1): Promise<void> {
+  runtimeReadyFingerprint = null
   terminalPtyController?.disposeAll()
   if (runtimeRestartPromise) return runtimeRestartPromise
   const pendingEnsure = runtimeEnsurePromise

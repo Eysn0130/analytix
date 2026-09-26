@@ -2079,6 +2079,55 @@ describe('send receipt acknowledgement and housekeeping', () => {
     expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
     expect(state.error).toBe(i18n.t('common:runtimeActiveTurn'))
   })
+  it('removes an unacknowledged user bubble after a host preflight conflict', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    state.busy = false
+
+    await expect(actions.sendMessage('Unacknowledged request', 'agent')).resolves.toBe(false)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual([])
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+  })
+  it('recognizes a durable turn when acknowledgement was lost', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    state.busy = false
+    state.recoverActiveTurn = vi.fn(async () => {
+      state.blocks = [{ kind: 'user', id: 'durable-user', text: 'Durable request', meta: { turnId: 'durable-turn' } }]
+      state.error = null
+      return false
+    })
+
+    await expect(actions.sendMessage('Durable request', 'agent')).resolves.toBe(true)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual([{ kind: 'user', id: 'durable-user', text: 'Durable request', meta: { turnId: 'durable-turn' } }])
+    expect(state.refreshThreads).toHaveBeenCalledOnce()
+  })
   it.each(['before-ack', 'after-ack'])('reports the original send result when an error occurs %s', async phase => {
     const provider = {
       sendUserMessage: vi.fn(async () => {

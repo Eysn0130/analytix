@@ -1764,42 +1764,53 @@ export function createThreadActions(
       // Post-acknowledgement housekeeping cannot turn a sent message into a
       // failed draft or roll back a turn that SSE has already established.
       if (acknowledged) return true
-      if (!ownsRunningReceipt()) return false
+      if (currentReceiptOwner !== receiptOwner || get().activeThreadId !== activeThreadId) return false
       clearBusyWatchdog()
       void window.analytix.logs.error('send-message', 'Failed to send message', {
         message: e instanceof Error ? e.message : String(e),
         threadId: activeThreadId
       }).catch(() => undefined)
-      if (looksLikeActiveTurnError(e)) {
+      const activeTurnConflict = looksLikeActiveTurnError(e)
+      const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
+        get().currentTurnUserId === userBlockId
+      if (ownsOptimisticTurn) {
+        submissionSubscription?.abort()
+        if (sseAbortRef.current === submissionSubscription) sseAbortRef.current = null
         if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
-        set({
-          blocks: previousBlocks,
-          busy: false,
-          currentTurnId: previousCurrentTurnId,
-          currentTurnUserId: previousCurrentTurnUserId,
-          turnStartedAtByUserId: previousTurnStartedAtByUserId,
-          turnDurationByUserId: previousTurnDurationByUserId,
-          queuedMessages: previousQueuedMessages,
-          error: i18n.t('common:runtimeActiveTurn')
+        set((state) => {
+          const { [userBlockId]: _started, ...started } = state.turnStartedAtByUserId
+          const { [userBlockId]: _duration, ...durations } = state.turnDurationByUserId
+          return {
+            blocks: state.blocks.filter((block) => block.id !== userBlockId),
+            busy: false,
+            currentTurnId: previousCurrentTurnId,
+            currentTurnUserId: previousCurrentTurnUserId,
+            turnStartedAtByUserId: started,
+            turnDurationByUserId: durations,
+            queuedMessages: previousQueuedMessages,
+            error: activeTurnConflict ? i18n.t('common:runtimeActiveTurn') : formatRuntimeError(e)
+          }
         })
-        await get().recoverActiveTurn()
-        await refreshReceiptThreads()
-        return false
       }
-      if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
-      set({
-        error: formatRuntimeError(e),
-        busy: false,
-        currentTurnId: previousCurrentTurnId,
-        currentTurnUserId: previousCurrentTurnUserId,
-        turnStartedAtByUserId: previousTurnStartedAtByUserId,
-        turnDurationByUserId: previousTurnDurationByUserId,
-        queuedMessages: previousQueuedMessages,
-        ...(shouldOpenSettingsForError(e)
-          ? { route: 'settings' as const, settingsSection: 'agents' as const }
-          : {})
-      })
-      await refreshReceiptThreads()
+      await get().recoverActiveTurn()
+      const recovered = get()
+      const originalUserIds = new Set(previousBlocks.filter((block) => block.kind === 'user').map((block) => block.id))
+      const durablyAccepted = recovered.activeThreadId === activeThreadId && recovered.blocks.some((block) =>
+        block.kind === 'user' && block.text === displayText && !originalUserIds.has(block.id) &&
+        !!block.meta?.turnId && !isPendingActiveStreamTurnId(block.meta.turnId)
+      )
+      if (durablyAccepted) {
+        await get().refreshThreads()
+        return true
+      }
+      if (recovered.activeThreadId === activeThreadId && !recovered.busy && recovered.error === null) {
+        set({
+          error: activeTurnConflict ? i18n.t('common:runtimeActiveTurn') : formatRuntimeError(e),
+          ...(shouldOpenSettingsForError(e)
+            ? { route: 'settings' as const, settingsSection: 'agents' as const }
+            : {})
+        })
+      }
       return false
     } finally {
       if (currentReceiptOwner === receiptOwner) currentReceiptOwner = null
