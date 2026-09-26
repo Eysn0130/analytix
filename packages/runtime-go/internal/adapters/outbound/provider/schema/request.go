@@ -1,6 +1,7 @@
 package schema
 
 import (
+	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -17,7 +18,7 @@ func NormalizeReasoningProtocol(value string) string {
 	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(value)), "/")
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	switch normalized {
-	case "none", "deepseek-chat-completions", "glm-chat-completions", "mimo-chat-completions", "openai-responses", "anthropic-thinking":
+	case "none", "deepseek-chat-completions", "deepseek-messages", "glm-chat-completions", "mimo-chat-completions", "openai-responses", "anthropic-thinking":
 		return normalized
 	default:
 		return ""
@@ -284,7 +285,9 @@ func AnthropicMessageContent(message domainmodel.Message) []map[string]any {
 	for _, call := range message.ToolCalls {
 		input := map[string]any{}
 		if len(call.Arguments) > 0 {
-			_ = json.Unmarshal(call.Arguments, &input)
+			if decoded, err := domainjsonstrict.DecodeObject(call.Arguments, domainjsonstrict.Options{}); err == nil {
+				input = decoded
+			}
 		}
 		parts = append(parts, map[string]any{
 			"type":  "tool_use",

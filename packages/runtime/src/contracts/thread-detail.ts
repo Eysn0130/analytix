@@ -54,6 +54,7 @@ const PublicThreadDetailUsageV1Schema = z.object({
 }).strict()
 
 const CaseBoundaryTurnV1Schema = z.object({
+  factHistoryState: z.literal('retained_snapshot').optional(),
   id: z.string().min(1),
   threadId: z.string().min(1),
   status: TurnStatus,
@@ -75,6 +76,9 @@ const CaseBoundaryTurnV1Schema = z.object({
     (('acceptedFinal' in item && item.acceptedFinal !== undefined) ||
       ('acceptedFinalView' in item && item.acceptedFinalView !== undefined))
   )
+  if (turn.factHistoryState && !turn.acceptedFinalView) {
+    ctx.addIssue({ code: 'custom', path: ['factHistoryState'], message: 'retained history requires accepted-final authority' })
+  }
   if (!turn.acceptedFinal && !turn.acceptedFinalView) {
     if (acceptedItems.length !== 0) {
       ctx.addIssue({ code: 'custom', path: ['items'], message: 'case turn accepted-final authority is torn' })

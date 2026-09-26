@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { GeneralTerminalDeliveryBatchV1Schema } from '../../packages/runtime/src/contracts/events'
-import { PublicRuntimeEventFilter } from './public-runtime-content'
+import { GeneralTerminalDeliveryBatchV1Schema, generalTerminalFailureMessageV1 } from '../../packages/runtime/src/contracts/events'
+import { isPublicSseIpcPayload, PublicRuntimeEventFilter } from './public-runtime-content'
 import {
+  isClosedPublicRuntimeSseEvent,
   isStrictPublicRuntimeSseEndPayload,
   isStrictPublicRuntimeSseErrorPayload,
   isStrictPublicRuntimeSseIpcPayload,
@@ -259,6 +260,23 @@ describe('public runtime SSE boundary', () => {
     }
   })
 
+  it.each(['approval_denied', 'input_cancelled'])('admits canonical completed %s boundary failure', (reason) => {
+    const batch = generalTerminalBatch()
+    const terminal = (batch.events as Array<Record<string, unknown>>)[2]
+    terminal.terminalReason = reason
+    terminal.code = reason
+    terminal.message = generalTerminalFailureMessageV1(reason)
+    terminal.severity = 'warning'
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(batch).success).toBe(true)
+
+    const forged = generalTerminalBatch()
+    const forgedTerminal = (forged.events as Array<Record<string, unknown>>)[2]
+    forgedTerminal.code = reason
+    forgedTerminal.message = generalTerminalFailureMessageV1(reason)
+    forgedTerminal.severity = 'warning'
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(forged).success).toBe(false)
+  })
+
   it('admits the closed typed ordinary result on the atomic general-terminal carrier', () => {
     const batch = typedGeneralTerminalBatch()
     expect(projectPublicRuntimeSseBlock(
@@ -270,6 +288,39 @@ describe('public runtime SSE boundary', () => {
       streamId: 'stream-strict',
       events: [batch]
     })).toBe(true)
+  })
+
+  it('preserves closed cache and attempt-cost diagnostics in the terminal carrier', () => {
+    const unknown = { complete: false, knownObservationCount: 0, observationCount: 2 }
+    const diagnostics = {
+      dynamicStateCheck: 'not_checked', toolSchemaEstimator: 'utf8_bytes_div4',
+      responseModelObservation: 'matches_resolved', modelInputFirstDifference: 'history',
+      modelInputComparable: true, modelInputComparablePrefixBytes: 123,
+      providerAttemptTelemetrySchema: 'provider-attempt-telemetry.v1', providerAttemptTelemetryValid: true,
+      providerLogicalCallCount: 1, providerAttemptCount: 2,
+      providerAttemptStatuses: { succeeded: 1, failed: 1, cancelled: 0, timedOut: 0, streamAborted: 0 },
+      providerAttemptInputTokens: unknown, providerAttemptOutputTokens: unknown,
+      providerAttemptCacheHitTokens: unknown, providerAttemptCacheMissTokens: unknown,
+      providerAttemptCacheRate: { known: false, numerator: 0, denominator: 0 },
+      providerCostEstimateComplete: false, providerCostKnownAttemptCount: 1,
+      providerKnownCostUsdNanos: 12, providerKnownCostCnyNanos: 0
+    }
+    const batch = generalTerminalBatch()
+    const usage = (batch.events as Array<Record<string, unknown>>)[1]
+    usage.cacheDiagnostics = diagnostics
+    const parsed = GeneralTerminalDeliveryBatchV1Schema.parse(batch)
+    expect(parsed.events[1]).toEqual(usage) // No stripping fields covered by the host digest.
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-cache', events: [batch] })).toBe(true)
+    for (const mutation of [
+      { dynamicStateCheck: 'checked_safe' }, { toolSchemaEstimator: 'actual_tokens' },
+      { responseModelObservation: 'PRIVATE_MODEL_PROSE' }, { modelInputFirstDifference: 'PRIVATE_INPUT' },
+      { modelInputComparablePrefixBytes: -1 }, { providerCostEstimateComplete: true },
+      { providerCostKnownAttemptCount: 3 }, { providerKnownCostUsdNanos: 0.1 },
+      { providerKnownCostCnyNanos: undefined }, { providerCostKnownAttemptCount: 0 }
+    ]) {
+      usage.cacheDiagnostics = { ...diagnostics, ...mutation }
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-cache', events: [batch] })).toBe(false)
+    }
   })
 
   it('admits only exact hash-and-enum diagnostics for an unadvertised-tool terminal', () => {
@@ -695,6 +746,23 @@ describe('public runtime SSE boundary', () => {
     }
   })
 
+  it('admits only numeric host reasoning latency across the desktop SSE boundary', () => {
+    for (const firstReasoningLatencyMs of [0, 17, 'PRIVATE_REASONING', { text: 'PRIVATE' }, -1, 1.5, Infinity]) {
+      const event = {
+        seq: 11, kind: 'pipeline_stage', timestamp: '2026-07-14T00:00:00.000Z',
+        threadId: 'thread-reasoning-timing', turnId: 'turn-reasoning-timing',
+        stage: 'response_received', label: 'Response Received',
+        details: { firstReasoningLatencyMs }
+      }
+      const valid = typeof firstReasoningLatencyMs === 'number' &&
+        Number.isSafeInteger(firstReasoningLatencyMs) && firstReasoningLatencyMs >= 0
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-timing', events: [event] })).toBe(valid)
+      expect(projectPublicRuntimeSseBlock(
+        frame('11', 'pipeline_stage', event), event.threadId, new PublicRuntimeEventFilter()
+      )?.status).toBe(valid ? 'emit' : 'invalid')
+    }
+  })
+
   it.each([
     ['root message', { message: 'MARKER_FREE_PROVIDER_ERROR_7F3C' }],
     ['root summary', { summary: 'MARKER_FREE_MCP_RESPONSE_9A2D' }],
@@ -879,6 +947,87 @@ describe('public runtime SSE boundary', () => {
   })
 })
 
+describe('public gate item replay', () => {
+  const base = {
+    id: 'item-gate', threadId: 'thread-strict', turnId: 'turn-strict',
+    status: 'pending', createdAt: '2026-09-23T00:00:00Z'
+  }
+  const items = [
+    { ...base, kind: 'approval', role: 'tool', approvalId: 'approval_123456789012',
+      toolName: 'write_file', summary: 'Approve write_file' },
+    { ...base, kind: 'user_input', role: 'system', inputId: 'input_a1b2c3d4e5f6',
+      prompt: 'Choose a path', questions: [{ id: 'input_a1b2c3d4e5f6_1', header: 'Path',
+        question: 'Choose a path', options: [] }] }
+  ]
+
+  it.each(items)('accepts the public $kind item produced by Core', (item) => {
+    const event = { kind: 'item_created', seq: 170, timestamp: item.createdAt,
+      threadId: item.threadId, turnId: item.turnId, itemId: item.id, item }
+    expect(isPublicSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', event), item.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 170 })
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', {
+      ...event, item: { ...item, continuationReceiptId: 'private' }
+    }), item.threadId, new PublicRuntimeEventFilter())).toEqual({
+      status: 'invalid', reason: 'invalid_public_projection'
+    })
+  })
+
+  it('replays a host user-input item whose question ID has a numeric digest run', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const item = { ...base, kind: 'user_input', role: 'system', inputId,
+      prompt: 'Choose a path', questions: [
+        { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+    const event = { kind: 'item_created', seq: 170, timestamp: item.createdAt,
+      threadId: item.threadId, turnId: item.turnId, itemId: item.id, item }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('170', 'item_created', event), item.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 170 })
+  })
+})
+
+describe('public gate request event replay', () => {
+  const base = { seq: 171, timestamp: '2026-09-23T00:00:00Z',
+    threadId: 'thread-strict', turnId: 'turn-strict', itemId: 'item-gate' }
+  const events = [
+    { ...base, kind: 'approval_requested', approvalId: 'approval_a1b2c3d4e5f6',
+      toolName: 'write_file', status: 'pending', approvalPolicy: 'on-request',
+      sandboxMode: 'workspace-write', summary: 'Approve write_file' },
+    { ...base, kind: 'user_input_requested', inputId: 'input_a1b2c3d4e5f6',
+      status: 'pending', prompt: 'Choose a path', questions: [
+        { id: 'input_a1b2c3d4e5f6_1', header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+  ]
+
+  it.each(events)('accepts the public $kind event produced by Core', (event) => {
+    expect(isPublicSseIpcPayload({ streamId: 'gate-stream', events: [event] })).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 171 })
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, {
+      ...event, continuationReceiptId: 'private'
+    }), event.threadId, new PublicRuntimeEventFilter())).toEqual({
+      status: 'invalid', reason: 'invalid_public_projection'
+    })
+  })
+
+  it('keeps an exact host question ID when its opaque digest contains a numeric run', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const event = { ...base, kind: 'user_input_requested', inputId,
+      status: 'pending', prompt: 'Choose a path', questions: [
+        { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+      ] }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('171', event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 171 })
+
+    const forged = { ...event, questions: [{ ...event.questions[0], id: `other_${'123456789012'}` }] }
+    expect(isClosedPublicRuntimeSseEvent(forged)).toBe(false)
+  })
+})
 
 function publicChildLedger(stage = 'background_job_delivery_pending', status = 'pending', callId?: string) {
   const delivery = stage.startsWith('background_job_delivery_')

@@ -14,6 +14,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-credential-backend:
+    name: Windows Provider credential backend
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: packages/runtime-go/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Verify native DPAPI, ACL, replacement and Registry restart
+        working-directory: packages/runtime-go
+        run: |
+          go test -count=1 -timeout 5m ./internal/adapters/outbound/secretstore -run '^(TestWindows|TestDPAPI)'
+          go test -count=1 -timeout 5m ./internal/runtimeapp -run '^TestWindowsProviderRegistryDPAPISaveRestartAndMissingKeyPreservation$'
+          go test -count=1 -timeout 5m -tags analytix_dev_credentials ./internal/runtimeapp -run '^TestDevelopmentProviderAuthorityIsolationAndRestart$'
+      - name: Verify Windows source profile and shared authority wiring
+        run: node --test scripts/dev-launcher-windows.test.mjs
+
   source-baseline:
     name: Source baseline
     runs-on: ubuntu-24.04
@@ -44,6 +68,11 @@ jobs:
         run: npm run verify:baseline
       - name: Verify deterministic Funds entry and report-scenario contracts
         run: npm run test:plugin-contracts
+      - name: Verify AtlasFlow locked renderer and missing-validator contracts
+        working-directory: plugins/atlasflow/skills/atlasflow
+        run: |
+          npm ci --ignore-scripts
+          npm test
 
   application-tests:
     name: Application tests
@@ -100,6 +129,15 @@ jobs:
           go test -count=1 -p 1 -parallel 2 -timeout 5m \
             ./internal/adapters/outbound/processsandbox \
             ./internal/adapters/outbound/process
+      - name: Verify development credential reuse and production rejection
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          go test -count=1 -timeout 5m -tags analytix_prod,analytix_dev_credentials ./internal/runtimeapp -run '^TestDevelopment'
+          go test -count=1 -timeout 5m -tags analytix_prod ./internal/runtimeapp -run '^TestDevelopmentProviderAuthorityIsolationAndRestart$'
       - name: Execute all macOS integration contracts with synthetic providers
         run: |
           umask 077
@@ -364,7 +402,7 @@ jobs:
   development-gate:
     name: Development gate
     if: ${{ always() }}
-    needs: [source-baseline, application-tests, macos-integration, filesystem-contracts, restart-contracts, runtime-shards, runtime-platform, go-tests, backend-tests, rust-tests]
+    needs: [windows-credential-backend, source-baseline, application-tests, macos-integration, filesystem-contracts, restart-contracts, runtime-shards, runtime-platform, go-tests, backend-tests, rust-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

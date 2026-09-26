@@ -28,6 +28,7 @@ type ProfileConfig struct {
 	Variant           string
 	Effort            string
 	EffortInvalid     bool
+	budgetInvalid     bool
 	PromptPreamble    string
 	SystemPrompt      string
 	ToolPolicy        string
@@ -47,12 +48,14 @@ type ProfileConfig struct {
 }
 
 type ProfileSettings struct {
-	Enabled           bool
-	DefaultToolPolicy string
-	DefaultProfile    string
-	MaxParallel       int
-	MaxChildRuns      int
-	Profiles          map[string]ProfileConfig
+	Enabled             bool
+	DefaultToolPolicy   string
+	DefaultProfile      string
+	MaxParallel         int
+	MaxChildRuns        int
+	Profiles            map[string]ProfileConfig
+	maxParallelInvalid  bool
+	maxChildRunsInvalid bool
 }
 
 type SourceValidation struct {
@@ -85,11 +88,17 @@ func ApplyProfile(request TaskRequest, settings ProfileSettings) (TaskRequest, e
 	if err := validateSubagentReasoningEffort(request.Effort); err != nil {
 		return request, err
 	}
+	if settings.maxParallelInvalid || settings.maxChildRunsInvalid {
+		return request, errInvalidBudget
+	}
 	if strings.TrimSpace(request.ProfileName) == "" && strings.TrimSpace(settings.DefaultProfile) != "" {
 		request.ProfileName = strings.TrimSpace(settings.DefaultProfile)
 	}
 	if strings.TrimSpace(request.ProfileName) != "" && !strings.HasPrefix(request.ProfileName, "skill:") {
 		if profile, ok := settings.Profiles[request.ProfileName]; ok {
+			if profile.budgetInvalid || !validTimeBudgetMS(profile.TimeBudgetMS) {
+				return request, errInvalidBudget
+			}
 			if profile.EffortInvalid || validateSubagentReasoningEffort(profile.Effort) != nil {
 				return request, ErrReasoningEffortInvalid
 			}

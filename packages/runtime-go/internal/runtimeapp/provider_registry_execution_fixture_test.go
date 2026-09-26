@@ -17,8 +17,16 @@ func seedProviderRegistryExecutionAuthorityV1(
 	models []string,
 	selectedModel string,
 	secret string,
+	kinds ...string,
 ) {
 	t.Helper()
+	kind := "openai-compatible"
+	if len(kinds) > 1 {
+		t.Fatal("one Registry protocol kind is required")
+	}
+	if len(kinds) == 1 {
+		kind = kinds[0]
+	}
 	installSyntheticProviderRegistryFallbackMasterKey(t, dataDir)
 	ctx := context.Background()
 	authority, err := openProviderRegistryAuthorityV1(ctx, dataDir)
@@ -40,7 +48,7 @@ func seedProviderRegistryExecutionAuthorityV1(
 			RegistryRevision: snapshot.Revision, RegistryIncarnation: snapshot.Incarnation,
 		},
 		Provider: domainregistry.ProviderInput{
-			ID: providerID, Kind: "openai-compatible", Endpoint: endpoint,
+			ID: providerID, Kind: kind, Endpoint: endpoint,
 			Models: append([]string(nil), models...), MediaModels: []string{}, SelectedModel: selectedModel,
 			SelectedRoutes: []string{"primary"},
 		},

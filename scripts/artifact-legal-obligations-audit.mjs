@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import {
   closeSync,
   constants,
@@ -26,6 +27,7 @@ export const ARTIFACT_OBLIGATION_CLASSES = Object.freeze({
 })
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const { loadCatalog, verifyEvidence, logicalEntry } = createRequire(import.meta.url)('./lib/dependency-legal-evidence.cjs')
 const ROOT_PACKAGE_ENTRY = 'package.json'
 const ROOT_PACKAGE_LOCK_ENTRY = 'package-lock.json'
 const RUNTIME_PACKAGE_ENTRY = 'packages/runtime/package.json'
@@ -82,6 +84,12 @@ const LICENSE_FILE_NAMES = [
   'LICENSE',
   'LICENSE.md',
   'LICENSE.txt',
+  'LICENSE.markdown',
+  'LICENSE.BSD',
+  'LICENSE.MIT',
+  'LICENSE.APACHE2',
+  'LICENCE',
+  'license-mit',
   'license',
   'license.md',
   'license.txt',
@@ -108,10 +116,11 @@ export const REQUIRED_PRODUCT_LICENSE_TEXT = Object.freeze([
 export const REQUIRED_PRODUCT_LICENSE_SHA256 =
   '339d7dd55119d76a0286d2be28868671e8905ad65df2967324a1b75db8d1f7a8'
 
-// Bind the complete legally reviewed notice without turning third-party product
-// identity or research history into a canonical production-code vocabulary.
+// Bind the complete reviewed notice, including the already recorded Office
+// generation dependency inventory. Keep this expected digest independent of
+// the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '66671ab885458de62437bed11d67c8924d319df59958d7aa6dc1149614911f92'
+  '1b6896b8f7e985fcb10a46ebe32dd3531e42b402e0e68f12fb2ff0372962f64b'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 
@@ -1085,8 +1094,12 @@ function createPackagedAppReader(root, asarPath) {
     (entry) => packagedRoot.read(`${unpackedPrefix}${entry}`)
   )
   const rootPrefix = 'packaged-root/'
+  // after-pack stages additional runtime files in app.asar.unpacked. They are
+  // shipped bytes even when no ASAR entry names them. Keep a physical namespace
+  // so they cannot shadow an indexed ASAR entry or borrow its license identity.
   const packagedEntries = packagedRoot.entries().filter((entry) =>
-    entry !== asarEntry && !entry.startsWith(unpackedPrefix)
+    entry !== asarEntry && (!entry.startsWith(unpackedPrefix) ||
+      !asar.has(entry.slice(unpackedPrefix.length)))
   )
   const entries = [
     ...asar.entries(),
@@ -1119,7 +1132,7 @@ function createPackagedAppReader(root, asarPath) {
   }
 }
 
-function createArtifactReaderFromPath(inputPath) {
+export function createArtifactReaderFromPath(inputPath) {
   const path = resolve(String(inputPath || ''))
   let stat
   try {
@@ -1175,12 +1188,11 @@ function licenseValue(packageJson) {
   return ''
 }
 
-function isInternalPackage(name, packageEntry, options = {}) {
+function isInternalPackage(name, options = {}) {
   const explicit = new Set(options.internalPackageNames || [])
   const prefixes = options.internalPackagePrefixes || []
   return explicit.has(name) || prefixes.some((prefix) => name.startsWith(prefix)) ||
-    INTERNAL_PACKAGE_NAME_RE.test(name) ||
-    /^(?:packages|plugins)\//i.test(packageEntry)
+    INTERNAL_PACKAGE_NAME_RE.test(name)
 }
 
 function dependencySource(name, version, internal) {
@@ -1192,12 +1204,12 @@ function findLegalEntry(reader, packageDirectory, names) {
   const entries = reader.entries()
   for (const name of names) {
     const candidate = normalizeEntry(`${packageDirectory}/${name}`)
-    if (entries.includes(candidate)) return `/${candidate}`
+    if (entries.includes(candidate) && reader.read(candidate)?.toString('utf8').trim()) return `/${candidate}`
   }
   const lower = new Map(entries.map((entry) => [entry.toLowerCase(), entry]))
   for (const name of names) {
     const candidate = normalizeEntry(`${packageDirectory}/${name}`).toLowerCase()
-    if (lower.has(candidate)) return `/${lower.get(candidate)}`
+    if (lower.has(candidate) && reader.read(lower.get(candidate))?.toString('utf8').trim()) return `/${lower.get(candidate)}`
   }
   return null
 }
@@ -1208,9 +1220,9 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
   const name = hasNonEmptyString(packageJson?.name) ? packageJson.name.trim() : ''
   const version = hasNonEmptyString(packageJson?.version) ? packageJson.version.trim() : ''
   const declaredLicense = licenseValue(packageJson)
-  const internal = isInternalPackage(name, entry, options)
+  const internal = isInternalPackage(name, options)
   const source = dependencySource(name, version, internal)
-  const licenseFile = findLegalEntry(reader, packageDirectory, LICENSE_FILE_NAMES)
+  let licenseFile = findLegalEntry(reader, packageDirectory, LICENSE_FILE_NAMES)
   const noticeFile = findLegalEntry(reader, packageDirectory, NOTICE_FILE_NAMES)
   let obligationClass = internal
     ? ARTIFACT_OBLIGATION_CLASSES.internalMetadata
@@ -1220,6 +1232,7 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
     ? 'Preserve the complete declared license choice and its texts; this gate does not silently select a governing branch.'
     : 'none; exact artifact license and applicable notice material are present'
   let governingTerm = declaredLicense || 'Declared license metadata is absent; the applicable redistribution term cannot be established.'
+  let supplementalEvidence = null
 
   if (!declaredLicense) {
     status = internal ? 'unverified' : 'blocked'
@@ -1234,6 +1247,29 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
   } else if (!licenseFile) {
     status = 'blocked'
     missingAction = 'Retain the exact package license file in the final artifact and bind it to this dependency instance.'
+  }
+
+  const catalog = options.legalCatalog
+  const record = catalog?.catalog.packages.find(record => {
+    if (record.name === name && record.version === version) return true
+    try {
+      const logical = logicalEntry(reader, entry)
+      return record.bindings.some(binding =>
+        `${binding.lock === 'package-lock.json' ? '' : 'packages/runtime/'}${binding.path}/package.json` === logical)
+    } catch { return false }
+  })
+  if (record) {
+    try {
+      supplementalEvidence = verifyEvidence(reader, entry, record, catalog)
+      governingTerm = supplementalEvidence.governingExpression
+      licenseFile = supplementalEvidence.licenseFile
+      status = 'passed'
+      missingAction = 'none; exact locked instance and supplemental legal materials verified'
+    } catch (error) {
+      status = 'blocked'
+      missingAction = /^dependency_legal_[a-z_]+$/.test(error.message)
+        ? error.message : 'dependency_legal_evidence_unreadable'
+    }
   }
 
   return {
@@ -1251,7 +1287,8 @@ function dependencyRecord({ reader, artifactEntry, packageJson, options = {} }) 
     mandatory: obligationClass === ARTIFACT_OBLIGATION_CLASSES.mandatoryExternal,
     engineeringBlocking: status === 'blocked' && obligationClass === ARTIFACT_OBLIGATION_CLASSES.mandatoryExternal,
     status,
-    declaredLicense: declaredLicense || null
+    declaredLicense: declaredLicense || null,
+    supplementalEvidence
   }
 }
 
@@ -1320,7 +1357,19 @@ function packageEntryEndingWith(reader, suffix) {
   ) || null
 }
 
+function runtimeMetadataEntry(reader, logicalEntry) {
+  if (reader.has(logicalEntry)) return logicalEntry
+  // Only the actual ASAR's after-pack directory can supply unindexed runtime
+  // metadata. An unrelated suffix match must not repair a missing owner file.
+  for (const component of reader.components || []) {
+    const candidate = normalizeEntry(`packaged-root/${component.artifactEntry}.unpacked/${logicalEntry}`)
+    if (reader.has(candidate)) return candidate
+  }
+  return null
+}
+
 function exactInventory(reader, options = {}) {
+  options = { ...options, legalCatalog: loadCatalog(REPO_ROOT) }
   const entries = exactPackageEntries(reader)
   const dependencyInstances = []
   const parseErrors = []
@@ -1368,9 +1417,7 @@ function exactInventory(reader, options = {}) {
       missingAction: `Set the exact packaged product author metadata to ${PRODUCT_PACKAGE_AUTHOR}.`
     })
   }
-  const runtimePackageEntry = reader.has(RUNTIME_PACKAGE_ENTRY)
-    ? RUNTIME_PACKAGE_ENTRY
-    : null
+  const runtimePackageEntry = runtimeMetadataEntry(reader, RUNTIME_PACKAGE_ENTRY)
   const runtimePackage = runtimePackageEntry ? readPackage(reader, runtimePackageEntry) : null
   if (!runtimePackage || licenseValue(runtimePackage) !== PRODUCT_LICENSE_ID) {
     artifactResourceBlockers.push({
@@ -1392,9 +1439,7 @@ function exactInventory(reader, options = {}) {
       missingAction: `Retain readable ${RUNTIME_PACKAGE_ENTRY} metadata with author ${PRODUCT_PACKAGE_AUTHOR}.`
     })
   }
-  const runtimePackageLockEntry = reader.has(RUNTIME_PACKAGE_LOCK_ENTRY)
-    ? RUNTIME_PACKAGE_LOCK_ENTRY
-    : null
+  const runtimePackageLockEntry = runtimeMetadataEntry(reader, RUNTIME_PACKAGE_LOCK_ENTRY)
   const runtimePackageLock = runtimePackageLockEntry ? readPackage(reader, runtimePackageLockEntry) : null
   const exactRuntimeLockPackage = runtimePackageLock?.packages?.['']
   if (exactRuntimeLockPackage?.license !== PRODUCT_LICENSE_ID) {
@@ -1698,6 +1743,8 @@ export const artifactLegalObligationsTestInternals = Object.freeze({
   captureDirectoryInventory,
   createAsarReader,
   createDirectoryReader,
+  createMemoryReader,
+  createArtifactReaderFromPath,
   readStableSingleLinkRegularFile
 })
 

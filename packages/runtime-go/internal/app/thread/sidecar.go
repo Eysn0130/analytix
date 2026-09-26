@@ -8,6 +8,7 @@ import (
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
 
 type HydrateSidecarInput struct {
@@ -273,14 +274,59 @@ func ValidatePublicHistory(thread map[string]any) error {
 	// TrustedPublicProjector applies the public workspace projection later.
 	ordinaryContent := contracts.CloneMap(thread)
 	delete(ordinaryContent, "workspace")
+	if rawArchive, present := ordinaryContent[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1]; present {
+		archive, err := domainturnterminal.ParseGeneralTerminalPublicationArchiveV1(rawArchive)
+		if err != nil {
+			return err
+		}
+		// The archive has a closed, digest-bound schema and can grow with
+		// history. Validate each entry against the same public record policy
+		// before applying the fixed limits to ordinary content below.
+		for _, commit := range archive.Commits {
+			if err := domainevent.ValidatePublicRecord(domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)); err != nil {
+				return err
+			}
+		}
+		delete(ordinaryContent, domainturnterminal.GeneralTerminalPublicationArchiveFieldV1)
+	}
 	if caseSensitive {
-		if err := domainevent.ValidatePublicRecord(ordinaryContent); err != nil {
+		if err := validatePublicThreadRecordChunksV1(ordinaryContent); err != nil {
 			return errors.Join(errors.New("case thread ordinary projection is unsafe"), err)
 		}
 		return nil
 	}
-	if err := domainevent.ValidatePublicRecord(ordinaryContent); err != nil {
+	if err := validatePublicThreadRecordChunksV1(ordinaryContent); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Each turn and the root metadata are independently bounded public records.
+// Applying one credential budget to the accumulated thread would reject valid
+// history after enough turns, while a malformed or unsafe individual record
+// must continue to fail closed.
+func validatePublicThreadRecordChunksV1(thread map[string]any) error {
+	turns, ok := thread["turns"].([]any)
+	if !ok {
+		return errors.New("public thread turns are invalid")
+	}
+	root := make(map[string]any, len(thread)-1)
+	for key, value := range thread {
+		if key != "turns" {
+			root[key] = value
+		}
+	}
+	if err := domainevent.ValidatePublicRecord(root); err != nil {
+		return err
+	}
+	for _, rawTurn := range turns {
+		turn, ok := rawTurn.(map[string]any)
+		if !ok || turn == nil {
+			return errors.New("public thread turn is invalid")
+		}
+		if err := domainevent.ValidatePublicRecord(turn); err != nil {
+			return err
+		}
 	}
 	return nil
 }

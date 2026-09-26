@@ -18,6 +18,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
@@ -127,6 +128,13 @@ func TestCaseDelegationProviderCommitmentGrammarIsOrdinaryProjectionStable(t *te
 				t.Fatalf("provider commitment collided with generic privacy projection: got=%q want=%q", projected, token)
 			}
 		})
+	}
+}
+
+func TestAttachmentVirtualPathIsOrdinaryProjectionStable(t *testing.T) {
+	const text = "FilePath: attachment://att_0123456789abcdef01234567"
+	if projected := ProjectOrdinaryText(text); projected != text {
+		t.Fatalf("virtual attachment path changed: got=%q want=%q", projected, text)
 	}
 }
 
@@ -1390,4 +1398,42 @@ func providerPrivacyOrdinaryBoundaryContext(t *testing.T) domainsecurity.TurnSec
 		t.Fatalf("invalid ordinary boundary context: %#v err=%v", securityContext, err)
 	}
 	return securityContext
+}
+
+func TestContinuationProviderReferenceSurvivesFinalPrivacyProjection(t *testing.T) {
+	// A decimal-heavy SHA is legal authority, but is not safe prose. The wire
+	// reference must survive the same projection as source text and tool args.
+	raw := strings.Repeat("9", 64)
+	snapshot := domainthread.TaskContinuationSnapshotV1{StateDigest: raw, UserHistory: &domainthread.ContinuationUserHistoryV1{Version: "continuation-user-history.v1", ScopeDigest: raw, Sources: []domainthread.ContinuationUserSourceV1{{Reference: raw, Digest: raw, Text: strings.Repeat("original context ", 2000)}}}}
+	view := domainthread.ProviderContinuationMapV1(snapshot)
+	body, _ := json.Marshal(view)
+	refs := view["userHistory"].(map[string]any)["sources"].([]map[string]any)
+	ref := refs[0]["reference"].(string)
+	args, _ := json.Marshal(map[string]any{"reference": ref})
+	request := domainmodel.Request{Messages: []domainmodel.Message{
+		{Role: "user", Content: string(body)},
+		{Role: "assistant", ToolCalls: []domainmodel.ToolCall{{ID: "read-source", Name: "read_task_history", Arguments: args}}},
+		{Role: "tool", ToolCallID: "read-source", Name: "read_task_history", Content: string(args)},
+	}}
+	projected, err := ProjectProviderRequestForEffect(domainsecurity.TurnSecurityContext{}, request, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if json.Unmarshal([]byte(projected.Messages[0].Content), &got) != nil {
+		t.Fatal("projection lost JSON")
+	}
+	sources := got["userHistory"].(map[string]any)["sources"].([]any)
+	if sources[0].(map[string]any)["reference"] != ref || string(projected.Messages[1].ToolCalls[0].Arguments) != string(args) || projected.Messages[2].Content != string(args) {
+		t.Fatal("final privacy projection changed the resolvable source reference")
+	}
+	if got["sourceSnapshotReference"] != view["sourceSnapshotReference"] {
+		t.Fatal("snapshot identity changed in final projection")
+	}
+	if ProjectOrdinaryText("account 6222020000000000000") == "account 6222020000000000000" {
+		t.Fatal("ordinary PII projection was relaxed")
+	}
+	if snapshot.UserHistory.Sources[0].Reference != raw {
+		t.Fatal("provider view rewrote sealed source")
+	}
 }

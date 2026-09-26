@@ -213,9 +213,6 @@ function buildHarness(overrides: Partial<ChatState> = {}): Harness {
     setRoute: () => undefined,
     openWrite: async () => undefined,
     openCode: async () => undefined,
-    ensureWriteThreadForWorkspace: async () => null,
-    createWriteThread: async () => null,
-    selectWriteThread: async () => undefined,
     openSettings: () => undefined,
     openPlugins: () => undefined,
     openClaw: () => undefined,
@@ -520,6 +517,20 @@ describe('chat-store-side-actions', () => {
         reasoningEffort: 'low'
       })
     )
+  })
+
+  it('does not send or create optimistic state without secure client message IDs', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    vi.stubGlobal('crypto', undefined)
+    try {
+      await expect(actions.sendSideMessage(id, 'keep this draft local')).rejects.toThrow()
+      expect(provider.sendMock).not.toHaveBeenCalled()
+      expect(state.sideConversations[id].busy).toBe(false)
+      expect(state.sideConversations[id].blocks).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('does not normalize invalid side reasoning effort aliases', async () => {
@@ -1609,6 +1620,19 @@ describe('chat-store-side-actions', () => {
     expect(state.sideConversations[id]).toBeUndefined()
     expect(signal?.aborted).toBe(true)
     expect(state.busy).toBe(true)
+  })
+
+  it('updates one provider progress row in its side conversation only', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    const sink = (provider.subscribeMock.mock.calls.at(-1) as [string, number, ThreadEventSink, AbortSignal])[2]
+    for (const stage of ['pre_send', 'post_send', 'response_received']) {
+      sink.onRuntimeStatus?.({ kind: 'pipeline_stage', itemId: 'runtime_status_side_turn_provider_progress',
+        turnId: 'side_turn', stage, label: 'UNTRUSTED_STAGE_TEXT' })
+    }
+    expect(state.blocks).toEqual([])
+    expect(state.sideConversations[id].blocks).toHaveLength(1)
+    expect(state.sideConversations[id].blocks[0]).toMatchObject({ kind: 'system', text: 'Response received' })
   })
 
   it('side runtime status stays scoped after a cursor update', async () => {

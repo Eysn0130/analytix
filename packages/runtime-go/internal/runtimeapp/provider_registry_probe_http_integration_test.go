@@ -3,19 +3,116 @@ package runtimeapp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	providerregistryapp "analytix.local/runtime-go/internal/app/providerregistry"
+	"analytix.local/runtime-go/internal/contracts"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
 	secretstoreport "analytix.local/runtime-go/internal/ports/secretstore"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
+
+func TestRuntimeHTTPNativeMessagesRegistrySurvivesRestartWithoutUIModelMetadata(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows native credential lifecycle has its own DPAPI fixture")
+	}
+	var mu sync.Mutex
+	var observed []map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if r.URL.Path != "/v1/messages" || r.Header.Get("X-Api-Key") != "synthetic-native-messages" || json.NewDecoder(r.Body).Decode(&body) != nil {
+			http.Error(w, "invalid synthetic request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		observed = append(observed, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"model\":\"deepseek-flash\",\"usage\":{\"input_tokens\":8,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Native Messages selected from Registry.\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":9}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer upstream.Close()
+	root, workspace := t.TempDir(), workspacetest.New(t)
+	config := Config{RuntimeToken: DefaultRuntimeToken, ProductionDurableRoot: filepath.Join(root, "durable"), DataDir: filepath.Join(root, "data"), UserDataDir: filepath.Join(root, "user")}
+	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, "native-messages", upstream.URL+"/v1", []string{"deepseek-flash"}, "deepseek-flash", "synthetic-native-messages", "deepseek-messages")
+	// No ModelProvidersJSON, UI profile or legacy key supplies the protocol.
+	for generation := 0; generation < 2; generation++ {
+		func() {
+			handler, err := NewRuntimeServerHandlerE(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			defer shutdownOwnedRuntimeHandler(t, handler)
+			client := &http.Client{Timeout: 30 * time.Second}
+			for _, effort := range [][]string{{"low", "medium", "high"}, {"max", "off", "auto"}}[generation] {
+				status, created := packagedSourceUnavailableHydrationHTTPJSONV1(t, client, server.URL, http.MethodPost, "/v1/threads", map[string]any{"title": "Native Messages", "workspace": workspace})
+				threadID := contracts.StringField(created, "id")
+				if status != http.StatusCreated || threadID == "" {
+					t.Fatalf("create thread status=%d", status)
+				}
+				status, _ = packagedSourceUnavailableHydrationHTTPJSONV1(t, client, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{"prompt": "Explain the selected protocol briefly.", "reasoningEffort": effort})
+				if status != http.StatusAccepted {
+					t.Fatalf("start native Messages status=%d", status)
+				}
+				deadline := time.Now().Add(60 * time.Second)
+				for {
+					_, thread := packagedSourceUnavailableHydrationHTTPJSONV1(t, client, server.URL, http.MethodGet, "/v1/threads/"+threadID, nil)
+					encoded, _ := json.Marshal(thread)
+					if strings.Contains(string(encoded), "Native Messages selected from Registry.") && strings.Contains(string(encoded), `"status":"completed"`) {
+						break
+					}
+					if strings.Contains(string(encoded), `"status":"failed"`) || time.Now().After(deadline) {
+						t.Fatal("native Messages did not publish a completed answer")
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				mu.Lock()
+				body := observed[len(observed)-1]
+				mu.Unlock()
+				thinking, _ := body["thinking"].(map[string]any)
+				output, _ := body["output_config"].(map[string]any)
+				if body["model"] != "deepseek-flash" || body["max_tokens"] != float64(4096) || body["betas"] != nil {
+					t.Fatal("native model/cap/baseline mismatch")
+				}
+				want := effort
+				if want == "medium" {
+					want = "high"
+				}
+				if effort == "auto" {
+					if body["thinking"] != nil || body["output_config"] != nil {
+						t.Fatal("auto changed the server default")
+					}
+				} else if effort == "off" {
+					if thinking["type"] != "disabled" {
+						t.Fatal("off did not disable thinking")
+					}
+				} else if thinking["type"] != "enabled" || output["effort"] != want {
+					t.Fatal("native thinking/effort did not reach the wire")
+				}
+			}
+		}()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) != 6 {
+		t.Fatal("unexpected physical request count")
+	}
+}
 
 func TestProviderRegistryProbeUsesOnlyCommittedProviderAndProtectedCredential(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -112,6 +209,18 @@ func TestProviderRegistryProbeUsesOnlyCommittedProviderAndProtectedCredential(t 
 	case <-requestObserved:
 	default:
 		t.Fatal("committed loopback Provider was not called")
+	}
+	credentialCheck := httptest.NewRecorder()
+	handler.Handle(credentialCheck, httptest.NewRequest(http.MethodPost,
+		httpapi.ProviderRegistryPathV1+"/providers/"+providerID+"/credential-check", strings.NewReader(expected)))
+	if credentialCheck.Code != http.StatusOK || !strings.Contains(credentialCheck.Body.String(), `"credentialAvailable":true`) ||
+		strings.Contains(credentialCheck.Body.String(), secret) || strings.Contains(credentialCheck.Body.String(), "credentialRef") {
+		t.Fatal("credential availability did not resolve through the composed protected store")
+	}
+	select {
+	case <-requestObserved:
+		t.Fatal("local credential resolution made an external Provider call")
+	default:
 	}
 	for _, required := range []string{
 		`"status":"reachable"`, `"modelCount":2`, `"registryRevision":"1"`,

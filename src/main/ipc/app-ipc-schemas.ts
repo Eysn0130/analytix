@@ -1,3 +1,4 @@
+import { objectExportBindingSchema } from '../../../packages/runtime/src/contracts/object-editing'
 import { z } from 'zod'
 import {
   ANALYTIX_APPROVAL_TEMPLATE,
@@ -79,10 +80,11 @@ import {
 } from '../../shared/app-settings'
 import { DESKTOP_COMMANDS } from '../../shared/analytix-api'
 import { providerRegistryOAuthBindingSchemaV1 } from '../../../packages/runtime/src/contracts/provider-registry.js'
+import { inlineCompletionDocumentSchema } from '../../../packages/runtime/src/contracts/inline-completion'
 
 const oauthProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/)
 const oauthAccountComponentSchema = z.string().trim().min(1).max(256).refine(
-  (value) => !/[\u0000\r\n\t]/.test(value)
+  (value) => !value.includes('\0') && !/[\r\n\t]/.test(value)
 )
 
 export const providerOAuthBeginPayloadSchema = z.object({
@@ -111,7 +113,7 @@ export const oauthAuthorizationIdPayloadSchema = z.object({
 
 export const providerOAuthSubscriptionPayloadSchema = z.object({
   providerId: oauthProviderIdSchema,
-  subscriptionToken: z.string().min(1).max(32 * 1024).refine((value) => !/[\u0000\r\n]/.test(value))
+  subscriptionToken: z.string().min(1).max(32 * 1024).refine((value) => !value.includes('\0') && !/[\r\n]/.test(value))
 }).strict()
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
 import { THREAD_TRACE_EVENT_NAMES } from '../../shared/thread-trace'
@@ -1355,6 +1357,7 @@ export const workspaceFileWatchPayloadSchema = z
 
 export const writeRetrievalPayloadSchema = z
   .object({
+    threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
     workspaceRoot: defaultPathSchema,
     currentFilePath: defaultPathSchema,
     query: z.string().trim().min(1).max(MAX_CHANNEL_TEXT_LENGTH),
@@ -1363,22 +1366,12 @@ export const writeRetrievalPayloadSchema = z
   })
   .strict()
 
-export const writeExportPayloadSchema = z
-  .object({
-    path: trimmedString(MAX_PATH_LENGTH),
-    format: z.enum(WRITE_EXPORT_FORMATS),
-    content: z.string().max(MAX_BODY_BYTES),
-    typography: writeTypographyPatchSchema.optional()
-  })
-  .strict()
+export const writeExportPayloadSchema = objectExportBindingSchema.extend({
+  format: z.enum(WRITE_EXPORT_FORMATS),
+  typography: writeTypographyPatchSchema.optional()
+}).strict()
 
-export const writeRichClipboardPayloadSchema = z
-  .object({
-    path: trimmedString(MAX_PATH_LENGTH),
-    workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
-    content: z.string().max(MAX_BODY_BYTES)
-  })
-  .strict()
+export const writeRichClipboardPayloadSchema = objectExportBindingSchema
 
 const writeInlineEditRecentEditSchema = z
   .object({
@@ -1418,6 +1411,9 @@ const writeInlineCompletionEditCandidateSchema = z
 
 export const writeInlineCompletionPayloadSchema = z
   .object({
+    threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
+    requestId: z.string().uuid().optional(),
+    document: inlineCompletionDocumentSchema.optional(),
     prefix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     suffix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),
     mode: z.enum(['short', 'long', 'edit']).optional(),
@@ -1472,6 +1468,8 @@ export const writeInlineCompletionPayloadSchema = z
     model: optionalTrimmedString(128)
   })
   .strict()
+
+export const writeInlineCompletionCancelSchema = z.object({ requestId: z.string().uuid() }).strict()
 
 export const writeInfographicPayloadSchema = z
   .object({
@@ -1562,6 +1560,7 @@ export const threadTraceEventPayloadSchema = z
     name: z.enum(THREAD_TRACE_EVENT_NAMES),
     timestamp: z.number().int().nonnegative(),
     threadId: optionalTrimmedString(MAX_ID_LENGTH),
+    turnId: optionalTrimmedString(MAX_ID_LENGTH),
     data: z
       .record(
         z.string().trim().min(1).max(64),

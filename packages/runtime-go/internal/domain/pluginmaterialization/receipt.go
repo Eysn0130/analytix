@@ -12,26 +12,28 @@ import (
 var receiptSignatureDomainV1 = []byte("analytix.bundled-plugin-materialization-receipt/signature/v1\x00")
 
 type ReceiptV1 struct {
-	SchemaVersion          int      `json:"schemaVersion"`
-	Purpose                string   `json:"purpose"`
-	ReceiptID              string   `json:"receiptId"`
-	IntentID               string   `json:"intentId"`
-	PackageAuthoritySHA256 string   `json:"packageAuthoritySha256"`
-	Target                 TargetV1 `json:"target"`
-	PluginName             string   `json:"pluginName"`
-	PluginVersion          string   `json:"pluginVersion"`
-	GenerationID           string   `json:"generationId"`
-	ActiveRelativePath     string   `json:"activeRelativePath"`
-	SourceTreeSHA256       string   `json:"sourceTreeSha256"`
-	SourceTreeFileCount    uint64   `json:"sourceTreeFileCount"`
-	ManifestSHA256         string   `json:"manifestSha256"`
-	EntrypointSHA256       string   `json:"entrypointSha256"`
-	FactToolsEnabled       bool     `json:"factToolsEnabled"`
-	IssuedAt               string   `json:"issuedAt"`
-	AuthorityAlgorithm     string   `json:"authorityAlgorithm"`
-	AuthorityKeyID         string   `json:"authorityKeyId"`
-	AuthorityPublicKey     string   `json:"authorityPublicKey"`
-	AuthoritySignature     string   `json:"authoritySignature"`
+	SchemaVersion            int      `json:"schemaVersion"`
+	Purpose                  string   `json:"purpose"`
+	ReceiptID                string   `json:"receiptId"`
+	IntentID                 string   `json:"intentId"`
+	PackageAuthoritySHA256   string   `json:"packageAuthoritySha256,omitempty"`
+	Target                   TargetV1 `json:"target"`
+	PluginName               string   `json:"pluginName"`
+	PluginVersion            string   `json:"pluginVersion"`
+	GenerationID             string   `json:"generationId"`
+	ActiveRelativePath       string   `json:"activeRelativePath"`
+	SourceTreeSHA256         string   `json:"sourceTreeSha256"`
+	SourceTreeFileCount      uint64   `json:"sourceTreeFileCount"`
+	ManifestSHA256           string   `json:"manifestSha256"`
+	EntrypointSHA256         string   `json:"entrypointSha256"`
+	FactToolsEnabled         bool     `json:"factToolsEnabled"`
+	IssuedAt                 string   `json:"issuedAt"`
+	AuthorityAlgorithm       string   `json:"authorityAlgorithm"`
+	AuthorityKeyID           string   `json:"authorityKeyId"`
+	AuthorityPublicKey       string   `json:"authorityPublicKey"`
+	AuthoritySignature       string   `json:"authoritySignature"`
+	Origin                   string   `json:"origin,omitempty"`
+	SourceRegistrationSHA256 string   `json:"sourceRegistrationSha256,omitempty"`
 }
 
 type SignFuncV1 func([]byte) ([]byte, error)
@@ -40,6 +42,7 @@ func NewReceiptV1(intent IntentV1, generationID, activeRelativePath string, issu
 	publicKey = append([]byte(nil), publicKey...)
 	receipt := ReceiptV1{
 		SchemaVersion: SchemaVersionV1, Purpose: ReceiptPurposeV1, IntentID: intent.IntentID,
+		Origin: intent.Origin, SourceRegistrationSHA256: intent.SourceRegistrationSHA256,
 		PackageAuthoritySHA256: intent.PackageAuthoritySHA256, Target: intent.Target,
 		PluginName: intent.PluginName, PluginVersion: intent.PluginVersion,
 		GenerationID: generationID, ActiveRelativePath: activeRelativePath,
@@ -91,6 +94,7 @@ func ValidateTrustedReceiptV1(receipt ReceiptV1, keyID string, publicKey []byte)
 func ValidateReceiptForIntentV1(receipt ReceiptV1, intent IntentV1) error {
 	if ValidateReceiptV1(receipt) != nil || ValidateIntentV1(intent) != nil ||
 		receipt.IntentID != intent.IntentID || receipt.PackageAuthoritySHA256 != intent.PackageAuthoritySHA256 ||
+		receipt.Origin != intent.Origin || receipt.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 ||
 		receipt.Target != intent.Target || receipt.PluginName != intent.PluginName || receipt.PluginVersion != intent.PluginVersion ||
 		receipt.SourceTreeSHA256 != intent.SourceTreeSHA256 || receipt.SourceTreeFileCount != intent.SourceTreeFileCount ||
 		receipt.ManifestSHA256 != intent.ManifestSHA256 || receipt.EntrypointSHA256 != intent.EntrypointSHA256 {
@@ -127,11 +131,11 @@ func ReceiptSHA256V1(receipt ReceiptV1) string {
 func validateReceiptPayload(receipt ReceiptV1) error {
 	if receipt.SchemaVersion != SchemaVersionV1 || receipt.Purpose != ReceiptPurposeV1 ||
 		!canonicalDigest(receipt.ReceiptID) || receipt.ReceiptID != deriveReceiptID(receipt) ||
-		!canonicalDigest(receipt.IntentID) || !canonicalDigest(receipt.PackageAuthoritySHA256) ||
+		!canonicalDigest(receipt.IntentID) || !validMaterializationOriginV1(receipt.Origin, receipt.PackageAuthoritySHA256, receipt.SourceRegistrationSHA256, receipt.PluginName) ||
 		ValidateTargetV1(receipt.Target) != nil || !validPluginIdentityV1(receipt.PluginName, receipt.PluginVersion) ||
 		!canonicalDigest(receipt.GenerationID) || !canonicalRelativePath(receipt.ActiveRelativePath) ||
 		!canonicalDigest(receipt.SourceTreeSHA256) || receipt.SourceTreeFileCount == 0 || receipt.SourceTreeFileCount > MaxSourceTreeFilesV1 ||
-		!canonicalDigest(receipt.ManifestSHA256) || !canonicalDigest(receipt.EntrypointSHA256) || receipt.FactToolsEnabled ||
+		!canonicalDigest(receipt.ManifestSHA256) || !validEntrypointForOriginV1(receipt.Origin, receipt.EntrypointSHA256) || receipt.FactToolsEnabled ||
 		!canonicalTime(receipt.IssuedAt) || receipt.AuthorityAlgorithm != AuthorityAlgorithmV1 || !canonicalDigest(receipt.AuthorityKeyID) {
 		return errors.New("bundled plugin materialization receipt is invalid")
 	}

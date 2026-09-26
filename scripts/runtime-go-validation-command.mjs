@@ -19,6 +19,7 @@ const commands = {
   'product-regression': { script: 'runtime-go-product-regression.mjs' },
   'rc-control-plane': { script: 'runtime-go-release-gate.mjs', args: ['--control-plane-only'] },
   'release-gate': { script: 'runtime-go-release-gate.mjs' },
+  'core-stage': { script: 'runtime-go-release-gate.mjs', args: ['--core-stage'] },
   'release-execution': { script: 'runtime-go-release-gate.mjs', args: ['--execute'] },
   'release-finalization': { script: 'runtime-go-release-gate.mjs', args: ['--finalize'] },
   'approval-user-input-evidence': { script: 'runtime-go-approval-user-input-evidence.mjs' },

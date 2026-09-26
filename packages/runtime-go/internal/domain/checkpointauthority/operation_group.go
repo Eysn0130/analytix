@@ -23,7 +23,12 @@ const (
 	OperationGroupTerminalSchemaVersion = 2
 	OperationGroupTerminalPurpose       = "analytix.checkpoint-operation-group-terminal/v2"
 	MaxOperationArgumentsBytes          = 1024 * 1024
-	maxOperationSnapshotStringBytes     = 4*((MaxSnapshotContentBytes+2)/3) + 64*1024
+	// Generation arguments share the existing execution-grant JSON ceiling.
+	MaxGeneratedOperationArgumentsBytes = 4 * 1024 * 1024
+	MaxGeneratedOperationStringBytes    = 1024 * 1024
+	// Only operation intents carry generated arguments; other record limits stay unchanged.
+	MaxOperationGroupIntentRecordBytes = MaxGeneratedOperationArgumentsBytes + MaxSnapshotAuthorityRecordBytes
+	maxOperationSnapshotStringBytes    = 4*((MaxSnapshotContentBytes+2)/3) + 64*1024
 )
 
 type OperationPathV2 struct {
@@ -81,12 +86,14 @@ type OperationGroupIntentV2 struct {
 	SourceWorkspaceCheckpointID string                             `json:"sourceWorkspaceCheckpointId"`
 	OperationOrdinal            uint64                             `json:"operationOrdinal"`
 	ToolName                    string                             `json:"toolName"`
+	GenerationPrincipalDigest   string                             `json:"generationPrincipalDigest,omitempty"`
 	ArgumentsJSON               json.RawMessage                    `json:"argumentsJson"`
 	Paths                       []OperationPathV2                  `json:"paths"`
 	CreatedAt                   string                             `json:"createdAt"`
 }
 
 type OperationGroupIntentInputV2 struct {
+	GenerationPrincipalDigest   string
 	SecurityContext             domainsecurity.TurnSecurityContext
 	ExecutionGrant              domainsecurity.ExecutionGrant
 	CheckpointID                string
@@ -144,7 +151,7 @@ type OperationGroupStateV2 struct {
 }
 
 func NewOperationGroupIntentV2(input OperationGroupIntentInputV2) (OperationGroupIntentV2, error) {
-	canonicalArguments, err := canonicalOperationArguments(input.ArgumentsJSON)
+	canonicalArguments, err := canonicalOperationArguments(strings.TrimSpace(input.ToolName), input.ArgumentsJSON)
 	if err != nil {
 		return OperationGroupIntentV2{}, err
 	}
@@ -187,7 +194,8 @@ func NewOperationGroupIntentV2(input OperationGroupIntentInputV2) (OperationGrou
 		SecurityContext: input.SecurityContext, ExecutionGrant: input.ExecutionGrant,
 		CheckpointID: strings.TrimSpace(input.CheckpointID), SourceWorkspaceCheckpointID: strings.TrimSpace(input.SourceWorkspaceCheckpointID),
 		OperationOrdinal: input.OperationOrdinal, ToolName: strings.TrimSpace(input.ToolName),
-		ArgumentsJSON: canonicalArguments, Paths: paths, CreatedAt: input.CreatedAt.UTC().Format(time.RFC3339Nano),
+		GenerationPrincipalDigest: input.GenerationPrincipalDigest,
+		ArgumentsJSON:             canonicalArguments, Paths: paths, CreatedAt: input.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	record.OperationGroupID = operationGroupIdentity(record)
 	record.IntentDigest = operationGroupIntentDigest(record)
@@ -198,10 +206,17 @@ func NewOperationGroupIntentV2(input OperationGroupIntentInputV2) (OperationGrou
 }
 
 func ValidateOperationGroupIntentV2(record OperationGroupIntentV2) error {
+	if record.ToolName == "generate_office_document" {
+		if !domainsecurity.IsSHA256Hex(record.GenerationPrincipalDigest) {
+			return errors.New("generated artifact principal binding is invalid")
+		}
+	} else if record.GenerationPrincipalDigest != "" {
+		return errors.New("unexpected generated artifact principal binding")
+	}
 	createdAt, createdErr := time.Parse(time.RFC3339Nano, record.CreatedAt)
 	grantIssuedAt, issuedErr := time.Parse(time.RFC3339Nano, record.ExecutionGrant.IssuedAt)
 	grantExpiresAt, expiresErr := time.Parse(time.RFC3339Nano, record.ExecutionGrant.ExpiresAt)
-	canonicalArguments, argumentsErr := canonicalOperationArguments(record.ArgumentsJSON)
+	canonicalArguments, argumentsErr := canonicalOperationArguments(record.ToolName, record.ArgumentsJSON)
 	if record.SchemaVersion != OperationGroupIntentSchemaVersion || record.Purpose != OperationGroupIntentPurpose ||
 		domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(record.SecurityContext) != nil ||
 		domainsecurity.ValidateExecutionGrantForOrdinaryContext(record.ExecutionGrant, record.SecurityContext) != nil ||
@@ -217,7 +232,7 @@ func ValidateOperationGroupIntentV2(record OperationGroupIntentV2) error {
 		!domainsecurity.IsSHA256Hex(record.IntentDigest) || record.IntentDigest != operationGroupIntentDigest(record) {
 		return errors.New("checkpoint operation group intent integrity is invalid")
 	}
-	arguments, ok := operationArgumentsObject(record.ArgumentsJSON)
+	arguments, ok := operationArgumentsObject(record.ToolName, record.ArgumentsJSON)
 	if !ok || !validOperationPaths(record.ToolName, record.Paths, arguments, record.SecurityContext) {
 		return errors.New("checkpoint operation group path authority is invalid")
 	}
@@ -362,11 +377,13 @@ func operationGroupIdentity(record OperationGroupIntentV2) string {
 		SourceWorkspaceCheckpointID string `json:"sourceWorkspaceCheckpointId"`
 		ToolName                    string `json:"toolName"`
 		ArgsHash                    string `json:"argsHash"`
+		GenerationPrincipalDigest   string `json:"generationPrincipalDigest,omitempty"`
 	}{
 		Purpose: OperationGroupIntentPurpose, ContextDigest: record.SecurityContext.ContextDigest,
 		GrantID: record.ExecutionGrant.GrantID, CheckpointID: record.CheckpointID,
 		SourceWorkspaceCheckpointID: record.SourceWorkspaceCheckpointID, ToolName: record.ToolName,
-		ArgsHash: record.ExecutionGrant.ArgsHash,
+		ArgsHash:                  record.ExecutionGrant.ArgsHash,
+		GenerationPrincipalDigest: record.GenerationPrincipalDigest,
 	}
 	body, _ := json.Marshal(identity)
 	return domainsecurity.SHA256Hex(body)
@@ -384,22 +401,28 @@ func operationGroupTerminalDigest(record OperationGroupTerminalV2) string {
 	return domainsecurity.SHA256Hex(body)
 }
 
-func canonicalOperationArguments(raw []byte) ([]byte, error) {
-	value, err := domainjsonstrict.DecodeValue(raw, domainjsonstrict.Options{
+func operationArgumentsLimits(toolName string) domainjsonstrict.Options {
+	options := domainjsonstrict.Options{
 		RequireObject: true, MaxBytes: MaxOperationArgumentsBytes, MaxDepth: 32, MaxTokens: 100_000,
 		MaxStringBytes: MaxSnapshotContentBytes + 64*1024,
-	})
+	}
+	if toolName == "generate_office_document" {
+		options.MaxBytes = MaxGeneratedOperationArgumentsBytes
+		options.MaxStringBytes = MaxGeneratedOperationStringBytes
+	}
+	return options
+}
+
+func canonicalOperationArguments(toolName string, raw []byte) ([]byte, error) {
+	value, err := domainjsonstrict.DecodeValue(raw, operationArgumentsLimits(toolName))
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(value)
 }
 
-func operationArgumentsObject(raw []byte) (map[string]any, bool) {
-	value, err := domainjsonstrict.DecodeValue(raw, domainjsonstrict.Options{
-		RequireObject: true, MaxBytes: MaxOperationArgumentsBytes, MaxDepth: 32, MaxTokens: 100_000,
-		MaxStringBytes: MaxSnapshotContentBytes + 64*1024,
-	})
+func operationArgumentsObject(toolName string, raw []byte) (map[string]any, bool) {
+	value, err := domainjsonstrict.DecodeValue(raw, operationArgumentsLimits(toolName))
 	object, ok := value.(map[string]any)
 	return object, err == nil && ok
 }
@@ -447,6 +470,9 @@ func validOperationPaths(
 	target, targetOK := roles["target"]
 	if len(paths) != 1 || !targetOK || !target.ExpectedAfterExisted {
 		return false
+	}
+	if toolName == "generate_office_document" {
+		return !target.BeforeExisted
 	}
 	if toolName != "write" && toolName != "write_file" && !target.BeforeExisted {
 		return false
@@ -519,12 +545,14 @@ func validObservedPathAuthority(item ObservedOperationPathV2) bool {
 
 func allowedMutationTool(toolName string) bool {
 	return oneOfOperationValue(toolName,
-		"write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol",
+		"write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "generate_office_document",
 	)
 }
 
 func allowedPathArgumentKey(toolName, key, role string) bool {
 	switch toolName {
+	case "generate_office_document":
+		return role == "target" && key == "path"
 	case "write", "write_file", "edit", "edit_file", "multi_edit", "notebook_edit", "delete_range", "delete_symbol":
 		return role == "target" && oneOfOperationValue(key, "path", "filePath", "FilePath")
 	case "move_file":
@@ -568,10 +596,17 @@ func oneOfOperationValue(value string, allowed ...string) bool {
 }
 
 func decodeStrictOperationGroupRecord(body []byte, target any) error {
-	if err := domainjsonstrict.Validate(body, domainjsonstrict.Options{
+	options := domainjsonstrict.Options{
 		RequireObject: true, MaxBytes: MaxSnapshotAuthorityRecordBytes, MaxDepth: 32,
 		MaxTokens: 200_000, MaxStringBytes: maxOperationSnapshotStringBytes,
-	}); err != nil {
+	}
+	intent, isIntent := target.(*OperationGroupIntentV2)
+	readOptions := options
+	if isIntent {
+		readOptions.MaxBytes = MaxOperationGroupIntentRecordBytes
+		readOptions.MaxStringBytes = MaxGeneratedOperationStringBytes
+	}
+	if err := domainjsonstrict.Validate(body, readOptions); err != nil {
 		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -582,6 +617,9 @@ func decodeStrictOperationGroupRecord(body []byte, target any) error {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return errors.New("checkpoint operation group authority contains trailing JSON")
+	}
+	if isIntent && intent.ToolName != "generate_office_document" {
+		return domainjsonstrict.Validate(body, options)
 	}
 	return nil
 }

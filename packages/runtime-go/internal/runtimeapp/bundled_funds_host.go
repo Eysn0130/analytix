@@ -123,7 +123,7 @@ func validateBundledFundsHostMaterializationWithDependenciesV1(
 		}
 		return nil, errors.New("bundled funds current package inspection failed")
 	}
-	if inspection.Publishable || inspection.FactToolsEnabled || inspection.PackageAnchor == "" {
+	if inspection.Authority.Core != nil || inspection.Publishable || inspection.FactToolsEnabled || inspection.PackageAnchor == "" {
 		return nil, errBundledFundsHostUnavailableV1
 	}
 	source, err := dependencies.inspectSource(ctx, inspection.PluginSourceRoot)

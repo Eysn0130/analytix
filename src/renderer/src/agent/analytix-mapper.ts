@@ -997,6 +997,10 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     const plan = extractPlanMetadata(item)
     if (plan) meta.plan = plan
   }
+  if (item.kind === 'tool_result' && item.toolName === 'generate_office_document' && !item.isError) {
+    const projection = PublicToolResultProjectionV1.safeParse(item.output)
+    if (projection.success && projection.data.projectionKind === 'artifact_status') meta.generatedArtifact = projection.data.artifact
+  }
   return {
     kind: 'tool',
     id: toolBlockId(item, normalizedChild),
@@ -1117,13 +1121,21 @@ function normalizeCacheDiagnostics(value: CoreCacheDiagnosticsJson | undefined):
     const digest = rendererSha256(value[key])
     if (digest) normalized[key] = digest
   }
-  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported'] as const) {
+  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported', 'modelInputComparable', 'providerCostEstimateComplete'] as const) {
     const flag = rendererBoolean(value[key])
     if (flag !== undefined) normalized[key] = flag
   }
-  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens'] as const) {
+  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
     const count = rendererNumber(value[key])
     if (count !== undefined) normalized[key] = count
+  }
+  if (value.dynamicStateCheck === 'not_checked') normalized.dynamicStateCheck = value.dynamicStateCheck
+  if (value.toolSchemaEstimator === 'utf8_bytes_div4') normalized.toolSchemaEstimator = value.toolSchemaEstimator
+  if (value.responseModelObservation === 'not_reported' || value.responseModelObservation === 'matches_resolved' || value.responseModelObservation === 'differs_resolved') {
+    normalized.responseModelObservation = value.responseModelObservation
+  }
+  if (value.modelInputFirstDifference === 'unavailable' || value.modelInputFirstDifference === 'none' || value.modelInputFirstDifference === 'system' || value.modelInputFirstDifference === 'tools' || value.modelInputFirstDifference === 'history' || value.modelInputFirstDifference === 'current' || value.modelInputFirstDifference === 'ordering') {
+    normalized.modelInputFirstDifference = value.modelInputFirstDifference
   }
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }
@@ -1833,6 +1845,8 @@ function childToolEventFromStatus(status: RuntimeStatusEventPayload): ToolEventP
   }
 }
 
+const VISIBLE_PROVIDER_PROGRESS_STAGES = new Set(['pre_send', 'post_send', 'response_received'])
+
 const BASE_PIPELINE_STAGE_LABELS = new Map<string, string>([
   ['setup', 'Setup'],
   ['pre_start', 'Pre-start'],
@@ -1842,8 +1856,8 @@ const BASE_PIPELINE_STAGE_LABELS = new Map<string, string>([
   ['input_routed', 'Input routed'],
   ['input_compressed', 'Input compressed'],
   ['input_remembered', 'Input remembered'],
-  ['pre_send', 'Pre-send'],
-  ['post_send', 'Post-send'],
+  ['pre_send', 'Preparing model request'],
+  ['post_send', 'Model request started'],
   ['response_received', 'Response received'],
   ['provider_retrying', 'Provider request is retrying'],
   ['step_limit_finalizing', 'Model step budget reached'],
@@ -1861,7 +1875,7 @@ function fixedPipelineStage(stage: unknown): { stage: string; label: string; vis
     return {
       stage,
       label: baseLabel,
-      visibleWithoutChild: stage === 'provider_retrying' || stage === 'provider_error' || stage === 'empty_final_recovered'
+      visibleWithoutChild: VISIBLE_PROVIDER_PROGRESS_STAGES.has(stage) || stage === 'provider_retrying' || stage === 'provider_error' || stage === 'empty_final_recovered'
     }
   }
   if (stage.startsWith('subagent_') && closedDiagnosticCode(stage.slice('subagent_'.length), CHILD_STATUS_CODES)) {
@@ -1981,6 +1995,8 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
     const projection = fixedPipelineStage(event.stage)
     if (!projection || (!child && !projection.visibleWithoutChild)) return null
     const { stage, label } = projection
+    const providerProgress = !child && VISIBLE_PROVIDER_PROGRESS_STAGES.has(stage)
+    if (providerProgress && !turnId) return null
     const details = event.details && typeof event.details === 'object' && !Array.isArray(event.details)
       ? event.details as Record<string, unknown>
       : undefined
@@ -1993,7 +2009,9 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
     const maxAttempt = readStructuredNumber(event as Record<string, unknown>, 'maxAttempt') ?? readStructuredNumber(details, 'maxAttempt')
     return {
       kind: 'pipeline_stage',
-      itemId: `runtime_status_${turnId ?? threadId ?? 'thread'}_${stage}_${key}`,
+      itemId: providerProgress
+        ? `runtime_status_${turnId}_provider_progress`
+        : `runtime_status_${turnId ?? threadId ?? 'thread'}_${stage}_${key}`,
       turnId,
       createdAt: event.timestamp,
       stage,

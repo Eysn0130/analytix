@@ -22,6 +22,7 @@ import (
 )
 
 type mutationPlan struct {
+	deferSelection            bool
 	operation                 domainregistry.Operation
 	expected                  domainregistry.ExpectedState
 	provider                  domainregistry.ProviderInput
@@ -44,7 +45,8 @@ func (manager *Manager) Connect(ctx context.Context, command ConnectCommand) (do
 	}
 	return manager.execute(ctx, mutationPlan{
 		operation: domainregistry.OperationConnect, expected: command.Expected,
-		provider: command.Provider, providerID: command.Provider.ID,
+		deferSelection: command.DeferSelection,
+		provider:       command.Provider, providerID: command.Provider.ID,
 		purpose: purpose, credential: command.Credential,
 	})
 }
@@ -160,6 +162,10 @@ func (manager *Manager) verifyCommittedSnapshot(ctx context.Context, state domai
 		})
 		if err != nil {
 			clear(plaintext)
+			if errors.Is(err, secretstoreport.ErrMasterKeyUnavailable) &&
+				manager.legacyReentryRefs[secretstoreport.CredentialRef(provider.CredentialRef)] == secretstoreport.Purpose(provider.CredentialPurpose) {
+				continue
+			}
 			return normalizeSecretError(err)
 		}
 		if len(plaintext) == 0 {
@@ -584,6 +590,17 @@ func (manager *Manager) ResolveProviderForOperation(
 		return ExecutionResolution{}, normalizeManagerError(err)
 	}
 	return result, nil
+}
+
+// CheckCredential resolves through the execution owner without a network call or
+// returning the secret. The caller's complete fence is rechecked after the read.
+func (manager *Manager) CheckCredential(ctx context.Context, command ProviderOperationCommand) error {
+	resolution, err := manager.ResolveProviderForOperation(ctx, command)
+	resolution.Clear()
+	if err != nil {
+		return err
+	}
+	return manager.ValidateProviderOperationCurrent(ctx, command)
 }
 
 func providerExecutionCredential(provider domainregistry.Provider, plaintext []byte) ([]byte, error) {
@@ -1043,7 +1060,7 @@ func buildTransaction(
 	case domainregistry.OperationConnect:
 		value := plan.provider.Provider(providerIncarnation, candidateRef, string(plan.purpose), 1, 1)
 		next = &value
-		if nextSelected == "" && value.PrivateAccount == nil {
+		if nextSelected == "" && value.PrivateAccount == nil && !plan.deferSelection {
 			nextSelected = value.ID
 		}
 	case domainregistry.OperationUpdate:
@@ -1118,7 +1135,8 @@ func buildTransaction(
 		fence.CurrentCredentialPurpose = prior.CredentialPurpose
 	}
 	pending := domainregistry.Transaction{
-		Version: domainregistry.TransactionVersion, ID: transactionID,
+		DeferSelection: plan.deferSelection,
+		Version:        domainregistry.TransactionVersion, ID: transactionID,
 		Operation: plan.operation, Phase: domainregistry.PhasePrepared, ProviderID: plan.providerID,
 		Resolution:                 domainregistry.ResolutionPending,
 		CandidateCredentialPurpose: candidatePurpose, SupersededCredentialPurpose: supersededPurpose, Fence: fence,
@@ -1615,6 +1633,10 @@ func normalizeManagerError(err error) error {
 		return registryport.ErrNotFound
 	case errors.Is(err, registryport.ErrVerification):
 		return registryport.ErrVerification
+	case errors.Is(err, registryport.ErrCredentialReentryRequired):
+		return registryport.ErrCredentialReentryRequired
+	case errors.Is(err, registryport.ErrCredentialUnavailable):
+		return registryport.ErrCredentialUnavailable
 	case errors.Is(err, errProtectedRecoveryNotFound):
 		return registryport.ErrNotFound
 	case errors.Is(err, errProtectedRecoveryConsumed), errors.Is(err, errProtectedRecoveryNotConfirmed),

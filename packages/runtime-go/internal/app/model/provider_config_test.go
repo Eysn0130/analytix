@@ -89,6 +89,11 @@ func TestDeepSeekReasoningProtocolRequiresExactHostAuthority(t *testing.T) {
 			providerID:    "deepseek", model: "deepseek-chat", wantProtocol: "deepseek-chat-completions", wantFamily: "deepseek", wantReasoningEff: true,
 		},
 		{
+			name:          "explicit Messages profile reaches TurnConfig",
+			providersJSON: `{"providers":[{"id":"messages","baseUrl":"https://api.deepseek.com/anthropic","apiKey":"test-key","endpointFormat":"messages","models":["deepseek-flash"],"modelProfiles":{"deepseek-flash":{"reasoning":{"requestProtocol":"deepseek-messages"}}}}]}`,
+			providerID:    "messages", model: "deepseek-flash", wantProtocol: "deepseek-messages", wantFamily: "anthropic-compatible", wantReasoningEff: true,
+		},
+		{
 			name:          "provider label cannot authorize protocol",
 			providersJSON: `{"providers":[{"id":"deepseek","baseUrl":"https://models.example/v1","apiKey":"test-key","endpointFormat":"chat_completions","models":["deepseek-chat"]}]}`,
 			providerID:    "deepseek", model: "deepseek-chat", wantFamily: "deepseek",

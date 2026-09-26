@@ -542,6 +542,8 @@ const failureStatuses: Record<Exclude<ProviderRegistryFailureCodeV1,
   not_found: 404,
   conflict: 409,
   persistence_failure: 503,
+  credential_unavailable: 503,
+  credential_reentry_required: 503,
   verification_failure: 500,
   request_too_large: 413,
   unauthorized: 401

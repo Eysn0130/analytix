@@ -116,7 +116,7 @@ func PrivateProtocolRequired(reasoningProtocol, effort string) bool {
 	switch protocol {
 	case "anthropic-thinking":
 		return effort != "" && effort != "off"
-	case "deepseek-chat-completions":
+	case "deepseek-chat-completions", "deepseek-messages":
 		// DeepSeek thinking defaults to enabled when the caller omits an
 		// explicit effort/toggle, so only an explicit off is non-private.
 		return effort != "off"
@@ -150,7 +150,7 @@ func ObservePrivateProtocolResponse(input PrivateProtocolResponseObservationInpu
 	if observed &&
 		((protocol == "anthropic-thinking" &&
 			strings.EqualFold(strings.TrimSpace(input.Effort), "off")) ||
-			(protocol == "deepseek-chat-completions" &&
+			((protocol == "deepseek-chat-completions" || protocol == "deepseek-messages") &&
 				strings.EqualFold(strings.TrimSpace(input.Effort), "off"))) {
 		return false, newPrivateProtocolResponseFailure(ErrAnthropicPrivateProtocolIncomplete)
 	}
@@ -159,7 +159,7 @@ func ObservePrivateProtocolResponse(input PrivateProtocolResponseObservationInpu
 	}
 	if observed {
 		if (protocol == "anthropic-thinking" && !signaturePresent) ||
-			(protocol == "deepseek-chat-completions" && !thinkingPresent) ||
+			((protocol == "deepseek-chat-completions" || protocol == "deepseek-messages") && !thinkingPresent) ||
 			(protocol == "deepseek-chat-completions" && signaturePresent) {
 			return false, newPrivateProtocolResponseFailure(ErrAnthropicPrivateProtocolIncomplete)
 		}
@@ -253,6 +253,8 @@ func IssueAnthropicPrivateProtocol(input AnthropicPrivateProtocolIssueInput) (An
 func privateProtocolProviderCompatible(config domainmodel.TurnConfig, protocol string) bool {
 	family := strings.ToLower(strings.TrimSpace(config.Family))
 	switch protocol {
+	case "deepseek-messages":
+		return true // Explicit protocol plus the Messages endpoint, never a model-name guess.
 	case "anthropic-thinking":
 		return family != "deepseek"
 	case "deepseek-chat-completions":
@@ -279,7 +281,7 @@ func AnthropicPrivateProtocolTerminalBoundary(input AnthropicPrivateProtocolTerm
 
 func privateProtocolEndpointCapable(protocol, endpointFormat, customRequestShape string) bool {
 	switch protocol {
-	case "anthropic-thinking":
+	case "anthropic-thinking", "deepseek-messages":
 		return AnthropicPrivateProtocolEndpointCapable(endpointFormat, customRequestShape)
 	case "deepseek-chat-completions":
 		return DeepSeekPrivateProtocolEndpointCapable(endpointFormat, customRequestShape)
@@ -292,8 +294,8 @@ func privateProtocolReasoningKind(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "anthropic-thinking":
 		return "anthropic-thinking"
-	case "deepseek-chat-completions":
-		return "deepseek-chat-completions"
+	case "deepseek-chat-completions", "deepseek-messages":
+		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
 	}

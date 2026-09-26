@@ -24,6 +24,7 @@ type Dependencies struct {
 	ResolveTask      sideeffectidentityapp.TaskProjectionResolver
 	MutationInput    func(context.Context, appmodel.PendingToolCall, map[string]any) filestore.MutationToolInput
 	ResolveMCP       sideeffectidentityapp.MCPProjectionResolver
+	HostBinding      any
 }
 
 type preparedContextKey struct{}
@@ -62,6 +63,7 @@ func Prepare(ctx context.Context, pending appmodel.PendingToolCall, issuedAt tim
 		ToolName: pending.ExecutionGrant.ToolName, Arguments: pending.Call.Arguments,
 		WorkspaceRealPath: pending.SecurityContext.WorkspaceRealPath, ResolvePath: resolvePath,
 		ResolveSkill: dependencies.ResolveSkill, ResolveSkillBody: dependencies.ResolveSkillBody, ResolveMCP: dependencies.ResolveMCP,
+		HostBinding: dependencies.HostBinding,
 		ResolveTask: func(request subagentapp.TaskRequest) (any, error) {
 			if dependencies.ResolveTask == nil {
 				return nil, errors.New("subagent semantic owner is unavailable")

@@ -3,9 +3,19 @@
 Status: Operational. Applies to public-source development and candidate
 packaging. Commands and CI results, not this document, establish readiness.
 
+The primary development and product execution route is Codex Desktop on the
+configured local Mac; ChatGPT + GitHub is the auxiliary route. See
+[Development routes](development-runbook.md#development-routes) for the current
+host authorization, isolated test data and route-specific evidence boundaries.
+An independent Mac or cloud host is not a default prerequisite.
+
 ## Update main, branch, install, verify, commit, PR
 
-Use one public `main`, not a second snapshot checkout. Before editing:
+Use one public `main`, not a second snapshot checkout. The sequence below is
+for new work. When explicitly continuing an existing unmerged PR, first refresh
+its actual head/base and candidate ancestry, preserve newer work, and continue
+that authorized branch; do not switch to old main or rebuild its history.
+Before new work:
 
 ```sh
 git status --short --branch
@@ -87,9 +97,9 @@ archive ancestry, force push, or push all local branches/tags.
 | `npm run doctor -- --native` | Also checks Electron SQLite/terminal module loading, configured host, pinned versions and runtime asset hashes. Native binary/SDK authority is still checked during build. |
 | `npm run verify:baseline` | Doctor, sync/setup regression tests, TypeScript typecheck, Electron + TS launcher build, and built-output layout smoke. |
 | `npm test` | Application/renderer/host/TS-runtime Vitest suite. Not every Go/Rust/Python/script test. |
-| `npm run dev` | Existing native development build, TS launcher build, then Electron. Default behavior is preserved; this command is not automatically isolated from real user state. |
+| `npm run dev` | Existing native development build, TS launcher build, then Electron with private task state and shared protected development credentials. |
 | `npm run dev:fast` | Reuses already built native/runtime inputs. Not a bootstrap, isolation or acceptance replacement. |
-| `npm run dev:isolated` | Checkout-specific private profile, explicit native task-Keychain provisioning, filtered build/app environments, native doctor and existing build chain. Whole desktop lifecycle acceptance is separate. |
+| `npm run dev:isolated` | Private task state with shared protected development credentials; `--isolated-keychain` explicitly selects release/QA isolation. Whole desktop lifecycle acceptance is separate. |
 | `npm run test:plugin-contracts` | Deterministic Funds production-entry closure and report-scenario contracts; no live model request. Not full plugin acceptance. |
 | `npm run assets:verify` | Pinned resource presence, size and hash checks for the current target. |
 
@@ -120,28 +130,62 @@ The current required CI has no Windows-native lane. The accepted first Windows
 installer target remains x64 NSIS; no minimum OS version or WSL qualification is
 established by these source fixes, and no Windows installer is produced here.
 
-The explicit `dev:isolated` candidate retains its own named profile under the configured
-local `~/.analytix-development` tree, keyed by checkout path. Build caches stay on
-the configured cache volume; protected profile/Keychain storage still requires
-the Core's managed local filesystem admission. Each task has separate `home`
-and `user-data` owners: the default `home/.analytix/data` runtime root cannot
-overlap Electron's root. Existing profiles without this topology are preserved
-and require explicit migration or a separate fresh profile. It does not reuse installed
-Analytix data, import the caller's Provider/Hub credentials, enable Hub bootstrap,
-inherit a prebuilt runtime override, or read the repository's `.env` through
-Vite. Its child-only home/config paths share the existing desktop isolation
-boundary; the invoking shell and normal application profile are unchanged.
-Protocol/login-item registrations and update traffic remain suppressed by that
-boundary. This is **state isolation, not an OS sandbox**; manually selected
-files and explicitly enabled tools still require their normal permissions.
+Normal `npm run dev` (or `dev:fast` with admitted existing build inputs) uses
+private task `home` and `user-data` directories under `~/.analytix-development`.
+The `dev:isolated` alias keeps this application-state isolation; credential
+isolation is a separate explicit choice. Ordinary profiles have a
+`development-profile-` prefix so a retained QA profile is never silently
+converted. Protocol/login registrations and update traffic remain suppressed;
+this is state isolation, not an OS sandbox.
 
-For a new `--profile <name>` or `--fresh` profile the launcher asks for an
-isolated Keychain password through a hidden native dialog, provisions the
-non-login bootstrap database and preserves its inode while binding the final
-task path. Keep that password for `--unlock-keychain`; credentials are never
-copied from an existing profile. `--fast` reuses already built native/runtime
-inputs. Cancellation or missing retained state stops without repair; `--fresh`
-creates a separate profile and preserves the incomplete one.
+Ordinary development shares one existing Provider Registry and encrypted Secret
+Store under `~/.analytix-development/provider-credentials`, independent of
+checkout/task lifecycle. The existing fallback master-key provider uses private
+0700 directories and 0600 files, exclusive initialization and readback. It is
+protected-local file authority, not OS-backed storage. Task profiles never copy
+credential values. Core receives this choice only through the main-private
+startup frame; the source binary requires `analytix_dev_credentials` in addition
+to `analytix_prod`. Packaged Electron rejects the option and ordinary packaged
+Go builds omit the development tag. Production selection is unchanged.
+
+Core's existing Registry OS lock, transaction/recovery and generation fences
+also govern the shared development owner. Startup semantic planning does not
+recover or initialize that independent owner; activation performs its normal
+recovery. The authority directory is a mandatory protected root for model tools.
+
+Once bootstrapped, a noninteractive bounded check uses the existing runtime CLI:
+
+```sh
+source ./scripts/use-analytix-cache.sh
+cd packages/runtime-go
+go run -tags analytix_prod,analytix_dev_credentials ./cmd/runtime-server provider verify \
+  --development-authority-dir "$HOME/.analytix-development/provider-credentials"
+```
+
+The one-time `--bootstrap-stdin` option accepts protected stdin bytes, never a
+command argument, environment file or log. It refuses to replace an existing
+Provider; replacement remains the existing Settings transaction. The check
+resolves the stored credential through Core/Registry/Secret Store, sends one
+synthetic no-tool `deepseek-flash` request to the exact official DeepSeek endpoint
+with 32 output tokens and no reconnect, and selects a new Provider only after
+success. A failed validation retains an unselected retryable credential.
+Output includes only safe status and usage; `returnedModel` is null because the
+current adapter does not retain the upstream model echo. It does not substitute
+for GUI acceptance or authorize exceeding the user's test budget.
+
+Use `--isolated-keychain` only for explicit release-admission/credential-isolation
+QA. For example, `npm run dev:isolated -- --isolated-keychain --profile qa` retains
+the prior task-specific namespace and protected password prompt. Add
+`--unlock-keychain` only in that mode. Credentials are never imported from the
+shared development owner or Production. Creation/unlock follows successful
+prerequisites, leaving the full unlocked window for testing. Cancellation or
+missing retained state preserves the incomplete profile; `--fresh` makes a
+separate profile. A locked QA Keychain remains unavailable and must not fall
+back to the development file authority.
+
+Production still uses normal OS-backed authority and system authorization;
+there is no separate Analytix password. CI fixtures continue to use explicitly
+injected synthetic/ephemeral authority and never the host's development store.
 
 The Go Secret Store persists committed physical Keychain identity in the V2
 record under the existing private binding filename. Restart rejects replacement
@@ -157,7 +201,12 @@ An unconfirmed write remains unavailable. A confirmed write with only cleanup
 residue can recover before the next explicit unlock. Rollback cannot replace a
 valid identity record with an unknown backup. V2 records require the writer's
 canonical encoding; duplicate fields and linked records are rejected. Each
-Security credential command has its own ten-second deadline; a timeout does
+Security credential command has its own ten-second deadline. Explicit task
+commands first run a bounded, noninteractive native lock-metadata check; an
+already locked or unqualified Keychain fails before starting `security`. This
+does not change the lock policy or read credentials in the metadata process.
+Locking after preflight remains a race covered by the command deadline, so this
+does not guarantee suppression of every possible OS authorization dialog. A timeout does
 not prove a native write had no side effect. These controls and focused tests do not establish GUI,
 real Provider, installation or complete restart acceptance by themselves.
 
@@ -166,13 +215,14 @@ the native package resource seal. Building native tools does not grant that
 process import authority: data import remains unavailable in this mode. Use
 the existing non-publishable development `.app` build, including its complete
 packaging/signing lifecycle, to assemble the native desktop inputs. That does
-not establish successful GUI launch or installer acceptance. The current
-isolated packaged launch remains blocked: Electron's enabled Cookie encryption
+not establish successful GUI launch or installer acceptance. The earlier
+isolated packaged launch encountered a separate startup wait: Electron's enabled Cookie encryption
 initializes OS key storage before Core, while the explicit task binding covers
 only the Go Secret Store. The old task-login GUI harness does not satisfy the
 accepted non-login binding contract and must not be reused as a fallback.
-Keep Cookie encryption enabled and preserve the blocked status until a
-separately admitted Chromium storage boundary is implemented and verified.
+Keep Cookie encryption enabled. The later installed8e QA session completed
+normal startup and Provider/restart checks; it does not establish stable
+Developer ID identity or eliminate all future OS authorization prompts.
 
 In a runtime with admitted native import capability, on first CSV/ZIP selection
 in a workspace without a case, Main requests explicit

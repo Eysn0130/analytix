@@ -10,12 +10,12 @@ import (
 	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainordinary "analytix.local/runtime-go/internal/domain/ordinaryprojection"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
-	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
 
@@ -74,11 +74,15 @@ type PreservedDerivedHistoryV1 interface {
 }
 
 type TrustedPublicProjector struct {
-	index            *gateprojection.TrustedFinalProjectionIndex
-	caseThreads      CaseThreadAuthority
-	currentAuthority CurrentCaseThreadAuthorityValidator
-	primaryCAS       finalauthorityport.AcceptedFinalCASReader
-	preservedHistory PreservedDerivedHistoryV1
+	index                *gateprojection.TrustedFinalProjectionIndex
+	caseThreads          CaseThreadAuthority
+	currentAuthority     CurrentCaseThreadAuthorityValidator
+	primaryCAS           finalauthorityport.AcceptedFinalCASReader
+	preservedHistory     PreservedDerivedHistoryV1
+	retainedFactVerifier func(domainevidence.PrivateAcceptedFinalRecord, domainsecurity.TurnSecurityContext) error
+	// Set only on a private, synchronous hydration copy; never shared or cached.
+	retainedProjectionThread map[string]any
+	retainedProjectionFacts  map[string]bool
 }
 
 func NewTrustedPublicProjector(index *gateprojection.TrustedFinalProjectionIndex) *TrustedPublicProjector {
@@ -112,6 +116,7 @@ func NewTrustedPublicProjectorWithPreservedHistoryV1(
 	currentAuthority CurrentCaseThreadAuthorityValidator,
 	primaryCAS finalauthorityport.AcceptedFinalCASReader,
 	history PreservedDerivedHistoryV1,
+	retainedVerifier ...func(domainevidence.PrivateAcceptedFinalRecord, domainsecurity.TurnSecurityContext) error,
 ) *TrustedPublicProjector {
 	if index == nil {
 		index = gateprojection.NewTrustedFinalProjectionIndex(nil)
@@ -119,9 +124,13 @@ func NewTrustedPublicProjectorWithPreservedHistoryV1(
 	if currentAuthority != nil {
 		caseThreads = currentAuthority
 	}
-	return &TrustedPublicProjector{
+	projector := &TrustedPublicProjector{
 		index: index, caseThreads: caseThreads, currentAuthority: currentAuthority, primaryCAS: primaryCAS, preservedHistory: history,
 	}
+	if len(retainedVerifier) == 1 {
+		projector.retainedFactVerifier = retainedVerifier[0]
+	}
+	return projector
 }
 
 func EnsurePublicProjector(projector PublicProjector) PublicProjector {
@@ -131,13 +140,59 @@ func EnsurePublicProjector(projector PublicProjector) PublicProjector {
 	return NewTrustedPublicProjector(nil)
 }
 
+// This admission is for public historical display only. It never changes
+// original context, execution grants, current query selection or signed finals.
+type retainedFactAdmissionV1 struct {
+	original domainevidence.PrivateAcceptedFinalRecord
+	current  domainsecurity.TurnSecurityContext
+}
+
+func (projector *TrustedPublicProjector) retainedFactsForThreadV1(thread map[string]any) (map[string]bool, []retainedFactAdmissionV1, error) {
+	if projector.retainedProjectionFacts != nil {
+		if !samePublicJSON(thread, projector.retainedProjectionThread) {
+			return nil, nil, errors.New("retained projection operation changed thread")
+		}
+		return projector.retainedProjectionFacts, nil, nil
+	}
+	retained := map[string]bool{}
+	var originals []retainedFactAdmissionV1
+	if projector.retainedFactVerifier != nil && projector.index != nil {
+		current, err := domainsecurity.ParseTurnSecurityContext(thread["securityState"])
+		if err == nil {
+			for _, record := range projector.index.RecordsForThread(current.ThreadID) {
+				if sameRetainedFactScopeV1(current, record.SecurityContext) && domainevidence.FinalAnswerRequiresPublicationSnapshotProof(record.Envelope) {
+					// Eligibility alone emits nothing. ProjectThread/Event perform the
+					// fresh exact admission after constructing their private candidate,
+					// immediately before returning any public projection.
+					retained[record.SecurityContext.TurnID] = true
+					originals = append(originals, retainedFactAdmissionV1{original: record, current: current})
+				}
+			}
+		}
+	}
+	return retained, originals, nil
+}
+
 func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (map[string]any, error) {
-	projected, err := projectPublicThreadWithAuthority(thread, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS, projector.preservedHistory)
+	retained, originals, err := projector.retainedFactsForThreadV1(thread)
 	if err != nil {
 		return nil, err
 	}
-	ordinary := projectTrustedStructuredOrdinaryV1(projected, trustedProjectionThreadRootV1)
-	out, _ := ordinary.(map[string]any)
+	projected, err := projectPublicThreadWithRetainedFactsV1(thread, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS, retained, projector.preservedHistory)
+	// A shared material authority fault can also make the primary-CAS candidate
+	// unavailable. Challenge the retained authority even on that failure path so
+	// the existing retryable response is used; healthy authority never masks a
+	// malformed candidate's original rejection.
+	if authorityErr := projector.verifyRetainedFactsV1(thread, originals); authorityErr != nil {
+		return nil, authorityErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	out, err := projectTrustedStructuredThreadV1(projected)
+	if err != nil {
+		return nil, err
+	}
 	if out == nil || !domainstartup.FrozenEventOrderAuthorityStableV1(projected, out) {
 		return nil, errors.New("ordinary public thread privacy projection failed")
 	}
@@ -147,14 +202,56 @@ func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (m
 	if !projectedOrdinaryResultIdentitiesV1(out, trustedProjectionThreadRootV1) {
 		return nil, errors.New("ordinary public result identity changed during projection")
 	}
-	if err := domainevent.ValidatePublicRecord(trustedStructuredValidationViewV1(out, trustedProjectionThreadRootV1)); err != nil {
+	validationView, _ := trustedStructuredValidationViewV1(out, trustedProjectionThreadRootV1).(map[string]any)
+	if validationView == nil {
+		return nil, errors.New("ordinary public thread privacy projection failed")
+	}
+	if err := validatePublicThreadRecordChunksV1(validationView); err != nil {
 		return nil, errors.Join(errors.New("ordinary public thread privacy projection failed"), err)
 	}
 	return out, nil
 }
 
+func projectTrustedStructuredThreadV1(thread map[string]any) (map[string]any, error) {
+	turns, ok := thread["turns"].([]any)
+	if !ok {
+		return nil, errors.New("ordinary public thread turns are invalid")
+	}
+	root := make(map[string]any, len(thread)-1)
+	for key, value := range thread {
+		if key != "turns" {
+			root[key] = value
+		}
+	}
+	out, _ := projectTrustedStructuredOrdinaryV1(root, trustedProjectionThreadRootV1).(map[string]any)
+	if out == nil {
+		return nil, errors.New("ordinary public thread root privacy projection failed")
+	}
+	projectedTurns := make([]any, 0, len(turns))
+	for _, rawTurn := range turns {
+		turn, ok := rawTurn.(map[string]any)
+		if !ok || turn == nil {
+			return nil, errors.New("ordinary public thread turn is invalid")
+		}
+		projected, _ := projectTrustedStructuredOrdinaryV1(turn, trustedProjectionTurnV1).(map[string]any)
+		if projected == nil {
+			return nil, errors.New("ordinary public thread turn privacy projection failed")
+		}
+		projectedTurns = append(projectedTurns, projected)
+	}
+	out["turns"] = projectedTurns
+	return out, nil
+}
+
 func (projector *TrustedPublicProjector) ProjectEvent(routeThreadID string, thread, event map[string]any) (map[string]any, bool, error) {
-	projected, visible, err := projectPublicThreadEvent(routeThreadID, thread, event, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS)
+	retained, originals, err := projector.retainedFactsForThreadV1(thread)
+	if err != nil {
+		return nil, false, err
+	}
+	projected, visible, err := projectPublicThreadEventWithRetainedFactsV1(routeThreadID, thread, event, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS, retained)
+	if err == nil && visible {
+		err = projector.verifyRetainedFactsV1(thread, originals)
+	}
 	if err != nil || !visible {
 		return projected, visible, err
 	}
@@ -176,6 +273,28 @@ func (projector *TrustedPublicProjector) ProjectEvent(routeThreadID string, thre
 		return nil, false, nil
 	}
 	return out, true, nil
+}
+
+func (projector *TrustedPublicProjector) verifyRetainedFactsV1(thread map[string]any, originals []retainedFactAdmissionV1) error {
+	for _, record := range originals {
+		if projector.retainedFactVerifier == nil || projector.retainedFactVerifier(record.original, record.current) != nil {
+			return errors.Join(ErrPublicProjectionPending, errors.New("retained fact history authority changed"))
+		}
+	}
+	if len(originals) > 0 && projector.currentAuthority != nil {
+		// A risk class or a restored case binding alone cannot detect A -> B -> A.
+		// Re-read the current epoch owner after the external witness boundary.
+		current, err := projector.currentAuthority.ValidateCurrent(contracts.StringField(thread, "id"), thread)
+		if err != nil {
+			return errors.Join(ErrPublicProjectionPending, errors.New("retained fact current epoch changed"))
+		}
+		for _, record := range originals {
+			if current != record.current {
+				return errors.Join(ErrPublicProjectionPending, errors.New("retained fact current context changed"))
+			}
+		}
+	}
+	return nil
 }
 
 // projectTrustedStructuredOrdinaryV1 projects only ordinary content leaves.
@@ -243,10 +362,9 @@ func projectTrustedStructuredOrdinaryV1(value any, scope trustedProjectionScopeV
 }
 
 // stageTrustedPlanDigestV1 protects the SHA-256 and RFC3339Nano metadata of an
-// exact, canonical tool-result item while the generic ordinary projector scans
-// the plan's display-bearing fields. Without this typed staging, a legitimate
-// digest or timestamp containing a long decimal run can be rewritten as PII
-// and the closed plan projection becomes invalid.
+// exact, canonical plan or artifact result while the generic ordinary projector
+// scans display-bearing fields. Without this typed staging, a legitimate digest
+// or timestamp containing a long decimal run can invalidate the closed result.
 func stageTrustedPlanDigestV1(
 	value any,
 	path []trustedProjectionPathSegmentV1,
@@ -284,31 +402,31 @@ func stageCanonicalPlanToolResultDigestV1(
 	path []trustedProjectionPathSegmentV1,
 	entries *[]trustedTerminalProjectionEntryV1,
 ) (map[string]any, bool) {
-	_, ok := domaintoolresult.ClosedPlanToolResultDigestV1(item)
+	container, fields, ok := domainevent.ClosedToolResultPrivacyMetadataV1(item)
 	if !ok {
 		return nil, false
 	}
 	staged, _ := cloneTrustedAuthorityValueV1(item).(map[string]any)
 	output, _ := staged["output"].(map[string]any)
-	plan, _ := output["plan"].(map[string]any)
-	if plan == nil {
+	metadata, _ := output[container].(map[string]any)
+	if metadata == nil {
 		return nil, false
 	}
-	for _, field := range []string{"contentHash", "savedAt"} {
+	for _, field := range fields {
 		placeholder := map[string]any{
 			"kind": "trusted_plan_digest_placeholder_v1", "ordinal": float64(len(*entries)),
 		}
 		stagedPlaceholder, _ := cloneTrustedAuthorityValueV1(placeholder).(map[string]any)
 		metadataPath := append(append([]trustedProjectionPathSegmentV1(nil), path...),
 			trustedProjectionPathSegmentV1{Kind: "key", Key: "output"},
-			trustedProjectionPathSegmentV1{Kind: "key", Key: "plan"},
+			trustedProjectionPathSegmentV1{Kind: "key", Key: container},
 			trustedProjectionPathSegmentV1{Kind: "key", Key: field},
 		)
 		*entries = append(*entries, trustedTerminalProjectionEntryV1{
-			path: metadataPath, authority: plan[field].(string),
+			path: metadataPath, authority: metadata[field].(string),
 			placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
 		})
-		plan[field] = stagedPlaceholder
+		metadata[field] = stagedPlaceholder
 	}
 	return staged, true
 }

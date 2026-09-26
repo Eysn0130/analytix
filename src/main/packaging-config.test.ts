@@ -627,6 +627,85 @@ afterEach(() => {
   }
 })
 
+type LockedRuntimePackage = {
+  dependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>
+  link?: boolean
+}
+
+// Test-only traversal of the pinned npm runtime graph. Follow actual nested
+// resolution and fail on unresolved required edges; unrelated plugins must not
+// expand the DOCX adapter's dependency admission.
+function lockedRuntimeClosure(packages: Record<string, LockedRuntimePackage>, root: string): string[] {
+  const visited = new Set<string>()
+  const queue = [root]
+  while (queue.length > 0) {
+    const key = queue.pop()!
+    if (visited.has(key)) continue
+    const pkg = packages[key]
+    if (!pkg || pkg.link) throw new Error(`Unresolved locked package: ${key}`)
+    visited.add(key)
+    const names = new Set([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.optionalDependencies ?? {}),
+      ...Object.keys(pkg.peerDependencies ?? {})
+    ])
+    for (const name of names) {
+      if (!/^(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+$/.test(name) || name.split('/').some(part => part === '.' || part === '..')) {
+        throw new Error('Invalid locked dependency name')
+      }
+      let scope = key
+      let resolved: string | undefined
+      while (true) {
+        const candidate = `${scope ? `${scope}/` : ''}node_modules/${name}`
+        if (Object.hasOwn(packages, candidate)) { resolved = candidate; break }
+        if (!scope) break
+        const parent = scope.lastIndexOf('/node_modules/')
+        scope = parent < 0 ? '' : scope.slice(0, parent)
+      }
+      const optional = Object.hasOwn(pkg.optionalDependencies ?? {}, name) ||
+        (!Object.hasOwn(pkg.dependencies ?? {}, name) && pkg.peerDependenciesMeta?.[name]?.optional === true)
+      if (!resolved) {
+        if (optional) continue
+        throw new Error(`Missing locked dependency: ${key} -> ${name}`)
+      }
+      queue.push(resolved)
+    }
+  }
+  return [...visited].sort()
+}
+
+describe('locked runtime dependency closure', () => {
+  it('follows nested and scoped peers, terminates cycles, and ignores unrelated packages', () => {
+    const packages: Record<string, LockedRuntimePackage> = {
+      'node_modules/docx': { dependencies: { child: '1' } },
+      'node_modules/docx/node_modules/child': { dependencies: { docx: '1' }, peerDependencies: { '@scope/peer': '1' } },
+      'node_modules/@scope/peer': {},
+      'node_modules/child': { dependencies: { 'image-size': '1' } },
+      'node_modules/image-size': {}
+    }
+    expect(lockedRuntimeClosure(packages, 'node_modules/docx')).toEqual([
+      'node_modules/@scope/peer', 'node_modules/docx', 'node_modules/docx/node_modules/child'
+    ])
+    packages['node_modules/docx/node_modules/child'].dependencies!['image-size'] = '1'
+    expect(lockedRuntimeClosure(packages, 'node_modules/docx')).toContain('node_modules/image-size')
+  })
+
+  it('rejects missing required or linked packages while allowing absent optional dependencies', () => {
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { dependencies: { missing: '1' } } }, 'node_modules/docx'))
+      .toThrow('Missing locked dependency')
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { peerDependencies: { missing: '1' } } }, 'node_modules/docx'))
+      .toThrow('Missing locked dependency')
+    expect(() => lockedRuntimeClosure({ 'node_modules/docx': { link: true } }, 'node_modules/docx'))
+      .toThrow('Unresolved locked package')
+    expect(lockedRuntimeClosure({ 'node_modules/docx': {
+      optionalDependencies: { absent: '1' }, peerDependencies: { peer: '1' }, peerDependenciesMeta: { peer: { optional: true } }
+    } }, 'node_modules/docx')).toEqual(['node_modules/docx'])
+  })
+})
+
 describe('electron-builder Analytix packaging', () => {
   it('omits unstaged optional resources while including every staged resource', () => {
     const absent = builderConfigurationFixture(false)
@@ -654,7 +733,13 @@ describe('electron-builder Analytix packaging', () => {
     expect(rootPackage.dependencies).not.toHaveProperty('html-to-docx')
     expect(rootPackage.devDependencies).not.toHaveProperty('@types/html-to-docx')
     expect(Object.keys(rootPackageLock.packages)).not.toContain('node_modules/html-to-docx')
-    expect(Object.keys(rootPackageLock.packages)).not.toContain('node_modules/image-size')
+    const docxClosure = lockedRuntimeClosure(rootPackageLock.packages, 'node_modules/docx')
+    expect(docxClosure.some(key => /(?:^|\/)node_modules\/image-size$/.test(key))).toBe(false)
+    expect(rootPackage.dependencies).not.toHaveProperty('image-size')
+    // The admitted PPTX generator uses its own locked image dimension helper;
+    // that does not make it part of the pure DOCX generator.
+    expect(lockedRuntimeClosure(rootPackageLock.packages, 'node_modules/pptxgenjs'))
+      .toContain('node_modules/image-size')
     expect(docxImports).not.toMatch(/node:child_process|packages\/runtime-go|provider|mcp/i)
     expect(docxSource).not.toMatch(/pandoc|libreoffice|html-to-docx/i)
   })
@@ -860,7 +945,7 @@ describe('electron-builder Analytix packaging', () => {
 
     expect(golden).toBe(`${JSON.stringify(authority)}\n`)
     expect(authority.authorityDigest).toBe(
-      '1103e3fa03b4bd8e7231f82a2669d244bc2ff39727e7601d118c839680807597'
+      'f310dbe02a258009085562dee8cd293daf2e1f4f69523ca4229af1daf573885b'
     )
   })
 
@@ -901,7 +986,7 @@ describe('electron-builder Analytix packaging', () => {
     expect(defaultConfig).not.toHaveProperty('electronFuses')
     expect(electronFusePolicy.ELECTRON_FUSE_POLICY_V1).toEqual({
       0: true,
-      1: true,
+      1: false,
       2: false,
       3: false,
       4: true,
@@ -913,6 +998,10 @@ describe('electron-builder Analytix packaging', () => {
       strictlyRequireAllFuses: true
     })
     expect(electronFusePolicy.electronFusePolicyV1Digest()).toBe(
+      '1e571ce1c5701dc2596824cb0737c2e9e5b6a6e77ce64e9db37f693cbe825083'
+    )
+    expect(electronFusePolicy.electronFusePolicyV1('win32')[1]).toBe(true)
+    expect(electronFusePolicy.electronFusePolicyV1Digest('win32')).toBe(
       'a11a3d69fb77157f56af8fd3332ae08059dd66a967d52facc373c36573b2b62c'
     )
     expect(rootPackage.devDependencies['@electron/fuses']).toBe('2.1.3')
@@ -1064,7 +1153,10 @@ describe('electron-builder Analytix packaging', () => {
     expect(rootPackage.scripts['build:data-native:development']).toBe(
       'node ./scripts/build-data-analysis-native-tools.cjs --development'
     )
-    expect(rootPackage.scripts.dev).toContain('npm run build:data-native:development')
+    expect(rootPackage.scripts.dev).toBe('node ./scripts/dev-launcher.mjs')
+    // The launcher's executable regression verifies doctor/native/runtime order.
+    expect(readFileSync(resolve(__dirname, '../../scripts/dev-launcher.mjs'), 'utf8'))
+      .toContain("['build:data-native:development', 'build:runtime']")
     expect(rootPackage.scripts['build:data-native:package']).toContain('--all-package-targets')
     expect(rootPackage.scripts['build:data-native:cached']).toBe('node ./scripts/build-windows-release-cache.cjs data-native')
     expect(rootPackage.scripts['build:backend-win-runtime']).toBe('node ./scripts/build-windows-backend-runtime-assets.cjs')
@@ -1338,6 +1430,20 @@ describe('electron-builder Analytix packaging', () => {
       expect(`${name}: ${command}`).not.toMatch(legacyRuntimeMarker)
       expect(command).toContain('scripts/runtime-go-validation-command.mjs')
     }
+    expect(rootPackage.scripts['runtime:go:core-stage']).toBe('node ./scripts/runtime-go-validation-command.mjs core-stage --json')
+    expect(readFileSync(join(process.cwd(), 'scripts/runtime-go-validation-command.mjs'), 'utf8'))
+      .toContain("'core-stage': { script: 'runtime-go-release-gate.mjs', args: ['--core-stage'] }")
+  })
+
+  it('excludes only the metadata-only https dependency while preserving the Node HTTPS implementation', () => {
+    const { base: config } = builderConfigurationFixture()
+    expect(config.files).toContain('!node_modules/https/**')
+    const packageRoot = dirname(require.resolve('https/package.json'))
+    expect(readdirSync(packageRoot)).toEqual(['package.json'])
+    expect(require.resolve('https')).toBe('https')
+    expect(require('https')).toBe(require('node:https'))
+    const pptxSource = readFileSync(require.resolve('pptxgenjs'), 'utf8')
+    expect(pptxSource).toContain("import('node:https')")
   })
 
   it('keeps packaged Go runtime on a binary-only production boundary', () => {
@@ -1915,17 +2021,18 @@ describe('electron-builder Analytix packaging', () => {
       `Go declaration v1 conformance failed:\n${goConformance.stdout}\n${goConformance.stderr}`
     ).toBe(0)
 
+    // This read-only gate varies only the declaration. Copy its immutable
+    // source and staged closures once, then replace both declarations with each
+    // independently constructed attack. No gate result is cached or mocked.
+    const sourceRoot = join(conformanceRoot, 'isolated-funds-source')
+    cpSync(canonicalRoot, sourceRoot, { recursive: true })
+    const context = createMacPackContext(conformanceRoot)
+    const stagedRoot = writeBundledFundsPlugin(context, sourceRoot)
     for (const attack of cases) {
-      const root = tempRoot()
-      const context = createMacPackContext(root)
-      const sourceRoot = join(root, 'isolated-funds-source')
-      cpSync(canonicalRoot, sourceRoot, { recursive: true })
-      writeFileSync(
-        join(sourceRoot, '.analytix-plugin', 'package.json'),
-        `${attack.body().trimEnd()}\n`,
-        'utf8'
-      )
-      writeBundledFundsPlugin(context, sourceRoot)
+      const body = `${attack.body().trimEnd()}\n`
+      for (const owner of [sourceRoot, stagedRoot]) {
+        writeFileSync(join(owner, '.analytix-plugin', 'package.json'), body, 'utf8')
+      }
       expect(
         () => afterPack._internals.validateBundledFundsPlugin(context, { sourceRoot }),
         attack.name
@@ -3559,6 +3666,7 @@ describe('electron-builder Analytix packaging', () => {
       'analytix_prod',
       '-ldflags',
       [
+        `-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedReleaseProfile=full`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedReceiptSHA256=${nativeTrust.receiptSHA256}`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedManifestSHA256=${nativeTrust.manifestSHA256}`,
         `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedTargetKey=${nativeTrust.targetKey}`,

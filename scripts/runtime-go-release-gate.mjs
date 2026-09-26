@@ -13,9 +13,11 @@ import {
 } from './runtime-go-rc-receipt.mjs'
 import {
   evaluateRuntimeGoFormalEvidence,
+  evaluateRuntimeGoCoreFormalEvidence,
   preflightRuntimeGoFormalEvidence
 } from './runtime-go-formal-evidence.mjs'
 import { closeGitEnvironment } from './upstream-source-audit.mjs'
+import { inspectExactArtifactLegalInventory } from './artifact-legal-obligations-audit.mjs'
 import { evaluateReleaseExecution, freezeReleaseClosure, sealReleaseExecution, finalizeReleaseExecution } from './runtime-go-release-finalization.mjs'
 
 const repoRoot = process.cwd()
@@ -70,6 +72,31 @@ const formalEvidenceOption = singlePathOption(formalEvidenceOptionName)
 const executionSealOption = singlePathOption('--execution-seal')
 const closureReportOption = singlePathOption('--closure-report')
 const closureTasksOption = singlePathOption('--closure-task-ids')
+
+// A read-only stage qualification uses the same evidence owner and never enters
+// the Full RC ledger/finalization path or produces publication authority.
+if (args.has('--core-stage')) {
+  const source = sourceIdentity(repoRoot)
+  const status = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' })
+  const invalid = controlPlaneOnly || executionOnly || finalizationOnly || dryRun || forbiddenSkip ||
+    !formalEvidenceOption.valid || !formalEvidenceOption.provided ||
+    executionSealOption.provided || closureReportOption.provided || closureTasksOption.provided ||
+    status.status !== 0 || status.stdout.trim() !== '' || !process.env[exactArtifactEnvironmentKey]
+  let result
+  if (invalid) result = { accepted: false, problems: ['core_stage_clean_source_exact_artifact_and_evidence_required'] }
+  else {
+    result = evaluateRuntimeGoCoreFormalEvidence({ repoRoot, source, bundleDirectory: formalEvidenceOption.value,
+      exactFormalArtifact: inspectExactArtifactLegalInventory({ artifact: process.env[exactArtifactEnvironmentKey] }) })
+    const after = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' })
+    if (JSON.stringify(sourceIdentity(repoRoot)) !== JSON.stringify(source) || after.status !== 0 || after.stdout.trim() !== '') {
+      result.accepted = false
+      result.problems.push('core_stage_source_changed')
+    }
+  }
+  console.log(JSON.stringify({ id: 'runtime-go-core-stage-qualification', source, stage: 'core',
+    fullProductAdmission: false, publicationReceiptIssued: false, result }, null, 2))
+  process.exit(result.accepted ? 0 : 1)
+}
 
 // Final adjudication branches before the run lock, toolchain inspection,
 // formal artifact/OS validation, or any execution-manifest command.

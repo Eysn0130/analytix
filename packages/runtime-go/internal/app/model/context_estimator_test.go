@@ -30,3 +30,39 @@ func TestProviderRequestEstimateIncludesToolsAndPrivateParts(t *testing.T) {
 		t.Fatalf("request estimate omitted bounded request material: base=%d payload=%d", EstimateProviderRequestTokensV1(base), EstimateProviderRequestTokensV1(withPayload))
 	}
 }
+
+func TestIncrementalTextEstimateMatchesEveryLegacyPrefix(t *testing.T) {
+	// Preserve the prior whole-string algorithm independently of the incremental
+	// implementation, including its conservative treatment of incomplete UTF-8.
+	legacy := func(text string) int {
+		tokens, ascii := 0, 0
+		for _, r := range text {
+			if r <= 0x7f {
+				ascii++
+			} else {
+				tokens += (ascii+3)/4 + 1
+				ascii = 0
+			}
+		}
+		return tokens + (ascii+3)/4
+	}
+	for _, text := range []string{
+		"", "abcdefghijk", "a案件证据bc🙂def\uFFFDg",
+		"a\xff\xfe\x80bc\xe4\xb8", "\xf0\x9f\x99\x82\xc0\xaf\xed\xa0\x80z", "a\xe4\xb8x",
+	} {
+		for size := 1; size <= len(text)+1; size++ {
+			var estimate TextTokenEstimatorV1
+			for start := 0; start < len(text); start += size {
+				end := min(start+size, len(text))
+				estimate.WriteString(text[start:end])
+				estimate.WriteString("")
+				if got, want := estimate.Tokens(), legacy(text[:end]); got != want {
+					t.Fatalf("prefix estimate changed: text=%q size=%d end=%d got=%d want=%d", text, size, end, got, want)
+				}
+			}
+			if estimate.Tokens() != legacy(text) || EstimateTextTokensV1(text) != legacy(text) {
+				t.Fatalf("final estimate changed: text=%q size=%d", text, size)
+			}
+		}
+	}
+}

@@ -1,3 +1,4 @@
+import { withImageThreadNavigation, deferImageThreadSelectionClear } from '../write/image-thread-navigation'
 import {
   CLAW_MANAGED_INSTRUCTIONS_HEADING,
   type ClawImAgentProfileV1,
@@ -227,6 +228,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         ? current
         : channels.find((channel) => channel.enabled)?.id ?? ''
       set({ clawChannels: channels, activeClawChannelId: activeId })
+      if (get().route === 'claw' && deferImageThreadSelectionClear()) return
       if (get().route === 'claw' && !activeId) {
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
@@ -239,10 +241,11 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
       }
     },
 
-    addClawChannel: async (provider, agentProfile, platformAccount, optionsArg) => {
+    addClawChannel: async (provider, agentProfile, platformAccount, optionsArg) => withImageThreadNavigation(undefined, async navigationCurrent => {
       if (typeof window.analytix === 'undefined') return
       const preserveRoute = optionsArg?.preserveRoute === true
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const targetChannelId = optionsArg?.channelId?.trim() ?? ''
       const existing = targetChannelId
         ? settings.claw.channels.find((channel) => channel.id === targetChannelId)
@@ -254,6 +257,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
             activeClawChannelId: existing.id,
             ...(preserveRoute ? {} : { route: 'claw' as const })
           })
+          if (!navigationCurrent()) return
           if (!preserveRoute) await get().selectClawChannel(existing.id)
           return
         }
@@ -292,9 +296,9 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         })
         set({
           clawChannels: saved.claw.channels,
-          activeClawChannelId: existing.id,
-          ...(preserveRoute ? {} : { route: 'claw' as const })
+          ...(navigationCurrent() ? { activeClawChannelId: existing.id, ...(preserveRoute ? {} : { route: 'claw' as const }) } : {})
         })
+        if (!navigationCurrent()) return
         if (!preserveRoute) await get().selectClawChannel(existing.id)
         return
       }
@@ -330,19 +334,20 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
       })
       set({
         clawChannels: saved.claw.channels,
-        activeClawChannelId: nextChannel.id,
-        ...(preserveRoute ? {} : { route: 'claw' as const })
+        ...(navigationCurrent() ? { activeClawChannelId: nextChannel.id, ...(preserveRoute ? {} : { route: 'claw' as const }) } : {})
       })
+      if (!navigationCurrent()) return
       if (!preserveRoute) await get().selectClawChannel(nextChannel.id)
-    },
+    }, optionsArg?.preserveRoute !== true),
 
-    selectClawChannel: async (channelId) => {
+    selectClawChannel: async (channelId) => withImageThreadNavigation(undefined, async navigationCurrent => {
       if (get().runtimeConnection !== 'ready') {
         set({ activeClawChannelId: channelId, error: i18n.t('common:runtimeActionNeedsConnection') })
         return
       }
       if (typeof window.analytix === 'undefined') return
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const channels = settings.claw.channels
       const channel = channels.find((item) => item.id === channelId)
       if (!channel) {
@@ -363,8 +368,10 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
       let threadId = clawThreadIdForProvider(channel, latestConversation)
       const recoveredThread = findRecoverableClawThread(get().threads, channels, channel)
       const configuredThreadExists = threadId ? await threadExists(provider, threadId) : false
+      if (!navigationCurrent()) return
       const configuredThreadHasUserMessages =
         threadId && configuredThreadExists ? await threadHasUserMessages(provider, threadId) : false
+      if (!navigationCurrent()) return
       const configuredThreadId = threadId
       threadId = resolveClawThreadId({
         configuredThreadId,
@@ -382,6 +389,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
             )
             const saved = await rendererRuntimeClient.setSettings({ claw: { channels: nextChannels } })
             set({ clawChannels: saved.claw.channels })
+            if (!navigationCurrent()) return
           }
           sseAbortRef.current?.abort()
           sseAbortRef.current = null
@@ -403,6 +411,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
           threadId = thread.id
           createdThread = thread
         } catch (error) {
+          if (!navigationCurrent()) return
           set({
             error: formatRuntimeError(error),
             ...(shouldOpenSettingsForError(error)
@@ -432,17 +441,20 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
           ? state.threads
           : [createdThread ?? recoveredThread ?? placeholder, ...state.threads]
       }))
+      if (!navigationCurrent()) return
       await get().selectThread(threadId)
+      if (!navigationCurrent()) return
       set({ route: 'claw', activeClawChannelId: channel.id })
-    },
+    }),
 
-    selectClawConversation: async (channelId, threadId) => {
+    selectClawConversation: async (channelId, threadId) => withImageThreadNavigation(undefined, async navigationCurrent => {
       if (get().runtimeConnection !== 'ready') {
         set({ activeClawChannelId: channelId, error: i18n.t('common:runtimeActionNeedsConnection') })
         return
       }
       if (typeof window.analytix === 'undefined') return
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const channels = settings.claw.channels
       const channel = channels.find((item) => item.id === channelId)
       if (!channel) {
@@ -472,6 +484,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
       let targetThreadId = clawThreadIdForProvider(channel, conversation)
       const configuredThreadId = targetThreadId
       const configuredThreadExists = targetThreadId ? await threadExists(provider, targetThreadId) : false
+      if (!navigationCurrent()) return
       if (!configuredThreadExists) {
         targetThreadId = ''
       }
@@ -489,6 +502,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
               : [thread, ...state.threads]
           }))
         } catch (error) {
+          if (!navigationCurrent()) return
           set({
             error: formatRuntimeError(error),
             ...(shouldOpenSettingsForError(error)
@@ -514,25 +528,30 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         const saved = await rendererRuntimeClient.setSettings({ claw: { channels: nextChannels } })
         set({ clawChannels: saved.claw.channels })
       }
+      if (!navigationCurrent()) return
       await get().selectThread(targetThreadId)
+      if (!navigationCurrent()) return
       set({ route: 'claw', activeClawChannelId: channel.id })
-    },
+    }),
 
-    deleteClawChannel: async (channelId) => {
+    deleteClawChannel: async (channelId) => withImageThreadNavigation(undefined, async navigationCurrent => {
       if (typeof window.analytix === 'undefined') return
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const channel = settings.claw.channels.find((item) => item.id === channelId)
       const saved = await window.analytix.connectPhone.disconnectImChannel(channelId)
       const nextChannel = saved.claw.channels.find((item) => item.enabled) ?? null
       set({
         clawChannels: saved.claw.channels,
-        activeClawChannelId: nextChannel?.id ?? ''
+        ...(navigationCurrent() ? { activeClawChannelId: nextChannel?.id ?? '' } : {})
       })
+      if (!navigationCurrent()) return
       if (channel && get().runtimeConnection === 'ready') {
         const threadId = clawThreadIdForProvider(channel)
         if (threadId) {
           const provider = getProvider()
           await provider.deleteThread(threadId).catch(() => undefined)
+          if (!navigationCurrent()) return
         }
       }
       if (nextChannel) {
@@ -543,15 +562,16 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         clearBusyWatchdog()
         set({ ...clearedThreadSelection(), route: 'claw' })
       }
-    },
+    }),
 
-    resetClawChannelSession: async (channelId) => {
+    resetClawChannelSession: async (channelId) => withImageThreadNavigation(undefined, async navigationCurrent => {
       if (get().runtimeConnection !== 'ready') {
         set({ error: i18n.t('common:runtimeActionNeedsConnection') })
         return
       }
       if (typeof window.analytix === 'undefined') return
       const settings = await rendererRuntimeClient.getSettings()
+      if (!navigationCurrent()) return
       const channel = settings.claw.channels.find((item) => item.id === channelId)
       if (!channel) return
       const provider = getProvider()
@@ -581,20 +601,24 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         )
         const saved = await rendererRuntimeClient.setSettings({ claw: { channels } })
         set((state) => ({
-          route: 'claw',
-          activeClawChannelId: channel.id,
+          ...(navigationCurrent() ? { route: 'claw' as const, activeClawChannelId: channel.id } : {}),
           clawChannels: saved.claw.channels,
           threads: state.threads.some((item) => item.id === thread.id)
             ? state.threads
             : [thread, ...state.threads]
         }))
+        if (!navigationCurrent()) return
         await get().selectThread(thread.id)
+        if (!navigationCurrent()) return
         if (oldThreadId && oldThreadId !== thread.id) {
           await provider.deleteThread(oldThreadId).catch(() => undefined)
+          if (!navigationCurrent()) return
           await get().refreshThreads()
+          if (!navigationCurrent()) return
         }
         set({ error: i18n.t('common:clawSessionCleared') })
       } catch (error) {
+        if (!navigationCurrent()) return
         set({
           error: formatRuntimeError(error),
           ...(shouldOpenSettingsForError(error)
@@ -602,7 +626,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
             : {})
         })
       }
-    },
+    }),
 
     setClawChannelModel: async (channelId, model) => {
       if (typeof window.analytix === 'undefined') return

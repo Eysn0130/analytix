@@ -58,3 +58,20 @@ func TestProviderPipelineStageRejectsUnknownStage(t *testing.T) {
 		t.Fatalf("unknown pipeline stage was accepted: %v", err)
 	}
 }
+
+func TestProviderConnectionMilestonesRemainClosedAndNumeric(t *testing.T) {
+	details := map[string]any{
+		"provider_connection_reused": true, "provider_connection_was_idle": true,
+		"provider_connection_acquired_ms": float64(1), "provider_connection_idle_ms": float64(20),
+		"provider_dns_done_ms": float64(0.1), "provider_connect_done_ms": float64(0.2),
+		"provider_tls_done_ms": float64(0.4), "provider_request_written_ms": float64(2),
+		"provider_first_response_byte_ms": float64(3),
+	}
+	if _, _, err := projectPipelineTelemetry("post_send", details, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	details["connection"] = "synthetic-private-address"
+	if _, _, err := projectPipelineTelemetry("post_send", details, nil, false); err == nil {
+		t.Fatal("connection objects or addresses must not become telemetry")
+	}
+}

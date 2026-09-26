@@ -1011,6 +1011,16 @@ function isCanonicalGeneralTerminalDiagnostics(diagnostics: Record<string, unkno
     return false
   }
 
+  const costKeys = ['providerCostEstimateComplete', 'providerCostKnownAttemptCount',
+    'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const
+  if (costKeys.some((key) => diagnostics[key] !== undefined)) {
+    if (costKeys.some((key) => diagnostics[key] === undefined) || diagnostics.providerAttemptCount === undefined) return false
+    const known = diagnostics.providerCostKnownAttemptCount as number
+    const total = diagnostics.providerAttemptCount as number
+    if (known > total || diagnostics.providerCostEstimateComplete !== (total > 0 && known === total) ||
+        (known === 0 && (diagnostics.providerKnownCostUsdNanos !== 0 || diagnostics.providerKnownCostCnyNanos !== 0))) return false
+  }
+
   if (diagnostics.cacheBaselineSchema !== undefined &&
       (typeof diagnostics.cacheContinuityDigest !== 'string' || diagnostics.cacheContinuityDigest.length === 0 ||
        typeof diagnostics.cacheProviderNamespaceDigest !== 'string' || diagnostics.cacheProviderNamespaceDigest.length === 0)) {
@@ -1034,6 +1044,16 @@ function isCanonicalGeneralTerminalDiagnostics(diagnostics: Record<string, unkno
 }
 
 const GeneralTerminalCacheDiagnosticsV1Schema = z.object({
+  dynamicStateCheck: z.literal('not_checked').optional(),
+  toolSchemaEstimator: z.literal('utf8_bytes_div4').optional(),
+  responseModelObservation: z.enum(['not_reported', 'matches_resolved', 'differs_resolved']).optional(),
+  modelInputFirstDifference: z.enum(['unavailable', 'none', 'system', 'tools', 'history', 'current', 'ordering']).optional(),
+  modelInputComparable: z.boolean().optional(),
+  modelInputComparablePrefixBytes: generalTerminalCanonicalUnsignedV1Schema().optional(),
+  providerCostEstimateComplete: z.boolean().optional(),
+  providerCostKnownAttemptCount: generalTerminalCanonicalUnsignedV1Schema().optional(),
+  providerKnownCostUsdNanos: generalTerminalCanonicalUnsignedV1Schema().optional(),
+  providerKnownCostCnyNanos: generalTerminalCanonicalUnsignedV1Schema().optional(),
   route: z.enum(['direct_answer', 'light_agent', 'tool_agent', 'subagent_agent']).optional(),
   prefixHash: z.union([z.literal(''), GeneralTerminalDigestV1Schema]).optional(),
   systemHash: z.union([z.literal(''), GeneralTerminalDigestV1Schema]).optional(),
@@ -1288,6 +1308,8 @@ export const GeneralTerminalDeliveryBatchV1Schema = z.object({
   if (item?.kind === 'item_completed') {
     const terminalHasFailureProjection = terminal.code !== undefined || terminal.message !== undefined ||
       terminal.error !== undefined || terminal.severity !== undefined || terminal.details !== undefined
+    const completedBoundaryFailure = new Set(['recovery', 'approval_denied', 'input_cancelled'])
+      .has(terminal.terminalReason)
     const errorItemMismatch = item.item.kind === 'error' && (
       item.item.status !== terminal.status || terminal.itemId !== item.itemId ||
       terminal.code !== item.item.code || terminal.message !== item.item.message ||
@@ -1295,7 +1317,8 @@ export const GeneralTerminalDeliveryBatchV1Schema = z.object({
       !sameGeneralTerminalFailureDetailsV1(item.item.details, terminal.details) ||
       (terminal.error !== undefined && terminal.error !== item.item.message)
     )
-    if ((item.item.kind === 'assistant_text' && (terminal.status !== 'completed' || terminalHasFailureProjection)) ||
+    if ((item.item.kind === 'assistant_text' &&
+         (terminal.status !== 'completed' || terminalHasFailureProjection !== completedBoundaryFailure)) ||
         errorItemMismatch ||
         (terminal.itemId !== undefined && terminal.itemId !== item.itemId)) {
       ctx.addIssue({ code: 'custom', path: ['events', 0], message: 'general terminal item profile is mismatched' })

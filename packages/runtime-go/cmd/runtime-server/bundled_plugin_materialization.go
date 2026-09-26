@@ -66,7 +66,7 @@ func runBundledPluginCommandV1(
 	// Validate the independently anchored package, current runtime image, and
 	// complete packaged plugin tree before creating any installation state.
 	inspection, err := dependencies.inspectPackage(ctx)
-	if err != nil {
+	if err != nil || inspection.Authority.Core != nil {
 		return errors.New("bundled funds package authority is unavailable")
 	}
 	source, err := dependencies.inspectSource(ctx, inspection.PluginSourceRoot)

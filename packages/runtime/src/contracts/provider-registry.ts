@@ -616,6 +616,7 @@ export const providerRegistryGetRequestSchemaV1 = z.object({
 export const providerRegistryConnectRequestSchemaV1 = z.object({
   ...schemaVersionShape,
   operation: z.literal('connect'),
+  deferSelection: z.boolean().optional(),
   expected: providerRegistryConnectExpectedStateSchemaV1,
   provider: providerRegistryProviderInputSchemaV1,
   credential: providerRegistryCredentialSetSchemaV1
@@ -675,6 +676,14 @@ export const providerRegistryProbeRequestSchemaV1 = z.object({
   'probe requires the committed credential purpose'
 )
 
+export const providerRegistryCredentialCheckRequestSchemaV1 = z.object({
+  ...expectedOperationRequestShape,
+  operation: z.literal('credential-check')
+}).strict().refine(
+  (request) => request.expected.providerCredentialPurpose !== '',
+  'credential check requires the committed credential purpose'
+)
+
 export const providerRegistryDiscoverModelsRequestSchemaV1 = z.object({
   ...expectedOperationRequestShape,
   operation: z.literal('discover-models')
@@ -723,6 +732,7 @@ export const providerRegistryRequestSchemaV1 = z.discriminatedUnion('operation',
   providerRegistryExplicitDeleteRequestSchemaV1,
   providerRegistryCredentialReplaceRequestSchemaV1,
   providerRegistryProbeRequestSchemaV1,
+  providerRegistryCredentialCheckRequestSchemaV1,
   providerRegistryDiscoverModelsRequestSchemaV1,
   providerRegistryObserveAccountRequestSchemaV1,
   providerRegistryRecoverRequestSchemaV1,
@@ -877,6 +887,17 @@ export const providerRegistryProbeResponseSchemaV1 = z.object({
   }
 })
 
+export const providerRegistryCredentialCheckResponseSchemaV1 = z.object({
+  ...schemaVersionShape,
+  registryRevision: providerRegistryDecimalSchemaV1,
+  registryIncarnation: providerRegistryIncarnationSchemaV1,
+  providerId: providerRegistryProviderIdSchemaV1,
+  providerRevision: nonZeroProviderRegistryDecimalSchemaV1,
+  providerGeneration: nonZeroProviderRegistryDecimalSchemaV1,
+  providerIncarnation: providerRegistryIncarnationSchemaV1,
+  credentialAvailable: z.literal(true)
+}).strict()
+
 export const providerRegistryAccountObservationStatusSchemaV1 = z.enum([
   'available',
   'unavailable',
@@ -967,6 +988,7 @@ export const providerRegistrySuccessSchemaV1 = z.union([
   providerRegistryDeletedResponseSchemaV1,
   providerRegistryRecoveredResponseSchemaV1,
   providerRegistryProbeResponseSchemaV1,
+  providerRegistryCredentialCheckResponseSchemaV1,
   providerRegistryAccountObservationResponseSchemaV1,
   providerRegistryPortableManifestExportResponseSchemaV1,
   providerRegistryPortableManifestImportResponseSchemaV1
@@ -978,6 +1000,8 @@ export const PROVIDER_REGISTRY_FAILURE_MESSAGES_V1 = {
   not_found: 'The requested provider was not found.',
   conflict: 'The provider registry state has changed.',
   persistence_failure: 'The provider registry is temporarily unavailable.',
+  credential_unavailable: 'Secure credential storage is temporarily unavailable. Check system security access and retry. Existing settings have been kept.',
+  credential_reentry_required: 'This saved credential used the former macOS Keychain authority. Re-enter it in Provider Settings to use the new private store. Existing settings have been kept.',
   verification_failure: 'The provider registry operation could not be verified.',
   request_too_large: 'The provider registry request is too large.',
   unauthorized: 'Provider registry authentication is required.',

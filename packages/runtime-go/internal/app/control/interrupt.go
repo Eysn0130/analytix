@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -332,10 +333,15 @@ func nonNegativeInterruptCount(value any) (int, bool) {
 	case int:
 		return count, count >= 0
 	case int64:
-		return int(count), count >= 0 && int64(int(count)) == count
+		if count < 0 || count > math.MaxInt {
+			return 0, false
+		}
+		return int(count), true
 	case float64:
-		integer := int(count)
-		return integer, count >= 0 && count == float64(integer)
+		if math.IsNaN(count) || count < 0 || count >= -float64(math.MinInt) || math.Trunc(count) != count {
+			return 0, false
+		}
+		return int(count), true
 	default:
 		return 0, false
 	}

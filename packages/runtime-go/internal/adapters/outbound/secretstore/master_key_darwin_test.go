@@ -13,9 +13,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	portsecretstore "analytix.local/runtime-go/internal/ports/secretstore"
 )
@@ -23,6 +25,51 @@ import (
 type scriptedKeychainStep struct {
 	result keychainCommandResult
 	err    error
+}
+
+func TestLockedTaskKeychainDoesNotStartSecurityCommand(t *testing.T) {
+	for _, arguments := range [][]string{{"help"}, {"-i"}} {
+		checked := false
+		runner := securityCommandRunner{
+			keychainDBPath: "/synthetic/analytix-task.keychain-db",
+			checkUnlocked: func(ctx context.Context, database string) bool {
+				checked = true
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) > 10*time.Second || database != "/synthetic/analytix-task.keychain-db" {
+					t.Fatal("preflight did not retain the operation deadline and exact binding")
+				}
+				return false
+			},
+		}
+		result, err := runner.Run(context.Background(), arguments, nil)
+		if !checked || !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) || len(result.stdout) != 0 {
+			t.Fatal("locked Keychain was not rejected before the otherwise successful security command")
+		}
+	}
+}
+
+func TestTaskKeychainMetadataProbeFailsClosed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if taskKeychainUnlocked(ctx, "relative") || taskKeychainUnlocked(ctx, filepath.Join(t.TempDir(), "analytix-task.keychain-db")) {
+		t.Fatal("invalid or nonexistent Keychain admitted")
+	}
+	directory := t.TempDir()
+	target := filepath.Join(directory, "synthetic-database")
+	if err := os.WriteFile(target, []byte("not a keychain"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "analytix-task.keychain-db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if taskKeychainUnlocked(ctx, link) {
+		t.Fatal("symlink admitted by private metadata entry")
+	}
+	cancel()
+	if taskKeychainUnlocked(ctx, "/synthetic/analytix-task.keychain-db") {
+		t.Fatal("cancelled preflight admitted")
+	}
 }
 
 func TestSecurityCommandRejectsCancelledContextBeforeStartingV1(t *testing.T) {
@@ -251,22 +298,13 @@ func TestKeychainInitializationSuppliesSecretOnlyOnStdinAndVerifiesReadback(t *t
 	}
 	assertFindKeychainArguments(t, runner.calls[0])
 	add := runner.calls[1]
-	if len(add.arguments) == 0 || add.arguments[0] != "add-generic-password" {
-		t.Fatalf("add arguments = %v", add.arguments)
+	if !slices.Equal(add.arguments, []string{"-i"}) {
+		t.Fatalf("default Keychain add argv = %v, want only -i", add.arguments)
 	}
-	if add.arguments[len(add.arguments)-1] != "-w" {
-		t.Fatal("Keychain add does not put -w in the final argv position")
-	}
-	for _, argument := range add.arguments {
-		if argument == "-U" {
-			t.Fatal("Keychain add uses forbidden overwrite flag -U")
-		}
-		if strings.Contains(argument, encoded) {
-			t.Fatal("Keychain add leaked the base64 master key into argv")
-		}
-	}
-	if !bytes.Equal(add.stdin, []byte(encoded+"\n")) {
-		t.Fatal("Keychain add did not provide the key through the stdin prompt")
+	wantInteractiveInput := []byte("add-generic-password -s " + keychainService +
+		" -a " + keychainAccount + " -w " + encoded + "\n")
+	if !bytes.Equal(add.stdin, wantInteractiveInput) {
+		t.Fatal("default Keychain add did not supply one bounded private command on stdin")
 	}
 	assertFindKeychainArguments(t, runner.calls[2])
 }
@@ -503,6 +541,32 @@ func TestExplicitTaskKeychainInteractiveAddInputRejectsInvalidTokenPathAndSecond
 				t.Fatalf("error = %v, want unavailable", err)
 			}
 		})
+	}
+}
+
+func TestDefaultKeychainInteractiveAddInputRejectsInvalidToken(t *testing.T) {
+	t.Parallel()
+	validToken := []byte(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, masterKeySize)))
+	input, err := darwinKeychainAddInput(validToken, "")
+	if err != nil {
+		t.Fatalf("valid default Keychain command error = %v", err)
+	}
+	defer clearBytes(input)
+	if bytes.Count(input, []byte{'\n'}) != 1 || input[len(input)-1] != '\n' ||
+		!bytes.HasSuffix(input, append(bytes.Clone(validToken), '\n')) {
+		t.Fatal("default Keychain command is not one bounded input line")
+	}
+	for _, token := range [][]byte{
+		nil,
+		[]byte("YQ=="),
+		append(bytes.Clone(validToken), '\n'),
+		append(bytes.Clone(validToken[:len(validToken)-1]), '\''),
+	} {
+		candidate, err := darwinKeychainAddInput(token, "")
+		clearBytes(candidate)
+		if !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+			t.Fatalf("invalid default Keychain token error = %v, want unavailable", err)
+		}
 	}
 }
 
@@ -1434,5 +1498,151 @@ func TestExplicitTaskKeychainUnknownBackupAndAmbiguousRecordArePreserved(t *test
 				}
 			}
 		})
+	}
+}
+
+func TestDevelopmentFileAuthorityNeverProbesKeychainOrAdoptsKeychainWinner(t *testing.T) {
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(directory, "credentials.v1.json")
+	selected, err := defaultMasterKeyProvider(storePath, Options{DevelopmentFileAuthority: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := selected.(*darwinMasterKeyProvider)
+	provider.keychain = nil // Any accidental Keychain path would panic.
+	first, err := provider.LoadOrCreate(context.Background())
+	if err != nil || len(first) != masterKeySize {
+		t.Fatal("development file initialization failed")
+	}
+	defer clearBytes(first)
+	second, err := provider.LoadOrCreate(context.Background())
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatal("development restart authority changed")
+	}
+	clearBytes(second)
+	if err := os.WriteFile(provider.authorityPath, []byte(darwinAuthorityKeychain), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := provider.LoadOrCreate(context.Background()); err == nil {
+		clearBytes(value)
+		t.Fatal("development replaced an OS-backed authority")
+	}
+	if _, err := defaultMasterKeyProvider(storePath, Options{DevelopmentFileAuthority: true, DarwinKeychainDBPath: "/synthetic/qa.keychain-db"}); err == nil {
+		t.Fatal("mixed QA and development options accepted")
+	}
+}
+
+func TestOrdinaryMacFileAuthorityRecoversWithoutKeychainProbe(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	first, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := first.(*darwinMasterKeyProvider)
+	runner := &scriptedKeychainRunner{}
+	selected.keychain.runner = runner
+	key, err := selected.LoadOrCreate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clearBytes(key)
+	if len(runner.calls) != 0 {
+		t.Fatal("ordinary macOS authority probed Keychain")
+	}
+	info, err := os.Stat(filepath.Join(filepath.Dir(storePath), "master-key", "master.key"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("ordinary master key is not owner-only: info=%v err=%v", info, err)
+	}
+	restarted, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := restarted.LoadOrCreate(context.Background())
+	if err != nil || !bytes.Equal(key, restored) {
+		t.Fatalf("ordinary restart did not recover file authority: %v", err)
+	}
+	clearBytes(restored)
+}
+
+func TestOrdinaryMacRefusesLegacyKeychainMarkerWithoutReadingIt(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	directory := filepath.Join(filepath.Dir(storePath), "master-key")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, darwinAuthorityFile), []byte(darwinAuthorityKeychain), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptedKeychainRunner{}
+	selected.(*darwinMasterKeyProvider).keychain.runner = runner
+	if _, err := selected.LoadOrCreate(context.Background()); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatalf("legacy Keychain marker was accepted without re-entry: %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatal("ordinary macOS startup read legacy Keychain")
+	}
+}
+
+func TestExplicitTaskKeychainBindingUsesLimitedLegacyReentryWithoutKeychainRead(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private", "provider-secrets", "credentials.v1.json")
+	writer, err := newStore(storePath, fixedMasterKeyProvider{key: bytes.Repeat([]byte{0x67}, masterKeySize)}, allowCredentialConsumer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := writer.Put(context.Background(), "provider-api-key", []byte("synthetic-old-credential"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(filepath.Dir(storePath), "master-key")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binding := darwinExplicitKeychainBindingV2{
+		SchemaVersion: 2, AuthorityDigest: strings.Repeat("a", 64),
+		Security: darwinKeychainSecurityDocumentV1{
+			SchemaVersion: 1, PathDigest: strings.Repeat("b", 64),
+			Device: "1", Inode: "2", Owner: strconv.Itoa(os.Geteuid()), Mode: "600", Links: "1",
+		},
+	}
+	encoded, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingPath := filepath.Join(directory, darwinExplicitBindingFile)
+	if err := os.WriteFile(bindingPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := InspectLegacyKeychainProfile(storePath)
+	if err != nil || profile == nil || profile.ActivePurposes()[ref] != "provider-api-key" {
+		t.Fatalf("explicit legacy binding did not reach limited re-entry: %v", err)
+	}
+	v2Path := filepath.Join(filepath.Dir(filepath.Dir(storePath)), "provider-secrets-v2", "credentials.v2.json")
+	if _, err := defaultMasterKeyProvider(v2Path, Options{LegacyReentryFileAuthority: true}); err != nil {
+		t.Fatalf("explicit legacy binding could not select file re-entry authority: %v", err)
+	}
+	if after, err := os.ReadFile(storePath); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("legacy inventory changed committed ciphertext")
+	}
+	binding.Security.Mode = "644"
+	encoded, err = json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bindingPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectLegacyKeychainProfile(storePath); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatalf("unsafe explicit legacy binding was admitted: %v", err)
 	}
 }

@@ -42,6 +42,7 @@ import {
   coordinateLocalCredentialEntry, readLocalCredentialScanSource, scanLocalCredentialIsolation,
   disposeLocalCredentialScanSource
 } from './lib/local-provider-credential-scan.mjs'
+import { prepareDevelopmentKeychain } from './development-keychain.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -991,6 +992,16 @@ function packagedAuthorityContext(appPath, target) {
   }
 }
 
+function controlledCoreDispositionValid(appPath, target, authority) {
+  if (!packagedAuthorityContract.isPackagedBuildAuthorityV2(authority) ||
+      authority.nativeDisposition.kind !== 'core_controlled_release' || target.key !== 'darwin-arm64') return false
+  try {
+    require('./mac-notarize.cjs')._internals.verifyDataNativeAfterSign(
+      packagedAuthorityContext(appPath, target), { requireDeveloperID: true, requireSecureTimestamp: true })
+    return true
+  } catch { return false }
+}
+
 function controlledNativeDispositionValid(appPath, target, authority) {
   if (authority?.nativeDisposition?.kind !== 'controlled_release_receipt') return false
   const receiptPath = join(runtimeResourcePath(appPath, target), 'analytix-native-components-receipt.json')
@@ -1144,6 +1155,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind: '',
     developmentNativeDisposition: false,
     controlledReleaseNativeReceipt: false,
+    controlledCoreQualification: false,
     worktreeSnapshotBinding: packagedWorktreeSnapshotBindingEvidence(
       currentWorktreeSnapshot,
       null
@@ -1279,6 +1291,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind,
     developmentNativeDisposition,
     controlledReleaseNativeReceipt,
+    controlledCoreQualification: controlledCoreDispositionValid(appPath, target, authority),
     worktreeSnapshotBinding
   }
 }
@@ -4142,6 +4155,27 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   let unlockCount = 0
   let executableEvidence = null
   let defaultEvidence = { ok: false, observedPathHash: '' }
+  const retireCreatedKeychain = () => {
+    if (!ownerOnlyDirectory(keychainsPath, true) ||
+      !ownerOnlyRegularFile(databasePath) ||
+      realpathSync(databasePath) !== databasePath) {
+      throw new Error('isolated_login_keychain_cleanup_identity_invalid')
+    }
+    // `security create-keychain` also adds this task Keychain to the macOS
+    // search list. Removing only its directory leaves a stale global entry.
+    const result = spawnSync(DARWIN_SECURITY_PATH, ['delete-keychain', requestedPath], {
+      cwd: home,
+      env: isolatedKeychainEnvironment(home),
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 5000,
+      maxBuffer: 4096
+    })
+    if (result.error || result.signal || result.status !== 0 ||
+      existsSync(requestedPath) || existsSync(databasePath)) {
+      throw new Error('isolated_login_keychain_cleanup_failed')
+    }
+  }
   const snapshot = () => Object.freeze({
     ok: !disposed && ownerOnlyRegularFile(databasePath) && defaultEvidence.ok,
     created: ownerOnlyRegularFile(databasePath),
@@ -4182,6 +4216,7 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   } catch (error) {
     password.fill(0)
     disposed = true
+    if (ownerOnlyRegularFile(databasePath)) retireCreatedKeychain()
     throw error
   }
   return Object.freeze({
@@ -4203,6 +4238,44 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
       }
       unlockCount += 1
       return snapshot()
+    },
+    dispose() {
+      if (disposed) return
+      password.fill(0)
+      retireCreatedKeychain()
+      disposed = true
+    }
+  })
+}
+
+export async function createIsolatedDarwinTaskKeychain(taskRoot, homeRoot) {
+  if (process.platform !== 'darwin' || !isAbsolute(taskRoot) || !isAbsolute(homeRoot)) {
+    throw new Error('isolated_task_keychain_requires_darwin_absolute_root')
+  }
+  const trustedTemp = trustedCacheTempRoot()
+  if (!trustedTemp.ok || realpathSync(taskRoot) !== resolve(taskRoot) ||
+    realpathSync(homeRoot) !== resolve(homeRoot) ||
+    pathIsOutside(trustedTemp.path, taskRoot) || pathIsOutside(taskRoot, homeRoot) ||
+    !ownerOnlyDirectory(taskRoot, true) || !ownerOnlyDirectory(homeRoot, true)) {
+    throw new Error('isolated_task_keychain_root_invalid')
+  }
+  const password = createRandomHexPasswordBuffer()
+  // The shared QA provisioner creates a non-login database and publishes the
+  // exact task binding without changing the default Keychain or search list.
+  // Core validates the binding against its own runtime data on each launch.
+  const profile = { taskRoot, homeRoot }
+  let disposed = false
+  try {
+    await prepareDevelopmentKeychain(profile, password, { create: true })
+  } catch (error) {
+    password.fill(0)
+    disposed = true
+    throw error
+  }
+  return Object.freeze({
+    async unlockForLaunch() {
+      if (disposed) throw new Error('isolated_task_keychain_disposed')
+      await prepareDevelopmentKeychain(profile, password)
     },
     dispose() {
       if (disposed) return
@@ -13801,10 +13874,10 @@ function commercialReleaseEvidence(artifact, releaseAuthority) {
     ),
     check(
       'controlled-release-native-receipt',
-      artifact?.controlledReleaseNativeReceipt === true,
+      (artifact?.controlledReleaseNativeReceipt === true || artifact?.controlledCoreQualification === true),
       artifact?.developmentNativeDisposition === true
         ? 'development package is valid for Milestone A but requires a controlled native receipt before commercial publication'
-        : 'commercial publication requires the exact packaged controlled native receipt',
+        : 'commercial publication requires the exact controlled Full receipt or Core qualification',
       nativeReceiptStatus
     )
   ]

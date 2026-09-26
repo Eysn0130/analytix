@@ -48,6 +48,7 @@ export const DailyUsageCountersSchema = z.object({
   output_tokens: z.number().int().nonnegative(),
   reasoning_tokens: z.number().int().nonnegative(),
   cached_tokens: z.number().int().nonnegative(),
+  cache_hit_tokens: z.number().int().nonnegative().optional(),
   cache_miss_tokens: z.number().int().nonnegative(),
   total_tokens: z.number().int().nonnegative(),
   cost_usd: z.number().nonnegative(),
@@ -89,6 +90,7 @@ export const ThreadUsageBucketSchema = DailyUsageCountersSchema.omit({
   thread_count: true
 }).extend({
   thread_id: z.string().min(1),
+  provider: z.string().min(1).optional(),
   /**
    * Cache hit rate of the most recent turn (by completedAt), distinct from the
    * thread-cumulative `cache_hit_rate`. The cumulative rate is dragged down by

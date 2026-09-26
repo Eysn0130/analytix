@@ -72,6 +72,55 @@ func BuildLatestAcceptedFinalHydrationV1(
 func BuildAcceptedFinalHydrationProjectionV1(
 	input AcceptedFinalHydrationInputV1,
 ) (AcceptedFinalHydrationProjectionV1, bool, error) {
+	projector, ok := input.Projector.(*TrustedPublicProjector)
+	if !ok || projector.retainedFactVerifier == nil || input.Context == nil {
+		return buildAcceptedFinalHydrationProjectionV1(input)
+	}
+	if err := input.Context.Err(); err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	if err := validateAcceptedFinalHydrationDeliveryBoundV1(input.ProjectedThread); err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	retained, originals, err := projector.retainedFactsForThreadV1(input.AuthorityThread)
+	if err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	return buildRetainedAcceptedFinalHydrationV1(input, projector, retained, originals)
+}
+
+func buildRetainedAcceptedFinalHydrationV1(input AcceptedFinalHydrationInputV1, projector *TrustedPublicProjector, retained map[string]bool, originals []retainedFactAdmissionV1) (AcceptedFinalHydrationProjectionV1, bool, error) {
+	verify := func() error {
+		if err := projector.verifyRetainedFactsV1(input.AuthorityThread, originals); err != nil {
+			return err
+		}
+		return input.Context.Err()
+	}
+	if err := verify(); err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	// One synchronous operation owns all groups. Each event still undergoes
+	// primary-CAS/manifest/current-case checks. Fresh historical witness and
+	// current permission are checked before signing and after all groups; no
+	// partially built delivery or per-request grant escapes a failed batch.
+	scoped := *projector
+	scoped.retainedFactVerifier = nil
+	scoped.retainedProjectionThread = contracts.CloneMap(input.AuthorityThread)
+	scoped.retainedProjectionFacts = retained
+	input.Projector = &scoped
+	projection, present, err := buildAcceptedFinalHydrationProjectionV1(input)
+	if err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	if err := verify(); err != nil {
+		return AcceptedFinalHydrationProjectionV1{}, false, err
+	}
+	return projection, present, nil
+}
+
+func buildAcceptedFinalHydrationProjectionV1(
+	input AcceptedFinalHydrationInputV1,
+) (AcceptedFinalHydrationProjectionV1, bool, error) {
 	empty := AcceptedFinalHydrationProjectionV1{}
 	if input.Context == nil || input.Context.Err() != nil || input.Projector == nil {
 		return empty, false, errors.New("accepted final hydration authority is unavailable")
@@ -101,7 +150,13 @@ func BuildAcceptedFinalHydrationProjectionV1(
 	if err != nil {
 		return empty, false, err
 	}
-	if durableLatestSeq != input.SnapshotLatestSeq {
+	if durableLatestSeq > input.SnapshotLatestSeq {
+		return empty, false, errors.Join(
+			ErrPublicProjectionPending,
+			errors.New("accepted final hydration snapshot and event frontier are torn"),
+		)
+	}
+	if durableLatestSeq < input.SnapshotLatestSeq {
 		return empty, false, errors.New("accepted final hydration snapshot and event frontier are torn")
 	}
 	if len(bindings) == 0 && len(manifests) == 0 {

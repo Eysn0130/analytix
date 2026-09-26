@@ -124,8 +124,8 @@ describe('daily usage helpers', () => {
         active_days: 1
       }
     })
-    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Not configured')
-    expect(formatCost(unpriced.totals.costUsd, 'zh-CN', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('价格未配置')
+    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Cost unavailable')
+    expect(formatCost(unpriced.totals.costUsd, 'zh-CN', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('费用未知')
 
     const freeConfigured = normalizeDailyUsageResponse({
       group_by: 'day',

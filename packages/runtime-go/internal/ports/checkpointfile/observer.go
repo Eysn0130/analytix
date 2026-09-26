@@ -35,6 +35,13 @@ type Observer interface {
 	ObserveRelative(context.Context, string, PathAuthority) domaincheckpoint.ObservedOperationPathV2
 }
 
+// GeneratedFileObserver hashes bounded native artifact bytes. Core selects this
+// lane only for an absent-before document creation intent, never a text edit.
+type GeneratedFileObserver interface {
+	ObserveGenerated(context.Context, string, PathAuthority, string) domaincheckpoint.ObservedOperationPathV2
+	ObserveGeneratedRelative(context.Context, string, PathAuthority) domaincheckpoint.ObservedOperationPathV2
+}
+
 // PreparedOperationRecovery is a read-only semantic decision frozen from one
 // durable open intent. Apply must revalidate the exact authority before any
 // filesystem mutation.

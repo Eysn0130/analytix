@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -54,9 +55,23 @@ const writeExportServiceMock = vi.hoisted(() => ({
   copyWriteDocumentAsRichText: vi.fn()
 }))
 
+const writeReadMock = vi.hoisted(() => ({
+  requestWriteInlineCompletion: vi.fn(),
+  retrieveWriteContext: vi.fn()
+}))
+vi.mock('../services/write-inline-completion-service', async (original) => ({
+  ...await original<typeof import('../services/write-inline-completion-service')>(),
+  requestWriteInlineCompletion: writeReadMock.requestWriteInlineCompletion
+}))
+vi.mock('../services/write-retrieval-service', async (original) => ({
+  ...await original<typeof import('../services/write-retrieval-service')>(),
+  retrieveWriteContext: writeReadMock.retrieveWriteContext
+}))
+
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => tmpdir()),
+    on: vi.fn(),
     quit: vi.fn()
   },
   BrowserWindow: {
@@ -228,6 +243,7 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
     store: { load: vi.fn(async () => settings()) } as never,
     loadHubAccountService: vi.fn(async () => hubAccountService as never),
     getMainWindow: () => null,
+    canNavigateWindow: () => true,
     applySettingsPatch,
     saveSettingsPatch,
     runtimeRequest: vi.fn() as never,
@@ -271,6 +287,8 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
 
 describe('registerAppIpcHandlers', () => {
   beforeEach(() => {
+    writeReadMock.requestWriteInlineCompletion.mockReset()
+    writeReadMock.retrieveWriteContext.mockReset()
     handlers.clear()
     gitCheckpointMock.createGitCheckpoint.mockReset()
     gitCheckpointMock.restoreGitCheckpoint.mockReset()
@@ -288,6 +306,117 @@ describe('registerAppIpcHandlers', () => {
     vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
     vi.mocked(dialog.showOpenDialog).mockReset()
     vi.mocked(dialog.showMessageBox).mockReset()
+  })
+
+  it.each(['write:inline-completion', 'write:retrieve-context'])(
+    'rejects untrusted %s before parsing or reading', async (channel) => {
+      const frame = {}
+      const sender = { mainFrame: frame, isDestroyed: () => false }
+      const mainWindow = { webContents: sender, isDestroyed: () => false }
+      const options = registerOptions({ getMainWindow: () => mainWindow as never })
+      registerAppIpcHandlers(options)
+      for (const event of [
+        { sender: { ...sender }, senderFrame: frame },
+        { sender, senderFrame: {} },
+        { sender, senderFrame: null }
+      ]) {
+        await expect(handlers.get(channel)?.(event, { query: 'synthetic' })).resolves.toMatchObject({ ok: false })
+      }
+      expect(writeReadMock.requestWriteInlineCompletion).not.toHaveBeenCalled()
+      expect(writeReadMock.retrieveWriteContext).not.toHaveBeenCalled()
+    }
+  )
+
+  it('cancels only the current owner request and keeps a replacement alive after old cleanup', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    const localDisplayRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) }))
+    registerAppIpcHandlers(registerOptions({ localDisplayRequest, getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never }))
+    const event = { sender, senderFrame: frame }
+    const context = { language: 'markdown', currentLinePrefix: 'draft', currentLineSuffix: '', previousLine: '', previousNonEmptyLine: '', nextLine: '', indentation: '', signals: {
+      list: false, quote: false, heading: false, table: false, atLineEnd: true, endsWithSentencePunctuation: false,
+      previousLineEndsWithSentencePunctuation: false, prefersNewLineCompletion: false, paragraphBreakOpportunity: false
+    } }
+    const payload = { threadId: 'thread-1', requestId: '7e2e6074-90d4-4e8b-a5c1-1e3d79d737f9', document: {path: '/workspace/draft.md'}, prefix: 'draft', suffix: '', workspaceRoot: '/workspace', cursor: {line: 1, column: 5}, context,
+      policy: {name: 'test', instruction: 'Continue', acceptanceCriteria: [], rejectionCriteria: []}, preview: {local: '', documentTail: ''} }
+    const finishes: Array<() => void> = []
+    const signals: AbortSignal[] = []
+    writeReadMock.requestWriteInlineCompletion.mockImplementation((_settings, _request, transport, options) => {
+      expect(transport).toBe(localDisplayRequest)
+      signals.push(options.signal)
+      return new Promise(resolve => finishes.push(() => resolve({ok: true, completion: 'late'})))
+    })
+    const first = handlers.get('write:inline-completion')!(event, payload)
+    await vi.waitFor(() => expect(signals).toHaveLength(1))
+    expect(handlers.get('write:inline-completion:cancel')!({...event, senderFrame: {}}, {requestId: payload.requestId})).toEqual({canceled: false})
+    expect(handlers.get('write:inline-completion:cancel')!(event, {requestId: '990c39a5-58bb-4d5a-ac3b-a4f1dce935a6'})).toEqual({canceled: false})
+    expect(signals[0].aborted).toBe(false)
+    const secondId = '990c39a5-58bb-4d5a-ac3b-a4f1dce935a6'
+    const second = handlers.get('write:inline-completion')!(event, {...payload, requestId: secondId})
+    await vi.waitFor(() => expect(signals).toHaveLength(2))
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
+    finishes[0]()
+    expect(await first).toMatchObject({ok: false})
+    expect(handlers.get('write:inline-completion:cancel')!(event, {requestId: secondId})).toEqual({canceled: true})
+    expect(signals[1].aborted).toBe(true)
+    finishes[1]()
+    expect(await second).toMatchObject({ok: false})
+    expect(sender.eventNames()).toEqual([])
+  })
+
+  it('admits current retrieval but suppresses results after its main frame is replaced', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    const options = registerOptions({ localDisplayRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) })), getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never })
+    registerAppIpcHandlers(options)
+    const context = { source: 'bm25-keyword', snippets: [{ text: 'synthetic-only' }] }
+    writeReadMock.retrieveWriteContext.mockResolvedValueOnce(context)
+    await expect(handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' }))
+      .resolves.toEqual({ ok: true, context })
+    writeReadMock.retrieveWriteContext.mockImplementationOnce(async (_request, options) => {
+      expect(options.isCurrent()).toBe(true)
+      sender.mainFrame = {}
+      expect(options.isCurrent()).toBe(false)
+      return context
+    })
+    await expect(handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' }))
+      .resolves.toMatchObject({ ok: false })
+    expect(writeReadMock.retrieveWriteContext).toHaveBeenCalledTimes(2)
+    expect(writeReadMock.retrieveWriteContext.mock.calls[1]?.[1]).toEqual({ isCurrent: expect.any(Function), source: expect.objectContaining({ key: expect.any(String) }) })
+    expect(sender.eventNames()).toEqual([])
+  })
+
+  it('invalidates a retrieval across same-frame same-URL navigation and releases listeners', async () => {
+    const frame = {}
+    const sender = Object.assign(new EventEmitter(), { mainFrame: frame, isDestroyed: () => false })
+    registerAppIpcHandlers(registerOptions({ localDisplayRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot: { threadId: 'thread-1', workspace: '/workspace', binding: 'a'.repeat(64) } }) })), getMainWindow: () => ({ webContents: sender, isDestroyed: () => false }) as never }))
+    let requestCurrent: (() => boolean) | undefined
+    writeReadMock.retrieveWriteContext.mockImplementationOnce(async (_request, options) => {
+      requestCurrent = options.isCurrent
+      sender.emit('did-start-navigation', {}, 'analytix://app', false, true)
+      return { snippets: [{ text: 'OLD_DOCUMENT' }] }
+    })
+    const result = await handlers.get('write:retrieve-context')?.({ sender, senderFrame: frame }, { query: 'synthetic', threadId: 'thread-1', workspaceRoot: '/workspace' })
+    expect(result).toMatchObject({ ok: false })
+    expect(requestCurrent?.()).toBe(false)
+    expect(sender.eventNames()).toEqual([])
+  })
+
+  it('suppresses private object responses after same-frame navigation and denies foreign frames', async () => {
+    const frame = {}, sender = Object.assign(new EventEmitter(), {mainFrame: {}, isDestroyed: () => false})
+    sender.mainFrame = frame
+    const transport = vi.fn(async () => {
+      sender.emit('did-start-navigation', {}, 'analytix://app', false, true)
+      return {ok:true,status:200,body:JSON.stringify({ok:true,closed:true})}
+    })
+    registerAppIpcHandlers(registerOptions({localDisplayRequest:transport,getMainWindow:()=>({webContents:sender,isDestroyed:()=>false}) as never}))
+    const request = {action:'close',sessionId:'a'.repeat(48)}
+    expect(await handlers.get('object:editing')?.({sender,senderFrame:{}},request)).toMatchObject({ok:false})
+    expect(transport).not.toHaveBeenCalled()
+    expect(await handlers.get('object:editing')?.({sender,senderFrame:frame},request)).toMatchObject({ok:false})
+    expect(transport).toHaveBeenCalledOnce()
+    expect(sender.eventNames()).toEqual([])
   })
 
   it('does not load Hub compatibility during registration or ordinary IPC and loads it only on explicit Hub invocation', async () => {
@@ -495,7 +624,7 @@ describe('registerAppIpcHandlers', () => {
     currentSettings.write = {
       ...currentSettings.write,
       defaultWorkspaceRoot: workspace,
-      activeWorkspaceRoot: workspace,
+      activeWorkspaceRoot: '/tmp/legacy-unrelated-write',
       workspaces: [workspace]
     }
     const store = { load: vi.fn(async () => currentSettings) }
@@ -506,16 +635,13 @@ describe('registerAppIpcHandlers', () => {
       ok: false,
       canceled: true
     })
-    registerAppIpcHandlers(registerOptions({
-      store: store as never,
-      getMainWindow: () => mainWindow as never
-    }))
-
-    const payload = {
-      path: join(workspace, 'draft.md'),
-      format: 'docx',
-      content: '# Draft'
-    }
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'current-main',
+      baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const snapshot = { ...binding, workspace, path: join(workspace, 'draft.md'), content: '# Draft',
+      contentDigest: createHash('sha256').update('# Draft').digest('hex') }
+    const localDisplayRequest = vi.fn(async (_path: string, _body: string) => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }))
+    registerAppIpcHandlers(registerOptions({ store: store as never, getMainWindow: () => mainWindow as never, localDisplayRequest }))
+    const payload = { ...binding, format: 'docx' }
     await expect(handlers.get('write:export')?.({ sender, senderFrame: {} }, payload)).resolves.toEqual({
       ok: false,
       canceled: false,
@@ -528,7 +654,7 @@ describe('registerAppIpcHandlers', () => {
       canceled: true
     })
     expect(writeExportServiceMock.exportWriteDocument).toHaveBeenCalledWith(
-      payload,
+      { path: snapshot.path, content: snapshot.content, format: 'docx', typography: undefined },
       expect.objectContaining({
         parentWindow: mainWindow,
         workspaceRoot: workspace,
@@ -539,6 +665,10 @@ describe('registerAppIpcHandlers', () => {
       authorityCurrent: () => Promise<boolean>
     }
     await expect(options.authorityCurrent()).resolves.toBe(true)
+    expect(localDisplayRequest.mock.calls.at(-1)?.[0]).toBe('/v1/local-display/object-editing')
+    expect(JSON.parse(localDisplayRequest.mock.calls.at(-1)![1])).toEqual({ action: 'export-snapshot', ...binding })
+    localDisplayRequest.mockResolvedValueOnce({ ok: false, status: 409, body: '{"ok":false}' })
+    await expect(options.authorityCurrent()).resolves.toBe(false)
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -565,7 +695,7 @@ describe('registerAppIpcHandlers', () => {
     currentSettings.write = {
       ...currentSettings.write,
       defaultWorkspaceRoot: workspace,
-      activeWorkspaceRoot: workspace,
+      activeWorkspaceRoot: '/tmp/legacy-unrelated-write',
       workspaces: [workspace]
     }
     const store = { load: vi.fn(async () => currentSettings) }
@@ -576,16 +706,13 @@ describe('registerAppIpcHandlers', () => {
       ok: true,
       copiedAt: '2026-08-26T04:00:00.000Z'
     })
-    registerAppIpcHandlers(registerOptions({
-      store: store as never,
-      getMainWindow: () => mainWindow as never
-    }))
-
-    const payload = {
-      path: join(workspace, 'draft.md'),
-      workspaceRoot: '/tmp/renderer-forged-workspace',
-      content: '# Draft'
-    }
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'current-main',
+      baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const snapshot = { ...binding, workspace, path: join(workspace, 'draft.md'), content: '# Draft',
+      contentDigest: createHash('sha256').update('# Draft').digest('hex') }
+    const localDisplayRequest = vi.fn(async (_path: string, _body: string) => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, snapshot }) }))
+    registerAppIpcHandlers(registerOptions({ store: store as never, getMainWindow: () => mainWindow as never, localDisplayRequest }))
+    const payload = binding
     await expect(handlers.get('write:copy-rich-text')?.({ sender, senderFrame: {} }, payload)).resolves.toEqual({
       ok: false,
       message: 'Write export requires the current main window.'
@@ -597,7 +724,7 @@ describe('registerAppIpcHandlers', () => {
       copiedAt: '2026-08-26T04:00:00.000Z'
     })
     expect(writeExportServiceMock.copyWriteDocumentAsRichText).toHaveBeenCalledWith(
-      payload,
+      { path: snapshot.path, content: snapshot.content },
       expect.objectContaining({
         workspaceRoot: workspace,
         authorityCurrent: expect.any(Function)
@@ -607,6 +734,10 @@ describe('registerAppIpcHandlers', () => {
       authorityCurrent: () => Promise<boolean>
     }
     await expect(options.authorityCurrent()).resolves.toBe(true)
+    expect(localDisplayRequest.mock.calls.at(-1)?.[0]).toBe('/v1/local-display/object-editing')
+    expect(JSON.parse(localDisplayRequest.mock.calls.at(-1)![1])).toEqual({ action: 'export-snapshot', ...binding })
+    localDisplayRequest.mockResolvedValueOnce({ ok: false, status: 409, body: '{"ok":false}' })
+    await expect(options.authorityCurrent()).resolves.toBe(false)
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -2477,10 +2608,10 @@ describe('registerAppIpcHandlers', () => {
 
   it('keeps the local-display runtime header and generation pin in the main-owned narrow dependency', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/main/index.ts'), 'utf8')
-    expect(source).toContain('localDisplayRequest: async (path, body) =>')
+    expect(source).toContain('localDisplayRequest: async (path, body, signal) =>')
     expect(source).toContain('const requestSettings = ensuredSettings ?? settings')
     expect(source).toContain('const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()')
-    expect(source).toContain('if (!isCurrentFinalPublicationAuthorityPin(runtimeAuthority))')
+    expect(source).toContain('if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority))')
     expect(source).toContain("headers.set('X-Analytix-Local-Display', 'typed-v1')")
   })
 
@@ -3390,4 +3521,21 @@ describe('registerAppIpcHandlers', () => {
     expect(mainWindow.setFullScreen).toHaveBeenCalledWith(true)
     expect(mainWindow.close).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it('desktop reload consults the live window navigation gate while other commands retain their behavior', async () => {
+  const contents = { reload: vi.fn(), copy: vi.fn() }
+  const main = { isDestroyed: () => false, webContents: contents }
+  const canNavigateWindow = vi.fn(() => false)
+  registerAppIpcHandlers(registerOptions({ getMainWindow: () => main as never, canNavigateWindow }))
+  const command = handlers.get('desktop:command')!
+  await command({ sender: {} }, 'reload')
+  expect(canNavigateWindow).toHaveBeenCalledExactlyOnceWith(contents)
+  expect(contents.reload).not.toHaveBeenCalled()
+  await command({ sender: {} }, 'copy')
+  expect(contents.copy).toHaveBeenCalledOnce()
+  canNavigateWindow.mockReturnValue(true)
+  await command({ sender: {} }, 'reload')
+  expect(contents.reload).toHaveBeenCalledOnce()
 })

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	secretstore "analytix.local/runtime-go/internal/adapters/outbound/secretstore"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -99,20 +101,13 @@ func ensureRegistryDirectory(dataDir, directory string) error {
 		return err
 	}
 	privateDirectory := filepath.Join(dataDir, "private")
-	if err := ensureWindowsDirectory(privateDirectory); err != nil {
+	if err := secretstore.EnsurePrivateWindowsDirectory(privateDirectory); err != nil {
 		return err
 	}
 	if filepath.Dir(directory) != privateDirectory {
 		return errors.New("provider registry directory invalid")
 	}
-	return ensureWindowsDirectory(directory)
-}
-
-func ensureWindowsDirectory(path string) error {
-	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	return validateWindowsDirectory(path)
+	return secretstore.EnsurePrivateWindowsDirectory(directory)
 }
 
 func validateWindowsDirectory(path string) error {

@@ -239,7 +239,7 @@ describe('InitialSessionUsageHeatmap', () => {
       loaded: true
     }))
 
-    expect(html).toContain('Not configured')
+    expect(html).toContain('Cost unavailable')
     expect(html).not.toContain('$0.0000')
   })
 
@@ -257,7 +257,7 @@ describe('InitialSessionUsageHeatmap', () => {
     }))
 
     expect(html).toContain('$0.0000')
-    expect(html).not.toContain('Not configured')
+    expect(html).not.toContain('Cost unavailable')
   })
 
   it('renders loading, empty, and error states as calendar-only warmup states', () => {

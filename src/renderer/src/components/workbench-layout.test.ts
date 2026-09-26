@@ -1,5 +1,11 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
+import { useWorkspaceTabsStore } from '../store/workspace-tabs-store'
+import { WORKSPACE_FILE_PREVIEW_EVENT } from '../lib/workspace-file-preview'
 import {
+  useWorkbenchLayout,
   WORKBENCH_TIMELINE_MIN_HEIGHT,
   clampWorkbenchTerminalHeight,
   createWorkbenchScrollReserve,
@@ -109,5 +115,52 @@ describe('workbench layout contracts', () => {
     storage.setItem(workbenchLayoutStorageKey('analytix.layout.rightPanelMode', scope), 'none')
 
     expect(readWorkbenchLayoutStorage(workspaceRoot).rightPanelMode).toBeNull()
+  })
+})
+
+
+describe('workspace tab layout compatibility', () => {
+  it('keeps file identity and bottom terminal state when the right dock folds or the thread changes', async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+    useWorkspaceTabsStore.setState({ tabs: [], activeTabId: null, selectorOpen: true, open: false, focused: false })
+    let layout: ReturnType<typeof useWorkbenchLayout>
+    function Harness({ thread, workspace }: { thread: string; workspace: string }) {
+      layout = useWorkbenchLayout({ activeThreadId: thread, workspaceRoot: workspace,
+        latestAutoOpenDevPreviewUrl: null, latestDevPreviewUrl: null, route: 'chat', writeAssistantOpen: false })
+      return null
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    document.body.append(container)
+    try {
+      await act(async () => root.render(createElement(Harness, { thread: 'a', workspace: '/synthetic/a' })))
+      await act(async () => {
+        layout.toggleTerminal()
+        window.dispatchEvent(new CustomEvent(WORKSPACE_FILE_PREVIEW_EVENT, { detail: { workspaceRoot: '/synthetic/a', path: '/synthetic/a/report.csv' } }))
+      })
+      expect(layout!.rightPanelVisible).toBe(true)
+      expect(layout!.rightPanelMode).toBe('file')
+      expect(layout!.terminalOpen).toBe(true)
+      const identity = useWorkspaceTabsStore.getState().activeTabId
+      await act(async () => useWorkspaceTabsStore.getState().toggleOpen())
+      expect(layout!.rightPanelVisible).toBe(false)
+      expect(layout!.terminalOpen).toBe(true)
+      await act(async () => useWorkspaceTabsStore.getState().toggleOpen())
+      await act(async () => root.render(createElement(Harness, { thread: 'b', workspace: '/synthetic/a' })))
+      expect(layout!.rightPanelMode).toBe('file')
+      expect(useWorkspaceTabsStore.getState().activeTabId).toBe(identity)
+      expect(layout!.terminalOpen).toBe(true)
+      // A retained tab owns its source workspace even when navigation moves elsewhere.
+      await act(async () => root.render(createElement(Harness, { thread: 'c', workspace: '/synthetic/b' })))
+      expect(layout!.filePreviewTarget).toMatchObject({ workspaceRoot: '/synthetic/a', path: '/synthetic/a/report.csv' })
+      await act(async () => useWorkspaceTabsStore.getState().closeTab(identity!))
+      expect(layout!.rightPanelVisible).toBe(true)
+      expect(layout!.rightPanelMode).toBeNull()
+      expect(useWorkspaceTabsStore.getState().selectorOpen).toBe(true)
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+      useWorkspaceTabsStore.setState({ tabs: [], activeTabId: null, selectorOpen: true, open: false, focused: false })
+    }
   })
 })

@@ -1,8 +1,10 @@
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent, assertCoreOptionalAssetsAbsent } = require('./core-package-profile.cjs')
 const { execFileSync } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
 const { dirname, isAbsolute, join, relative, resolve, sep } = require('node:path')
 const { parse: parseJavaScriptModule } = require('acorn')
+const { stagePrivateLocal, verifyPrivateLocal } = require('./office-private-local-contract.cjs')
 const {
   RECEIPT_FILE_NAME,
   assertNativeBinaryTarget,
@@ -752,7 +754,7 @@ function collectEffectiveBuilderContextV1(context) {
     ),
     target,
     fusePolicyContract: ELECTRON_FUSE_POLICY_V1_CONTRACT,
-    fusePolicySha256: electronFusePolicyV1Digest()
+    fusePolicySha256: electronFusePolicyV1Digest(normalizePlatform(context.electronPlatformName))
   }
   return {
     ...withoutDigest,
@@ -770,7 +772,7 @@ function isEffectiveBuilderContextV1(value) {
   ]) || value.schemaVersion !== 1 || value.contract !== EFFECTIVE_BUILDER_CONTEXT_CONTRACT ||
     !isSha256(value.effectiveConfigSha256) ||
     value.fusePolicyContract !== ELECTRON_FUSE_POLICY_V1_CONTRACT ||
-    value.fusePolicySha256 !== electronFusePolicyV1Digest() || !isSha256(value.contextDigest) ||
+    value.fusePolicySha256 !== electronFusePolicyV1Digest(value.target?.platform) || !isSha256(value.contextDigest) ||
     !exactKeys(value.target, ['key', 'platform', 'arch', 'targets', 'digest']) ||
     typeof value.target.key !== 'string' || !value.target.key ||
     !['darwin', 'win32', 'linux'].includes(value.target.platform) ||
@@ -1374,7 +1376,9 @@ function verifyElectronV8SnapshotInventoryV1(context) {
 
 function verifyElectronFusePolicyV1(context) {
   verifyElectronV8SnapshotInventoryV1(context)
-  const frameworkTarget = normalizePlatform(context.electronPlatformName) === 'darwin'
+  const platform = normalizePlatform(context.electronPlatformName)
+  const policy = electronFusePolicyV1(platform)
+  const frameworkTarget = platform === 'darwin'
     ? canonicalElectronFrameworkFuseTargetV1(context)
     : null
   const fuseFilePath = frameworkTarget?.path || electronFuseFilePath(context)
@@ -1409,7 +1413,7 @@ function verifyElectronFusePolicyV1(context) {
       throw new Error('[after-pack] Electron FuseV1 wire length is invalid')
     }
     for (let index = 0; index < ELECTRON_FUSE_V1_WIRE_LENGTH; index += 1) {
-      const enabled = ELECTRON_FUSE_POLICY_V1[index]
+      const enabled = policy[index]
       const expected = enabled ? ELECTRON_FUSE_STATE_ENABLED : ELECTRON_FUSE_STATE_DISABLED
       if (typeof enabled !== 'boolean' || stable.content[wireOffset + 2 + index] !== expected) {
         throw new Error(`[after-pack] Electron FuseV1 policy mismatch at wire index ${index}`)
@@ -1418,7 +1422,7 @@ function verifyElectronFusePolicyV1(context) {
   }
   return {
     contract: ELECTRON_FUSE_POLICY_V1_CONTRACT,
-    policySha256: electronFusePolicyV1Digest(),
+    policySha256: electronFusePolicyV1Digest(platform),
     wireCount: sentinelOffsets.length
   }
 }
@@ -1435,7 +1439,7 @@ async function applyElectronFusePolicyV1(context) {
   const resetAdHocDarwinSignature = normalizePlatform(context.electronPlatformName) === 'darwin' &&
     goArchForTarget(context.arch) === 'arm64'
   const mutatedWireCount = await flipFuses(appBundlePath(context), {
-    ...electronFusePolicyV1(),
+    ...electronFusePolicyV1(normalizePlatform(context.electronPlatformName)),
     resetAdHocDarwinSignature
   })
   const verified = verifyElectronFusePolicyV1(context)
@@ -1549,8 +1553,16 @@ function isDevelopmentNativeDisposition(value) {
   })
 }
 
+function isControlledCoreDisposition(value) {
+  return exactKeys(value, ['kind', 'targetKey', 'signingPolicySha256', 'signingMode', 'appleTeamIdentifier']) &&
+    value.kind === CORE_CONTROLLED_DISPOSITION && value.targetKey === 'darwin-arm64' &&
+    isSha256(value.signingPolicySha256) && value.signingMode === 'developer-id' &&
+    /^[A-Z0-9]{10}$/u.test(value.appleTeamIdentifier)
+}
+
 function isNativeDisposition(value) {
-  return isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value)
+  return isControlledCoreDisposition(value) || isControlledReleaseNativeDisposition(value) || isDevelopmentNativeDisposition(value) ||
+    (exactKeys(value, ['kind', 'targetKey']) && value.kind === CORE_DISPOSITION && value.targetKey === 'darwin-arm64')
 }
 
 function normalizeNativeDisposition(value) {
@@ -1571,7 +1583,7 @@ function normalizeNativeDisposition(value) {
 }
 
 function authorityClassification(worktreeSnapshot, nativeDisposition) {
-  if (nativeDisposition.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (nativeDisposition.kind === NATIVE_DISPOSITION_DEVELOPMENT || nativeDisposition.kind === CORE_DISPOSITION) {
     return worktreeSnapshot.dirty
       ? 'development_dirty_non_publishable'
       : 'development_clean_non_publishable'
@@ -1579,6 +1591,12 @@ function authorityClassification(worktreeSnapshot, nativeDisposition) {
   return worktreeSnapshot.dirty
     ? 'controlled_release_dirty_non_publishable'
     : 'controlled_release_clean_candidate_non_publishable'
+}
+
+function validProfileFundsBinding(disposition, binding) {
+  return isCoreDisposition(disposition)
+    ? canonicalJSON(binding) === canonicalJSON(ABSENT_FUNDS)
+    : isFundsPluginArtifactBindingV2(binding)
 }
 
 function isPackagedBuildAuthorityV2(value) {
@@ -1601,7 +1619,7 @@ function isPackagedBuildAuthorityV2(value) {
     !isNativeArtifactBinding(value.artifacts.executable) ||
     !isContentArtifactBinding(value.artifacts.appAsar) ||
     !isNativeArtifactBinding(value.artifacts.runtimeServer) ||
-    !isFundsPluginArtifactBindingV2(value.artifacts.fundsPlugin) ||
+    !validProfileFundsBinding(value.nativeDisposition, value.artifacts.fundsPlugin) ||
     !isStagedPayloadClosureV1(value.stagedPayload) || !isSha256(value.authorityDigest)) {
     return false
   }
@@ -1624,7 +1642,7 @@ function createPackagedBuildAuthorityV2(options) {
     !isNativeArtifactBinding(options.artifacts.executable) ||
     !isContentArtifactBinding(options.artifacts.appAsar) ||
     !isNativeArtifactBinding(options.artifacts.runtimeServer) ||
-    !isFundsPluginArtifactBindingV2(options.artifacts.fundsPlugin) ||
+    !validProfileFundsBinding(nativeDisposition, options.artifacts.fundsPlugin) ||
     !isStagedPayloadClosureV1(options.stagedPayload)) {
     throw new Error('[after-pack] Packaged build authority inputs are invalid')
   }
@@ -1651,6 +1669,39 @@ function formalPackagedReleaseIntent(env = process.env) {
     env.ANALYTIX_RELEASE_BUILD === '1' || env.MAC_SIGN === '1' ||
     Boolean(env.CSC_LINK || env.CSC_NAME || env.CSC_KEY_PASSWORD || env.WIN_CSC_LINK ||
       env.ANALYTIX_WINDOWS_EXPECTED_SIGNER_SHA1)
+}
+
+// Private Office admission is a build-only disposition. The runtime never reads
+// these variables; it verifies the installed resource seal and qualified bytes.
+function privateOfficeBuildRequested(context, nativeDisposition, env = process.env) {
+  const requested = env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD
+  const assetRoot = env.ANALYTIX_OFFICE_PRIVATE_LOCAL_ASSET_ROOT
+  if (requested == null && assetRoot == null) return false
+  if (requested !== '1' || typeof assetRoot !== 'string' || !isAbsolute(assetRoot) ||
+    resolve(assetRoot) !== assetRoot || packagedTargetKey(context) !== 'darwin-arm64' ||
+    nativeDisposition.kind !== NATIVE_DISPOSITION_DEVELOPMENT || formalPackagedReleaseIntent(env) ||
+    env.ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE !== 'isolated-local-v1') {
+    throw new Error('[after-pack] office_private_local_build_scope_invalid')
+  }
+  return true
+}
+function stagePrivateOfficeForPack(context, nativeDisposition, repoRoot, snapshot, env = process.env) {
+  const root = join(packedResourcesDir(context), 'office-private')
+  const requested = privateOfficeBuildRequested(context, nativeDisposition, env)
+  if (pathEntryExists(root)) throw new Error('[after-pack] office_private_local_payload_already_present')
+  if (!requested) return
+  return stagePrivateLocal({repoRoot,assetRoot:env.ANALYTIX_OFFICE_PRIVATE_LOCAL_ASSET_ROOT,
+    destination:root,worktreeSnapshot:snapshot,targetKey:packagedTargetKey(context)})
+}
+function verifyPrivateOfficeForPack(context, nativeDisposition, snapshot, env = process.env) {
+  const root = join(packedResourcesDir(context), 'office-private')
+  const requested = privateOfficeBuildRequested(context, nativeDisposition, env)
+  if (!requested) {
+    if (pathEntryExists(root)) throw new Error('[after-pack] office_private_local_payload_not_authorized')
+    return
+  }
+  return verifyPrivateLocal(root,{sourceCommit:snapshot.sourceCommit,
+    worktreeSnapshotDigest:snapshot.snapshotDigest,targetKey:packagedTargetKey(context)})
 }
 
 function syncRegularFile(path) {
@@ -1730,11 +1781,12 @@ function removeOwnedTemporaryFile(path, ownership) {
 function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
   const targetKey = packagedTargetKey(context)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
+  if (isCoreDisposition(nativeDisposition) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== targetKey) {
     throw new Error('[after-pack] Native disposition does not match the packaged authority target')
   }
   if (formalPackagedReleaseIntent(options.env || process.env) &&
-    nativeDisposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE) {
+    nativeDisposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE && !isControlledCoreDisposition(nativeDisposition)) {
     throw new Error('[after-pack] packaged_development_native_disposition_forbidden_for_release')
   }
   const runtimeDir = join(packedResourcesDir(context), 'runtime')
@@ -1748,6 +1800,9 @@ function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
     if (nativeReceipt.sha256 !== nativeDisposition.receiptSha256) {
       throw new Error('[after-pack] Native receipt changed before packaged authority issuance')
     }
+  } else if (isCoreDisposition(nativeDisposition)) {
+    if (!isCoreContext(context)) throw Error('core_profile_authority_mismatch')
+    assertCoreResourcesAbsent(packedResourcesDir(context))
   } else {
     verifyPackagedDevelopmentNativeDisposition(context, nativeDisposition, {
       repoRoot: options.repoRoot,
@@ -1760,6 +1815,7 @@ function writePackagedBuildAuthorityV2(context, nativeTrust, options = {}) {
   if (formalPackagedReleaseIntent(options.env || process.env) && worktreeSnapshot.dirty) {
     throw new Error('[after-pack] Formal packaged release requires a clean Git worktree')
   }
+  verifyPrivateOfficeForPack(context, nativeDisposition, worktreeSnapshot, options.env || process.env)
   const buildContext = options.buildContext || collectEffectiveBuilderContextV1(context)
   const stagedPayload = options.stagedPayload || collectStagedPayloadClosureV1(context)
   const expectedFundsPluginAdmission = options.fundsPluginAdmission
@@ -1938,7 +1994,9 @@ function verifyPackagedBuildAuthorityArtifacts(context, authority, options = {})
   const appAsar = hashStableRegularFile(packagedAppAsarPath(context), {
     requireSingleLink: true
   })
-  const fundsPlugin = collectPackagedFundsPluginIdentityV2(context)
+  const fundsPlugin = isCoreDisposition(authority.nativeDisposition)
+    ? (assertCoreResourcesAbsent(packedResourcesDir(context)), ABSENT_FUNDS)
+    : collectPackagedFundsPluginIdentityV2(context)
   const stagedPayload = collectStagedPayloadClosureV1(context)
   const fusePolicy = options.verifyFuses === false ? null : verifyElectronFusePolicyV1(context)
   if (!samePublishedNativeArtifact(authority.artifacts.executable, executable) ||
@@ -2541,6 +2599,11 @@ function sameFundsPluginAdmissionV1(left, right) {
 }
 
 function requireCurrentFundsPluginAdmissionV1(context, expected) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    if (canonicalJSON(expected) !== canonicalJSON({ artifact: ABSENT_FUNDS })) throw Error('core_profile_funds_admission_mismatch')
+    return { artifact: ABSENT_FUNDS }
+  }
   if (!isFundsPluginAdmissionV1(expected)) {
     throw new Error('[after-pack] funds_plugin_admission_changed')
   }
@@ -2562,6 +2625,10 @@ function requireCurrentFundsPluginAdmissionV1(context, expected) {
 // embedded in the signed packaged authority so the later Go materializer
 // cannot bless whatever plugin tree happens to occupy the path at startup.
 function collectPackagedFundsPluginIdentityV2(context) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    return ABSENT_FUNDS
+  }
   const requestedRoot = join(
     packedResourcesDir(context),
     'plugins',
@@ -2641,6 +2708,10 @@ function collectPackagedFundsPluginIdentityV2(context) {
 }
 
 function validateBundledFundsPlugin(context, options = {}) {
+  if (isCoreContext(context)) {
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    return { artifact: ABSENT_FUNDS }
+  }
   const canonicalSourceRoot = join(__dirname, '..', 'plugins', ANALYTIX_FUNDS_PLUGIN_NAME)
   const sourceRoot = options.sourceRoot == null
     ? canonicalSourceRoot
@@ -4005,7 +4076,7 @@ function validateBundledAnalytixRuntime(context, options = {}) {
     }
   }
   assertExists(bundledGoRuntimeServerPath(context), 'Go runtime server binary')
-  for (const name of ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS) {
+  for (const name of (isCoreContext(context) ? [] : ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS)) {
     assertExists(
       bundledDataAnalysisNativeToolPath(context, name),
       `data analysis native tool (${name})`
@@ -4014,7 +4085,10 @@ function validateBundledAnalytixRuntime(context, options = {}) {
   const nativeDisposition = options.nativeDisposition
     ? normalizeNativeDisposition(options.nativeDisposition)
     : null
-  if (nativeDisposition?.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (isCoreContext(context)) {
+    if (!isCoreDisposition(nativeDisposition)) throw Error('core_profile_native_disposition_mismatch')
+    assertCoreResourcesAbsent(resources)
+  } else if (nativeDisposition?.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
     verifyPackagedDevelopmentNativeDisposition(context, nativeDisposition, {
       repoRoot: options.repoRoot,
       verifyCurrentSource: options.verifyCurrentSource,
@@ -4094,7 +4168,7 @@ function validateBundledAnalytixRuntime(context, options = {}) {
   if (normalizePlatform(context.electronPlatformName) !== 'win32') {
     chmodSync(join(root, 'packages/runtime/node_modules/analytix-computer-use/bin/analytix-computer-use'), 0o755)
     chmodSync(bundledOpenComputerUseNativePath(context), 0o755)
-    for (const name of ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS) {
+    for (const name of (isCoreContext(context) ? [] : ANALYTIX_DATA_NATIVE_REQUIRED_TOOLS)) {
       chmodSync(bundledDataAnalysisNativeToolPath(context, name), 0o755)
     }
   }
@@ -4138,6 +4212,7 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
   const goos = goOSForPlatform(context.electronPlatformName)
   const goarch = goArchForTarget(context.arch)
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
+  if (isCoreDisposition(nativeDisposition) !== isCoreContext(context)) throw Error('core_profile_authority_mismatch')
   if (nativeDisposition.targetKey !== packagedTargetKey(context)) {
     throw new Error('[after-pack] Exact packaged native disposition is required before building runtime-server')
   }
@@ -4190,6 +4265,8 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
   }
   const ldflags = [
+    `-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedReleaseProfile=${isCoreContext(context) ? 'core' : 'full'}`,
+    ...(isControlledCoreDisposition(nativeDisposition) ? [`-X analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs.embeddedCoreQualification=${sha256Bytes(JSON.stringify(nativeDisposition))}`] : []),
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedReceiptSHA256=${runtimeNativeTrust.receiptSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedManifestSHA256=${runtimeNativeTrust.manifestSHA256}`,
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedTargetKey=${runtimeNativeTrust.targetKey}`,
@@ -4429,7 +4506,16 @@ async function afterPack(context) {
   const runtimeDir = join(packedResourcesDir(context), 'runtime')
   const controlledNativeReceiptPresent = pathEntryExists(join(runtimeDir, RECEIPT_FILE_NAME))
   let nativeTrust
-  if (controlledNativeReceiptPresent) {
+  if (isCoreContext(context)) {
+    if (packagedTargetKey(context) !== 'darwin-arm64' || process.env.ANALYTIX_OFFICE_PRIVATE_LOCAL_BUILD) throw Error('core_profile_candidate_scope_invalid')
+    assertCoreResourcesAbsent(packedResourcesDir(context))
+    mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
+    nativeTrust = formalPackagedReleaseIntent(process.env)
+      ? { kind: CORE_CONTROLLED_DISPOSITION, targetKey: packagedTargetKey(context),
+          signingPolicySha256: macSigningPolicyDigest, signingMode: 'developer-id',
+          appleTeamIdentifier: require('./macos-signing-policy.cjs').requireOfficialTeamIdentifier() }
+      : { kind: CORE_DISPOSITION, targetKey: packagedTargetKey(context) }
+  } else if (controlledNativeReceiptPresent) {
     nativeTrust = verifyPackagedNativeBeforeRuntimeBuild(context)
   } else {
     assertNativePackageQuarantined(context, { allowUnavailable: true })
@@ -4437,11 +4523,11 @@ async function afterPack(context) {
       throw new Error('[after-pack] native_component_release_authority_unavailable')
     }
   }
-  if (!controlledNativeReceiptPresent) {
+  if (!controlledNativeReceiptPresent && !isCoreContext(context)) {
     nativeTrust = materializePackagedDevelopmentNativeComponents(context)
   }
   const nativeDisposition = normalizeNativeDisposition(nativeTrust)
-  materializePackagedDocumentRuntime(context, {
+  if (!isCoreContext(context)) materializePackagedDocumentRuntime(context, {
     required: formalPackagedReleaseIntent(process.env)
   })
   const runtimeServer = buildBundledGoRuntimeServer(context, nativeDisposition)
@@ -4460,6 +4546,23 @@ async function afterPack(context) {
   if (canonicalJSON(worktreeSnapshotAfter) !== lifecycle.snapshotCanonical ||
     canonicalJSON(worktreeSnapshotAfter) !== canonicalJSON(entrySnapshot)) {
     throw new Error('[after-pack] Source worktree changed during afterPack')
+  }
+  stagePrivateOfficeForPack(context, nativeDisposition, repoRoot, worktreeSnapshotAfter)
+  const { validateOfficeCodecDirectory } = await import('./build-office-codec.mjs')
+  await validateOfficeCodecDirectory(join(unpackedAppRoot(context), 'out', 'office-codec'))
+  // Supply legal inputs before the resource closure and signatures are created.
+  const legal = require('./lib/dependency-legal-evidence.cjs')
+  const legalTarget = { platform: context.electronPlatformName, arch: normalizeArch(context.arch) }
+  const legalInputs = legal.materializeLegalEvidence(repoRoot, packedResourcesDir(context), legalTarget)
+  const { createArtifactReaderFromPath } = await import('./artifact-legal-obligations-audit.mjs')
+  const legalReader = createArtifactReaderFromPath(
+    context.electronPlatformName === 'darwin' ? appBundlePath(context) : context.appOutDir
+  )
+  if (isCoreContext(context)) assertCoreOptionalAssetsAbsent(legalReader)
+  legal.verifyPackagedLegalMaterials(legalReader, legalInputs, { ...legalTarget, allowSigned: false })
+  legalReader.assertStable?.()
+  if (canonicalJSON(collectPackagedWorktreeSnapshotV1(repoRoot)) !== canonicalJSON(worktreeSnapshotAfter)) {
+    throw new Error('[after-pack] Source inputs changed while materializing legal evidence')
   }
   const authority = writePackagedBuildAuthorityV2(context, nativeDisposition, {
     repoRoot,
@@ -4491,6 +4594,9 @@ exports.NATIVE_DISPOSITION_DEVELOPMENT = NATIVE_DISPOSITION_DEVELOPMENT
 exports.DOCUMENT_RUNTIME_MANIFEST_FILE = DOCUMENT_RUNTIME_MANIFEST_FILE
 exports.DOCUMENT_RUNTIME_UNAVAILABLE = DOCUMENT_RUNTIME_UNAVAILABLE
 exports._internals = {
+  privateOfficeBuildRequested,
+  stagePrivateOfficeForPack,
+  verifyPrivateOfficeForPack,
   appBundlePath,
   packedResourcesDir,
   unpackedAppRoot,

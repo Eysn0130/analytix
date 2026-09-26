@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -360,7 +361,7 @@ func positiveCaseCompactionInteger(value any) (int64, bool) {
 	case int64:
 		return typed, typed > 0
 	case float64:
-		if typed <= 0 || typed != float64(int64(typed)) {
+		if math.IsNaN(typed) || typed <= 0 || typed >= -float64(math.MinInt64) || math.Trunc(typed) != typed {
 			return 0, false
 		}
 		return int64(typed), true
@@ -377,14 +378,16 @@ func caseCompactionNumeric(value any) int {
 	case int:
 		return typed
 	case int64:
-		return int(typed)
+		if typed >= math.MinInt && typed <= math.MaxInt {
+			return int(typed)
+		}
 	case float64:
-		if typed == float64(int(typed)) {
+		if !math.IsNaN(typed) && typed >= float64(math.MinInt) && typed < -float64(math.MinInt) && math.Trunc(typed) == typed {
 			return int(typed)
 		}
 	case json.Number:
 		parsed, err := strconv.ParseInt(string(typed), 10, 64)
-		if err == nil && int64(int(parsed)) == parsed {
+		if err == nil && parsed >= math.MinInt && parsed <= math.MaxInt {
 			return int(parsed)
 		}
 	}

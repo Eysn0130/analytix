@@ -36,6 +36,8 @@ type Controller struct {
 	driver Driver
 
 	mu                    sync.Mutex
+	auxiliary             map[string]*auxiliaryOperation
+	foregroundPreparing   map[string]int
 	turnCancels           map[turnKey]context.CancelFunc
 	interruptReservations map[turnKey]struct{}
 	cancelReservations    map[turnKey]struct{}
@@ -164,6 +166,8 @@ func NewController(driver Driver) *Controller {
 	close(idle)
 	return &Controller{
 		driver:                driver,
+		auxiliary:             map[string]*auxiliaryOperation{},
+		foregroundPreparing:   map[string]int{},
 		turnCancels:           map[turnKey]context.CancelFunc{},
 		interruptReservations: map[turnKey]struct{}{},
 		cancelReservations:    map[turnKey]struct{}{},
@@ -339,6 +343,11 @@ func (c *Controller) RegisterTurnCancelAfterThreadTail(
 	if !ok || cancel == nil || c == nil || ctx == nil {
 		return ErrTurnExecutionConflict
 	}
+	releasePreparation, err := c.PrepareForeground(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	defer releasePreparation()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -391,6 +400,11 @@ func (c *Controller) RegisterTurnCancelWithError(threadID, turnID string, cancel
 	if c.shuttingDown {
 		c.mu.Unlock()
 		return ErrRuntimeShuttingDown
+	}
+	if auxiliary := c.auxiliary[key.threadID]; auxiliary != nil {
+		c.mu.Unlock()
+		auxiliary.cancel()
+		return ErrTurnExecutionConflict
 	}
 	if _, exists := c.turnCancels[key]; exists {
 		c.mu.Unlock()
@@ -476,8 +490,15 @@ func (c *Controller) BeginShutdown() int {
 	if len(c.turnCancels) > 0 {
 		c.notifyTurnStateChangedLocked()
 	}
-	count := len(c.turnCancels)
+	count := len(c.turnCancels) + len(c.auxiliary)
+	cancels := make([]context.CancelFunc, 0, len(c.auxiliary))
+	for _, operation := range c.auxiliary {
+		cancels = append(cancels, operation.cancel)
+	}
 	c.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	return count
 }
 

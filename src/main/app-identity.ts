@@ -1,5 +1,6 @@
 import { app } from 'electron'
-import { resolve } from 'node:path'
+import { lstatSync, mkdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 /**
  * 项目对外展示的产品名,需要和:
@@ -17,6 +18,7 @@ export const APP_PRODUCT_NAME = 'Analytix'
 export const APP_DISPLAY_NAME = 'Analytix'
 export const APP_USER_DATA_DIRECTORY_NAME = 'analytix'
 export const ANALYTIX_USER_DATA_DIR_ENV = 'ANALYTIX_USER_DATA_DIR'
+export const MAC_CHROMIUM_SESSION_DIRECTORY_NAME = 'chromium-session-no-keychain-v1'
 
 /**
  * 在 main 进程最早期调用,把 app 的对外名称设好。
@@ -35,4 +37,19 @@ export function configureAppIdentity(env: NodeJS.ProcessEnv = process.env): void
 
   app.setName(APP_PRODUCT_NAME)
   app.setPath('userData', userDataPath)
+}
+
+// Call after the legacy userData migration barrier, before app.whenReady().
+// The old Chromium bytes remain in place, while the disabled cookie-encryption
+// fuse starts with a distinct session. Websites may require a new sign-in.
+export function configureMacChromiumSessionData(): void {
+  if (process.platform !== 'darwin') return
+  const sessionDataPath = join(app.getPath('userData'), MAC_CHROMIUM_SESSION_DIRECTORY_NAME)
+  mkdirSync(sessionDataPath, { recursive: true, mode: 0o700 })
+  const info = lstatSync(sessionDataPath)
+  if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o700 ||
+      (process.getuid && info.uid !== process.getuid())) {
+    throw new Error('Analytix Chromium session directory is unsafe')
+  }
+  app.setPath('sessionData', sessionDataPath)
 }

@@ -1,3 +1,4 @@
+import { withImageThreadNavigation, deferImageThreadSelectionClear } from '../write/image-thread-navigation'
 import type { AgentProvider, NormalizedThread } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -28,6 +29,7 @@ import { isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/wor
 import { buildClawRuntimePrompt } from '@shared/app-settings'
 import { parseRuntimeStatusPublicV1 } from '@shared/analytix-runtime-status'
 import {
+  checkLocalProviderReadiness,
   localProviderRecoveryReadiness,
   resolveLocalProviderReadiness
 } from '../account/local-provider-readiness'
@@ -55,16 +57,12 @@ import {
   threadBelongsToWorkspace
 } from './chat-store-runtime-helpers'
 import {
-  WRITE_ASSISTANT_THREAD_TITLE,
-  activeWriteThreadForWorkspace,
   forgetWriteThread,
   hydrateWriteThreadRegistry,
   isWriteThreadId,
-  markWriteThread,
   pruneWriteThreadRegistry,
   readWriteThreadRegistry,
   saveWriteThreadRegistry,
-  writeThreadBelongsToWorkspace,
   writeWorkspaceForThreadId
 } from '../write/write-thread-registry'
 import {
@@ -86,7 +84,6 @@ import {
   forkedTurnCount,
   isCodeThread,
   looksLikeActiveTurnError,
-  readActiveWriteWorkspace,
   readWriteWorkspaceRoots,
   rememberPendingClawFeishuMirror,
   runtimeErrorDetail,
@@ -109,12 +106,11 @@ let clawChannelActivityUnsubscribe: (() => void) | null = null
 let runtimeStatusUnsubscribe: (() => void) | null = null
 let cancelScheduledThreadDetailPrewarm: (() => void) | null = null
 let searchRefreshTimer: ReturnType<typeof setTimeout> | null = null
-let caseProjectIndexRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const defaultThreadRefreshLimit = 50
 const archivedThreadRefreshLimit = 200
 const caseProjectRefreshLimit = 100
 const caseProjectThreadLoadLimit = 200
-const runtimeRecoveryDelaysMs = [250, 1000, 3000] as const
+const runtimeRecoveryDelaysMs = [250, 1000, 3000, 10_000, 30_000] as const
 
 function mergeThreadsById(existing: NormalizedThread[], incoming: NormalizedThread[]): NormalizedThread[] {
   const map = new Map<string, NormalizedThread>()
@@ -140,9 +136,12 @@ async function reconcileThreadListSideEffects(
     sidebarThreads: NormalizedThread[]
     replaceThreads: boolean
     allowClearSelection: boolean
+    isCurrent?: () => boolean
   }
 ): Promise<{ displayThreads: NormalizedThread[]; enrichedThreads: NormalizedThread[] }> {
   const { provider, replaceThreads, allowClearSelection } = options
+  const cancelled = () => options.isCurrent?.() === false
+  if (cancelled()) return { displayThreads: [], enrichedThreads: [] }
   const rawThreads = filterRevokedPublicProjectionThreads(options.rawThreads)
   const sddThreadRegistry = readSddThreadRegistry()
   const sidebarThreads = filterRevokedPublicProjectionThreads(options.sidebarThreads)
@@ -151,7 +150,6 @@ async function reconcileThreadListSideEffects(
     replaceThreads ? sidebarThreads : mergeThreadsById(get().threads, sidebarThreads),
     readThreadForkRegistry()
   )
-  saveThreadForkRegistry(forkRegistry)
   const enrichedThreads = enrichThreadsWithForkInfo(sidebarThreads, forkRegistry)
 
   const activeId = get().activeThreadId
@@ -200,6 +198,8 @@ async function reconcileThreadListSideEffects(
   }
 
   const writeWorkspaceRoots = await readWriteWorkspaceRoots()
+  if (cancelled()) return { displayThreads: [], enrichedThreads: [] }
+  saveThreadForkRegistry(forkRegistry)
   displayThreads = filterRevokedPublicProjectionThreads(displayThreads)
   const writeRegistry = hydrateWriteThreadRegistry(
     displayThreads,
@@ -232,10 +232,9 @@ async function reconcileThreadListSideEffects(
   const activeThreadIsManagedInCodeRoute =
     get().route === 'chat' &&
     activeThread != null &&
-    (isWriteThreadId(activeThread.id, writeRegistry) ||
-      isClawThread(activeThread, get().clawChannels))
+    isClawThread(activeThread, get().clawChannels)
   const shouldClearSelection =
-    allowClearSelection &&
+    allowClearSelection && !deferImageThreadSelectionClear() &&
     activeThreadId != null &&
     !displayThreads.some((thread) => thread.id === activeThreadId)
   if (shouldClearSelection) {
@@ -269,7 +268,7 @@ async function reconcileThreadListSideEffects(
   cancelScheduledThreadDetailPrewarm = schedulePrewarmThreadDetails(provider, displayThreads, {
     activeThreadId: get().activeThreadId,
     concurrency: 2,
-    shouldSkip: () => get().busy || get().runtimeConnection !== 'ready'
+    shouldSkip: () => cancelled() || get().busy || get().runtimeConnection !== 'ready'
   })
   if (activeThreadIsManagedInCodeRoute) {
     await get().openCode()
@@ -282,12 +281,23 @@ async function reconcileThreadListSideEffects(
 
 export function createNavigationActions(
   { set, get, sseAbortRef }: StoreActionContext
-): Pick<ChatState, 'openCode' | 'openWrite' | 'ensureWriteThreadForWorkspace' | 'createWriteThread' | 'selectWriteThread' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshCaseProjects' | 'loadCaseProjectThreads' | 'setCaseProjectExpanded' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
+): Pick<ChatState, 'openCode' | 'openWrite' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshCaseProjects' | 'loadCaseProjectThreads' | 'setCaseProjectExpanded' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
+  const caseProjectLoadOwners = new Map<string, symbol>()
+  let caseProjectIndexRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let caseProjectRefreshGeneration = 0
   let runtimeProbeGeneration = 0
   let activeUserRuntimeProbeGeneration = 0
   let runtimeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
   let runtimeRecoveryAttempt = 0
   let runtimeRecoveryEpoch = 0
+
+  const invalidateCaseProjectRefresh = (): void => {
+    caseProjectRefreshGeneration += 1
+    if (caseProjectIndexRefreshTimer != null) {
+      clearTimeout(caseProjectIndexRefreshTimer)
+      caseProjectIndexRefreshTimer = null
+    }
+  }
 
   const clearRuntimeRecovery = (): void => {
     runtimeRecoveryEpoch += 1
@@ -302,13 +312,12 @@ export function createNavigationActions(
     if (
       get().runtimeConnection !== 'offline' ||
       activeUserRuntimeProbeGeneration !== 0 ||
-      runtimeRecoveryTimer != null ||
-      runtimeRecoveryAttempt >= runtimeRecoveryDelaysMs.length
+      runtimeRecoveryTimer != null
     ) {
       return
     }
     const epoch = runtimeRecoveryEpoch
-    const delay = runtimeRecoveryDelaysMs[runtimeRecoveryAttempt]
+    const delay = runtimeRecoveryDelaysMs[Math.min(runtimeRecoveryAttempt, runtimeRecoveryDelaysMs.length - 1)]
     runtimeRecoveryTimer = setTimeout(() => {
       runtimeRecoveryTimer = null
       if (
@@ -318,7 +327,7 @@ export function createNavigationActions(
       ) {
         return
       }
-      runtimeRecoveryAttempt += 1
+      runtimeRecoveryAttempt = Math.min(runtimeRecoveryAttempt + 1, runtimeRecoveryDelaysMs.length - 1)
       const probeRuntime = get().probeRuntime
       if (typeof probeRuntime !== 'function') return
       void probeRuntime('background').then(() => {
@@ -343,7 +352,7 @@ export function createNavigationActions(
   }
 
   return {
-  openCode: async () => {
+  openCode: async () => withImageThreadNavigation(undefined, async () => {
     const state = get()
     const activeThread = state.activeThreadId
       ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
@@ -371,144 +380,12 @@ export function createNavigationActions(
     }
 
     openCleanCodeStage()
-  },
+  }),
 
+  // Compatibility entry: opening a document never selects or creates a thread.
+  // Workbench consumes this legacy route by opening the right document surface.
   openWrite: async () => {
-    const state = get()
-    const selectedWorkspace = await readActiveWriteWorkspace(state.workspaceRoot)
-    const writeWorkspaceRoots = await readWriteWorkspaceRoots()
-    const registry = hydrateWriteThreadRegistry(
-      state.threads,
-      selectedWorkspace ? [selectedWorkspace, ...writeWorkspaceRoots] : writeWorkspaceRoots,
-      pruneWriteThreadRegistry(state.threads, readWriteThreadRegistry())
-    )
-    saveWriteThreadRegistry(registry)
-    const activeThread = state.activeThreadId
-      ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
-      : null
-    if (
-      activeThread &&
-      activeThread.archived !== true &&
-      selectedWorkspace &&
-      writeThreadBelongsToWorkspace(activeThread, selectedWorkspace, registry)
-    ) {
-      set({ route: 'write' })
-      return
-    }
-
-    const target = activeWriteThreadForWorkspace(
-      selectedWorkspace,
-      state.threads.filter((thread) => thread.archived !== true),
-      registry
-    )
-
     set({ route: 'write' })
-    if (target && state.runtimeConnection === 'ready') {
-      await get().selectThread(target.id)
-      return
-    }
-
-    sseAbortRef.current?.abort()
-    sseAbortRef.current = null
-    clearBusyWatchdog()
-    const nextWatch = { ...state.watchTurnCompletion }
-    if (state.activeThreadId && state.busy) {
-      nextWatch[state.activeThreadId] = true
-      watchTurnCompletionNotification(state.activeThreadId)
-    }
-    set({
-      ...clearedThreadSelection(),
-      route: 'write',
-      watchTurnCompletion: nextWatch
-    })
-    syncTurnCompletionPoll(set, get)
-  },
-
-  ensureWriteThreadForWorkspace: async (workspaceRoot) => {
-    const state = get()
-    const targetWorkspace = normalizeWorkspaceRoot(workspaceRoot) || (await readActiveWriteWorkspace(state.workspaceRoot))
-    if (!targetWorkspace) {
-      set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
-      return null
-    }
-    if (state.runtimeConnection !== 'ready') {
-      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
-      return null
-    }
-
-    const registry = hydrateWriteThreadRegistry(
-      state.threads,
-      [targetWorkspace],
-      pruneWriteThreadRegistry(state.threads, readWriteThreadRegistry())
-    )
-    saveWriteThreadRegistry(registry)
-    const activeThread = state.activeThreadId
-      ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
-      : null
-    if (activeThread && writeThreadBelongsToWorkspace(activeThread, targetWorkspace, registry)) {
-      set({ route: 'write', error: null })
-      return activeThread.id
-    }
-
-    const existing = activeWriteThreadForWorkspace(targetWorkspace, state.threads, registry)
-    if (existing) {
-      set({ route: 'write' })
-      await get().selectThread(existing.id)
-      return existing.id
-    }
-
-    return get().createWriteThread(targetWorkspace)
-  },
-
-  createWriteThread: async (workspaceRoot) => {
-    const targetWorkspace = normalizeWorkspaceRoot(workspaceRoot) || (await readActiveWriteWorkspace(get().workspaceRoot))
-    if (!targetWorkspace) {
-      set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
-      return null
-    }
-    if (get().runtimeConnection !== 'ready') {
-      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
-      return null
-    }
-    try {
-      const p = getProvider()
-      const thread = await p.createThread({
-        workspace: targetWorkspace,
-        title: WRITE_ASSISTANT_THREAD_TITLE,
-        mode: 'agent'
-      })
-      saveWriteThreadRegistry(markWriteThread(targetWorkspace, thread.id))
-      set((s) => ({
-        route: 'write',
-        threads: s.threads.some((item) => item.id === thread.id) ? s.threads : [thread, ...s.threads],
-        error: null
-      }))
-      await get().refreshThreads()
-      await get().selectThread(thread.id)
-      return thread.id
-    } catch (e) {
-      set({
-        error: formatRuntimeError(e),
-        ...(shouldOpenSettingsForError(e)
-          ? { route: 'settings' as const, settingsSection: 'agents' as const }
-          : {})
-      })
-      return null
-    }
-  },
-
-  selectWriteThread: async (threadId, workspaceRoot) => {
-    const targetId = threadId.trim()
-    if (!targetId) return
-    const thread = get().threads.find((item) => item.id === targetId)
-    const targetWorkspace = normalizeWorkspaceRoot(workspaceRoot) ||
-      normalizeWorkspaceRoot(thread?.workspace) ||
-      (await readActiveWriteWorkspace(get().workspaceRoot))
-    if (targetWorkspace) {
-      saveWriteThreadRegistry(markWriteThread(targetWorkspace, targetId))
-    }
-    set({ route: 'write' })
-    await get().selectThread(targetId)
   },
 
   probeRuntime: async (mode = 'user', options) => {
@@ -517,6 +394,8 @@ export function createNavigationActions(
     if (mode === 'user') {
       clearRuntimeRecovery()
       activeUserRuntimeProbeGeneration = probeGeneration
+      // A later ready state cannot revive work from before this connection check.
+      invalidateCaseProjectRefresh()
       set({ runtimeConnection: 'checking' })
     }
     try {
@@ -531,6 +410,13 @@ export function createNavigationActions(
       }
       const p = getProvider()
       await p.connect()
+      const providerReadiness = await checkLocalProviderReadiness(
+        (request) => window.analytix.providerRegistry.request(request)
+      )
+      if (providerReadiness.kind !== 'ready') {
+        throw new Error(providerReadiness.kind === 'recovery'
+          ? providerReadiness.message : 'Choose a Provider in Settings to finish setup.')
+      }
       if (probeGeneration !== runtimeProbeGeneration &&
           probeGeneration !== activeUserRuntimeProbeGeneration) return
       if (mode === 'background' && activeUserRuntimeProbeGeneration !== 0) return
@@ -563,6 +449,7 @@ export function createNavigationActions(
       const detail = runtimeErrorDetail(e)
       const needsSettings = shouldOpenSettingsForError(e)
       if (mode === 'user') {
+        invalidateCaseProjectRefresh()
         stopTurnCompletionPoll()
         set({
           runtimeConnection: 'offline',
@@ -574,6 +461,7 @@ export function createNavigationActions(
         })
       } else {
         if (prev === 'ready') {
+          invalidateCaseProjectRefresh()
           stopTurnCompletionPoll()
           set({
             runtimeConnection: 'offline',
@@ -705,6 +593,8 @@ export function createNavigationActions(
         const fromStorage = readStoredComposerModel(initialPick)
         if (fromStorage) {
           set({ composerModel: fromStorage })
+        } else {
+          set({ composerModel: readiness.model, composerProviderId: readiness.providerId })
         }
         await get().probeRuntime('user')
       } catch (e) {
@@ -725,13 +615,14 @@ export function createNavigationActions(
     return bootPromise
   },
 
-  chooseWorkspace: async ({ createThreadAfter = false, selectThreadAfter = true } = {}) => {
+  chooseWorkspace: async ({ createThreadAfter = false, selectThreadAfter = true } = {}) => withImageThreadNavigation(null, async navigationCurrent => {
     try {
       const wasWriteRoute = get().route === 'write'
       if (typeof window.analytix === 'undefined' || typeof window.analytix.workspace.pickDirectory !== 'function') {
         throw new Error(i18n.t('common:workspacePickerUnavailable'))
       }
       const picked = await window.analytix.workspace.pickDirectory(get().workspaceRoot || undefined)
+      if (!navigationCurrent()) return null
       if (picked.canceled || !picked.path) {
         if (createThreadAfter) {
           set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
@@ -739,6 +630,7 @@ export function createNavigationActions(
         return null
       }
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: picked.path })
+      if (!navigationCurrent()) return null
       const workspaceRoot = normalizeWorkspaceRoot(next.workspaceRoot)
       const codeWorkspaceRoots = rememberCodeWorkspaceRoots(get().codeWorkspaceRoots, [workspaceRoot])
 
@@ -749,10 +641,12 @@ export function createNavigationActions(
         error: null
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return null
       if (workspaceRoot) {
         if (!selectThreadAfter) return workspaceRoot
         if (wasWriteRoute) {
           await get().openWrite()
+          if (!navigationCurrent()) return null
           return workspaceRoot
         }
         const workspaceThreads = get().threads
@@ -762,27 +656,30 @@ export function createNavigationActions(
 
         if (createThreadAfter || workspaceThreads.length === 0) {
           await get().createThread({ workspaceRoot })
+          if (!navigationCurrent()) return null
         } else {
           const targetThreadId = workspaceThreads[0]?.id
           if (targetThreadId && get().activeThreadId !== targetThreadId) {
             await get().selectThread(targetThreadId)
+            if (!navigationCurrent()) return null
           }
         }
       }
       return workspaceRoot
     } catch (e) {
+      if (!navigationCurrent()) return null
       set({
         error: formatWorkspacePickerError(e)
       })
       return null
     }
-  },
+  }),
 
   // Switch the active working directory to an already-known workspace (no native
   // picker). Persists the choice and lands on a clean new-conversation state for
   // that directory — typing then starts a fresh thread there. This backs the
   // workspace picker shown beneath the composer.
-  selectWorkspaceRoot: async (workspaceRoot) => {
+  selectWorkspaceRoot: async (workspaceRoot) => withImageThreadNavigation(null, async navigationCurrent => {
     const normalized = normalizeWorkspaceRoot(workspaceRoot)
     if (!normalized) return null
     if (get().runtimeConnection !== 'ready') {
@@ -796,6 +693,7 @@ export function createNavigationActions(
     }
     try {
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: normalized })
+      if (!navigationCurrent()) return null
       const persisted = normalizeWorkspaceRoot(next.workspaceRoot) || normalized
       sseAbortRef.current?.abort()
       sseAbortRef.current = null
@@ -810,19 +708,22 @@ export function createNavigationActions(
         error: null
       }))
       await get().refreshThreads()
+      if (!navigationCurrent()) return null
       return persisted
     } catch (e) {
+      if (!navigationCurrent()) return null
       set({ error: formatRuntimeError(e) })
       return null
     }
-  },
+  }),
 
-  clearWorkspace: async () => {
+  clearWorkspace: async () => withImageThreadNavigation(undefined, async navigationCurrent => {
     try {
       if (typeof window.analytix === 'undefined' || typeof window.analytix.settings.setSettings !== 'function') {
         return
       }
       const next = await rendererRuntimeClient.setSettings({ workspaceRoot: '' })
+      if (!navigationCurrent()) return
       set({
         workspaceRoot: normalizeWorkspaceRoot(next.workspaceRoot),
         codeWorkspaceRoots: get().codeWorkspaceRoots,
@@ -830,12 +731,14 @@ export function createNavigationActions(
         error: null
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch {
+      if (!navigationCurrent()) return
       // silently ignore — the workspace will remain set
     }
-  },
+  }),
 
-  deleteWorkspace: async (workspacePath) => {
+  deleteWorkspace: async (workspacePath) => withImageThreadNavigation(undefined, async navigationCurrent => {
     const normalizedPath = normalizeWorkspaceRoot(workspacePath)
     if (!normalizedPath) return
     if (get().runtimeConnection !== 'ready') {
@@ -854,11 +757,14 @@ export function createNavigationActions(
       clearBusyWatchdog()
     }
     try {
+      const removeIds = new Set<string>()
       for (const th of workspaceThreads) {
         await p.deleteThread(th.id)
+        removeIds.add(th.id)
+        if (!navigationCurrent()) break
       }
-      const removeIds = new Set(workspaceThreads.map((th) => th.id))
-      const codeWorkspaceRoots = forgetCodeWorkspaceRoot(get().codeWorkspaceRoots, normalizedPath)
+      const codeWorkspaceRoots = removeIds.size === workspaceThreads.length
+        ? forgetCodeWorkspaceRoot(get().codeWorkspaceRoots, normalizedPath) : get().codeWorkspaceRoots
       set((s) => {
         const w = { ...s.watchTurnCompletion }
         const u = { ...s.unreadThreadIds }
@@ -869,20 +775,21 @@ export function createNavigationActions(
         }
         return {
           threads: s.threads.filter(
-            (thread) => !threadBelongsToWorkspace(thread, normalizedPath)
+            (thread) => !removeIds.has(thread.id)
           ),
           codeWorkspaceRoots,
           watchTurnCompletion: w,
           unreadThreadIds: u,
-          ...(deletingActive ? clearedThreadSelection() : {}),
+          ...(deletingActive && navigationCurrent() ? clearedThreadSelection() : {}),
           error: null
         }
       })
       // If the deleted workspace is the current workspaceRoot, clear it.
-      if (normalizeWorkspaceRoot(get().workspaceRoot) === normalizedPath) {
+      if (navigationCurrent() && normalizeWorkspaceRoot(get().workspaceRoot) === normalizedPath) {
         try {
           if (typeof window.analytix?.settings?.setSettings === 'function') {
             const next = await rendererRuntimeClient.setSettings({ workspaceRoot: '' })
+            if (!navigationCurrent()) return
             set({
               workspaceRoot: normalizeWorkspaceRoot(next.workspaceRoot),
               codeWorkspaceRoots: get().codeWorkspaceRoots,
@@ -890,11 +797,14 @@ export function createNavigationActions(
             })
           }
         } catch {
+          if (!navigationCurrent()) return
           /* silently keep workspaceRoot if settings clear fails */
         }
       }
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -902,54 +812,74 @@ export function createNavigationActions(
           : {})
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     }
-	  },
+	  }),
 
-	  refreshCaseProjects: async () => {
-	    if (get().runtimeConnection !== 'ready') return
-	    const p = getProvider()
-	    if (typeof p.listCaseProjects !== 'function') return
-		    const caseProjectResult = await p.listCaseProjects(caseProjectRefreshLimit)
-		    const caseProjects = Array.isArray(caseProjectResult)
-		      ? caseProjectResult
-		      : caseProjectResult.caseProjects
-		    const caseProjectIndexStatus = Array.isArray(caseProjectResult)
-		      ? 'ready'
-		      : caseProjectResult.indexStatus
-		    const validProjectIds = new Set(caseProjects.map((project) => project.id))
-		    set((s) => ({
-		      caseProjects,
-		      caseProjectIndexStatus,
-		      caseProjectThreadsById: pruneRecordToIds(s.caseProjectThreadsById, validProjectIds),
-		      caseProjectLoadingById: pruneRecordToIds(s.caseProjectLoadingById, validProjectIds),
-		      caseProjectErrorsById: pruneRecordToIds(s.caseProjectErrorsById, validProjectIds),
-		      caseProjectExpandedById: pruneRecordToIds(s.caseProjectExpandedById, validProjectIds)
-		    }))
-		    if (caseProjectIndexStatus === 'building' && caseProjectIndexRefreshTimer == null) {
-		      caseProjectIndexRefreshTimer = setTimeout(() => {
-		        caseProjectIndexRefreshTimer = null
-		        if (get().runtimeConnection === 'ready') {
-		          void get().refreshCaseProjects().catch(() => {
-		            /* refreshCaseProjects stores state on success */
-		          })
-		        }
-		      }, 1500)
-		    }
-		  },
+  refreshCaseProjects: async (options = {}) => {
+    if (options.isCurrent?.() === false || get().runtimeConnection !== 'ready') return
+    const p = getProvider()
+    if (typeof p.listCaseProjects !== 'function') return
+    // A newer admitted read owns the existing timer slot, even while its I/O is
+    // pending. An obsolete timer/result must neither block nor replace its chain.
+    invalidateCaseProjectRefresh()
+    const generation = caseProjectRefreshGeneration
+    const isCurrent = () => generation === caseProjectRefreshGeneration &&
+      options.isCurrent?.() !== false && get().runtimeConnection === 'ready'
+    try {
+      const caseProjectResult = await p.listCaseProjects(caseProjectRefreshLimit)
+      if (!isCurrent()) return
+      const caseProjects = Array.isArray(caseProjectResult)
+        ? caseProjectResult
+        : caseProjectResult.caseProjects
+      const caseProjectIndexStatus = Array.isArray(caseProjectResult)
+        ? 'ready'
+        : caseProjectResult.indexStatus
+      const validProjectIds = new Set(caseProjects.map((project) => project.id))
+      set((s) => ({
+        caseProjects,
+        caseProjectIndexStatus,
+        caseProjectThreadsById: pruneRecordToIds(s.caseProjectThreadsById, validProjectIds),
+        caseProjectLoadingById: pruneRecordToIds(s.caseProjectLoadingById, validProjectIds),
+        caseProjectErrorsById: pruneRecordToIds(s.caseProjectErrorsById, validProjectIds),
+        caseProjectExpandedById: pruneRecordToIds(s.caseProjectExpandedById, validProjectIds)
+      }))
+      if (caseProjectIndexStatus === 'building' && isCurrent()) {
+        const timer = setTimeout(() => {
+          if (caseProjectIndexRefreshTimer !== timer) return
+          caseProjectIndexRefreshTimer = null
+          if (isCurrent()) {
+            void get().refreshCaseProjects(options).catch(() => {
+              /* refreshCaseProjects stores state on success */
+            })
+          }
+        }, 1500)
+        caseProjectIndexRefreshTimer = timer
+      }
+    } catch (error) {
+      // Do not turn an obsolete read failure into current reconnect/error state.
+      if (isCurrent()) throw error
+    }
+  },
 
 	  loadCaseProjectThreads: async (caseProjectId, options = {}) => {
 	    const projectId = caseProjectId.trim()
+      if (options.isCurrent?.() === false) return
 	    if (!projectId || get().runtimeConnection !== 'ready') return
 	    const p = getProvider()
 	    if (typeof p.listCaseProjectThreads !== 'function') return
 	    if (!options.force && get().caseProjectThreadsById[projectId]) return
 	    if (get().caseProjectLoadingById[projectId]) return
-	    set((s) => ({
+	    const loadOwner = Symbol('case-project-load')
+      caseProjectLoadOwners.set(projectId, loadOwner)
+      const isCurrent = () => caseProjectLoadOwners.get(projectId) === loadOwner && options.isCurrent?.() !== false
+      set((s) => ({
 	      caseProjectLoadingById: { ...s.caseProjectLoadingById, [projectId]: true },
 	      caseProjectErrorsById: { ...s.caseProjectErrorsById, [projectId]: null }
 	    }))
 	    try {
 	      const rawThreads = await p.listCaseProjectThreads(projectId, caseProjectThreadLoadLimit)
+        if (!isCurrent()) return
 	      const threads = rawThreads.map((thread) => ({
 	        ...thread,
 	        workspace: normalizeWorkspaceRoot(thread.workspace)
@@ -962,10 +892,12 @@ export function createNavigationActions(
 		          rawThreads: threads,
 		          sidebarThreads,
 		          replaceThreads: false,
-		          allowClearSelection: false
+		          allowClearSelection: false,
+              isCurrent
 		        }
 		      )
-		      set((s) => ({
+		      if (!isCurrent()) return
+          set((s) => ({
 		        caseProjectThreadsById: {
 		          ...s.caseProjectThreadsById,
 		          [projectId]: filterRevokedPublicProjectionThreads(enrichedThreads)
@@ -974,6 +906,7 @@ export function createNavigationActions(
 		        caseProjectErrorsById: { ...s.caseProjectErrorsById, [projectId]: null }
 		      }))
 	    } catch (error) {
+        if (!isCurrent()) return
 	      set((s) => ({
 	        caseProjectLoadingById: { ...s.caseProjectLoadingById, [projectId]: false },
 	        caseProjectErrorsById: {
@@ -981,7 +914,15 @@ export function createNavigationActions(
 	          [projectId]: formatRuntimeError(error)
 	        }
 	      }))
-	    }
+      } finally {
+        // Release only this request's loading marker, not a replacement load.
+        if (caseProjectLoadOwners.get(projectId) === loadOwner) {
+          caseProjectLoadOwners.delete(projectId)
+          if (get().caseProjectLoadingById[projectId]) {
+            set(state => ({ caseProjectLoadingById: { ...state.caseProjectLoadingById, [projectId]: false } }))
+          }
+        }
+      }
 	  },
 
 	  setCaseProjectExpanded: (caseProjectId, expanded) => {
@@ -998,7 +939,9 @@ export function createNavigationActions(
 	    }
 	  },
 
-	  refreshThreads: async () => {
+	  refreshThreads: async (options = {}) => {
+      const isCurrent = () => options.isCurrent?.() !== false
+      if (!isCurrent()) return
 	    if (get().runtimeConnection !== 'ready') return
 	    const p = getProvider()
 	    try {
@@ -1018,13 +961,16 @@ export function createNavigationActions(
         } catch {
           listedThreads = []
         }
-        await get().refreshCaseProjects()
+        if (!isCurrent()) return
+        await get().refreshCaseProjects(options)
+        if (!isCurrent()) return
         const expandedProjectIds = Object.entries(get().caseProjectExpandedById)
           .filter(([, expanded]) => expanded)
           .map(([projectId]) => projectId)
         await Promise.all(expandedProjectIds.map((projectId) =>
-          get().loadCaseProjectThreads(projectId, { force: true })
+          get().loadCaseProjectThreads(projectId, { force: true, isCurrent })
         ))
+        if (!isCurrent()) return
         const retainedThreads = mergeThreadsById(
           get().threads,
           listedThreads
@@ -1040,7 +986,8 @@ export function createNavigationActions(
             rawThreads: retainedThreads,
             sidebarThreads: retainedSidebarThreads,
             replaceThreads: true,
-            allowClearSelection: false
+            allowClearSelection: false,
+            isCurrent
           }
         )
         return
@@ -1053,8 +1000,10 @@ export function createNavigationActions(
 	          includeArchived: true
 	        })
       } catch {
+        if (!isCurrent()) return
         rawThreads = await p.listThreads()
       }
+      if (!isCurrent()) return
       const threads = rawThreads.map((thread) => ({
         ...thread,
         workspace: normalizeWorkspaceRoot(thread.workspace)
@@ -1067,15 +1016,20 @@ export function createNavigationActions(
 	          rawThreads: threads,
 	          sidebarThreads,
 	          replaceThreads: true,
-	          allowClearSelection: true
+	          allowClearSelection: true,
+            isCurrent
 	        }
 	      )
 	    } catch (e) {
+        if (!isCurrent()) return
 	      const refreshError = formatRuntimeError(e)
 	      try {
 	        await p.connect()
+          if (!isCurrent()) return
 	        set({ error: refreshError })
 	      } catch (connectionError) {
+          if (!isCurrent()) return
+          invalidateCaseProjectRefresh()
 	        stopTurnCompletionPoll()
 	        set({
 	          runtimeConnection: 'offline',

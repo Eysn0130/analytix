@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -203,6 +204,42 @@ func TestProviderOutputTokenBudgetIsEnforcedByHostStreamBoundary(t *testing.T) {
 	}
 }
 
+func TestProviderOutputBudgetIncludesReasoningAndText(t *testing.T) {
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			{Kind: domainmodel.ChunkReasoning, Text: "abcdabcd"},
+			{Kind: domainmodel.ChunkText, Text: "efghefgh"},
+		},
+	}}}
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider, Request: domainmodel.Request{MaxOutputTokens: 3},
+	})
+	if !errors.Is(err, ErrProviderOutputTokenBudgetExceeded) || len(provider.requests) != 1 ||
+		output.Text != "" || output.Reasoning != "" {
+		t.Fatal("reasoning and text did not consume one fail-closed output budget")
+	}
+}
+
+func BenchmarkProviderOutputBudgetChunking(b *testing.B) {
+	// Same 64 KiB output and host cap; vary only the delivery granularity.
+	const totalBytes = 64 * 1024
+	for _, chunkBytes := range []int{totalBytes, 1024, 64} {
+		b.Run(fmt.Sprintf("chunk_bytes_%d", chunkBytes), func(b *testing.B) {
+			chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: strings.Repeat("a", chunkBytes)}
+			b.ReportAllocs()
+			b.SetBytes(totalBytes)
+			for i := 0; i < b.N; i++ {
+				budget := newProviderOutputTokenBudgetV1(totalBytes)
+				for sent := 0; sent < totalBytes; sent += chunkBytes {
+					if err := budget.Observe(chunk); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestPrivateAttemptCannotRemoveProviderOutputTokenBudget(t *testing.T) {
 	provider := &providerStreamStub{}
 	settled := ""
@@ -358,6 +395,10 @@ func TestStreamProviderWithRetryStreamsTypedChunks(t *testing.T) {
 	}
 	if !output.Result.HasDuration || !output.Result.HasFirstTokenLatency {
 		t.Fatalf("expected timing metadata on streamed result: %#v", output.Result)
+	}
+	if !output.Result.HasFirstReasoningLatency || !output.Result.HasFirstRawTextLatency ||
+		output.Result.FirstRawTextLatencyMs < output.Result.FirstReasoningLatencyMs {
+		t.Fatalf("private reasoning and raw text timing were not distinguished: %#v", output.Result)
 	}
 	if got := strings.Join(events, "|"); got != "retry:retrying upstream|tool:read|text:hello" {
 		t.Fatalf("unexpected callback order: %s", got)
@@ -884,6 +925,29 @@ func TestStreamProviderWithRetryRejectsTransportReconnectAfterText(t *testing.T)
 	}
 }
 
+func TestStreamProviderWithRetryTimingExcludesDiscardedPrivateAttempt(t *testing.T) {
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			{Kind: domainmodel.ChunkReasoning, Text: "discarded private attempt"},
+			{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2},
+			{Kind: domainmodel.ChunkText, Text: "replacement"},
+			{Kind: domainmodel.ChunkDone},
+		},
+	}}}
+	var retryAt time.Time
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider,
+		Callbacks: ProviderStreamCallbacks{OnProviderRetrying: func(int, int, error) error {
+			retryAt = time.Now()
+			return nil
+		}},
+	})
+	if err != nil || retryAt.IsZero() || output.Result.HostTiming.FirstContentAt.Before(retryAt) ||
+		output.Result.HostTiming.FirstTextAt.Before(retryAt) || output.Reasoning != "" {
+		t.Fatalf("replacement candidate retained discarded timing or reasoning: err=%v timing=%+v", err, output.Result.HostTiming)
+	}
+}
+
 func TestStreamProviderWithRetryBindsDistinctOuterAttempts(t *testing.T) {
 	provider := &providerStreamStub{responses: []providerStreamResponse{
 		{err: fakeProviderRetryError{retryable: true}},
@@ -1388,5 +1452,80 @@ func TestStreamProviderWithRetryDoesNotPublishTextFromFailedToolAttempt(t *testi
 	})
 	if err == nil || len(provider.requests) != 1 || !output.PartialToolStarted || output.Text != "" || public != "" {
 		t.Fatalf("failed tool attempt published text: calls=%d output=%#v public=%q err=%v", len(provider.requests), output, public, err)
+	}
+}
+
+func TestProviderStreamByteBudgetRejectsBeforeCallbacksAndReturnedMaterial(t *testing.T) {
+	for _, mode := range []string{"callback", "ignored callback", "result", "reasoning", "tool", "tool identity"} {
+		t.Run(mode, func(t *testing.T) {
+			observed := 0
+			chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: "12345"}
+			if mode == "reasoning" {
+				chunk.Kind = domainmodel.ChunkReasoning
+			}
+			if mode == "tool" {
+				chunk = domainmodel.Chunk{Kind: domainmodel.ChunkToolCall, ToolCall: domainmodel.ToolCall{Name: "abc", Arguments: []byte(`{}`)}}
+			}
+			if mode == "tool identity" {
+				chunk = domainmodel.Chunk{Kind: domainmodel.ChunkToolCallStart, ToolCall: domainmodel.ToolCall{ID: "12345"}}
+			}
+			provider := auxiliaryProviderFunc(func(_ context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+				if mode != "result" {
+					err := request.OnChunk(chunk)
+					if !errors.Is(err, ErrProviderOutputByteBudgetExceeded) {
+						t.Fatalf("oversized chunk accepted: %v", err)
+					}
+					if mode != "ignored callback" {
+						return domainmodel.Result{}, err
+					}
+				}
+				return domainmodel.Result{Chunks: []domainmodel.Chunk{chunk}, StreamCompleted: true}, nil
+			})
+			output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, MaxOutputBytes: 4, MaxAttempts: 1,
+				Request:   domainmodel.Request{Messages: []domainmodel.Message{{Role: "user", Content: "continue"}}},
+				Callbacks: ProviderStreamCallbacks{OnTextDelta: func(string) error { observed++; return nil }},
+			})
+			if !errors.Is(err, ErrProviderOutputByteBudgetExceeded) || observed != 0 || output.Text != "" || len(output.Result.Chunks) != 0 {
+				t.Fatalf("oversized material escaped budget: callbacks=%d err=%v", observed, err)
+			}
+		})
+	}
+}
+
+// This measures the complete local stream use case (validation, projection,
+// chunk budgets, decoder, normalization and final callback), without sockets,
+// persistence or UI. The separate installed measurement owns those stages.
+func BenchmarkProviderStreamChunking(b *testing.B) {
+	for _, kind := range []domainmodel.ChunkKind{domainmodel.ChunkText, domainmodel.ChunkReasoning} {
+		for _, count := range []int{1, 64, 1024} {
+			for _, unit := range []string{"a", "字"} {
+				b.Run(fmt.Sprintf("%s/%d/%d", kind, count, len(unit)), func(b *testing.B) {
+					value := strings.Repeat(unit, (64*1024)/len(unit))
+					runes := []rune(value)
+					chunks := make([]domainmodel.Chunk, 0, count+1)
+					for i := 0; i < count; i++ {
+						chunks = append(chunks, domainmodel.Chunk{Kind: kind, Text: string(runes[len(runes)*i/count : len(runes)*(i+1)/count])})
+					}
+					chunks = append(chunks, domainmodel.Chunk{Kind: domainmodel.ChunkDone})
+					b.ReportAllocs()
+					b.SetBytes(int64(len(value)))
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						provider := &providerStreamStub{responses: []providerStreamResponse{{callbackChunks: chunks, resultChunks: chunks}}}
+						out, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, Request: domainmodel.Request{MaxOutputTokens: 65536}, MaxOutputBytes: 256 * 1024})
+						if err != nil {
+							b.Fatal(err)
+						}
+						got := out.Text
+						if kind == domainmodel.ChunkReasoning {
+							got = out.Reasoning
+						}
+						if got != value {
+							b.Fatal("stream output changed")
+						}
+					}
+				})
+			}
+		}
 	}
 }

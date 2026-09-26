@@ -224,7 +224,7 @@ const A0_APP_KEYS = new Set([
   'packagedScheduleStrictEmptyInputSchemaBound',
   'packagedScheduleNonMutatingListImplementationBound',
   'codeSignatureVerified', 'nativeDispositionKind',
-  'developmentNativeDisposition', 'controlledReleaseNativeReceipt',
+  'developmentNativeDisposition', 'controlledReleaseNativeReceipt', 'controlledCoreQualification',
   'worktreeSnapshotBinding', 'bundledRuntimeGoSourcePresent'
 ])
 const B1_ARTIFACT_KEYS = new Set([
@@ -1616,6 +1616,62 @@ export function evaluateRuntimeGoFormalEvidence({
       : null,
     problems
   }
+}
+
+// Core has the same A0 and exact-artifact requirements as Full. Its authenticated
+// absence of professional payloads makes B1 inapplicable to this stage only.
+// This projection never issues publication authority or Full product admission.
+export function evaluateRuntimeGoCoreFormalEvidence({ repoRoot, bundleDirectory = '', source, exactFormalArtifact } = {}) {
+  const result = {
+    contract: 'analytix.runtime-go-core-formal-evidence/v1', stage: 'core',
+    provided: Boolean(bundleDirectory), accepted: false, publicationReceiptIssued: false,
+    statuses: { electron: 'not_executed', package: 'not_executed', a0: 'not_executed', b1: 'not_applicable_core' },
+    reports: null, artifactBinding: null, problems: []
+  }
+  if (!bundleDirectory) return result
+  const problems = []
+  if (!currentSourceValid(source)) return { ...result, problems: ['formal_evidence_current_source_invalid'] }
+  let file
+  try {
+    const directory = stableFormalEvidenceDirectory(bundleDirectory)
+    file = readStableFormalReport(directory, FORMAL_REPORT_FILES.a0)
+    if (!stableFormalEvidenceDirectoryIdentity(directory)) throw Error('formal_evidence_directory_changed_during_read')
+    problems.push(...validateA0(file.report, { source, a0Harness: currentHarnessEntries(repoRoot, A0_HARNESS_FILES) }))
+  } catch (error) { return { ...result, problems: [safeReadFailure(error)] } }
+  const appAsar = exactAppAsarBinding(exactFormalArtifact)
+  const validation = validatePackagedAuthority(exactFormalArtifact, source, appAsar)
+  problems.push(...validation.problems)
+  let authority
+  try {
+    authority = readStableAuthorityFile(packagedAuthorityPath(exactFormalArtifact)).authority
+    if (!packagedAuthority().isPackagedBuildAuthorityV2(authority) ||
+        authority.nativeDisposition.kind !== 'core_controlled_release' ||
+        authority.classification !== 'controlled_release_clean_candidate_non_publishable') {
+      throw Error('core_formal_qualification_required')
+    }
+    require('./mac-notarize.cjs')._internals.verifyDataNativeAfterSign(
+      darwinPackagedContext(exactFormalArtifact), { requireDeveloperID: true, requireSecureTimestamp: true })
+    if (authority.authorityDigest !== validation.evidence?.digest) throw Error('core_formal_authority_changed')
+  } catch (error) {
+    problems.push(error?.message === 'core_formal_qualification_required'
+      ? 'core_formal_qualification_required' : 'core_formal_developer_id_or_authority_verification_failed')
+  }
+  const app = file.report.app || {}
+  staticProblem(problems, app.controlledCoreQualification === true && validation.evidence && appAsar &&
+    app.authoritySha256 === validation.evidence.sha256 && app.authorityDigest === validation.evidence.digest &&
+    app.executableSha256 === validation.evidence.currentExecutableSha256 &&
+    app.runtimeServerSha256 === validation.evidence.currentRuntimeServerSha256 && app.appAsarSha256 === appAsar.sha256 &&
+    app.worktreeSnapshotBinding?.packaged?.digest === validation.evidence.worktreeSnapshotDigest &&
+    app.worktreeSnapshotBinding?.packaged?.authorityClassification === validation.evidence.classification,
+  'core_formal_exact_artifact_mismatch')
+  // Last read belongs to the existing whole-artifact legal owner, after signature
+  // inspection. A source-only inventory or an earlier artifact is insufficient.
+  problems.push(...revalidateExactArtifactLegalInventory(exactFormalArtifact).problems)
+  const accepted = problems.length === 0
+  return { ...result, accepted,
+    statuses: { electron: accepted ? 'passed' : 'failed', package: accepted ? 'passed' : 'failed', a0: accepted ? 'passed' : 'failed', b1: 'not_applicable_core' },
+    reports: { a0: { fileName: FORMAL_REPORT_FILES.a0, sha256: file.sha256, byteLength: file.byteLength, lane: 'ordinary-a0' } },
+    artifactBinding: validation.evidence, problems: [...new Set(problems)] }
 }
 
 export const runtimeGoFormalEvidenceContract = Object.freeze({

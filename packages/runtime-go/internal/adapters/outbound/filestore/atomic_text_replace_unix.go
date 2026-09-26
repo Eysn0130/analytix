@@ -5,7 +5,6 @@ package filestore
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +23,7 @@ type atomicUnixState struct {
 	identity atomicUnixIdentity
 }
 
-func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) (atomicTextState, error) {
+func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool, maxBytes int64, policy atomicTextReadPolicy) (atomicTextState, error) {
 	parent, base, missing, err := openAtomicUnixParent(path, false)
 	if err != nil {
 		return atomicTextState{}, err
@@ -36,7 +35,7 @@ func inspectAtomicTextTargetPlatform(path string, missingParentsAreAbsent bool) 
 		return atomicTextState{}, os.ErrNotExist
 	}
 	defer unix.Close(parent)
-	state, err := inspectAtomicUnixTarget(parent, base)
+	state, err := inspectAtomicUnixTarget(parent, base, maxBytes, policy)
 	return state.state, err
 }
 
@@ -50,7 +49,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	}
 	defer unix.Close(parent)
 
-	initial, err := inspectAtomicUnixTarget(parent, base)
+	initial, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return err
 	}
@@ -89,7 +88,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return fmt.Errorf("sync atomic text temporary file: %w", err)
 	}
 
-	current, err := inspectAtomicUnixTarget(parent, base)
+	current, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 		return fmt.Errorf("replace atomic text target: %w", err)
 	}
 	if request.ExpectedExists {
-		displaced, displacedErr := inspectAtomicUnixTarget(parent, tempName)
+		displaced, displacedErr := inspectAtomicUnixTarget(parent, tempName, request.MaxBytes, request.ReadPolicy)
 		if displacedErr != nil || validateAtomicTextBefore(request, displaced.state) != nil || !sameAtomicUnixState(initial, displaced) {
 			rollbackErr := rollbackAtomicUnixTextSwap(parent, tempName, base)
 			if rollbackErr != nil {
@@ -126,7 +125,7 @@ func atomicReplaceTextPlatform(request atomicTextReplaceRequest, hooks *atomicTe
 	}
 	tempOpen = false
 
-	replaced, err := inspectAtomicUnixTarget(parent, base)
+	replaced, err := inspectAtomicUnixTarget(parent, base, request.MaxBytes, request.ReadPolicy)
 	if err != nil {
 		return fmt.Errorf("verify atomic text replacement: %w", err)
 	}
@@ -222,7 +221,7 @@ func canonicalAtomicUnixSystemAlias(path string) (string, error) {
 	return clean, nil
 }
 
-func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
+func inspectAtomicUnixTarget(parent int, base string, maxBytes int64, policy atomicTextReadPolicy) (atomicUnixState, error) {
 	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return atomicUnixState{}, nil
@@ -230,7 +229,7 @@ func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
 	if err != nil {
 		return atomicUnixState{}, fmt.Errorf("%w: open target without following links: %v", ErrAtomicTextUnsafePath, err)
 	}
-	file := os.NewFile(uintptr(fd), base)
+	file := os.NewFile(uintptr(fd), "atomic-text-target")
 	if file == nil {
 		_ = unix.Close(fd)
 		return atomicUnixState{}, errors.New("atomic text target handle is invalid")
@@ -243,7 +242,13 @@ func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
 	if before.Mode&unix.S_IFMT != unix.S_IFREG {
 		return atomicUnixState{}, fmt.Errorf("%w: target is not a regular file", ErrAtomicTextUnsafePath)
 	}
-	content, readErr := io.ReadAll(file)
+	if policy.RequireSingleLink && before.Nlink != 1 {
+		return atomicUnixState{}, fmt.Errorf("%w: target must have exactly one link", ErrAtomicTextUnsafePath)
+	}
+	if maxBytes > 0 && before.Size > maxBytes {
+		return atomicUnixState{}, ErrAtomicTextTooLarge
+	}
+	content, readErr := readAtomicTextContent(file, maxBytes)
 	if readErr != nil {
 		return atomicUnixState{}, readErr
 	}
@@ -254,6 +259,9 @@ func inspectAtomicUnixTarget(parent int, base string) (atomicUnixState, error) {
 	}
 	if err := unix.Fstatat(parent, base, &linked, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return atomicUnixState{}, fmt.Errorf("%w: target changed while being read: %v", ErrAtomicTextBeforeDrift, err)
+	}
+	if policy.RequireSingleLink && (after.Nlink != 1 || linked.Nlink != 1) {
+		return atomicUnixState{}, fmt.Errorf("%w: target link count changed while being read", ErrAtomicTextUnsafePath)
 	}
 	if !sameAtomicUnixStat(before, after) || !sameAtomicUnixStat(after, linked) || int64(len(content)) != after.Size {
 		return atomicUnixState{}, fmt.Errorf("%w: target changed while being read", ErrAtomicTextBeforeDrift)

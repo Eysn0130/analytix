@@ -1,8 +1,13 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { clearWritePdfTextCache, readWritePdfText } from './write-pdf-text-service'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearWritePdfTextCache, readWritePdfText, readWritePdfBytes } from './write-pdf-text-service'
+
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
 
 function escapePdfText(text: string): string {
   return text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')
@@ -43,6 +48,16 @@ afterEach(() => {
 })
 
 describe('write PDF text service', () => {
+  it('parses authorized bytes without reopening a file and refuses a revoked owner', async () => {
+    vi.mocked(readFile).mockClear()
+    const bytes = createSimpleTextPdf('Authorized PDF context')
+    const result = await readWritePdfBytes(bytes, () => true)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.pages[0].text).toContain('Authorized PDF context')
+    expect(await readWritePdfBytes(bytes, () => false)).toMatchObject({ ok: false })
+    expect(readFile).not.toHaveBeenCalled()
+  })
+
   it('extracts page text from a text-layer PDF fixture', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'analytix-write-pdf-text-'))
     const pdfPath = join(workspaceRoot, 'papers', 'fixture.pdf')

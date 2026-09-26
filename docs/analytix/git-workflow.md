@@ -3,6 +3,10 @@
 Status: Operational. The canonical checkout and GitHub `main` share the public
 history rooted at `eed7dfb1a1e6cdd50002f7ce8fcb2e2888b0547d`.
 
+Primary development and product execution use Codex Desktop on the configured
+local Mac; ChatGPT + GitHub is auxiliary. Both routes follow this same Git
+workflow and the [execution boundaries](development-runbook.md#development-routes).
+
 ## Branch → PR → CI/acceptance → Merge main
 
 `main` is the shared canonical integration baseline, not the working branch for
@@ -10,7 +14,8 @@ normal changes. Features, Runtime, Plugin, security, dependencies and cross-laye
 changes use short-lived `codex/*` branches. This supersedes the earlier direct-main
 push workflow without rewriting commits already published under that workflow.
 
-In a clean project checkout, before editing:
+For new work in a clean project checkout, before editing (an explicitly
+continued open PR instead retains its verified branch and newer candidate):
 
 ```sh
 git status --short --branch
@@ -71,7 +76,9 @@ tests, isolated Linux/macOS held-state restart contracts and all Rust component 
 requires a PR, that check from GitHub Actions, an up-to-date candidate and resolved
 review conversations. It retains force-update/deletion protection with no bypass
 actor. It does not invent an extra mandatory second approver; applicable review
-and product acceptance still need real evidence. CI success alone is not live
+and product acceptance still need real evidence. The current rules also require
+extra approval for unattributed changes (`require_extra_approval_for_unattributed_changes`);
+ordinary approval count zero does not waive that condition. CI success alone is not live
 Provider, installer or release acceptance. Existing baseline failures remain
 failures and must be repaired on branches, not exempted to merge this workflow.
 

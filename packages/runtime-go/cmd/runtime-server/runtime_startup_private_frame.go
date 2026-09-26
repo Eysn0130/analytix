@@ -29,6 +29,7 @@ type runtimeStartupPrivateFrameV1 struct {
 	Purpose                            string                                     `json:"purpose"`
 	ProtectedAuthorityV1               *runtimeMainOwnedAuthorityEnvelopeV1       `json:"protectedAuthorityV1,omitempty"`
 	DarwinSecretStoreKeychainBindingV1 *runtimeDarwinSecretStoreKeychainBindingV1 `json:"darwinSecretStoreKeychainBindingV1,omitempty"`
+	DevelopmentProviderAuthorityDir    string                                     `json:"developmentProviderAuthorityDir,omitempty"`
 	HostScheduleMCPBindingV1           *runtimeHostScheduleMCPBindingV1           `json:"hostScheduleMcpBindingV1,omitempty"`
 }
 
@@ -87,8 +88,8 @@ type runtimeMainOwnedAuthorityConfigV1 struct {
 
 // readRuntimeStartupPrivateFrameV1 consumes one length-prefixed canonical
 // startup document and requires EOF. Authority, the exact host schedule
-// projection, and the validated Darwin task Keychain binding are the only
-// accepted capabilities; every unknown field is closed.
+// projection, the validated Darwin task Keychain binding or explicit source
+// development credential directory are accepted; unknown fields remain closed.
 func readRuntimeStartupPrivateFrameV1(reader io.Reader) (runtimeStartupPrivateFrameV1, error) {
 	if reader == nil {
 		return runtimeStartupPrivateFrameV1{}, errors.New("runtime private startup frame is unavailable")
@@ -123,7 +124,7 @@ func readRuntimeStartupPrivateFrameV1(reader io.Reader) (runtimeStartupPrivateFr
 	}
 	if frame.SchemaVersion != 1 || frame.Purpose != runtimeStartupPrivateFramePurposeV1 ||
 		(frame.ProtectedAuthorityV1 == nil && frame.HostScheduleMCPBindingV1 == nil &&
-			frame.DarwinSecretStoreKeychainBindingV1 == nil) {
+			frame.DarwinSecretStoreKeychainBindingV1 == nil && frame.DevelopmentProviderAuthorityDir == "") {
 		return runtimeStartupPrivateFrameV1{}, errors.New("runtime private startup frame payload is invalid")
 	}
 	if frame.ProtectedAuthorityV1 != nil {
@@ -140,6 +141,9 @@ func readRuntimeStartupPrivateFrameV1(reader io.Reader) (runtimeStartupPrivateFr
 		if err := frame.DarwinSecretStoreKeychainBindingV1.validateDocument(); err != nil {
 			return runtimeStartupPrivateFrameV1{}, errors.New("runtime private startup frame payload is invalid")
 		}
+	}
+	if frame.DevelopmentProviderAuthorityDir != "" && (frame.DarwinSecretStoreKeychainBindingV1 != nil || !filepath.IsAbs(frame.DevelopmentProviderAuthorityDir) || filepath.Clean(frame.DevelopmentProviderAuthorityDir) != frame.DevelopmentProviderAuthorityDir || filepath.Base(frame.DevelopmentProviderAuthorityDir) != "provider-credentials") {
+		return runtimeStartupPrivateFrameV1{}, errors.New("development Provider authority is invalid")
 	}
 	canonical, err := json.Marshal(frame)
 	if err != nil || !bytes.Equal(canonical, body) {

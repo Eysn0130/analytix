@@ -45,9 +45,12 @@ type keychainCommandRunner interface {
 	Run(context.Context, []string, []byte) (keychainCommandResult, error)
 }
 
-type securityCommandRunner struct{}
+type securityCommandRunner struct {
+	keychainDBPath string
+	checkUnlocked  func(context.Context, string) bool
+}
 
-func (securityCommandRunner) Run(ctx context.Context, arguments []string, stdin []byte) (keychainCommandResult, error) {
+func (runner securityCommandRunner) Run(ctx context.Context, arguments []string, stdin []byte) (keychainCommandResult, error) {
 	// A locked Keychain may wait indefinitely for SecurityAgent interaction.
 	// Unlock is an explicit host operation; credential reads/writes must return
 	// a bounded failure and preserve any unconfirmed write outcome.
@@ -56,6 +59,18 @@ func (securityCommandRunner) Run(ctx context.Context, arguments []string, stdin 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if runner.keychainDBPath != "" {
+		check := runner.checkUnlocked
+		if check == nil {
+			check = taskKeychainUnlocked
+		}
+		// Metadata reads must not turn an already locked task Keychain into a
+		// background password dialog. Keep the command deadline as a second
+		// boundary: the Keychain can still lock after this preflight.
+		if !check(ctx, runner.keychainDBPath) {
+			return keychainCommandResult{}, portsecretstore.ErrMasterKeyUnavailable
+		}
+	}
 	command := exec.CommandContext(ctx, keychainSecurityPath, arguments...)
 	command.WaitDelay = time.Second
 	if stdin != nil {
@@ -120,23 +135,17 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 		clearBytes(candidate)
 		return nil, err
 	}
-	arguments := []string{"add-generic-password", "-s", keychainService, "-a", keychainAccount}
-	addInput := encoded
-	if provider.keychainDBPath != "" {
-		arguments = []string{"-i"}
-		addInput, err = explicitDarwinKeychainAddInput(encoded[:len(encoded)-1], provider.keychainDBPath)
-		if err != nil {
-			clearBytes(encoded)
-			clearBytes(candidate)
-			return nil, portsecretstore.ErrMasterKeyUnavailable
-		}
-	} else {
-		arguments = append(arguments, "-w")
+	// security add-generic-password -w without an argv value prompts twice.
+	// Send one bounded command to security -i so the key stays off argv and
+	// the default Keychain path is as non-interactive as the explicit path.
+	addInput, err := darwinKeychainAddInput(encoded[:len(encoded)-1], provider.keychainDBPath)
+	if err != nil {
+		clearBytes(encoded)
+		clearBytes(candidate)
+		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
-	result, addErr := provider.runner.Run(ctx, arguments, addInput)
-	if provider.keychainDBPath != "" {
-		clearBytes(addInput)
-	}
+	result, addErr := provider.runner.Run(ctx, []string{"-i"}, addInput)
+	clearBytes(addInput)
 	clearBytes(encoded)
 	clearBytes(result.stdout)
 	if errors.Is(addErr, errOSCredentialUnavailable) {
@@ -198,8 +207,15 @@ func (provider *keychainMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]
 }
 
 func explicitDarwinKeychainAddInput(candidateToken []byte, databasePath string) ([]byte, error) {
+	if !darwinSafeTaskKeychainPath(databasePath) {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	return darwinKeychainAddInput(candidateToken, databasePath)
+}
+
+func darwinKeychainAddInput(candidateToken []byte, databasePath string) ([]byte, error) {
 	if len(candidateToken) != base64.StdEncoding.EncodedLen(masterKeySize) ||
-		!darwinSafeTaskKeychainPath(databasePath) {
+		(databasePath != "" && !darwinSafeTaskKeychainPath(databasePath)) {
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	decoded := make([]byte, masterKeySize)
@@ -218,8 +234,10 @@ func explicitDarwinKeychainAddInput(candidateToken []byte, databasePath string) 
 	input := make([]byte, 0, len(prefix)+len(candidateToken)+1+len(databasePath)+1)
 	input = append(input, prefix...)
 	input = append(input, candidateToken...)
-	input = append(input, ' ')
-	input = append(input, databasePath...)
+	if databasePath != "" {
+		input = append(input, ' ')
+		input = append(input, databasePath...)
+	}
 	input = append(input, '\n')
 	return input, nil
 }
@@ -301,16 +319,43 @@ const (
 )
 
 type darwinMasterKeyProvider struct {
-	authorityPath string
-	keychain      *keychainMasterKeyProvider
-	fallback      *fallbackMasterKeyProvider
-	mu            sync.Mutex
+	developmentFile bool
+	ordinaryFile    bool
+	storePath       string
+	authorityPath   string
+	keychain        *keychainMasterKeyProvider
+	fallback        *fallbackMasterKeyProvider
+	mu              sync.Mutex
 }
 
 func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]byte, error) {
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 
+	if provider.developmentFile || provider.ordinaryFile {
+		authority, err := provider.readAuthority()
+		if errors.Is(err, os.ErrNotExist) {
+			// A lost marker in a populated profile is not fresh provisioning.
+			// In particular, never create a file key over legacy Keychain
+			// ciphertext after an interrupted upgrade. The existing
+			// development file-authority route retains its prior behavior.
+			if provider.ordinaryFile && provider.storePath != "" {
+				fallbackKey, fallbackErr := provider.fallback.readWithBoundedInitializationWait()
+				clearBytes(fallbackKey)
+				if fallbackErr != nil && !errors.Is(fallbackErr, os.ErrNotExist) {
+					return nil, portsecretstore.ErrMasterKeyUnavailable
+				}
+				if errors.Is(fallbackErr, os.ErrNotExist) && !freshDarwinFileAuthorityProfile(provider.storePath) {
+					return nil, portsecretstore.ErrMasterKeyUnavailable
+				}
+			}
+			authority, err = provider.selectAuthority(darwinAuthorityFallback)
+		}
+		if err != nil || authority != darwinAuthorityFallback {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+		return provider.fallback.LoadOrCreate(ctx)
+	}
 	authority, err := provider.readAuthority()
 	if err == nil {
 		return provider.loadSelected(ctx, authority)
@@ -357,6 +402,14 @@ func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]by
 	}
 	clearBytes(probedKey)
 	return provider.loadSelected(ctx, winner)
+}
+
+func freshDarwinFileAuthorityProfile(storePath string) bool {
+	// The Registry is created before the first visible Save. Its committed
+	// references are verified by Manager.Recover before any mutation, while the
+	// Secret Store must never mint a new key over existing ciphertext.
+	_, err := os.Lstat(storePath)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func (provider *darwinMasterKeyProvider) loadSelected(ctx context.Context, authority darwinMasterKeyAuthority) ([]byte, error) {
@@ -444,6 +497,19 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 	}
 	directory := filepath.Join(filepath.Dir(storePath), "master-key")
 	bindingPath := filepath.Join(directory, darwinExplicitBindingFile)
+	if options.DevelopmentFileAuthority && !options.empty() {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	if options.LegacyReentryFileAuthority && (options.DevelopmentFileAuthority || !options.empty() ||
+		filepath.Base(storePath) != "credentials.v2.json" || filepath.Base(filepath.Dir(storePath)) != "provider-secrets-v2") {
+		return nil, portsecretstore.ErrMasterKeyUnavailable
+	}
+	if options.LegacyReentryFileAuthority {
+		legacyPath := filepath.Join(filepath.Dir(filepath.Dir(storePath)), "provider-secrets", "credentials.v1.json")
+		if verifyLegacyKeychainMarker(legacyPath) != nil {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+	}
 	if !options.empty() {
 		if options.DarwinKeychainDBPath == "" || options.DarwinKeychainBindingDigest == "" ||
 			options.DarwinKeychainSecurityDigest == "" || options.DarwinKeychainAuthorityStorePath == "" ||
@@ -474,7 +540,7 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 			return nil, portsecretstore.ErrMasterKeyUnavailable
 		}
 		return &keychainMasterKeyProvider{
-			runner: securityCommandRunner{}, random: rand.Reader,
+			runner: securityCommandRunner{keychainDBPath: options.DarwinKeychainDBPath}, random: rand.Reader,
 			bindingPath: bindingPath, binding: binding,
 			keychainDBPath:         options.DarwinKeychainDBPath,
 			keychainSecurityDigest: options.DarwinKeychainSecurityDigest,
@@ -484,7 +550,10 @@ func defaultMasterKeyProvider(storePath string, options Options) (masterKeyProvi
 		return nil, portsecretstore.ErrMasterKeyUnavailable
 	}
 	return &darwinMasterKeyProvider{
-		authorityPath: filepath.Join(directory, darwinAuthorityFile),
+		developmentFile: options.DevelopmentFileAuthority,
+		ordinaryFile:    !options.DevelopmentFileAuthority,
+		storePath:       storePath,
+		authorityPath:   filepath.Join(directory, darwinAuthorityFile),
 		keychain: &keychainMasterKeyProvider{
 			runner: securityCommandRunner{},
 			random: rand.Reader,

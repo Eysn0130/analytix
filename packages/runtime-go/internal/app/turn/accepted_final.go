@@ -48,6 +48,7 @@ type PersistAcceptedFinalInput struct {
 }
 
 type PersistAcceptedFinalResult struct {
+	Timing           PublicationTiming `json:"-"`
 	CompletionRecord CompletionRecord
 	AcceptedFinal    domainevidence.AcceptedFinalRecord
 	Publication      AcceptedFinalPublicationPlan
@@ -101,6 +102,7 @@ func PersistAcceptedFinalTerminal(input PersistAcceptedFinalInput) (PersistAccep
 	if !ok {
 		return PersistAcceptedFinalResult{}, errors.New("accepted final completion store lacks authorized CAS")
 	}
+	timing := PublicationTiming{ProjectionReadyAt: time.Now()}
 	changed, status, err := authorizedStore.FinishTurnIfActiveWithAcceptedFinalAuthority(
 		input.ThreadID, input.TurnID, terminalStatus, publication.TurnItems, publication.TurnFields,
 		privateFinal, input.FactAuthority,
@@ -108,7 +110,8 @@ func PersistAcceptedFinalTerminal(input PersistAcceptedFinalInput) (PersistAccep
 	if err != nil || !changed {
 		return PersistAcceptedFinalResult{CompletionRecord: publication.Completion, AcceptedFinal: acceptedFinal, Publication: publication, Changed: changed, Status: status}, err
 	}
-	return PersistAcceptedFinalResult{CompletionRecord: publication.Completion, AcceptedFinal: acceptedFinal, Publication: publication, Changed: true, Status: status}, nil
+	timing.CommittedAt = time.Now()
+	return PersistAcceptedFinalResult{Timing: timing, CompletionRecord: publication.Completion, AcceptedFinal: acceptedFinal, Publication: publication, Changed: true, Status: status}, nil
 }
 
 func ValidatePrivateAcceptedFinalMutationAuthority(

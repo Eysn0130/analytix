@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test'
 import { createRequire } from 'node:module'
 
 import {
+  putObject,
   RELEASE_PUBLICATION_AUTHORITY_CONTRACT,
   releasePublicationAuthorityDigest,
   releasePublicationAuthoritySignaturePayload,
@@ -72,7 +73,7 @@ function signReceipt(receiptWithoutDigestAndSignature, privateKey) {
   return { ...receiptWithoutDigestAndSignature, receiptDigest, signature }
 }
 
-function makeFixture() {
+function makeFixture(core = false) {
   const root = mkdtempSync(join(tmpdir(), 'analytix-release-authority-'))
   const distDir = join(root, 'dist')
   require('node:fs').mkdirSync(distDir)
@@ -81,19 +82,21 @@ function makeFixture() {
   stableWrite(publicKeyPath, publicKey.export({ type: 'spki', format: 'pem' }))
 
   const targetKey = 'darwin-arm64'
+  const golden = JSON.parse(readFileSync(join(process.cwd(), 'packages/runtime-go/internal/domain/packagedbuildauthority/testdata/packaged-build-authority-v2-js-golden.json'), 'utf8'))
   const packagedAuthority = packagedAuthorityContract.createPackagedBuildAuthorityV2({
+    ...golden,
     worktreeSnapshot: cleanWorktreeSnapshot(),
     targetKey,
     nativeDisposition: {
-      kind: 'controlled_release_receipt',
+      kind: core ? 'core_controlled_release' : 'controlled_release_receipt',
       targetKey,
-      receiptSha256: '2'.repeat(64),
-      manifestSha256: '3'.repeat(64),
+      ...(core ? {} : { receiptSha256: '2'.repeat(64), manifestSha256: '3'.repeat(64) }),
       signingPolicySha256: '4'.repeat(64),
       signingMode: 'developer-id',
       appleTeamIdentifier: TEAM_IDENTIFIER
     },
     artifacts: {
+      fundsPlugin: core ? require('./core-package-profile.cjs').ABSENT_FUNDS : golden.artifacts.fundsPlugin,
       executable: artifactBinding('mach-o', 'arm64', '5'),
       appAsar: { sha256: '6'.repeat(64), byteLength: 128 },
       runtimeServer: artifactBinding('mach-o', 'arm64', '7')
@@ -104,16 +107,21 @@ function makeFixture() {
   const packagedAuthorityPath = join(distDir, packagedAuthorityFileName)
   stableWrite(packagedAuthorityPath, JSON.stringify(packagedAuthority))
 
-  const dmgFileName = 'analytix-9.9.9-mac-arm64.dmg'
+  const dmgFileName = `analytix-${core ? 'core-' : ''}9.9.9-mac-arm64.dmg`
   const dmgPath = join(distDir, dmgFileName)
   stableWrite(dmgPath, Buffer.from('signed-notarized-stapled-dmg-fixture', 'utf8'))
+  const zipFileName = 'analytix-core-9.9.9-mac-arm64.zip'
+  const zipBytes = Buffer.from('synthetic signed ZIP')
+  if (core) stableWrite(join(distDir, zipFileName), zipBytes)
   const updateFileName = 'latest-mac.yml'
   const updatePath = join(distDir, updateFileName)
   stableWrite(updatePath, [
     'version: 9.9.9',
+    ...(core ? ['analytixProfile: core', 'analytixTarget: darwin-arm64', 'analytixChannel: stable', 'analytixAppId: com.analytix.desktop', 'analytixDataCompatibility: core-v1'] : []),
     'files:',
+    ...(core ? [`  - url: ${zipFileName}`, `    sha512: ${require('node:crypto').createHash('sha512').update(zipBytes).digest('base64')}`, `    size: ${zipBytes.length}`] : []),
     `  - url: ${dmgFileName}`,
-    '    sha512: fixture-only',
+    `    sha512: ${core ? require('node:crypto').createHash('sha512').update(readFileSync(dmgPath)).digest('base64') : 'fixture-only'}`,
     `    size: ${readFileSync(dmgPath).length}`,
     'releaseDate: 2026-07-23T00:00:00.000Z',
     ''
@@ -140,7 +148,7 @@ function makeFixture() {
       sha256: sha256(readFileSync(packagedAuthorityPath)),
       authorityDigest: packagedAuthority.authorityDigest
     }],
-    artifacts: [dmgFileName, updateFileName].sort().map((fileName) => {
+    artifacts: [dmgFileName, updateFileName, ...(core ? [zipFileName] : [])].sort().map((fileName) => {
       const bytes = readFileSync(join(distDir, fileName))
       return {
         platform: 'mac',
@@ -433,4 +441,28 @@ test('rejects a tampered receipt that was not re-signed', async () => {
     }),
     /release_publication_authority_invalid/
   )
+})
+
+test('controlled Core publication requires signed exact authority and compatible update bytes', async () => {
+  const core = makeFixture(true)
+  const options = { authorityPath: core.authorityPath, publicKeyPath: core.publicKeyPath, tag: TAG, channel: CHANNEL, sourceCommit: SOURCE_COMMIT, platforms: ['mac'], distDirs: { mac: core.distDir }, officialTeamIdentifier: TEAM_IDENTIFIER, trustedPublicKeySha256: sha256(readFileSync(core.publicKeyPath)), now: core.now }
+  try {
+    const result = await verifyReleasePublicationAuthority(options)
+    assert.equal(result.releaseProfile, 'core')
+    // A test signature exercises the owner; it is not the production trust root.
+    stableWrite(join(core.distDir, 'analytix-core-9.9.9-mac-arm64.zip'), Buffer.from('damaged archive'))
+    await assert.rejects(verifyReleasePublicationAuthority(options), /digest_mismatch|hash_mismatch/)
+  } finally { rmSync(core.root, {recursive:true}) }
+})
+
+
+test('version archive uploads never overwrite while channel pointers remain separately mutable', async () => {
+  const seen=[]
+  const config={bucket:'test-only',client:{send:async command=>{seen.push(command.input)}}}
+  await putObject({config,key:'analytix/core/darwin-arm64/channels/stable/releases/v1.0.7/file.zip',body:'synthetic',dryRun:false})
+  await putObject({config,key:'analytix/core/darwin-arm64/channels/stable/latest/latest-mac.yml',body:'synthetic',dryRun:false})
+  assert.equal(seen[0].IfNoneMatch,'*')
+  assert.equal(seen[1].IfNoneMatch,undefined)
+  config.client.send=async()=>{throw Object.assign(Error('synthetic collision'),{name:'PreconditionFailed'})}
+  await assert.rejects(putObject({config,key:'analytix/channels/stable/releases/v1.0.7/file.zip',body:'new bytes',dryRun:false}),/collision/)
 })

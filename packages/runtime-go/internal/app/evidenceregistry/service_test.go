@@ -1188,3 +1188,59 @@ func (store *memoryRegistryCapsuleStore) Resolve(_ context.Context, digest strin
 	}
 	return record, nil
 }
+
+func TestRecoveredFactWitnessIsFreshExactScopedAndNonSerializable(t *testing.T) {
+	fixture := newWitnessedRegistryFixture(t)
+	input := witnessedRegistryIssueInput(t, fixture.securityContext, "recover-fact")
+	receipt, err := fixture.service.CommitPrepared(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := witnessedFactFinalRecord(t, fixture, input, receipt)
+	err = fixture.service.WithFactFinalWitnessAuthority(context.Background(), witnessedFactFinalRequest(t, fixture, record), func(cap registryport.FactFinalWitnessCapability) error {
+		var e error
+		record, e = cap.PrivateFinal()
+		return e
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := domainevidence.PrivateAcceptedFinalRecordBytes(record)
+	var escaped registryport.FactFinalWitnessCapability
+	calls := 0
+	err = fixture.service.WithRecoveredFactFinalWitness(context.Background(), record, func(cap registryport.FactFinalWitnessCapability) error {
+		escaped = cap
+		if _, e := json.Marshal(cap); e == nil {
+			t.Fatal("serialized recovery authority")
+		}
+		if e := cap.UseExact(record, func() error { calls++; return nil }); e != nil {
+			return e
+		}
+		altered := record
+		altered.RenderedText = "tampered"
+		if e := cap.UseExact(altered, func() error { calls++; return nil }); e == nil {
+			t.Fatal("changed record admitted")
+		}
+		fixture.advanceDatasetChildForTest(t)
+		if e := cap.UseExact(record, func() error { calls++; return nil }); e == nil {
+			t.Fatal("revoked selection admitted after recovery")
+		}
+		return nil
+	})
+	if err != nil || calls != 1 {
+		t.Fatalf("recovery calls=%d err=%v", calls, err)
+	}
+	if escaped.UseExact(record, func() error { return nil }) == nil {
+		t.Fatal("recovery authority escaped callback")
+	}
+	after, _ := domainevidence.PrivateAcceptedFinalRecordBytes(record)
+	if !bytes.Equal(before, after) {
+		t.Fatal("recovery rewrote original final")
+	}
+	if fixture.service.WithRecoveredFactFinalWitness(context.Background(), record, func(registryport.FactFinalWitnessCapability) error {
+		t.Fatal("stale recovery invoked callback")
+		return nil
+	}) == nil {
+		t.Fatal("stale recovery accepted")
+	}
+}

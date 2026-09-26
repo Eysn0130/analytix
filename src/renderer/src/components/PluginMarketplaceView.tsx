@@ -48,6 +48,7 @@ import type {
 import { redactSecretText } from '@shared/secret-redaction'
 import { useChatStore } from '../store/chat-store'
 import { TabButton, type MarketplaceNotice } from './PluginMarketplaceParts'
+import { BuiltinOfficePlugins } from './BuiltinOfficePlugins'
 
 type CatalogTab = 'plugin' | 'skill'
 type PluginKind = 'mcp' | 'skill'
@@ -2159,6 +2160,8 @@ export function PluginMarketplaceView({
             </div>
           </div>
         ) : null}
+
+        {activeKind === 'plugin' && !resolvedSelectedDetail ? <BuiltinOfficePlugins query={query} /> : null}
 
         {activeKind === 'skill' && !resolvedSelectedDetail ? (
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">

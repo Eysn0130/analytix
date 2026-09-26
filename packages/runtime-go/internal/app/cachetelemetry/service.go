@@ -62,15 +62,16 @@ type CacheRateV1 struct {
 }
 
 type AggregateV1 struct {
-	LogicalCallCount uint64
-	AttemptCount     uint64
-	Statuses         ProviderStatusCountsV1
-	InputTokens      AggregatedTokenCountV1
-	OutputTokens     AggregatedTokenCountV1
-	CacheHitTokens   AggregatedTokenCountV1
-	CacheMissTokens  AggregatedTokenCountV1
-	ReasoningTokens  AggregatedTokenCountV1
-	CacheRate        CacheRateV1
+	CostKnownAttempts, CostUSDNanos, CostCNYNanos uint64
+	LogicalCallCount                              uint64
+	AttemptCount                                  uint64
+	Statuses                                      ProviderStatusCountsV1
+	InputTokens                                   AggregatedTokenCountV1
+	OutputTokens                                  AggregatedTokenCountV1
+	CacheHitTokens                                AggregatedTokenCountV1
+	CacheMissTokens                               AggregatedTokenCountV1
+	ReasoningTokens                               AggregatedTokenCountV1
+	CacheRate                                     CacheRateV1
 }
 
 type SnapshotV1 struct {
@@ -226,6 +227,17 @@ func aggregateObservations(observations []domaincache.ProviderCallObservationV1)
 				observation.Shape.LogicalCallHMAC,
 				observation.Shape.Attempt,
 			)
+		}
+		if cost := observation.Usage.EstimatedCost; cost.Known {
+			aggregate.CostKnownAttempts++
+			total := &aggregate.CostUSDNanos
+			if cost.Currency == "CNY" {
+				total = &aggregate.CostCNYNanos
+			}
+			if *total > 9007199254740991-cost.NanoUnits {
+				return AggregateV1{}, ErrAggregateOverflow
+			}
+			*total += cost.NanoUnits
 		}
 		logicalCalls[observation.Shape.LogicalCallHMAC] = struct{}{}
 		if err := addStatus(&aggregate.Statuses, observation.Status); err != nil {

@@ -522,6 +522,25 @@ afterEach(async () => {
 })
 
 describe('startAnalytixChild', () => {
+  it('resolves the standalone development codec with the existing macOS Helper', async () => {
+    const { resolveDocumentCodecLaunch } = await import('./analytix-process')
+    expect(resolveDocumentCodecLaunch({ appPath: '/synthetic/source', execPath: '/synthetic/Electron.app/Contents/MacOS/Electron', isPackaged: false }, 'darwin')).toEqual({
+      executable: '/synthetic/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper',
+      entry: '/synthetic/source/out/office-codec/office-generation-codec-entry.js'
+    })
+  })
+
+  it('resolves the packaged codec to real unpacked files without using ASAR paths for Go', async () => {
+    const { resolveDocumentCodecLaunch } = await import('./analytix-process')
+    expect(resolveDocumentCodecLaunch({ appPath: '/synthetic/Analytix.app/Contents/Resources/app.asar', execPath: '/synthetic/Analytix.app/Contents/MacOS/Analytix', isPackaged: true }, 'darwin')).toEqual({
+      executable: '/synthetic/Analytix.app/Contents/Frameworks/Analytix Helper.app/Contents/MacOS/Analytix Helper',
+      entry: '/synthetic/Analytix.app/Contents/Resources/app.asar.unpacked/out/office-codec/office-generation-codec-entry.js'
+    })
+    expect(resolveDocumentCodecLaunch({ appPath: '/synthetic/resources/app.asar', execPath: '/synthetic/analytix', isPackaged: true }, 'linux')).toEqual({
+      executable: '/synthetic/analytix', entry: '/synthetic/resources/app.asar.unpacked/out/office-codec/office-generation-codec-entry.js'
+    })
+  })
+
   it('rejects the retired TypeScript child runtime path without spawning a process', async () => {
     const module = await import('./analytix-process')
     await expect(module.startAnalytixChild(createSettings('/tmp/retired-runtime.js'))).rejects.toThrow(

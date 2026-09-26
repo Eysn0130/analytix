@@ -87,3 +87,9 @@ type FactFinalWitnessCapability interface {
 type FactFinalWitnessIssuer interface {
 	WithFactFinalWitnessAuthority(context.Context, FactFinalWitnessRequest, func(FactFinalWitnessCapability) error) error
 }
+
+// RecoveredFactFinalWitnessIssuer re-admits an immutable committed original.
+// It never reissues the fact or reconstructs process authority from JSON.
+type RecoveredFactFinalWitnessIssuer interface {
+	WithRecoveredFactFinalWitness(context.Context, domainevidence.PrivateAcceptedFinalRecord, func(FactFinalWitnessCapability) error) error
+}

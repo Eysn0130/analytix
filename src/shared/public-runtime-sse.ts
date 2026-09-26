@@ -5,15 +5,19 @@ import {
 } from './public-runtime-content'
 import {
   AcceptedFinalDeliveryBatchV2Schema,
+  ApprovalEvent,
   GeneralTerminalDeliveryBatchV1Schema,
-  PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema
+  PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema,
+  UserInputEvent
 } from '../../packages/runtime/src/contracts/events.js'
 import type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
 import {
+  ApprovalTurnItem,
   TaskContinuationSnapshotV1Schema,
   ToolCallTurnItem,
   ToolProgressTurnItem,
-  ToolResultTurnItem
+  ToolResultTurnItem,
+  UserInputTurnItem
 } from '../../packages/runtime/src/contracts/items.js'
 import {
   containsInternalCaseEntityReference,
@@ -200,13 +204,13 @@ const PUBLIC_EVENT_CONTRACTS: Readonly<Record<string, PublicEventContract>> = {
     'parentThreadId', 'sourceTurnId', 'createdAt', 'pausedAt', 'resumedAt'
   ], validateChildPauseEvent),
   approval_requested: eventContract([
-    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode'
+    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode', 'summary'
   ], validateApprovalEvent),
   approval_resolved: eventContract([
-    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode'
+    'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode', 'summary'
   ], validateApprovalEvent),
-  user_input_requested: eventContract(['inputId', 'status'], validateUserInputEvent),
-  user_input_resolved: eventContract(['inputId', 'status'], validateUserInputEvent),
+  user_input_requested: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
+  user_input_resolved: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
   compaction_started: eventContract(['auto'], validateCompactionEvent),
   compaction_completed: eventContract([
     'summary', 'replacedTokens', 'auto', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
@@ -481,15 +485,16 @@ function isClosedToolProgressItem(event: Record<string, unknown>, item: Record<s
 }
 
 function isClosedApprovalItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName']) &&
+  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName', 'summary']) &&
     isClosedItemBase(event, item) && item.role === 'tool' && isSafePublicId(item.approvalId) &&
-    isSafeToolName(item.toolName) && new Set(['pending', 'allowed', 'denied', 'expired']).has(String(item.status))
+    isSafeToolName(item.toolName) && ApprovalTurnItem.safeParse(item).success
 }
 
 function isClosedUserInputItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId']) && isClosedItemBase(event, item) &&
+  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId', 'prompt', 'questions']) &&
+    isClosedItemBase(event, item) &&
     item.role === 'system' && isSafePublicId(item.inputId) &&
-    new Set(['pending', 'submitted', 'cancelled']).has(String(item.status))
+    UserInputTurnItem.safeParse(item).success
 }
 
 function isClosedCompactionItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
@@ -663,17 +668,18 @@ function validateApprovalEvent(event: Record<string, unknown>): boolean {
   const allowed = event.kind === 'approval_requested'
     ? new Set(['pending'])
     : new Set(['allowed', 'denied', 'expired'])
-  return eventHasTurn(event) && isSafePublicId(event.approvalId) && isSafeToolName(event.toolName) &&
+  return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.approvalId) && isSafeToolName(event.toolName) &&
     typeof event.status === 'string' && allowed.has(event.status) &&
-    isOptionalEnum(event.approvalPolicy, APPROVAL_POLICIES) && isOptionalEnum(event.sandboxMode, SANDBOX_MODES)
+    isOptionalEnum(event.approvalPolicy, APPROVAL_POLICIES) && isOptionalEnum(event.sandboxMode, SANDBOX_MODES) &&
+    ApprovalEvent.safeParse(event).success
 }
 
 function validateUserInputEvent(event: Record<string, unknown>): boolean {
   const allowed = event.kind === 'user_input_requested'
     ? new Set(['pending'])
     : new Set(['submitted', 'cancelled'])
-  return eventHasTurn(event) && isSafePublicId(event.inputId) &&
-    typeof event.status === 'string' && allowed.has(event.status)
+  return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.inputId) &&
+    typeof event.status === 'string' && allowed.has(event.status) && UserInputEvent.safeParse(event).success
 }
 
 function validateCompactionEvent(event: Record<string, unknown>): boolean {
@@ -1023,7 +1029,7 @@ function isClosedPipelineDetails(value: unknown): boolean {
   const allowed = [
     'visibleRecovery', 'recoveryKind', 'recoveryAttempt', 'maxRecoveryAttempt',
     'maxRecoveryAttempts', 'recoveryExhausted', 'partialToolStarted', 'maxModelSteps', 'toolName',
-    'guardKind', 'stormCount', 'providerError', 'reasonCode'
+    'guardKind', 'stormCount', 'providerError', 'reasonCode', 'firstReasoningLatencyMs'
   ]
   if (!hasOnlyKeys(value, allowed) || !isOptionalBoolean(value.visibleRecovery) ||
       !isOptionalEnum(value.recoveryKind, new Set([
@@ -1032,7 +1038,8 @@ function isClosedPipelineDetails(value: unknown): boolean {
       !isOptionalSafeSequence(value.maxRecoveryAttempt) ||
       !isOptionalSafeSequence(value.maxRecoveryAttempts) || !isOptionalBoolean(value.recoveryExhausted) ||
       !isOptionalBoolean(value.partialToolStarted) || !isOptionalSafeSequence(value.maxModelSteps) ||
-      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeIdentifier(value.toolName) ||
+      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeSequence(value.firstReasoningLatencyMs) ||
+      !isOptionalSafeIdentifier(value.toolName) ||
       !isOptionalEnum(value.guardKind, new Set([
         'tool_failure', 'invalid_tool_arguments'
       ])) ||

@@ -4,11 +4,11 @@ import { extractLatestTurnDevPreviewUrls } from '../../lib/dev-preview-detection
 import { useChatStore } from '../../store/chat-store'
 import { useChatTimelinePanelState, useDevPreviewUrls } from './ChatTimelineIsland'
 
+const loadDocumentWorkspacePanel = () => import('./DocumentWorkspacePanel').then((module) => ({ default: module.DocumentWorkspacePanel }))
+export const DocumentWorkspacePanel = lazy(loadDocumentWorkspacePanel)
+
 const loadChangeInspector = () =>
   import('../ChangeInspector').then((module) => ({ default: module.ChangeInspector }))
-
-const loadWriteAssistantPanel = () =>
-  import('../write/WriteAssistantPanel').then((module) => ({ default: module.WriteAssistantPanel }))
 
 const loadSddAssistantPanel = () =>
   import('../sdd/SddAssistantPanel').then((module) => ({ default: module.SddAssistantPanel }))
@@ -17,8 +17,8 @@ const loadDevBrowserPanel = () =>
   import('../DevBrowserPanel').then((module) => ({ default: module.DevBrowserPanel }))
 
 const loadWorkspaceFilePreviewPanel = () =>
-  import('../WorkspaceFilePreviewPanel').then((module) => ({
-    default: module.WorkspaceFilePreviewPanel
+  import('./WorkspaceObjectPreviewPanel').then((module) => ({
+    default: module.WorkspaceObjectPreviewPanel
   }))
 
 const loadPlanPanel = () =>
@@ -34,7 +34,6 @@ const loadSubagentInspectorPanel = () =>
   import('../summary/SubagentInspectorPanel').then((module) => ({ default: module.SubagentInspectorPanel }))
 
 const ChangeInspector = lazy(loadChangeInspector)
-const WriteAssistantPanel = lazy(loadWriteAssistantPanel)
 const SddAssistantPanel = lazy(loadSddAssistantPanel)
 const DevBrowserPanel = lazy(loadDevBrowserPanel)
 export const WorkspaceFilePreviewPanel = lazy(loadWorkspaceFilePreviewPanel)
@@ -44,6 +43,8 @@ export const ThreadSummaryPanelIsland = lazy(loadThreadSummaryPanel)
 export const SubagentInspectorPanelIsland = lazy(loadSubagentInspectorPanel)
 
 export type RightPanelIslandPreloadTarget =
+  | 'documents'
+  | 'files'
   | 'todo'
   | 'changes'
   | 'browser'
@@ -52,12 +53,14 @@ export type RightPanelIslandPreloadTarget =
   | 'summary'
   | 'sdd-ai'
   | 'child-agent'
-  | 'write-assistant'
 
 export function preloadRightPanelIsland(
   target: RightPanelIslandPreloadTarget | null | undefined
 ): void {
   switch (target) {
+    case 'documents':
+      void loadDocumentWorkspacePanel()
+      break
     case 'todo':
       void loadTodoPanel()
       break
@@ -82,34 +85,15 @@ export function preloadRightPanelIsland(
     case 'child-agent':
       void loadSubagentInspectorPanel()
       break
-    case 'write-assistant':
-      void loadWriteAssistantPanel()
-      break
     default:
       break
   }
 }
 
-type WriteAssistantPanelIslandProps = Omit<
-  ComponentProps<typeof WriteAssistantPanel>,
-  'blocks' | 'hasLiveStream'
->
-
 type SddAssistantPanelIslandProps = Omit<
   ComponentProps<typeof SddAssistantPanel>,
   'blocks' | 'hasLiveStream'
 >
-
-export function WriteAssistantPanelIsland(props: WriteAssistantPanelIslandProps): ReactElement {
-  const { blocks, hasLiveStream } = useChatTimelinePanelState()
-  return (
-    <WriteAssistantPanel
-      {...props}
-      blocks={blocks}
-      hasLiveStream={hasLiveStream}
-    />
-  )
-}
 
 export function SddAssistantPanelIsland(props: SddAssistantPanelIslandProps): ReactElement {
   const { blocks, hasLiveStream } = useChatTimelinePanelState()
@@ -136,11 +120,13 @@ export function ChangeInspectorIsland({
 export function DevBrowserPanelIsland({
   preferredUrl,
   className,
-  onCollapse
+  onCollapse,
+  onSubmitPrompt
 }: {
   preferredUrl?: string | null
   className?: string
   onCollapse: () => void
+  onSubmitPrompt?: ComponentProps<typeof DevBrowserPanel>['onSubmitPrompt']
 }): ReactElement {
   const detectedUrls = useDevPreviewUrls(extractLatestTurnDevPreviewUrls)
   return (
@@ -149,6 +135,7 @@ export function DevBrowserPanelIsland({
       preferredUrl={preferredUrl}
       className={className}
       onCollapse={onCollapse}
+      onSubmitPrompt={onSubmitPrompt}
     />
   )
 }

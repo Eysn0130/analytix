@@ -7,7 +7,7 @@ import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
-  CoreRuntimeSkillJson,
+  CoreRuntimeSkillsResponseJson,
   CoreRuntimeToolDiagnosticsJson,
   CoreModelExecutionRefJson,
   CoreModelExecutionSourceJson,
@@ -231,6 +231,7 @@ export type WebCitationSource = {
 }
 
 export type RuntimeDisclosureMetadata = {
+  factHistoryState?: 'retained_snapshot'
   turnId?: string
   displayText?: string
   delivery?: 'steer'
@@ -290,6 +291,17 @@ export type RuntimeProviderErrorDiagnosticsMetadata = {
 
 /** Renderer-safe cache telemetry: hashes, counters and booleans only. */
 export type RuntimeCacheDiagnosticsMetadata = {
+  dynamicStateCheck?: 'not_checked'
+  toolSchemaEstimator?: 'utf8_bytes_div4'
+  responseModelObservation?: 'not_reported' | 'matches_resolved' | 'differs_resolved'
+  modelInputComparable?: boolean
+  modelInputFirstDifference?: 'unavailable' | 'none' | 'system' | 'tools' | 'history' | 'current' | 'ordering'
+  modelInputComparablePrefixBytes?: number
+  providerAttemptCount?: number
+  providerCostKnownAttemptCount?: number
+  providerKnownCostUsdNanos?: number
+  providerKnownCostCnyNanos?: number
+  providerCostEstimateComplete?: boolean
   prefixHash?: string
   prefixChanged?: boolean
   toolSourceChanged?: boolean
@@ -1077,7 +1089,7 @@ export interface AgentProvider {
   ): Promise<CoreCheckpointRewindApplyResultJson>
   getRuntimeInfo?(): Promise<CoreRuntimeInfoJson>
   getToolDiagnostics?(): Promise<CoreRuntimeToolDiagnosticsJson>
-  listSkills?(): Promise<CoreRuntimeSkillJson[]>
+  listSkills?(): Promise<CoreRuntimeSkillsResponseJson>
   uploadAttachment?(input: {
     name: string
     mimeType?: string

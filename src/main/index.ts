@@ -1,3 +1,5 @@
+import { registerBrowserGuest } from './browser/browser-selection'
+import { clearWriteRetrievalCache } from './services/write-retrieval-service'
 import {
   app,
   BrowserWindow,
@@ -12,6 +14,8 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { existsSync } from 'node:fs'
+import { createWriteShutdownCoordinator } from './write-shutdown'
+import { prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './office/native-office-ipc'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -25,7 +29,7 @@ import analytixAppIconPng from '../asset/brand/analytix-app-icon-512.png?url'
 import analytixMacIconPng from '../asset/brand/analytix-app-icon-1024.png?url'
 import { appIdentityIconSource, createAppIcon, prepareTrayIcon } from './app-icon'
 import { configureLinuxWaylandImeSwitches } from './app-command-line'
-import { APP_DISPLAY_NAME, configureAppIdentity } from './app-identity'
+import { APP_DISPLAY_NAME, configureAppIdentity, configureMacChromiumSessionData } from './app-identity'
 import {
   inspectLegacyMigrationRequirement,
   issueElectronLegacySingletonAuthority,
@@ -154,6 +158,7 @@ import {
   startWeixinInstallQrcode
 } from './claw-platform-install'
 import { registerRuntimeSseIpc } from './runtime-sse-ipc'
+import { appendThreadTraceEvent } from './services/thread-trace-service'
 import {
   registerTerminalPtyIpc,
   type TerminalPtyIpcController
@@ -205,7 +210,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const APP_USER_MODEL_ID = 'com.analytix.desktop'
 const NATIVE_OAUTH_CALLBACK_PROTOCOL = 'com.analytix.desktop'
 const HIDDEN_START_ARG = '--hidden'
-const desktopExternalState = consumeDesktopExternalStateBoundary(process.env)
+const desktopExternalState = consumeDesktopExternalStateBoundary(process.env, undefined, app.isPackaged)
 configureGoRuntimeDesktopExternalStateBoundary(desktopExternalState)
 const desktopStateHomeRoot = desktopExternalState.isolated
   ? desktopExternalState.stateHomeRoot
@@ -376,6 +381,8 @@ if (!runningClawScheduleMcpServer) {
   }
 }
 
+if (!runningClawScheduleMcpServer && legacyMigrationReady) configureMacChromiumSessionData()
+
 configureLinuxWaylandImeSwitches()
 
 if (!runningClawScheduleMcpServer && process.platform === 'win32') {
@@ -399,6 +406,16 @@ let trayMenu: Menu | null = null
 let trayMenuOpenPromise: Promise<void> | null = null
 let loadTrayProviderObservation: (() => Promise<TrayProviderObservation | null>) | null = null
 let isQuitting = false
+let nativeOfficeQuitPending = false
+const writeShutdown = createWriteShutdownCoordinator({
+  ipc: ipcMain,
+  prepareNative: prepareNativeOfficeQuit,
+  cancelNative: cancelNativeOfficeQuit,
+  notifyBlocked: async window => {
+    await dialog.showMessageBox(window, { type: 'warning', message: '文档尚未保存，已取消关闭',
+      detail: '草稿仍保留在当前窗口。请完成输入、导出或处理保存提示后重试。', buttons: ['返回文档'], noLink: true })
+  }
+})
 let closeWindowPromptOpen = false
 let pendingDeepLinkThreadId = ''
 let desktopStartupBarrierComplete = false
@@ -420,6 +437,7 @@ async function stopManagedRuntimesForQuit(): Promise<void> {
 }
 
 async function stopManagedRuntimes(): Promise<void> {
+  clearWriteRetrievalCache()
   if (!managedRuntimesStopPromise) {
     managedRuntimesStopPromise = (async () => {
       terminalPtyController?.disposeAll()
@@ -489,6 +507,7 @@ async function readGuiUpdateState(): Promise<GuiUpdateState> {
 
 function installDevPreviewWebviewGuards(): void {
   app.on('web-contents-created', (_, contents) => {
+    contents.on('did-attach-webview', (_event, guest) => registerBrowserGuest(contents, guest))
     contents.on('will-attach-webview', (event, webPreferences, params) => {
       const src = typeof params.src === 'string' ? params.src : ''
       // Prototype embeds are file:// pages the renderer authorized through
@@ -961,6 +980,7 @@ async function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
 
 let runtimeEnsurePromise: Promise<AppSettingsV1> | null = null
 let runtimeEnsureFingerprint: string | null = null
+let runtimeReadyFingerprint: string | null = null
 let runtimeRestartPromise: Promise<void> | null = null
 let runtimeSettingsApplyPromise: Promise<void> | null = null
 let lastAppliedSettings: AppSettingsV1 | null = null
@@ -998,6 +1018,7 @@ function noteRuntimeHealthy(
 
 function handleUnexpectedAnalytixExit(info: AnalytixUnexpectedExitInfo): void {
   terminalPtyController?.disposeAll()
+  runtimeReadyFingerprint = null
   void superviseAnalytixCrash(info).catch((error: unknown) => {
     logError(
       'analytix-supervisor',
@@ -1147,6 +1168,7 @@ function queueRuntimeSettingsApply(
   lastAppliedSettings = next
   const startupConfigChanged = runtimeStartupConfigChanged(anchor, next)
   if (!startupConfigChanged) return runtimeSettingsApplyPromise
+  runtimeReadyFingerprint = null
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
@@ -1174,6 +1196,7 @@ function queueRuntimeSettingsApply(
 
 function queueRuntimeMcpConfigApply(settings: AppSettingsV1): void {
   lastAppliedSettings = settings
+  runtimeReadyFingerprint = null
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
@@ -1237,6 +1260,12 @@ async function ensureRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
       /* fall through to retry with the current settings */
     }
   }
+  await waitForQueuedRuntimeSettingsApply()
+  // The watchdog owns ongoing liveness. Re-probing the thread list before
+  // every request can reject a new send during an unrelated terminal write.
+  if (runtimeReadyFingerprint === fingerprint && analytixRuntimeAdapter.isChildRunning()) {
+    return settings
+  }
   const task = ensureRuntimeOnce(settings)
   let trackedTask: Promise<AppSettingsV1>
   trackedTask = task.finally(() => {
@@ -1256,7 +1285,9 @@ async function ensureRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
 
 async function ensureRuntimeOnce(settings: AppSettingsV1): Promise<AppSettingsV1> {
   await waitForQueuedRuntimeSettingsApply()
-  return ensureAnalytixRuntime(settings)
+  const ensured = await ensureAnalytixRuntime(settings)
+  runtimeReadyFingerprint = runtimeFingerprint(ensured)
+  return ensured
 }
 
 async function resolveManagedAnalytixLaunchSettings(
@@ -1330,6 +1361,7 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
 }
 
 async function restartRuntime(settings: AppSettingsV1): Promise<void> {
+  runtimeReadyFingerprint = null
   terminalPtyController?.disposeAll()
   if (runtimeRestartPromise) return runtimeRestartPromise
   const pendingEnsure = runtimeEnsurePromise
@@ -1387,7 +1419,9 @@ async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
   noteRuntimeHealthy('restart')
 }
 
-function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?: string; primary?: boolean } = {}): BrowserWindow {
+function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?: string; primary?: boolean } = {}): BrowserWindow | null {
+  // Successful shutdown holds this admission closed while Core stops.
+  if (!writeShutdown.canCreateWindow()) return null
   traceStartup('createWindow:start')
   const preloadPath = resolvePreloadPath()
   const usesDesktopTitleBar = process.platform === 'win32' || process.platform === 'linux'
@@ -1452,6 +1486,7 @@ function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?
     if (appWindow.isDestroyed() || !primary) return
     handleMainWindowClose(appWindow, event)
   })
+  writeShutdown.trackWindow(appWindow)
   appWindow.on('closed', () => {
     if (initialShowFallbackTimer) {
       clearTimeout(initialShowFallbackTimer)
@@ -1460,6 +1495,7 @@ function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?
     ipcMain.off(WINDOW_STARTUP_SURFACE_READY_CHANNEL, handleStartupSurfaceReady)
     disposeDataAnalysisRendererPrincipal()
     if (primary && mainWindow === appWindow) {
+      clearWriteRetrievalCache()
       mainWindow = null
     }
   })
@@ -1710,13 +1746,16 @@ async function runtimeRequest(
 async function localDisplayRuntimeRequest(
   settings: AppSettingsV1,
   path: string,
-  body: string
+  body: string,
+  signal?: AbortSignal
 ): Promise<{ ok: boolean; status: number; body: string }> {
   if (!isLocalDisplayRuntimePathV1(path)) {
     return { ok: false, status: 400, body: '' }
   }
   try {
+    if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const ensuredSettings = await ensureRuntime(settings)
+    if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const requestSettings = ensuredSettings ?? settings
     const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()
     if (!runtimeAuthority) return { ok: false, status: 503, body: '' }
@@ -1729,11 +1768,14 @@ async function localDisplayRuntimeRequest(
       method: 'POST',
       headers,
       body,
-      signal: AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
-        path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
+      signal: AbortSignal.any([
+        ...(signal ? [signal] : []),
+        AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
+          path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
+      ])
     })
     const responseBody = await response.text()
-    if (!isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
+    if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
       return { ok: false, status: 409, body: '' }
     }
     return {
@@ -2239,6 +2281,11 @@ app.whenReady().then(async () => {
         await new Promise<void>((resolveReady) => setImmediate(resolveReady))
       }
       saved = await store.patch(partial)
+      if (startupConfigChanged || saved.write.inlineCompletion.enabled === false || saved.write.inlineCompletion.retrievalEnabled === false) {
+        clearWriteRetrievalCache()
+      } else if (prev.workspaceRoot && prev.workspaceRoot !== saved.workspaceRoot) {
+        clearWriteRetrievalCache({ workspaceRoot: prev.workspaceRoot })
+      }
       const runtimeApply = queueRuntimeSettingsApply(prev, saved)
       if (releaseTerminalCreates) {
         const release = releaseTerminalCreates
@@ -2328,12 +2375,19 @@ app.whenReady().then(async () => {
     store,
     loadHubAccountService,
     getMainWindow: () => mainWindow,
+    canNavigateWindow: contents => {
+      const owner = BrowserWindow.fromWebContents(contents)
+      return !!owner && writeShutdown.canNavigateWindow(owner)
+    },
     isTrustedProviderRegistrySender: isTrustedDesktopRenderer,
     applySettingsPatch,
     saveSettingsPatch,
     runtimeRequest: async (path, method, body) => {
       const settings = await store.load()
-      return runtimeRequest(settings, path, { method, body })
+      const result = await runtimeRequest(settings, path, { method, body })
+      const removedThread = method === 'DELETE' && result.ok ? /^\/v1\/threads\/([A-Za-z0-9._:-]+)$/.exec(path)?.[1] : undefined
+      if (removedThread) clearWriteRetrievalCache({ threadId: removedThread })
+      return result
     },
     protectedRuntimeRequest: mainAccountRuntimeRequest,
     getCurrentProfile: async () => {
@@ -2365,9 +2419,9 @@ app.whenReady().then(async () => {
       }),
       authHeaders: runtimeAuthHeaders
     }),
-    localDisplayRequest: async (path, body) => {
+    localDisplayRequest: async (path, body, signal) => {
       const settings = await store.load()
-      return localDisplayRuntimeRequest(settings, path, body)
+      return localDisplayRuntimeRequest(settings, path, body, signal)
     },
     restartRuntime: async () => {
       const settings = await store.load()
@@ -2397,7 +2451,12 @@ app.whenReady().then(async () => {
     logError
   })
 
-  registerRuntimeSseIpc({ ipcMain, store, ensureRuntime, logError })
+  registerRuntimeSseIpc({
+    ipcMain, store, ensureRuntime, logError,
+    recordThreadTrace: (event) => {
+      void appendThreadTraceEvent(app.getPath('userData'), event).catch(() => undefined)
+    }
+  })
   terminalPtyController = registerTerminalPtyIpc({
     ipcMain,
     getMainWindow: () => mainWindow,
@@ -2411,7 +2470,8 @@ app.whenReady().then(async () => {
       ]
     },
     isTrustedSender: isTrustedDesktopRenderer,
-    registerBeforeQuit: (listener) => app.on('before-quit', listener),
+    // The confirmed quit path disposes PTYs in stopManagedRuntimes. A raw
+    // before-quit listener would destroy them even when Office cancels exit.
     logError
   })
   registerBackgroundTaskIpc({ ipcMain })
@@ -2489,15 +2549,26 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
-  stopRuntimeWatchdog()
   if (managedRuntimesStoppedForQuit) return
   event.preventDefault()
-  void stopManagedRuntimesForQuit()
-    .catch((error) => {
+  if (nativeOfficeQuitPending) return
+  nativeOfficeQuitPending = true
+  void (async () => {
+    if (!await writeShutdown.prepareQuit()) {
+      isQuitting = false
+      return
+    }
+    // Native drafts and unresolved file outcomes use the existing Core session.
+    // Confirm and drain them before stopping that runtime, not at window close.
+    stopRuntimeWatchdog()
+    try { await stopManagedRuntimesForQuit() } catch (error) {
       publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
       managedRuntimesStoppedForQuit = true
-    })
-    .finally(() => {
-      app.quit()
-    })
+    }
+    app.quit()
+  })().catch(async () => {
+    await writeShutdown.cancel().catch(() => undefined)
+    isQuitting = false
+    if (desktopStartupBarrierComplete) startRuntimeWatchdog()
+  }).finally(() => { nativeOfficeQuitPending = false })
 })

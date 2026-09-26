@@ -3,6 +3,7 @@ package thread
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,47 @@ func TestValidateOrdinaryHistoryPreservesWorkspaceAuthorityAndProjectsItsPublicV
 	thread["title"] = "账号: " + accountLikePathSegment
 	if err := ValidatePublicHistory(thread); err == nil {
 		t.Fatal("ordinary history accepted restricted PII outside workspace authority")
+	}
+}
+
+func TestLongOrdinaryHistoryKeepsPerRecordProjectionBounds(t *testing.T) {
+	const threadID = "thr_long_ordinary"
+	turns := make([]any, 0, 120)
+	for turnNumber := 1; turnNumber <= 120; turnNumber++ {
+		turnID := fmt.Sprintf("turn_%03d", turnNumber)
+		items := make([]any, 0, 24)
+		for itemNumber := 1; itemNumber <= 24; itemNumber++ {
+			items = append(items, map[string]any{
+				"id":       fmt.Sprintf("item_%03d_%02d", turnNumber, itemNumber),
+				"threadId": threadID, "turnId": turnID, "kind": "user_message",
+				"text": "A synthetic public history item", "status": "completed",
+			})
+		}
+		turns = append(turns, map[string]any{
+			"id": turnID, "threadId": threadID, "status": "completed",
+			"prompt": "Continue synthetic history", "items": items,
+		})
+	}
+	thread := map[string]any{
+		"id": threadID, "title": "Synthetic long history", "workspace": "/tmp/ordinary-history",
+		"status": "idle", "turns": turns,
+	}
+	if err := ValidatePublicHistory(thread); err != nil {
+		t.Fatalf("valid 120-turn history was rejected: %v", err)
+	}
+	projected, err := ProjectPublicThread(thread)
+	publicTurns, _ := projected["turns"].([]any)
+	if err != nil || len(publicTurns) != len(turns) {
+		t.Fatalf("120-turn public history was truncated: turns=%d err=%v", len(publicTurns), err)
+	}
+	item := turns[59].(map[string]any)["items"].([]any)[12].(map[string]any)
+	item["text"] = "sk-synthetic-private-token-123456"
+	if err := ValidatePublicHistory(thread); err == nil {
+		t.Fatal("credential in a later turn passed the per-record boundary")
+	}
+	item["text"] = strings.Repeat("x", (1<<20)+1)
+	if err := ValidatePublicHistory(thread); err == nil {
+		t.Fatal("oversized individual item passed the fixed credential boundary")
 	}
 }
 

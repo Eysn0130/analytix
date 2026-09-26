@@ -319,3 +319,10 @@ type IndexStore interface {
 	PutIfAbsent(context.Context, domainsecurity.DatasetSnapshotIndexV1) error
 	Resolve(context.Context, string) (domainsecurity.DatasetSnapshotIndexV1, error)
 }
+
+// HistoricalFactAuthorityV2 exposes exact original publication material only
+// while its immutable index remains on a newly challenged retained chain.
+// No query/commit capability escapes; current access permission is separate.
+type HistoricalFactAuthorityV2 interface {
+	WithHistoricalFactSelectionV2(context.Context, ResolveInputV2, domainsecurity.TurnSecurityContext, evidenceauthorityport.FreshHead, func(CurrentSelectionV2) error) error
+}

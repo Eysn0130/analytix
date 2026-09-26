@@ -354,7 +354,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		input.ProviderConfig.EndpointFormat,
 		input.ProviderCustomRequestShape,
 	)
-	deepSeekPrivateProtocol := privateProtocolKind == "deepseek-chat-completions"
+	deepSeekPrivateProtocol := (privateProtocolKind == "deepseek-chat-completions" || privateProtocolKind == "deepseek-messages")
 	configuredReasoningProtocol := strings.TrimSpace(input.ProviderConfig.ReasoningProtocol)
 	privateProtocolSafeHistoryRequired :=
 		deepSeekPrivateProtocol ||
@@ -469,6 +469,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		}
 		return &slot, nil
 	}
+	var lastToolSettledAt time.Time
 	finishCandidateBoundary := func(
 		candidateText string,
 		candidateResult domainmodel.Result,
@@ -519,13 +520,19 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				return RuntimeAgentLoopResult{}, true, nil
 			}
 		}
+		projectionStartedAt := time.Now()
 		ordinaryResult, err := compileOrdinaryCandidate(currentProviderStep, candidateText)
 		if err != nil {
 			releaseCandidateTerminal()
 			return RuntimeAgentLoopResult{AssistantText: candidateText, LastResult: candidateResult}, false,
 				WrapHostBoundaryFailure(HostCandidateProjectionFailure, err)
 		}
+		lastDependencyAt := candidateResult.HostTiming.FinishedAt
+		if lastToolSettledAt.After(lastDependencyAt) {
+			lastDependencyAt = lastToolSettledAt
+		}
 		return RuntimeAgentLoopResult{
+			LastDependencyAt: lastDependencyAt, CandidateProjectionStartedAt: projectionStartedAt, CandidateProjectionReadyAt: time.Now(),
 			AssistantText: candidateText, LastResult: candidateResult,
 			ReportDeliveryCompleted:  reportDeliveryCompleted || candidateReportDeliveryCompleted,
 			CandidateUsesCaseData:    currentProviderStep.UsesCaseDataAuthority(),
@@ -643,7 +650,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			privateProtocolKind = appmodel.PrivateProtocolReasoningKindForProvider(
 				input.ProviderConfig, input.ProviderConfig.EndpointFormat, input.ProviderCustomRequestShape,
 			)
-			deepSeekPrivateProtocol = privateProtocolKind == "deepseek-chat-completions"
+			deepSeekPrivateProtocol = (privateProtocolKind == "deepseek-chat-completions" || privateProtocolKind == "deepseek-messages")
 			configuredReasoningProtocol = strings.TrimSpace(input.ProviderConfig.ReasoningProtocol)
 			privateProtocolSafeHistoryRequired = deepSeekPrivateProtocol ||
 				appmodel.PrivateProtocolRequired(configuredReasoningProtocol, input.Effort)
@@ -781,74 +788,23 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			},
 		}
 		providerRequestToolManifestHash := toolcatalogapp.ToolSchemaHash(providerRequest.Tools)
-		providerSendPending := false
-		providerSendPairs := 0
-		providerAttemptPairStart := 0
-		providerAttemptStarted := false
-		providerAttemptClosed := false
-		providerRequest.OnPipelineStage = func(stage domainmodel.PipelineStage) error {
-			switch stage.Stage {
-			case "provider_admission_rejected":
-				return flushStartupStages(stage)
-			case "pre_send":
-				if providerSendPending {
-					return errors.New("provider pre-send pipeline stage is already pending")
-				}
-				// Persist the attempt marker before the provider transport begins.
-				// A crash after the HTTP request is sent must leave a durable
-				// indeterminate-attempt record rather than look never-sent.
-				if err := flushStartupStagesWithCriticalStage(stage); err != nil {
-					return err
-				}
-				providerSendPending = true
-				return nil
-			case "post_send":
-				if !providerSendPending {
-					return errors.New("provider send pipeline stage pair is invalid")
-				}
-				if err := loopEvents.PipelineStageAtomic(input.ThreadID, input.TurnID, stage); err != nil {
-					return err
-				}
-				providerSendPending = false
-				providerSendPairs++
-				return nil
-			default:
+		dispatch := providerDispatchGuard{
+			pre: flushStartupStagesWithCriticalStage,
+			post: func(stage domainmodel.PipelineStage) error {
+				return loopEvents.PipelineStageAtomic(input.ThreadID, input.TurnID, stage)
+			},
+			rejected: func(stage domainmodel.PipelineStage) error { return flushStartupStages(stage) },
+			other: func(stage domainmodel.PipelineStage) error {
 				return loopEvents.PipelineStage(input.ThreadID, input.TurnID, stage.Stage, stage.Details, stage.At, stage.Trace)
-			}
+			},
 		}
+		providerRequest.OnPipelineStage = dispatch.stage
 		providerCallbacks := ProviderStreamCallbacks{
 			AcquireProviderAttempt: func(attemptCtx context.Context, attempt int) (context.Context, func(), error) {
 				return deps.AcquireProviderAttempt(attemptCtx, attempt, providerStep)
 			},
-			BeforeProviderInvocation: func(int) error {
-				if providerSendPending {
-					return providerPipelineContractError{reason: "provider durable send pipeline stage pair is incomplete"}
-				}
-				if providerAttemptStarted && !providerAttemptClosed {
-					return providerPipelineContractError{reason: "provider retry followed an unclosed durable dispatch attempt"}
-				}
-				providerAttemptStarted = true
-				providerAttemptClosed = false
-				providerAttemptPairStart = providerSendPairs
-				return nil
-			},
-			AfterProviderAttempt: func(_ int, providerErr error) error {
-				if !providerAttemptStarted {
-					return providerPipelineContractError{reason: "provider dispatch attempt was not opened"}
-				}
-				providerAttemptClosed = true
-				if providerSendPending {
-					return providerPipelineContractError{reason: "provider durable send pipeline stage pair is incomplete"}
-				}
-				if providerSendPairs != providerAttemptPairStart {
-					return nil
-				}
-				dispatchState, known := providerDispatchStateFromErrorV1(providerErr)
-				if known && dispatchState == domaincache.ProviderDispatchStateNotSent {
-					return nil
-				}
-				return providerPipelineContractError{reason: "provider attempt lacks a durable send pipeline pair or trusted not-sent disposition"}
-			},
+			BeforeProviderInvocation: dispatch.before,
+			AfterProviderAttempt:     dispatch.after,
 			OnTextChunk: func(domainmodel.Chunk) error {
 				// Provider prose remains a private draft until the terminal
 				// publication lane validates the complete candidate.
@@ -879,13 +835,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				Sequence: providerCallSequence,
 			},
 		})
-		if providerSendPending {
-			stream = sealFailedProviderStreamOutput(stream)
-			err = errors.Join(err, ProviderStreamCallbackError{Err: providerPipelineContractError{reason: "provider durable send pipeline stage pair is incomplete"}})
-		} else if (providerAttemptStarted && !providerAttemptClosed) || (err == nil && !providerAttemptStarted) {
-			stream = sealFailedProviderStreamOutput(stream)
-			err = errors.Join(err, ProviderStreamCallbackError{Err: providerPipelineContractError{reason: "provider completed without a closed durable dispatch attempt"}})
-		}
+		stream, err = dispatch.finish(stream, err)
 		if len(pendingStartupStages) > 0 {
 			if flushErr := flushStartupStages(); flushErr != nil {
 				stream = sealFailedProviderStreamOutput(stream)
@@ -979,13 +929,20 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			}
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, err
 		}
-		if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", map[string]any{
+		responseDetails := map[string]any{
 			"stopReason":          result.Usage.FinishReason,
 			"toolCallCount":       float64(ToolCallCount(result.Chunks)),
 			"streamCompleted":     result.StreamCompleted,
 			"durationMs":          float64(result.DurationMs),
 			"firstTokenLatencyMs": float64(result.FirstTokenLatencyMs),
-		}, time.Now().UTC(), nil); err != nil {
+		}
+		if result.HasFirstReasoningLatency {
+			responseDetails["firstReasoningLatencyMs"] = float64(result.FirstReasoningLatencyMs)
+		}
+		if result.HasFirstRawTextLatency {
+			responseDetails["firstRawTextLatencyMs"] = float64(result.FirstRawTextLatencyMs)
+		}
+		if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", responseDetails, time.Now().UTC(), nil); err != nil {
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result},
 				WrapHostBoundaryFailure(HostResponseEventFailure, err)
 		}
@@ -1309,6 +1266,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			},
 			Driver: deps.ToolDriver,
 		})
+		lastToolSettledAt = time.Now()
 		if err != nil && toolStep.providerCorrectableToolName != "" {
 			var failure TurnFailureError
 			if errors.As(err, &failure) && strings.TrimSpace(failure.Code) == "validation_error" {

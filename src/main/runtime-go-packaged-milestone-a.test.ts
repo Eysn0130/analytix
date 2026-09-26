@@ -563,6 +563,9 @@ function fixtureMilestoneModule(exposeInternals: boolean): Promise<Record<string
     .replace("'./lib/local-provider-credential-scan.mjs'", JSON.stringify(pathToFileURL(join(
       process.cwd(), 'scripts/lib/local-provider-credential-scan.mjs'
     )).href))
+    .replace("'./development-keychain.mjs'", JSON.stringify(pathToFileURL(join(
+      process.cwd(), 'scripts/development-keychain.mjs'
+    )).href))
     .replace(
       "'./lib/packaged-release-publication-authority.mjs'",
       JSON.stringify(publicationAuthorityUrl)
@@ -3358,6 +3361,11 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     mkdirSync(isolatedHome, { mode: 0o700 })
     chmodSync(isolatedHome, 0o700)
     const { createIsolatedDarwinLoginKeychain } = await milestoneModule()
+    const taskKeychain = join(isolatedHome, 'Library', 'Keychains', 'login.keychain')
+    const userDefaultBefore = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(userDefaultBefore.status).toBe(0)
     const controller = await createIsolatedDarwinLoginKeychain(isolatedHome)
     try {
       const created = controller.evidence()
@@ -3399,6 +3407,44 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     } finally {
       controller.dispose()
     }
+    expect(existsSync(`${taskKeychain}-db`)).toBe(false)
+    const searchListAfter = spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    const userDefaultAfter = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(searchListAfter.status).toBe(0)
+    expect(searchListAfter.stdout).not.toContain(taskKeychain)
+    expect(userDefaultAfter.status).toBe(0)
+    expect(userDefaultAfter.stdout).toBe(userDefaultBefore.stdout)
+  })
+
+  it('provisions the non-login Core task keychain without changing user Keychain selection', async () => {
+    if (process.platform !== 'darwin') return
+    const taskRoot = taskOwnedSandbox()
+    const homeRoot = join(taskRoot, 'home')
+    mkdirSync(homeRoot, { mode: 0o700 })
+    const snapshot = () => ({
+      defaultKeychain: spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], { encoding: 'utf8' }),
+      searchList: spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], { encoding: 'utf8' })
+    })
+    const before = snapshot()
+    expect(before.defaultKeychain.status).toBe(0)
+    expect(before.searchList.status).toBe(0)
+    const { createIsolatedDarwinTaskKeychain } = await milestoneModule()
+    const controller = await createIsolatedDarwinTaskKeychain(taskRoot, homeRoot)
+    try {
+      expect(existsSync(join(taskRoot, 'darwin-secret-store-keychain', 'analytix-task.keychain-db'))).toBe(true)
+      await controller.unlockForLaunch()
+    } finally {
+      controller.dispose()
+    }
+    const after = snapshot()
+    expect(after.defaultKeychain.status).toBe(0)
+    expect(after.searchList.status).toBe(0)
+    expect(after.defaultKeychain.stdout).toBe(before.defaultKeychain.stdout)
+    expect(after.searchList.stdout).toBe(before.searchList.stdout)
   })
 
   it('keeps the isolated keychain password out of argv, env, files, and reports', () => {

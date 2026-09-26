@@ -245,3 +245,67 @@ func connectCommandForExpected(revision uint64, incarnation string, index int) C
 	command.Credential = credential
 	return command
 }
+
+func TestDeferredOnboardingSelectionSurvivesFilesystemRecovery(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	first, err := providerregistryfs.New(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := newMemorySecretStore()
+	manager := mustManager(t, first, secrets, nil)
+	snapshot, err := manager.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := connectCommandForExpected(snapshot.Revision, snapshot.Incarnation, 0)
+	command.DeferSelection = true
+	interrupted := mustManager(t, first, secrets, faultOnce(FaultAfterMetadataCommitted))
+	if _, err := interrupted.Connect(ctx, command); !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("crash = %v", err)
+	}
+	if err := first.WithExclusive(ctx, func(tx registryport.Transaction) error {
+		state, err := tx.Load(ctx)
+		if err != nil {
+			return err
+		}
+		for _, pending := range state.Transactions {
+			if !pending.DeferSelection {
+				t.Fatal("prepare lost deferred initialization intent")
+			}
+			pending.DeferSelection = false
+			if pending.Validate() == nil {
+				t.Fatal("tampered selection intent accepted")
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := providerregistryfs.New(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	restarted := mustManager(t, second, secrets, nil)
+	if err := restarted.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := restarted.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.SelectedProviderID != "" || len(restored.Providers) != 1 || len(restored.Transactions) != 0 {
+		t.Fatal("restart incorrectly completed onboarding")
+	}
+	for id := range restored.Providers {
+		if err := restarted.CheckCredential(ctx, ProviderOperationCommand{Expected: expectedFor(restored, id), ProviderID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

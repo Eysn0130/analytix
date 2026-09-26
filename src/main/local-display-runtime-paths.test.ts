@@ -8,6 +8,13 @@ import {
 describe('typed local-display runtime path allowlist', () => {
   it('admits the complete closed production path family including deterministic cleaning', () => {
     expect(LOCAL_DISPLAY_RUNTIME_PATHS_V1).toEqual([
+      '/v1/local-display/generated-artifact',
+      '/v1/local-display/object-editing',
+      '/v1/local-display/browser-selection',
+  '/v1/local-display/workspace-read',
+  '/v1/local-display/inline-completion',
+      '/v1/local-display/plugin-package-host',
+      '/v1/local-display/office-private-admission',
       '/v1/local-display/import-mapping-preview',
       '/v1/local-display/cleaning-diff-preview',
       '/v1/local-display/direct-source-preview',
@@ -36,4 +43,11 @@ describe('typed local-display runtime path allowlist', () => {
     expect(mainSource).toContain('if (!isLocalDisplayRuntimePathV1(path)) {')
     expect(mainSource).not.toContain('const LOCAL_DISPLAY_RUNTIME_PATHS = new Set(')
   })
+})
+
+
+it('admits only the exact Main Office admission route',()=>{
+  const path='/v1/local-display/office-private-admission'
+  expect(isLocalDisplayRuntimePathV1(path)).toBe(true)
+  for(const value of [path+'/',path+'?root=/private',path+'#fragment',path+'/assets','/prefix'+path,path.replace('/v1/','/')])expect(isLocalDisplayRuntimePathV1(value)).toBe(false)
 })

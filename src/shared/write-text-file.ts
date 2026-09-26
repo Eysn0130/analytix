@@ -56,12 +56,17 @@ export function isWritePdfFilePath(path: string): boolean {
   return isWritePdfFileExtension(extensionFromPath(path))
 }
 
+export function isNativeOfficeFilePath(path: string): boolean {
+  return ['.docx', '.xlsx', '.pptx'].includes(extensionFromPath(path).toLowerCase())
+}
+
 export function isWriteWorkspaceFilePath(path: string): boolean {
-  return isWriteTextFilePath(path) || isWriteImageFilePath(path) || isWritePdfFilePath(path)
+  return isNativeOfficeFilePath(path) || isWriteTextFilePath(path) || isWriteImageFilePath(path) || isWritePdfFilePath(path)
 }
 
 export function isWriteWorkspaceEntry(entry: WorkspaceEntry): boolean {
   return entry.type === 'directory' ||
+    ['.docx', '.xlsx', '.pptx'].includes(entry.ext.toLowerCase()) ||
     isWriteTextFileExtension(entry.ext) ||
     isWriteImageFileExtension(entry.ext) ||
     isWritePdfFileExtension(entry.ext)

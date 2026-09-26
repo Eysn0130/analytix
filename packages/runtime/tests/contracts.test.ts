@@ -78,6 +78,24 @@ import {
   ServeExitCode
 } from '../src/cli/serve.js'
 
+describe('derived gate item history', () => {
+  const base = {
+    id: 'item-gate', turnId: 'turn-derived', threadId: 'thr-derived',
+    createdAt: '2026-09-23T00:00:00Z'
+  }
+
+  it('preserves terminal approval and user input display after source handles are stripped', () => {
+    const approval = { ...base, kind: 'approval', role: 'tool', status: 'expired',
+      toolName: 'write_file', summary: 'Approve write_file' }
+    const input = { ...base, kind: 'user_input', role: 'system', status: 'cancelled',
+      prompt: 'Choose a path', questions: [] }
+    expect(TurnItem.safeParse(approval).success).toBe(true)
+    expect(TurnItem.safeParse(input).success).toBe(true)
+    expect(TurnItem.safeParse({ ...approval, status: 'pending' }).success).toBe(false)
+    expect(TurnItem.safeParse({ ...input, status: 'pending' }).success).toBe(false)
+  })
+})
+
 function reasonixIntegrationTopologyFixture() {
   const row = (
     id: string,
@@ -1106,6 +1124,17 @@ describe('contracts', () => {
     expect(summary.providerId).toBe('zai-coding-plan')
     expect(summary.turnCount).toBe(3)
     expect(summary.messageCount).toBe(7)
+  })
+
+  it('accepts the running-turn marker on derived thread summaries only when true', () => {
+    const summary = {
+      id: 'thr_derived', title: 'Derived thread', workspace: '/tmp/project',
+      model: 'deepseek-chat', mode: 'agent', status: 'idle',
+      createdAt: '2026-09-23T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
+      hasRunningTurn: true
+    }
+    expect(ThreadSummarySchema.safeParse(summary).success).toBe(true)
+    expect(ThreadSummarySchema.safeParse({ ...summary, hasRunningTurn: false }).success).toBe(false)
   })
 
   it('accepts thread todo contracts and events', () => {

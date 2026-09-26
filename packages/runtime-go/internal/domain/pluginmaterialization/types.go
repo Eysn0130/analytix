@@ -187,3 +187,32 @@ func canonicalBytes(value any, validate func() error) ([]byte, error) {
 	}
 	return body, nil
 }
+
+// An empty origin retains the original packaged V1 wire representation.
+const DevelopmentSourceOriginV1 = "development-source"
+
+func validDevelopmentPackageIDV1(id string) bool {
+	switch id {
+	case "analytix-documents", "analytix-spreadsheets", "analytix-presentations", "analytix-canvas":
+		return true
+	}
+	return false
+}
+
+func validOriginProjectionV1(origin, registration string) bool {
+	return (origin == "" && registration == "") || (origin == DevelopmentSourceOriginV1 && canonicalDigest(registration))
+}
+
+func validMaterializationOriginV1(origin, packaged, registration, packageID string) bool {
+	if origin == "" {
+		return canonicalDigest(packaged) && registration == ""
+	}
+	return origin == DevelopmentSourceOriginV1 && packaged == "" && canonicalDigest(registration) && validDevelopmentPackageIDV1(packageID)
+}
+
+func validEntrypointForOriginV1(origin, entrypoint string) bool {
+	if origin == DevelopmentSourceOriginV1 {
+		return entrypoint == ""
+	}
+	return canonicalDigest(entrypoint)
+}

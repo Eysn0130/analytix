@@ -13,6 +13,7 @@ import {
   Sparkles,
   X
 } from 'lucide-react'
+import type { NativeReference } from '../office/native-reference-store'
 import type { ChatBlock } from '../agent/types'
 import {
   DEFAULT_DEV_PREVIEW_URL,
@@ -28,8 +29,12 @@ import {
   writeBrowserStorageItem
 } from '../lib/browser-storage'
 import { PanelCollapseButton } from './workbench/PanelCollapseButton'
+import { useChatStore } from '../store/chat-store'
+import { useNativeReferenceStore } from '../office/native-reference-store'
+import { browserScopeSchema } from '../../../../packages/runtime/src/contracts/browser-selection'
 
 type DevWebviewTag = HTMLElement & {
+  getWebContentsId(): number
   canGoBack(): boolean
   canGoForward(): boolean
   getURL(): string
@@ -121,16 +126,49 @@ export function DevBrowserPanel({
   detectedUrls: providedDetectedUrls,
   preferredUrl,
   className,
-  onCollapse
+  onCollapse,
+  onSubmitPrompt
 }: {
   blocks?: ChatBlock[]
   detectedUrls?: string[]
   preferredUrl?: string | null
   className?: string
   onCollapse: () => void
+  onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void
 }): ReactElement {
   const { t } = useTranslation('common')
   const webviewRef = useRef<DevWebviewTag | null>(null)
+  const captureEpoch = useRef(0)
+  const [capturingSelection, setCapturingSelection] = useState(false)
+  useEffect(() => {
+    const epoch = captureEpoch
+    const unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.activeThreadId !== previous.activeThreadId || state.workspaceRoot !== previous.workspaceRoot) captureEpoch.current++
+    })
+    return () => { epoch.current++; unsubscribe() }
+  }, [])
+  const captureSelection = async (actionPrompt?: string) => {
+    const guest = webviewRef.current, threadId = useChatStore.getState().activeThreadId
+    if (!guest || !threadId || capturingSelection) return
+    const epoch = captureEpoch.current
+    setCapturingSelection(true)
+    try {
+      const response = await window.analytix.browserSelection.request({ action: 'capture', guestId: guest.getWebContentsId(), threadId })
+      if (!response.ok && response.error === 'child-frame-unsupported') { setLoadError(t('browserChildSelectionUnsupported')); return }
+      const scope = response.ok ? browserScopeSchema.safeParse(response.scope) : null
+      if (!scope?.success) throw Error('selection-unavailable')
+      if (epoch !== captureEpoch.current || guest !== webviewRef.current || useChatStore.getState().activeThreadId !== threadId) {
+        void window.analytix.browserSelection.request({ action: 'revoke', scope: scope.data })
+        return
+      }
+      const reference: NativeReference = { id: crypto.randomUUID(), kind: 'browser-selection', threadId, workspace: scope.data.workspace,
+        objectId: scope.data.documentId, revision: scope.data.selectionId, scopeId: scope.data.scopeId,
+        browserScope: scope.data, editable: false, path: '', text: '', label: t('browserSelectedText') }
+      if (actionPrompt) onSubmitPrompt?.(actionPrompt, [reference])
+      else useNativeReferenceStore.getState().add(reference)
+    } catch { setLoadError(t('browserSelectionUnavailable')) }
+    finally { setCapturingSelection(false) }
+  }
   const iframeLoadedUrlRef = useRef<string | null>(null)
   const detectedUrls = useMemo(
     () => providedDetectedUrls ?? extractDetectedDevPreviewUrls(blocks),
@@ -427,6 +465,10 @@ export function DevBrowserPanel({
             <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
           </button>
           <div className="ml-auto flex shrink-0 items-center">
+            {useElectronWebview && <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
+              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserQuoteSelection')}</button>}
+            {useElectronWebview && onSubmitPrompt && <button type="button" onClick={() => void captureSelection(t('browserExplainPrompt'))} disabled={capturingSelection}
+              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserExplainSelection')}</button>}
             <PanelCollapseButton
               onClick={onCollapse}
               ariaLabel={t('rightPanelCollapse')}
@@ -584,7 +626,7 @@ export function DevBrowserPanel({
             key={`webview:${previewInstanceNonce}`}
             ref={webviewRef}
             src={activeUrl}
-            partition="persist:analytix-dev-browser"
+            partition="persist:analytix-dev-browser-v2"
             webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
             className="flex h-full w-full bg-white"
           />

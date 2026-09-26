@@ -47,7 +47,7 @@ export function createWriteSettingsActions({ set, get }: WriteSettingsActionCont
         const settings = await rendererRuntimeClient.getSettings({ forceRefresh: true })
         const write = applyWriteSettingsState(set, settings)
         set({ settingsLoading: false })
-        await get().initializeWorkspace(write.activeWorkspaceRoot)
+        await get().initializeWorkspace(get().workspaceRoot || write.activeWorkspaceRoot)
       } catch (error) {
         set({
           settingsLoading: false,

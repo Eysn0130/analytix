@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ReviewOutputSchema, ReviewTargetSchema } from './review.js'
 import { RuntimeErrorSeverity } from './errors.js'
+import { generatedArtifactMetadataSchema } from './generated-artifact.js'
 
 /**
  * Conversation items returned as part of a thread or turn.
@@ -1024,6 +1025,15 @@ const PublicToolResultPlanStatusV1 = z.object({
   }).strict()
 }).strict()
 
+const PublicToolResultArtifactStatusV1 = z.object({
+  ...PublicToolResultBaseV1,
+  projectionKind: z.literal('artifact_status'),
+  messageKey: z.literal('artifact_created'),
+  code: z.literal('artifact_created'),
+  status: z.literal('completed'),
+  artifact: generatedArtifactMetadataSchema
+}).strict()
+
 const PublicToolResultCaseSourceStatusV1 = z.object({
   ...PublicToolResultBaseV1,
   projectionKind: z.literal('case_source_status'),
@@ -1059,6 +1069,7 @@ const PublicToolResultProjectionShapeV1 = z.discriminatedUnion('projectionKind',
   PublicToolResultWithheldV1,
   PublicToolResultHostStatusV1,
   PublicToolResultPlanStatusV1,
+  PublicToolResultArtifactStatusV1,
   PublicToolResultCaseSourceStatusV1,
   PublicToolResultMcpDiagnosticV1
 ])
@@ -1210,19 +1221,27 @@ export type ToolProgressTurnItem = z.infer<typeof ToolProgressTurnItem>
 
 export const ApprovalTurnItem = TurnItemBase.extend({
   kind: z.literal('approval'),
-  approvalId: z.string().min(1),
+  approvalId: z.string().min(1).optional(),
   toolName: z.string().min(1),
   summary: z.string(),
   status: z.enum(['pending', 'allowed', 'denied', 'expired'])
+}).superRefine((item, ctx) => {
+  if (item.status === 'pending' && item.approvalId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['approvalId'], message: 'pending approval requires a live handle' })
+  }
 })
 export type ApprovalTurnItem = z.infer<typeof ApprovalTurnItem>
 
 export const UserInputTurnItem = TurnItemBase.extend({
   kind: z.literal('user_input'),
-  inputId: z.string().min(1),
+  inputId: z.string().min(1).optional(),
   prompt: z.string(),
   questions: z.array(UserInputQuestionSchema).default([]),
   status: z.enum(['pending', 'submitted', 'cancelled'])
+}).superRefine((item, ctx) => {
+  if (item.status === 'pending' && item.inputId === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['inputId'], message: 'pending user input requires a live handle' })
+  }
 })
 export type UserInputTurnItem = z.infer<typeof UserInputTurnItem>
 
@@ -1245,7 +1264,29 @@ const TaskContinuationTodoV1Schema = z.object({
   }
 })
 
+const ContinuationUserHistoryV1Schema = z.object({
+  version: z.literal('continuation-user-history.v1'),
+  scopeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  sources: z.array(z.object({
+    reference: z.string().regex(/^[a-f0-9]{64}$/),
+    text: z.string().min(1).max(1 << 20),
+    digest: z.string().regex(/^[a-f0-9]{64}$/)
+  }).strict()).max(256)
+}).strict().superRefine((history, ctx) => {
+  const refs = new Set<string>()
+  let bytes = 0
+  for (const source of history.sources) {
+    bytes += new TextEncoder().encode(source.text).byteLength
+    if (refs.has(source.reference) || !source.text.trim()) {
+      ctx.addIssue({ code: 'custom', message: 'continuation user source must be unique and nonempty' })
+    }
+    refs.add(source.reference)
+  }
+  if (bytes > 1 << 20) ctx.addIssue({ code: 'custom', message: 'continuation source budget exceeded' })
+})
+
 export const TaskContinuationSnapshotV1Schema = z.object({
+  userHistory: ContinuationUserHistoryV1Schema.optional(),
   schemaVersion: z.literal(1),
   goal: z.object({
     goalId: z.string().min(1),

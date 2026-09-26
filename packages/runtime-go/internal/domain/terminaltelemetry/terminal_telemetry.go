@@ -62,12 +62,14 @@ const (
 	terminalCacheBaselineObservedV1
 	terminalProviderAttemptTelemetryValidV1
 	terminalContextEpochStateValidV1
+	terminalModelInputComparableV1
+	terminalProviderCostCompleteV1
 	terminalBoolFieldCountV1
 )
 
 var terminalBoolFieldNamesV1 = [terminalBoolFieldCountV1]string{
 	"prefixChanged", "toolSourceChanged", "cacheTelemetrySupported", "cacheTelemetryPresent",
-	"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid",
+	"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete",
 }
 
 type terminalNumberFieldV1 uint8
@@ -82,12 +84,16 @@ const (
 	terminalProviderLogicalCallCountV1
 	terminalProviderAttemptCountV1
 	terminalContextEpochV1
+	terminalModelInputPrefixBytesV1
+	terminalCostKnownAttemptsV1
+	terminalCostUSDNanosV1
+	terminalCostCNYNanosV1
 	terminalNumberFieldCountV1
 )
 
 var terminalNumberFieldNamesV1 = [terminalNumberFieldCountV1]string{
 	"toolSchemaTokens", "toolCount", "firstTokenLatencyMs", "durationMs", "cacheHitTokens", "cacheMissTokens",
-	"providerLogicalCallCount", "providerAttemptCount", "contextEpoch",
+	"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos",
 }
 
 type terminalUsageV1 struct {
@@ -142,8 +148,12 @@ const (
 )
 
 type terminalCacheDiagnosticsV1 struct {
-	state terminalCacheStateV1
-	route terminalPromptRouteV1
+	dynamicStateCheck        string
+	toolSchemaEstimator      string
+	responseModelObservation string
+	modelInputDifference     string
+	state                    terminalCacheStateV1
+	route                    terminalPromptRouteV1
 
 	hashes      [terminalHashFieldCountV1]string
 	hashPresent [terminalHashFieldCountV1]bool
@@ -247,6 +257,16 @@ func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any)
 	if !ok || !terminalTelemetryUsageConsistentV1(projection.usage, validated) {
 		projection.diagnostics.state = terminalCacheRejectedV1
 		return projection
+	}
+	if validated.boolPresent[terminalProviderCostCompleteV1] {
+		// Never display the last attempt's price as the complete turn cost.
+		projection.usage.costUSD, projection.usage.costCNY = 0, 0
+		projection.usage.cacheSavingsUSD, projection.usage.cacheSavingsCNY = 0, 0
+		projection.usage.priceConfigured = validated.bools[terminalProviderCostCompleteV1]
+		if projection.usage.priceConfigured {
+			projection.usage.costUSD = float64(validated.numbers[terminalCostUSDNanosV1]) / 1e9
+			projection.usage.costCNY = float64(validated.numbers[terminalCostCNYNanosV1]) / 1e9
+		}
 	}
 	projection.diagnostics = validated
 	return projection
@@ -436,6 +456,33 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			if _, ok := terminalStringList(value, terminalGenericStringAllowed); !ok {
 				return terminalCacheDiagnosticsV1{}, false
 			}
+		case "dynamicStateCheck":
+			if value != "not_checked" {
+				return terminalCacheDiagnosticsV1{}, false
+			}
+			out.dynamicStateCheck = "not_checked"
+		case "toolSchemaEstimator":
+			if value != "utf8_bytes_div4" {
+				return terminalCacheDiagnosticsV1{}, false
+			}
+			out.toolSchemaEstimator = "utf8_bytes_div4"
+		case "responseModelObservation":
+			text, ok := value.(string)
+			if !ok || (text != "not_reported" && text != "matches_resolved" && text != "differs_resolved") {
+				return terminalCacheDiagnosticsV1{}, false
+			}
+			out.responseModelObservation = text
+		case "modelInputFirstDifference":
+			text, ok := value.(string)
+			if !ok {
+				return terminalCacheDiagnosticsV1{}, false
+			}
+			switch text {
+			case "unavailable", "none", "system", "tools", "history", "current", "ordering":
+				out.modelInputDifference = text
+			default:
+				return terminalCacheDiagnosticsV1{}, false
+			}
 		case "cacheTelemetrySource":
 			if value != "provider_usage" {
 				return terminalCacheDiagnosticsV1{}, false
@@ -457,7 +504,7 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			}
 			out.hasProviderAttemptError = true
 		case "prefixChanged", "toolSourceChanged", "cacheTelemetrySupported", "cacheTelemetryPresent",
-			"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid":
+			"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete":
 			field, ok := terminalBoolFieldForNameV1(key)
 			flag, valid := value.(bool)
 			if !ok || !valid || out.boolPresent[field] {
@@ -465,7 +512,7 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			}
 			out.boolPresent[field], out.bools[field] = true, flag
 		case "toolSchemaTokens", "toolCount", "firstTokenLatencyMs", "durationMs", "cacheHitTokens", "cacheMissTokens",
-			"providerLogicalCallCount", "providerAttemptCount", "contextEpoch":
+			"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos":
 			field, ok := terminalNumberFieldForNameV1(key)
 			number, valid := terminalUnsignedNumber(value)
 			if !ok || !valid || out.numPresent[field] {
@@ -534,6 +581,15 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			return terminalCacheDiagnosticsV1{}, false
 		}
 	}
+	if out.boolPresent[terminalProviderCostCompleteV1] || out.numPresent[terminalCostKnownAttemptsV1] || out.numPresent[terminalCostUSDNanosV1] || out.numPresent[terminalCostCNYNanosV1] {
+		if !out.boolPresent[terminalProviderCostCompleteV1] || !out.numPresent[terminalCostKnownAttemptsV1] || !out.numPresent[terminalCostUSDNanosV1] || !out.numPresent[terminalCostCNYNanosV1] || !out.numPresent[terminalProviderAttemptCountV1] {
+			return terminalCacheDiagnosticsV1{}, false
+		}
+		known, total := out.numbers[terminalCostKnownAttemptsV1], out.numbers[terminalProviderAttemptCountV1]
+		if known > total || out.bools[terminalProviderCostCompleteV1] != (total > 0 && known == total) || (known == 0 && (out.numbers[terminalCostUSDNanosV1] != 0 || out.numbers[terminalCostCNYNanosV1] != 0)) {
+			return terminalCacheDiagnosticsV1{}, false
+		}
+	}
 	if !out.validateCrossField(observedCacheRatePresent, observedCacheRate) {
 		return terminalCacheDiagnosticsV1{}, false
 	}
@@ -562,6 +618,18 @@ func (diagnostics terminalCacheDiagnosticsV1) publicMap() map[string]any {
 	}
 	if diagnostics.cacheRate.present && diagnostics.cacheRate.known {
 		out["cacheHitRate"] = float64(diagnostics.cacheRate.numerator) / float64(diagnostics.cacheRate.denominator)
+	}
+	if diagnostics.dynamicStateCheck != "" {
+		out["dynamicStateCheck"] = diagnostics.dynamicStateCheck
+	}
+	if diagnostics.responseModelObservation != "" {
+		out["responseModelObservation"] = diagnostics.responseModelObservation
+	}
+	if diagnostics.toolSchemaEstimator != "" {
+		out["toolSchemaEstimator"] = diagnostics.toolSchemaEstimator
+	}
+	if diagnostics.modelInputDifference != "" {
+		out["modelInputFirstDifference"] = diagnostics.modelInputDifference
 	}
 	if diagnostics.hasCacheTelemetrySource {
 		out["cacheTelemetrySource"] = "provider_usage"

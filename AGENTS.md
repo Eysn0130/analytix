@@ -166,6 +166,13 @@ unsafe logs, or unverified claims.
 
 ## Preserve And Verify The Workspace
 
+- The primary development and product execution route is Codex Desktop on the
+  configured local Mac, in this canonical workspace. ChatGPT + GitHub is the
+  auxiliary development route. Neither route requires another Mac or cloud
+  environment by default. Follow the development routes section of
+  `docs/analytix/development-runbook.md` for execution scope and evidence;
+  changing routes does not clear a specific safety refusal or transfer native
+  acceptance evidence.
 - Before repository-grounded review, diagnosis, implementation, or mutation,
   run `git status --short --branch` and preserve existing user changes.
 - The canonical `main` tracks `origin/main` in the public repository. Follow

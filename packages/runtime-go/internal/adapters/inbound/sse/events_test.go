@@ -404,6 +404,16 @@ func TestThreadEventsHandlerLiveReplayUsesSnapshotRequiredForHugeBacklog(t *test
 			},
 		}),
 	}
+	preflightCalls := 0
+	projectionCalls := 0
+	handler.Store.PreflightPublic = func(string) string {
+		preflightCalls++
+		return ""
+	}
+	handler.Store.ProjectPublic = func(_ string, event map[string]any) (map[string]any, bool, string) {
+		projectionCalls++
+		return event, true, ""
+	}
 	recorder := httptest.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -424,6 +434,23 @@ func TestThreadEventsHandlerLiveReplayUsesSnapshotRequiredForHugeBacklog(t *test
 	}
 	if strings.Contains(body, `"kind":"pipeline_stage"`) {
 		t.Fatalf("huge live replay should use snapshot_required instead of partial deltas:\n%s", body)
+	}
+	if preflightCalls != 2 || projectionCalls != 0 {
+		t.Fatalf("large replay must recheck public authority without per-event projection: preflight=%d projection=%d", preflightCalls, projectionCalls)
+	}
+	preflightCalls = 0
+	handler.Store.PreflightPublic = func(string) string {
+		preflightCalls++
+		if preflightCalls == 2 {
+			return casePublicAuthorityRejectedCode
+		}
+		return ""
+	}
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, request, "t1")
+	if preflightCalls != 2 || !strings.Contains(revoked.Body.String(), `"kind":"public_projection_revoked"`) ||
+		strings.Contains(revoked.Body.String(), `"kind":"snapshot_required"`) {
+		t.Fatal("large replay advanced its cursor after public authority was revoked")
 	}
 }
 

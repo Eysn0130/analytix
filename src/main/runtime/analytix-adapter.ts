@@ -1,3 +1,5 @@
+import { packagedReleaseProfile } from '../release-profile'
+import { createRuntimePublicationTraceReceiver } from '../services/thread-trace-service'
 import { app } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -86,9 +88,6 @@ import {
   selectRuntimeHostScheduleMcpBindingV1,
   writeRuntimeStartupPrivateFrameV1
 } from './runtime-startup-private-frame-v1'
-import {
-  resolveDarwinSecretStoreKeychainBindingV1
-} from './darwin-secret-store-keychain-binding-v1'
 import { isAnalytixHealthResponseBody } from '../analytix-health'
 import {
   TaskJobKillResponseV1Schema,
@@ -125,6 +124,7 @@ import {
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   DeleteThreadResponse,
   ListThreadsResponse,
+  ResumeThreadResponse,
   ThreadSchema,
   ThreadTodosResponse
 } from '../../../packages/runtime/src/contracts/threads.js'
@@ -143,7 +143,10 @@ import {
   SteerTurnResponse
 } from '../../../packages/runtime/src/contracts/turns.js'
 import { StartReviewResponse } from '../../../packages/runtime/src/contracts/review.js'
-import { ApprovalDecisionResponse } from '../../../packages/runtime/src/contracts/approvals.js'
+import {
+  ApprovalDecisionResponse,
+  UserInputResolutionResponse
+} from '../../../packages/runtime/src/contracts/approvals.js'
 import {
   DailyUsageResponseSchema,
   ModelUsageResponseSchema,
@@ -157,6 +160,7 @@ import {
   providerRegistryPortableManifestExportResponseSchemaV1,
   providerRegistryPortableManifestImportResponseSchemaV1,
   providerRegistryProbeResponseSchemaV1,
+  providerRegistryCredentialCheckResponseSchemaV1,
   providerRegistryProviderResponseSchemaV1,
   providerRegistryRecoveredResponseSchemaV1,
   providerRegistrySnapshotResponseSchemaV1
@@ -1501,13 +1505,14 @@ function appendRuntimeGoSourceFingerprintEntries(root: string, relativeDir: stri
       appendRuntimeGoSourceFingerprintEntries(root, relativePath, entries)
       continue
     }
-    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum') {
+    const canonicalPath = relativePath.replaceAll('\\', '/')
+    const embeddedOfficeManifest = canonicalPath === 'internal/adapters/outbound/officeengineassets/manifest.json'
+    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum' && !embeddedOfficeManifest) {
       continue
     }
     if (!stat.isFile()) {
       throw new Error(`Go runtime build input must be a regular file: ${relativePath}`)
     }
-    const canonicalPath = relativePath.replaceAll('\\', '/')
     entries.push(`${canonicalPath}:${stat.size}:${sha256File(fullPath)}`)
   }
 }
@@ -1517,7 +1522,7 @@ type DevGoRuntimeCacheManifestV1 = {
   sourceDigestSha256: string
   toolchainDigestSha256: string
   buildContractDigestSha256: string
-  buildMode: 'go-build-trimpath-analytix-prod-v1'
+  buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1'
   platform: NodeJS.Platform
   arch: string
   binaryName: string
@@ -1583,7 +1588,7 @@ function parseDevGoRuntimeCacheManifestV1(value: unknown): DevGoRuntimeCacheMani
     'toolchainDigestSha256'
   ]
   if (Object.keys(record).sort().join('\n') !== expectedKeys.join('\n')) return null
-  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-v1') return null
+  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-dev-credentials-v1') return null
   if (!isSha256(record.sourceDigestSha256) || !isSha256(record.toolchainDigestSha256) ||
       !isSha256(record.buildContractDigestSha256) || !isSha256(record.binarySha256)) return null
   if (typeof record.platform !== 'string' || typeof record.arch !== 'string' || !record.arch) return null
@@ -1651,7 +1656,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     schemaVersion: 1,
     sourceDigestSha256,
     toolchainDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1',
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1',
     cachePolicy: options.env.ANALYTIX_DEV_CACHE_ROOT ? 'repository-cache-v1' : 'ordinary-v1',
     platform,
     arch,
@@ -1662,7 +1667,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     sourceDigestSha256,
     toolchainDigestSha256,
     buildContractDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1' as const,
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1' as const,
     platform,
     arch,
     binaryName
@@ -1685,7 +1690,7 @@ function ensureDevGoRuntimeServerBinary(options: {
       'build',
       '-trimpath',
       '-tags',
-      'analytix_prod',
+      'analytix_prod,analytix_dev_credentials',
       '-o',
       output,
       './cmd/runtime-server'
@@ -1862,10 +1867,6 @@ export async function migrateDesktopPrivateHistoryBeforeStartV2(
   const launchTarget = resolveGoRuntimeLaunchTarget({
     runtimeServer: true,
     runtimeGoDir: getGoRuntimeDir()
-  })
-  resolveDarwinSecretStoreKeychainBindingV1({
-    boundary: desktopExternalStateBoundaryForGoRuntime,
-    dataDir
   })
   const child = spawn(
     launchTarget.command,
@@ -2518,12 +2519,8 @@ async function startGoConformanceSidecarOnce(
     runtimeServer: isRuntimeServer,
     runtimeGoDir
   })
-  const darwinSecretStoreKeychainBindingV1 = isRuntimeServer
-    ? resolveDarwinSecretStoreKeychainBindingV1({
-        boundary: desktopExternalStateBoundaryForGoRuntime,
-        dataDir
-      })
-    : null
+  const developmentProviderAuthorityDir = desktopExternalStateBoundaryForGoRuntime.developmentProviderAuthorityDir
+  if (developmentProviderAuthorityDir && app.isPackaged) throw new Error('Packaged Analytix rejects development credential authority.')
   if (launchTarget.mode === 'go-run-source' && !existsSync(join(runtimeGoDir, 'go.mod'))) {
     throw new Error(`Go runtime source is missing at ${runtimeGoDir}`)
   }
@@ -2545,7 +2542,7 @@ async function startGoConformanceSidecarOnce(
     hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1
   }
   let bundledFundsConfigSynced = false
-  const bundledFundsMaterialization = isRuntimeServer
+  const bundledFundsMaterialization = isRuntimeServer && (!app.isPackaged || packagedReleaseProfile(app.getAppPath()) !== 'core')
     ? await settleOptionalRuntimeCapability('bundled_funds', async () => {
         const materialization = await materializeBundledFundsBeforeRuntimeV1({
           appIsPackaged: app.isPackaged,
@@ -2606,11 +2603,10 @@ async function startGoConformanceSidecarOnce(
     if (!bundledFundsConfigSynced) await syncRuntimeConfig()
     hostScheduleMcpBindingV1 = selectRuntimeHostScheduleMcpBindingV1(
       mainOwnedAuthority,
-      hostScheduleMcpBindingV1,
-      darwinSecretStoreKeychainBindingV1
+      hostScheduleMcpBindingV1
     )
     hasPrivateStartupFrame = Boolean(
-      mainOwnedAuthority || hostScheduleMcpBindingV1 || darwinSecretStoreKeychainBindingV1
+      mainOwnedAuthority || hostScheduleMcpBindingV1 || developmentProviderAuthorityDir
     )
     if (isRuntimeDefault) {
       args.push('--durable-root', durableRoot)
@@ -2655,17 +2651,20 @@ async function startGoConformanceSidecarOnce(
   goSidecarRuntimeToken = runtimeToken
   goSidecarFinalPublicationAuthorityPin = null
   const launchGeneration = ++goSidecarGeneration
-  child.stderr?.on('data', (chunk) => appendGoStderrTail(String(chunk)))
+  const publicationTrace = createRuntimePublicationTraceReceiver(app.getPath('userData'), child.pid ?? 0, launchGeneration)
+  child.stderr?.on('data', (chunk) => {
+    appendGoStderrTail(String(chunk))
+    publicationTrace.write(chunk)
+  })
+  child.once('close', () => publicationTrace.close())
   const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })
   let readyPayloadReceived = false
 
   try {
     if (hasPrivateStartupFrame) {
       await writeRuntimeStartupPrivateFrameV1(child.stdin, {
+        ...(developmentProviderAuthorityDir ? { developmentProviderAuthorityDir } : {}),
         ...(mainOwnedAuthority ? { protectedAuthorityV1: mainOwnedAuthority } : {}),
-        ...(darwinSecretStoreKeychainBindingV1
-          ? { darwinSecretStoreKeychainBindingV1 }
-          : {}),
         ...(hostScheduleMcpBindingV1 ? { hostScheduleMcpBindingV1 } : {})
       })
     }
@@ -4044,12 +4043,18 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
     return [PublicThreadHTTPResponseV1Schema]
   }
   if (/^\/v1\/threads\/[^/]+\/fork$/.test(path)) return [PublicThreadHTTPResponseV1Schema]
+  if (/^\/v1\/sessions\/[^/]+\/resume-thread$/.test(path) && method === 'POST') {
+    return [ResumeThreadResponse]
+  }
   if (/^\/v1\/threads\/[^/]+\/turns$/.test(path)) return [StartTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/steer$/.test(path)) return [SteerTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/interrupt$/.test(path)) return [InterruptTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/rewind$/.test(path)) return [RewindThreadResponse]
   if (/^\/v1\/threads\/[^/]+\/review$/.test(path)) return [StartReviewResponse]
   if (/^\/v1\/approvals\/[^/]+$/.test(path)) return [ApprovalDecisionResponse]
+  if (/^\/v1\/user-inputs\/[^/]+$/.test(path) && method === 'POST') {
+    return [UserInputResolutionResponse]
+  }
   if (path === '/v1/usage') {
     return [DailyUsageResponseSchema, ThreadUsageResponseSchema, RuntimeUsageResponseSchema, ModelUsageResponseSchema]
   }
@@ -4066,7 +4071,7 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (path === ANALYTIX_PROVIDER_REGISTRY_RECOVER_PATH && method === 'POST') {
     return [providerRegistryRecoveredResponseSchemaV1]
   }
-  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|probe|discover-models|account-observation))?$/.exec(path)
+  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|credential-check|probe|discover-models|account-observation))?$/.exec(path)
   if (providerRegistryProviderRoute) {
     switch (providerRegistryProviderRoute[1]) {
       case undefined:
@@ -4075,6 +4080,8 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
         return null
       case 'probe':
         return method === 'POST' ? [providerRegistryProbeResponseSchemaV1] : null
+      case 'credential-check':
+        return method === 'POST' ? [providerRegistryCredentialCheckResponseSchemaV1] : null
       case 'account-observation':
         return method === 'POST' ? [providerRegistryAccountObservationResponseSchemaV1] : null
       case 'select':
@@ -4249,6 +4256,13 @@ export function sanitizeRuntimeResponse(
 ): { ok: boolean; status: number; body: string } {
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
+  const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    (/^\/v1\/threads\/[^/]+\/fork$/.test(path) || (path === '/v1/threads' && method === 'GET'))
+  if (packagedForkDiagnostic) {
+    console.error('[packaged-fork-schema] ' + JSON.stringify({
+      phase: 'response', status: response.status, ok: response.ok
+    }))
+  }
   if (!response.body.trim()) {
     if (response.ok && !runtimeResponseRequiresBody(path)) return response
     return response.ok
@@ -4302,6 +4316,9 @@ export function sanitizeRuntimeResponse(
       }
       const authorityProjected = projectVerifiedAcceptedFinalHTTPValue(parsed, pin)
       if (canonicalRuntimeBoundaryValue(authorityProjected) !== canonicalRuntimeBoundaryValue(parsed)) {
+        if (packagedForkDiagnostic) {
+          console.error('[packaged-fork-schema] ' + JSON.stringify({ phase: 'authority_projection_changed' }))
+        }
         return {
           ok: false,
           status: 502,
@@ -4313,6 +4330,33 @@ export function sanitizeRuntimeResponse(
       }
       const validated = exactRuntimeResponseValueV1(outputSchemas, authorityProjected, pin)
       if (validated === null) {
+        if (packagedForkDiagnostic) {
+          const schemaResult = outputSchemas[0].safeParse(authorityProjected)
+          console.error('[packaged-fork-schema] ' + JSON.stringify({
+            phase: 'exact_validation',
+            schemaValid: schemaResult.success,
+            issuePaths: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .map((issue) => `${issue.path.join('.')}:${issue.code}`),
+            issueKeys: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .filter((issue) => issue.code === 'unrecognized_keys')
+              .flatMap((issue) => issue.keys),
+            sanitizerChanged: schemaResult.success &&
+              canonicalRuntimeBoundaryValue(sanitizePublicRuntimeValue(schemaResult.data)) !==
+                canonicalRuntimeBoundaryValue(schemaResult.data)
+          }))
+        }
+        return {
+          ok: false,
+          status: 502,
+          body: JSON.stringify({
+            code: 'runtime_response_schema_invalid',
+            message: 'Runtime response failed schema validation.'
+          })
+        }
+      }
+      const resumedSession = /^\/v1\/sessions\/([^/]+)\/resume-thread$/.exec(path)
+      if (resumedSession && (validated as { session_id?: unknown }).session_id !==
+          decodeClosedRuntimeRouteSegmentV1(resumedSession[1])) {
         return {
           ok: false,
           status: 502,
@@ -4377,6 +4421,15 @@ export function sanitizeRuntimeResponse(
   }
 }
 
+export function runtimeRequestTimeoutMs(pathAndQuery: string, method: string): number {
+  const path = pathAndQuery.split('?', 1)[0] || '/'
+  const verb = method.trim().toUpperCase()
+  // Credential mutations may wait on the protected task Keychain before Go replies.
+  const providerRegistryMutation = /^\/v1\/provider-registry(?:\/|$)/.test(path) &&
+    (verb === 'PATCH' || verb === 'PUT' || verb === 'DELETE')
+  return verb === 'POST' || providerRegistryMutation ? 60_000 : 15_000
+}
+
 export async function runtimeRequestViaHost(
   settings: AppSettingsV1,
   pathAndQuery: string,
@@ -4400,19 +4453,48 @@ export async function runtimeRequestViaHost(
   if (init.body && !hdrs.has('Content-Type')) {
     hdrs.set('Content-Type', 'application/json')
   }
+  const packagedThreadReadDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    (init.method ?? 'GET').toUpperCase() === 'GET' && /^\/v1\/threads\/[^/]+$/.test(pathNorm)
+  let rawResponseSeen = false
   try {
     const res = await fetch(url, {
       method: init.method ?? 'GET',
       headers: hdrs,
       body: init.body,
-      signal: AbortSignal.timeout(init.method === 'POST' ? 60_000 : 15_000)
+      signal: AbortSignal.timeout(runtimeRequestTimeoutMs(pathNorm, init.method ?? 'GET'))
     })
+    const body = await res.text()
+    rawResponseSeen = true
+    if (packagedThreadReadDiagnostic && !res.ok) {
+      let code = 'unclassified'
+      try {
+        const candidate = (JSON.parse(body) as { code?: unknown }).code
+        if (candidate === 'public_projection_pending' ||
+          candidate === 'accepted_final_hydration_unavailable' ||
+          candidate === 'internal_error') code = candidate
+      } catch { /* Response contents remain private. */ }
+      const rawHydrationClass = res.headers.get('X-Analytix-QA-Hydration-Class')
+      const hydrationClass = code === 'accepted_final_hydration_unavailable' && [
+        'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+        'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+        'seal_rejected', 'batch_invalid', 'retained_authority',
+        'authority_mismatch', 'delivery_bound', 'other'
+      ].includes(rawHydrationClass || '') ? rawHydrationClass : null
+      console.error('[packaged-thread-read] ' + JSON.stringify({
+        status: res.status, code, ...(hydrationClass ? { hydrationClass } : {})
+      }))
+    }
     return sanitizeRuntimeResponse({
       ok: res.ok,
       status: res.status,
-      body: await res.text()
+      body
     }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
   } catch {
+    if (packagedThreadReadDiagnostic) {
+      console.error('[packaged-thread-read] ' + JSON.stringify({
+        status: 0, code: rawResponseSeen ? 'sanitizer_failed' : 'transport_unavailable'
+      }))
+    }
     throw new Error(JSON.stringify({
       code: 'runtime_unavailable',
       message: 'The Analytix runtime is unavailable.'
@@ -4473,6 +4555,8 @@ export function buildGoRuntimeSidecarEnv(
     'ANALYTIX_RUNTIME_TOKEN',
     'ANALYTIX_MCP_CONFIG_PATH',
     'ANALYTIX_APP_ROOT',
+    'ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT',
+    'ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT',
     'ANALYTIX_RESOURCES_PATH'
   ])
   // Windows folds environment names when spawning. Remove every alias before
@@ -4484,6 +4568,10 @@ export function buildGoRuntimeSidecarEnv(
     ...childEnvironment,
     ANALYTIX_RUNTIME_TOKEN: runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveGoRuntimeMCPConfigPath(dataDir),
+    ...(app.isPackaged ? {} : {
+      ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: appRoot(),
+      ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT: env.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT ?? ''
+    }),
     ANALYTIX_APP_ROOT: appRoot(),
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }

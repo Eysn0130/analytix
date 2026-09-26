@@ -300,6 +300,7 @@ export const ThreadSummarySchema = ThreadSchema.pick({
   messageCount: z.number().int().nonnegative().optional(),
   turnCount: z.number().int().nonnegative().optional(),
   latestTurnId: z.string().min(1).optional(),
+  hasRunningTurn: z.literal(true).optional(),
   historyAuthority: z.literal('case_boundary_only_v1').optional()
 }).strict()
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>
@@ -420,6 +421,14 @@ export const ClearThreadTodosResponse = z.object({
   cleared: z.boolean()
 })
 export type ClearThreadTodosResponse = z.infer<typeof ClearThreadTodosResponse>
+
+export const ResumeThreadResponse = z.object({
+  thread_id: z.string().min(1),
+  session_id: z.string().min(1),
+  message_count: z.number().int().nonnegative(),
+  summary: z.string()
+}).strict()
+export type ResumeThreadResponse = z.infer<typeof ResumeThreadResponse>
 
 export const UpdateThreadRequest = z
   .object({

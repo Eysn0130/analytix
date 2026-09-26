@@ -878,7 +878,7 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 			t.Fatalf("ordinary work prompt should still advertise builtin investigation tool %s: %#v", expected, toolNames)
 		}
 	}
-	for _, hidden := range []string{"delegate_task", "task", "parallel_tasks", "run_skill"} {
+	for _, hidden := range []string{"delegate_task", "task", "parallel_tasks", "run_skill", "read_task_history"} {
 		if containsString(toolNames, hidden) {
 			t.Fatalf("ordinary work prompt should not advertise heavy %s tool without an explicit cue: %#v", hidden, toolNames)
 		}
@@ -4414,7 +4414,10 @@ func TestRuntimeServerDefaultContractCoversRendererBaselineEndpoints(t *testing.
 		nil,
 		http.StatusOK,
 	)
-	if workspaceStatus["exists"] != true || workspaceStatus["isGitRepository"] != false || workspaceStatus["isDirty"] != nil {
+	// The production probe now contains metadata reads as well as Git. Hosts
+	// without the protected-process backend must fail closed, not use host Stat.
+	expectWorkspaceExists := runtime.GOOS == "darwin"
+	if workspaceStatus["exists"] != expectWorkspaceExists || workspaceStatus["isGitRepository"] != false || workspaceStatus["isDirty"] != nil {
 		t.Fatalf("workspace status response mismatch: %#v", workspaceStatus)
 	}
 
@@ -4768,9 +4771,9 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		total["cacheMissTokens"] != float64(300) {
 		t.Fatalf("runtime usage total mismatch: %#v", runtimeUsage)
 	}
-	if floatField(t, total, "costCny") <= 0 || floatField(t, total, "costUsd") <= 0 ||
-		floatField(t, total, "cacheSavingsCny") <= 0 || floatField(t, total, "cacheSavingsUsd") <= 0 {
-		t.Fatalf("runtime usage total must include non-zero provider pricing and cache savings: %#v", total)
+	if floatField(t, total, "costCny") != 0.000394 || floatField(t, total, "costUsd") != 0 ||
+		!boolField(total, "priceConfigured") || floatField(t, total, "cacheSavingsCny") != 0 || floatField(t, total, "cacheSavingsUsd") != 0 {
+		t.Fatalf("runtime usage must retain known attempt cost in its configured currency without inferred exchange or savings: %#v", total)
 	}
 	if perThread, ok := runtimeUsage["perThread"].([]any); !ok || len(perThread) == 0 {
 		t.Fatalf("runtime usage must include perThread usage: %#v", runtimeUsage)
@@ -4794,8 +4797,8 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		threadBucket["last_turn_cache_hit_rate"] != 0.7 {
 		t.Fatalf("thread usage bucket mismatch: %#v", threadBucket)
 	}
-	if floatField(t, threadBucket, "cost_cny") <= 0 || floatField(t, threadBucket, "cost_usd") <= 0 {
-		t.Fatalf("thread usage bucket must include non-zero cost: %#v", threadBucket)
+	if floatField(t, threadBucket, "cost_cny") != 0.000394 || floatField(t, threadBucket, "cost_usd") != 0 {
+		t.Fatalf("thread usage bucket must preserve the configured currency cost: %#v", threadBucket)
 	}
 
 	missingDayWindow := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/usage?group_by=day&timezone=UTC", g1.RuntimeToken, nil, http.StatusBadRequest)
@@ -4847,8 +4850,8 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		detailUsage["cacheMissTokens"] != float64(300) {
 		t.Fatalf("thread detail must include cumulative usage: %#v", thread)
 	}
-	if floatField(t, detailUsage, "costCny") <= 0 || floatField(t, detailUsage, "costUsd") <= 0 {
-		t.Fatalf("thread detail usage must include non-zero cost: %#v", detailUsage)
+	if floatField(t, detailUsage, "costCny") != 0.000394 || floatField(t, detailUsage, "costUsd") != 0 {
+		t.Fatalf("thread detail usage must preserve the configured currency cost: %#v", detailUsage)
 	}
 }
 
@@ -5834,9 +5837,9 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 			`data: [DONE]`,
 		},
 		{
-			`data: {"type":"message_start","message":{"usage":{"input_tokens":80}}}`,
+			`data: {"type":"message_start","message":{"usage":{"input_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic priced"}}`,
-			`data: {"type":"message_delta","usage":{"output_tokens":12}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
@@ -12976,16 +12979,19 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 			`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
 			`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"## Plan\nUse the verified Anthropic implementation path."}}`,
 			`data: {"type":"content_block_stop","index":1}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":24}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Anthropic plan saved"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":28}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Anthropic plan history continued after restart"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 	})
@@ -13608,6 +13614,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
@@ -13617,24 +13624,25 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_read","name":"read","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"alpha.txt\"}"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":32}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic inspected both results"}}`,
-			`data: {"type":"message_delta","usage":{"output_tokens":4}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":40}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic continued from closed history"}}`,
-			`data: {"type":"message_delta","usage":{"output_tokens":5}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":44}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic fork continued without private wire"}}`,
-			`data: {"type":"message_delta","usage":{"output_tokens":5}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 			`data: {"type":"message_stop"}`,
 		},
 	})
@@ -13812,21 +13820,25 @@ func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) 
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_ordinary_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":20}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ordinary Anthropic tool turn complete"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":24}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ordinary Anthropic history continued"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":28}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ordinary Anthropic fork continued"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 	})
@@ -13904,6 +13916,14 @@ func TestRuntimeServerOrdinaryAnthropicHistoryKeepsNativeToolWire(t *testing.T) 
 }
 
 func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory(t *testing.T) {
+	testCompletedMessagesPrivateToolRestart(t, "")
+}
+
+func TestPostC8CompletedDeepSeekMessagesPrivateToolTurnRestartsWithClosedHistory(t *testing.T) {
+	testCompletedMessagesPrivateToolRestart(t, "deepseek-messages")
+}
+
+func testCompletedMessagesPrivateToolRestart(t *testing.T, protocol string) {
 	dataDir := workspacetest.New(t)
 	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
@@ -13915,7 +13935,7 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 	}
 	const thinkingSentinel = "ANTHROPIC_COMPLETED_RESTART_PRIVATE_THINKING"
 	const signatureSentinel = "sig_anthropic_completed_restart"
-	provider := newCompleteProviderServer(t, [][]string{
+	frames := [][]string{
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":8}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`,
@@ -13923,19 +13943,28 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_restart_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":20}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"completed before restart"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":24}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"continued after restart"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
-	})
+	}
+	if protocol != "" {
+		for i := 1; i < len(frames); i++ {
+			frames[i] = append([]string{frames[i][0], `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`}, frames[i][1:]...)
+		}
+	}
+	provider := newCompleteProviderServer(t, frames)
 	config := RuntimeServerContractConfig{
 		RuntimeToken:       DefaultRuntimeToken,
 		DurableTempDir:     durableRoot,
@@ -13943,6 +13972,15 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 		Port:               0,
 		DataDir:            dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-restart-provider", "claude-restart-model", "messages"),
+	}
+	if protocol != "" {
+		var providers map[string]any
+		if err := json.Unmarshal([]byte(config.ModelProvidersJSON), &providers); err != nil {
+			t.Fatal(err)
+		}
+		p := anyList(providers["providers"])[0].(map[string]any)
+		p["modelProfiles"] = map[string]any{"claude-restart-model": map[string]any{"reasoning": map[string]any{"requestProtocol": protocol, "supportedEfforts": []string{"off", "high"}, "defaultEffort": "high"}}}
+		config.ModelProvidersJSON = string(mustJSON(t, providers))
 	}
 	firstHandler := newRuntimeServerProviderReadyTestHandler(t, config)
 	firstServer := httptest.NewServer(firstHandler)
@@ -13958,6 +13996,9 @@ func TestRuntimeServerCompletedAnthropicPrivateToolTurnRestartsWithClosedHistory
 	}), http.StatusAccepted)
 	if provider.RequestCount() != 2 {
 		t.Fatalf("completed private Anthropic turn should call provider twice, got %d bodies=%#v", provider.RequestCount(), provider.Bodies())
+	}
+	if protocol != "" && (!strings.Contains(provider.Body(1), thinkingSentinel) || !strings.Contains(provider.Body(1), `"type":"tool_result"`)) {
+		t.Fatal("DeepSeek Messages lost private current-loop tool replay")
 	}
 	firstServer.Close()
 	shutdownRuntimeTestHandler(t, firstHandler)
@@ -14017,11 +14058,13 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_approval_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":20}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"approval continuation complete"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 	})
@@ -14097,11 +14140,13 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 			`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_approval_read","name":"read","input":{}}}`,
 			`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"approval.txt\"}"}}`,
 			`data: {"type":"content_block_stop","index":1}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":20}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"approval continuation complete"}}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 			`data: {"type":"message_stop"}`,
 		},
 	})
@@ -14182,6 +14227,7 @@ func TestRuntimeServerAnthropicApprovalDenialClearsPrivateProtocolWithoutProvide
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_denied_ls","name":"ls","input":{}}}`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
 		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
 		`data: {"type":"message_stop"}`,
 	}})
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
@@ -17799,7 +17845,7 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 	dataDir := workspacetest.New(t)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"request_user_input","arguments":"{\"prompt\":\"Pick a path\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_input","type":"function","function":{"name":"user_input","arguments":"{\"prompt\":\"Pick a path\",\"questions\":[{\"question\":\"Pick a path\",\"header\":\"Answer\"}]}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
@@ -17824,7 +17870,9 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 		"model":      "input-model",
 	}), http.StatusCreated)
 	threadID := stringField(thread, "id")
-	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{"prompt": "Ask only if needed."}), http.StatusAccepted)
+	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"prompt": "Ask only if needed.", "approvalPolicy": "never", "sandboxMode": "read-only", "disableUserInput": false,
+	}), http.StatusAccepted)
 	if start["status"] != "waiting" || start["pendingKind"] != "user_input" {
 		t.Fatalf("model-called user_input should pause the turn: %#v", start)
 	}

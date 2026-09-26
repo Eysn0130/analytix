@@ -99,6 +99,7 @@ function publicReasoningMetadataState(
     case 'reasoning':
       return PublicModelReasoningV2.safeParse(value).success ? 'valid' : 'invalid'
     case 'reasoningtokens':
+    case 'firstreasoninglatencyms':
       return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? 'valid' : 'invalid'
     case 'reasoningeffort':
       if (value === '') return 'legacy-empty'

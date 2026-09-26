@@ -5,7 +5,14 @@ import type { ThreadHandoffOperation } from '@shared/thread-handoff'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
+import { runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
+import { useWriteWorkspaceStore } from '../write/write-workspace-store'
+import { composeWritePrompt } from '../write/quoted-selection'
+import { emptySelection } from '../write/write-workspace-store-helpers'
+import { objectEditingRequestSchema, objectEditingResponseSchema, type ObjectEditingRequest } from '../../../../packages/runtime/src/contracts/object-editing'
+
+vi.mock('electron', () => ({ clipboard: {} }))
 
 const registryMock = vi.hoisted(() => ({
   getProvider: vi.fn()
@@ -113,6 +120,93 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 }
 
 describe('chat-store-thread-actions queued messages', () => {
+  it('opens, edits, saves and reopens a real synthetic file, then sends its selection in the existing conversation', async () => {
+    // Load host fixtures at runtime so Node/Electron ambient globals do not
+    // change the renderer's browser type environment.
+    const { mkdtemp, readFile, writeFile, rm } = await vi.importActual<{
+      mkdtemp: (prefix: string) => Promise<string>
+      readFile: (path: string, encoding: 'utf8') => Promise<string>
+      writeFile: (path: string, content: string) => Promise<void>
+      rm: (path: string, options: { recursive: boolean; force: boolean }) => Promise<void>
+    }>('node:fs/promises')
+    const { tmpdir } = await vi.importActual<{ tmpdir: () => string }>('node:os')
+    const { createHash } = await vi.importActual<{ createHash: (algorithm: string) => { update: (value: string) => { digest: (encoding: 'hex') => string } } }>('node:crypto')
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+    const root = await mkdtemp(`${tmpdir()}/analytix-workbench-roundtrip-`)
+    const filePath = `${root}/report.md`
+    const sessionId = 'a'.repeat(48), objectId = hash(filePath)
+    const receipts = new Map<string, ReturnType<typeof objectEditingResponseSchema.parse>>()
+    const objectRequest = vi.fn(async (input: ObjectEditingRequest) => {
+      const request = objectEditingRequestSchema.parse(input)
+      if (request.action === 'open') {
+        expect(request).toEqual({action:'open',workspace:root,path:filePath})
+        const content = await readFile(filePath, 'utf8')
+        return objectEditingResponseSchema.parse({ok:true,document:{sessionId,objectId,path:filePath,content,revision:hash(content)}})
+      }
+      if (request.action === 'close') {
+        expect(request.sessionId).toBe(sessionId)
+        return objectEditingResponseSchema.parse({ok:true,closed:true})
+      }
+      if (request.action !== 'commit') throw new Error('Unexpected synthetic object operation')
+      expect(request.sessionId).toBe(sessionId)
+      const replay = receipts.get(request.operationId)
+      if (replay) return replay
+      expect(request.baseRevision).toBe(hash(await readFile(filePath, 'utf8')))
+      await writeFile(filePath, request.content)
+      const result = objectEditingResponseSchema.parse({ok:true,receipt:{operationId:request.operationId,revision:hash(request.content),status:'committed',savedAt:'2026-09-14T00:00:00Z'}})
+      receipts.set(request.operationId,result)
+      return result
+    })
+    const legacyRead = vi.fn(), legacyWrite = vi.fn()
+    const provider = {
+      sendUserMessage: vi.fn(async (_threadId: string, _text: string, _options: unknown) => ({ threadId: 'thr_existing', turnId: 'turn_roundtrip', userMessageItemId: 'user_roundtrip' })),
+      subscribeThreadEvents: vi.fn(async () => undefined)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      objects:{request:objectRequest}, files: { read:legacyRead, write:legacyWrite },
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    try {
+      await writeFile(filePath, '# 合成报告\n\n原始段落\n')
+      useWriteWorkspaceStore.getState().resetWorkspace()
+      useWriteWorkspaceStore.setState({ workspaceRoot: root })
+      await useWriteWorkspaceStore.getState().openFile(root, filePath)
+      expect(useWriteWorkspaceStore.getState().fileContent).toContain('原始段落')
+      const content = '# 合成报告\n\n已编辑的中文段落\n'
+      useWriteWorkspaceStore.getState().setFileContent(content)
+      expect(await useWriteWorkspaceStore.getState().flushSave(root)).toBe(true)
+      expect(await readFile(filePath, 'utf8')).toBe(content)
+      expect(await useWriteWorkspaceStore.getState().openWorkspaceHome(root)).toBe(true)
+      await useWriteWorkspaceStore.getState().openFile(root, filePath)
+      expect(useWriteWorkspaceStore.getState().fileContent).toBe(content)
+      const selected = '已编辑的中文段落'
+      const from = content.indexOf(selected)
+      useWriteWorkspaceStore.getState().setSelection({ ...emptySelection(), text: selected, charCount: selected.length,
+        ranges: [{ from, to: from + selected.length, text: selected, startLine: 3, endLine: 3, startColumn: 1, endColumn: selected.length + 1, charCount: selected.length }] })
+      useWriteWorkspaceStore.getState().quoteCurrentSelection(root)
+      const quotes = useWriteWorkspaceStore.getState().quotedSelections
+      expect(quotes).toHaveLength(1)
+      expect(quotes[0].snapshotContent).toBe(content)
+      const prompt = composeWritePrompt('解释这个选区', quotes, { workspaceRoot: root, activeFilePath: filePath })
+      const { actions, state } = buildHarness()
+      state.busy = false
+      state.threads[0].workspace = root
+      expect(await actions.sendMessage(prompt, 'agent')).toBe(true)
+      expect(state.activeThreadId).toBe('thr_existing')
+      expect(provider.sendUserMessage).toHaveBeenCalledWith('thr_existing', expect.stringContaining(selected), expect.any(Object))
+      expect(provider.sendUserMessage.mock.calls[0][1]).not.toContain('snapshotContent')
+      expect(objectRequest.mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1)
+      expect(useWriteWorkspaceStore.getState().objectSession?.revision).toBe(hash(content))
+      expect(legacyRead).not.toHaveBeenCalled()
+      expect(legacyWrite).not.toHaveBeenCalled()
+    } finally {
+      useWriteWorkspaceStore.getState().resetWorkspace()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   beforeEach(() => {
     rendererRuntimeClient.invalidateSettings()
     registryMock.getProvider.mockReset()
@@ -143,6 +237,22 @@ describe('chat-store-thread-actions queued messages', () => {
 
     expect(state.queuedMessages).toHaveLength(0)
     expect(state.error).toBeTruthy()
+  })
+
+  it('does not steer or create optimistic state without secure client message IDs', async () => {
+    const provider = { steerUserMessage: vi.fn(), sendUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    state.activeThreadId = 'thr_existing'
+    state.currentTurnId = 'turn_active'
+    state.busy = true
+    vi.stubGlobal('crypto', undefined)
+
+    await expect(actions.sendMessage('keep this draft local', 'agent')).rejects.toThrow()
+    expect(provider.steerUserMessage).not.toHaveBeenCalled()
+    expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    expect(state.blocks).toEqual([])
+    expect(state.queuedMessages).toEqual([])
   })
 
   it('steers a running turn instead of queueing or interrupting when the composer sends text while busy', async () => {
@@ -1369,14 +1479,17 @@ describe('chat-store-thread-actions queued messages', () => {
     state.lastSeq = 0
     state.busy = false
 
-    await actions.subscribeThreadEventsLive('thr_existing')
+    const subscribing = actions.subscribeThreadEventsLive('thr_existing')
+    const subscribedSignal = sseAbortRef.current?.signal
+    expect(subscribedSignal).toBeInstanceOf(AbortSignal)
+    await subscribing
 
     expect(provider.getThreadDetail).toHaveBeenCalledTimes(1)
     expect(provider.subscribeThreadEvents).toHaveBeenCalledWith(
       'thr_existing',
       0,
       expect.any(Object),
-      sseAbortRef.current?.signal
+      subscribedSignal
     )
     expect(state.lastSeq).toBe(5)
     expect(state.liveAssistant).toBe('')
@@ -1931,7 +2044,6 @@ describe('chat-store-thread-actions queued messages', () => {
     const { actions, state } = buildHarness()
     state.route = 'write'
     state.busy = false
-    state.ensureWriteThreadForWorkspace = vi.fn(async () => 'thr_existing') as never
 
     await expect(actions.sendMessage('make a prototype', 'agent', {
       model: 'MiniMax-M3',
@@ -1946,5 +2058,138 @@ describe('chat-store-thread-actions queued messages', () => {
       'make a prototype',
       expect.objectContaining({ model: 'MiniMax-M3', providerId: 'minimax-token-plan' })
     )
+  })
+})
+
+describe('send receipt acknowledgement and housekeeping', () => {
+  beforeEach(() => {
+    rendererRuntimeClient.invalidateSettings()
+    registryMock.getProvider.mockReset()
+  })
+  afterEach(() => {
+    clearActiveStream()
+    rendererRuntimeClient.invalidateSettings()
+    vi.unstubAllGlobals()
+  })
+  it('removes the optimistic user bubble when Core rejects a send during terminal arbitration', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'turn_execution_conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    const originalBlocks: ChatState['blocks'] = []
+    state.busy = false
+
+    await expect(actions.sendMessage('Next request', 'agent')).resolves.toBe(false)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual(originalBlocks)
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+    expect(state.error).toBe(i18n.t('common:runtimeActiveTurn'))
+  })
+  it('removes an unacknowledged user bubble after a host preflight conflict', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    state.busy = false
+
+    await expect(actions.sendMessage('Unacknowledged request', 'agent')).resolves.toBe(false)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual([])
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+  })
+  it('removes its own pending bubble when SSE disconnects before a failed send receipt', async () => {
+    let abortStream: (() => void) | undefined
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        abortStream?.()
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.busy = false
+    abortStream = () => sseAbortRef.current?.abort()
+
+    await expect(actions.sendMessage('Interrupted request', 'agent')).resolves.toBe(false)
+
+    expect(state.blocks).toEqual([])
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+  })
+  it('recognizes a durable turn when acknowledgement was lost', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    state.busy = false
+    state.recoverActiveTurn = vi.fn(async () => {
+      state.blocks = [{ kind: 'user', id: 'durable-user', text: 'Durable request', meta: { turnId: 'durable-turn' } }]
+      state.error = null
+      return false
+    })
+
+    await expect(actions.sendMessage('Durable request', 'agent')).resolves.toBe(true)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual([{ kind: 'user', id: 'durable-user', text: 'Durable request', meta: { turnId: 'durable-turn' } }])
+    expect(state.refreshThreads).toHaveBeenCalledOnce()
+  })
+  it.each(['before-ack', 'after-ack'])('reports the original send result when an error occurs %s', async phase => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        if (phase === 'before-ack') throw new Error('Synthetic send rejected')
+        return { threadId: 'thr_existing', turnId: 'confirmed-turn', userMessageItemId: 'confirmed-user' }
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.busy = false
+    if (phase === 'after-ack') state.refreshThreads = vi.fn(async () => { throw new Error('Synthetic housekeeping failed') })
+    expect(await actions.sendMessage('Original request', 'agent')).toBe(phase === 'after-ack')
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    if (phase === 'after-ack') {
+      expect(state).toMatchObject({ busy: true, currentTurnId: 'confirmed-turn', currentTurnUserId: 'confirmed-user', error: null })
+      expect(window.analytix.logs.error).toHaveBeenCalledWith('thread-refresh', 'Post-send sidebar refresh failed')
+    } else expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
+    sseAbortRef.current?.abort()
   })
 })

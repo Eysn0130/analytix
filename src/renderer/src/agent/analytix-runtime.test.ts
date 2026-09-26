@@ -953,7 +953,7 @@ describe('AnalytixRuntimeProvider', () => {
         return { ok: true, status: 201, body: JSON.stringify({ ...threadBody, id: 'thr_fork', forkedFromThreadId: 'thr_surface' }) }
       }
       if (path.includes('/resume-thread')) {
-        return { ok: true, status: 201, body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_surface' }) }
+        return { ok: true, status: 201, body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_surface', message_count: 1, summary: 'resumed' }) }
       }
       if (path === '/v1/threads/thr_surface/summary') {
         return { ok: true, status: 200, body: JSON.stringify(summaryResponse('thr_surface')) }
@@ -1409,7 +1409,7 @@ describe('AnalytixRuntimeProvider', () => {
     const runtimeRequest = vi.fn(async (path: string) => ({
       ok: true, status: 200,
       body: JSON.stringify(path.endsWith('/resume-thread')
-        ? { thread_id: 'thr_case', session_id: 'session_case' } : response)
+        ? { thread_id: 'thr_case', session_id: 'session_case', message_count: 1, summary: 'resumed' } : response)
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -1568,6 +1568,7 @@ describe('AnalytixRuntimeProvider', () => {
     const secondDelivery = secondAcceptedFinalDeliveryBatchForRenderer()
     const response = acceptedCaseThreadResponse(record, firstView, firstView) as Record<string, any>
     const firstTurn = response.turns[0] as Record<string, any>
+    firstTurn.factHistoryState = 'retained_snapshot'
     delete firstTurn.acceptedFinal
     delete firstTurn.items.find((item: Record<string, unknown>) => item.kind === 'assistant_text').acceptedFinal
     const secondAssistantEvent = secondDelivery.events[0] as any
@@ -1613,6 +1614,8 @@ describe('AnalytixRuntimeProvider', () => {
       'assistant:item_final_second'
     ])
     const assistants = accepted.blocks.filter((block) => block.kind === 'assistant')
+    expect(assistants[0].meta?.factHistoryState).toBe('retained_snapshot')
+    expect(assistants[1].meta?.factHistoryState).toBeUndefined()
     expect(assistants.map((block) => block.acceptedFinalProjectionReceipt?.batchId)).toEqual([
       firstDelivery.batchId,
       secondDelivery.batchId
@@ -2043,6 +2046,84 @@ describe('AnalytixRuntimeProvider', () => {
       '/v1/threads/thr_1/review',
       'POST',
       expect.stringContaining('"providerId":"zai-coding-plan"')
+    )
+  })
+
+  it('preserves an explicit Registry model when legacy Settings list older models', async () => {
+    const runtimeRequest = vi.fn(async (path: string, _method?: string, _body?: string) => {
+      if (path === '/v1/threads') {
+        return {
+          ok: true,
+          status: 201,
+          body: JSON.stringify({
+            id: 'thr_1',
+            title: 'Provider thread',
+            workspace: '/tmp/workspace',
+            model: 'deepseek-flash',
+            providerId: 'deepseek',
+            mode: 'agent',
+            status: 'idle',
+            createdAt: '2026-06-20T00:00:00.000Z',
+            updatedAt: '2026-06-20T00:00:00.000Z'
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_1/review') {
+        return {
+          ok: true,
+          status: 202,
+          body: JSON.stringify({
+            threadId: 'thr_1',
+            turnId: 'turn_review',
+            userMessageItemId: 'item_user_review',
+            reviewItemId: 'item_review'
+          })
+        }
+      }
+      return {
+        ok: true,
+        status: 202,
+        body: JSON.stringify({ threadId: 'thr_1', turnId: 'turn_1', userMessageItemId: 'item_user' })
+      }
+    })
+    installDsGui({ runtimeRequest })
+    const provider = new AnalytixRuntimeProvider()
+
+    const thread = await provider.createThread({
+      workspace: '/tmp/workspace',
+      title: 'Provider thread',
+      model: 'deepseek-flash',
+      providerId: 'deepseek'
+    })
+    await provider.sendUserMessage('thr_1', 'hello', { model: 'deepseek-flash', providerId: 'deepseek' })
+    await provider.reviewThread('thr_1', { kind: 'uncommittedChanges' }, {
+      model: 'deepseek-flash',
+      providerId: 'deepseek'
+    })
+
+    expect(thread.providerId).toBe('deepseek')
+    for (const call of runtimeRequest.mock.calls) {
+      expect(JSON.parse(call[2] ?? '{}')).toMatchObject({
+        providerId: 'deepseek', model: 'deepseek-flash'
+      })
+    }
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      1,
+      '/v1/threads',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
+    )
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      2,
+      '/v1/threads/thr_1/turns',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
+    )
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      3,
+      '/v1/threads/thr_1/review',
+      'POST',
+      expect.stringContaining('"providerId":"deepseek"')
     )
   })
 
@@ -2714,14 +2795,15 @@ describe('AnalytixRuntimeProvider', () => {
       providerCount: 1,
       schemaVersion: 2
     })
-    await expect(provider.listSkills()).resolves.toEqual([
-      expect.objectContaining({
+    await expect(provider.listSkills()).resolves.toMatchObject({
+      validationErrorCount: 0,
+      skills: [expect.objectContaining({
         id: 'review',
         name: 'Review',
         scope: 'project',
         legacy: false
-      })
-    ])
+      })]
+    })
     await expect(provider.uploadAttachment({
       name: 'shot.png',
       mimeType: 'image/png',
@@ -2763,6 +2845,16 @@ describe('AnalytixRuntimeProvider', () => {
         workspace: '/tmp/workspace'
       })
     )
+  })
+
+  it.each([0, 1])('preserves incomplete skill discovery diagnostics with %i usable skills', async (skillCount) => {
+    const response = { schemaVersion: 2, enabled: true, available: skillCount > 0,
+      reasonCode: skillCount > 0 ? 'available' : 'unavailable', configuredRootCount: 0,
+      skillCount, validationErrorCount: 1,
+      skills: skillCount ? [{ id: 'analytix-documents', name: 'Analytix Documents', scope: 'global', legacy: false }] : [] }
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(response) }))
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().listSkills()).resolves.toEqual(response)
   })
 
   it('rejects legacy or private runtime skill catalog responses', async () => {
@@ -2939,7 +3031,7 @@ describe('AnalytixRuntimeProvider', () => {
         return {
           ok: true,
           status: 201,
-          body: JSON.stringify({ thread_id: 'thr_resumed', session_id: sessionId })
+          body: JSON.stringify({ thread_id: 'thr_resumed', session_id: sessionId, message_count: 1, summary: 'resumed' })
         }
       }
       if (path.endsWith('/rewind')) {
@@ -3052,7 +3144,7 @@ describe('AnalytixRuntimeProvider', () => {
     const runtimeRequest = vi.fn(async () => ({
       ok: true,
       status: 201,
-      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1', message_count: 1, summary: 'resumed' })
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -3072,11 +3164,23 @@ describe('AnalytixRuntimeProvider', () => {
     )
   })
 
+  it('rejects an incomplete resumed session response', async () => {
+    installDsGui({
+      runtimeRequest: vi.fn(async () => ({
+        ok: true,
+        status: 201,
+        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      }))
+    })
+    const provider = new AnalytixRuntimeProvider()
+    await expect(provider.resumeSession('sess_1')).rejects.toThrow('runtime_response_schema_invalid')
+  })
+
   it('passes providerId through resume session requests', async () => {
     const runtimeRequest = vi.fn(async () => ({
       ok: true,
       status: 201,
-      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1' })
+      body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_1', message_count: 1, summary: 'resumed' })
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
@@ -3129,7 +3233,7 @@ describe('AnalytixRuntimeProvider', () => {
       return {
         ok: true,
         status: 201,
-        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_mimo' })
+        body: JSON.stringify({ thread_id: 'thr_resumed', session_id: 'sess_mimo', message_count: 1, summary: 'resumed' })
       }
     })
     installDsGui({ getSettings, runtimeRequest })

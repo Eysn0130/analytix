@@ -118,6 +118,7 @@ module.exports = {
   ],
   asar: true,
   asarUnpack: [
+    'out/office-codec/**/*',
     '**/packages/runtime/dist/cli/**/*',
     '**/packages/runtime/dist/config/**/*',
     '**/packages/runtime/dist/contracts/**/*',
@@ -146,6 +147,9 @@ module.exports = {
     'packages/runtime/package-lock.json',
     'packages/runtime/node_modules/**/*',
     'node_modules/openclaw/LICENSE',
+    // pptxgenjs 4.0.1 imports node:https. Its metadata-only npm "https"
+    // dependency contains no implementation and is not a runtime input.
+    '!node_modules/https/**',
     '!**/*.map',
     '!**/*.d.ts',
     '!**/*.ts',
@@ -315,3 +319,8 @@ module.exports = {
     }
   }
 }
+
+// Explicit build profile; the sealed effective builder context binds this choice.
+module.exports = require('./scripts/core-package-profile.cjs').applyReleaseProfile(
+  module.exports, process.env.ANALYTIX_RELEASE_PROFILE || 'full'
+)

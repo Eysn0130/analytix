@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "adapter": "zeta-office",
+  "documentKind": "pptx",
+  "openFormats": [
+    "pptx"
+  ],
+  "readOnly": true,
+  "protocolVersion": 1
+}

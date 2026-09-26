@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
@@ -93,6 +96,71 @@ func TestAcceptedFinalCursorInsideRangeReplaysWholeBatch(t *testing.T) {
 	}
 	if len(replay.Events) != 0 {
 		t.Fatalf("cursor at the accepted-final batch tail replayed delivered events: %#v", replay.Events)
+	}
+}
+
+func TestGeneralTerminalReplayLookbackKeepsWholeBatch(t *testing.T) {
+	store, err := NewTempDurableEventSessionStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.CreateThread(map[string]any{"title": "general terminal replay"}, workspacetest.New(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadID := stringField(thread, "id")
+	commitID := digestServerBatchTest("general-terminal-" + threadID)
+	authorityDigest := digestServerBatchTest("general-terminal-cas-" + threadID)
+	const timestamp = "2026-07-20T03:00:00Z"
+	events := []map[string]any{
+		{
+			"kind": "item_completed", "threadId": threadID, "turnId": "turn-1", "itemId": "item-1",
+			"seq": float64(1), "timestamp": timestamp,
+			"item": map[string]any{
+				"id": "item-1", "threadId": threadID, "turnId": "turn-1", "role": "assistant",
+				"kind": "assistant_text", "status": "completed", "createdAt": timestamp,
+				"finishedAt": timestamp, "text": domainevent.GeneralTerminalCompletedBoundaryTextV1,
+			},
+		},
+		{
+			"kind": "usage", "threadId": threadID, "turnId": "turn-1", "seq": float64(2),
+			"timestamp": timestamp, "model": "", "usage": domainterminaltelemetry.ProviderUsageMap(domainmodel.Usage{}),
+			"cacheDiagnostics": map[string]any{}, "usageFinalStatus": "completed",
+		},
+		{
+			"kind": "turn_completed", "threadId": threadID, "turnId": "turn-1", "seq": float64(3),
+			"timestamp": timestamp, "status": "completed", "terminalReason": "success",
+		},
+	}
+	for index, slot := range []string{"terminal-item", "usage", "terminal"} {
+		event := events[index]
+		event["generalTerminalCommitId"] = commitID
+		event["generalTerminalEventId"] = domainevent.GeneralTerminalDeliveryEventIDV1(commitID, slot)
+		event["generalTerminalSlot"] = slot
+		event["generalTerminalAuthorityKind"] = domainevent.GeneralTerminalCASAuthorityKind
+		event["generalTerminalAuthorityDigest"] = authorityDigest
+		event["generalTerminalPayloadDigest"] = domainevent.GeneralTerminalDeliveryPayloadDigestV1(event)
+		if event["generalTerminalPayloadDigest"] != domainturnterminal.GeneralTerminalPublicationPayloadDigestV1(event) {
+			t.Fatalf("general terminal payload digest drifted at slot %s", slot)
+		}
+	}
+	if err := store.eventLog.AppendEventsAtomic(threadID, events); err != nil {
+		t.Fatal(err)
+	}
+
+	// SSE looks behind the public cursor when a new turn starts. A cursor inside
+	// this committed group must return its full batch to the strict validator.
+	replay, err := store.LoadPublicEventsSince(threadID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := domainevent.AtomicTerminalReplayEventsAfter(replay.Events, 2)
+	if err != nil {
+		t.Fatalf("lookback split a committed general terminal batch: %v", err)
+	}
+	if len(filtered) != 3 || filtered[0]["kind"] != "item_completed" ||
+		filtered[1]["kind"] != "usage" || filtered[2]["kind"] != "turn_completed" {
+		t.Fatalf("unexpected general terminal replay shape: %d events", len(filtered))
 	}
 }
 

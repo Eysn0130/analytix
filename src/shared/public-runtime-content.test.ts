@@ -177,6 +177,19 @@ function toolCallItem(argumentsValue: unknown, extra: Record<string, unknown> = 
 }
 
 describe('public runtime content', () => {
+  it('preserves host question IDs with numeric digest runs in thread detail', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const item = {
+      kind: 'user_input', role: 'system', status: 'pending', inputId, prompt: 'Choose a path',
+      questions: [{ id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }]
+    }
+    const thread = { id: 'thread-gate', turns: [{ id: 'turn-gate', items: [item] }] }
+    expect(sanitizePublicRuntimeValue(thread)).toEqual(thread)
+    expect(sanitizePublicRuntimeValue({ ...thread, turns: [{ id: 'turn-gate', items: [{
+      ...item, questions: [{ ...item.questions[0], question: 'account=6222020202020202020' }]
+    }] }] })).toBeUndefined()
+  })
+
   it('withholds marker-free raw provider, tool, and job diagnostic fields', () => {
     const sentinel = 'SOL_RAW_JOB_ERROR_SENTINEL_7F3C'
     const value = {

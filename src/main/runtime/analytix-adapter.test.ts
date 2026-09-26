@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
   defaultKeyboardShortcuts,
@@ -57,11 +57,16 @@ import {
   takeExactGoRuntimeReadyLine,
   verifyWitnessedAuthorityStartupIdentity,
   waitForDesktopPrivateHistoryMigrationV2,
+  runtimeRequestTimeoutMs,
   runtimeRequestViaHost
 } from './analytix-adapter'
 import type {
   MainOwnedRuntimeAuthorityEnvelopeV1
 } from './main-owned-authority-envelope-v1'
+
+const electronApp = vi.hoisted(() => ({ isPackaged: false, getAppPath: () => process.cwd() }))
+vi.mock('electron', () => ({ app: electronApp }))
+afterEach(() => { electronApp.isPackaged = false })
 
 function mainOwnedAuthorityFixtureV1(): MainOwnedRuntimeAuthorityEnvelopeV1 {
   const publicKey = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1))
@@ -1490,6 +1495,148 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('allows protected Provider Registry mutations to finish beyond the ordinary read deadline', () => {
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'PATCH')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek/credential', 'PUT')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'DELETE')).toBe(60_000)
+    expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'GET')).toBe(15_000)
+    expect(runtimeRequestTimeoutMs('/v1/threads/thread-a', 'PATCH')).toBe(15_000)
+    expect(runtimeRequestTimeoutMs('/v1/threads', 'POST')).toBe(60_000)
+  })
+
+  it('admits provider attribution in Core thread usage without losing exact public fields', () => {
+    const counters = {
+      input_tokens: 12,
+      output_tokens: 3,
+      reasoning_tokens: 0,
+      cached_tokens: 2,
+      cache_hit_tokens: 2,
+      cache_miss_tokens: 10,
+      total_tokens: 15,
+      cost_usd: 0,
+      cost_cny: 0,
+      price_configured: false,
+      cache_savings_usd: 0,
+      cache_savings_cny: 0,
+      token_economy_savings_tokens: 0,
+      token_economy_savings_usd: 0,
+      token_economy_savings_cny: 0,
+      turns: 1,
+      cache_hit_rate: 2 / 12
+    }
+    const response = {
+      group_by: 'thread',
+      buckets: [{
+        ...counters,
+        thread_id: 'thr_durable_1',
+        provider: 'xiaomi',
+        last_turn_cache_hit_rate: 2 / 12,
+        last_turn_cacheable_hit_rate: 2 / 12,
+        last_turn_total_input_hit_rate: 2 / 12,
+        last_cache_miss_reasons: [],
+        last_cache_suggestions: []
+      }],
+      totals: { ...counters, thread_count: 1 }
+    }
+    const raw = { ok: true, status: 200, body: JSON.stringify(response) }
+    const accepted = sanitizeRuntimeResponse(raw, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET')
+    expect(accepted).toEqual(raw)
+    expect(sanitizeRuntimeResponse(accepted, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET'))
+      .toEqual(raw)
+    const unexpected = {
+      ...response,
+      buckets: [{ ...response.buckets[0], privateAuthority: 'not public' }]
+    }
+    const rejected = sanitizeRuntimeResponse({
+      ...raw,
+      body: JSON.stringify(unexpected)
+    }, '/v1/usage?group_by=thread&thread_id=thr_durable_1', null, 'GET')
+    expect(rejected).toMatchObject({ ok: false, status: 502 })
+    expect(rejected.body).not.toContain('privateAuthority')
+  })
+
+  it('accepts exact user-input resolution responses without opening the generic runtime bridge', () => {
+    const path = '/v1/user-inputs/input_turn_1'
+    const submitted = {
+      inputId: 'input_turn_1',
+      status: 'submitted',
+      answers: [{ id: 'q1', value: 'approved answer' }]
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(submitted)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 200, body: JSON.stringify(submitted) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    const cancelled = { inputId: 'input_turn_1', status: 'cancelled' }
+    expect(sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(cancelled)
+    }, path, null, 'POST')).toEqual({ ok: true, status: 200, body: JSON.stringify(cancelled) })
+
+    for (const invalid of [
+      { ...submitted, privateAuthority: 'not public' },
+      { ...submitted, answers: [{ id: 'q1', value: 'approved answer', privateToken: 'not public' }] }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 200, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
+  it('accepts committed Go interrupt flags while rejecting extra response fields', () => {
+    const path = '/v1/threads/thr_cancel/turns/turn_cancel/interrupt'
+    const committed = {
+      threadId: 'thr_cancel', turnId: 'turn_cancel', status: 'aborted',
+      discard: false, cancelled: true
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(committed)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 200, body: JSON.stringify(committed) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    for (const invalid of [
+      { ...committed, cancelled: 'true' },
+      { ...committed, privateAuthority: 'not public' }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 200, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected).toMatchObject({ ok: false, status: 502 })
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
+  it('accepts the exact Go resume response and binds it to the requested session', () => {
+    const path = '/v1/sessions/thr_original/resume-thread'
+    const body = {
+      thread_id: 'thr_resumed',
+      session_id: 'thr_original',
+      message_count: 1,
+      summary: 'resumed'
+    }
+    const accepted = sanitizeRuntimeResponse({
+      ok: true, status: 201, body: JSON.stringify(body)
+    }, path, null, 'POST')
+    expect(accepted).toEqual({ ok: true, status: 201, body: JSON.stringify(body) })
+    expect(sanitizeRuntimeResponse(accepted, path, null, 'POST')).toEqual(accepted)
+
+    for (const invalid of [
+      { ...body, session_id: 'thr_other' },
+      { ...body, privateAuthority: 'not public' }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true, status: 201, body: JSON.stringify(invalid)
+      }, path, null, 'POST')
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain('not public')
+    }
+  })
+
   it('accepts the public rewind response and rejects its private authority turn extension', () => {
     const response = {
       threadId: 'thr_rewind',
@@ -2026,6 +2173,23 @@ describe('runtimeRequestViaHost', () => {
     expect(await handler({ schemaVersion: 1, operation: 'list' })).toEqual(failure)
   })
 
+  it('preserves only the fixed public projection pending code across both desktop sanitizers', () => {
+    const raw = { ok: false, status: 503, body: JSON.stringify({
+      code: 'public_projection_pending', message: 'SYNTHETIC_PRIVATE_ERROR'
+    }) }
+    const once = sanitizeRuntimeResponse(raw, '/v1/threads/thread-a', null, 'GET')
+    const twice = sanitizeRuntimeResponse(once, '/v1/threads/thread-a', null, 'GET')
+    expect(twice).toEqual({
+      ok: false,
+      status: 503,
+      body: JSON.stringify({
+        code: 'public_projection_pending',
+        message: 'The thread public projection is finalizing.'
+      })
+    })
+    expect(JSON.stringify(twice)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+  })
+
   it('rejects noncanonical Registry errors without exposing their content', async () => {
     for (const body of [
       { schemaVersion: 1, error: { code: 'persistence_failure', message: 'SYNTHETIC_PRIVATE_ERROR' } },
@@ -2148,6 +2312,16 @@ describe('runtimeRequestViaHost', () => {
       })
       expect(rejected.body).not.toContain(privateSentinel)
     }
+  })
+
+  it.each([0, 1])('retains incomplete runtime skill discovery with %i usable skills', (skillCount) => {
+    const response = { schemaVersion: 2, enabled: true, available: skillCount > 0,
+      reasonCode: skillCount > 0 ? 'available' : 'unavailable', configuredRootCount: 0,
+      skillCount, validationErrorCount: 1,
+      skills: skillCount ? [{ id: 'analytix-documents', name: 'Analytix Documents', scope: 'global', legacy: false }] : [] }
+    const projected = sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(response) }, '/v1/skills')
+    expect(projected.ok).toBe(true)
+    expect(JSON.parse(projected.body)).toEqual(response)
   })
 
   it('accepts the closed runtime skills projection and rejects private catalog fields', () => {
@@ -2687,6 +2861,66 @@ describe('runtimeRequestViaHost', () => {
     expect(seenAuthorization).toBe('')
   })
 
+  it('records only a fixed upstream thread-read category in packaged QA mode', async () => {
+    const port = await listen((_req, res) => {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({
+        code: 'public_projection_pending', message: 'SYNTHETIC_PRIVATE_ERROR'
+      }))
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    try {
+      const response = await runtimeRequestViaHost(
+        settingsForPort(port), '/v1/threads/thread-a', { method: 'GET' }, async () => undefined
+      )
+      expect(response.status).toBe(503)
+      expect(JSON.parse(response.body).code).toBe('public_projection_pending')
+      expect(logged).toHaveBeenCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"public_projection_pending"}'
+      )
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+    } finally {
+      vi.unstubAllEnvs()
+      logged.mockRestore()
+    }
+  })
+
+  it('records a fixed hydration subtype without exposing the upstream body or header', async () => {
+    let rawHeader = 'frontier_torn'
+    const port = await listen((_req, res) => {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('X-Analytix-QA-Hydration-Class', rawHeader)
+      res.end(JSON.stringify({
+        code: 'accepted_final_hydration_unavailable', message: 'SYNTHETIC_PRIVATE_ERROR'
+      }))
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    try {
+      const request = () => runtimeRequestViaHost(
+        settingsForPort(port), '/v1/threads/thread-a', { method: 'GET' }, async () => undefined
+      )
+      const response = await request()
+      expect(response.status).toBe(503)
+      expect(JSON.parse(response.body).code).toBe('internal_error')
+      expect(logged).toHaveBeenCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable","hydrationClass":"frontier_torn"}'
+      )
+      rawHeader = 'SYNTHETIC_PRIVATE_ERROR'
+      await request()
+      expect(logged).toHaveBeenLastCalledWith(
+        '[packaged-thread-read] {"status":503,"code":"accepted_final_hydration_unavailable"}'
+      )
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_ERROR')
+    } finally {
+      vi.unstubAllEnvs()
+      logged.mockRestore()
+    }
+  })
+
   it('uses settings returned by ensureRuntime when the managed port changes', async () => {
     let seenUrl = ''
     const port = await listen((req, res) => {
@@ -3003,6 +3237,19 @@ exit 1
 	      })
 	      expect(reused).toEqual(target)
 
+          const manifestDir = join(runtimeGoDir, 'internal', 'adapters', 'outbound', 'officeengineassets')
+          mkdirSync(manifestDir, { recursive: true })
+          writeFileSync(join(manifestDir, 'manifest.json'), '{"buildId":"first"}', 'utf8')
+          const withManifest = resolveGoRuntimeLaunchTarget({ runtimeServer: true, appIsPackaged: false,
+            runtimeGoDir, goBinaryCandidates: [], env: { PATH: root, ANALYTIX_GO_RUNTIME_SERVER_CACHE_DIR: cacheDir } })
+          expect(withManifest.command).not.toBe(target.command)
+          writeFileSync(join(manifestDir, 'manifest.json'), '{"buildId":"other"}', 'utf8')
+          const changedManifest = resolveGoRuntimeLaunchTarget({ runtimeServer: true, appIsPackaged: false,
+            runtimeGoDir, goBinaryCandidates: [], env: { PATH: root, ANALYTIX_GO_RUNTIME_SERVER_CACHE_DIR: cacheDir } })
+          expect(changedManifest.command).not.toBe(withManifest.command)
+          // Restore the original source state for the binary-tamper assertion.
+          rmSync(join(manifestDir, 'manifest.json'))
+
 	      writeFileSync(target.command, '#!/bin/sh\nexit 99\n', 'utf8')
 	      expect(() => resolveGoRuntimeLaunchTarget({
 	        runtimeServer: true,
@@ -3298,6 +3545,7 @@ exit 1
       },
       'development-runtime-token'
     )
+    electronApp.isPackaged = true
     const packaged = buildGoRuntimeSidecarEnv(
       settings,
       runtime,
@@ -3305,6 +3553,9 @@ exit 1
       {
         PATH: '/usr/bin',
         NODE_ENV: 'production',
+        ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: '/untrusted/plugin-source',
+        ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT: '/untrusted/office-assets',
+        analytix_development_office_asset_root: '/untrusted/lowercase-assets',
         ANALYTIX_API_KEY: syntheticCredential,
         ANALYTIX_MODEL_PROVIDERS: JSON.stringify({ apiKey: syntheticCredential }),
         ANALYTIX_RUNTIME_DEEPSEEK_API_KEY: syntheticCredential,
@@ -3318,6 +3569,10 @@ exit 1
 
     expect(development.ANALYTIX_MCP_CONFIG_PATH).toBe('/tmp/analytix-k4-shared-profile/config.json')
     expect(packaged.ANALYTIX_MCP_CONFIG_PATH).toBe(development.ANALYTIX_MCP_CONFIG_PATH)
+    expect(development.ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT).toBe(process.cwd())
+    expect(packaged.ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT).toBeUndefined()
+    expect(packaged.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT).toBeUndefined()
+    expect(packaged.analytix_development_office_asset_root).toBeUndefined()
     for (const environment of [development, packaged]) {
       expect(environment.ANALYTIX_API_KEY).toBeUndefined()
       expect(environment.ANALYTIX_MODEL_PROVIDERS).toBeUndefined()

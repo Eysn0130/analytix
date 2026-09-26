@@ -12,7 +12,7 @@ import {
   normalizeAppSettings
 } from '@shared/app-settings'
 import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/analytix-api'
-import { providerRegistryRequestSchemaV1, providerRegistryResultSchemaV1 } from '../../../../packages/runtime/src/contracts/provider-registry.js'
+import { PROVIDER_REGISTRY_FAILURE_MESSAGES_V1, providerRegistryRequestSchemaV1, providerRegistryResultSchemaV1 } from '../../../../packages/runtime/src/contracts/provider-registry.js'
 import { ProvidersSettingsSection } from './settings-section-providers'
 import { useChatStore } from '../store/chat-store'
 
@@ -48,6 +48,7 @@ function registryFixture() {
   let revision = 1
   const calls: ProviderRegistryRequest[] = []
   let failure: ProviderRegistryRequest['operation'] | null = null
+  let legacyReentryRequired = false
   const gates: Array<{ operation: ProviderRegistryRequest['operation']; entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }> = []
   const snapshot = (): Snapshot => ({
     schemaVersion: 1, registryRevision: String(revision), registryIncarnation,
@@ -62,11 +63,27 @@ function registryFixture() {
       result = { schemaVersion: 1, error: { code: 'runtime_unavailable', message: 'The provider registry is unavailable.' } }
     } else if (input.operation === 'list') {
       result = snapshot()
+    } else if (input.operation === 'credential-check') {
+      if (legacyReentryRequired) {
+        result = { schemaVersion: 1, error: {
+          code: 'credential_reentry_required', message: PROVIDER_REGISTRY_FAILURE_MESSAGES_V1.credential_reentry_required
+        } }
+      } else {
+        const current = providers.find((entry) => entry.id === input.providerId)!
+        result = {
+          schemaVersion: 1, registryRevision: String(revision), registryIncarnation,
+          providerId: current.id, providerRevision: current.revision,
+          providerGeneration: current.generation, providerIncarnation: current.incarnation,
+          credentialAvailable: true
+        }
+      }
     } else if (input.operation === 'credential-replace' || input.operation === 'connect' || input.operation === 'update') {
       expect(input.expected.registryRevision === String(revision)).toBe(true)
       expect(input.expected.registryIncarnation === registryIncarnation).toBe(true)
       const id = input.operation === 'connect' ? input.provider.id : input.providerId
       const prior = providers.find((entry) => entry.id === id)
+      // Core's transactional identity keeps kind immutable after connect.
+      if (input.operation === 'update') expect(input.provider.kind).toBe(prior!.kind)
       revision += 1
       const next: Provider = {
         ...(prior ?? provider(id)),
@@ -78,10 +95,12 @@ function registryFixture() {
           selectedRoutes: input.provider.selectedRoutes
         }),
         revision: String(Number(prior?.revision ?? 0) + 1),
-        generation: String(Number(prior?.generation ?? 0) + 1),
+        generation: input.operation === 'update' && input.credential.kind === 'keep'
+          ? prior!.generation : String(Number(prior?.generation ?? 0) + 1),
         credentialConfigured: true, credentialPurpose: 'provider-api-key'
       }
       providers = [...providers.filter((entry) => entry.id !== id), next].sort((left, right) => left.id.localeCompare(right.id))
+      if (input.operation === 'credential-replace') legacyReentryRequired = false
       result = { schemaVersion: 1, registryRevision: String(revision), registryIncarnation, provider: structuredClone(next) }
     } else if (input.operation === 'select') {
       expect(input.expected.registryRevision === String(revision)).toBe(true)
@@ -111,7 +130,8 @@ function registryFixture() {
       gates.push(gate)
       return gate
     },
-    mutations: () => calls.filter((call) => call.operation !== 'list')
+    requireLegacyReentry() { legacyReentryRequired = true },
+    mutations: () => calls.filter((call) => call.operation !== 'list' && call.operation !== 'credential-check')
   }
 }
 
@@ -123,7 +143,7 @@ let patches: unknown[]
 const originalNotice = useChatStore.getState().showTopNotice
 
 function keyInput(): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"]')
+  const input = container.querySelector<HTMLInputElement>('input[placeholder="modelProviderApiKeyPlaceholder"], input[placeholder="modelProviderApiKeySavedPlaceholder"], input[placeholder="modelProviderApiKeyReentryPlaceholder"]')
   expect(Boolean(input)).toBe(true)
   return input!
 }
@@ -143,7 +163,7 @@ async function enter(input: HTMLInputElement, value: string) {
   })
 }
 
-async function mount() {
+async function mount(expectCredential = true) {
   const form = normalizeAppSettings({
     version: 1, locale: 'en', theme: 'system', uiFontScale: 'small',
     provider: defaultModelProviderSettings(), runtime: defaultAnalytixRuntimeSettings(),
@@ -162,7 +182,7 @@ async function mount() {
     }} />)
   })
   expect(registry.calls.some((call) => call.operation === 'list')).toBe(true)
-  expect(keyInput().type).toBe('password')
+  if (expectCredential) expect(keyInput().type).toBe('password')
 }
 
 async function addDraft() {
@@ -200,6 +220,38 @@ async function unmount() {
   root = null
 }
 
+it('selects native Messages at creation and preserves the saved Registry protocol', async () => {
+  const endpoint = (): HTMLSelectElement => {
+    const label = [...container.querySelectorAll('label')].find(node => node.textContent?.startsWith('modelProviderEndpointFormat'))
+    expect(label?.querySelector('select')).not.toBeNull()
+    return label!.querySelector('select')!
+  }
+  expect(endpoint().disabled).toBe(true)
+  expect(container.textContent).toContain('modelProviderEndpointFormatCommitted')
+  await readyDraft()
+  expect(endpoint().disabled).toBe(false)
+  const draftId = draftIdInput().value
+  await act(async () => {
+    endpoint().value = 'deepseek-messages'
+    endpoint().dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await click('modelProviderDraftConfirm')
+  expect(registry.snapshot().providers.find(item => item.id === draftId)?.kind).toBe('deepseek-messages')
+  expect(registry.calls.find(call => call.operation === 'connect')).toMatchObject({
+    provider: { kind: 'deepseek-messages' }, credential: { kind: 'set' }
+  })
+  expect(patches.some(patch => Object.prototype.hasOwnProperty.call(patch, 'provider'))).toBe(false)
+  await unmount()
+  await mount()
+  expect(endpoint().value).toBe('deepseek-messages')
+  expect(endpoint().disabled).toBe(true)
+  const generation = registry.snapshot().providers.find(item => item.id === draftId)?.generation
+  await click('modelProviderSaveChanges')
+  expect(registry.snapshot().providers.find(item => item.id === draftId)).toMatchObject({
+    kind: 'deepseek-messages', generation
+  })
+})
+
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('fetch', () => { throw new Error('Unexpected fixture network') })
@@ -232,6 +284,37 @@ afterEach(async () => {
 })
 
 describe('mounted Provider credential lifecycle', () => {
+  it('shows a key-free legacy re-entry notice and clears it after fenced replacement', async () => {
+    registry.requireLegacyReentry()
+    const beforeChecks = registry.calls.filter((call) => call.operation === 'credential-check').length
+    await unmount()
+    await mount()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(registry.calls.filter((call) => call.operation === 'credential-check').length).toBeGreaterThan(beforeChecks)
+    expect(container.textContent).toContain('modelProviderApiKeyReentryHint')
+    expect(keyInput().placeholder).toBe('modelProviderApiKeyReentryPlaceholder')
+    expect(keyInput().value).toBe('')
+    await enter(keyInput(), firstInput)
+    await click('modelProviderSaveChanges')
+    expect(registry.mutations().at(-1)?.operation).toBe('credential-replace')
+    expect(container.textContent).not.toContain('modelProviderApiKeyReentryHint')
+    expect(keyInput().value).toBe('')
+  })
+
+  it('shows committed credential state after remount without restoring the secret into the input', async () => {
+    expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
+    expect(container.textContent).toContain('modelProviderApiKeySavedHint')
+    expect(keyInput().value).toBe('')
+    await unmount()
+    await mount()
+    expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
+    expect(keyInput().value).toBe('')
+    await addDraft()
+    expect(keyInput().placeholder).toBe('modelProviderApiKeyPlaceholder')
+    expect(container.textContent).not.toContain('modelProviderApiKeySavedHint')
+    expect(registry.mutations()).toHaveLength(0)
+  })
+
   it('clears an unchanged successful input after a real helper write and readback', async () => {
     await enter(keyInput(), firstInput)
     expect(keyInput().value === firstInput).toBe(true)
@@ -400,4 +483,22 @@ describe('mounted Provider credential lifecycle', () => {
     expect(notices.length).toBe(0)
     expect(patches.length).toBe(0)
   })
+})
+
+it('shows unavailable state and retries without replacing saved providers or credentials', async () => {
+  await unmount()
+  const before = registry.snapshot()
+  registry.failNext('list')
+  await mount(false)
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('modelProviderRegistryUnavailable')
+  expect(registry.snapshot()).toEqual(before)
+  expect(registry.mutations()).toEqual([])
+  expect(patches).toEqual([])
+  await click('modelProviderRegistryRetry')
+  expect(container.querySelector('[role="alert"]')).toBeNull()
+  expect(keyInput().type).toBe('password')
+  expect(keyInput().value).toBe('')
+  expect(registry.snapshot()).toEqual(before)
+  expect(registry.mutations()).toEqual([])
+  expect(patches).toEqual([])
 })

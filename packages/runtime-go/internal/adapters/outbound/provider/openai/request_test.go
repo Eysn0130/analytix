@@ -74,6 +74,39 @@ func TestChatCompletionsBodyCarriesHostOutputTokenBudget(t *testing.T) {
 	}
 }
 
+func TestDeepSeekChatReasoningEffortWireMapping(t *testing.T) {
+	for _, test := range []struct {
+		input, expected string
+	}{
+		{"low", "low"}, {"medium", "high"}, {"high", "high"},
+		{"max", "max"},
+		{"off", ""}, {"auto", ""},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			body, err := ChatCompletionsBody(domainmodel.Request{
+				Family: "deepseek", Model: "deepseek-chat", ReasoningProtocol: "deepseek-chat-completions",
+				ReasoningEffort: test.input,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.expected == "" {
+				if _, present := body["reasoning_effort"]; present {
+					t.Fatal("off/auto must not send a reasoning effort")
+				}
+			} else if body["reasoning_effort"] != test.expected {
+				t.Fatalf("reasoning effort %q encoded as %#v, want %q", test.input, body["reasoning_effort"], test.expected)
+			}
+			if test.input == "off" && body["thinking"].(map[string]any)["type"] != "disabled" {
+				t.Fatal("off must explicitly disable DeepSeek thinking")
+			}
+			if test.input == "auto" && body["thinking"] != nil {
+				t.Fatal("auto must preserve the provider default")
+			}
+		})
+	}
+}
+
 func TestChatCompletionsBodyReplaysExactDeepSeekToolReasoning(t *testing.T) {
 	assistant := domainmodel.Message{Role: "assistant", ToolCalls: []domainmodel.ToolCall{{
 		ID: "provider-call", Name: "read", Arguments: json.RawMessage(`{"path":"a"}`),

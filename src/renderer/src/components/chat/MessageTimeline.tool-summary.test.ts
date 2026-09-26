@@ -11,6 +11,7 @@ import {
   shouldShowReturnToBottomButton,
   summarizeToolBlock
 } from './MessageTimeline'
+import { composeWritePrompt } from '../../write/quoted-selection'
 import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
 import { ProcessSectionRow, groupProcessSections } from './message-timeline-process'
 import { projectSubagentActionResponse, SubagentCallCard } from './SubagentCallCard'
@@ -341,6 +342,20 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       clawChannels: [],
       activeClawChannelId: ''
     })
+  })
+
+  it('renders document quote metadata in the unified chat without showing internal writing instructions', () => {
+    useChatStore.setState({ route: 'chat' })
+    const text = composeWritePrompt('解释这段', [{
+      id: 'quote', text: '合成选区', sourceTitle: 'report.md', sourceFilePath: '/workspace/report.md',
+      charCount: 4, createdAt: '2026-09-14', lineStart: 2, lineEnd: 2
+    }])
+    const html = renderToStaticMarkup(createElement(MessageBubble, { block: { kind: 'user', id: 'quote-message', text } }))
+    expect(html).toContain('解释这段')
+    expect(html).toContain('1 ref')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('改稿约定')
+    expect(html).not.toContain('当前权限')
   })
 
   it('renders user image attachments as thumbnails instead of attachment chips', () => {

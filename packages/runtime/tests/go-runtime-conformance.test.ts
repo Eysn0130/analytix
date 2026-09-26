@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
@@ -897,7 +898,12 @@ function runtimeServerSsePayloads(text: string, threadId: string): Record<string
     const decision = projectPublicRuntimeSseBlock(next.block, threadId, filter)
     if (decision === null) continue
     if (decision.status !== 'emit') {
-      throw new Error(`runtime SSE replay is not public and strict: ${decision.status}`)
+      // Synthetic conformance diagnostics expose shape only, never field values.
+      const dataLine = next.block.split('\n').find((line) => line.startsWith('data:'))
+      const rejected = dataLine ? recordValue(JSON.parse(dataLine.slice(5))) : {}
+      const shape = Object.fromEntries(['details', 'cacheDiagnostics', 'usage'].map((key) =>
+        [key, Object.keys(recordValue(rejected[key])).sort()]))
+      throw new Error(`runtime SSE replay is not public and strict: ${decision.status}; fields=${Object.keys(rejected).sort().join(',')}; shape=${JSON.stringify(shape)}`)
     }
     const eventKind = typeof decision.event.kind === 'string' ? decision.event.kind : ''
     if (eventKind === 'general_terminal_batch' &&
@@ -1570,10 +1576,15 @@ function desktopSovereigntyControlCase() {
   const windowTypeProperties = Array.from(
     windowInterface?.[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\??\s*:/gm) ?? []
   ).map((match) => match[1])
-  const facade = sharedApiSource.match(/export type AnalytixDomainFacade = \{([\s\S]*?)^\}/m)
-  const facadeDomains = Array.from(
-    facade?.[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm) ?? []
-  ).map((match) => match[1])
+  const sharedApiSyntax = ts.createSourceFile(sourceFiles.sharedApi, sharedApiSource, ts.ScriptTarget.Latest, true)
+  const facade = sharedApiSyntax.statements.find(node => ts.isTypeAliasDeclaration(node) && node.name.text === 'AnalytixDomainFacade')
+  if (!facade || !ts.isTypeAliasDeclaration(facade) || !ts.isTypeLiteralNode(facade.type)) throw new Error('Domain facade type is unavailable')
+  // Only direct properties are facade domains. Inline domain methods belong
+  // to their owning property and must not become independent bridge names.
+  const facadeDomains = facade.type.members.map(member => {
+    if (!ts.isPropertySignature(member) || !ts.isIdentifier(member.name)) throw new Error('Unsupported domain facade member')
+    return member.name.text
+  })
   const forbiddenBridgeAliases = [
     'analytixGui',
     'deepseek',

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   readSync,
   rmSync,
   writeFileSync
@@ -18,8 +19,9 @@ import http from 'node:http'
 import net from 'node:net'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const {
@@ -34,6 +36,22 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const goCommand = process.env.GO || 'go'
 const jsonOutput = args.has('--json') || args.has('--dry-run')
 const skipCommands = args.has('--skip-commands') || args.has('--dry-run')
+const actualOnly = args.has('--actual-only')
+const forkOnly = args.has('--fork-only')
+const focusedForkStage = argValue('--fork-after', forkOnly ? 'initial' : '')
+const relaunchAfterInitial = args.has('--relaunch-after-initial')
+const cancelOnly = args.has('--cancel-only')
+const segmentedObservation = args.has('--segmented-observation')
+if (forkOnly && !['initial', 'tool', 'attachment', 'approval-deny', 'approval-allow', 'user-input'].includes(focusedForkStage)) {
+  throw new Error('unsupported focused fork stage')
+}
+if (!forkOnly && focusedForkStage) throw new Error('--fork-after requires --fork-only')
+if (forkOnly && relaunchAfterInitial) throw new Error('--relaunch-after-initial cannot be combined with --fork-only')
+if (cancelOnly && (forkOnly || relaunchAfterInitial)) throw new Error('--cancel-only requires an independent session')
+if (segmentedObservation && (forkOnly || relaunchAfterInitial || cancelOnly)) {
+  throw new Error('--segmented-observation requires a full session')
+}
+const retainDiagnosticProfile = args.has('--retain-diagnostic-profile')
 const reportOnly = args.has('--no-gate')
 const noWrite = args.has('--no-write') || skipCommands
 const defaultEvidencePath = 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-session-soak.json'
@@ -104,12 +122,19 @@ const evidencePath = argValue(
   process.env.ANALYTIX_RUNTIME_GO_PACKAGED_SOAK_EVIDENCE || defaultEvidencePath
 )
 
+function protectedDiagnosticOutputSelected() {
+  const cacheRoot = process.env.ANALYTIX_DEV_CACHE_ROOT
+  if (!cacheRoot || !rawArgs.some((item) => item === '--output' || item.startsWith('--output='))) return false
+  const evidenceRoot = resolve(cacheRoot, 'evidence')
+  return resolve(process.cwd(), evidencePath).startsWith(evidenceRoot + sep)
+}
+
 function writeEvidenceReport(report) {
   if (noWrite) return
   const absoluteEvidencePath = resolve(process.cwd(), evidencePath)
   report.outputPath = absoluteEvidencePath
-  mkdirSync(dirname(absoluteEvidencePath), { recursive: true })
-  writeFileSync(absoluteEvidencePath, JSON.stringify(report, null, 2), 'utf8')
+  mkdirSync(dirname(absoluteEvidencePath), { recursive: true, mode: 0o700 })
+  writeFileSync(absoluteEvidencePath, JSON.stringify(report, null, 2), { encoding: 'utf8', mode: 0o600 })
 }
 
 function commandText(item) {
@@ -313,6 +338,15 @@ function currentGitCommit() {
   return result.status === 0 ? String(result.stdout || '').trim() : ''
 }
 
+function harnessGitCommit() {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+    encoding: 'utf8',
+    stdio: 'pipe'
+  })
+  return result.status === 0 ? String(result.stdout || '').trim() : ''
+}
+
 function resolveDefaultPackagedAppPath(target) {
   const exactPath = target.platform === 'darwin'
     ? target.arch === 'arm64' ? 'dist/mac-arm64/analytix.app' : 'dist/mac/analytix.app'
@@ -451,7 +485,11 @@ function buildAuthorityEvidence(appPath, target, artifacts, expectedSourceCommit
     JSON.stringify(authority.worktreeSnapshot) === JSON.stringify(currentWorktreeSnapshot)
   let nativeDispositionValid = false
   try {
-    if (authority?.nativeDisposition?.kind === 'controlled_release_receipt') {
+    if (authorityShapeValid && ['core_no_professional_components', 'core_controlled_release'].includes(authority?.nativeDisposition?.kind)) {
+      require('./core-package-profile.cjs').assertCoreResourcesAbsent(dirname(dirname(nativeReceiptPath)))
+      packagedAuthorityContract.verifyPackagedBuildAuthorityArtifacts(packagedAuthorityContext(appPath, target), authority)
+      nativeDispositionValid = !nativeReceiptFile.exists
+    } else if (authority?.nativeDisposition?.kind === 'controlled_release_receipt') {
       const nativeReceipt = nativeReceiptFile.regular
         ? JSON.parse(nativeReceiptFile.content.toString('utf8'))
         : null
@@ -679,6 +717,43 @@ async function stopSmokeRuntimeOnPort(port, runtimeDataDir) {
   }
 }
 
+function ownedSmokeRuntimePids(runtimeDataDir) {
+  if (process.platform !== 'darwin' || !runtimeDataDir) return []
+  let pids
+  try {
+    pids = execFileSync('pgrep', ['-f', '/Contents/Resources/runtime-go/bin/runtime-server'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+  } catch {
+    return []
+  }
+  return pids.split(/\r?\n/).map((value) => Number(value.trim())).filter((pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    const command = commandLineForPid(pid)
+    return command.includes('/Contents/Resources/runtime-go/bin/runtime-server ') &&
+      (command.includes(`--data-dir ${runtimeDataDir} `) || command.endsWith(`--data-dir ${runtimeDataDir}`))
+  })
+}
+
+async function stopOwnedSmokeRuntimes(runtimeDataDir) {
+  for (const pid of ownedSmokeRuntimePids(runtimeDataDir)) {
+    try { process.kill(pid, 'SIGTERM') } catch { /* already exited */ }
+  }
+  for (let attempt = 0; attempt < 12 && ownedSmokeRuntimePids(runtimeDataDir).length; attempt += 1) {
+    await sleep(100)
+  }
+  for (const pid of ownedSmokeRuntimePids(runtimeDataDir)) {
+    try { process.kill(pid, 'SIGKILL') } catch { /* already exited */ }
+  }
+  for (let attempt = 0; attempt < 8 && ownedSmokeRuntimePids(runtimeDataDir).length; attempt += 1) {
+    await sleep(100)
+  }
+  if (ownedSmokeRuntimePids(runtimeDataDir).length) {
+    throw new Error('owned packaged runtime did not stop')
+  }
+}
+
 async function waitForDebugTarget(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   let lastError = ''
@@ -703,74 +778,184 @@ async function waitForDebugTarget(port, timeoutMs) {
 
 async function evaluateCdp(wsUrl, expression, timeoutMs) {
   if (typeof WebSocket === 'undefined') throw new Error('global WebSocket is unavailable in this Node runtime')
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 0x7fffffff) {
+    throw new Error('cdp_invalid_timeout')
+  }
+  const deadline = Date.now() + timeoutMs
   const ws = new WebSocket(wsUrl)
-  await new Promise((resolve, reject) => {
-    ws.addEventListener('open', resolve, { once: true })
-    ws.addEventListener('error', reject, { once: true })
-  })
   const id = 1
+  // A disconnect after send does not establish whether the expression ran.
+  // This expression writes settings, restarts Core and executes tools: never
+  // replay it just because its response was lost.
+  let commandSent = false
+  let settled = false
+  let timer
+  const listeners = []
+  const listen = (name, listener) => {
+    ws.addEventListener(name, listener)
+    listeners.push([name, listener])
+  }
+  const failure = (code) => Object.assign(new Error(code), {
+    cdpCommandSent: commandSent,
+    cdpOutcome: commandSent ? 'unknown' : 'not_sent'
+  })
   try {
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('CDP Runtime.evaluate timeout')), timeoutMs)
-      ws.addEventListener('message', (event) => {
-        const message = JSON.parse(String(event.data))
-        if (message.id !== id) return
+      const finish = (error, value) => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
-        if (message.error) {
-          reject(new Error(JSON.stringify(message.error)))
+        if (error) reject(error)
+        else resolve(value)
+      }
+      timer = setTimeout(() => finish(failure(
+        commandSent ? 'cdp_evaluation_timeout' : 'cdp_handshake_timeout'
+      )), timeoutMs)
+      listen('error', () => finish(failure('cdp_connection_error')))
+      listen('close', () => finish(failure('cdp_connection_closed')))
+      listen('message', (event) => {
+        if (settled) return
+        let message
+        try { message = JSON.parse(String(event.data)) } catch {
+          finish(failure('cdp_invalid_response'))
           return
         }
-        if (message.result?.exceptionDetails) {
-          reject(new Error(JSON.stringify(message.result.exceptionDetails)))
+        if (!message || typeof message !== 'object') {
+          finish(failure('cdp_invalid_response'))
           return
         }
-        resolve(message.result?.result?.value)
+        if (message.id !== id) return
+        if (message.error || message.result?.exceptionDetails) {
+          // Do not place raw remote exception descriptions or stack frames in
+          // evidence: they may contain paths, arguments or other private data.
+          const error = failure('cdp_evaluation_failed')
+          error.cdpRemoteKind = message.error ? 'protocol_error' : 'exception'
+          error.cdpProtocolCode = Number.isInteger(message.error?.code)
+            ? message.error.code : null
+          const exceptionClass = message.result?.exceptionDetails?.exception?.className
+          error.cdpExceptionClass = ['SyntaxError', 'TypeError', 'ReferenceError', 'RangeError']
+            .includes(exceptionClass) ? exceptionClass : 'unknown'
+          finish(error)
+          return
+        }
+        if (!message.result?.result || typeof message.result.result !== 'object') {
+          finish(failure('cdp_invalid_response'))
+          return
+        }
+        finish(null, message.result.result.value)
       })
-      ws.send(JSON.stringify({
-        id,
-        method: 'Runtime.evaluate',
-        params: {
-          expression,
-          awaitPromise: true,
-          returnByValue: true,
-          timeout: timeoutMs
+      listen('open', () => {
+        if (settled || commandSent) return
+        const remainingMs = deadline - Date.now()
+        if (remainingMs <= 0) {
+          finish(failure('cdp_handshake_timeout'))
+          return
         }
-      }))
+        // Set before send: a thrown/ambiguous send must not become a retry.
+        commandSent = true
+        try {
+          ws.send(JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: {
+              expression,
+              awaitPromise: true,
+              returnByValue: true,
+              timeout: remainingMs
+            }
+          }))
+        } catch {
+          finish(failure('cdp_send_failed'))
+        }
+      })
     })
   } finally {
-    ws.close()
+    clearTimeout(timer)
+    for (const [name, listener] of listeners) ws.removeEventListener(name, listener)
+    try { ws.close() } catch { /* Preserve the original result or refusal. */ }
   }
 }
 
 function isTransientCdpEvaluationError(error) {
-  const text = error instanceof Error ? error.message : String(error || '')
-  return text.includes('Execution context was destroyed') ||
-    text.includes('Cannot find context') ||
-    text.includes('Target closed') ||
-    text.includes('target closed') ||
-    text.includes('WebSocket') ||
-    text.includes('renderer debug target not ready')
+  return error?.cdpCommandSent === false && [
+    'cdp_handshake_timeout', 'cdp_connection_error', 'cdp_connection_closed'
+  ].includes(error.message)
 }
 
 async function evaluateRendererWithRetries({ debugPort, expression, timeoutMs }) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 0x7fffffff) {
+    throw new Error('cdp_invalid_timeout')
+  }
   const deadline = Date.now() + timeoutMs
   let lastError = null
   for (let attempt = 0; Date.now() < deadline; attempt += 1) {
-    const remainingMs = Math.max(250, deadline - Date.now())
+    const remainingMs = deadline - Date.now()
+    // Discovery is read-only and already polls. A failure here must not be
+    // confused with a response lost AFTER a mutating Runtime.evaluate.
+    const target = await waitForDebugTarget(debugPort, remainingMs)
+    const evaluationBudget = deadline - Date.now()
+    if (evaluationBudget <= 0) break
     try {
-      const target = await waitForDebugTarget(debugPort, Math.min(5_000, remainingMs))
-      return await evaluateCdp(
-        target.webSocketDebuggerUrl,
-        expression,
-        Math.min(20_000, Math.max(1_000, deadline - Date.now()))
-      )
+      return await evaluateCdp(target.webSocketDebuggerUrl, expression, evaluationBudget)
     } catch (error) {
       lastError = error
       if (!isTransientCdpEvaluationError(error)) throw error
       await sleep(Math.min(250 + attempt * 100, 1_000, Math.max(0, deadline - Date.now())))
     }
   }
-  throw lastError || new Error('CDP Runtime.evaluate timeout')
+  throw lastError || new Error('cdp_discovery_timeout')
+}
+
+async function waitForRendererReady({ debugPort, deadline }) {
+  const expression = `(async () => {
+    if (document.title !== 'Analytix') return 'title_mismatch';
+    if (!window.analytix?.runtime?.runtimeRequest) return 'runtime_bridge_missing';
+    try {
+      const response = await window.analytix.runtime.runtimeRequest('/health', 'GET');
+      if (response?.status !== 200) return 'health_non_200';
+      try {
+        return JSON.parse(response.body || '{}').service === 'analytix'
+          ? 'ready' : 'health_service_mismatch';
+      } catch { return 'health_invalid_body'; }
+    } catch { return 'health_request_failed'; }
+  })()`
+  let consecutiveReady = 0
+  let readyTarget = ''
+  let lastFailure = ''
+  while (Date.now() < deadline) {
+    const discoveryBudget = Math.min(2_000, deadline - Date.now())
+    try {
+      const target = await waitForDebugTarget(debugPort, discoveryBudget)
+      const evaluationBudget = Math.min(2_000, deadline - Date.now())
+      if (evaluationBudget <= 0) break
+      const ready = await evaluateCdp(target.webSocketDebuggerUrl, expression, evaluationBudget)
+      if (ready === 'ready') {
+        consecutiveReady = target.webSocketDebuggerUrl === readyTarget ? consecutiveReady + 1 : 1
+        readyTarget = target.webSocketDebuggerUrl
+        if (consecutiveReady >= 2) return
+      } else {
+        consecutiveReady = 0
+        lastFailure = [
+          'title_mismatch', 'runtime_bridge_missing', 'health_non_200',
+          'health_service_mismatch', 'health_invalid_body', 'health_request_failed'
+        ].includes(ready) ? ready : 'unknown'
+      }
+    } catch (error) {
+      consecutiveReady = 0
+      const failure = String(error?.message || '').startsWith('renderer debug target not ready')
+        ? 'cdp_debug_target_unavailable'
+        : /^cdp_[a-z_]+$/.test(error?.message || '') ? error.message : 'unknown'
+      // A final connection attempt can consume the caller's remaining budget.
+      // Keep a concrete renderer phase already observed before that tail timeout.
+      if (!(failure === 'cdp_handshake_timeout' && Date.now() >= deadline && lastFailure)) {
+        lastFailure = failure
+      }
+    }
+    await sleep(Math.min(250, Math.max(0, deadline - Date.now())))
+  }
+  throw Object.assign(new Error('cdp_renderer_readiness_timeout'), {
+    cdpPreflightLastFailure: lastFailure
+  })
 }
 
 function startContractProvider() {
@@ -787,6 +972,13 @@ function startContractProvider() {
     req.on('end', () => {
       const currentPrompt = currentUserPrompt(raw)
       const parsedBody = parseProviderBody(raw)
+      const currentToolResult = currentTurnHasToolResult(parsedBody)
+      const filePathLine = currentPrompt.split(/\r?\n/).find((line) => line.startsWith('FilePath: '))
+      const filePathValue = filePathLine?.slice('FilePath: '.length).trim() || ''
+      const filePathShape = !filePathLine ? 'absent' : !filePathValue ? 'empty' :
+        filePathValue.startsWith('attachment://') ? 'attachment-virtual' :
+          filePathValue.startsWith('/') ? 'absolute' :
+            filePathValue.startsWith('[') || filePathValue.startsWith('<') ? 'placeholder' : 'other'
       requests.push({
         authorizationConfigured: Boolean(req.headers.authorization),
         requestPath: req.url,
@@ -794,31 +986,44 @@ function startContractProvider() {
         bodyContainsInitialPrompt: raw.includes('Run packaged session soak.'),
         bodyContainsToolTimelinePrompt: raw.includes('Run packaged session tool timeline.'),
         bodyContainsToolTimelineFollowup: raw.includes('Run packaged session tool timeline.') &&
-          raw.includes('call_packaged_ls'),
+          currentToolResult,
         bodyContainsMimoPlanPrompt: raw.includes('Run packaged MiMo plan mode.'),
-        bodyContainsMimoPlanResult: raw.includes('call_packaged_mimo_plan') &&
-          raw.includes('.analytixsdd/plan/packaged-mimo.md'),
+        bodyContainsMimoPlanResult: raw.includes('Run packaged MiMo plan mode.') &&
+          currentToolResult,
         bodyContainsAttachmentPrompt: raw.includes('Run packaged session attachment fallback.'),
-        bodyContainsAttachmentFilePath: raw.includes('FilePath:') && raw.includes('packaged-attachment.txt'),
+        bodyContainsAttachmentVirtualPath: raw.includes('FilePath: attachment://'),
+        bodyContainsAttachmentEnvelope: raw.includes('[Attached file]'),
+        bodyContainsAttachmentProtocol: raw.includes('attachment://'),
+        bodyContainsAttachmentFilePathField: raw.includes('FilePath:'),
+        attachmentFilePathShape: filePathShape,
+        attachmentFilePathLength: filePathValue.length,
+        attachmentFilePathFirstCharCode: filePathValue ? filePathValue.charCodeAt(0) : 0,
+        bodyContainsAbsoluteFilePath: raw.includes('FilePath: /'),
+        bodyContainsRedactedFilePath: raw.includes('FilePath: ['),
         bodyContainsAttachmentText: raw.includes('Packaged attachment fallback text'),
         bodyContainsApprovalDenyPrompt: raw.includes('Run packaged session approval deny.'),
-        bodyContainsApprovalDenyResult: raw.includes('approval_denied') &&
-          raw.includes('call_packaged_approval_deny'),
+        bodyContainsApprovalDenyResult: currentToolResult &&
+          raw.includes('Run packaged session approval deny.'),
         bodyContainsApprovalAllowPrompt: raw.includes('Run packaged session approval allow.'),
-        bodyContainsApprovalAllowResult: raw.includes('call_packaged_approval_allow') &&
-          raw.includes('approval-allow.txt'),
+        bodyContainsApprovalAllowResult: currentToolResult &&
+          raw.includes('Run packaged session approval allow.'),
         bodyContainsUserInputPrompt: raw.includes('Run packaged session user input.'),
-        bodyContainsUserInputAnswer: raw.includes('call_packaged_user_input') &&
+        bodyContainsUserInputAnswer: currentToolResult &&
           raw.includes('Packaged user input answer'),
         bodyContainsForkPrompt: raw.includes('Continue packaged session soak from fork.'),
         bodyContainsResumePrompt: raw.includes('Continue packaged session soak from resume.'),
         bodyContainsInitialPromptAsHistory: raw.includes('Run packaged session soak.') &&
-          (raw.includes('Continue packaged session soak from fork.') || raw.includes('Continue packaged session soak from resume.'))
+          (raw.includes('Continue packaged session soak from fork.') || raw.includes('Continue packaged session soak from resume.')),
+        bodyContainsGoRecoveryHistory: raw.includes('Run packaged session soak.') &&
+          raw.includes('Run packaged session soak after Go restart.'),
+        bodyContainsRelaunchHistory: raw.includes('Run packaged session soak.') &&
+          raw.includes('Run packaged session soak after Go restart.') &&
+          raw.includes('Run packaged session soak after new process.')
       })
       const isAttachmentRequest = currentPrompt.includes('Run packaged session attachment fallback.')
       const isToolTimelineRequest = currentPrompt.includes('Run packaged session tool timeline.')
       const isMimoPlanRequest = currentPrompt.includes('Run packaged MiMo plan mode.')
-      if (isToolTimelineRequest && !raw.includes('call_packaged_ls')) {
+      if (isToolTimelineRequest && !currentToolResult) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
           'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_ls","type":"function","function":{"name":"ls","arguments":"{\\"path\\":\\".\\"}"}}]},"finish_reason":"tool_calls"}]}',
@@ -829,13 +1034,13 @@ function startContractProvider() {
       if (isToolTimelineRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged tool timeline ok"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged tool timeline ok"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":34,"completion_tokens":5,"total_tokens":39,"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":27}}',
           'data: [DONE]'
         ].join('\n\n'))
         return
       }
-      if (isMimoPlanRequest && !raw.includes('call_packaged_mimo_plan')) {
+      if (isMimoPlanRequest && !currentToolResult) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
           'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_mimo_plan","type":"function","function":{"name":"create_plan","arguments":"{\\"markdown\\":\\"# Packaged MiMo plan\\",\\"operation\\":\\"draft\\",\\"source_request\\":\\"Run packaged MiMo plan mode.\\",\\"title\\":\\"Packaged MiMo\\",\\"plan_id\\":\\"packaged-mimo\\",\\"plan_relative_path\\":\\".analytixsdd/plan/packaged-mimo.md\\"}"}}]},"finish_reason":"tool_calls"}]}',
@@ -846,7 +1051,7 @@ function startContractProvider() {
       if (isMimoPlanRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged mimo plan saved"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged mimo plan saved"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":36,"completion_tokens":5,"total_tokens":41,"cached_tokens":8}}',
           'data: [DONE]'
         ].join('\n\n'))
@@ -855,17 +1060,17 @@ function startContractProvider() {
       if (isAttachmentRequest) {
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"content":"packaged attachment fallback ok"}}]}',
+          'data: {"choices":[{"delta":{"content":"packaged attachment fallback ok"},"finish_reason":"stop"}]}',
           'data: {"choices":[],"usage":{"prompt_tokens":29,"completion_tokens":4,"total_tokens":33,"prompt_cache_hit_tokens":6,"prompt_cache_miss_tokens":23}}',
           'data: [DONE]'
         ].join('\n\n'))
         return
       }
       if (currentPrompt.includes('Run packaged session approval deny.')) {
-        if (raw.includes('call_packaged_approval_deny')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged approval deny ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged approval deny ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":31,"completion_tokens":4,"total_tokens":35,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -873,16 +1078,16 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_deny","type":"function","function":{"name":"bash","arguments":"{\\"command\\":\\"printf denied > approval-deny.txt\\"}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_deny","type":"function","function":{"name":"write_file","arguments":"{\\"path\\":\\"approval-deny.txt\\",\\"content\\":\\"denied\\"}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
       }
       if (currentPrompt.includes('Run packaged session approval allow.')) {
-        if (raw.includes('call_packaged_approval_allow')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged approval allow ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged approval allow ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":32,"completion_tokens":4,"total_tokens":36,"prompt_cache_hit_tokens":6,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -890,16 +1095,16 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_allow","type":"function","function":{"name":"bash","arguments":"{\\"command\\":\\"printf allowed > approval-allow.txt\\"}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_approval_allow","type":"function","function":{"name":"write_file","arguments":"{\\"path\\":\\"approval-allow.txt\\",\\"content\\":\\"allowed\\"}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
       }
       if (currentPrompt.includes('Run packaged session user input.')) {
-        if (raw.includes('call_packaged_user_input')) {
+        if (currentToolResult) {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
           res.end([
-            'data: {"choices":[{"delta":{"content":"packaged user input ok"}}]}',
+            'data: {"choices":[{"delta":{"content":"packaged user input ok"},"finish_reason":"stop"}]}',
             'data: {"choices":[],"usage":{"prompt_tokens":33,"completion_tokens":4,"total_tokens":37,"prompt_cache_hit_tokens":7,"prompt_cache_miss_tokens":26}}',
             'data: [DONE]'
           ].join('\n\n'))
@@ -907,14 +1112,14 @@ function startContractProvider() {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
         res.end([
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_user_input","type":"function","function":{"name":"user_input","arguments":"{\\"prompt\\":\\"Provide packaged session answer\\",\\"fields\\":[{\\"id\\":\\"answer\\",\\"label\\":\\"Answer\\",\\"type\\":\\"text\\"}]}"}}]},"finish_reason":"tool_calls"}]}',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_packaged_user_input","type":"function","function":{"name":"user_input","arguments":"{\\"prompt\\":\\"Provide packaged session answer\\",\\"questions\\":[{\\"question\\":\\"Provide packaged session answer\\",\\"header\\":\\"Answer\\"}]}"}}]},"finish_reason":"tool_calls"}]}',
           'data: [DONE]'
         ].join('\n\n'))
         return
       }
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
       res.end([
-        'data: {"choices":[{"delta":{"content":"packaged session soak ok"}}]}',
+        'data: {"choices":[{"delta":{"content":"packaged session soak ok"},"finish_reason":"stop"}]}',
         'data: {"choices":[],"usage":{"prompt_tokens":21,"completion_tokens":4,"total_tokens":25,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":16}}',
         'data: [DONE]'
       ].join('\n\n'))
@@ -961,6 +1166,18 @@ function currentUserPrompt(raw) {
   return ''
 }
 
+function currentTurnHasToolResult(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  let lastUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      lastUserIndex = index
+      break
+    }
+  }
+  return messages.slice(lastUserIndex + 1).some((message) => message?.role === 'tool')
+}
+
 function messageContentText(content) {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -972,7 +1189,7 @@ function messageContentText(content) {
   }).filter(Boolean).join('\n')
 }
 
-function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePort, runtimeDataDir, workspace, syntheticApiKey }) {
+function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePort, runtimeDataDir, workspace, syntheticApiKey, progressToken }) {
   const legacyKunAlias = String.fromCharCode(107, 117, 110)
   const legacyEngineAlias = String.fromCharCode(114, 101, 97, 115, 111, 110, 105, 120)
   return `(async () => {
@@ -1023,6 +1240,10 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       approvalAllowRequestedOk: false,
       approvalAllowResolvedOk: false,
       approvalAllowExecutedOk: false,
+      cancelTurnOk: false,
+      cancelGateOk: false,
+      cancelRequestAccepted: false,
+      cancelReplayOk: false,
       userInputTurnOk: false,
       userInputRequestedOk: false,
       userInputResolvedOk: false,
@@ -1038,10 +1259,58 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       toolTurnId: '',
       forkThreadId: '',
       resumeThreadId: '',
+      forkChildrenBefore: -1,
+      forkChildrenAfter: -1,
+      parentHistoryUnchanged: false,
+      stage: 'renderer-ready',
       error: ''
     };
+    // This fixed-category snapshot remains readable when the mutating CDP
+    // evaluation loses its response. It never contains prompts or credentials.
+    const progress = { token: ${JSON.stringify(progressToken)}, stage: out.stage,
+      revision: 0, changedAt: Date.now() };
+    Object.defineProperty(out, 'stage', {
+      enumerable: true,
+      get() { return progress.stage; },
+      set(value) {
+        progress.stage = value;
+        progress.revision += 1;
+        progress.changedAt = Date.now();
+      }
+    });
+    Object.defineProperty(window, '__analytixPackagedSoakProgress', {
+      value: progress, configurable: true
+    });
     function parseJSON(response) {
       try { return JSON.parse(response && response.body || '{}'); } catch { return {}; }
+    }
+    async function bounded(promise, label, timeoutMs = 20000) {
+      let timer;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(label + '_timeout')), timeoutMs);
+          })
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    const replayCursorByThread = new Map();
+    function publicReplayEvents(batch) {
+      return batch.flatMap((event) => event && event.kind === 'general_terminal_batch' &&
+        Array.isArray(event.events) ? event.events : [event]);
+    }
+    async function acknowledgeReplayBatch(threadId, streamId, batch) {
+      if (batch.some((event) => event && event.kind === 'accepted_final_batch')) return false;
+      const maxSeq = batch.reduce((seq, event) =>
+        Number.isSafeInteger(event && event.seq) ? Math.max(seq, event.seq) : seq, 0);
+      if (maxSeq === 0) return true;
+      const acknowledged = await api.runtime.ackSseEvent(streamId, maxSeq).catch(() => false);
+      if (acknowledged) replayCursorByThread.set(threadId,
+        Math.max(replayCursorByThread.get(threadId) || 0, maxSeq));
+      return acknowledged;
     }
     async function request(path, method, payload) {
       const response = await api.runtime.runtimeRequest(
@@ -1051,15 +1320,21 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       );
       const body = parseJSON(response);
       if (!response || response.status < 200 || response.status >= 300) {
-        throw new Error(method + ' ' + path + ' returned ' + (response && response.status) + ': ' + String(response && response.body || '').slice(0, 240));
+        const code = typeof body.code === 'string' && /^[a-z0-9_]{1,64}$/.test(body.code)
+          ? body.code : 'unclassified';
+        throw new Error('runtime_request_failed status=' + Number(response && response.status || 0) + ' code=' + code);
       }
       return body;
     }
-    async function collectSseReplay(threadId, turnId, expectedText, requireToolEvents) {
+    const gateEventsByTurn = new Map();
+    async function collectSseReplay(threadId, turnId, expectedText, requireToolEvents, terminalReason) {
       const streamId = 'packaged-session-soak-' + Math.random().toString(36).slice(2);
-      const events = [];
+      const events = gateEventsByTurn.get(turnId) || [];
+      gateEventsByTurn.delete(turnId);
       const errors = [];
       let settled = false;
+      let replayTimer;
+      let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
         const finish = (ok) => {
@@ -1068,22 +1343,35 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(ok);
         };
-        const timer = setTimeout(() => finish(false), 5000);
+        const timer = replayTimer = setTimeout(() => finish(false), 30000);
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
-          events.push(...batch);
-          const serialized = JSON.stringify(events);
-          const ok = serialized.includes('turn_started') &&
-            serialized.includes('assistant_text_delta') &&
-            serialized.includes('usage') &&
-            serialized.includes('turn_completed') &&
-            serialized.includes(expectedText) &&
+          pendingAck = pendingAck.then((ok) => ok && acknowledgeReplayBatch(threadId, streamId, batch));
+          events.push(...publicReplayEvents(batch));
+          const turnEvents = events.filter((event) => event && event.turnId === turnId);
+          const kinds = new Set(turnEvents.map((event) => event.kind));
+          const assistantText = turnEvents.some((event) =>
+            (event.kind === 'assistant_text_delta' &&
+              (event.text || event.delta || '').includes(expectedText)) ||
+            (event.kind === 'item_completed' && event.item &&
+              event.item.kind === 'assistant_text' &&
+              (event.item.text || '').includes(expectedText)));
+          const terminal = turnEvents.find((event) => event.kind ===
+            (terminalReason === 'cancel' ? 'turn_aborted' : 'turn_completed'));
+          const terminalMatches = terminalReason === 'cancel'
+            ? terminal?.terminalReason === 'cancel' && !turnEvents.some((event) =>
+              event.kind === 'tool_call_started' || event.kind === 'tool_call_finished')
+            : terminalReason
+            ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
+              (event.item.text || '').includes('packaged approval deny ok'))
+            : assistantText && Boolean(terminal);
+          const ok = kinds.has('turn_started') && terminalMatches &&
+            kinds.has('usage') &&
             (!requireToolEvents ||
-              (serialized.includes('tool_call_ready') &&
-                serialized.includes('tool_call_started') &&
-                serialized.includes('tool_call_finished'))) &&
-            (serialized.includes('"turnId":"' + turnId + '"') || serialized.includes('"turn_id":"' + turnId + '"'));
+              (kinds.has('tool_call_ready') && kinds.has('tool_call_started') &&
+                kinds.has('tool_call_finished')));
           if (ok) finish(true);
         }));
         unsubscribers.push(api.runtime.onSseError((payload) => {
@@ -1093,28 +1381,49 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         }));
         unsubscribers.push(api.runtime.onSseEnd((payload) => {
           if (!payload || payload.streamId !== streamId) return;
-          const serialized = JSON.stringify(events);
-          finish(serialized.includes('turn_completed') &&
-            serialized.includes(expectedText) &&
-            (!requireToolEvents ||
-              (serialized.includes('tool_call_ready') &&
-                serialized.includes('tool_call_started') &&
-                serialized.includes('tool_call_finished'))));
+          const turnEvents = events.filter((event) => event && event.turnId === turnId);
+          const kinds = new Set(turnEvents.map((event) => event.kind));
+          const terminal = turnEvents.find((event) => event.kind ===
+            (terminalReason === 'cancel' ? 'turn_aborted' : 'turn_completed'));
+          const terminalMatches = terminalReason === 'cancel'
+            ? terminal?.terminalReason === 'cancel' && !turnEvents.some((event) =>
+              event.kind === 'tool_call_started' || event.kind === 'tool_call_finished')
+            : terminalReason
+            ? terminal?.terminalReason === terminalReason && !turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item?.kind === 'assistant_text' &&
+              (event.item.text || '').includes('packaged approval deny ok'))
+            : Boolean(terminal) && turnEvents.some((event) =>
+              event.kind === 'item_completed' && event.item &&
+              event.item.kind === 'assistant_text' &&
+              (event.item.text || '').includes(expectedText));
+          finish(kinds.has('turn_started') && kinds.has('usage') && terminalMatches &&
+            (!requireToolEvents || (kinds.has('tool_call_ready') &&
+              kinds.has('tool_call_started') && kinds.has('tool_call_finished'))));
         }));
       });
-      await api.runtime.startSse(threadId, 0, streamId);
-      const ok = await waitForReplay;
-      await api.runtime.stopSse(streamId).catch(() => false);
-      for (const unsubscribe of unsubscribers) {
-        try { unsubscribe(); } catch {}
+      try {
+        await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId),
+          'start_sse');
+        const ok = await waitForReplay;
+        const acked = await bounded(pendingAck, 'ack_sse');
+        return { ok: ok && acked, eventCount: events.length, errorCount: errors.length,
+          eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))] };
+      } finally {
+        settled = true;
+        clearTimeout(replayTimer);
+        for (const unsubscribe of unsubscribers) {
+          try { unsubscribe(); } catch {}
+        }
+        await bounded(api.runtime.stopSse(streamId), 'stop_sse').catch(() => false);
       }
-      return { ok, eventCount: events.length, errorCount: errors.length };
     }
     async function collectGateReplay(threadId, turnId, requiredKind, idField) {
       const streamId = 'packaged-session-gate-' + Math.random().toString(36).slice(2);
       const events = [];
       const errors = [];
       let settled = false;
+      let replayTimer;
+      let pendingAck = Promise.resolve(true);
       const unsubscribers = [];
       const waitForReplay = new Promise((resolve) => {
         const finish = (result) => {
@@ -1123,7 +1432,7 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           clearTimeout(timer);
           resolve(result);
         };
-        const timer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 5000);
+        const timer = replayTimer = setTimeout(() => finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length }), 30000);
         const inspect = () => {
           const matching = events.find((event) => {
             if (!event || event.kind !== requiredKind) return false;
@@ -1131,12 +1440,16 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           });
           if (!matching) return;
           const id = matching[idField] || matching.itemId || matching.item_id || '';
-          finish({ ok: !!id, id, eventCount: events.length, errorCount: errors.length });
+          const questionId = Array.isArray(matching.questions) &&
+            typeof matching.questions[0]?.id === 'string' ? matching.questions[0].id : '';
+          finish({ ok: !!id, id, questionId,
+            eventCount: events.length, errorCount: errors.length });
         };
         unsubscribers.push(api.runtime.onSseEvent((payload) => {
           if (!payload || payload.streamId !== streamId) return;
           const batch = Array.isArray(payload.events) ? payload.events : [];
-          events.push(...batch);
+          pendingAck = pendingAck.then((ok) => ok && acknowledgeReplayBatch(threadId, streamId, batch));
+          events.push(...publicReplayEvents(batch));
           inspect();
         }));
         unsubscribers.push(api.runtime.onSseError((payload) => {
@@ -1150,28 +1463,41 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           if (!settled) finish({ ok: false, id: '', eventCount: events.length, errorCount: errors.length });
         }));
       });
-      await api.runtime.startSse(threadId, 0, streamId);
-      const result = await waitForReplay;
-      await api.runtime.stopSse(streamId).catch(() => false);
-      for (const unsubscribe of unsubscribers) {
-        try { unsubscribe(); } catch {}
+      try {
+        await bounded(api.runtime.startSse(threadId, replayCursorByThread.get(threadId) || 0, streamId), 'start_gate_sse');
+        const result = await waitForReplay;
+        const acked = await bounded(pendingAck, 'ack_gate_sse');
+        const turnEvents = events.filter((event) => event &&
+          (event.turnId === turnId || event.turn_id === turnId));
+        if (result.ok && acked) gateEventsByTurn.set(turnId, turnEvents);
+        return { ...result, ok: result.ok && acked,
+          eventKinds: [...new Set(events.map((event) => event && event.kind).filter(Boolean))],
+          turnEventKinds: [...new Set(turnEvents.map((event) => event.kind))],
+          errorCodes: errors.map((error) =>
+            String(Number(error && error.status || 0)) + ':' + String(error && error.code || '')).slice(0, 4) };
+      } finally {
+        settled = true;
+        clearTimeout(replayTimer);
+        for (const unsubscribe of unsubscribers) {
+          try { unsubscribe(); } catch {}
+        }
+        await bounded(api.runtime.stopSse(streamId), 'stop_gate_sse').catch(() => false);
       }
-      return result;
     }
     try {
       if (!api) return out;
+      out.stage = 'settings-read';
       const initial = await api.settings.getSettings();
       out.settingsOk = !!(initial && initial.runtime && initial.provider);
       out.settingsRuntimeTopLevel = !!(initial && initial.runtime && !initial.agent && !initial.agents && !initial.reasonix);
+      if (!out.settingsOk || !out.settingsRuntimeTopLevel) return out;
       const profilePatch = {
         provider: {
           activeProviderId: ${JSON.stringify(providerId)},
-          apiKey: ${JSON.stringify(syntheticApiKey)},
           baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
           providers: [{
             id: ${JSON.stringify(providerId)},
             name: 'Packaged Session Soak Provider',
-            apiKey: ${JSON.stringify(syntheticApiKey)},
             baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
             endpointFormat: 'chat_completions',
             models: ['mimo-v2.5-pro', 'mimo-v2.5'],
@@ -1212,41 +1538,75 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
           model: ${JSON.stringify(model)}
         }
       };
-      const compatPatch = {
-        provider: {
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)}
-        },
-        runtime: {
-          port: ${JSON.stringify(runtimePort)},
-          dataDir: ${JSON.stringify(runtimeDataDir)},
-          autoStart: true,
-          apiKey: ${JSON.stringify(syntheticApiKey)},
-          baseUrl: ${JSON.stringify(`${providerBaseUrl}/v1`)},
-          model: ${JSON.stringify(model)}
-        }
-      };
       try {
-        await api.settings.setSettings(profilePatch);
+        out.stage = 'settings-write';
+        await bounded(api.settings.setSettings(profilePatch), 'settings_write');
         out.settingsProfilePatchAccepted = true;
         out.settingsPatchMode = 'provider-profile';
       } catch (error) {
         out.settingsPatchError = error && (error.stack || error.message) || String(error);
-        await api.settings.setSettings(compatPatch);
-        out.settingsCompatPatchUsed = true;
-        out.settingsPatchMode = 'compat-minimal';
+        return out;
       }
       try {
-        await api.runtime.restartRuntime();
+        out.stage = 'runtime-restart';
+        await bounded(api.runtime.restartRuntime(), 'runtime_restart');
         out.restartOk = true;
       } catch (error) {
         out.restartError = error && (error.stack || error.message) || String(error);
         return out;
       }
+      out.stage = 'runtime-health';
       const health = await api.runtime.runtimeRequest('/health', 'GET');
       out.healthStatus = health.status;
       out.healthService = JSON.parse(health.body || '{}').service || '';
+      if (out.healthStatus !== 200 || out.healthService !== 'analytix') return out;
+      try {
+        out.stage = 'registry-connect';
+        const before = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        if (!before || before.error || !Array.isArray(before.providers)) {
+          throw new Error('synthetic_provider_registry_unavailable');
+        }
+        const connected = await api.providerRegistry.request({
+          schemaVersion: 1,
+          operation: 'connect',
+          expected: {
+            registryRevision: before.registryRevision,
+            registryIncarnation: before.registryIncarnation,
+            providerRevision: '0',
+            providerGeneration: '0',
+            providerIncarnation: '',
+            providerCredentialPurpose: ''
+          },
+          provider: {
+            id: ${JSON.stringify(providerId)},
+            kind: 'openai-compatible',
+            endpoint: ${JSON.stringify(`${providerBaseUrl}/v1`)},
+            proxy: '',
+            models: ['mimo-v2.5-pro', 'mimo-v2.5'],
+            mediaModels: [],
+            selectedModel: 'mimo-v2.5-pro',
+            selectedMediaModel: '',
+            selectedRoutes: []
+          },
+          credential: {
+            kind: 'set',
+            purpose: 'provider-api-key',
+            valueBase64: btoa(${JSON.stringify(syntheticApiKey)})
+          }
+        });
+        if (!connected || connected.error) throw new Error('synthetic_provider_connect_failed');
+        const registry = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+        const registered = registry && !registry.error && Array.isArray(registry.providers)
+          ? registry.providers.find((item) => item && item.id === ${JSON.stringify(providerId)}) : null;
+        if (!registered || registered.credentialConfigured !== true) {
+          throw new Error('synthetic_provider_credential_not_configured');
+        }
+      } catch (error) {
+        out.settingsPatchError = error && (error.stack || error.message) || String(error);
+        return out;
+      }
 
+      out.stage = 'initial-thread-create';
       const thread = await request('/v1/threads', 'POST', {
         title: 'Packaged Session Soak',
         workspace: ${JSON.stringify(workspace)},
@@ -1257,9 +1617,12 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const threadId = thread.id || thread.thread_id || '';
       out.initialThreadId = threadId;
       out.threadCreateOk = !!threadId;
+      if (!out.threadCreateOk) return out;
 
+      out.stage = 'initial-turn-create';
       const turn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session soak.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1269,12 +1632,74 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const turnId = turn.turnId || turn.turn_id || '';
       out.initialTurnId = turnId;
       out.turnCreateOk = !!turnId && (turn.threadId === threadId || turn.thread_id === threadId);
+      if (!out.turnCreateOk) return out;
 
+      out.stage = 'initial-sse-replay';
       const replay = await collectSseReplay(threadId, turnId, 'packaged session soak ok', false);
+      out.initialReplay = replay;
       out.sseReplayOk = replay.ok === true && replay.eventCount > 0 && replay.errorCount === 0;
+      if (!out.sseReplayOk) return out;
+      if (${JSON.stringify(relaunchAfterInitial)}) return out;
+      if (${JSON.stringify(cancelOnly)}) {
+        out.stage = 'cancel-pending-approval';
+        const cancelTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
+          prompt: 'Run packaged session approval allow.',
+          async: true,
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          approvalPolicy: 'always',
+          sandboxMode: 'workspace-write',
+          disableUserInput: true
+        });
+        const cancelTurnId = cancelTurn.turnId || cancelTurn.turn_id || '';
+        out.cancelTurnOk = !!cancelTurnId &&
+          (cancelTurn.threadId === threadId || cancelTurn.thread_id === threadId);
+        if (!out.cancelTurnOk) return out;
+        const cancelGate = await collectGateReplay(threadId, cancelTurnId, 'approval_requested', 'approvalId');
+        out.cancelGateOk = cancelGate.ok === true && !!cancelGate.id;
+        if (!out.cancelGateOk) return out;
+        out.stage = 'cancel-interrupt';
+        await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns/' +
+          encodeURIComponent(cancelTurnId) + '/interrupt', 'POST', { discard: false });
+        out.cancelRequestAccepted = true;
+        out.stage = 'cancel-terminal-replay';
+        const cancelReplay = await collectSseReplay(threadId, cancelTurnId, '', false, 'cancel');
+        out.cancelReplay = cancelReplay;
+        out.cancelReplayOk = cancelReplay.ok === true &&
+          cancelReplay.eventCount > 0 && cancelReplay.errorCount === 0;
+        return out;
+      }
+      const runFocusedFork = async (stage) => {
+        out.stage = 'session-fork-' + stage;
+        const countForkChildren = async () => {
+          const listed = await request('/v1/threads?include=side', 'GET');
+          return Array.isArray(listed.threads) ? listed.threads.filter((item) =>
+            item && item.parentThreadId === threadId && item.relation === 'fork').length : -1;
+        };
+        out.forkChildrenBefore = await countForkChildren().catch(() => -1);
+        let fork;
+        try {
+          fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
+            relation: 'fork', title: 'Packaged Session Soak Focused Fork'
+          });
+        } catch (error) {
+          out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+          throw error;
+        }
+        out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+        out.forkThreadId = fork.id || '';
+        out.forkOk = !!out.forkThreadId && fork.parentThreadId === threadId &&
+          Number.isSafeInteger(out.forkChildrenBefore) && out.forkChildrenBefore >= 0 &&
+          Number.isSafeInteger(out.forkChildrenAfter) &&
+          out.forkChildrenAfter === out.forkChildrenBefore + 1;
+        return out;
+      };
+      if (${JSON.stringify(focusedForkStage)} === 'initial') return await runFocusedFork('initial');
 
+      out.stage = 'tool-turn-create';
       const toolTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session tool timeline.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1284,55 +1709,77 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const toolTurnId = toolTurn.turnId || toolTurn.turn_id || '';
       out.toolTurnId = toolTurnId;
       out.toolTurnOk = !!toolTurnId && (toolTurn.threadId === threadId || toolTurn.thread_id === threadId);
+      if (!out.toolTurnOk) return out;
+      out.stage = 'tool-sse-replay';
       const toolReplay = await collectSseReplay(threadId, toolTurnId, 'packaged tool timeline ok', true);
+      out.toolReplay = toolReplay;
       out.toolTimelineOk = toolReplay.ok === true && toolReplay.eventCount > 0 && toolReplay.errorCount === 0;
+      if (!out.toolTimelineOk) return out;
+      if (${JSON.stringify(focusedForkStage)} === 'tool') {
+        if (!out.toolTimelineOk) return out;
+        return await runFocusedFork('tool');
+      }
 
-      const mimoPlanThread = await request('/v1/threads', 'POST', {
-        title: 'Packaged MiMo Plan Soak',
-        workspace: ${JSON.stringify(workspace)},
-        providerId: ${JSON.stringify(providerId)},
-        model: ${JSON.stringify(model)},
-        mode: 'plan'
-      });
-      const mimoPlanThreadId = mimoPlanThread.id || mimoPlanThread.thread_id || '';
-      out.mimoPlanThreadOk = !!mimoPlanThreadId;
-      const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
-        prompt: 'Run packaged MiMo plan mode.',
-        mode: 'plan',
-        providerId: ${JSON.stringify(providerId)},
-        model: ${JSON.stringify(model)},
-        guiPlan: {
-          operation: 'draft',
-          workspaceRoot: ${JSON.stringify(workspace)},
-          relativePath: '.analytixsdd/plan/packaged-mimo.md',
-          planId: 'packaged-mimo',
-          sourceRequest: 'Run packaged MiMo plan mode.',
-          title: 'Packaged MiMo'
-        },
-        approvalPolicy: 'never',
-        sandboxMode: 'workspace-write',
-        disableUserInput: true
-      });
-      const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
-      out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
-      const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
-      out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
+      if (!${JSON.stringify(forkOnly)}) {
+        out.stage = 'plan-thread-create';
+        const mimoPlanThread = await request('/v1/threads', 'POST', {
+          title: 'Packaged MiMo Plan Soak',
+          workspace: ${JSON.stringify(workspace)},
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          mode: 'plan'
+        });
+        const mimoPlanThreadId = mimoPlanThread.id || mimoPlanThread.thread_id || '';
+        out.mimoPlanThreadOk = !!mimoPlanThreadId;
+        if (!out.mimoPlanThreadOk) return out;
+        out.stage = 'plan-turn-create';
+        const mimoPlanTurn = await request('/v1/threads/' + encodeURIComponent(mimoPlanThreadId) + '/turns', 'POST', {
+          prompt: 'Run packaged MiMo plan mode.',
+          async: true,
+          mode: 'plan',
+          providerId: ${JSON.stringify(providerId)},
+          model: ${JSON.stringify(model)},
+          guiPlan: {
+            operation: 'draft',
+            workspaceRoot: ${JSON.stringify(workspace)},
+            relativePath: '.analytixsdd/plan/packaged-mimo.md',
+            planId: 'packaged-mimo',
+            sourceRequest: 'Run packaged MiMo plan mode.',
+            title: 'Packaged MiMo'
+          },
+          approvalPolicy: 'never',
+          sandboxMode: 'workspace-write',
+          disableUserInput: true
+        });
+        const mimoPlanTurnId = mimoPlanTurn.turnId || mimoPlanTurn.turn_id || '';
+        out.mimoPlanTurnOk = !!mimoPlanTurnId && (mimoPlanTurn.threadId === mimoPlanThreadId || mimoPlanTurn.thread_id === mimoPlanThreadId);
+        if (!out.mimoPlanTurnOk) return out;
+        out.stage = 'plan-sse-replay';
+        const mimoPlanReplay = await collectSseReplay(mimoPlanThreadId, mimoPlanTurnId, 'packaged mimo plan saved', true);
+        out.mimoPlanReplay = mimoPlanReplay;
+        out.mimoPlanReplayOk = mimoPlanReplay.ok === true && mimoPlanReplay.eventCount > 0 && mimoPlanReplay.errorCount === 0;
+        if (!out.mimoPlanReplayOk) return out;
+      }
 
-      const attachmentLocalPath = ${JSON.stringify(join(workspace, 'packaged-attachment.txt'))};
+      out.stage = 'attachment-upload';
       const attachmentUpload = await request('/v1/attachments', 'POST', {
         name: 'packaged-attachment.txt',
         mimeType: 'text/plain',
         dataBase64: btoa('Packaged attachment fallback text'),
-        localFilePath: attachmentLocalPath,
+        documentText: 'Packaged attachment fallback text',
         threadId,
         workspace: ${JSON.stringify(workspace)}
       });
       const attachment = attachmentUpload && attachmentUpload.attachment || {};
       const attachmentId = attachment.id || '';
       out.attachmentUploadOk = !!attachmentId;
-      out.attachmentMetadataOk = attachment.localFilePath === attachmentLocalPath;
+      out.attachmentMetadataOk = attachment.scope === 'thread' &&
+        attachment.name === 'packaged-attachment.txt' && attachment.localFilePath === undefined;
+      if (!out.attachmentUploadOk || !out.attachmentMetadataOk) return out;
+      out.stage = 'attachment-turn-create';
       const attachmentTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session attachment fallback.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         attachmentIds: [attachmentId],
@@ -1342,11 +1789,20 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const attachmentTurnId = attachmentTurn.turnId || attachmentTurn.turn_id || '';
       out.attachmentTurnOk = !!attachmentTurnId && (attachmentTurn.threadId === threadId || attachmentTurn.thread_id === threadId);
+      if (!out.attachmentTurnOk) return out;
+      out.stage = 'attachment-sse-replay';
       const attachmentReplay = await collectSseReplay(threadId, attachmentTurnId, 'packaged attachment fallback ok', false);
       out.attachmentSseReplayOk = attachmentReplay.ok === true && attachmentReplay.eventCount > 0 && attachmentReplay.errorCount === 0;
+      if (!out.attachmentSseReplayOk) return out;
+      if (${JSON.stringify(focusedForkStage)} === 'attachment') {
+        if (!out.attachmentSseReplayOk) return out;
+        return await runFocusedFork('attachment');
+      }
 
+      out.stage = 'approval-deny-turn-create';
       const approvalDenyTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval deny.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'always',
@@ -1355,19 +1811,34 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const approvalDenyTurnId = approvalDenyTurn.turnId || approvalDenyTurn.turn_id || '';
       out.approvalDenyTurnOk = !!approvalDenyTurnId && (approvalDenyTurn.threadId === threadId || approvalDenyTurn.thread_id === threadId);
+      if (!out.approvalDenyTurnOk) return out;
+      out.stage = 'approval-deny-gate';
       const approvalDenyGate = await collectGateReplay(threadId, approvalDenyTurnId, 'approval_requested', 'approvalId');
+      out.approvalDenyGate = approvalDenyGate;
       out.approvalDenyRequestedOk = approvalDenyGate.ok === true;
+      if (!out.approvalDenyRequestedOk || !approvalDenyGate.id) return out;
       if (approvalDenyGate.id) {
+        out.stage = 'approval-deny-decision';
         const approvalDeny = await request('/v1/approvals/' + encodeURIComponent(approvalDenyGate.id), 'POST', {
           decision: 'deny'
         });
         out.approvalDenyResolvedOk = approvalDeny.status === 'denied' || approvalDeny.decision === 'deny';
+        if (!out.approvalDenyResolvedOk) return out;
       }
-      const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, 'packaged approval deny ok', false);
+      out.stage = 'approval-deny-sse-replay';
+      const approvalDenyReplay = await collectSseReplay(threadId, approvalDenyTurnId, '', false, 'approval_denied');
+      out.approvalDenyReplay = approvalDenyReplay;
       out.approvalDenyNoExecuteOk = approvalDenyReplay.ok === true && approvalDenyReplay.eventCount > 0 && approvalDenyReplay.errorCount === 0;
+      if (!out.approvalDenyNoExecuteOk) return out;
+      if (${JSON.stringify(focusedForkStage)} === 'approval-deny') {
+        if (!out.approvalDenyNoExecuteOk) return out;
+        return await runFocusedFork('approval-deny');
+      }
 
+      out.stage = 'approval-allow-turn-create';
       const approvalAllowTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session approval allow.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'always',
@@ -1376,19 +1847,34 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const approvalAllowTurnId = approvalAllowTurn.turnId || approvalAllowTurn.turn_id || '';
       out.approvalAllowTurnOk = !!approvalAllowTurnId && (approvalAllowTurn.threadId === threadId || approvalAllowTurn.thread_id === threadId);
+      if (!out.approvalAllowTurnOk) return out;
+      out.stage = 'approval-allow-gate';
       const approvalAllowGate = await collectGateReplay(threadId, approvalAllowTurnId, 'approval_requested', 'approvalId');
+      out.approvalAllowGate = approvalAllowGate;
       out.approvalAllowRequestedOk = approvalAllowGate.ok === true;
+      if (!out.approvalAllowRequestedOk || !approvalAllowGate.id) return out;
       if (approvalAllowGate.id) {
+        out.stage = 'approval-allow-decision';
         const approvalAllow = await request('/v1/approvals/' + encodeURIComponent(approvalAllowGate.id), 'POST', {
           decision: 'allow'
         });
         out.approvalAllowResolvedOk = approvalAllow.status === 'allowed' || approvalAllow.decision === 'allow';
+        if (!out.approvalAllowResolvedOk) return out;
       }
+      out.stage = 'approval-allow-sse-replay';
       const approvalAllowReplay = await collectSseReplay(threadId, approvalAllowTurnId, 'packaged approval allow ok', false);
+      out.approvalAllowReplay = approvalAllowReplay;
       out.approvalAllowExecutedOk = approvalAllowReplay.ok === true && approvalAllowReplay.eventCount > 0 && approvalAllowReplay.errorCount === 0;
+      if (!out.approvalAllowExecutedOk) return out;
+      if (${JSON.stringify(focusedForkStage)} === 'approval-allow') {
+        if (!out.approvalAllowExecutedOk) return out;
+        return await runFocusedFork('approval-allow');
+      }
 
+      out.stage = 'user-input-turn-create';
       const userInputTurn = await request('/v1/threads/' + encodeURIComponent(threadId) + '/turns', 'POST', {
         prompt: 'Run packaged session user input.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
@@ -1397,37 +1883,86 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       });
       const userInputTurnId = userInputTurn.turnId || userInputTurn.turn_id || '';
       out.userInputTurnOk = !!userInputTurnId && (userInputTurn.threadId === threadId || userInputTurn.thread_id === threadId);
+      if (!out.userInputTurnOk) return out;
+      out.stage = 'user-input-gate';
       const userInputGate = await collectGateReplay(threadId, userInputTurnId, 'user_input_requested', 'inputId');
+      out.userInputGate = userInputGate;
       out.userInputRequestedOk = userInputGate.ok === true;
-      if (userInputGate.id) {
+      if (!out.userInputRequestedOk || !userInputGate.id || !userInputGate.questionId) return out;
+      if (userInputGate.id && userInputGate.questionId) {
+        out.stage = 'user-input-answer';
         await request('/v1/user-inputs/' + encodeURIComponent(userInputGate.id), 'POST', {
-          answers: [{ id: 'answer', value: 'Packaged user input answer' }]
+          answers: [{ id: userInputGate.questionId, value: 'Packaged user input answer' }]
         });
         out.userInputResolvedOk = true;
       }
+      out.stage = 'user-input-sse-replay';
       const userInputReplay = await collectSseReplay(threadId, userInputTurnId, 'packaged user input ok', false);
+      out.userInputReplay = userInputReplay;
       out.userInputReplayOk = userInputReplay.ok === true && userInputReplay.eventCount > 0 && userInputReplay.errorCount === 0;
+      if (!out.userInputReplayOk) return out;
+      if (${JSON.stringify(focusedForkStage)} === 'user-input') {
+        if (!out.userInputReplayOk) return out;
+        return await runFocusedFork('user-input');
+      }
 
+      out.stage = 'thread-detail';
       const detail = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
       out.threadListOk = detail.id === threadId && Array.isArray(detail.turns);
+      if (!out.threadListOk) return out;
+      const parentTurnsBeforeFork = JSON.stringify(detail.turns);
 
-      const fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
-        relation: 'fork',
-        title: 'Packaged Session Soak Fork'
-      });
+      out.stage = 'session-fork';
+      const countForkChildren = async () => {
+        const listed = await request('/v1/threads?include=side', 'GET');
+        return Array.isArray(listed.threads) ? listed.threads.filter((item) =>
+          item && item.parentThreadId === threadId && item.relation === 'fork').length : -1;
+      };
+      out.forkChildrenBefore = await countForkChildren().catch(() => -1);
+      let fork;
+      try {
+        fork = await request('/v1/threads/' + encodeURIComponent(threadId) + '/fork', 'POST', {
+          relation: 'fork',
+          title: 'Packaged Session Soak Fork'
+        });
+      } catch (error) {
+        // A failed response can follow a durable create. Observe before any
+        // further mutation; this run must never retry the same fork.
+        out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+        throw error;
+      }
+      out.forkChildrenAfter = await countForkChildren().catch(() => -1);
+      out.stage = 'fork-parent-history-read';
+      const parentAfterFork = await request('/v1/threads/' + encodeURIComponent(threadId), 'GET');
+      out.parentHistoryUnchanged = parentAfterFork.id === threadId &&
+        Array.isArray(parentAfterFork.turns) &&
+        JSON.stringify(parentAfterFork.turns) === parentTurnsBeforeFork;
       const forkId = fork.id || '';
       out.forkThreadId = forkId;
-      out.forkOk = !!forkId && fork.parentThreadId === threadId;
+      out.forkOk = !!forkId && fork.parentThreadId === threadId &&
+        Number.isSafeInteger(out.forkChildrenBefore) && out.forkChildrenBefore >= 0 &&
+        Number.isSafeInteger(out.forkChildrenAfter) &&
+        out.forkChildrenAfter === out.forkChildrenBefore + 1 &&
+        out.parentHistoryUnchanged;
+      if (!out.forkOk) return out;
       const forkTurn = await request('/v1/threads/' + encodeURIComponent(forkId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from fork.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
         sandboxMode: 'read-only',
         disableUserInput: true
       });
-      out.forkTurnOk = !!(forkTurn.turnId || forkTurn.turn_id);
+      const forkTurnId = forkTurn.turnId || forkTurn.turn_id || '';
+      out.forkTurnOk = !!forkTurnId;
+      if (!out.forkTurnOk) return out;
+      out.stage = 'fork-sse-replay';
+      const forkReplay = await collectSseReplay(forkId, forkTurnId, 'packaged session soak ok', false);
+      out.forkReplayOk = forkReplay.ok === true && forkReplay.eventCount > 0 && forkReplay.errorCount === 0;
+      if (!out.forkReplayOk) return out;
 
+      out.stage = 'session-resume';
       const resume = await request('/v1/sessions/' + encodeURIComponent(threadId) + '/resume-thread', 'POST', {
         workspace: ${JSON.stringify(workspace)},
         model: ${JSON.stringify(model)},
@@ -1436,16 +1971,25 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
       const resumeId = resume.thread_id || resume.threadId || '';
       out.resumeThreadId = resumeId;
       out.resumeOk = resume.session_id === threadId && !!resumeId;
+      if (!out.resumeOk) return out;
       const resumeTurn = await request('/v1/threads/' + encodeURIComponent(resumeId) + '/turns', 'POST', {
         prompt: 'Continue packaged session soak from resume.',
+        async: true,
         providerId: ${JSON.stringify(providerId)},
         model: ${JSON.stringify(model)},
         approvalPolicy: 'never',
         sandboxMode: 'read-only',
         disableUserInput: true
       });
-      out.resumeTurnOk = !!(resumeTurn.turnId || resumeTurn.turn_id);
+      const resumeTurnId = resumeTurn.turnId || resumeTurn.turn_id || '';
+      out.resumeTurnOk = !!resumeTurnId;
+      if (!out.resumeTurnOk) return out;
+      out.stage = 'resume-sse-replay';
+      const resumeReplay = await collectSseReplay(resumeId, resumeTurnId, 'packaged session soak ok', false);
+      out.resumeReplayOk = resumeReplay.ok === true && resumeReplay.eventCount > 0 && resumeReplay.errorCount === 0;
+      if (!out.resumeReplayOk) return out;
 
+      out.stage = 'thread-list-and-usage';
       const list = await request('/v1/threads?include=side&search=Packaged%20Session%20Soak', 'GET');
       const threads = Array.isArray(list.threads) ? list.threads : [];
       out.threadListOk = out.threadListOk && threads.some((item) => item && item.id === threadId) &&
@@ -1456,10 +2000,256 @@ function buildRendererExpression({ providerBaseUrl, providerId, model, runtimePo
         const total = Number(bucket && (bucket.total_tokens || bucket.totalTokens || 0));
         return bucket && (bucket.thread_id === threadId || bucket.threadId === threadId) && total > 0;
       });
+      if (!out.threadListOk || !out.usageOk) return out;
+      out.stage = 'complete';
     } catch (error) {
       out.error = error && (error.stack || error.message) || String(error);
     }
     return out;
+  })()`
+}
+
+async function readRendererProgress(debugPort, progressToken) {
+  try {
+    const target = await waitForDebugTarget(debugPort, 2_000)
+    const expression = `(() => {
+      const value = window.__analytixPackagedSoakProgress;
+      if (!value || value.token !== ${JSON.stringify(progressToken)}) return null;
+      const outcome = window.__analytixPackagedSoakOutcome;
+      const matchingOutcome = outcome && outcome.token === value.token ? outcome : null;
+      return { stage: value.stage, revision: value.revision,
+        changedAt: value.changedAt,
+        outcomeStatus: matchingOutcome?.status || 'running',
+        result: matchingOutcome?.status === 'complete' ? matchingOutcome.result : null };
+    })()`
+    const value = await evaluateCdp(target.webSocketDebuggerUrl, expression, 2_000)
+    if (!value || typeof value.stage !== 'string' ||
+      !/^[a-z0-9-]{1,64}$/.test(value.stage) ||
+      !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+      !Number.isSafeInteger(value.changedAt)) return { status: 'unavailable' }
+    return { status: 'observed', stage: value.stage, revision: value.revision,
+      ageMs: Math.max(0, Math.min(86_400_000, Date.now() - value.changedAt)),
+      outcomeStatus: ['running', 'complete', 'rejected'].includes(value.outcomeStatus)
+        ? value.outcomeStatus : 'running',
+      result: value.outcomeStatus === 'complete' && value.result &&
+        typeof value.result === 'object' ? value.result : null }
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
+
+function buildRendererStartExpression(options) {
+  return `(() => {
+    const token = ${JSON.stringify(options.progressToken)};
+    const outcome = { token, status: 'running', result: null };
+    Object.defineProperty(window, '__analytixPackagedSoakOutcome', {
+      value: outcome, configurable: true
+    });
+    Promise.resolve(${buildRendererExpression(options)}).then(
+      (result) => { outcome.result = result; outcome.status = 'complete'; },
+      () => { outcome.status = 'rejected'; }
+    );
+    return { started: true, token };
+  })()`
+}
+
+async function observeRendererJourneyByStage({ debugPort, expression, progressToken, startTimeoutMs }) {
+  // The renderer keeps one mutating journey. Every later CDP call is a read-only
+  // probe bound to its token, so a lost start response never resends writes.
+  let acknowledgement = null
+  let startError = null
+  try {
+    acknowledgement = await evaluateRendererWithRetries({ debugPort, expression,
+      timeoutMs: startTimeoutMs })
+  } catch (error) {
+    if (error?.cdpOutcome !== 'unknown') throw error
+    startError = error
+  }
+  if (acknowledgement && (acknowledgement.started !== true ||
+    acknowledgement.token !== progressToken)) throw new Error('packaged_journey_start_unconfirmed')
+  const deadline = Date.now() + 360_000
+  let missingSince = 0
+  let lastStage = ''
+  while (Date.now() < deadline) {
+    const progress = await readRendererProgress(debugPort, progressToken)
+    if (progress.status === 'observed') {
+      missingSince = 0
+      lastStage = progress.stage
+      if (progress.outcomeStatus === 'complete') {
+        if (!progress.result) throw new Error('packaged_journey_result_missing')
+        return progress.result
+      }
+      if (progress.outcomeStatus === 'rejected') {
+        throw Object.assign(new Error('packaged_journey_rejected'), { packagedStage: lastStage })
+      }
+      if (progress.ageMs > 45_000) {
+        throw Object.assign(new Error('packaged_stage_observation_timeout'), { packagedStage: lastStage })
+      }
+    } else {
+      if (!missingSince) missingSince = Date.now()
+      if (Date.now() - missingSince > 5_000) {
+        throw Object.assign(startError || new Error('packaged_journey_progress_unavailable'),
+          { packagedStage: lastStage })
+      }
+    }
+    await sleep(1_000)
+  }
+  throw Object.assign(new Error('packaged_journey_observation_timeout'), { packagedStage: lastStage })
+}
+
+function buildRelaunchExpression({ threadId, turnId, providerId, model,
+  priorTurnIds = [turnId], prompt = 'Run packaged session soak after new process.',
+  providerEndpoint = '' }) {
+  return `(async () => {
+    let stage = 'bridge';
+    let historyRecovered = false;
+    let continuationCreated = false;
+    let credentialAvailable = false;
+    let beforeTurnCount = 0;
+    let afterTurnCount = 0;
+    let usageIncreased = false;
+    try {
+    const api = window.analytix;
+    if (!api?.runtime?.runtimeRequest) return { error: 'runtime_bridge_unavailable' };
+    const request = async (path, method, payload) => {
+      const response = await api.runtime.runtimeRequest(path, method || 'GET',
+        payload === undefined ? undefined : JSON.stringify(payload));
+      if (!response || response.status < 200 || response.status >= 300) {
+        let code = 'unclassified';
+        try {
+          const parsed = JSON.parse(response?.body || '{}');
+          if (typeof parsed.code === 'string' && /^[a-z0-9_]{1,64}$/.test(parsed.code)) code = parsed.code;
+        } catch {}
+        const error = new Error('relaunch_http_error');
+        error.httpStatus = Number(response?.status || 0);
+        error.httpCode = code;
+        throw error;
+      }
+      return JSON.parse(response.body || '{}');
+    };
+    const readPublicThread = async (path, deadline) => {
+      while (true) {
+        try { return await request(path, 'GET'); }
+        catch (error) {
+          if (error?.httpStatus !== 503 || error?.httpCode !== 'public_projection_pending' ||
+            Date.now() >= deadline) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    };
+    const threadId = ${JSON.stringify(threadId)};
+    const priorTurnIds = ${JSON.stringify(priorTurnIds)};
+    if (${JSON.stringify(Boolean(providerEndpoint))}) {
+      stage = 'credential-check';
+      const snapshot = await api.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+      const provider = snapshot?.providers?.find((item) => item?.id === ${JSON.stringify(providerId)});
+      if (snapshot?.error || !provider || provider.endpoint !== ${JSON.stringify(providerEndpoint)} ||
+        provider.credentialConfigured !== true) {
+        return { error: 'provider_binding_unavailable', stage, credentialAvailable: false };
+      }
+      const checked = await api.providerRegistry.request({
+        schemaVersion: 1, operation: 'credential-check',
+        providerId: ${JSON.stringify(providerId)},
+        expected: {
+          registryRevision: snapshot.registryRevision,
+          registryIncarnation: snapshot.registryIncarnation,
+          providerRevision: provider.revision,
+          providerGeneration: provider.generation,
+          providerIncarnation: provider.incarnation,
+          providerCredentialPurpose: provider.credentialPurpose || ''
+        }
+      });
+      if (checked?.error || checked?.credentialAvailable !== true) {
+        return { error: 'credential_unavailable', stage, credentialAvailable: false };
+      }
+      credentialAvailable = true;
+    }
+    const path = '/v1/threads/' + encodeURIComponent(threadId);
+    const readUsageTotal = async () => {
+      const usage = await request('/v1/usage?group_by=thread&thread_id=' + encodeURIComponent(threadId), 'GET');
+      const buckets = Array.isArray(usage.buckets) ? usage.buckets : [];
+      return buckets.reduce((total, bucket) => {
+        if (bucket?.thread_id !== threadId && bucket?.threadId !== threadId) return total;
+        return total + Number(bucket.total_tokens || bucket.totalTokens || 0);
+      }, 0);
+    };
+    const historyDeadline = Date.now() + 20000;
+    stage = 'history-read';
+    const before = await readPublicThread(path, historyDeadline);
+    const sourceTurns = Array.isArray(before.turns) ? before.turns : [];
+    beforeTurnCount = sourceTurns.length;
+    historyRecovered = before.id === threadId && sourceTurns.length === priorTurnIds.length &&
+      sourceTurns.every((turn, index) => turn?.id === priorTurnIds[index] && turn.status === 'completed') &&
+      new Set(priorTurnIds).size === priorTurnIds.length;
+    if (!historyRecovered) return { historyRecovered: false, continuationCreated: false,
+      continuationCompleted: false, credentialAvailable, beforeTurnCount: sourceTurns.length };
+    const usageBefore = ${JSON.stringify(Boolean(providerEndpoint))} ? await readUsageTotal() : 0;
+    stage = 'continuation-post';
+    const created = await request(path + '/turns', 'POST', {
+      prompt: ${JSON.stringify(prompt)}, async: true,
+      providerId: ${JSON.stringify(providerId)}, model: ${JSON.stringify(model)},
+      approvalPolicy: 'never', sandboxMode: 'read-only', disableUserInput: true
+    });
+    const newTurnId = created.turnId || created.turn_id || '';
+    continuationCreated = !!newTurnId && (created.threadId === threadId ||
+      created.thread_id === threadId);
+    let continuationCompleted = false;
+    afterTurnCount = sourceTurns.length;
+    if (continuationCreated) {
+      stage = 'continuation-read';
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        const after = await readPublicThread(path, deadline);
+        const turns = Array.isArray(after.turns) ? after.turns : [];
+        afterTurnCount = turns.length;
+        continuationCompleted = turns.length === priorTurnIds.length + 1 &&
+          turns.slice(0, -1).every((turn, index) =>
+            turn?.id === priorTurnIds[index] && turn.status === 'completed') &&
+          turns.at(-1)?.id === newTurnId && turns.at(-1)?.status === 'completed';
+        if (continuationCompleted) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (continuationCompleted && ${JSON.stringify(Boolean(providerEndpoint))}) {
+        stage = 'continuation-usage';
+        const usageDeadline = Date.now() + 20000;
+        while (Date.now() < usageDeadline) {
+          usageIncreased = (await readUsageTotal()) > usageBefore;
+          if (usageIncreased) break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    }
+    return { historyRecovered, continuationCreated, continuationCompleted,
+      credentialAvailable, usageIncreased, continuationTurnId: newTurnId,
+      beforeTurnCount: sourceTurns.length, afterTurnCount };
+    } catch (error) {
+      const errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError']
+        .includes(error?.name) ? error.name : 'other';
+      return { error: 'relaunch_step_failed', stage, errorClass,
+        historyRecovered, continuationCreated, credentialAvailable, usageIncreased,
+        beforeTurnCount, afterTurnCount,
+        httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : 0,
+        httpCode: typeof error?.httpCode === 'string' && /^[a-z0-9_]{1,64}$/.test(error.httpCode)
+          ? error.httpCode : 'unclassified' };
+    }
+  })()`
+}
+
+function buildGoRestartExpression() {
+  return `(async () => {
+    try {
+      const api = window.analytix;
+      if (!api?.runtime?.restartRuntime || !api?.runtime?.runtimeRequest) {
+        return { restarted: false, error: 'runtime_bridge_unavailable' };
+      }
+      await api.runtime.restartRuntime();
+      const health = await api.runtime.runtimeRequest('/health', 'GET');
+      let service = '';
+      try { service = JSON.parse(health?.body || '{}').service || ''; } catch {}
+      return { restarted: health?.status === 200 && service === 'analytix' };
+    } catch {
+      return { restarted: false, error: 'go_restart_failed' };
+    }
   })()`
 }
 
@@ -1472,7 +2262,31 @@ function summarizeError(raw) {
   return text.slice(0, 360)
 }
 
-function smokeChildEnv({ tempHome, userDataDir }) {
+function parsePackagedThreadReadDiagnostics(stderr) {
+  return String(stderr || '').split(/\r?\n/)
+    .filter((line) => line.includes('[packaged-thread-read] '))
+    .slice(-12)
+    .map((line) => {
+      try {
+        const value = JSON.parse(line.slice(line.indexOf('[packaged-thread-read] ') + '[packaged-thread-read] '.length))
+        const hydrationClass = [
+          'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+          'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+          'seal_rejected', 'batch_invalid', 'retained_authority',
+          'authority_mismatch', 'delivery_bound', 'other'
+        ].includes(value.hydrationClass) ? value.hydrationClass : ''
+        return {
+          status: Number.isInteger(value.status) ? value.status : 0,
+          code: ['public_projection_pending', 'accepted_final_hydration_unavailable',
+            'internal_error', 'transport_unavailable', 'sanitizer_failed'].includes(value.code)
+            ? value.code : 'unclassified',
+          ...(hydrationClass ? { hydrationClass } : {})
+        }
+      } catch { return { status: 0, code: 'unclassified' } }
+    })
+}
+
+function smokeChildEnv({ tempHome, stateRoot, userDataDir, chromiumTempDir }) {
   const keep = new Set([
     'PATH',
     'SystemRoot',
@@ -1483,6 +2297,7 @@ function smokeChildEnv({ tempHome, userDataDir }) {
     'LANG',
     'LC_ALL',
     'LC_CTYPE',
+    'ANALYTIX_DEV_CACHE_ROOT',
     'ELECTRON_ENABLE_LOGGING'
   ])
   const env = {}
@@ -1493,6 +2308,19 @@ function smokeChildEnv({ tempHome, userDataDir }) {
   return {
     ...env,
     HOME: tempHome,
+    USERPROFILE: tempHome,
+    TMPDIR: chromiumTempDir,
+    TEMP: chromiumTempDir,
+    TMP: chromiumTempDir,
+    ...(process.platform === 'darwin'
+      ? { MAC_CHROMIUM_TMPDIR: chromiumTempDir, SHELL: '/bin/zsh' }
+      : {}),
+    ...(process.platform === 'darwin'
+      ? {
+          ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE: 'isolated-local-v1',
+          ANALYTIX_DEV_STATE_ROOT: stateRoot
+        }
+      : {}),
     ANALYTIX_USER_DATA_DIR: userDataDir,
     ANALYTIX_RUNTIME_BACKEND: 'go-runtime-default',
     ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK: '1'
@@ -1519,9 +2347,21 @@ function providerRequestShapeEvidence(requests) {
     mimoPlanPrompt: item.bodyContainsMimoPlanPrompt === true,
     mimoPlanResult: item.bodyContainsMimoPlanResult === true,
     attachmentPrompt: item.bodyContainsAttachmentPrompt === true,
+    attachmentText: item.bodyContainsAttachmentText === true,
+    attachmentVirtualPath: item.bodyContainsAttachmentVirtualPath === true,
+    attachmentEnvelope: item.bodyContainsAttachmentEnvelope === true,
+    attachmentProtocol: item.bodyContainsAttachmentProtocol === true,
+    attachmentFilePathField: item.bodyContainsAttachmentFilePathField === true,
+    attachmentFilePathShape: item.attachmentFilePathShape,
+    attachmentFilePathLength: item.attachmentFilePathLength,
+    attachmentFilePathFirstCharCode: item.attachmentFilePathFirstCharCode,
+    absoluteFilePath: item.bodyContainsAbsoluteFilePath === true,
+    redactedFilePath: item.bodyContainsRedactedFilePath === true,
     approvalDenyPrompt: item.bodyContainsApprovalDenyPrompt === true,
     approvalAllowPrompt: item.bodyContainsApprovalAllowPrompt === true,
     userInputPrompt: item.bodyContainsUserInputPrompt === true,
+    goRecoveryHistory: item.bodyContainsGoRecoveryHistory === true,
+    relaunchHistory: item.bodyContainsRelaunchHistory === true,
     forkPrompt: item.bodyContainsForkPrompt === true,
     resumePrompt: item.bodyContainsResumePrompt === true
   }))
@@ -1621,56 +2461,259 @@ async function runActualPackagedSessionSoak() {
   let debugPort = 0
   let runtimePort = 0
   let contractProvider = null
+  let approvalDenyFileAbsent = false
+  let approvalAllowFileMatches = false
+  let cancelFileAbsent = false
+  let forkDiagnostic = null
+  let threadReadDiagnostic = null
+  let sseDiagnostic = null
+  let diagnosticProfilePath = ''
+  let mainPid = 0
+  let goPidsBeforeCleanup = []
+  let mainStartedAt = ''
+  let cleanupQuiesced = false
+  let cleanupError = ''
+  let rendererReadinessPassed = false
+  let cdpFailure = null
+  let goRecovery = null
+  let relaunch = null
+  const progressToken = randomUUID()
   const providerId = 'xiaomi'
-  const model = 'mimo-v2.5-pro-ultraspeed'
+  const model = 'mimo-v2.5-pro'
 
   try {
     if (artifactEvidence.ok) {
       contractProvider = await startContractProvider()
       tempHome = mkdtempSync(join(tmpdir(), 'analytix-packaged-session-home-'))
-      userDataDir = join(tempHome, '.analytix', 'packaged-session-user-data')
-      runtimeDataDir = join(tempHome, '.analytix', 'packaged-session-runtime-data')
+      const taskRoot = join(tempHome, '.analytix')
+      const profileHome = join(taskRoot, 'home')
+      userDataDir = join(taskRoot, 'packaged-session-user-data')
+      // The desktop's isolated settings owner selects home/.analytix/data
+      // before renderer settings are available. Keep it separate from userData.
+      runtimeDataDir = join(profileHome, '.analytix', 'data')
+      const chromiumTempDir = join(tempHome, 'chromium-tmp')
       const workspace = join(tempHome, 'workspace')
+      mkdirSync(dirname(userDataDir), { recursive: true, mode: 0o700 })
+      mkdirSync(userDataDir, { mode: 0o700 })
+      mkdirSync(profileHome, { mode: 0o700 })
+      mkdirSync(dirname(runtimeDataDir), { mode: 0o700 })
+      mkdirSync(runtimeDataDir, { mode: 0o700 })
+      mkdirSync(chromiumTempDir, { mode: 0o700 })
+      mkdirSync(workspace, { mode: 0o700 })
       debugPort = await getFreePort()
       runtimePort = await getFreePort()
       while (runtimePort === debugPort) runtimePort = await getFreePort()
       const syntheticApiKey = `sk-packaged-session-soak-${sha256(`${Date.now()}:${runtimePort}`).slice(0, 24)}`
+      mainStartedAt = new Date().toISOString()
       child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
         cwd: process.cwd(),
-        env: smokeChildEnv({ tempHome, userDataDir }),
+        env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
         stdio: ['ignore', 'pipe', 'pipe']
       })
+      mainPid = child.pid || 0
       child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
-        renderer = await evaluateRendererWithRetries({
-          debugPort,
-          expression: buildRendererExpression({
-            providerBaseUrl: contractProvider.url,
-            providerId,
-            model,
-            runtimePort,
-            runtimeDataDir,
-            workspace,
-            syntheticApiKey
-          }),
-          timeoutMs
-        })
+        const evaluationDeadline = Date.now() + timeoutMs
+        await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
+        rendererReadinessPassed = true
+        const journeyOptions = { providerBaseUrl: contractProvider.url, providerId,
+          model, runtimePort, runtimeDataDir, workspace, syntheticApiKey, progressToken }
+        const startTimeoutMs = Math.max(1, evaluationDeadline - Date.now())
+        renderer = segmentedObservation
+          ? await observeRendererJourneyByStage({ debugPort, progressToken,
+            expression: buildRendererStartExpression(journeyOptions), startTimeoutMs })
+          : await evaluateRendererWithRetries({ debugPort,
+            expression: buildRendererExpression(journeyOptions), timeoutMs: startTimeoutMs })
         renderer = renderer && typeof renderer === 'object' ? renderer : null
         if (renderer) {
           renderer.restartError = summarizeError(renderer.restartError)
           renderer.settingsPatchError = summarizeError(renderer.settingsPatchError)
           renderer.error = summarizeError(renderer.error)
         }
+        if (relaunchAfterInitial && renderer?.sseReplayOk === true &&
+          renderer.initialThreadId && renderer.initialTurnId) {
+          goRecovery = { attempted: true, firstGoPid: 0, secondGoPid: 0,
+            restartAcknowledged: false, credentialAvailable: false,
+            historyRecovered: false, continuationCreated: false,
+            continuationCompleted: false, usageIncreased: false,
+            beforeTurnCount: 0, afterTurnCount: 0,
+            continuationTurnId: '', error: '' }
+          try {
+            const beforeGoPids = ownedSmokeRuntimePids(runtimeDataDir)
+            if (beforeGoPids.length !== 1) throw new Error('first_go_process_not_unique')
+            goRecovery.firstGoPid = beforeGoPids[0]
+            const restarted = await evaluateRendererWithRetries({
+              debugPort, expression: buildGoRestartExpression(),
+              timeoutMs: Math.max(1, evaluationDeadline - Date.now())
+            })
+            goRecovery.restartAcknowledged = restarted?.restarted === true
+            if (!goRecovery.restartAcknowledged) throw new Error(restarted?.error || 'go_restart_unconfirmed')
+            const afterGoPids = ownedSmokeRuntimePids(runtimeDataDir)
+            if (afterGoPids.length !== 1 || afterGoPids[0] === goRecovery.firstGoPid) {
+              throw new Error('go_process_identity_unchanged')
+            }
+            goRecovery.secondGoPid = afterGoPids[0]
+            const observed = await evaluateRendererWithRetries({
+              debugPort,
+              expression: buildRelaunchExpression({
+                threadId: renderer.initialThreadId,
+                turnId: renderer.initialTurnId,
+                providerId, model,
+                prompt: 'Run packaged session soak after Go restart.',
+                providerEndpoint: `${contractProvider.url}/v1`
+              }),
+              timeoutMs: Math.max(1, evaluationDeadline - Date.now())
+            })
+            if (!observed || typeof observed !== 'object') throw new Error('invalid_go_recovery_observation')
+            for (const field of ['credentialAvailable', 'historyRecovered', 'continuationCreated',
+              'continuationCompleted', 'usageIncreased']) {
+              goRecovery[field] = observed[field] === true
+            }
+            goRecovery.beforeTurnCount = Number(observed.beforeTurnCount || 0)
+            goRecovery.afterTurnCount = Number(observed.afterTurnCount || 0)
+            goRecovery.continuationTurnId = observed.continuationTurnId || ''
+            goRecovery.error = observed.error === undefined || observed.error === '' ? '' :
+              typeof observed.error === 'string' && /^[a-z0-9_]{1,64}$/.test(observed.error)
+                ? observed.error : 'unclassified'
+            if (!goRecovery.credentialAvailable || !goRecovery.historyRecovered ||
+              !goRecovery.continuationCreated || !goRecovery.continuationCompleted ||
+              !goRecovery.usageIncreased ||
+              goRecovery.beforeTurnCount !== 1 || goRecovery.afterTurnCount !== 2 ||
+              !goRecovery.continuationTurnId || contractProvider.requests.length !== 2 ||
+              !contractProvider.requests.some((item) => item.bodyContainsGoRecoveryHistory)) {
+              throw new Error(goRecovery.error || 'go_recovery_not_complete')
+            }
+          } catch (error) {
+            goRecovery.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+          }
+          if (goRecovery.error === '' && goRecovery.continuationCompleted) {
+            relaunch = { attempted: true, firstMainPid: mainPid, secondMainPid: 0,
+              firstProcessQuiesced: false, secondRendererReady: false,
+              credentialAvailable: false, historyRecovered: false, continuationCreated: false,
+              continuationCompleted: false, usageIncreased: false,
+              beforeTurnCount: 0, afterTurnCount: 0,
+              error: '' }
+            try {
+              await stopChild(child)
+              await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+              await stopOwnedSmokeRuntimes(runtimeDataDir)
+              relaunch.firstProcessQuiesced =
+                (child.exitCode !== null || Boolean(child.signalCode)) &&
+                ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
+                !listeningPidsOnPort(runtimePort).some((pid) =>
+                  commandLineForPid(pid).includes(runtimeDataDir))
+              if (!relaunch.firstProcessQuiesced) throw new Error('first_process_not_quiesced')
+              debugPort = await getFreePort()
+              while (debugPort === runtimePort) debugPort = await getFreePort()
+              child = spawn(resolveExecutablePath(appPath, target), [`--remote-debugging-port=${debugPort}`], {
+                cwd: process.cwd(),
+                env: smokeChildEnv({ tempHome: profileHome, stateRoot: tempHome, userDataDir, chromiumTempDir }),
+                stdio: ['ignore', 'pipe', 'pipe']
+              })
+              relaunch.secondMainPid = child.pid || 0
+              child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+              child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+              await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
+              relaunch.secondRendererReady = true
+              const observed = await evaluateRendererWithRetries({
+                debugPort,
+                expression: buildRelaunchExpression({
+                  threadId: renderer.initialThreadId,
+                  turnId: goRecovery.continuationTurnId,
+                  priorTurnIds: [renderer.initialTurnId, goRecovery.continuationTurnId],
+                  providerId, model,
+                  providerEndpoint: `${contractProvider.url}/v1`
+                }),
+                timeoutMs: Math.max(1, evaluationDeadline - Date.now())
+              })
+              if (!observed || typeof observed !== 'object') throw new Error('invalid_relaunch_observation')
+              for (const field of ['credentialAvailable', 'historyRecovered', 'continuationCreated',
+                'continuationCompleted', 'usageIncreased']) {
+                relaunch[field] = observed[field] === true
+              }
+              relaunch.beforeTurnCount = Number(observed.beforeTurnCount || 0)
+              relaunch.afterTurnCount = Number(observed.afterTurnCount || 0)
+              relaunch.error = observed.error === undefined || observed.error === '' ? '' :
+                typeof observed.error === 'string' && /^[a-z0-9_]{1,64}$/.test(observed.error)
+                  ? observed.error : 'unclassified'
+              relaunch.stage = typeof observed.stage === 'string' &&
+                /^[a-z0-9_-]{1,64}$/.test(observed.stage) ? observed.stage : ''
+              relaunch.errorClass = ['TypeError', 'SyntaxError', 'ReferenceError', 'RangeError', 'other']
+                .includes(observed.errorClass) ? observed.errorClass : ''
+              relaunch.httpStatus = Number.isInteger(observed.httpStatus) ? observed.httpStatus : 0
+              relaunch.httpCode = typeof observed.httpCode === 'string' &&
+                /^[a-z0-9_]{1,64}$/.test(observed.httpCode) ? observed.httpCode : ''
+            } catch (error) {
+              relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
+              relaunch.remoteKind = error?.cdpRemoteKind || ''
+              relaunch.protocolCode = error?.cdpProtocolCode ?? null
+              relaunch.exceptionClass = error?.cdpExceptionClass || ''
+            }
+          }
+        }
       } catch (error) {
         launchError = error instanceof Error ? error.message : String(error)
+        cdpFailure = {
+          remoteKind: error?.cdpRemoteKind || '',
+          protocolCode: error?.cdpProtocolCode ?? null,
+          exceptionClass: error?.cdpExceptionClass || '',
+          preflightLastFailure: error?.cdpPreflightLastFailure || '',
+          commandOutcome: error?.cdpOutcome || 'unknown',
+          observedStage: error?.packagedStage || '',
+          progress: rendererReadinessPassed
+            ? await readRendererProgress(debugPort, progressToken)
+            : { status: 'unavailable' }
+        }
       }
     }
   } finally {
+    goPidsBeforeCleanup = ownedSmokeRuntimePids(runtimeDataDir)
     await stopChild(child)
     await stopSmokeRuntimeOnPort(runtimePort, runtimeDataDir)
+    try {
+      await stopOwnedSmokeRuntimes(runtimeDataDir)
+    } catch (error) {
+      cleanupError = error instanceof Error ? error.message : String(error)
+    }
+    cleanupQuiesced = (!child || child.exitCode !== null || Boolean(child.signalCode)) &&
+      ownedSmokeRuntimePids(runtimeDataDir).length === 0 &&
+      !listeningPidsOnPort(runtimePort).some((pid) =>
+        commandLineForPid(pid).includes(runtimeDataDir))
+    if (!cleanupQuiesced) cleanupError ||= 'owned packaged processes did not stop'
+    forkDiagnostic = stderr.split(/\r?\n/)
+      .filter((line) => line.includes('[packaged-fork-schema] '))
+      .slice(0, 8)
+      .map((line) => {
+        try { return JSON.parse(line.slice(line.indexOf('[packaged-fork-schema] ') + '[packaged-fork-schema] '.length)) }
+        catch { return { parseFailed: true } }
+      })
+    threadReadDiagnostic = parsePackagedThreadReadDiagnostics(stderr)
+    sseDiagnostic = stderr.split(/\r?\n/)
+      .filter((line) => line.includes('[packaged-sse-schema] '))
+      .slice(0, 12)
+      .map((line) => {
+        try { return JSON.parse(line.slice(line.indexOf('[packaged-sse-schema] ') + '[packaged-sse-schema] '.length)) }
+        catch { return { parseFailed: true } }
+      })
     if (contractProvider) await contractProvider.close()
-    if (tempHome) rmSync(tempHome, { recursive: true, force: true })
+    if (tempHome) {
+      const workspace = join(tempHome, 'workspace')
+      approvalDenyFileAbsent = !existsSync(join(workspace, 'approval-deny.txt'))
+      cancelFileAbsent = !existsSync(join(workspace, 'approval-allow.txt'))
+      try {
+        approvalAllowFileMatches = readFileSync(join(workspace, 'approval-allow.txt'), 'utf8') === 'allowed'
+      } catch {
+        approvalAllowFileMatches = false
+      }
+      // Explicit protected-QA retention must also cover failed boolean checks
+      // and successful diagnostic runs, not just exceptions or focused modes.
+      if (!cleanupQuiesced || retainDiagnosticProfile) {
+        diagnosticProfilePath = tempHome
+      } else {
+        rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+      }
+    }
   }
 
   const providerRequests = contractProvider?.requests || []
@@ -1693,8 +2736,8 @@ async function runActualPackagedSessionSoak() {
   const providerAttachmentPromptSeen = providerRequests.some((item) => item.bodyContainsAttachmentPrompt)
   const providerAttachmentFallbackSeen = providerRequests.some((item) =>
     item.bodyContainsAttachmentPrompt &&
-    item.bodyContainsAttachmentFilePath &&
-    item.bodyContainsAttachmentText
+    item.bodyContainsAttachmentText &&
+    item.bodyContainsAttachmentVirtualPath
   )
   const providerApprovalDenySeen = providerRequests.some((item) =>
     item.bodyContainsApprovalDenyPrompt &&
@@ -1709,6 +2752,8 @@ async function runActualPackagedSessionSoak() {
     item.bodyContainsUserInputAnswer
   )
   const providerHistorySeen = providerRequests.some((item) => item.bodyContainsInitialPromptAsHistory)
+  const providerGoRecoveryHistorySeen = providerRequests.some((item) => item.bodyContainsGoRecoveryHistory)
+  const providerRelaunchHistorySeen = providerRequests.some((item) => item.bodyContainsRelaunchHistory)
   checks.push(actualCheck(
     'packaged-app-launch',
     'Packaged app launch',
@@ -1767,10 +2812,10 @@ async function runActualPackagedSessionSoak() {
     'packaged-session-sse-replay',
     'Packaged session SSE replay',
     renderer?.sseReplayOk === true,
-    renderer?.error || 'packaged app must replay turn events including assistant delta, usage, and turn_completed',
+    renderer?.error || 'packaged app must replay completed assistant text, usage, and turn_completed for the current turn',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-tool-timeline',
     'Packaged session tool timeline',
     renderer?.toolTurnOk === true &&
@@ -1780,7 +2825,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must replay tool_call_ready, tool_call_started, tool_call_finished, usage, and final answer before operator gate',
     renderer?.sseReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-mimo-plan',
     'Packaged MiMo plan mode',
     renderer?.mimoPlanThreadOk === true &&
@@ -1791,7 +2836,7 @@ async function runActualPackagedSessionSoak() {
     renderer?.error || 'packaged app must create a plan-mode turn with Xiaomi/MiMo provider settings, canonicalize the alias model in the provider body, execute create_plan, and replay the tool timeline',
     renderer?.toolTimelineOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-attachment-fallback',
     'Packaged session attachment fallback',
     renderer?.attachmentUploadOk === true &&
@@ -1800,10 +2845,10 @@ async function runActualPackagedSessionSoak() {
       renderer?.attachmentSseReplayOk === true &&
       providerAttachmentPromptSeen &&
       providerAttachmentFallbackSeen,
-    renderer?.error || 'packaged app must upload an attachment, preserve localFilePath, send bounded FilePath text fallback to provider, and replay the turn',
+    renderer?.error || 'packaged app must upload a public document attachment, send bounded text to the provider without a local path, and replay the turn',
     renderer?.mimoPlanReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-approval-user-input',
     'Packaged session approval and user input',
     renderer?.approvalDenyTurnOk === true &&
@@ -1818,38 +2863,77 @@ async function runActualPackagedSessionSoak() {
       renderer?.userInputRequestedOk === true &&
       renderer?.userInputResolvedOk === true &&
       renderer?.userInputReplayOk === true &&
+      approvalDenyFileAbsent &&
+      approvalAllowFileMatches &&
       providerApprovalDenySeen &&
       providerApprovalAllowSeen &&
       providerUserInputSeen,
     renderer?.error || 'packaged app must show approval/user_input gates only when tools call them, resolve through renderer bridge, and continue the turn',
     renderer?.attachmentSseReplayOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-fork',
     'Packaged session fork',
-    renderer?.forkOk === true && renderer?.forkTurnOk === true && providerForkPromptSeen && providerHistorySeen,
+    renderer?.forkOk === true && renderer?.parentHistoryUnchanged === true &&
+      renderer?.forkTurnOk === true && renderer?.forkReplayOk === true &&
+      providerForkPromptSeen && providerHistorySeen,
     renderer?.error || 'packaged app must fork, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-resume',
     'Packaged session resume',
-    renderer?.resumeOk === true && renderer?.resumeTurnOk === true && providerResumePromptSeen && providerHistorySeen,
+    renderer?.resumeOk === true && renderer?.resumeTurnOk === true && renderer?.resumeReplayOk === true &&
+      providerResumePromptSeen && providerHistorySeen,
     renderer?.error || 'packaged app must resume, continue, and preserve initial history in provider request',
     renderer?.turnCreateOk === true ? 'failed' : 'skipped'
   ))
-  checks.push(actualCheck(
+  if (!relaunchAfterInitial) checks.push(actualCheck(
     'packaged-session-thread-list',
     'Packaged session thread list',
     renderer?.threadListOk === true,
     renderer?.error || 'packaged app must list/search source and forked threads',
     renderer?.forkOk === true ? 'failed' : 'skipped'
   ))
+  const goRecoveryPassed = relaunchAfterInitial && goRecovery?.attempted === true &&
+    goRecovery.restartAcknowledged === true && goRecovery.firstGoPid > 0 &&
+    goRecovery.secondGoPid > 0 && goRecovery.firstGoPid !== goRecovery.secondGoPid &&
+    goRecovery.credentialAvailable === true && goRecovery.historyRecovered === true &&
+    goRecovery.continuationCreated === true && goRecovery.continuationCompleted === true &&
+    goRecovery.usageIncreased === true &&
+    goRecovery.beforeTurnCount === 1 && goRecovery.afterTurnCount === 2 &&
+    providerGoRecoveryHistorySeen
+  if (relaunchAfterInitial) checks.push(actualCheck(
+    'packaged-go-recovery',
+    'Packaged session Go restart recovery',
+    goRecoveryPassed,
+    goRecovery?.error || 'new Go process must read the protected credential and finish one unique continuation'
+  ))
+  const focusedRelaunchPassed = goRecoveryPassed && relaunch?.attempted === true &&
+    relaunch.firstProcessQuiesced === true && relaunch.secondRendererReady === true &&
+    relaunch.firstMainPid > 0 && relaunch.secondMainPid > 0 &&
+    relaunch.firstMainPid !== relaunch.secondMainPid &&
+    relaunch.credentialAvailable === true && relaunch.historyRecovered === true && relaunch.continuationCreated === true &&
+    relaunch.continuationCompleted === true && relaunch.usageIncreased === true &&
+    relaunch.beforeTurnCount === 2 && relaunch.afterTurnCount === 3 &&
+    providerRelaunchHistorySeen && providerRequests.length === 3
+  if (relaunchAfterInitial) checks.push(actualCheck(
+    'packaged-session-relaunch',
+    'Packaged session new Main recovery',
+    focusedRelaunchPassed,
+    relaunch?.error || 'new Main must read the completed turn and finish one unique continuation with the same Provider'
+  ))
   checks.push(actualCheck(
     'packaged-session-provider-redaction',
     'Packaged session provider redaction',
     providerRequests.every((item) => item.authorizationConfigured === true),
     'local contract provider must receive authorization without recording secret values'
+  ))
+  checks.push(actualCheck(
+    'packaged-process-cleanup',
+    'Packaged process cleanup',
+    cleanupQuiesced,
+    cleanupError || 'owned packaged processes must stop before isolated state cleanup'
   ))
 
   const rendererEvidence = renderer
@@ -1873,31 +2957,71 @@ async function runActualPackagedSessionSoak() {
         threadCreateOk: renderer.threadCreateOk === true,
         turnCreateOk: renderer.turnCreateOk === true,
         sseReplayOk: renderer.sseReplayOk === true,
+        initialReplay: renderer.initialReplay || null,
         toolTurnOk: renderer.toolTurnOk === true,
         toolTimelineOk: renderer.toolTimelineOk === true,
+        toolReplay: renderer.toolReplay || null,
         mimoPlanThreadOk: renderer.mimoPlanThreadOk === true,
         mimoPlanTurnOk: renderer.mimoPlanTurnOk === true,
         mimoPlanReplayOk: renderer.mimoPlanReplayOk === true,
+        mimoPlanReplay: renderer.mimoPlanReplay || null,
         attachmentUploadOk: renderer.attachmentUploadOk === true,
         attachmentTurnOk: renderer.attachmentTurnOk === true,
         attachmentSseReplayOk: renderer.attachmentSseReplayOk === true,
         attachmentMetadataOk: renderer.attachmentMetadataOk === true,
         approvalDenyTurnOk: renderer.approvalDenyTurnOk === true,
+        approvalDenyGate: renderer.approvalDenyGate && {
+          ok: renderer.approvalDenyGate.ok === true,
+          eventCount: renderer.approvalDenyGate.eventCount,
+          errorCount: renderer.approvalDenyGate.errorCount,
+          eventKinds: renderer.approvalDenyGate.eventKinds,
+          turnEventKinds: renderer.approvalDenyGate.turnEventKinds,
+          errorCodes: renderer.approvalDenyGate.errorCodes
+        },
         approvalDenyRequestedOk: renderer.approvalDenyRequestedOk === true,
         approvalDenyResolvedOk: renderer.approvalDenyResolvedOk === true,
         approvalDenyNoExecuteOk: renderer.approvalDenyNoExecuteOk === true,
+        approvalDenyReplay: renderer.approvalDenyReplay || null,
         approvalAllowTurnOk: renderer.approvalAllowTurnOk === true,
+        approvalAllowGate: renderer.approvalAllowGate && {
+          ok: renderer.approvalAllowGate.ok === true,
+          eventCount: renderer.approvalAllowGate.eventCount,
+          errorCount: renderer.approvalAllowGate.errorCount,
+          eventKinds: renderer.approvalAllowGate.eventKinds,
+          turnEventKinds: renderer.approvalAllowGate.turnEventKinds,
+          errorCodes: renderer.approvalAllowGate.errorCodes
+        },
         approvalAllowRequestedOk: renderer.approvalAllowRequestedOk === true,
         approvalAllowResolvedOk: renderer.approvalAllowResolvedOk === true,
         approvalAllowExecutedOk: renderer.approvalAllowExecutedOk === true,
+        approvalAllowReplay: renderer.approvalAllowReplay || null,
+        cancelTurnOk: renderer.cancelTurnOk === true,
+        cancelGateOk: renderer.cancelGateOk === true,
+        cancelRequestAccepted: renderer.cancelRequestAccepted === true,
+        cancelReplayOk: renderer.cancelReplayOk === true,
+        cancelReplay: renderer.cancelReplay || null,
         userInputTurnOk: renderer.userInputTurnOk === true,
+        userInputGate: renderer.userInputGate && {
+          ok: renderer.userInputGate.ok === true,
+          eventCount: renderer.userInputGate.eventCount,
+          errorCount: renderer.userInputGate.errorCount,
+          eventKinds: renderer.userInputGate.eventKinds,
+          turnEventKinds: renderer.userInputGate.turnEventKinds,
+          errorCodes: renderer.userInputGate.errorCodes
+        },
         userInputRequestedOk: renderer.userInputRequestedOk === true,
         userInputResolvedOk: renderer.userInputResolvedOk === true,
         userInputReplayOk: renderer.userInputReplayOk === true,
+        userInputReplay: renderer.userInputReplay || null,
         forkOk: renderer.forkOk === true,
+        forkChildrenBefore: Number(renderer.forkChildrenBefore),
+        forkChildrenAfter: Number(renderer.forkChildrenAfter),
+        parentHistoryUnchanged: renderer.parentHistoryUnchanged === true,
         forkTurnOk: renderer.forkTurnOk === true,
+        forkReplayOk: renderer.forkReplayOk === true,
         resumeOk: renderer.resumeOk === true,
         resumeTurnOk: renderer.resumeTurnOk === true,
+        resumeReplayOk: renderer.resumeReplayOk === true,
         threadListOk: renderer.threadListOk === true,
         usageOk: renderer.usageOk === true,
         initialThreadIdHash: renderer.initialThreadId ? sha256(renderer.initialThreadId) : '',
@@ -1911,6 +3035,10 @@ async function runActualPackagedSessionSoak() {
   const secretFinding = firstSecretFinding({
     checks,
     renderer: rendererEvidence,
+    relaunch,
+    forkDiagnostic,
+    threadReadDiagnostic,
+    sseDiagnostic,
     launchError: summarizeError(launchError)
   })
   if (secretFinding) {
@@ -1919,14 +3047,63 @@ async function runActualPackagedSessionSoak() {
   const failed = checks.filter((item) => item.status === 'failed')
   const blocked = checks.filter((item) => item.status === 'live_blocked')
   const skipped = checks.filter((item) => item.status === 'skipped')
+  const requiredCheckIds = relaunchAfterInitial
+    ? [
+        'packaged-app-artifact', 'packaged-app-launch', 'packaged-renderer-bridge',
+        'packaged-settings-bridge', 'packaged-provider-profile-settings',
+        'packaged-runtime-restart', 'packaged-session-thread-create',
+        'packaged-session-turn-create', 'packaged-session-sse-replay',
+        'packaged-go-recovery', 'packaged-session-relaunch', 'packaged-session-provider-redaction',
+        'packaged-process-cleanup'
+      ]
+    : REQUIRED_ACTUAL_CHECK_IDS
   const passed = failed.length === 0 &&
     blocked.length === 0 &&
     skipped.length === 0 &&
-    REQUIRED_ACTUAL_CHECK_IDS.every((id) => checks.some((item) => item.id === id && item.status === 'passed'))
+    requiredCheckIds.every((id) => checks.some((item) => item.id === id && item.status === 'passed'))
   return {
     requested: true,
     passed,
     status: passed ? 'passed' : failed.length > 0 ? 'failed' : blocked.length > 0 ? 'live_blocked' : 'skipped',
+    focusedCancel: cancelOnly ? {
+      passed: artifactEvidence.ok && renderer?.cancelTurnOk === true &&
+        renderer?.cancelGateOk === true && renderer?.cancelRequestAccepted === true &&
+        renderer?.cancelReplayOk === true && cancelFileAbsent && cleanupQuiesced &&
+        !launchError && !secretFinding,
+      stage: renderer?.stage || '',
+      approvalPendingBeforeInterrupt: renderer?.cancelGateOk === true,
+      interruptAccepted: renderer?.cancelRequestAccepted === true,
+      terminalReplayComplete: renderer?.cancelReplayOk === true,
+      noToolFileEffect: cancelFileAbsent,
+      cleanupQuiesced
+    } : null,
+    focusedRelaunch: relaunchAfterInitial ? {
+      passed: focusedRelaunchPassed && cleanupQuiesced && !launchError && !secretFinding,
+      goRestartAcknowledged: goRecovery?.restartAcknowledged === true,
+      firstGoPid: goRecovery?.firstGoPid || 0,
+      secondGoPid: goRecovery?.secondGoPid || 0,
+      goCredentialAvailable: goRecovery?.credentialAvailable === true,
+      goContinuationCompleted: goRecovery?.continuationCompleted === true,
+      goUsageIncreased: goRecovery?.usageIncreased === true,
+      goBeforeTurnCount: goRecovery?.beforeTurnCount || 0,
+      goAfterTurnCount: goRecovery?.afterTurnCount || 0,
+      goError: goRecovery?.error || '',
+      firstMainPid: relaunch?.firstMainPid || 0,
+      secondMainPid: relaunch?.secondMainPid || 0,
+      firstProcessQuiesced: relaunch?.firstProcessQuiesced === true,
+      secondRendererReady: relaunch?.secondRendererReady === true,
+      mainCredentialAvailable: relaunch?.credentialAvailable === true,
+      historyRecovered: relaunch?.historyRecovered === true,
+      continuationCreated: relaunch?.continuationCreated === true,
+      continuationCompleted: relaunch?.continuationCompleted === true,
+      mainUsageIncreased: relaunch?.usageIncreased === true,
+      beforeTurnCount: relaunch?.beforeTurnCount || 0,
+      afterTurnCount: relaunch?.afterTurnCount || 0,
+      providerRequestCount: providerRequests.length,
+      providerGoHistoryObserved: providerGoRecoveryHistorySeen,
+      providerHistoryObserved: providerRelaunchHistorySeen,
+      error: relaunch?.error || ''
+    } : null,
     app: artifactEvidence,
     launch: {
       actualPackagedAppLaunched: Boolean(renderer),
@@ -1947,7 +3124,19 @@ async function runActualPackagedSessionSoak() {
       stdoutTailHash: stdout ? sha256(redactSecrets(stdout.slice(-4000))) : '',
       stderrTailHash: stderr ? sha256(redactSecrets(stderr.slice(-4000))) : ''
     },
+    ...(retainDiagnosticProfile ? { diagnostic: {
+      mode: relaunchAfterInitial ? 'relaunch_after_initial'
+        : forkOnly ? `focused_fork_${focusedForkStage}`
+          : cancelOnly ? 'focused_cancel_pending_approval' : 'full_session',
+      mainPid, mainStartedAt, goPidsBeforeCleanup, debugPort, runtimePort,
+      isolatedProfilePath: diagnosticProfilePath,
+      isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
+      rendererReadinessPassed, cdpFailure, relaunch
+    } } : {}),
     renderer: rendererEvidence,
+    forkDiagnostic,
+    threadReadDiagnostic,
+    sseDiagnostic,
     provider: {
       localContractProviderUsed: Boolean(contractProvider),
       externalProviderNetworkCalled: false,
@@ -1966,7 +3155,14 @@ async function runActualPackagedSessionSoak() {
       userInputSeen: providerUserInputSeen,
       forkPromptSeen: providerForkPromptSeen,
       resumePromptSeen: providerResumePromptSeen,
+      historyCarriedToGoRecovery: providerGoRecoveryHistorySeen,
+      historyCarriedToRelaunch: providerRelaunchHistorySeen,
       historyCarriedToChildOrResume: providerHistorySeen
+    },
+    isolatedWorkspace: {
+      approvalDenyFileAbsent,
+      approvalAllowFileMatches,
+      cancelFileAbsent
     },
     redaction: {
       status: secretFinding ? 'failed' : 'passed',
@@ -2160,13 +3356,19 @@ async function runCheck(item) {
 }
 
 async function main() {
+  if (retainDiagnosticProfile && (jsonOutput || noWrite || !protectedDiagnosticOutputSelected())) {
+    throw new Error('retained diagnostic profile requires a protected cache evidence output without JSON stdout')
+  }
   // Keep the nested TypeScript validation owner out of the Go test window.
   // Overlap makes a standalone soak faster but can starve the nested Vitest
   // process when this contract itself runs inside the full root suite.
-  const goCheck = await runCheck(commands[0])
-  const checks = [goCheck]
-  if (goCheck.status === 'passed') {
-    checks.push(await runCheck(commands[1]))
+  const checks = []
+  if (!actualOnly) {
+    const goCheck = await runCheck(commands[0])
+    checks.push(goCheck)
+    if (goCheck.status === 'passed') {
+      checks.push(await runCheck(commands[1]))
+    }
   }
   const failed = checks.some((check) => check.status !== 'passed')
 
@@ -2189,9 +3391,11 @@ async function main() {
     checks: []
   }
   const actualRequiredAndFailed = actualPackagedSoak && actual.passed !== true
-  const passed = !skipCommands && !failed && checks.every((item) => item.status === 'passed') && !actualRequiredAndFailed
+  const passed = !skipCommands && !actualOnly && !failed && checks.every((item) => item.status === 'passed') && !actualRequiredAndFailed
   const deterministicChecksFailed = failed || checks.some((item) => item.status === 'failed')
-  const status = passed
+  const status = actualOnly && actual.passed === true
+    ? 'partial'
+    : passed
     ? 'passed'
     : skipCommands
       ? 'skipped'
@@ -2211,10 +3415,11 @@ async function main() {
     id: 'runtime-go-packaged-session-soak',
     generatedAt: new Date().toISOString(),
     sourceCommit: actualPackagedSoak ? packageSourceCommit : currentGitCommit(),
-    testHarnessCommit: currentGitCommit(),
+    testHarnessCommit: harnessGitCommit(),
     status,
     passed,
     soak: {
+      actualOnly,
       deterministicContractOnly: actualPackagedSoak !== true,
       formalInstanceMode,
       secondInstanceStarted: actual.launch?.secondInstanceStarted === true,
@@ -2282,7 +3487,7 @@ async function main() {
   if (!reportOnly && !passed) process.exitCode = 1
 }
 
-main().catch((error) => {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => {
   const report = {
     schemaVersion: 1,
     id: 'runtime-go-packaged-session-soak',
@@ -2305,8 +3510,16 @@ main().catch((error) => {
       reason: error instanceof Error ? redactSecrets(error.message) : redactSecrets(String(error))
     }]
   }
-  writeEvidenceReport(report)
+  if (!retainDiagnosticProfile || protectedDiagnosticOutputSelected()) writeEvidenceReport(report)
   if (jsonOutput) console.log(JSON.stringify(report, null, 2))
   else console.error(`FAILED ${report.id}: ${report.checks[0].reason}`)
   process.exitCode = 1
+})
+
+// Reuse the installed-product lifecycle in bounded acceptance drivers without
+// triggering the CLI or duplicating authority checks and profile isolation.
+export const packagedSessionAcceptance = Object.freeze({
+  getFreePort, smokeChildEnv, packagedAppArtifactEvidence, resolveExecutablePath,
+  stopChild, stopOwnedSmokeRuntimes, ownedSmokeRuntimePids,
+  waitForRendererReady, evaluateCdp, waitForDebugTarget, buildGoRestartExpression
 })

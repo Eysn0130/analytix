@@ -1,3 +1,5 @@
+import { requestDocumentInlineCompletion } from '../inline-completion/request'
+import { isWriteShutdownFrozen, registerWriteShutdownInput } from '../write-shutdown'
 import {
   useEffect,
   useRef,
@@ -12,12 +14,13 @@ import { TableKit } from '@tiptap/extension-table'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useChatStore } from '../../store/chat-store'
 import type {
   WriteEditorSelectionState,
   WriteSelectionAnchorRect,
   WriteSelectionRange
 } from '../../components/write/WriteMarkdownEditor'
-import { NodeSelection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
 import { buildInlineCompletionPayload } from '../inline-completion'
 import { isSelectableRasterImageSrc } from '../selected-image'
@@ -41,7 +44,7 @@ import { replaceRangeWithMarkdown } from './markdown-insert'
 import { applyExternalMarkdownToEditor } from './markdown-sync'
 import { WriteLocalImage } from './local-image'
 import { WritePasteImage } from './paste-image'
-import { WriteRichInlineCompletion } from './extensions/inline-completion'
+import { WriteRichInlineCompletion, cancelWriteRichInlineCompletion } from './extensions/inline-completion'
 import {
   WriteRichTermPropagation,
   writeRichExternalSyncMeta
@@ -325,6 +328,24 @@ export function WriteRichEditor({
   const onFidelityChangeRef = useRef(onFidelityChange)
   const lastEmittedValueRef = useRef<string | null>(null)
   const [gate, setGate] = useState<GateState | null>(null)
+  // File identity, not a late active-task lookup, determines the completion
+  // owner. A same-file task switch pauses completion until reopen/remount.
+  const completionOwnerKey = JSON.stringify([workspaceRoot ?? '', filePath ?? ''])
+  const completionOwnerRef = useRef({ key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId })
+  const completionThreadEpochRef = useRef(0)
+  if (completionOwnerRef.current.key !== completionOwnerKey) {
+    completionOwnerRef.current = { key: completionOwnerKey, threadId: useChatStore.getState().activeThreadId }
+  }
+  useEffect(() => useChatStore.subscribe((state, previous) => {
+    if (state.activeThreadId !== previous.activeThreadId) {
+      completionThreadEpochRef.current += 1
+      if (editorRef.current && !editorRef.current.isDestroyed) cancelWriteRichInlineCompletion(editorRef.current.view)
+    }
+  }), [])
+
+  useEffect(() => {
+    if (editorRef.current && !editorRef.current.isDestroyed) cancelWriteRichInlineCompletion(editorRef.current.view)
+  }, [completionEnabled, completionLongEnabled, readOnly, workspaceRoot, filePath, completionModel])
 
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
@@ -391,6 +412,9 @@ export function WriteRichEditor({
     })
 
     const extensions: AnyExtension[] = [
+      Extension.create({ name: 'writeShutdown', addProseMirrorPlugins: () => [new Plugin({
+        filterTransaction: transaction => !isWriteShutdownFrozen() || !transaction.docChanged
+      })] }),
       StarterKit.configure({
         link: { openOnClick: false },
         undoRedo: { depth: 200 },
@@ -411,7 +435,7 @@ export function WriteRichEditor({
         getWorkspaceRoot: () => workspaceRootRef.current,
         getFilePath: () => filePathRef.current,
         getImageDirectory: () => imageDirectoryRef.current,
-        isReadOnly: () => readOnlyRef.current,
+        isReadOnly: () => (readOnlyRef.current || isWriteShutdownFrozen()),
         onSaved: () => onImagePasteSavedRef.current?.(),
         onError: (message) => onImagePasteErrorRef.current?.(message)
       }),
@@ -421,19 +445,26 @@ export function WriteRichEditor({
         getLongDebounceMs: () => completionLongDebounceMsRef.current,
         getLongMinAcceptScore: () => completionLongMinAcceptScoreRef.current,
         isLongEnabled: () => completionLongEnabledRef.current,
-        isEnabled: () => completionEnabledRef.current && !readOnlyRef.current,
+        isEnabled: () => completionEnabledRef.current && Boolean(completionOwnerRef.current.threadId) &&
+          completionOwnerRef.current.threadId === useChatStore.getState().activeThreadId && !(readOnlyRef.current || isWriteShutdownFrozen()),
         getFilePath: () => filePathRef.current,
-        requestCompletion: async (context, mode) => {
+        requestCompletion: async (context, mode, signal) => {
+          const owner = completionOwnerRef.current
+          const threadId = owner.threadId
+          const epoch = completionThreadEpochRef.current
+          if (!threadId || threadId !== useChatStore.getState().activeThreadId || context.filePath !== filePathRef.current) return null
           if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') return null
-          const result = await window.analytix.write.requestWriteInlineCompletion(
+          const result = await requestDocumentInlineCompletion(
             buildInlineCompletionPayload(context, {
+              threadId,
               model: completionModelRef.current,
               workspaceRoot: workspaceRootRef.current,
               mode,
               recentEdits: recentEditsRef.current
-            })
+            }), signal
           )
-          if (!result.ok) return null
+          if (signal.aborted || !result.ok || threadId !== useChatStore.getState().activeThreadId ||
+            epoch !== completionThreadEpochRef.current || owner !== completionOwnerRef.current) return null
           if (result.action?.kind === 'edit') {
             return { text: result.action.replacement, action: result.action, mode }
           }
@@ -444,7 +475,7 @@ export function WriteRichEditor({
       }),
       WriteRichTermPropagation,
       WriteRichTemplateShortcuts.configure({
-        isReadOnly: () => readOnlyRef.current
+        isReadOnly: () => (readOnlyRef.current || isWriteShutdownFrozen())
       }),
       ...(requirementBadges ? [SddRequirementBadges] : []),
       saveShortcut
@@ -454,11 +485,11 @@ export function WriteRichEditor({
       element: hostRef.current,
       extensions,
       content: parseWriteMarkdown(value),
-      editable: !readOnlyRef.current,
+      editable: !(readOnlyRef.current || isWriteShutdownFrozen()),
       editorProps: {
         attributes: {
           class: 'write-rich-editor',
-          spellcheck: readOnlyRef.current ? 'false' : 'true',
+          spellcheck: (readOnlyRef.current || isWriteShutdownFrozen()) ? 'false' : 'true',
           'data-write-editor-mode': 'rich'
         }
       },
@@ -491,6 +522,13 @@ export function WriteRichEditor({
     })
 
     editorRef.current = editor
+    const unregisterShutdown = registerWriteShutdownInput({
+      composing: () => editor.view.composing,
+      freeze: frozen => {
+        if (frozen) cancelWriteRichInlineCompletion(editor.view)
+        editor.setEditable(!readOnlyRef.current && !frozen, false)
+      }
+    })
     lastEmittedValueRef.current = value
     onSelectionChangeRef.current(selectionStateFromEditor(editor))
 
@@ -503,7 +541,7 @@ export function WriteRichEditor({
         },
         applyProjectedReplacement: (range, original, replacement, instruction) => {
           const instance = editorRef.current
-          if (!instance || instance.isDestroyed || readOnlyRef.current) return false
+          if (!instance || instance.isDestroyed || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const doc = instance.state.doc
           const projection = buildWriteRichMarkdownProjection(doc)
           const from = posForProjectedOffset(doc, projection, range.from)
@@ -585,7 +623,7 @@ export function WriteRichEditor({
         },
         toggleInlineFormat: (kind) => {
           const instance = editorRef.current
-          if (!instance || instance.isDestroyed || readOnlyRef.current) return false
+          if (!instance || instance.isDestroyed || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const chain = instance.chain().focus()
           if (kind === 'bold') return chain.toggleBold().run()
           if (kind === 'italic') return chain.toggleItalic().run()
@@ -594,7 +632,7 @@ export function WriteRichEditor({
         },
         setBlockType: (type) => {
           const instance = editorRef.current
-          if (!instance || instance.isDestroyed || readOnlyRef.current) return false
+          if (!instance || instance.isDestroyed || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           const chain = instance.chain().focus()
           switch (type) {
             case 'heading1':
@@ -617,7 +655,7 @@ export function WriteRichEditor({
         },
         setTextAlign: (align) => {
           const instance = editorRef.current
-          if (!instance || instance.isDestroyed || readOnlyRef.current) return false
+          if (!instance || instance.isDestroyed || (readOnlyRef.current || isWriteShutdownFrozen())) return false
           return applyRichTextAlign(instance, align)
         }
       }
@@ -625,6 +663,7 @@ export function WriteRichEditor({
 
     return () => {
       if (handleRef) handleRef.current = null
+      unregisterShutdown()
       editor.destroy()
       editorRef.current = null
     }
@@ -636,7 +675,7 @@ export function WriteRichEditor({
   useEffect(() => {
     const editor = editorRef.current
     if (!editor || editor.isDestroyed) return
-    editor.setEditable(!readOnly)
+    editor.setEditable(!readOnly && !isWriteShutdownFrozen(), false)
   }, [readOnly])
 
   if (eligible === false) {

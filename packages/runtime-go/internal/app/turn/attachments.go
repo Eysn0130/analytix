@@ -1,7 +1,9 @@
 package turn
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	appprivacy "analytix.local/runtime-go/internal/app/privacyprojection"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainattachment "analytix.local/runtime-go/internal/domain/attachment"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
@@ -318,7 +321,26 @@ func attachmentVirtualPath(metadata map[string]any) string {
 	if id == "" {
 		return "attachment://unavailable"
 	}
-	return "attachment://" + id
+	path := "attachment://" + id
+	if providerSafeAttachmentVirtualPath(path) {
+		return path
+	}
+	// A digest-derived ID can accidentally contain PII-shaped digit runs. Keep
+	// the attachment's durable identity and privacy projection unchanged; only
+	// its descriptive provider path receives a stable opaque alias.
+	for attempt := 0; attempt < 32; attempt++ {
+		digest := sha256.Sum256([]byte(fmt.Sprintf("analytix.attachment-provider-path.v1:%s:%d", id, attempt)))
+		candidate := "attachment://att_" + hex.EncodeToString(digest[:12])
+		if providerSafeAttachmentVirtualPath(candidate) {
+			return candidate
+		}
+	}
+	return "[ATTACHMENT_REFERENCE_UNAVAILABLE]"
+}
+
+func providerSafeAttachmentVirtualPath(path string) bool {
+	text := "FilePath: " + path
+	return appprivacy.ProjectOrdinaryText(text) == text
 }
 
 func attachmentDocumentText(metadata map[string]any) (string, bool) {

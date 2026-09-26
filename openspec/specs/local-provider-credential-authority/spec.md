@@ -42,6 +42,25 @@ The Secret Store SHALL keep encrypted credential bytes separate from key-free Re
 - **WHEN** the Secret Store cannot authenticate or decrypt a committed credential
 - **THEN** the affected credential operation fails closed without overwriting metadata, ciphertext, or another usable credential
 
+### Requirement: Ordinary Provider credentials recover without macOS Keychain access
+On macOS, ordinary fresh profiles SHALL keep the Secret Store master key in the application's private, owner-only per-user data directory and SHALL NOT read, create, or probe a system Keychain item for ordinary Provider startup, save, execution, restart, or update. The credential envelope, key-free Registry, and mutation fences remain separate. An owner-only file protects against other operating-system users; it does not prevent a process or Agent tool running as the same user from reading the master key and ciphertext. The product SHALL describe that boundary accurately. On Windows the ordinary per-user DPAPI master-key backend remains the supported silent recovery path.
+
+#### Scenario: A fresh macOS user saves a Provider key
+- **WHEN** the user enters the key once through onboarding or Provider Settings in a fresh profile
+- **THEN** the encrypted credential and owner-only master key are committed under that profile's private data directory
+- **AND** ordinary app and runtime restarts and a compatible update recover the selected Provider without another key entry or Keychain access
+
+#### Scenario: A legacy macOS profile has only a Keychain master key
+- **WHEN** a new version opens a profile whose committed Provider credentials depend on the legacy Keychain authority
+- **THEN** it preserves the legacy Registry and encrypted store and presents a limited, key-free credential-unavailable state that permits visible in-product re-entry
+- **AND** it never silently reads the legacy Keychain or treats an unavailable credential as executable
+- **AND** a revision-fenced replacement or explicit deletion retires the affected legacy reference only after the successor is durably committed and verified; an interruption preserves a recoverable prior state and never exposes an unverified successor
+- **AND** subsequent ordinary restarts and updates use the new file authority without another entry
+
+#### Scenario: A file authority is damaged or ambiguous
+- **WHEN** the master-key file, authority marker, envelope, permissions, ownership, or migration state is missing, malformed, inconsistent, or unreadable
+- **THEN** startup or the affected credential operation fails closed without creating a replacement key over existing ciphertext or erasing the prior data
+
 ### Requirement: Registry mutations are crash-safe and concurrency-safe
 Every credential-bearing Registry mutation and background credential refresh SHALL use revision compare-and-set plus generation/incarnation fencing, a durable prepare record, an atomic commit decision, and idempotent recovery. The Registry SHALL preserve the last committed usable credential until a successor or explicit deletion is committed and verified.
 
@@ -421,7 +440,7 @@ Acceptance SHALL exercise real Electron development with an isolated profile and
 - **THEN** it uses synthetic credential markers or redacted assertions and contains no real keys, tokens, user data, raw Provider bodies, or copied credential storage
 
 ### Requirement: Isolated Darwin tasks use one safe explicit Keychain binding
-An isolated Darwin task SHALL bind only `<unique isolationRoot>/darwin-secret-store-keychain/analytix-task.keychain-db` through the existing private startup frame and Registry/Secret Store authority. Admission SHALL reject a case-insensitive `login.keychain` substring anywhere in the full input paths, non-canonical tokens, aliases, symlinks, or invalid owner-only filesystem identities before a Security operation. Ordinary non-isolated credential behavior SHALL remain unchanged; this task binding SHALL NOT migrate, reuse, or fall back to a real-user, old task-login, default, or Data Protection Keychain.
+An explicitly credential-isolated Darwin QA or release-admission task SHALL bind only `<unique isolationRoot>/darwin-secret-store-keychain/analytix-task.keychain-db` through the existing private startup frame and Registry/Secret Store authority. Admission SHALL reject a case-insensitive `login.keychain` substring anywhere in the full input paths, non-canonical tokens, aliases, symlinks, or invalid owner-only filesystem identities before a Security operation. Ordinary non-isolated credential behavior SHALL remain unchanged; this task binding SHALL NOT migrate, reuse, or fall back to a real-user, old task-login, default, or Data Protection Keychain.
 
 #### Scenario: A fresh task Keychain is provisioned
 - **WHEN** an authorized isolated task creates its explicit Keychain
@@ -437,3 +456,23 @@ An isolated Darwin task SHALL bind only `<unique isolationRoot>/darwin-secret-st
 - **WHEN** an isolated task cleans its exact owned inventory or reports a failed operation
 - **THEN** cleanup validates identities and drained handles, does not adopt replacement entries on repeat calls, and preserves unknown residual state after partial failure
 - **AND** public failures contain fixed codes and bounded field-difference booleans without paths, secret values, database bytes, or unsafe error bodies; equality of default/search-list configuration does not establish that global Data Protection state was unchanged
+
+
+### Requirement: Ordinary source development reuses one persistent credential authority
+Ordinary source development SHALL keep application state task-local while reusing one private development Provider Registry and the existing encrypted Secret Store independently of task, restart and checkout lifetimes. It SHALL use the existing owner-only fallback master-key authority without an isolated Keychain password, and SHALL NOT copy secret values or credential envelopes into task profiles. This source-only mode is not Production OS-backed storage or release-admission credential isolation.
+
+#### Scenario: A normal development task starts or restarts
+- **WHEN** a normal source launcher opens a private task profile after the authorized one-time credential bootstrap
+- **THEN** Core resolves the existing development credential through the same Registry and Secret Store owners without API-key re-entry or a task-Keychain unlock
+- **AND** the shared authority remains a protected local root, with existing transaction, recovery, currentness and non-disclosure checks
+
+#### Scenario: QA or packaged startup attempts to use shared development credentials
+- **WHEN** an explicit credential-isolated QA launch occurs
+- **THEN** it retains the task-Keychain binding and locked/unavailable behavior and does not receive the shared development authority
+- **WHEN** a packaged app or production runtime receives a development authority option
+- **THEN** it refuses that source-only authority rather than weakening Production storage
+
+#### Scenario: Autonomous development verification runs
+- **WHEN** the bounded development verification entry executes
+- **THEN** it uses Core, Registry, stored credential resolution and the Provider adapter, returning only sanitized status and usage
+- **AND** bootstrap input is accepted only once through protected input; normal reuse does not depend on chat, environment exports, `.env`, logs or evidence containing the credential

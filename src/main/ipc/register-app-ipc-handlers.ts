@@ -1,4 +1,13 @@
+import { registerBrowserSelectionIpc } from '../browser/browser-selection'
+import { authorizeWriteRetrievalSource } from './write-retrieval-ipc'
+import { createWriteExportSnapshotResolver } from './write-export-ipc'
+import { createOfficePrivateAdmissionProvider } from '../office/office-private-admission'
+import { registerNativeOfficeIpc } from '../office/native-office-ipc'
+import { registerCanvasIpc } from '../canvas/canvas-ipc'
 import type { PrivateMediaRuntimeRequest } from '../services/private-media-runtime-request'
+import { createObjectEditingHandler } from './object-editing-ipc'
+import { createGeneratedArtifactHandler } from './generated-artifact-ipc'
+import { createPluginPackageHostHandler } from './plugin-package-host-ipc'
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -134,6 +143,7 @@ import {
   writeRichClipboardPayloadSchema,
   writeInfographicPayloadSchema,
   writeInlineCompletionPayloadSchema,
+  writeInlineCompletionCancelSchema,
   writePrototypeFilePayloadSchema,
   writeRetrievalPayloadSchema,
   workspaceRootSchema,
@@ -257,6 +267,7 @@ type RegisterAppIpcHandlersOptions = {
   store: JsonSettingsStore
   loadHubAccountService: LoadHubAccountService
   getMainWindow: () => BrowserWindow | null
+  canNavigateWindow: (contents: WebContents) => boolean
   isTrustedProviderRegistrySender?: (event: IpcMainInvokeEvent) => boolean
   applySettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
   saveSettingsPatch: (partial: AppSettingsPatch) => Promise<AppSettingsV1>
@@ -273,7 +284,7 @@ type RegisterAppIpcHandlersOptions = {
   getCurrentProfile?: () => { profileBinding: string; dataDirectory: string } | null | Promise<{ profileBinding: string; dataDirectory: string } | null>
   /** Fixed Main-only media transport; absent injection must fail closed. */
   privateMediaRequest?: PrivateMediaRuntimeRequest
-  localDisplayRequest: (path: string, body: string) => Promise<RuntimeRequestResult>
+  localDisplayRequest: (path: string, body: string, signal?: AbortSignal) => Promise<RuntimeRequestResult>
   restartRuntime: () => Promise<void>
   fetchUpstreamModels: () => Promise<UpstreamModelsResult>
   getClawRuntime: () => ClawRuntime | null
@@ -1212,6 +1223,33 @@ function localDisplayRendererIsCurrent(
   )
 }
 
+// A main-frame object can survive same-process navigation, including a reload
+// of the same URL. A request that witnessed navigation never regains ownership.
+function captureWriteRendererOwner(event: IpcMainInvokeEvent, getMainWindow: () => BrowserWindow | null) {
+  if (!localDisplayRendererIsCurrent(event, getMainWindow)) return null
+  let active = true
+  const controller = new AbortController()
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
+  const invalidate = (): void => { active = false; controller.abort() }
+  const navigating = (_event: Electron.Event, _url: string, _inPlace: boolean, mainFrame: boolean): void => {
+    if (mainFrame) invalidate()
+  }
+  event.sender.on('did-start-navigation', navigating)
+  event.sender.on('render-process-gone', invalidate)
+  event.sender.once('destroyed', invalidate)
+  return {
+    signal,
+    cancel: invalidate,
+    isCurrent: () => active && !signal.aborted && localDisplayRendererIsCurrent(event, getMainWindow),
+    release: () => {
+      invalidate()
+      event.sender.removeListener('did-start-navigation', navigating)
+      event.sender.removeListener('render-process-gone', invalidate)
+      event.sender.removeListener('destroyed', invalidate)
+    }
+  }
+}
+
 function safeSaveAsFileName(input: string | undefined, fallback = 'generated-file'): string {
   const candidate = (input ?? '').trim().replace(/\0/g, '')
   const name = basename(candidate) || fallback
@@ -1295,7 +1333,8 @@ function validateMcpConfigContent(content: string): void {
 function runDesktopCommand(
   command: DesktopCommand,
   sender: WebContents,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  canNavigateWindow: (contents: WebContents) => boolean
 ): void {
   const mainWindow = getMainWindow()
   const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : sender
@@ -1320,6 +1359,7 @@ function runDesktopCommand(
       contents.selectAll()
       return
     case 'reload':
+      if (!canNavigateWindow(contents)) return
       contents.reload()
       return
     case 'zoomIn':
@@ -2714,6 +2754,41 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     openEditorPath(parseIpcPayload('editor:open-path', openEditorPathPayloadSchema, payload))
   )
 
+  const packageHost = createPluginPackageHostHandler(localDisplayRequest)
+  registerNativeOfficeIpc(getMainWindow, packageHost, createOfficePrivateAdmissionProvider(localDisplayRequest))
+  registerCanvasIpc(event => isTrustedProviderRegistrySender?.(event) === true, packageHost)
+  const rendererPackageHost = createPluginPackageHostHandler(localDisplayRequest, 'renderer')
+  ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents ||
+        event.senderFrame !== main.webContents.mainFrame) {
+      return { ok: false, code: 'identity_invalid', message: 'Plugin control requires the main workspace.' }
+    }
+    return rendererPackageHost(payload)
+  })
+
+  const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
+  registerBrowserSelectionIpc(getMainWindow, localDisplayRequest)
+  const objectEditing = createObjectEditingHandler(localDisplayRequest)
+  const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
+  ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {
+    const main = getMainWindow()
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return {ok:false,code:'unavailable'}
+    const frame=main.webContents.mainFrame
+    const result=await resolveArtifact(payload)
+    if (getMainWindow()!==main || main.isDestroyed() || main.webContents.mainFrame!==frame) return {ok:false,code:'unavailable'}
+    return result
+  })
+  ipcMain.handle('object:editing', async (event, payload: unknown) => {
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) {
+      return { ok: false, code: 'forbidden', message: 'The protected editor is available only in the main workspace.' }
+    }
+    try {
+      const result = await objectEditing(payload)
+      return owner.isCurrent() ? result : { ok: false, code: 'unavailable', message: 'The protected editor owner changed.' }
+    } finally { owner.release() }
+  })
   ipcMain.handle('file:resolve-workspace', async (_, payload: unknown) =>
     resolveWorkspaceFile(
       parseIpcPayload('file:resolve-workspace', workspaceFileTargetPayloadSchema, payload)
@@ -2856,32 +2931,12 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        canceled: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return exportWriteDocument(request, {
-      parentWindow: getMainWindow(),
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, canceled: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return exportWriteDocument({ path: resolved.snapshot.path, content: resolved.snapshot.content,
+      format: request.format, typography: request.typography }, {
+      parentWindow: getMainWindow(), workspaceRoot: resolved.snapshot.workspace,
+      authorityCurrent: resolved.authorityCurrent
     })
   })
   ipcMain.handle('write:copy-rich-text', async (event, payload: unknown) => {
@@ -2893,51 +2948,56 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       }
     }
 
-    const initialSettings = await store.load()
-    const configuredWorkspace = initialSettings.write.activeWorkspaceRoot.trim()
-    if (!configuredWorkspace) {
-      return {
-        ok: false as const,
-        message: 'The active Write workspace is unavailable.'
-      }
-    }
-    const workspaceRoot = await canonicalPath(resolve(expandHomePath(configuredWorkspace)))
-    const authorityCurrent = async (): Promise<boolean> => {
-      if (!localDisplayRendererIsCurrent(event, getMainWindow)) return false
-      try {
-        const currentSettings = await store.load()
-        const currentWorkspace = currentSettings.write.activeWorkspaceRoot.trim()
-        if (!currentWorkspace) return false
-        return await canonicalPath(resolve(expandHomePath(currentWorkspace))) === workspaceRoot
-      } catch {
-        return false
-      }
-    }
-
-    return copyWriteDocumentAsRichText(request, {
-      workspaceRoot,
-      authorityCurrent
+    const resolved = await resolveExportSnapshot(request, () => localDisplayRendererIsCurrent(event, getMainWindow))
+    if (!resolved) return { ok: false as const, message: 'The document export snapshot is unavailable or stale.' }
+    return copyWriteDocumentAsRichText({ path: resolved.snapshot.path, content: resolved.snapshot.content }, {
+      workspaceRoot: resolved.snapshot.workspace, authorityCurrent: resolved.authorityCurrent
     })
   })
-  ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>
-    requestWriteInlineCompletion(
-      await store.load(),
-      parseIpcPayload('write:inline-completion', writeInlineCompletionPayloadSchema, payload),
-      runtimeRequest
-    )
-  )
-  ipcMain.handle('write:retrieve-context', async (_, payload: unknown) => {
+
+  let activeInlineCompletion: { sender: IpcMainInvokeEvent['sender']; requestId: string; owner: NonNullable<ReturnType<typeof captureWriteRendererOwner>> } | null = null
+  ipcMain.handle('write:inline-completion:cancel', (event, payload: unknown) => {
+    if (!localDisplayRendererIsCurrent(event, getMainWindow)) return { canceled: false }
+    const parsed = writeInlineCompletionCancelSchema.safeParse(payload)
+    const active = activeInlineCompletion
+    if (!parsed.success || !active || active.sender !== event.sender || active.requestId !== parsed.data.requestId || !active.owner.isCurrent()) return { canceled: false }
+    active.owner.cancel()
+    return { canceled: true }
+  })
+  ipcMain.handle('write:inline-completion', async (event, payload: unknown) => {
+    const denied = { ok: false as const, message: 'Write completion requires the current main window.' }
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) return denied
     try {
-      const context = await retrieveWriteContext(
-        parseIpcPayload('write:retrieve-context', writeRetrievalPayloadSchema, payload)
-      )
-      return { ok: true as const, context }
-    } catch (error) {
-      return {
-        ok: false as const,
-        message: error instanceof Error ? error.message : String(error)
-      }
+      const request = parseIpcPayload('write:inline-completion', writeInlineCompletionPayloadSchema, payload)
+      if (!request.threadId || !request.requestId || !request.document) return denied
+      activeInlineCompletion?.owner.cancel()
+      activeInlineCompletion = { sender: event.sender, requestId: request.requestId, owner }
+      const settings = await store.load()
+      if (!owner.isCurrent()) return denied
+      const source = settings.write.inlineCompletion.retrievalEnabled === false ? null
+        : await authorizeWriteRetrievalSource((path, body) => localDisplayRequest(path, body, owner.signal), request.threadId, request.workspaceRoot, owner.isCurrent)
+      if (!owner.isCurrent()) return denied
+      const result = await requestWriteInlineCompletion(settings, request, localDisplayRequest, { isCurrent: owner.isCurrent, signal: owner.signal, source: source ?? undefined })
+      return owner.isCurrent() ? result : denied
+    } finally {
+      if (activeInlineCompletion?.owner === owner) activeInlineCompletion = null
+      owner.release()
     }
+  })
+  ipcMain.handle('write:retrieve-context', async (event, payload: unknown) => {
+    const denied = { ok: false as const, message: 'Write retrieval requires the current main window.' }
+    const owner = captureWriteRendererOwner(event, getMainWindow)
+    if (!owner) return denied
+    try {
+      const request = parseIpcPayload('write:retrieve-context', writeRetrievalPayloadSchema, payload)
+      const source = await authorizeWriteRetrievalSource((path, body) => localDisplayRequest(path, body, owner.signal), request.threadId, request.workspaceRoot, owner.isCurrent)
+      if (!source) return { ok: false as const, message: 'Write retrieval is unavailable.' }
+      const context = await retrieveWriteContext(request, { isCurrent: owner.isCurrent, source })
+      return owner.isCurrent() ? { ok: true as const, context } : denied
+    } catch {
+      return { ok: false as const, message: 'Write retrieval is unavailable.' }
+    } finally { owner.release() }
   })
   ipcMain.handle('write:generate-infographic', async (_, payload: unknown) =>
     requestWriteInfographic(
@@ -2972,7 +3032,8 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     runDesktopCommand(
       parseIpcPayload('desktop:command', desktopCommandSchema, command),
       event.sender,
-      getMainWindow
+      getMainWindow,
+      options.canNavigateWindow
     )
   })
   ipcMain.handle('shell:open-external', async (_, url: unknown) => {

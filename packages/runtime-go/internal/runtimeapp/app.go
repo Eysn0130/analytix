@@ -26,6 +26,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	fundscsvsourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundscsvsource"
 	fundsquerysourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundsquerysource"
+	"analytix.local/runtime-go/internal/adapters/outbound/managededitingfiles"
 	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
@@ -45,6 +46,7 @@ import (
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
 	continuationapp "analytix.local/runtime-go/internal/app/continuation"
 	controlapp "analytix.local/runtime-go/internal/app/control"
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	executionpolicy "analytix.local/runtime-go/internal/app/executionpolicy"
 	fundscleaningapp "analytix.local/runtime-go/internal/app/fundscleaning"
@@ -61,9 +63,11 @@ import (
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
@@ -185,6 +189,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	originalCreates *runtimeOriginalCreateStartupV1,
 	inheritedChildFloors ...domainpendingwork.ChildIdentityFloorsV1,
 ) (_ http.Handler, resultErr error) {
+	if err := validateDevelopmentProviderAuthority(config); err != nil {
+		return nil, err
+	}
 	startupPhase := "configuration"
 	if simulation {
 		defer func() {
@@ -256,6 +263,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 	}
+	uncontainedMCPConfigured := len(mcpSpecs) > 0
 	mcpSpecs = mcp.BindHostScheduleMCPServerV1(mcpSpecs, config.HostScheduleMCPServer)
 	mcpSearch := loadRuntimeMCPSearchSettings(document, hasRuntimeConfig)
 	skillCatalog, err := loadRuntimeSkillCatalog(config, document, hasRuntimeConfig)
@@ -985,6 +993,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	providerClientOwnedByHandler := false
+	defer func() {
+		if !providerClientOwnedByHandler {
+			resultErr = errors.Join(resultErr, providerClient.Close())
+		}
+	}()
 	if strings.TrimSpace(config.ProviderAuditSocketPath) != "" {
 		providerClient.ProviderBodyAuditor, err = providerclient.NewUnixProviderRequestBodyAuditorV1(
 			config.ProviderAuditSocketPath,
@@ -1269,9 +1283,35 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err := trustedFinals.SeedTerminalComplete(ctx, terminalProjectionAuthorities); err != nil {
 		return nil, err
 	}
+	startupPhase = "fact-final-witness-recovery"
+	restoreRuntimeFactTerminalsV1(ctx, trustedFinals, terminalRecovery.FactCandidates, evidenceStore,
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord) error {
+			return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+				OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+				Context: record.SecurityContext, Workspace: record.SecurityContext.WorkspaceRealPath,
+			})
+		},
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, authority appturn.FactFinalMutationAuthority) ([]map[string]any, error) {
+			return evidenceapp.LoadVerifiedAcceptedFinalEventsWithAuthority(ctx, finalEventIO, store, record, authority)
+		},
+	)
 	currentCaseAuthority := threadapp.NewCurrentCaseThreadAuthorityValidator(caseThreads, filestore.CaseBindingReader{}, nil)
 	publicProjector := threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(
 		trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report,
+		func(record domainevidence.PrivateAcceptedFinalRecord, current domainsecurity.TurnSecurityContext) error {
+			issuer, ok := evidenceStore.(evidenceregistryport.RecoveredFactFinalWitnessIssuer)
+			if !ok {
+				return errors.New("retained fact witness issuer is unavailable")
+			}
+			return issuer.WithRecoveredFactFinalWitness(ctx, record, func(cap evidenceregistryport.FactFinalWitnessCapability) error {
+				return cap.UseExact(record, func() error {
+					return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+						OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+						Context: current, Workspace: current.WorkspaceRealPath,
+					})
+				})
+			})
+		},
 	)
 	store.SetActiveHistorySourceAdmissionV1(func(source map[string]any) error {
 		if _, err := publicProjector.ProjectThread(source); err != nil {
@@ -1587,7 +1627,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 		evidenceapp.ToolEvidenceService{Issuer: evidenceIssuer, Reader: mcpManager},
 	)
 	var providerRegistryAuthority *providerRegistryAuthorityV1
-	if config.DarwinSecretStoreKeychainDBPath == "" &&
+	if config.DevelopmentProviderAuthorityDir != "" {
+		providerRegistryAuthority, err = openDevelopmentProviderAuthority(ctx, config, simulation)
+	} else if config.DarwinSecretStoreKeychainDBPath == "" &&
 		config.DarwinSecretStoreKeychainBindingDigest == "" &&
 		config.DarwinSecretStoreKeychainSecurityDigest == "" {
 		providerRegistryAuthority, err = openProviderRegistryAuthorityV1(ctx, config.DataDir)
@@ -1611,7 +1653,18 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
 	phaseObserver, _ := ctx.Value(asyncTurnPhaseObservationContextKeyV1{}).(func(string))
+	officeAdapters, officePackageHost, officePrivate, officeSkillDiscoveryErrors := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	skillCatalog = toolcatalogapp.WithSkillDiscoveryErrors(skillCatalog, officeSkillDiscoveryErrors)
+	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
+	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		DocumentCodec:       newDocumentCodec(config),
+		ManagedEditingFiles: managededitingfiles.New(),
+		ObjectEditing:       objectEditingHandler.Service,
+		WorkspaceRead:       workspaceRead,
+		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
+		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
 		AsyncTurnPhaseObserverV1: phaseObserver,
 
@@ -1687,6 +1740,23 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
+	artifactResolver, ok := handler.(interface {
+		ResolveGeneratedArtifact(context.Context, string, string) (generationapp.Resolved, error)
+	})
+	if !ok {
+		return nil, errors.Join(errors.New("generated artifact resolver is unavailable"), nativeAuthority.Close())
+	}
+	var inlineCompletion httpapi.InlineCompletionService
+	if !objectEditingHandler.UnsupportedPlatform {
+		inlineCompletion, err = server.NewInlineCompletionService(handler, providerTelemetry)
+		if err != nil {
+			return nil, errors.Join(err, nativeAuthority.Close())
+		}
+	}
+	handler, err = bindRuntimeOwnedResourceV1(handler, providerClient)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
+	}
 	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
@@ -1718,8 +1788,15 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
-			FundsCSVAdmission: fundsCSVAdmission,
-			FundsCleaning:     fundsCleaning,
+			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
+			ObjectEditing:          objectEditingHTTP,
+			BrowserSelection:       httpapi.BrowserSelectionHandler{Service: objectEditingHandler.Service},
+			WorkspaceRead:          httpapi.WorkspaceReadHandler{Service: workspaceRead},
+			InlineCompletion:       httpapi.InlineCompletionHandler{Service: inlineCompletion},
+			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},
+			OfficePrivateAdmission: httpapi.OfficePrivateAdmissionHandler{Assets: officePrivate},
+			FundsCSVAdmission:      fundsCSVAdmission,
+			FundsCleaning:          fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(
 				fundsAccountFlow.caseEntities,
 				privateFinalStore,
@@ -1773,6 +1850,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	// Semantic-stage handlers are discarded after planning, so their Registry
 	// resources close through the defer above. Only a live handler owns them.
 	providerRegistryAuthorityTransferred = !simulation
+	providerClientOwnedByHandler = !simulation
 	return boundHandler, nil
 }
 
