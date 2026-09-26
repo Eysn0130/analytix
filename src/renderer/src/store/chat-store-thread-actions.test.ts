@@ -5,6 +5,7 @@ import type { ThreadHandoffOperation } from '@shared/thread-handoff'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
+import { runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { composeWritePrompt } from '../write/quoted-selection'
@@ -2053,6 +2054,30 @@ describe('send receipt acknowledgement and housekeeping', () => {
     clearActiveStream()
     rendererRuntimeClient.invalidateSettings()
     vi.unstubAllGlobals()
+  })
+  it('removes the optimistic user bubble when Core rejects a send during terminal arbitration', async () => {
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        throw runtimeErrorToError({ code: 'turn_execution_conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state } = buildHarness()
+    const originalBlocks: ChatState['blocks'] = []
+    state.busy = false
+
+    await expect(actions.sendMessage('Next request', 'agent')).resolves.toBe(false)
+
+    expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(state.blocks).toEqual(originalBlocks)
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+    expect(state.error).toBe(i18n.t('common:runtimeActiveTurn'))
   })
   it.each(['before-ack', 'after-ack'])('reports the original send result when an error occurs %s', async phase => {
     const provider = {

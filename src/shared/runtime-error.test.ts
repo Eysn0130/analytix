@@ -110,6 +110,21 @@ describe('runtime public error projection', () => {
       message: 'The runtime request could not be completed safely.'
     })
 
+    expect(projectPublicRuntimeHTTPError(409, {
+      code: 'turn_execution_conflict',
+      message: privateSentinel
+    })).toEqual({
+      code: 'turn_execution_conflict',
+      message: 'Another terminal or security transition still owns this thread.'
+    })
+    expect(projectPublicRuntimeHTTPError(503, {
+      code: 'turn_execution_conflict',
+      message: privateSentinel
+    })).toEqual({
+      code: 'internal_error',
+      message: 'The runtime request could not be completed safely.'
+    })
+
 		expect(projectPublicRuntimeHTTPError(409, {
 			code: 'worktree_isolation_authority_required',
 			message: privateSentinel,

@@ -17,6 +17,7 @@ export const PUBLIC_RUNTIME_HTTP_ERROR_CODES = [
   'case_history_restricted',
   'case_compaction_archive_required',
   'thread_running',
+  'turn_execution_conflict',
   'gate_continuation_unavailable',
   'gate_continuation_terminal_turn',
   'task_job_output_schema_invalid',

@@ -422,6 +422,7 @@ export function shouldOpenSettingsForError(error: unknown): boolean {
 }
 
 export function looksLikeActiveTurnError(error: unknown): boolean {
+  if (getRuntimeErrorCode(error) === 'turn_execution_conflict') return true
   const raw = error instanceof Error ? error.message : String(error ?? '')
   return raw.toLowerCase().includes('active turn')
 }
