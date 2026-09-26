@@ -1016,8 +1016,8 @@ function noteRuntimeHealthy(
 }
 
 function handleUnexpectedAnalytixExit(info: AnalytixUnexpectedExitInfo): void {
-  runtimeReadyFingerprint = null
   terminalPtyController?.disposeAll()
+  runtimeReadyFingerprint = null
   void superviseAnalytixCrash(info).catch((error: unknown) => {
     logError(
       'analytix-supervisor',

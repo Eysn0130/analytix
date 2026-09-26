@@ -6,7 +6,7 @@ import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { applyTheme, applyUiFontScale } from '../lib/apply-theme'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
-import { formatRuntimeError } from '../lib/format-runtime-error'
+import { formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
 import {
   getDefaultThreadTitle
 } from '../lib/thread-title'
@@ -1764,18 +1764,26 @@ export function createThreadActions(
       // Post-acknowledgement housekeeping cannot turn a sent message into a
       // failed draft or roll back a turn that SSE has already established.
       if (acknowledged) return true
-      if (currentReceiptOwner !== receiptOwner || get().activeThreadId !== activeThreadId) return false
+      if (!ownsReceiptContext()) return false
       clearBusyWatchdog()
       void window.analytix.logs.error('send-message', 'Failed to send message', {
         message: e instanceof Error ? e.message : String(e),
         threadId: activeThreadId
       }).catch(() => undefined)
       const activeTurnConflict = looksLikeActiveTurnError(e)
+      // A transport or arbitration failure may arrive after Core committed the
+      // turn but before Main returned its acknowledgement. Ordinary local
+      // failures have no such ambiguity and retain their bounded follow-up.
+      const errorCode = getRuntimeErrorCode(e)
+      const mayHaveLostAcknowledgement = activeTurnConflict || errorCode === 'conflict' ||
+        errorCode === 'runtime_request_failed' || errorCode === 'fetch_failed'
       const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
         get().currentTurnUserId === userBlockId
       if (ownsOptimisticTurn) {
-        submissionSubscription?.abort()
-        if (sseAbortRef.current === submissionSubscription) sseAbortRef.current = null
+        if (mayHaveLostAcknowledgement) {
+          submissionSubscription?.abort()
+          if (sseAbortRef.current === submissionSubscription) sseAbortRef.current = null
+        }
         if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
         set((state) => {
           const { [userBlockId]: _started, ...started } = state.turnStartedAtByUserId
@@ -1791,6 +1799,10 @@ export function createThreadActions(
             error: activeTurnConflict ? i18n.t('common:runtimeActiveTurn') : formatRuntimeError(e)
           }
         })
+      }
+      if (!mayHaveLostAcknowledgement) {
+        await refreshReceiptThreads()
+        return false
       }
       await get().recoverActiveTurn()
       const recovered = get()
