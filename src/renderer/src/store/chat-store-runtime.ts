@@ -506,6 +506,9 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
     return i18n.t('common:compactionSummaryFallbackStatus')
   }
   if (event.kind === 'pipeline_stage') {
+    if (event.stage === 'pre_send') return i18n.t('common:providerRequestPreparingStatus')
+    if (event.stage === 'post_send') return i18n.t('common:providerRequestStartedStatus')
+    if (event.stage === 'response_received') return i18n.t('common:providerResponseReceivedStatus')
     if (event.stage === 'provider_retrying') {
       return i18n.t('common:providerRetryingStatus', { defaultValue: '模型服务正在重试' })
     }

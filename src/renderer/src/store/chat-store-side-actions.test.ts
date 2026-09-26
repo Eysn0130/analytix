@@ -1608,6 +1608,19 @@ describe('chat-store-side-actions', () => {
     expect(state.busy).toBe(true)
   })
 
+  it('updates one provider progress row in its side conversation only', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    const sink = (provider.subscribeMock.mock.calls.at(-1) as [string, number, ThreadEventSink, AbortSignal])[2]
+    for (const stage of ['pre_send', 'post_send', 'response_received']) {
+      sink.onRuntimeStatus?.({ kind: 'pipeline_stage', itemId: 'runtime_status_side_turn_provider_progress',
+        turnId: 'side_turn', stage, label: 'UNTRUSTED_STAGE_TEXT' })
+    }
+    expect(state.blocks).toEqual([])
+    expect(state.sideConversations[id].blocks).toHaveLength(1)
+    expect(state.sideConversations[id].blocks[0]).toMatchObject({ kind: 'system', text: 'Response received' })
+  })
+
   it('side runtime status stays scoped after a cursor update', async () => {
     const { actions, state, provider } = buildHarness()
     const id = (await actions.spawnSideConversation())!

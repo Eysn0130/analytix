@@ -1526,6 +1526,24 @@ describe('thread event sink binding', () => {
     }
   })
 
+  it('projects trusted provider progress through one existing status row without exposing event prose', async () => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', blocks: [] })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    for (const [index, stage] of (['pre_send', 'post_send', 'response_received'] as const).entries()) {
+      await dispatchAnalytixRuntimeEvent({
+        kind: 'pipeline_stage', seq: index + 1, threadId: 'thread-current', turnId: 'turn_1',
+        stage, label: 'UNTRUSTED_PROVIDER_PROGRESS_PROSE', timestamp: '2026-09-26T00:00:00Z'
+      }, sink, async () => undefined)
+      expect(getState().blocks).toHaveLength(1)
+      expect(getState().blocks[0]).toMatchObject({ kind: 'system', id: 'runtime_status_turn_1_provider_progress' })
+      expect(JSON.stringify(getState().blocks)).not.toContain('UNTRUSTED_PROVIDER_PROGRESS_PROSE')
+    }
+    expect(getState().blocks[0]).toMatchObject({ text: i18n.t('common:providerResponseReceivedStatus') })
+    expect(getState().busy).toBe(true)
+    expect(getState().liveAssistant).toBe('')
+    expect(getState().blocks.some(block => block.kind === 'assistant')).toBe(false)
+  })
+
   it('does not render blank runtime status rows for internal pipeline stages', () => {
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current',

@@ -2421,6 +2421,20 @@ describe('streaming runtime status events', () => {
     expect(tools).toEqual([])
   })
 
+  it('coalesces fixed provider progress by turn and rejects unscoped progress', async () => {
+    const statuses: Array<{ itemId: string; label?: string }> = []
+    const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => { statuses.push(event) } }
+    for (const [index, stage] of (['pre_send', 'post_send', 'response_received'] as const).entries()) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: index + 1,
+        threadId: 'thr_progress', turnId: 'turn_progress', stage, label: 'UNTRUSTED_STAGE_TEXT' }, sink, async () => undefined)
+    }
+    expect(statuses.map(s => s.label)).toEqual(['Preparing model request', 'Model request started', 'Response received'])
+    expect(new Set(statuses.map(s => s.itemId))).toEqual(new Set(['runtime_status_turn_progress_provider_progress']))
+    await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 4,
+      threadId: 'thr_progress', stage: 'post_send', label: 'UNSCOPED' }, sink, async () => undefined)
+    expect(statuses).toHaveLength(3)
+  })
+
   it('surfaces subagent pipeline child linkage as a runtime status event', async () => {
     let captured: unknown = null
     const sink: ThreadEventSink = {
