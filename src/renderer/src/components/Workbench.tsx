@@ -107,7 +107,6 @@ import { normalizeWorkspaceRoot, workspaceRootIdentityKey } from '../lib/workspa
 import {
   preloadCaseOverviewForWorkspace
 } from '../data-analysis/services/analysis/stats-case-overview-resource'
-import { preloadSharedThreadSummary } from './summary/thread-summary-resource'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { useKeyboardShortcutSettings } from '../lib/keyboard-shortcut-settings'
 import { useUiModeCameosEnabled, useUiPluginStore } from '../store/ui-plugin-store'
@@ -3078,21 +3077,6 @@ export function Workbench(): ReactElement {
   }, [activeCaseProjectWorkspaceRoot, activeDataAnalysis, route])
 
   useEffect(() => {
-    if (!activeThreadId || route !== 'chat' || activeSddDraft || activeDataAnalysis) return undefined
-    let frameId: number | null = null
-    const timer = window.setTimeout(() => {
-      frameId = window.requestAnimationFrame(() => {
-        preloadRightPanelIsland('summary')
-        void preloadSharedThreadSummary(activeThreadId).catch(() => {})
-      })
-    }, 48)
-    return () => {
-      window.clearTimeout(timer)
-      if (frameId !== null) window.cancelAnimationFrame(frameId)
-    }
-  }, [activeDataAnalysis, activeSddDraft, activeThreadId, route])
-
-  useEffect(() => {
     if (rightPanelMode === 'summary') preloadRightPanelIsland('summary')
   }, [rightPanelMode])
 
@@ -3242,7 +3226,9 @@ export function Workbench(): ReactElement {
                   <DevBrowserPanelIsland onSubmitPrompt={sendWritePrompt} preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
                 </div>
               ) : null}
-              {panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'summary' ? renderSummaryPanel() : panelMode === 'child-agent' && activeSubagentInspector ? (
+              {panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'summary' ? (
+                rightPanelDockedVisible && !workspaceSelectorOpen ? renderSummaryPanel() : null
+              ) : panelMode === 'child-agent' && activeSubagentInspector ? (
                 <SubagentInspectorPanelIsland tabbedWorkspace
                   subagents={activeSubagentInspector.subagents}
                   selectedKey={activeSubagentInspector.selectedKey}

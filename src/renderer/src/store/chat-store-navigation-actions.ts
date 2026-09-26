@@ -110,7 +110,7 @@ const defaultThreadRefreshLimit = 50
 const archivedThreadRefreshLimit = 200
 const caseProjectRefreshLimit = 100
 const caseProjectThreadLoadLimit = 200
-const runtimeRecoveryDelaysMs = [250, 1000, 3000] as const
+const runtimeRecoveryDelaysMs = [250, 1000, 3000, 10_000, 30_000] as const
 
 function mergeThreadsById(existing: NormalizedThread[], incoming: NormalizedThread[]): NormalizedThread[] {
   const map = new Map<string, NormalizedThread>()
@@ -312,13 +312,12 @@ export function createNavigationActions(
     if (
       get().runtimeConnection !== 'offline' ||
       activeUserRuntimeProbeGeneration !== 0 ||
-      runtimeRecoveryTimer != null ||
-      runtimeRecoveryAttempt >= runtimeRecoveryDelaysMs.length
+      runtimeRecoveryTimer != null
     ) {
       return
     }
     const epoch = runtimeRecoveryEpoch
-    const delay = runtimeRecoveryDelaysMs[runtimeRecoveryAttempt]
+    const delay = runtimeRecoveryDelaysMs[Math.min(runtimeRecoveryAttempt, runtimeRecoveryDelaysMs.length - 1)]
     runtimeRecoveryTimer = setTimeout(() => {
       runtimeRecoveryTimer = null
       if (
@@ -328,7 +327,7 @@ export function createNavigationActions(
       ) {
         return
       }
-      runtimeRecoveryAttempt += 1
+      runtimeRecoveryAttempt = Math.min(runtimeRecoveryAttempt + 1, runtimeRecoveryDelaysMs.length - 1)
       const probeRuntime = get().probeRuntime
       if (typeof probeRuntime !== 'function') return
       void probeRuntime('background').then(() => {

@@ -11,6 +11,7 @@ import type { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
 // mounted Workbench, plan controller, composer draft hook and stores are real.
 const io = vi.hoisted(() => ({
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
+  summaryMounted: vi.fn(),
   document: null as { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void } | null,
   provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn() },
   browser: vi.fn(), retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock('./shell/ShellNavigationControls', () => ({ ShellNavigationControls: () 
 vi.mock('./DevPreviewLaunchCard', () => ({ DevPreviewLaunchCard: () => null }))
 vi.mock('./RuntimeBanner', () => ({ RuntimeBanner: () => null }))
 vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null }))
-vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null, SubagentInspectorPanelIsland: () => null, ThreadSummaryPanelIsland: () => null, TodoPanel: () => null, WorkspaceFilePreviewPanel: () => null, DocumentWorkspacePanel: (props: { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void }) => { io.document = props; return null }, preloadRightPanelIsland: () => null }))
+vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null, SubagentInspectorPanelIsland: () => null, ThreadSummaryPanelIsland: () => { io.summaryMounted(); return null }, TodoPanel: () => null, WorkspaceFilePreviewPanel: () => null, DocumentWorkspacePanel: (props: { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void }) => { io.document = props; return null }, preloadRightPanelIsland: () => null }))
 
 vi.mock('./workbench/ChatTimelineIsland', () => ({ ChatTimelineIsland: () => null, useDevPreviewUrls: () => [] }))
 import { Workbench } from './Workbench'
@@ -132,6 +133,17 @@ afterEach(async () => {
 })
 
 describe('Workbench Canvas consumer path', () => {
+  it('stops mounting the summary poller when the right pane closes', async () => {
+    await act(async () => useWorkspaceTabsStore.getState().openTab({
+      id: 'tool:summary', kind: 'tool', mode: 'summary', title: 'Summary'
+    }))
+    expect(io.summaryMounted).toHaveBeenCalled()
+
+    io.summaryMounted.mockClear()
+    await act(async () => useWorkspaceTabsStore.getState().setOpen(false))
+    expect(io.summaryMounted).not.toHaveBeenCalled()
+  })
+
   it('does not send on attachment; ordinary success clears only the submitted draft and Canvas scope', async () => {
     expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
     expect(useNativeReferenceStore.getState().references).toHaveLength(1)

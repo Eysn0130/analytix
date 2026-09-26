@@ -1094,7 +1094,7 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.runtimeConnection).toBe('ready')
   })
 
-  it('keeps a persistently unavailable runtime offline after three background retries', async () => {
+  it('keeps probing an unavailable local runtime at a bounded rate', async () => {
     vi.useFakeTimers()
     const restartRuntime = vi.fn(async () => undefined)
     const provider = {
@@ -1140,11 +1140,51 @@ describe('chat-store navigation workspace selection', () => {
     await vi.advanceTimersByTimeAsync(3_000)
     expect(provider.connect).toHaveBeenCalledTimes(4)
     await vi.advanceTimersByTimeAsync(10_000)
+    expect(provider.connect).toHaveBeenCalledTimes(5)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(provider.connect).toHaveBeenCalledTimes(6)
+    await vi.advanceTimersByTimeAsync(30_000)
 
-    expect(provider.connect).toHaveBeenCalledTimes(4)
+    expect(provider.connect).toHaveBeenCalledTimes(7)
     expect(restartRuntime).not.toHaveBeenCalled()
     expect(harness.state.runtimeConnection).toBe('offline')
     expect(harness.state.error).toBeTruthy()
+  })
+
+  it('recovers when the local runtime becomes available after the initial retries', async () => {
+    vi.useFakeTimers()
+    const provider = {
+      connect: vi.fn()
+        .mockRejectedValueOnce(new Error('runtime still starting'))
+        .mockRejectedValueOnce(new Error('runtime still starting'))
+        .mockRejectedValueOnce(new Error('runtime still starting'))
+        .mockRejectedValueOnce(new Error('runtime still starting'))
+        .mockResolvedValue(undefined)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', {
+      analytix: {
+        settings: {
+          getSettings: vi.fn(async () => ({
+            workspaceRoot: '/cases/a',
+            runtime: { providerId: 'analytix-hub', model: 'deepseek-v4-flash' }
+          }))
+        }
+      }
+    })
+    const harness = buildHarness({ runtimeConnection: 'ready' } as Partial<ChatState>)
+    harness.state.probeRuntime = harness.actions.probeRuntime
+
+    await harness.actions.probeRuntime('background')
+    await vi.advanceTimersByTimeAsync(250 + 1_000 + 3_000)
+    expect(provider.connect).toHaveBeenCalledTimes(4)
+    expect(harness.state.runtimeConnection).toBe('offline')
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(provider.connect).toHaveBeenCalledTimes(5)
+    expect(harness.state.runtimeConnection).toBe('ready')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(provider.connect).toHaveBeenCalledTimes(5)
   })
 
   it('does not let a failed user probe restart background recovery retries', async () => {
@@ -1249,7 +1289,7 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.runtimeConnection).toBe('ready')
   })
 
-  it('keeps the retry budget bounded across alternating probe and preload failures', async () => {
+  it('caps the retry rate across alternating probe and preload failures', async () => {
     vi.useFakeTimers()
     let connectAttempt = 0
     const provider = {
@@ -1288,7 +1328,12 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.runtimeConnection).toBe('offline')
 
     await vi.advanceTimersByTimeAsync(100_000)
-    expect(provider.connect).toHaveBeenCalledTimes(7)
+    const attempts = provider.connect.mock.calls.length
+    expect(attempts).toBeGreaterThan(7)
+    expect(attempts).toBeLessThanOrEqual(13)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(provider.connect.mock.calls.length).toBeGreaterThan(attempts)
+    expect(provider.connect.mock.calls.length).toBeLessThanOrEqual(attempts + 2)
     expect(harness.state.runtimeConnection).toBe('offline')
   })
 })
