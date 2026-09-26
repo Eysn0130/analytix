@@ -184,7 +184,18 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 	t.Log("reopening Core")
 	handler = newRuntimeServerProviderReadyTestHandler(t, config)
 	server = httptest.NewServer(handler)
-	assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	recovered := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	if recovered["goal"] != nil {
+		t.Fatal("no-Goal journey acquired a Goal")
+	}
+	for _, rawTurn := range anyList(recovered["turns"]) {
+		turn := rawTurn.(map[string]any)
+		for _, field := range []string{"steering", "attachmentIds", "activeSkillIds", "injectedMemoryIds"} {
+			if values, ok := turn[field].([]any); !ok || values == nil {
+				t.Fatalf("recovered public turn missing exact schema array %s", field)
+			}
+		}
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if writes != 1 {

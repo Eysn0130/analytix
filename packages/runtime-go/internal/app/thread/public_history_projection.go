@@ -665,6 +665,15 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 			"workspaceCheckpointId", "toolCatalogFingerprint", "toolCatalogToolCount", "toolCatalogDrift",
 			"maxModelSteps", "guiPlan", "mode", "disableUserInput", "error",
 		})
+		// Match TurnSchema's closed wire shape before Main performs exact
+		// validation. Compaction and legacy turns omit these optional durable
+		// lists; materialize only absent defaults in the public copy. Existing
+		// values, including invalid ones, must never be silently repaired.
+		for _, field := range []string{"steering", "attachmentIds", "activeSkillIds", "injectedMemoryIds"} {
+			if _, present := turn[field]; !present {
+				turn[field] = []any{}
+			}
+		}
 		legacyInterruptedHistory := false
 		if status := strings.TrimSpace(contracts.StringField(turn, "status")); status != "" {
 			switch status {

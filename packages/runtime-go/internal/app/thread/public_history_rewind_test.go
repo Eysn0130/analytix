@@ -22,6 +22,7 @@ func publicHistoryRewindFixture(t *testing.T) (PreparedRewindMutation, map[strin
 	retained := map[string]any{
 		"id": "turn-retained", "threadId": current.ThreadID, "status": "completed",
 		"prompt": "earlier request", "createdAt": "2026-07-14T00:00:00Z", "items": []any{},
+		"steering": []any{}, "attachmentIds": []any{}, "activeSkillIds": []any{}, "injectedMemoryIds": []any{},
 	}
 	thread["turns"] = append([]any{retained}, thread["turns"].([]any)...)
 	prepared, err := PrepareRewindMutation(thread, current.ThreadID, current.TurnID, current, time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC))
