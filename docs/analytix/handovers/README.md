@@ -5,7 +5,27 @@ Status: Operational。唯一恢复入口；原 Codex 保持唯一 writer，未�
 Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
 branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/Eysn0130/analytix/pull/28)。
 
-## 当前恢复点 — 2026-09-24 PDT
+## 当前恢复点 — 2026-09-26 PDT
+
+- 原分支产品 SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473`；PR28
+  Draft/open，产品提交对应的 57/57 检查成功。直接读取的 `origin/main` 是
+  `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，本地 `main` 是
+  `60839b721b273119ab30158c65109dde4db52441`。恢复时仍须重读
+  HEAD/tree/dirty、PR/CI/main，不用本行覆盖更新后继。
+- e15 私有 DMG 的安装副本通过合成 Provider 可见 Save、Go/Main 重启、
+  120-turn 与 post-120 GUI 续答、旧线程续答、e13→e15 负例升级保全及恢复、
+  双页 PDF 夹具。真实 Provider 仅在原获准持久开发 authority 的新源码 Core
+  进程中有有界回执，未复制到安装版 QA。准确制品哈希、C01–C18 分母、
+  原生 Windows 与未验边界见[当前 e15 验收记录](../qa/pr28-e15-credential-authority-2026-09-26.md)。
+- `SourceReady=true` 仅对上述产品 SOURCE；`PrivateCandidateReady=false`，
+  因安装版真实受保护 Provider 的保存/重启恢复仍无获准 QA 句柄；
+  `MergeReady=false`，PR 保持 Draft；`PublicMacReleaseReady=false`，制品为
+  `development_clean_non_publishable`。本轮三个合成 QA profile 与 loopback
+  Provider 在有界验收后清理，持久开发 authority 保留。下一依赖是在现有预算
+  和权限下取得可用的安装版受保护 QA 入口，再做一次正常可见保存/重启，
+  不复制开发密钥、不弱化安装版隔离。
+
+## 历史恢复点 — 2026-09-24 PDT
 
 - 最新产品源码与完整私有 app/DMG/ZIP 绑定
   `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；当前已推送 QA 后继

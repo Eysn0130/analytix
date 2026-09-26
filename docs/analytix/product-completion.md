@@ -1,13 +1,40 @@
 # Analytix product completion
 
-Status: Operational current matrix, 2026-09-24 PDT. Accepted targets remain in the
+Status: Operational current matrix, 2026-09-26 PDT. Accepted targets remain in the
 [spec registry](specs/README.md) and scoped OpenSpec requirements. This matrix does
 not shrink the original A–M/P0–P5 outcome or declare product/release acceptance.
 Delivery order is owned by the [Operational execution plan](delivery-execution-plan.md).
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-## Current PR28 Core admission — 2026-09-24 PDT
+## Current PR28 Core admission — 2026-09-26 PDT
+
+Exact product SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473` has
+57/57 successful PR checks. A clean e15 private Core DMG/ZIP was built from
+that SOURCE; the installed macOS 26.5.2 arm64 app passed visible synthetic
+Provider Save, Go and Main restart continuation, 120 consecutive GUI turns,
+post-120 GUI continuation, older-thread readback/continuation, a two-page PDF
+fixture, and e13→e15 rejected-upgrade preservation followed by restored
+continuation. The current protected real development authority was also
+reused through a separate new source Core process without key re-entry. These
+are separate evidence seams. The exact installed-app legal audit passed with
+1,172 package instances and zero artifact admission blockers. See the
+[exact e15 checkpoint](qa/pr28-e15-credential-authority-2026-09-26.md)
+for source, artifact hashes, C01–C18 limits and private receipt.
+
+| Exit | Current status and scope |
+| --- | --- |
+| SourceReady | `true` for exact product SOURCE `96294a314` and its checks. A later documentation HEAD must be checked on its own terms. |
+| PrivateCandidateReady | `false`: protected real-Provider recovery in the packaged app remains unverified without an approved packaged QA handle. Synthetic installed acceptance and source Core real reuse do not substitute for it. |
+| MergeReady | `false`: PR28 remains Draft with the private-candidate gate open. GitHub mergeability and green CI alone are insufficient. |
+| PublicMacReleaseReady | `false`: e15 is ad hoc and `development_clean_non_publishable`; no public distribution claim. |
+
+Windows native DPAPI/ACL/Registry tests and the development-launcher test pass
+on the Windows 2022 CI runner; a Windows installed desktop run and a distinct
+wrong-user login test are unverified. No OS-level trace proved zero Keychain
+API access, and unrestricted same-UID shell access is not claimed isolated.
+
+## Historical PR28 Core admission — 2026-09-24 PDT
 
 The latest product-code SOURCE on
 `codex/workbench-product-delivery-20260914` is
