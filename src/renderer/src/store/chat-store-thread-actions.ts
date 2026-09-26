@@ -1764,7 +1764,12 @@ export function createThreadActions(
       // Post-acknowledgement housekeeping cannot turn a sent message into a
       // failed draft or roll back a turn that SSE has already established.
       if (acknowledged) return true
-      if (!ownsReceiptContext()) return false
+      // A disconnected SSE listener does not revoke our still-pending user
+      // bubble. Navigation or a newer send does revoke it, including A-B-A.
+      const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
+        get().currentTurnUserId === userBlockId
+      if (currentReceiptOwner !== receiptOwner || sendGeneration !== receiptGeneration ||
+        get().activeThreadId !== activeThreadId || (!ownsReceiptContext() && !ownsOptimisticTurn)) return false
       clearBusyWatchdog()
       void window.analytix.logs.error('send-message', 'Failed to send message', {
         message: e instanceof Error ? e.message : String(e),
@@ -1777,8 +1782,6 @@ export function createThreadActions(
       const errorCode = getRuntimeErrorCode(e)
       const mayHaveLostAcknowledgement = activeTurnConflict || errorCode === 'conflict' ||
         errorCode === 'runtime_request_failed' || errorCode === 'fetch_failed'
-      const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
-        get().currentTurnUserId === userBlockId
       if (ownsOptimisticTurn) {
         if (mayHaveLostAcknowledgement) {
           submissionSubscription?.abort()

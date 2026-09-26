@@ -2101,6 +2101,30 @@ describe('send receipt acknowledgement and housekeeping', () => {
     expect(state.busy).toBe(false)
     expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
   })
+  it('removes its own pending bubble when SSE disconnects before a failed send receipt', async () => {
+    let abortStream: (() => void) | undefined
+    const provider = {
+      sendUserMessage: vi.fn(async () => {
+        abortStream?.()
+        throw runtimeErrorToError({ code: 'conflict', message: 'private' })
+      }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.busy = false
+    abortStream = () => sseAbortRef.current?.abort()
+
+    await expect(actions.sendMessage('Interrupted request', 'agent')).resolves.toBe(false)
+
+    expect(state.blocks).toEqual([])
+    expect(state.busy).toBe(false)
+    expect(state.recoverActiveTurn).toHaveBeenCalledOnce()
+  })
   it('recognizes a durable turn when acknowledgement was lost', async () => {
     const provider = {
       sendUserMessage: vi.fn(async () => {
