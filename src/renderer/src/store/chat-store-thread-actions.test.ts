@@ -2172,6 +2172,7 @@ describe('send receipt acknowledgement and housekeeping', () => {
     expect(provider.sendUserMessage).toHaveBeenCalledOnce()
     if (phase === 'after-ack') {
       expect(state).toMatchObject({ busy: true, currentTurnId: 'confirmed-turn', currentTurnUserId: 'confirmed-user', error: null })
+      expect(window.analytix.logs.error).toHaveBeenCalledWith('thread-refresh', 'Post-send sidebar refresh failed')
     } else expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
     sseAbortRef.current?.abort()
   })

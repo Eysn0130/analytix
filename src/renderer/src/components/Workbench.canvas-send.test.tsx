@@ -689,6 +689,40 @@ describe('Workbench receipt ownership compatibility', () => {
 })
 
 describe('R07 reaudit: normal receipt follow-up lifetime', () => {
+  it('releases a new-thread submission after acknowledgement while its index refresh is pending', async () => {
+    const listing = deferred<NormalizedThread[]>()
+    const first = { ...thread('fresh-one'), title: 'First named thread' }
+    const second = { ...thread('fresh-two'), title: 'Second named thread' }
+    Object.assign(io.provider, { createThread: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second) })
+    io.provider.listThreads.mockResolvedValueOnce([first, thread('a'), thread('b')])
+      .mockReturnValueOnce(listing.promise).mockResolvedValue([first, second, thread('a'), thread('b')])
+    io.provider.sendUserMessage.mockResolvedValueOnce({ turnId: 'fresh-turn-one', userMessageItemId: 'fresh-user-one' })
+      .mockResolvedValueOnce({ turnId: 'fresh-turn-two', userMessageItemId: 'fresh-user-two' })
+    try {
+      await act(async () => {
+        useNativeReferenceStore.setState({ references: [], drafts: {} })
+        await useChatStore.getState().createThread()
+      })
+      await act(async () => composer().setInput('First new thread request'))
+      await send()
+      expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+      expect(io.provider.listThreads).toHaveBeenCalledTimes(2)
+      expect(composer().input).toBe('')
+      const sink = io.provider.subscribeThreadEvents.mock.calls[0][2] as ThreadEventSink
+      await act(async () => { await sink.onTurnComplete({ threadId: first.id, turnId: 'fresh-turn-one', seq: 20 }) })
+      await act(async () => { await useChatStore.getState().createThread() })
+      await act(async () => composer().setInput('Second new thread request'))
+      await send()
+      expect(io.provider.sendUserMessage).toHaveBeenCalledTimes(2)
+      expect(io.provider.sendUserMessage.mock.calls.map(([id]) => id)).toEqual([first.id, second.id])
+      expect(composer().input).toBe('')
+    } finally {
+      listing.resolve([first, thread('a'), thread('b')])
+      await settle()
+      Reflect.deleteProperty(io.provider, 'createThread')
+    }
+  })
+
   it.each(['success', 'failure'])('continues a building case index after a current send returns (%s)', async outcome => {
     vi.useFakeTimers()
     const listCaseProjects = vi.fn()

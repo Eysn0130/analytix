@@ -1574,7 +1574,17 @@ export function createThreadActions(
       const { busy, currentTurnId, currentTurnUserId } = get()
       const isCurrent = () => ownsFollowupContext() && get().busy === busy &&
         get().currentTurnId === currentTurnId && get().currentTurnUserId === currentTurnUserId
-      if (isCurrent()) await get().refreshThreads({ isCurrent })
+      if (!isCurrent()) return
+      try {
+        await get().refreshThreads({ isCurrent })
+      } catch {
+        // The existing refresh owner normally handles its I/O errors. Keep an
+        // unexpected rejection in diagnostics, without making an acknowledged
+        // send look retryable or exposing obsolete receipt errors in another view.
+        if (isCurrent()) {
+          await window.analytix.logs.error('thread-refresh', 'Post-send sidebar refresh failed').catch(() => undefined)
+        }
+      }
     }
     const cancelPreparedSubmission = (): void => {
       const ownsState = ownsRunningReceipt()
@@ -1758,7 +1768,10 @@ export function createThreadActions(
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac)
       }
       armBusyWatchdog(set, get)
-      await refreshReceiptThreads()
+      // Sidebar/index I/O is an owned, fenced follow-up, not part of the send
+      // acknowledgement. Waiting here retains Workbench's draft submission
+      // lock after a completed turn and can discard a new Agent's Send click.
+      void refreshReceiptThreads()
       return true
     } catch (e) {
       // Post-acknowledgement housekeeping cannot turn a sent message into a
@@ -1804,7 +1817,7 @@ export function createThreadActions(
         })
       }
       if (!mayHaveLostAcknowledgement) {
-        await refreshReceiptThreads()
+        void refreshReceiptThreads()
         return false
       }
       await get().recoverActiveTurn()
