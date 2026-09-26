@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -203,6 +204,42 @@ func TestProviderOutputTokenBudgetIsEnforcedByHostStreamBoundary(t *testing.T) {
 	}
 }
 
+func TestProviderOutputBudgetIncludesReasoningAndText(t *testing.T) {
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			{Kind: domainmodel.ChunkReasoning, Text: "abcdabcd"},
+			{Kind: domainmodel.ChunkText, Text: "efghefgh"},
+		},
+	}}}
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider, Request: domainmodel.Request{MaxOutputTokens: 3},
+	})
+	if !errors.Is(err, ErrProviderOutputTokenBudgetExceeded) || len(provider.requests) != 1 ||
+		output.Text != "" || output.Reasoning != "" {
+		t.Fatal("reasoning and text did not consume one fail-closed output budget")
+	}
+}
+
+func BenchmarkProviderOutputBudgetChunking(b *testing.B) {
+	// Same 64 KiB output and host cap; vary only the delivery granularity.
+	const totalBytes = 64 * 1024
+	for _, chunkBytes := range []int{totalBytes, 1024, 64} {
+		b.Run(fmt.Sprintf("chunk_bytes_%d", chunkBytes), func(b *testing.B) {
+			chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: strings.Repeat("a", chunkBytes)}
+			b.ReportAllocs()
+			b.SetBytes(totalBytes)
+			for i := 0; i < b.N; i++ {
+				budget := newProviderOutputTokenBudgetV1(totalBytes)
+				for sent := 0; sent < totalBytes; sent += chunkBytes {
+					if err := budget.Observe(chunk); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestPrivateAttemptCannotRemoveProviderOutputTokenBudget(t *testing.T) {
 	provider := &providerStreamStub{}
 	settled := ""
@@ -358,6 +395,10 @@ func TestStreamProviderWithRetryStreamsTypedChunks(t *testing.T) {
 	}
 	if !output.Result.HasDuration || !output.Result.HasFirstTokenLatency {
 		t.Fatalf("expected timing metadata on streamed result: %#v", output.Result)
+	}
+	if !output.Result.HasFirstReasoningLatency || !output.Result.HasFirstRawTextLatency ||
+		output.Result.FirstRawTextLatencyMs < output.Result.FirstReasoningLatencyMs {
+		t.Fatalf("private reasoning and raw text timing were not distinguished: %#v", output.Result)
 	}
 	if got := strings.Join(events, "|"); got != "retry:retrying upstream|tool:read|text:hello" {
 		t.Fatalf("unexpected callback order: %s", got)

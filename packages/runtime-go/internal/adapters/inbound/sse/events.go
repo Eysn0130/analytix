@@ -666,7 +666,7 @@ func (h ThreadEventsHandler) withSSETrace(event map[string]any) map[string]any {
 	case domainevent.AcceptedFinalDeliveryBatchKind, domainevent.GeneralTerminalDeliveryBatchKind:
 		return event
 	}
-	out := make(map[string]any, len(event)+1)
+	out := make(map[string]any, len(event))
 	for key, value := range event {
 		out[key] = value
 	}

@@ -922,13 +922,20 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			}
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, err
 		}
-		if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", map[string]any{
+		responseDetails := map[string]any{
 			"stopReason":          result.Usage.FinishReason,
 			"toolCallCount":       float64(ToolCallCount(result.Chunks)),
 			"streamCompleted":     result.StreamCompleted,
 			"durationMs":          float64(result.DurationMs),
 			"firstTokenLatencyMs": float64(result.FirstTokenLatencyMs),
-		}, time.Now().UTC(), nil); err != nil {
+		}
+		if result.HasFirstReasoningLatency {
+			responseDetails["firstReasoningLatencyMs"] = float64(result.FirstReasoningLatencyMs)
+		}
+		if result.HasFirstRawTextLatency {
+			responseDetails["firstRawTextLatencyMs"] = float64(result.FirstRawTextLatencyMs)
+		}
+		if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", responseDetails, time.Now().UTC(), nil); err != nil {
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result},
 				WrapHostBoundaryFailure(HostResponseEventFailure, err)
 		}

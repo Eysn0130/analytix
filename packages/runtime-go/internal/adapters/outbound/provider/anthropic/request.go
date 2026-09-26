@@ -40,7 +40,7 @@ func MessagesBody(request domainmodel.Request) (map[string]any, error) {
 		}
 	}
 	maxTokens := 4096
-	if request.MaxOutputTokens > 0 && request.MaxOutputTokens < maxTokens {
+	if request.MaxOutputTokens > 0 {
 		maxTokens = request.MaxOutputTokens
 	}
 	body := map[string]any{

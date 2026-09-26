@@ -112,13 +112,13 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		rawSSEChunkAt := time.Now().UTC()
+		rawSSEChunkAt := time.Now()
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" {
 			continue
 		}
 		if data == "[DONE]" {
-			parsedAt := time.Now().UTC()
+			parsedAt := time.Now()
 			if err := completeAtBoundary(rawSSEChunkAt, parsedAt); err != nil {
 				return chunks, usage, err
 			}
@@ -126,7 +126,7 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 		}
 		observePayload(onPayload, PayloadObservationControl)
 		itemChunks, itemUsage, ok, finishReason, observation, err := parseOpenAIChatSSEPayloadAtObserved(data, toolCalls, &thinkingTags, rawSSEChunkAt)
-		parsedAt := time.Now().UTC()
+		parsedAt := time.Now()
 		observePayload(onPayload, observation)
 		if err != nil {
 			return chunks, usage, err
@@ -156,7 +156,7 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 		return chunks, usage, err
 	}
 	if !completed {
-		now := time.Now().UTC()
+		now := time.Now()
 		if err := completeAtBoundary(now, now); err != nil {
 			return chunks, usage, err
 		}

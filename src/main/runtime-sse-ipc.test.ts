@@ -17,6 +17,7 @@ import {
   type AppSettingsV1
 } from '../shared/app-settings'
 import { registerRuntimeSseIpc } from './runtime-sse-ipc'
+import type { ThreadTraceEventPayload } from '../shared/thread-trace'
 import {
   acceptedFinalPublicationEventId,
   acceptedFinalPublicationPayloadDigest
@@ -64,6 +65,7 @@ function registerHarness(
       runtimeUrl: string
       generation: number
     }
+    recordThreadTrace?: (event: ThreadTraceEventPayload) => void
   } = {}
 ) {
   const handlers = new Map<string, IpcHandler>()
@@ -81,6 +83,7 @@ function registerHarness(
     store: store as never,
     ensureRuntime,
     logError,
+    ...(overrides.recordThreadTrace ? { recordThreadTrace: overrides.recordThreadTrace } : {}),
     ...(overrides.authorityPin
       ? {
           resolveFinalPublicationAuthorityPin: () => overrides.authorityPin ?? null,
@@ -1484,8 +1487,11 @@ describe('registerRuntimeSseIpc', () => {
     await flushAsync()
   })
 
-  it('delivers one pinned sealed accepted-final batch and only acknowledges its last sequence', async () => {
+  it.each([false, true])('delivers one pinned sealed accepted-final batch and only acknowledges its last sequence (trace throws: %s)', async (traceThrows) => {
     const { batch, pin } = acceptedFinalDeliveryBatch()
+    const recordThreadTrace = vi.fn((_event: ThreadTraceEventPayload) => {
+      if (traceThrows) throw new Error('synthetic diagnostic failure')
+    })
     const controlled = controlledStream([
       strictFrame(batch.lastSeq, 'accepted_final_batch', batch)
     ])
@@ -1493,7 +1499,7 @@ describe('registerRuntimeSseIpc', () => {
       status: 200,
       headers: { 'content-type': 'text/event-stream' }
     }))
-    const { handlers } = registerHarness(fetchMock as typeof fetch, { authorityPin: pin })
+    const { handlers } = registerHarness(fetchMock as typeof fetch, { authorityPin: pin, recordThreadTrace })
     const sender = makeSender()
 
     await handlers.get('runtime:sse:start')?.({ sender }, {
@@ -1506,6 +1512,12 @@ describe('registerRuntimeSseIpc', () => {
     expect(sseEventCalls(sender)[0]?.[1]).toEqual({
       streamId: 'stream-sealed-accepted',
       events: [batch]
+    })
+    expect(recordThreadTrace.mock.calls.map(([event]) => event.name)).toEqual([
+      'thread.terminal.verified', 'thread.terminal.ipc_sent'
+    ])
+    expect(recordThreadTrace.mock.calls[0]?.[0]?.data).toMatchObject({
+      lastSeq: batch.lastSeq, acceptedFinal: true
     })
     expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
       streamId: 'stream-sealed-accepted', seq: batch.firstSeq

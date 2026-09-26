@@ -230,8 +230,14 @@ type Result struct {
 	StreamCompleted      bool        `json:"streamCompleted"`
 	FirstTokenLatencyMs  int64       `json:"firstTokenLatencyMs,omitempty"`
 	HasFirstTokenLatency bool        `json:"-"`
-	DurationMs           int64       `json:"durationMs,omitempty"`
-	HasDuration          bool        `json:"-"`
+	// These host-observed timings distinguish private reasoning and raw text
+	// from an authorized final answer. They are never provider output fields.
+	FirstReasoningLatencyMs  int64 `json:"-"`
+	HasFirstReasoningLatency bool  `json:"-"`
+	FirstRawTextLatencyMs    int64 `json:"-"`
+	HasFirstRawTextLatency   bool  `json:"-"`
+	DurationMs               int64 `json:"durationMs,omitempty"`
+	HasDuration              bool  `json:"-"`
 	// CacheObservations contains only validated HMAC identities and numeric
 	// usage settlements for every real HTTP attempt. It is internal authority
 	// input and must never be serialized as provider output or public history.

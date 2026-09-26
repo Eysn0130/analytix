@@ -1288,6 +1288,20 @@ export function buildThreadEventSink(
   const loadThreadDetail = binding.getThreadDetail ?? ((threadId: string) => getProvider().getThreadDetail(threadId))
   const traceSink = new PersistedThreadTraceSink()
   const traceThreadId = (): string | undefined => boundThreadId || get().activeThreadId || undefined
+  const recordTerminalCommit = (threadId: string | null | undefined, lastSeq: number, acceptedFinal: boolean): void => {
+    if (!threadId || !isThreadTraceEnabled()) return
+    traceSink.record(createThreadTraceEvent('thread.terminal.renderer_committed', {
+      threadId, data: { lastSeq, acceptedFinal }
+    }))
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        if (get().activeThreadId !== threadId) return
+        traceSink.record(createThreadTraceEvent('thread.terminal.next_frame', {
+          threadId, data: { lastSeq, acceptedFinal }
+        }))
+      })
+    }
+  }
   let appliedDeltaSeqFloor = binding.sinceSeq ?? 0
   const legacyLiveAssistant = createLiveTextBuffer(get().liveAssistant ?? '')
   let legacyLiveStoreLastPublishedAt = 0
@@ -2330,6 +2344,8 @@ export function buildThreadEventSink(
       })
       if (!committed) return reject('general terminal delivery could not be committed atomically')
 
+      recordTerminalCommit(batch.threadId, batch.lastSeq, false)
+
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
       const settledState = get()
@@ -2506,6 +2522,8 @@ export function buildThreadEventSink(
         return reject('accepted-final delivery could not be committed atomically')
       }
 
+      recordTerminalCommit(batch.threadId, batch.lastSeq, true)
+
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
       const settledState = get()
@@ -2586,6 +2604,8 @@ export function buildThreadEventSink(
         get
       })
       if (!reconciled) return
+
+      recordTerminalCommit(completedThreadId, eventSeq ?? get().lastSeq, false)
 
       const settledState = get()
       const pendingMirror = takePendingClawFeishuMirror(completedTurnId)

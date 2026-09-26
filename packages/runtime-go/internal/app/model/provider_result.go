@@ -16,6 +16,10 @@ func NormalizeProviderResult(request domainmodel.Request, result domainmodel.Res
 	result.PrefixShape = CapturePrefixShape(request)
 	result.FirstTokenLatencyMs = 0
 	result.HasFirstTokenLatency = false
+	result.FirstReasoningLatencyMs = 0
+	result.HasFirstReasoningLatency = false
+	result.FirstRawTextLatencyMs = 0
+	result.HasFirstRawTextLatency = false
 	result.DurationMs = 0
 	result.HasDuration = false
 	return result

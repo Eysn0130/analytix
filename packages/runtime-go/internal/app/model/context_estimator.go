@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
@@ -79,33 +80,45 @@ func EstimateMessagesTokensV1(messages []domainmodel.Message) int {
 }
 
 func EstimateTextTokensV1(value string) int {
-	if value == "" {
-		return 0
-	}
-	tokens := 0
-	asciiBytes := 0
-	flushASCII := func() {
-		if asciiBytes > 0 {
-			tokens += (asciiBytes + 3) / 4
-			asciiBytes = 0
-		}
+	var estimate TextTokenEstimatorV1
+	estimate.WriteString(value)
+	return estimate.Tokens()
+}
+
+// TextTokenEstimatorV1 applies the same conservative estimate to append-only
+// fragments without retaining or rescanning the full output. An incomplete UTF-8
+// suffix (at most three bytes) counts as invalid bytes until the next fragment
+// completes it, exactly as EstimateTextTokensV1 does for each observed prefix.
+type TextTokenEstimatorV1 struct {
+	tokens      int
+	asciiBytes  int
+	pendingUTF8 string
+}
+
+func (estimate *TextTokenEstimatorV1) WriteString(value string) {
+	if estimate.pendingUTF8 != "" {
+		value = estimate.pendingUTF8 + value
+		estimate.pendingUTF8 = ""
 	}
 	for len(value) > 0 {
-		r, size := utf8.DecodeRuneInString(value)
-		if r == utf8.RuneError && size == 1 {
-			flushASCII()
-			tokens++
+		if value[0] <= 0x7f {
+			estimate.asciiBytes++
 			value = value[1:]
 			continue
 		}
-		if r <= 0x7f {
-			asciiBytes++
-		} else {
-			flushASCII()
-			tokens++
+		estimate.tokens += (estimate.asciiBytes + 3) / 4
+		estimate.asciiBytes = 0
+		r, size := utf8.DecodeRuneInString(value)
+		if r == utf8.RuneError && size == 1 && !utf8.FullRuneInString(value) {
+			// Clone the tiny suffix so it cannot retain a large source buffer.
+			estimate.pendingUTF8 = strings.Clone(value)
+			return
 		}
+		estimate.tokens++
 		value = value[size:]
 	}
-	flushASCII()
-	return tokens
+}
+
+func (estimate *TextTokenEstimatorV1) Tokens() int {
+	return estimate.tokens + (estimate.asciiBytes+3)/4 + len(estimate.pendingUTF8)
 }

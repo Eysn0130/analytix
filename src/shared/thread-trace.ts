@@ -8,7 +8,11 @@ export const THREAD_TRACE_EVENT_NAMES = [
   'thread.virtualizer.measured',
   'thread.scroll.anchor_corrected',
   'thread.react.commit_sample',
-  'thread.markdown.finalized'
+  'thread.markdown.finalized',
+  'thread.terminal.verified',
+  'thread.terminal.ipc_sent',
+  'thread.terminal.renderer_committed',
+  'thread.terminal.next_frame'
 ] as const
 
 export type ThreadTraceEventName = (typeof THREAD_TRACE_EVENT_NAMES)[number]

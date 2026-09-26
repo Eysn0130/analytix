@@ -54,7 +54,11 @@ const THREAD_TRACE_DATA_KEYS = {
     'estimatedLines',
     'codeBlockChars',
     'deferred'
-  ]
+  ],
+  'thread.terminal.verified': ['lastSeq', 'verificationMs', 'acceptedFinal'],
+  'thread.terminal.ipc_sent': ['lastSeq', 'acceptedFinal'],
+  'thread.terminal.renderer_committed': ['lastSeq', 'acceptedFinal'],
+  'thread.terminal.next_frame': ['lastSeq', 'acceptedFinal']
 } as const satisfies Record<ThreadTraceEventName, readonly string[]>
 
 type PendingTraceFile = {

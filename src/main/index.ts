@@ -158,6 +158,7 @@ import {
   startWeixinInstallQrcode
 } from './claw-platform-install'
 import { registerRuntimeSseIpc } from './runtime-sse-ipc'
+import { appendThreadTraceEvent } from './services/thread-trace-service'
 import {
   registerTerminalPtyIpc,
   type TerminalPtyIpcController
@@ -2450,7 +2451,12 @@ app.whenReady().then(async () => {
     logError
   })
 
-  registerRuntimeSseIpc({ ipcMain, store, ensureRuntime, logError })
+  registerRuntimeSseIpc({
+    ipcMain, store, ensureRuntime, logError,
+    recordThreadTrace: (event) => {
+      void appendThreadTraceEvent(app.getPath('userData'), event).catch(() => undefined)
+    }
+  })
   terminalPtyController = registerTerminalPtyIpc({
     ipcMain,
     getMainWindow: () => mainWindow,

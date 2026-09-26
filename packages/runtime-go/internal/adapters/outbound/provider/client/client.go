@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"sort"
@@ -42,6 +43,27 @@ type HTTPProviderClient struct {
 	cacheLogicalCalls   atomic.Uint64
 	telemetryRecorder   cachetelemetryport.Recorder
 	productionTelemetry bool
+	transportMu         sync.Mutex
+	transportSlots      map[providerTransportOwner]*providerTransportSlot
+	transportUse        uint64
+	transportClosed     bool
+}
+
+const maxProviderTransportSlots = 8
+
+type providerTransportOwner struct{ providerID, family string }
+
+type providerTransportKey struct {
+	proxyURL, endpointOrigin string
+	authoritative            bool
+}
+
+type providerTransportSlot struct {
+	key     providerTransportKey
+	client  *http.Client
+	active  int
+	lastUse uint64
+	retired bool
 }
 
 var _ ports.DurablePipelineProviderClient = (*HTTPProviderClient)(nil)
@@ -412,7 +434,7 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 			err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageRequestValidation, 0,
 		)
 	}
-	requestBuildStartedAt := time.Now().UTC()
+	requestBuildStartedAt := time.Now()
 	endpoint, body, headers, err := buildHTTPRequest(request)
 	if err != nil {
 		return domainmodel.Result{}, withProviderFailureContextV1(
@@ -531,16 +553,13 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	for key, value := range headers {
 		httpReq.Header.Set(key, value)
 	}
-	baseHTTPClient, closeAttemptTransport, err := c.httpClientForAttempt(
-		request.ProxyURL,
-		request.PrivateProviderProxyAuthority,
-	)
+	baseHTTPClient, releaseTransport, err := c.httpClientForAttempt(request, endpoint)
 	if err != nil {
 		return domainmodel.Result{}, false, domaincache.ProviderDispatchStateNotSent,
 			withProviderFailureStageV1(err, ProviderFailureStageRequestBuild)
 	}
-	if closeAttemptTransport {
-		defer baseHTTPClient.CloseIdleConnections()
+	if releaseTransport != nil {
+		defer releaseTransport()
 	}
 	httpClient := *baseHTTPClient
 	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
@@ -552,7 +571,7 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 				withProviderFailureStageV1(err, ProviderFailureStageCallbackProjection)
 		}
 	}
-	requestPreSendAt := time.Now().UTC()
+	requestPreSendAt := time.Now()
 	if err := emitProviderPipelineStage(request, "pre_send", requestPreSendAt, providerRequestPipelineDetails(request, endpoint, body, bodyBytes, attempt, map[string]any{
 		"provider_request_build_started_at": unixMillis(requestBuildStartedAt),
 		"provider_request_pre_send_at":      unixMillis(requestPreSendAt),
@@ -567,24 +586,31 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	// transport. It is diagnostic latency metadata, not proof that request bytes
 	// crossed the socket; the signed dispatchState remains the authority for
 	// sent/indeterminate settlement.
-	requestSentAt := time.Now().UTC()
+	requestSentAt := time.Now()
+	var transportTrace *providerTransportTrace
+	if request.OnPipelineStage != nil {
+		transportTrace = newProviderTransportTrace(requestSentAt)
+		httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), transportTrace.hooks()))
+	}
 	dispatchState := domaincache.ProviderDispatchStateIndeterminate
 	resp, err := httpClient.Do(httpReq)
 	if resp != nil {
 		dispatchState = domaincache.ProviderDispatchStateSent
 	}
-	responseHeadersAt := time.Now().UTC()
+	responseHeadersAt := time.Now()
 	status := 0
 	if resp != nil {
 		status = resp.StatusCode
 	}
-	if stageErr := emitProviderPipelineStage(request, "post_send", responseHeadersAt, providerRequestPipelineDetails(request, endpoint, body, bodyBytes, attempt, map[string]any{
+	postSendDetails := map[string]any{
 		"status":                            float64(status),
 		"provider_request_pre_send_at":      unixMillis(requestPreSendAt),
 		"provider_request_sent_at":          unixMillis(requestSentAt),
 		"provider_response_headers_at":      unixMillis(responseHeadersAt),
 		"provider_response_headers_wait_ms": float64(responseHeadersAt.Sub(requestSentAt).Milliseconds()),
-	}), map[string]any{
+	}
+	transportTrace.snapshotInto(postSendDetails)
+	if stageErr := emitProviderPipelineStage(request, "post_send", responseHeadersAt, providerRequestPipelineDetails(request, endpoint, body, bodyBytes, attempt, postSendDetails), map[string]any{
 		"provider_request_pre_send_at": unixMillis(requestPreSendAt),
 		"provider_request_sent_at":     unixMillis(requestSentAt),
 		"provider_response_headers_at": unixMillis(responseHeadersAt),
@@ -674,19 +700,56 @@ func (c *HTTPProviderClient) httpClient() *http.Client {
 	return NewDefaultHTTPClient(10 * time.Second)
 }
 
-func (c *HTTPProviderClient) httpClientForAttempt(proxyURL string, authoritative bool) (*http.Client, bool, error) {
-	proxyURL = strings.TrimSpace(proxyURL)
+func (c *HTTPProviderClient) httpClientForAttempt(request domainmodel.Request, endpoint string) (*http.Client, func(), error) {
+	proxyURL := strings.TrimSpace(request.ProxyURL)
+	authoritative := request.PrivateProviderProxyAuthority
+	owner := providerTransportOwner{providerID: request.ProviderID, family: request.Family}
 	if proxyURL == "" && !authoritative {
-		return c.httpClient(), false, nil
+		c.transportMu.Lock()
+		if c.transportClosed {
+			c.transportMu.Unlock()
+			return nil, nil, errors.New("provider client is closed")
+		}
+		if previous := c.transportSlots[owner]; previous != nil {
+			delete(c.transportSlots, owner)
+			c.retireTransportLocked(previous)
+		}
+		c.transportMu.Unlock()
+		return c.httpClient(), nil, nil
 	}
 	proxySpec := netclient.ProxySpec{Mode: netclient.ModeOff}
 	if proxyURL != "" {
 		parsed, err := url.Parse(proxyURL)
 		if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery ||
 			parsed.Fragment != "" || parsed.RawFragment != "" {
-			return nil, false, errors.New("provider proxy authority is invalid")
+			return nil, nil, errors.New("provider proxy authority is invalid")
 		}
 		proxySpec = providerProxySpec(proxyURL)
+	}
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil || endpointURL.Scheme == "" || endpointURL.Host == "" {
+		return nil, nil, errors.New("provider endpoint authority is invalid")
+	}
+	key := providerTransportKey{
+		proxyURL: proxyURL, endpointOrigin: endpointURL.Scheme + "://" + endpointURL.Host,
+		authoritative: authoritative,
+	}
+	c.transportMu.Lock()
+	if c.transportClosed {
+		c.transportMu.Unlock()
+		return nil, nil, errors.New("provider client is closed")
+	}
+	if c.transportSlots == nil {
+		c.transportSlots = make(map[providerTransportOwner]*providerTransportSlot)
+	}
+	if existing := c.transportSlots[owner]; existing != nil {
+		if existing.key == key {
+			c.transportUse++
+			existing.lastUse = c.transportUse
+			existing.active++
+			c.transportMu.Unlock()
+			return existing.client, c.releaseTransport(existing), nil
+		}
 	}
 	client, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{
 		DialTimeout:           30 * time.Second,
@@ -695,13 +758,71 @@ func (c *HTTPProviderClient) httpClientForAttempt(proxyURL string, authoritative
 		ResponseHeaderTimeout: 120 * time.Second,
 	})
 	if err != nil {
-		return nil, false, errors.New("provider proxy authority is invalid")
+		c.transportMu.Unlock()
+		return nil, nil, errors.New("provider proxy authority is invalid")
 	}
 	if base := c.httpClient(); base != nil {
 		client.Timeout = base.Timeout
 		client.Jar = base.Jar
 	}
-	return client, true, nil
+	if existing := c.transportSlots[owner]; existing != nil {
+		delete(c.transportSlots, owner)
+		c.retireTransportLocked(existing)
+	}
+	if len(c.transportSlots) >= maxProviderTransportSlots {
+		var oldestOwner providerTransportOwner
+		var oldest *providerTransportSlot
+		for candidateOwner, candidate := range c.transportSlots {
+			if oldest == nil || candidate.lastUse < oldest.lastUse {
+				oldestOwner, oldest = candidateOwner, candidate
+			}
+		}
+		delete(c.transportSlots, oldestOwner)
+		c.retireTransportLocked(oldest)
+	}
+	c.transportUse++
+	slot := &providerTransportSlot{key: key, client: client, active: 1, lastUse: c.transportUse}
+	c.transportSlots[owner] = slot
+	c.transportMu.Unlock()
+	return client, c.releaseTransport(slot), nil
+}
+
+func (c *HTTPProviderClient) retireTransportLocked(slot *providerTransportSlot) {
+	slot.retired = true
+	if slot.active == 0 {
+		slot.client.CloseIdleConnections()
+	}
+}
+
+func (c *HTTPProviderClient) releaseTransport(slot *providerTransportSlot) func() {
+	return func() {
+		c.transportMu.Lock()
+		slot.active--
+		if slot.retired && slot.active == 0 {
+			slot.client.CloseIdleConnections()
+		}
+		c.transportMu.Unlock()
+	}
+}
+
+// Close retires idle transports without changing the cancellation or authority
+// of an in-flight request. The runtime owner drains those operations first;
+// any late release closes its retired transport and cannot repopulate the pool.
+func (c *HTTPProviderClient) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.transportMu.Lock()
+	c.transportClosed = true
+	for _, slot := range c.transportSlots {
+		c.retireTransportLocked(slot)
+	}
+	c.transportSlots = nil
+	c.transportMu.Unlock()
+	if c.HTTP != nil {
+		c.HTTP.CloseIdleConnections()
+	}
+	return nil
 }
 
 func (c *HTTPProviderClient) effectiveStreamIdleTimeout() time.Duration {

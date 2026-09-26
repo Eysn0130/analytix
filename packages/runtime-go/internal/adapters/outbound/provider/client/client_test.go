@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -688,6 +689,199 @@ func TestHTTPProviderClientUsesAttemptBoundProxyWithoutPublicCredentialEcho(t *t
 	}
 	if strings.Contains(string(encoded), credential) {
 		t.Fatal("Provider credential crossed the result boundary")
+	}
+}
+
+func TestHTTPProviderClientReusesOnlyCurrentProxyAuthorityConnection(t *testing.T) {
+	var mu sync.Mutex
+	newProxy := func(observed *[]string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			mu.Lock()
+			*observed = append(*observed, request.RemoteAddr)
+			mu.Unlock()
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"+
+				"data: [DONE]\n\n")
+		}))
+	}
+	var firstConnections, secondConnections []string
+	first := newProxy(&firstConnections)
+	defer first.Close()
+	second := newProxy(&secondConnections)
+	defer second.Close()
+	client := NewHTTPProviderClient(nil)
+	defer client.Close()
+	var observations []map[string]any
+	request := domainmodel.Request{
+		ProviderID: "proxy-authority", Family: "openai", EndpointFormat: "chat_completions",
+		BaseURL: "http://provider-unreachable.invalid/v1", APIKey: "synthetic-key", Model: "test",
+		Messages:                      []domainmodel.Message{{Role: "user", Content: "hello"}},
+		PrivateProviderProxyAuthority: true,
+		OnPipelineStage: func(stage domainmodel.PipelineStage) error {
+			if stage.Stage == "post_send" {
+				observations = append(observations, stage.Details)
+			}
+			return nil
+		},
+	}
+	for _, proxyURL := range []string{first.URL, first.URL, second.URL, first.URL} {
+		request.ProxyURL = proxyURL
+		if _, err := client.Stream(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, observation := range observations {
+		if observation["provider_connection_reused"] != (index == 1) {
+			t.Fatalf("attempt %d connection observation does not match socket reuse", index)
+		}
+		for _, key := range []string{"provider_connection_acquired_ms", "provider_request_written_ms", "provider_first_response_byte_ms"} {
+			if value, ok := observation[key].(float64); !ok || value < 0 {
+				t.Fatalf("attempt %d lacks non-negative %s", index, key)
+			}
+		}
+		if _, observed := observation["provider_tls_done_ms"]; observed {
+			t.Fatal("HTTP loopback was reported as a TLS handshake")
+		}
+	}
+	if len(observations) != 4 {
+		t.Fatalf("observed %d attempts, want 4", len(observations))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(firstConnections) != 3 || firstConnections[0] != firstConnections[1] ||
+		firstConnections[1] == firstConnections[2] || len(secondConnections) != 1 {
+		t.Fatalf("proxy connection reuse or authority rotation is wrong: first=%#v second=%#v",
+			firstConnections, secondConnections)
+	}
+}
+
+func TestHTTPProviderClientTransportLifecycle(t *testing.T) {
+	client := NewHTTPProviderClient(nil)
+	defer client.Close()
+	request := domainmodel.Request{ProviderID: "one", Family: "openai", PrivateProviderProxyAuthority: true}
+	const endpoint = "https://provider.invalid/v1/chat/completions"
+	first, release, err := client.httpClientForAttempt(request, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := providerTransportOwner{providerID: request.ProviderID, family: request.Family}
+	firstSlot := client.transportSlots[owner]
+	var workers sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			current, done, acquireErr := client.httpClientForAttempt(request, endpoint)
+			if acquireErr != nil {
+				t.Error(acquireErr)
+				return
+			}
+			defer done()
+			if current != first {
+				t.Error("concurrent requests did not reuse the current transport")
+			}
+		}()
+	}
+	workers.Wait()
+	invalid := request
+	invalid.ProxyURL = "http://user:secret@proxy.invalid"
+	if _, _, err := client.httpClientForAttempt(invalid, endpoint); err == nil {
+		t.Fatal("invalid proxy authority was admitted")
+	}
+	if firstSlot.retired || firstSlot.active != 1 {
+		t.Fatal("invalid authority or concurrent release retired the current active transport")
+	}
+	// Credential rotation changes request headers, never the transport identity.
+	request.APIKey = "synthetic-rotated-key"
+	same, done, err := client.httpClientForAttempt(request, endpoint)
+	if err != nil || same != first {
+		t.Fatal("credential rotation unexpectedly replaced the transport")
+	}
+	done()
+	replacement, done, err := client.httpClientForAttempt(request, "https://next-provider.invalid/v1/messages")
+	if err != nil || replacement == first || !firstSlot.retired || firstSlot.active != 1 {
+		t.Fatal("endpoint change did not retire the old authority while retaining its active request")
+	}
+	done()
+	release()
+	if firstSlot.active != 0 {
+		t.Fatal("retired transport was not released")
+	}
+	for i := 0; i < maxProviderTransportSlots+2; i++ {
+		request.ProviderID = fmt.Sprintf("provider-%d", i)
+		_, done, err := client.httpClientForAttempt(request, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done()
+	}
+	if len(client.transportSlots) != maxProviderTransportSlots || client.transportSlots[owner] != nil {
+		t.Fatal("idle transport pool was not bounded or did not evict the least recently used owner")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, authoritative := range []bool{true, false} {
+		request.PrivateProviderProxyAuthority = authoritative
+		if _, _, err := client.httpClientForAttempt(request, endpoint); err == nil {
+			t.Fatal("closed client resurrected a transport")
+		}
+	}
+}
+
+func TestHTTPProviderClientRetirementDoesNotCancelAnActiveStream(t *testing.T) {
+	entered, unblock := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	finish := func() { once.Do(func() { close(unblock) }) }
+	defer finish()
+	send := func(w http.ResponseWriter) {
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"+
+			"data: [DONE]\n\n")
+	}
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		close(entered)
+		select {
+		case <-unblock:
+			send(w)
+		case <-r.Context().Done():
+		}
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		send(w)
+	}))
+	defer second.Close()
+	client := NewHTTPProviderClient(nil)
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	request := domainmodel.Request{
+		ProviderID: "rotation", Family: "openai", EndpointFormat: "chat_completions",
+		BaseURL: "http://provider.invalid/v1", APIKey: "synthetic-key", Model: "test",
+		PrivateProviderProxyAuthority: true, ProxyURL: first.URL,
+	}
+	completed := make(chan error, 1)
+	firstRequest := request
+	go func() { _, err := client.Stream(ctx, firstRequest); completed <- err }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("first stream did not start")
+	}
+	request.ProxyURL = second.URL
+	if _, err := client.Stream(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	finish()
+	if err := <-completed; err != nil {
+		t.Fatalf("transport retirement cancelled an already authorized active stream: %v", err)
 	}
 }
 

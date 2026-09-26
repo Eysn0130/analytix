@@ -18,6 +18,9 @@ type PreparedHTTPRequest struct {
 }
 
 func BuildHTTPRequest(request domainmodel.Request) (PreparedHTTPRequest, error) {
+	if request.MaxOutputTokens < 0 {
+		return PreparedHTTPRequest{}, errors.New("maxOutputTokens must be non-negative")
+	}
 	if err := domainmodel.ValidateReasoningEffortV1(request.ReasoningEffort); err != nil {
 		return PreparedHTTPRequest{}, err
 	}

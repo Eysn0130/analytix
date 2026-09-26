@@ -18,6 +18,16 @@ func TestMessagesBodyCarriesHostOutputTokenBudget(t *testing.T) {
 	}
 }
 
+func TestMessagesBodyPreservesLargeHostOutputTokenBudget(t *testing.T) {
+	body := mustMessagesBody(t, domainmodel.Request{
+		Model: "bounded", MaxOutputTokens: 8192,
+		Messages: []domainmodel.Message{{Role: "user", Content: "bounded"}},
+	})
+	if body["max_tokens"] != 8192 {
+		t.Fatalf("messages output token budget was reduced: %#v", body)
+	}
+}
+
 func TestMessagesBodyAddsBoundedCacheBreakpoints(t *testing.T) {
 	body := mustMessagesBody(t, domainmodel.Request{
 		Model: "claude-test",

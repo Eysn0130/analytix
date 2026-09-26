@@ -24,6 +24,7 @@ import {
 } from './runtime/analytix-adapter'
 import { verifiedAcceptedFinalDeliveryBatch } from './accepted-final-publication'
 import { generalTerminalDeliveryBatchVerificationV1 } from './general-terminal-publication'
+import { sanitizeThreadTraceEvent, type ThreadTraceEventPayload } from '../shared/thread-trace'
 
 type SseControllerState = {
   controller: AbortController
@@ -251,10 +252,27 @@ export function registerRuntimeSseIpc(options: {
   logError: (category: string, message: string, detail?: unknown) => void
   resolveFinalPublicationAuthorityPin?: () => ManagedFinalPublicationAuthorityPinV1 | null
   isFinalPublicationAuthorityPinCurrent?: (pin: ManagedFinalPublicationAuthorityPinV1 | null) => boolean
+  recordThreadTrace?: (event: ThreadTraceEventPayload) => void
 }): void {
   const { ipcMain, store, ensureRuntime, logError } = options
   const resolveAuthorityPin = options.resolveFinalPublicationAuthorityPin ?? captureCurrentFinalPublicationAuthorityPin
   const authorityPinIsCurrent = options.isFinalPublicationAuthorityPinCurrent ?? isCurrentFinalPublicationAuthorityPin
+  const recordTerminalTrace = (
+    name: 'thread.terminal.verified' | 'thread.terminal.ipc_sent',
+    threadId: string,
+    lastSeq: number,
+    acceptedFinal: boolean,
+    verificationMs?: number
+  ): void => {
+    try {
+      options.recordThreadTrace?.(sanitizeThreadTraceEvent({
+        name, timestamp: Date.now(), threadId,
+        data: { lastSeq, acceptedFinal, ...(verificationMs === undefined ? {} : { verificationMs }) }
+      }))
+    } catch {
+      // Optional diagnostics cannot interrupt verified delivery or its ACK.
+    }
+  }
   ipcMain.handle('runtime:sse:start', async (event, args: unknown) => {
     const request = sseStartPayloadSchema.parse(args)
     const loadedSettings = await store.load()
@@ -437,6 +455,11 @@ export function registerRuntimeSseIpc(options: {
                 stopSseController(state)
                 return false
               }
+              for (const delivered of batch) {
+                if (delivered.kind !== 'accepted_final_batch' && delivered.kind !== 'general_terminal_batch') continue
+                recordTerminalTrace('thread.terminal.ipc_sent', state.threadId, batchMaxSeq,
+                  delivered.kind === 'accepted_final_batch')
+              }
               state.deliveredSinceSeq = batchMaxSeq
               state.deliveredAckSeqs.add(batchMaxSeq)
               if (terminalRuntimeEventSeen) return false
@@ -445,6 +468,7 @@ export function registerRuntimeSseIpc(options: {
 
             const admitEvent = (event: Record<string, unknown>): boolean => {
               if (event.kind === 'accepted_final_batch') {
+                const verificationStartedAt = performance.now()
                 if (!connectionAuthorityPin) {
                   protocolViolationReason = connectionAuthorityPinUnavailableReason
                   return false
@@ -461,6 +485,8 @@ export function registerRuntimeSseIpc(options: {
                   protocolViolationReason = 'accepted_final_batch_invalid'
                   return false
                 }
+                recordTerminalTrace('thread.terminal.verified', state.threadId, accepted.lastSeq, true,
+                  performance.now() - verificationStartedAt)
                 state.requiredAcceptedFinalAck = {
                   seq: accepted.lastSeq,
                   batchId: accepted.batch.batchId as string,
@@ -474,6 +500,7 @@ export function registerRuntimeSseIpc(options: {
                 return false
               }
               if (event.kind === 'general_terminal_batch') {
+                const verificationStartedAt = performance.now()
                 const verification = generalTerminalDeliveryBatchVerificationV1(event)
                 const verified = verification.verified
                 if (!verified) {
@@ -481,6 +508,8 @@ export function registerRuntimeSseIpc(options: {
                     'general_terminal_batch_verification_failed'
                   return false
                 }
+                recordTerminalTrace('thread.terminal.verified', state.threadId, verified.lastSeq, false,
+                  performance.now() - verificationStartedAt)
                 // Ordinary terminal delivery is also an indivisible transport
                 // unit. It has no evidence/fact authority, but mixing it with
                 // progress would make the preload reject the whole IPC payload

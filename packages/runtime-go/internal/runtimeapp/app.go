@@ -993,6 +993,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	providerClientOwnedByHandler := false
+	defer func() {
+		if !providerClientOwnedByHandler {
+			resultErr = errors.Join(resultErr, providerClient.Close())
+		}
+	}()
 	if strings.TrimSpace(config.ProviderAuditSocketPath) != "" {
 		providerClient.ProviderBodyAuditor, err = providerclient.NewUnixProviderRequestBodyAuditorV1(
 			config.ProviderAuditSocketPath,
@@ -1747,6 +1753,10 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, errors.Join(err, nativeAuthority.Close())
 		}
 	}
+	handler, err = bindRuntimeOwnedResourceV1(handler, providerClient)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
+	}
 	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
@@ -1840,6 +1850,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	// Semantic-stage handlers are discarded after planning, so their Registry
 	// resources close through the defer above. Only a live handler owns them.
 	providerRegistryAuthorityTransferred = !simulation
+	providerClientOwnedByHandler = !simulation
 	return boundHandler, nil
 }
 
