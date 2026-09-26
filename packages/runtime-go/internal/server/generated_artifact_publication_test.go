@@ -19,6 +19,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"analytix.local/runtime-go/internal/provider"
+	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 func TestGeneratedArtifactTypedReceiptSettlesDurablyAndReplaysSSE(t *testing.T) {
@@ -32,7 +33,7 @@ func testGeneratedArtifactPublication(t *testing.T, kind string) {
 		ArtifactID: decimalHash, Kind: kind, ContentHash: decimalHash, ByteSize: 1200,
 		SavedAt: "2026-09-12T12:35:15.123456789Z",
 	}
-	durableRoot, workspace := t.TempDir(), t.TempDir()
+	durableRoot, workspace := t.TempDir(), workspacetest.New(t)
 	store, err := NewTempDurableEventSessionStore(durableRoot)
 	if err != nil {
 		t.Fatal(err)

@@ -595,7 +595,9 @@ export function registerRuntimeSseIpc(options: {
                 }
               }
               buffer += dec.decode()
-              if (buffer.trim() && !protocolViolationReason && !refreshConnectionAuthority) {
+              // A delivered terminal ends this connection. Coalesced later history
+              // belongs to a subsequent replay, not to an incomplete final frame.
+              if (!terminalRuntimeEventSeen && buffer.trim() && !protocolViolationReason && !refreshConnectionAuthority) {
                 const decision = projectPublicRuntimeSseBlock(buffer, state.threadId, state.publicEventFilter)
                 if (decision?.status === 'emit') {
                   admitEvent(decision.event)

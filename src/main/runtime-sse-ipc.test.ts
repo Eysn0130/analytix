@@ -1615,11 +1615,14 @@ describe('registerRuntimeSseIpc', () => {
     expect(JSON.stringify(v1WrapperWithV3Event)).toBe(before)
   })
 
-  it('delivers a sealed V3 generic accepted-final batch without a private V5 record', async () => {
+  it.each(['separate', 'coalesced'])('delivers a sealed V3 generic accepted-final batch without a private V5 record (%s)', async (chunking) => {
     const { batch, pin, privateRecord } = acceptedFinalDeliveryBatch()
-    const controlled = controlledStream([
-      strictFrame(batch.lastSeq, 'accepted_final_batch', batch)
-    ])
+    const frames = [
+      strictFrame(batch.lastSeq, 'accepted_final_batch', batch),
+      eventFrame(batch.lastSeq + 1, 'later-history', batch.threadId),
+      eventFrame(batch.lastSeq + 2, 'later-history', batch.threadId)
+    ]
+    const controlled = controlledStream(chunking === 'coalesced' ? [frames.join('')] : frames)
     const fetchMock = vi.fn(async () => new Response(controlled.stream, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' }
@@ -1636,6 +1639,7 @@ describe('registerRuntimeSseIpc', () => {
 
     const delivered = sseEventCalls(sender)[0]?.[1]
     expect(delivered).toEqual({ streamId: 'stream-v3-generic-accepted', events: [batch] })
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
     const body = JSON.stringify(delivered)
     const acceptedFinalView = (batch.events[0].item as Record<string, any>).acceptedFinalView as Record<string, any>
     const publicSetDigest = acceptedFinalView.receiptMetadata.setDigest as string
@@ -2019,14 +2023,16 @@ describe('registerRuntimeSseIpc', () => {
     })).toBe(true)
   })
 
-  it('delivers an ordinary general terminal batch alone and waits for its atomic renderer ACK', async () => {
+  it.each(['separate', 'coalesced'])('delivers an ordinary general terminal batch alone and waits for its atomic renderer ACK (%s)', async (chunking) => {
     const threadId = 'thread-general-terminal'
     const batch = generalTerminalDeliveryBatch(threadId, 'turn-general-terminal', 2)
-    const controlled = controlledStream([
+    const frames = [
       eventFrame(1, 'progress', threadId),
       strictFrame(batch.lastSeq as number, 'general_terminal_batch', batch),
-      eventFrame(4, 'must-not-follow-terminal', threadId)
-    ])
+      eventFrame(4, 'must-not-follow-terminal', threadId),
+      eventFrame(5, 'later-history-must-not-follow-terminal', threadId)
+    ]
+    const controlled = controlledStream(chunking === 'coalesced' ? [frames.join('')] : frames)
     const fetchMock = vi.fn(async () => new Response(controlled.stream, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' }
@@ -2046,6 +2052,7 @@ describe('registerRuntimeSseIpc', () => {
       { streamId: 'stream-general-terminal', events: [batch] }
     ])
     expect(JSON.stringify(sseEventCalls(sender))).not.toContain('must-not-follow-terminal')
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
     expect(sender.send).not.toHaveBeenCalledWith('runtime:sse-end', expect.anything())
     expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
       streamId: 'stream-general-terminal',
@@ -2055,6 +2062,10 @@ describe('registerRuntimeSseIpc', () => {
       sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end')
     )
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+      streamId: 'stream-general-terminal', seq: batch.lastSeq
+    })).toBe(false)
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
 
     controlled.close()
     await flushAsync()
