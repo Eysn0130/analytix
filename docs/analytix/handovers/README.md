@@ -7,6 +7,17 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 ## 当前恢复点 — 2026-09-26 PDT
 
+- 当前性能后继产品 SOURCE：`c8cec28cd4de61ae5c8fa23fa9d09d115fd58bc8`，
+  原分支/writer 接续 `ee91dcfed`；落地 low/cap 编码、连接池及发布诊断，
+  实测后修复输出预算逐 chunk 全历史扫描。Go 12 个定向包、生产装配三项、
+  typecheck、桌面 120 项通过；连接池 race 单独通过。
+  准确边界、before/after、A01—A09、native 协议和安装后继剩余项见
+  [性能后继记录](../qa/pr28-e15-performance-followup-2026-09-26.md)。
+  新源码 `SourceReady=pending`（准确远端 CI 尚待核验）；其余三个出口仍 false。
+  e15 证据继续仅属于下述历史准确制品，不因本轮源码修复而重新命名。
+
+### e15 凭据与安装验收检查点（保留）
+
 - 原分支产品 SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473`；PR28
   Draft/open，产品提交对应的 57/57 检查成功。直接读取的 `origin/main` 是
   `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，本地 `main` 是
