@@ -7,6 +7,25 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 ## 当前恢复点 — 2026-09-26 PDT
 
+- D01–D08 当前产品后继：`74e4316eabff41ad72878001b5be3b89db020a1d`，
+  保留协议、缓存、计时、语义续接与现有连接池修复；后继补齐真实 UI 阶段、
+  压缩历史公共数组、终态后合并帧重放及安全客户端消息 ID。原分支继续。
+  准确新 DMG/ZIP 已构建、安装并通过签名与 1,172 项许可审计；可独立交付项
+  已完成：可见 Save、Go/Main 续答、T01–T08、双页 PDF、连续 120 回合和
+  Main 重启后第 121 回合、c8 原配置及 6d 语义任务原位升级。六项 authority/
+  配置哈希未变，已完成文件效果未重放；整段结束后清理 15 个临时合成目录。
+  `6d29c8634` 的实际历史读取、两次压缩和文件效果作为明确 SOURCE 的前继
+  证据保留，Go 目录树未变；74e 再次验证恢复与无重复效果。
+  产品 SOURCE 的 57/57 CI 检查成功，SourceReady=true；最终文档后继与其
+  检查单独报告，不因文档重包。PrivateCandidateReady / MergeReady /
+  PublicMacReleaseReady 仍 false：X01 缺独立获准的安装版真实 Provider QA
+  入口。下一依赖仅为在准确候选正常设置中获准配置，再做有界真实重启续答。
+  不复制开发密钥；PR28 保持 Draft，制品仍为非公开候选，未合并或发布。
+  实际状态、完整命令与未完成分母见
+  [post-c8 接续记录](../qa/pr28-post-c8-completion-2026-09-26.md)。
+
+### c8 源码检查点（保留）
+
 - 当前性能后继产品 SOURCE：`c8cec28cd4de61ae5c8fa23fa9d09d115fd58bc8`，
   原分支/writer 接续 `ee91dcfed`；落地 low/cap 编码、连接池及发布诊断，
   实测后修复输出预算逐 chunk 全历史扫描。Go 12 个定向包、生产装配三项、
