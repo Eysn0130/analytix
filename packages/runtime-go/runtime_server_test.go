@@ -878,7 +878,7 @@ func TestRuntimeServerWorkPromptDoesNotAdvertiseSubagentOrSkillToolsWithoutCue(t
 			t.Fatalf("ordinary work prompt should still advertise builtin investigation tool %s: %#v", expected, toolNames)
 		}
 	}
-	for _, hidden := range []string{"delegate_task", "task", "parallel_tasks", "run_skill"} {
+	for _, hidden := range []string{"delegate_task", "task", "parallel_tasks", "run_skill", "read_task_history"} {
 		if containsString(toolNames, hidden) {
 			t.Fatalf("ordinary work prompt should not advertise heavy %s tool without an explicit cue: %#v", hidden, toolNames)
 		}
@@ -4771,9 +4771,9 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		total["cacheMissTokens"] != float64(300) {
 		t.Fatalf("runtime usage total mismatch: %#v", runtimeUsage)
 	}
-	if floatField(t, total, "costCny") <= 0 || floatField(t, total, "costUsd") <= 0 ||
-		floatField(t, total, "cacheSavingsCny") <= 0 || floatField(t, total, "cacheSavingsUsd") <= 0 {
-		t.Fatalf("runtime usage total must include non-zero provider pricing and cache savings: %#v", total)
+	if floatField(t, total, "costCny") != 0.000394 || floatField(t, total, "costUsd") != 0 ||
+		!boolField(total, "priceConfigured") || floatField(t, total, "cacheSavingsCny") != 0 || floatField(t, total, "cacheSavingsUsd") != 0 {
+		t.Fatalf("runtime usage must retain known attempt cost in its configured currency without inferred exchange or savings: %#v", total)
 	}
 	if perThread, ok := runtimeUsage["perThread"].([]any); !ok || len(perThread) == 0 {
 		t.Fatalf("runtime usage must include perThread usage: %#v", runtimeUsage)
@@ -4797,8 +4797,8 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		threadBucket["last_turn_cache_hit_rate"] != 0.7 {
 		t.Fatalf("thread usage bucket mismatch: %#v", threadBucket)
 	}
-	if floatField(t, threadBucket, "cost_cny") <= 0 || floatField(t, threadBucket, "cost_usd") <= 0 {
-		t.Fatalf("thread usage bucket must include non-zero cost: %#v", threadBucket)
+	if floatField(t, threadBucket, "cost_cny") != 0.000394 || floatField(t, threadBucket, "cost_usd") != 0 {
+		t.Fatalf("thread usage bucket must preserve the configured currency cost: %#v", threadBucket)
 	}
 
 	missingDayWindow := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/usage?group_by=day&timezone=UTC", g1.RuntimeToken, nil, http.StatusBadRequest)
@@ -4850,8 +4850,8 @@ func TestRuntimeServerUsageEndpointCoversRuntimeThreadDayModelAndThreadDetail(t 
 		detailUsage["cacheMissTokens"] != float64(300) {
 		t.Fatalf("thread detail must include cumulative usage: %#v", thread)
 	}
-	if floatField(t, detailUsage, "costCny") <= 0 || floatField(t, detailUsage, "costUsd") <= 0 {
-		t.Fatalf("thread detail usage must include non-zero cost: %#v", detailUsage)
+	if floatField(t, detailUsage, "costCny") != 0.000394 || floatField(t, detailUsage, "costUsd") != 0 {
+		t.Fatalf("thread detail usage must preserve the configured currency cost: %#v", detailUsage)
 	}
 }
 
@@ -5837,7 +5837,7 @@ func TestRuntimeServerConfiguredProviderPricingProducesNonZeroCost(t *testing.T)
 			`data: [DONE]`,
 		},
 		{
-			`data: {"type":"message_start","message":{"usage":{"input_tokens":80}}}`,
+			`data: {"type":"message_start","message":{"usage":{"input_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"anthropic priced"}}`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}`,
 			`data: {"type":"message_stop"}`,

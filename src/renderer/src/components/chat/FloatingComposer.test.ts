@@ -215,7 +215,7 @@ describe('FloatingComposer usage footer helpers', () => {
     }, 'en')
 
     expect(display.tokens).toBe('120')
-    expect(display.cost).toBe('Not configured')
+    expect(display.cost).toBe('Cost unavailable')
     expect(display.cost).not.toBe('$0.0000')
     expect(display.saved).toBe('4.1k')
     expect(display.cache).toBe('40%')

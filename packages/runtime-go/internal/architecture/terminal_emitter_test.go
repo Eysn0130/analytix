@@ -64,6 +64,9 @@ func TestTerminalProductionCallGraphIsClosed(t *testing.T) {
 		},
 		"FinalizeCurrentGeneralAfterLoop": {
 			{file: "app/publicationauthority/service.go", function: "FinalizeCurrentGeneralAfterLoop"},
+			// Continuation's timing observer wraps the existing authority method
+			// value; the same owner still performs the fenced publication.
+			{file: "server/turn_finalize.go", function: "finalizeRuntimeTurnAfterLoop"},
 		},
 		"WithCurrentGeneralFixedTerminal": {
 			{file: "server/runtime_restore.go", function: "abortStaleRuntimeTurnAfterRestart"},

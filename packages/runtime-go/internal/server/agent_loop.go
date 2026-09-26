@@ -171,6 +171,7 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 	}
 	input.SystemPrompt = baseSystemPrompt
 	maxSteps := h.resolveRuntimeModelStepLimit(input.Thread, input.Request)
+	continuationSourcesRequired := appmodel.ContinuationSourceReferencesRequiredV1(input.Thread)
 	return apploop.RunRuntimeAgentLoop(ctx, apploop.RuntimeRunnerInput{
 		ThreadID: input.ThreadID, TurnID: input.TurnID,
 		ProviderConfig: input.ProviderConfig, ProviderID: input.ProviderID, Model: input.Model, Effort: input.Effort,
@@ -242,8 +243,19 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 				input.Request.DisableUserInput, stepScope, input.SubagentDepth > 0, planActive, step.Prompt,
 				h.runtimeGoalToolsActive(input.ThreadID, step.Prompt, stepScope), advertisements,
 			)
+			if !continuationSourcesRequired {
+				// No source references are advertised before a scoped continuation
+				// needs them; avoid an unusable tool and unrelated prefix growth.
+				filtered := make([]domainmodel.ToolSchema, 0, len(schemas))
+				for _, schema := range schemas {
+					if schema.Name != "read_task_history" {
+						filtered = append(filtered, schema)
+					}
+				}
+				schemas = filtered
+			}
 			if len(schemas) == 0 && input.SubagentDepth == 0 && input.DelegatedToolManifest == nil &&
-				step.OrdinaryEffect() && appmodel.ContinuationSourceReferencesRequiredV1(input.Thread) {
+				step.OrdinaryEffect() && continuationSourcesRequired {
 				// Do not widen a delegated or explicit tool scope to make history
 				// convenient. This narrow read is still guarded at execution.
 				for _, schema := range toolcatalogapp.BuiltinToolSchemas(toolcatalogapp.BuiltinToolSchemaInput{}) {

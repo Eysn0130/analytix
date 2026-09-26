@@ -2,13 +2,14 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
 
-func TestMissingProviderKeyErrorCarriesIdentityNotCredential(t *testing.T) {
+func TestMissingProviderKeyErrorCarriesOnlyFixedAdmissionReason(t *testing.T) {
 	const providerID = "d5-private-provider-canary"
 	const unrelatedCredential = "sk-d5-unrelated-credential-canary"
 	for _, test := range []struct{ name, value string }{{"empty", ""}, {"whitespace", " \t\n"}} {
@@ -25,11 +26,11 @@ func TestMissingProviderKeyErrorCarriesIdentityNotCredential(t *testing.T) {
 			}
 			set := NewRuntimeProviderConfigSet(domainmodel.RuntimeProviderConfigInput{ModelProvidersJSON: string(encoded)})
 			_, err = set.ResolveTurnExecution(TurnExecutionInput{})
-			if err == nil || err.Error() != "provider configuration error: apiKey is required for provider "+providerID {
-				t.Fatal("missing-key source did not return its identity-only diagnostic")
+			if !errors.Is(err, ErrMissingProviderKey) || err.Error() != "provider configuration error: apiKey is required" {
+				t.Fatal("missing-key source did not return its fixed admission diagnostic")
 			}
-			if strings.Contains(err.Error(), unrelatedCredential) {
-				t.Fatal("missing-key diagnostic retained another provider's credential")
+			if strings.Contains(err.Error(), unrelatedCredential) || strings.Contains(err.Error(), providerID) {
+				t.Fatal("missing-key diagnostic retained configured identity or credential data")
 			}
 		})
 	}

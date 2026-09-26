@@ -18,6 +18,10 @@ const defaultAnalytixModel = "deepseek-v4-flash"
 
 var ErrUnsupportedReasoningEffort = errors.New("provider reasoning effort is unsupported")
 
+// Missing credentials are a fixed admission failure. Do not interpolate a
+// user-configured identity into an error that can enter durable failure records.
+var ErrMissingProviderKey = errors.New("provider configuration error: apiKey is required")
+
 type RuntimeProviderConfigSet struct {
 	defaultProviderID     string
 	defaultBaseURL        string
@@ -262,7 +266,7 @@ func (set RuntimeProviderConfigSet) ResolveTurnExecution(input TurnExecutionInpu
 		return TurnExecutionResult{}, errors.New("provider configuration error: baseUrl is required")
 	}
 	if strings.TrimSpace(config.APIKey) == "" {
-		return TurnExecutionResult{}, fmt.Errorf("provider configuration error: apiKey is required for provider %s", config.ProviderID)
+		return TurnExecutionResult{}, ErrMissingProviderKey
 	}
 	if effort != "" && SupportsReasoningEffort(config) {
 		if len(config.ReasoningSupportedEfforts) > 0 && !hasString(config.ReasoningSupportedEfforts, effort) {

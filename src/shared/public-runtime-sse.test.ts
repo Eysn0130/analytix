@@ -290,6 +290,39 @@ describe('public runtime SSE boundary', () => {
     })).toBe(true)
   })
 
+  it('preserves closed cache and attempt-cost diagnostics in the terminal carrier', () => {
+    const unknown = { complete: false, knownObservationCount: 0, observationCount: 2 }
+    const diagnostics = {
+      dynamicStateCheck: 'not_checked', toolSchemaEstimator: 'utf8_bytes_div4',
+      responseModelObservation: 'matches_resolved', modelInputFirstDifference: 'history',
+      modelInputComparable: true, modelInputComparablePrefixBytes: 123,
+      providerAttemptTelemetrySchema: 'provider-attempt-telemetry.v1', providerAttemptTelemetryValid: true,
+      providerLogicalCallCount: 1, providerAttemptCount: 2,
+      providerAttemptStatuses: { succeeded: 1, failed: 1, cancelled: 0, timedOut: 0, streamAborted: 0 },
+      providerAttemptInputTokens: unknown, providerAttemptOutputTokens: unknown,
+      providerAttemptCacheHitTokens: unknown, providerAttemptCacheMissTokens: unknown,
+      providerAttemptCacheRate: { known: false, numerator: 0, denominator: 0 },
+      providerCostEstimateComplete: false, providerCostKnownAttemptCount: 1,
+      providerKnownCostUsdNanos: 12, providerKnownCostCnyNanos: 0
+    }
+    const batch = generalTerminalBatch()
+    const usage = (batch.events as Array<Record<string, unknown>>)[1]
+    usage.cacheDiagnostics = diagnostics
+    const parsed = GeneralTerminalDeliveryBatchV1Schema.parse(batch)
+    expect(parsed.events[1]).toEqual(usage) // No stripping fields covered by the host digest.
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-cache', events: [batch] })).toBe(true)
+    for (const mutation of [
+      { dynamicStateCheck: 'checked_safe' }, { toolSchemaEstimator: 'actual_tokens' },
+      { responseModelObservation: 'PRIVATE_MODEL_PROSE' }, { modelInputFirstDifference: 'PRIVATE_INPUT' },
+      { modelInputComparablePrefixBytes: -1 }, { providerCostEstimateComplete: true },
+      { providerCostKnownAttemptCount: 3 }, { providerKnownCostUsdNanos: 0.1 },
+      { providerKnownCostCnyNanos: undefined }, { providerCostKnownAttemptCount: 0 }
+    ]) {
+      usage.cacheDiagnostics = { ...diagnostics, ...mutation }
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-cache', events: [batch] })).toBe(false)
+    }
+  })
+
   it('admits only exact hash-and-enum diagnostics for an unadvertised-tool terminal', () => {
     const batch = toolNotAdvertisedTerminalBatch()
     const parsed = GeneralTerminalDeliveryBatchV1Schema.safeParse(batch)
@@ -710,6 +743,23 @@ describe('public runtime SSE boundary', () => {
         streamId: 'stream-provider-stage',
         events: [{ ...event, details: { ...event.details, providerError } }]
       })).toBe(false)
+    }
+  })
+
+  it('admits only numeric host reasoning latency across the desktop SSE boundary', () => {
+    for (const firstReasoningLatencyMs of [0, 17, 'PRIVATE_REASONING', { text: 'PRIVATE' }, -1, 1.5, Infinity]) {
+      const event = {
+        seq: 11, kind: 'pipeline_stage', timestamp: '2026-07-14T00:00:00.000Z',
+        threadId: 'thread-reasoning-timing', turnId: 'turn-reasoning-timing',
+        stage: 'response_received', label: 'Response Received',
+        details: { firstReasoningLatencyMs }
+      }
+      const valid = typeof firstReasoningLatencyMs === 'number' &&
+        Number.isSafeInteger(firstReasoningLatencyMs) && firstReasoningLatencyMs >= 0
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-timing', events: [event] })).toBe(valid)
+      expect(projectPublicRuntimeSseBlock(
+        frame('11', 'pipeline_stage', event), event.threadId, new PublicRuntimeEventFilter()
+      )?.status).toBe(valid ? 'emit' : 'invalid')
     }
   })
 

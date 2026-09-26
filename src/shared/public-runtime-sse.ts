@@ -1029,7 +1029,7 @@ function isClosedPipelineDetails(value: unknown): boolean {
   const allowed = [
     'visibleRecovery', 'recoveryKind', 'recoveryAttempt', 'maxRecoveryAttempt',
     'maxRecoveryAttempts', 'recoveryExhausted', 'partialToolStarted', 'maxModelSteps', 'toolName',
-    'guardKind', 'stormCount', 'providerError', 'reasonCode'
+    'guardKind', 'stormCount', 'providerError', 'reasonCode', 'firstReasoningLatencyMs'
   ]
   if (!hasOnlyKeys(value, allowed) || !isOptionalBoolean(value.visibleRecovery) ||
       !isOptionalEnum(value.recoveryKind, new Set([
@@ -1038,7 +1038,8 @@ function isClosedPipelineDetails(value: unknown): boolean {
       !isOptionalSafeSequence(value.maxRecoveryAttempt) ||
       !isOptionalSafeSequence(value.maxRecoveryAttempts) || !isOptionalBoolean(value.recoveryExhausted) ||
       !isOptionalBoolean(value.partialToolStarted) || !isOptionalSafeSequence(value.maxModelSteps) ||
-      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeIdentifier(value.toolName) ||
+      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeSequence(value.firstReasoningLatencyMs) ||
+      !isOptionalSafeIdentifier(value.toolName) ||
       !isOptionalEnum(value.guardKind, new Set([
         'tool_failure', 'invalid_tool_arguments'
       ])) ||

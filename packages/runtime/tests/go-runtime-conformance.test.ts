@@ -898,7 +898,12 @@ function runtimeServerSsePayloads(text: string, threadId: string): Record<string
     const decision = projectPublicRuntimeSseBlock(next.block, threadId, filter)
     if (decision === null) continue
     if (decision.status !== 'emit') {
-      throw new Error(`runtime SSE replay is not public and strict: ${decision.status}`)
+      // Synthetic conformance diagnostics expose shape only, never field values.
+      const dataLine = next.block.split('\n').find((line) => line.startsWith('data:'))
+      const rejected = dataLine ? recordValue(JSON.parse(dataLine.slice(5))) : {}
+      const shape = Object.fromEntries(['details', 'cacheDiagnostics', 'usage'].map((key) =>
+        [key, Object.keys(recordValue(rejected[key])).sort()]))
+      throw new Error(`runtime SSE replay is not public and strict: ${decision.status}; fields=${Object.keys(rejected).sort().join(',')}; shape=${JSON.stringify(shape)}`)
     }
     const eventKind = typeof decision.event.kind === 'string' ? decision.event.kind : ''
     if (eventKind === 'general_terminal_batch' &&
