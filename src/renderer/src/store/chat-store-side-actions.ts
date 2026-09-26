@@ -71,8 +71,8 @@ const sideAbortControllers = new Map<string, AbortController>()
 const sideLatestSeqByThread = new Map<string, number>()
 const SIDE_TERMINAL_SNAPSHOT_UNAVAILABLE_KEY = 'common:runtimeFinalSnapshotUnavailable'
 
-function createSideClientUserMessageId(now = Date.now()): string {
-  return globalThis.crypto?.randomUUID?.() ?? `side-user-${now}-${Math.random().toString(16).slice(2)}`
+function createSideClientUserMessageId(): string {
+  return globalThis.crypto.randomUUID()
 }
 
 function bindSideUserBlockTurn(blocks: ChatBlock[], userBlockId: string, turnId: string): ChatBlock[] {

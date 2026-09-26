@@ -239,6 +239,22 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.error).toBeTruthy()
   })
 
+  it('does not steer or create optimistic state without secure client message IDs', async () => {
+    const provider = { steerUserMessage: vi.fn(), sendUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    state.activeThreadId = 'thr_existing'
+    state.currentTurnId = 'turn_active'
+    state.busy = true
+    vi.stubGlobal('crypto', undefined)
+
+    await expect(actions.sendMessage('keep this draft local', 'agent')).rejects.toThrow()
+    expect(provider.steerUserMessage).not.toHaveBeenCalled()
+    expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    expect(state.blocks).toEqual([])
+    expect(state.queuedMessages).toEqual([])
+  })
+
   it('steers a running turn instead of queueing or interrupting when the composer sends text while busy', async () => {
     const abort = vi.fn()
     const provider = {

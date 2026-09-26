@@ -519,6 +519,20 @@ describe('chat-store-side-actions', () => {
     )
   })
 
+  it('does not send or create optimistic state without secure client message IDs', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    vi.stubGlobal('crypto', undefined)
+    try {
+      await expect(actions.sendSideMessage(id, 'keep this draft local')).rejects.toThrow()
+      expect(provider.sendMock).not.toHaveBeenCalled()
+      expect(state.sideConversations[id].busy).toBe(false)
+      expect(state.sideConversations[id].blocks).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('does not normalize invalid side reasoning effort aliases', async () => {
     const { actions, state, provider } = buildHarness()
     const id = (await actions.spawnSideConversation())!

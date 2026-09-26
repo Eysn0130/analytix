@@ -355,8 +355,8 @@ type MidTurnSteerDraft = {
   guiPlan?: QueuedUserMessage['guiPlan']
 }
 
-function createClientUserMessageId(now = Date.now()): string {
-  return globalThis.crypto?.randomUUID?.() ?? `steer-${now}-${Math.random().toString(16).slice(2)}`
+function createClientUserMessageId(): string {
+  return globalThis.crypto.randomUUID()
 }
 
 function requiresOrdinaryPublicProjection(text: string): boolean {
@@ -399,7 +399,7 @@ async function steerActiveTurn(options: {
   }
 
   const now = Date.now()
-  const clientUserMessageId = createClientUserMessageId(now)
+  const clientUserMessageId = createClientUserMessageId()
   const visibleText = projectOrdinaryPublicText(draft.displayText?.trim() || draft.text)
   const publicAttachments = draft.attachments?.length
     ? projectAttachmentReferencesForPublicSurfaces(draft.attachments)
