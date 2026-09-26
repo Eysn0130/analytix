@@ -368,6 +368,9 @@ async function syncProviderCredential(input: {
       ? { kind: existing.kind }
       : {})
   }
+  if (existing && provider.kind !== existing.kind) {
+    throw new Error('Provider protocol cannot change after creation.')
+  }
   if (!existing && input.action.kind === 'preserve') return input.snapshot
   let result: ProviderRegistryResult
   if (existing) {

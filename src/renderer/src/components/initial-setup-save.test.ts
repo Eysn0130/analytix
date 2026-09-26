@@ -667,11 +667,11 @@ describe('credential persistence', () => {
     expect(registry.request.mock.calls.map(([request]) => request.operation)).toEqual(['list'])
   })
 
-  it('persists and leaves native Messages through the Registry without replacing credentials', async () => {
+  it('keeps a native Registry identity and rejects a protocol rewrite before mutation', async () => {
     const profile = getModelProviderSettings(settings()).providers.find((item) => item.id === 'deepseek')!
     const native = { ...profile, endpointFormat: 'messages' as const, registryKind: 'deepseek-messages' as const }
     const existing = publicProvider(profile.id, true, {
-      kind: 'anthropic-compatible', endpoint: profile.baseUrl, models: profile.models,
+      kind: 'deepseek-messages', endpoint: profile.baseUrl, models: profile.models,
       selectedModel: profile.models[0]
     })
     const registry = registryHarness([existing], existing.id)
@@ -683,14 +683,12 @@ describe('credential persistence', () => {
       profile: native, selectedModel: profile.models[0]!, credentialDraft: '', requestProviderRegistry: registry.request
     })
     expect(kept.provider?.kind).toBe('deepseek-messages')
-    const generic = await persistProviderSettingsDraft({
+    await expect(persistProviderSettingsDraft({
       profile: { ...native, registryKind: undefined }, selectedModel: profile.models[0]!,
       credentialDraft: '', requestProviderRegistry: registry.request
-    })
-    expect(generic.provider?.kind).toBe('anthropic-compatible')
+    })).rejects.toThrow('Provider protocol cannot change after creation.')
     const updates = registry.request.mock.calls.map(([request]) => request).filter(request => request.operation === 'update')
-    expect(updates).toHaveLength(2)
-    expect(updates.map(request => request.credential)).toEqual([{ kind: 'keep' }, { kind: 'keep' }])
+    expect(updates).toHaveLength(0)
   })
 
   it('updates Registry metadata with credential keep and treats masked input as write-only no-op', async () => {

@@ -2177,6 +2177,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     {t('modelProviderEndpointFormat')}
                     <select
                       className={selectControlClass}
+                      disabled={Boolean(activeRegistryProvider)}
                       value={activeProvider.registryKind ?? activeProvider.endpointFormat}
                       onChange={(e) => updateModelProvider(activeProvider.id, {
                         endpointFormat: e.target.value === 'deepseek-messages' ? 'messages' : e.target.value as ModelEndpointFormat,
@@ -2193,6 +2194,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       </option>
                     </select>
                   </label>
+                  {activeRegistryProvider ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('modelProviderEndpointFormatCommitted')}
+                    </p>
+                  ) : null}
                   {activeProvider.endpointFormat === 'custom_endpoint' ? (
                     <p className="text-[12px] leading-5 text-ds-muted">
                       {t('modelEndpointCustomEndpointDesc')}

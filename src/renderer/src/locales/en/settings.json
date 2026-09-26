@@ -248,6 +248,7 @@
   "modelProviderApiKeyReentryHint": "This credential used the former macOS Keychain store. Re-enter it once here to use the new private store. Your Provider settings remain saved until replacement succeeds.",
   "modelProviderBaseUrl": "Base URL",
   "modelProviderEndpointFormat": "Endpoint format",
+  "modelProviderEndpointFormatCommitted": "A saved Provider keeps its protocol. Add a new Provider to use a different protocol.",
   "modelEndpointChatCompletions": "/v1/chat/completions",
   "modelEndpointResponses": "/v1/responses",
   "modelEndpointMessages": "/v1/messages",

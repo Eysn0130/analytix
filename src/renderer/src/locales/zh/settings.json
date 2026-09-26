@@ -248,6 +248,7 @@
   "modelProviderApiKeyReentryHint": "此凭据使用旧版 macOS 钥匙串存储。请在此重新填写一次，改用新的私有存储；替换成功前会保留原有供应商设置。",
   "modelProviderBaseUrl": "Base URL",
   "modelProviderEndpointFormat": "端点格式",
+  "modelProviderEndpointFormatCommitted": "已保存供应商的协议保持不变。使用其他协议时，请添加新的供应商。",
   "modelEndpointChatCompletions": "/v1/chat/completions",
   "modelEndpointResponses": "/v1/responses",
   "modelEndpointMessages": "/v1/messages",

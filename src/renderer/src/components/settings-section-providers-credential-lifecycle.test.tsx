@@ -82,6 +82,8 @@ function registryFixture() {
       expect(input.expected.registryIncarnation === registryIncarnation).toBe(true)
       const id = input.operation === 'connect' ? input.provider.id : input.providerId
       const prior = providers.find((entry) => entry.id === id)
+      // Core's transactional identity keeps kind immutable after connect.
+      if (input.operation === 'update') expect(input.provider.kind).toBe(prior!.kind)
       revision += 1
       const next: Provider = {
         ...(prior ?? provider(id)),
@@ -93,7 +95,8 @@ function registryFixture() {
           selectedRoutes: input.provider.selectedRoutes
         }),
         revision: String(Number(prior?.revision ?? 0) + 1),
-        generation: String(Number(prior?.generation ?? 0) + 1),
+        generation: input.operation === 'update' && input.credential.kind === 'keep'
+          ? prior!.generation : String(Number(prior?.generation ?? 0) + 1),
         credentialConfigured: true, credentialPurpose: 'provider-api-key'
       }
       providers = [...providers.filter((entry) => entry.id !== id), next].sort((left, right) => left.id.localeCompare(right.id))
@@ -217,25 +220,36 @@ async function unmount() {
   root = null
 }
 
-it('saves the native Messages choice through Registry and restores it in a fresh settings view', async () => {
+it('selects native Messages at creation and preserves the saved Registry protocol', async () => {
   const endpoint = (): HTMLSelectElement => {
     const label = [...container.querySelectorAll('label')].find(node => node.textContent?.startsWith('modelProviderEndpointFormat'))
     expect(label?.querySelector('select')).not.toBeNull()
     return label!.querySelector('select')!
   }
+  expect(endpoint().disabled).toBe(true)
+  expect(container.textContent).toContain('modelProviderEndpointFormatCommitted')
+  await readyDraft()
+  expect(endpoint().disabled).toBe(false)
+  const draftId = draftIdInput().value
   await act(async () => {
     endpoint().value = 'deepseek-messages'
     endpoint().dispatchEvent(new Event('change', { bubbles: true }))
   })
-  await click('modelProviderSaveChanges')
-  expect(registry.snapshot().providers[0]?.kind).toBe('deepseek-messages')
-  expect(registry.calls.find(call => call.operation === 'update')).toMatchObject({
-    provider: { kind: 'deepseek-messages' }, credential: { kind: 'keep' }
+  await click('modelProviderDraftConfirm')
+  expect(registry.snapshot().providers.find(item => item.id === draftId)?.kind).toBe('deepseek-messages')
+  expect(registry.calls.find(call => call.operation === 'connect')).toMatchObject({
+    provider: { kind: 'deepseek-messages' }, credential: { kind: 'set' }
   })
   expect(patches.some(patch => Object.prototype.hasOwnProperty.call(patch, 'provider'))).toBe(false)
   await unmount()
   await mount()
   expect(endpoint().value).toBe('deepseek-messages')
+  expect(endpoint().disabled).toBe(true)
+  const generation = registry.snapshot().providers.find(item => item.id === draftId)?.generation
+  await click('modelProviderSaveChanges')
+  expect(registry.snapshot().providers.find(item => item.id === draftId)).toMatchObject({
+    kind: 'deepseek-messages', generation
+  })
 })
 
 beforeEach(async () => {
