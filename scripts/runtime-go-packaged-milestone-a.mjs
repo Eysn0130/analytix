@@ -443,7 +443,25 @@ const PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES = Object.freeze({
     'extension_account_reconciliation_done',
   'OAuth callback router:done': 'oauth_callback_router_done',
   'OAuth authorization sweep:done': 'oauth_authorization_sweep_done',
-  'OAuth refresh scheduler:done': 'oauth_refresh_scheduler_done'
+  'OAuth refresh scheduler:done': 'oauth_refresh_scheduler_done',
+  'runtime ensure:begin': 'runtime_ensure_begin',
+  'runtime initial health:done': 'runtime_initial_health_done',
+  'runtime launch settings:done': 'runtime_launch_settings_done',
+  'runtime adapter:begin': 'runtime_adapter_begin',
+  'runtime adapter:done': 'runtime_adapter_done',
+  'runtime adapter:failed': 'runtime_adapter_failed',
+  'runtime health:done': 'runtime_health_done',
+  'runtime thread probe:done': 'runtime_thread_probe_done',
+  'runtime ensure:done': 'runtime_ensure_done',
+  'go preflight:begin': 'go_preflight_begin',
+  'go capability materialization:done': 'go_capability_materialization_done',
+  'go authority:done': 'go_authority_done',
+  'go process:spawned': 'go_process_spawned',
+  'go private frame:done': 'go_private_frame_done',
+  'go ready line:received': 'go_ready_line_received',
+  'go ready identity:verified': 'go_ready_identity_verified',
+  'go adapter:done': 'go_adapter_done',
+  'go adapter:failed': 'go_adapter_failed'
 })
 const PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH = 4096
 const repositoryContextMarkers = new WeakMap()

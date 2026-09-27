@@ -66,7 +66,7 @@ import { getAnalytixBaseUrl } from '../analytix-base-url'
 import type { RuntimeHostScheduleMcpBindingV1 } from '../claw-schedule-mcp-config'
 import type { DesktopExternalStateBoundary } from '../desktop-external-state-isolation'
 import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
-import { logWarn } from '../logger'
+import { logWarn, type StartupTraceStage } from '../logger'
 import {
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
@@ -184,6 +184,18 @@ import {
 const ANALYTIX_RUNTIME_ID = 'analytix' as const
 const GO_CONFORMANCE_READY_PREFIX = 'ANALYTIX_SIDECAR_READY '
 const GO_RUNTIME_SERVER_READY_PREFIX = 'ANALYTIX_RUNTIME_SERVER_READY '
+let runtimeStartupTraceObserver: ((stage: StartupTraceStage) => void) | null = null
+
+export function configureRuntimeStartupTraceObserver(
+  observer: ((stage: StartupTraceStage) => void) | null
+): void {
+  runtimeStartupTraceObserver = observer
+}
+
+function traceRuntimeStartup(stage: StartupTraceStage): void {
+  if (process.env.ANALYTIX_STARTUP_TRACE !== '1') return
+  try { runtimeStartupTraceObserver?.(stage) } catch { /* diagnostics never gate startup */ }
+}
 const DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2 = 'ANALYTIX_DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2\n'
 const GO_CONFORMANCE_STARTUP_TIMEOUT_MS = 60_000
 const MAX_GO_READY_STDOUT_BYTES = 64 << 10
@@ -2507,6 +2519,7 @@ async function startGoConformanceSidecarOnce(
   backend: AnalytixRuntimeGoBackendId,
   fallbackAlreadyUsed = false
 ): Promise<void> {
+  traceRuntimeStartup('go preflight:begin')
   const runtime = resolveAnalytixRuntimeSettings(settings)
   const dataDir = resolveAnalytixDataDir(runtime)
   const runtimeInsecure = isAnalytixRuntimeInsecure(runtime)
@@ -2556,9 +2569,11 @@ async function startGoConformanceSidecarOnce(
         return materialization
       })
     : null
+  traceRuntimeStartup('go capability materialization:done')
   const mainOwnedAuthority = isRuntimeServer && !fallbackAlreadyUsed
     ? await takeMainOwnedRuntimeAuthorityForLaunchV1()
     : null
+  traceRuntimeStartup('go authority:done')
   const expectedWitnessedAuthority = mainOwnedAuthority
     ? authorityAnchorProjectionV1(mainOwnedAuthority.authorityAnchorV1)
     : null
@@ -2643,6 +2658,7 @@ async function startGoConformanceSidecarOnce(
       detached: process.platform !== 'win32'
     }
   )
+  traceRuntimeStartup('go process:spawned')
   const ownedProcess = ownSpawnedProcess(child, {
     detached: process.platform !== 'win32'
   })
@@ -2668,6 +2684,7 @@ async function startGoConformanceSidecarOnce(
         ...(hostScheduleMcpBindingV1 ? { hostScheduleMcpBindingV1 } : {})
       })
     }
+    traceRuntimeStartup('go private frame:done')
     const runtimeLabel = isRuntimeServer ? 'Go runtime server' : 'Go conformance sidecar'
     const ready = await waitForGoConformanceReady(
       child,
@@ -2677,6 +2694,7 @@ async function startGoConformanceSidecarOnce(
       isRuntimeServer ? GO_RUNTIME_SERVER_STARTUP_TIMEOUT_MS_V1 : GO_CONFORMANCE_STARTUP_TIMEOUT_MS
     )
     readyPayloadReceived = true
+    traceRuntimeStartup('go ready line:received')
     if (!isRuntimeServer && ready.runtimeToken !== runtimeToken) {
       throw new Error(`${runtimeLabel} ready token does not match the requested runtime token.`)
     }
@@ -2714,6 +2732,7 @@ async function startGoConformanceSidecarOnce(
         generation: launchGeneration
       }
     }
+    traceRuntimeStartup('go ready identity:verified')
     exitObserver.markReady()
     if (isRuntimeDefault) {
       if (bundledFundsMaterialization) {
@@ -2723,6 +2742,7 @@ async function startGoConformanceSidecarOnce(
       }
       activeBackend = backend
       lastBackendFallbackReason = ''
+      traceRuntimeStartup('go adapter:done')
       return
     }
     const canary = await probeGoConformanceRuntimeCanary(settings, ready.url, backend)
@@ -2731,7 +2751,9 @@ async function startGoConformanceSidecarOnce(
     }
     activeBackend = backend
     lastBackendFallbackReason = ''
+    traceRuntimeStartup('go adapter:done')
   } catch (error) {
+    traceRuntimeStartup('go adapter:failed')
     const retryWithoutAuthority = shouldRetryWithoutOptionalCaseAuthorityV1({
       runtimeServer: isRuntimeServer,
       authorityAttempted: mainOwnedAuthority !== null,

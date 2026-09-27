@@ -1151,6 +1151,25 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     expect(JSON.stringify(recorder.evidence())).not.toContain('/Users/private')
   })
 
+  it('records the Go startup boundary without retaining private ready payloads', async () => {
+    const { createPackagedStartupTraceRecorder } = await milestoneModule()
+    const recorder = createPackagedStartupTraceRecorder()
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    let line = ''
+    try {
+      publicConsoleInfo('startup', '', {
+        stage: 'go ready identity:verified', elapsedMs: 421,
+        runtimeToken: 'do-not-retain'
+      })
+      line = info.mock.calls[0].join(' ')
+    } finally {
+      info.mockRestore()
+    }
+    recorder.accept('stdout', `${line}\n`)
+    expect(recorder.evidence().checkpointElapsedMs).toEqual({ go_ready_identity_verified: 421 })
+    expect(JSON.stringify(recorder.evidence())).not.toContain('do-not-retain')
+  })
+
   it('wires bounded sanitized startup tracing into both packaged launches and stable defaults', () => {
     const script = source('scripts/runtime-go-packaged-milestone-a.mjs')
 

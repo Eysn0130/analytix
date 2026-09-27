@@ -18,6 +18,7 @@ import { createWriteShutdownCoordinator } from './write-shutdown'
 import { prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './office/native-office-ipc'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -75,6 +76,7 @@ import { isAuthorizedPrototypeFileUrl } from './services/prototype-embed-registr
 import { fetchUpstreamModelIds } from './upstream-models'
 import {
   analytixRuntimeAdapter,
+  configureRuntimeStartupTraceObserver,
   captureCurrentFinalPublicationAuthorityPin,
   configureGoRuntimeDesktopExternalStateBoundary,
   getAnalytixRuntimeBackendStatus,
@@ -230,6 +232,23 @@ if (desktopExternalState.isolated) {
 const startupTraceEnabled =
   process.env.ANALYTIX_STARTUP_TRACE === '1'
 const startupTraceStart = Date.now()
+const startupEventLoopDelay = startupTraceEnabled ? monitorEventLoopDelay({ resolution: 20 }) : null
+startupEventLoopDelay?.enable()
+const flushStartupLag = (): void => {
+  if (!startupEventLoopDelay) return
+  publicConsoleInfo('startup-lag', '', {
+    maxEventLoopLagMs: Math.round(startupEventLoopDelay.max / 1_000_000)
+  })
+}
+const startupLagTimer = startupEventLoopDelay ? setInterval(flushStartupLag, 5_000) : null
+startupLagTimer?.unref()
+if (startupEventLoopDelay) app.once('before-quit', () => {
+  flushStartupLag()
+  if (startupLagTimer) clearInterval(startupLagTimer)
+  startupEventLoopDelay.disable()
+})
+let inFlightHealthProbes = 0
+let maxConcurrentWaitForHealthProbes = 0
 let currentStartupStage: StartupTraceStage = 'main module evaluated'
 const computerUseAgentBaselinePromise = captureOpenComputerUseAgentBaselineV1()
 const nativeOAuthCallbackRouter = createNativeOAuthCallbackRouter()
@@ -241,7 +260,9 @@ function traceStartup(label: StartupTraceStage, _detail?: unknown): void {
     stage: label,
     elapsedMs: Date.now() - startupTraceStart
   })
+  if (label === 'runtime ensure:done' || label === 'runtime adapter:failed') flushStartupLag()
 }
+configureRuntimeStartupTraceObserver(traceStartup)
 
 function isManagedGoRuntimeBackend(): boolean {
   const backend = getAnalytixRuntimeBackendStatus().gate.backend
@@ -953,6 +974,13 @@ async function waitForAnalytixHealth(settings: AppSettingsV1, timeoutMs: number)
   while (Date.now() <= deadline) {
     try {
       const remaining = Math.max(1, deadline - Date.now())
+      inFlightHealthProbes += 1
+      if (inFlightHealthProbes > maxConcurrentWaitForHealthProbes) {
+        maxConcurrentWaitForHealthProbes = inFlightHealthProbes
+        if (startupTraceEnabled) publicConsoleInfo('runtime-health-probe', '', {
+          maxConcurrentWaitForHealthProbes
+        })
+      }
       const res = await fetch(`${base}/health`, {
         headers: runtimeAuthHeaders(settings),
         signal: AbortSignal.timeout(Math.max(250, Math.min(1_000, remaining)))
@@ -960,6 +988,8 @@ async function waitForAnalytixHealth(settings: AppSettingsV1, timeoutMs: number)
       if (res.ok && isAnalytixHealthResponseBody(await res.text())) return true
     } catch {
       /* retry until the deadline */
+    } finally {
+      inFlightHealthProbes -= 1
     }
     await sleep(150)
   }
@@ -1313,6 +1343,7 @@ async function resolveManagedAnalytixLaunchSettings(
 }
 
 async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
+  traceStartup('runtime ensure:begin')
   const runtime = getAnalytixRuntimeSettings(settings)
   const adapter = analytixRuntimeAdapter
 
@@ -1321,6 +1352,7 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
   }
 
   const healthy = await waitForAnalytixHealth(settings, 2_000)
+  traceStartup('runtime initial health:done')
   if (healthy) {
     const threadApi = await probeThreadApi(settings)
     if (threadApi.ok) {
@@ -1338,10 +1370,14 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
   }
 
   const launchSettings = await resolveManagedAnalytixLaunchSettings(settings, 'runtime-start')
+  traceStartup('runtime launch settings:done')
   publishRuntimeStatus({ code: 'runtime_starting', source: 'ensure' })
   try {
+    traceStartup('runtime adapter:begin')
     await adapter.ensureRunning(launchSettings)
+    traceStartup('runtime adapter:done')
   } catch (e) {
+    traceStartup('runtime adapter:failed')
     publicConsoleError(
       'runtime',
       'Failed to start Analytix.',
@@ -1350,6 +1386,7 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
     throw e
   }
   const started = await waitForAnalytixHealth(launchSettings, 20_000)
+  traceStartup('runtime health:done')
   if (!started) {
     throw runtimeJsonError(
       'runtime_unhealthy',
@@ -1358,10 +1395,12 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
   }
 
   const threadApi = await probeThreadApi(launchSettings)
+  traceStartup('runtime thread probe:done')
   if (!threadApi.ok) {
     throw runtimeJsonError(threadApi.error, threadApi.message)
   }
   noteRuntimeHealthy('ensure')
+  traceStartup('runtime ensure:done')
   return launchSettings
 }
 

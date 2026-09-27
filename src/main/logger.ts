@@ -65,6 +65,8 @@ const SAFE_NUMBER_DETAIL_KEYS = new Set([
   'count',
   'durationMs',
   'elapsedMs',
+  'maxConcurrentWaitForHealthProbes',
+  'maxEventLoopLagMs',
   'exitCode',
   'port',
   'previousPort',
@@ -124,7 +126,25 @@ export const STARTUP_TRACE_STAGES = [
   'Claw and IM runtime composition:done',
   'ipc registration:start',
   'ipc registration:done',
-  'createWindow:returned'
+  'createWindow:returned',
+  'runtime ensure:begin',
+  'runtime initial health:done',
+  'runtime launch settings:done',
+  'runtime adapter:begin',
+  'runtime adapter:done',
+  'runtime adapter:failed',
+  'runtime health:done',
+  'runtime thread probe:done',
+  'runtime ensure:done',
+  'go preflight:begin',
+  'go capability materialization:done',
+  'go authority:done',
+  'go process:spawned',
+  'go private frame:done',
+  'go ready line:received',
+  'go ready identity:verified',
+  'go adapter:done',
+  'go adapter:failed'
 ] as const
 export type StartupTraceStage = typeof STARTUP_TRACE_STAGES[number]
 const STARTUP_TRACE_STAGE_SET: ReadonlySet<string> = new Set(STARTUP_TRACE_STAGES)
