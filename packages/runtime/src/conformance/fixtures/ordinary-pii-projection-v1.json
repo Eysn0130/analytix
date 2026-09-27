@@ -94,6 +94,26 @@
       "id": "calendar-date",
       "input": "日期 20260720",
       "expected": "preserve"
+    },
+    {
+      "id": "chinese-year-and-count",
+      "input": "2026 年的中文 文件共有 2645472 条。",
+      "expected": "preserve"
+    },
+    {
+      "id": "precise-ordinary-amount",
+      "input": "金额 12345678.90 元，币种 CNY；数量 0。",
+      "expected": "preserve"
+    },
+    {
+      "id": "iso-local-date-time",
+      "input": "日期 2026-09-26 18:30:00",
+      "expected": "preserve"
+    },
+    {
+      "id": "opaque-machine-reference",
+      "input": "引用 550e8400-e29b-41d4-a716-44665544a000，摘要 abababababababababababababababababababababababababababababababab",
+      "expected": "preserve"
     }
   ],
   "typedFieldCases": [
