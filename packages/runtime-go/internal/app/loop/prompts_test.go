@@ -276,6 +276,8 @@ func TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut(t *testing
 	for _, prompt := range []string{
 		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
 		"修改代码并写明当前案件甲公司支付乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2万元。",
+		"修改代码并写明当前案件张某与李某存在父子关系。",
 		"修改代码并写明当前案件张某与李某是父子。",
 	} {
 		if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {
@@ -296,7 +298,10 @@ func TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut(t *testing
 	for _, prompt := range []string{
 		"导出当前案件资金分析代码的测试报告。",
 		"支付2次测试，检查回调顺序。",
+		"支付给测试模块 2 万个元件。",
 		"请解释 DOM 元素的父子关系。",
+		"请解释 DOM 元素是否存在父子关系。",
+		"DOM 元素与子元素存在父子关系。",
 	} {
 		if PromptRequiresCaseRiskAdmission(prompt) {
 			t.Fatalf("ordinary task was classified as case work: %q", prompt)

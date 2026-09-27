@@ -70,10 +70,14 @@ func TestContainsUnboundCaseRiskV1SeparatesOrdinaryValuesFromCaseAssertions(t *t
 		{name: "ordinary DOM relation", text: "解释 DOM 父子节点和兄弟节点的遍历", want: false},
 		{name: "ordinary payment module tests", text: "支付模块新增 3 个测试", want: false},
 		{name: "ordinary payment action count", text: "支付2次测试，检查回调顺序", want: false},
+		{name: "ordinary component count", text: "支付2元件用于测试", want: false},
 		{name: "ordinary payee component count", text: "支付给测试模块 3 个元件", want: false},
+		{name: "ordinary payee ten-thousand component count", text: "支付给测试模块 2 万个元件", want: false},
 		{name: "ordinary sibling travel", text: "为两位姐妹写旅行计划", want: false},
 		{name: "ordinary parent child DOM", text: "解释 DOM 父子节点关系", want: false},
 		{name: "ordinary DOM relationship", text: "请解释 DOM 元素的父子关系。", want: false},
+		{name: "ordinary DOM relationship question", text: "请解释 DOM 元素是否存在父子关系。", want: false},
+		{name: "ordinary DOM relationship assertion", text: "DOM 元素与子元素存在父子关系。", want: false},
 		{name: "later QA marker", text: "请列出金额字段。标记 N04-QA-107d-ordinary。", want: false},
 		{name: "acquired currency", text: "甲公司取得￥2645.72，见doc/a.txt", want: true},
 		{name: "real payment before path", text: "甲公司支付2645.72元，见doc/a.txt", want: true},
@@ -81,9 +85,15 @@ func TestContainsUnboundCaseRiskV1SeparatesOrdinaryValuesFromCaseAssertions(t *t
 		{name: "real payment with currency prefix", text: "甲公司支付￥2645.72", want: true},
 		{name: "real payment with payee", text: "甲公司支付给乙公司2645.72元", want: true},
 		{name: "real payment with direct payee", text: "甲公司支付乙公司2645.72元。", want: true},
+		{name: "real payment with ten-thousand unit", text: "甲公司支付乙公司2万元。", want: true},
+		{name: "real payment with hundred-million unit", text: "甲公司支付乙公司2亿元。", want: true},
+		{name: "real payment with ten-thousand currency unit", text: "甲公司支付乙公司2万人民币。", want: true},
+		{name: "acquired ten-thousand unit", text: "甲公司取得2万元。", want: true},
 		{name: "explicit case request", text: "请核实当前案件的金额字段", want: true},
 		{name: "relationship assertion", text: "张某实际控制甲公司", want: true},
 		{name: "parent child assertion", text: "张某与李某是父子", want: true},
+		{name: "parent child exists assertion", text: "张某与李某存在父子关系。", want: true},
+		{name: "parent child exists named assertion", text: "张三与李四存在父子关系。", want: true},
 		{name: "sibling assertion", text: "张某与李某为姐妹", want: true},
 		{name: "synthetic phone", text: "请查询电话 13800138000", want: true},
 	}
@@ -100,6 +110,8 @@ func TestContainsUnboundCaseFactAssertionV1DoesNotUseSoftwareWordsAsAuthority(t 
 	for _, text := range []string{
 		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
 		"修改代码并写明当前案件甲公司支付乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2万元。",
+		"修改代码并写明当前案件张某与李某存在父子关系。",
 		"修改代码并写明当前案件张某与李某是父子。",
 	} {
 		if !ContainsUnboundCaseFactAssertionV1(text) {
@@ -110,6 +122,8 @@ func TestContainsUnboundCaseFactAssertionV1DoesNotUseSoftwareWordsAsAuthority(t 
 		"导出当前案件资金分析代码的测试报告。",
 		"支付2次测试，检查回调顺序。",
 		"请解释 DOM 元素的父子关系。",
+		"请解释 DOM 元素是否存在父子关系。",
+		"DOM 元素与子元素存在父子关系。",
 	} {
 		if ContainsUnboundCaseFactAssertionV1(text) {
 			t.Fatalf("ordinary software text became a case assertion: %q", text)

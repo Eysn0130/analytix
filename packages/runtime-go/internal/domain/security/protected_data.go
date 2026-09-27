@@ -1,6 +1,7 @@
 package security
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -38,7 +39,9 @@ var unboundConcreteCaseAssertionPhrases = []string{
 	"串通投标", "行贿", "利益输送", "具备立案条件",
 }
 
-var unboundMonetaryActionCues = []string{"支付", "转账", "收款", "付款", "汇入", "汇出"}
+var unboundMonetaryActionCues = []string{"支付", "转账", "收款", "付款", "汇入", "汇出", "取得"}
+
+var unboundRelationshipAssertion = regexp.MustCompile(`([\p{Han}]{1,4})[与和]([\p{Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系`)
 
 // ContainsProtectedCaseData detects structured values whose publication must
 // never depend on a model or a lexical case-intent guess. It is deliberately a
@@ -78,7 +81,9 @@ func ContainsUnboundCaseRiskV1(text string) bool {
 	if ContainsProtectedCaseData(text) {
 		return true
 	}
-	if containsAnyCaseFactPhrase(normalizeCaseFactText(text), unboundCaseAssertionPhrases) {
+	normalized := normalizeCaseFactText(text)
+	if containsAnyCaseFactPhrase(normalized, unboundCaseAssertionPhrases) ||
+		containsUnboundRelationshipAssertionV1(normalized) {
 		return true
 	}
 	return containsUnboundMonetaryFactV1(text)
@@ -88,10 +93,30 @@ func ContainsUnboundCaseRiskV1(text string) bool {
 // being treated as software work merely because the same clause mentions code.
 // Bare case vocabulary remains a weaker admission signal.
 func ContainsUnboundCaseFactAssertionV1(text string) bool {
-	if containsAnyCaseFactPhrase(normalizeCaseFactText(text), unboundConcreteCaseAssertionPhrases) {
+	normalized := normalizeCaseFactText(text)
+	if containsAnyCaseFactPhrase(normalized, unboundConcreteCaseAssertionPhrases) ||
+		containsUnboundRelationshipAssertionV1(normalized) {
 		return true
 	}
 	return containsUnboundMonetaryFactV1(text)
+}
+
+func containsUnboundRelationshipAssertionV1(normalized string) bool {
+	for _, match := range unboundRelationshipAssertion.FindAllStringSubmatch(normalized, -1) {
+		if !technicalRelationshipSubjectV1(match[1]) && !technicalRelationshipSubjectV1(match[2]) {
+			return true
+		}
+	}
+	return false
+}
+
+func technicalRelationshipSubjectV1(subject string) bool {
+	for _, term := range []string{"元素", "节点", "组件", "模块", "对象"} {
+		if strings.Contains(subject, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsUnboundMonetaryFactV1(text string) bool {
@@ -99,9 +124,6 @@ func containsUnboundMonetaryFactV1(text string) bool {
 		return strings.ContainsRune("。！？!?；;\n", character)
 	}) {
 		clause := normalizeCaseFactText(rawClause)
-		if index := strings.Index(clause, "取得"); index >= 0 && containsCurrencyAmount(clause[index+len("取得"):]) {
-			return true
-		}
 		for _, cue := range unboundMonetaryActionCues {
 			if actionHasAdjacentAmount(clause, cue) {
 				return true
@@ -162,6 +184,10 @@ func amountHasCurrencyUnit(text string) bool {
 		return false
 	}
 	afterAmount := strings.TrimSpace(strings.TrimLeft(text, "0123456789,."))
+	afterAmount = strings.TrimLeft(afterAmount, "十百千万亿")
+	if strings.HasPrefix(afterAmount, "元件") {
+		return false
+	}
 	for _, unit := range []string{"元", "人民币", "美元", "欧元", "英镑"} {
 		if strings.HasPrefix(afterAmount, unit) {
 			return true

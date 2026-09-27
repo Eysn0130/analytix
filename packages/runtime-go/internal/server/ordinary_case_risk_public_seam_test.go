@@ -482,24 +482,30 @@ func TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn(t *testin
 			"providerId": "mixed-case-admission-provider", "model": "mixed-case-admission-model",
 		})), http.StatusCreated)
 	threadID := stringField(thread, "id")
-	blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
-		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
-			"prompt": "修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
-		})), http.StatusAccepted)
-	if requests := providerClient.Requests(); len(requests) != 0 {
-		t.Fatalf("case assertion reached ordinary provider: requests=%d", len(requests))
-	}
-	rawThread, err := handler.store.GetThread(threadID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blockedTurn, found := appmodel.TurnByID(rawThread, stringField(blocked, "turnId"))
-	blockedFinal, _ := blockedTurn["acceptedFinal"].(map[string]any)
-	securityContext, contextErr := domainsecurity.ParseTurnSecurityContext(blockedTurn["securityContext"])
-	if !found || contextErr != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(securityContext) ||
-		stringField(blockedFinal, "terminalReason") != "source_unavailable" {
-		t.Fatalf("mixed case assertion did not receive a source boundary: found=%t reason=%q err=%v",
-			found, stringField(blockedFinal, "terminalReason"), contextErr)
+	for _, prompt := range []string{
+		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2万元。",
+		"修改代码并写明当前案件张某与李某存在父子关系。",
+	} {
+		blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+			"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"prompt": prompt,
+			})), http.StatusAccepted)
+		if requests := providerClient.Requests(); len(requests) != 0 {
+			t.Fatalf("case assertion reached ordinary provider: prompt=%q requests=%d", prompt, len(requests))
+		}
+		rawThread, err := handler.store.GetThread(threadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedTurn, found := appmodel.TurnByID(rawThread, stringField(blocked, "turnId"))
+		blockedFinal, _ := blockedTurn["acceptedFinal"].(map[string]any)
+		securityContext, contextErr := domainsecurity.ParseTurnSecurityContext(blockedTurn["securityContext"])
+		if !found || contextErr != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(securityContext) ||
+			stringField(blockedFinal, "terminalReason") != "source_unavailable" {
+			t.Fatalf("mixed case assertion did not receive a source boundary: prompt=%q found=%t reason=%q err=%v",
+				prompt, found, stringField(blockedFinal, "terminalReason"), contextErr)
+		}
 	}
 	continued := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
 		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
@@ -510,7 +516,7 @@ func TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn(t *testin
 		!requests[0].PrivateProviderTelemetry.OrdinaryEffect {
 		t.Fatalf("independent ordinary DOM turn lost provider access: requests=%d", len(requests))
 	}
-	rawThread, err = handler.store.GetThread(threadID)
+	rawThread, err := handler.store.GetThread(threadID)
 	if err != nil {
 		t.Fatal(err)
 	}

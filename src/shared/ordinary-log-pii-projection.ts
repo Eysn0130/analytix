@@ -139,7 +139,8 @@ const UNBOUND_CASE_ASSERTION_PHRASES = [
   '串通投标', '围标',
   '行贿', '利益输送', '具备立案条件', '当前案件', '案件账户', '案件账号', '涉案'
 ]
-const UNBOUND_MONETARY_ACTION_CUES = ['支付', '转账', '收款', '付款', '汇入', '汇出']
+const UNBOUND_MONETARY_ACTION_CUES = ['支付', '转账', '收款', '付款', '汇入', '汇出', '取得']
+const UNBOUND_RELATIONSHIP_ASSERTION = /([\p{Script=Han}]{1,4})[与和]([\p{Script=Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系/gu
 
 type PublicPIITraversalState = {
   active: WeakSet<object>
@@ -192,12 +193,22 @@ export function containsUnboundCaseRiskV1(text: string): boolean {
   if (containsOrdinaryPublicPII(text)) return true
   const normalized = normalizeCaseFactText(text)
   if (UNBOUND_CASE_ASSERTION_PHRASES.some((phrase) => normalized.includes(phrase))) return true
+  if (containsUnboundRelationshipAssertionV1(normalized)) return true
   return text.split(/[。！？!?；;\n]/u).some((rawClause) => {
     const clause = normalizeCaseFactText(rawClause)
-    const acquiredAt = clause.indexOf('取得')
-    if (acquiredAt >= 0 && containsCurrencyAmount(clause.slice(acquiredAt + '取得'.length))) return true
     return UNBOUND_MONETARY_ACTION_CUES.some((cue) => actionHasAdjacentAmount(clause, cue))
   })
+}
+
+function containsUnboundRelationshipAssertionV1(normalized: string): boolean {
+  for (const match of normalized.matchAll(UNBOUND_RELATIONSHIP_ASSERTION)) {
+    if (!technicalRelationshipSubjectV1(match[1]) && !technicalRelationshipSubjectV1(match[2])) return true
+  }
+  return false
+}
+
+function technicalRelationshipSubjectV1(subject: string): boolean {
+  return ['元素', '节点', '组件', '模块', '对象'].some((term) => subject.includes(term))
 }
 
 function actionHasAdjacentAmount(clause: string, cue: string): boolean {
@@ -223,8 +234,8 @@ function actionHasAdjacentAmount(clause: string, cue: string): boolean {
 
 function amountHasCurrencyUnit(text: string): boolean {
   if (!/^[0-9]/u.test(text)) return false
-  const afterAmount = text.replace(/^[0-9][0-9,.]*/u, '').trimStart()
-  return /^(?:元|人民币|美元|欧元|英镑)/u.test(afterAmount)
+  const afterAmount = text.replace(/^[0-9][0-9,.]*/u, '').trimStart().replace(/^[十百千万亿]+/u, '')
+  return /^(?:元(?!件)|人民币|美元|欧元|英镑)/u.test(afterAmount)
 }
 
 function decodeASCIIJSONUnicodeEscapes(text: string): string {

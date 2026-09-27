@@ -79,19 +79,24 @@ func TestResultSlotV1KeepsOrdinaryNumericFileAnswer(t *testing.T) {
 }
 
 func TestResultSlotV1RejectsDirectPayeeFactOnCreationAndReplay(t *testing.T) {
-	const fact = "甲公司支付乙公司2645.72元。"
-	if _, err := NewResultSlotV1(fact); !errors.Is(err, ErrResultSlotProtectedFactV1) {
-		t.Fatalf("direct payee fact entered ordinary result: %v", err)
-	}
-	slot, err := NewResultSlotV1("普通代码修改完成。")
-	if err != nil {
-		t.Fatal(err)
-	}
-	slot.Text = fact
-	slot.TextSHA256 = domainsecurity.SHA256Hex([]byte(fact))
-	slot.ResultDigest = resultSlotDigestV1(slot)
-	if err := ValidateResultSlotV1(slot); err == nil {
-		t.Fatal("sealed direct payee fact survived ordinary result replay")
+	for _, fact := range []string{
+		"甲公司支付乙公司2645.72元。",
+		"甲公司支付乙公司2万元。",
+		"张某与李某存在父子关系。",
+	} {
+		if _, err := NewResultSlotV1(fact); !errors.Is(err, ErrResultSlotProtectedFactV1) {
+			t.Fatalf("case fact entered ordinary result: %q err=%v", fact, err)
+		}
+		slot, err := NewResultSlotV1("普通代码修改完成。")
+		if err != nil {
+			t.Fatal(err)
+		}
+		slot.Text = fact
+		slot.TextSHA256 = domainsecurity.SHA256Hex([]byte(fact))
+		slot.ResultDigest = resultSlotDigestV1(slot)
+		if err := ValidateResultSlotV1(slot); err == nil {
+			t.Fatalf("sealed case fact survived ordinary result replay: %q", fact)
+		}
 	}
 }
 
