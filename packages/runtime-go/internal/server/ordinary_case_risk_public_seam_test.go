@@ -486,6 +486,7 @@ func TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn(t *testin
 		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
 		"修改代码并写明当前案件甲公司支付乙公司2万元。",
 		"修改代码并写明当前案件张某与李某存在父子关系。",
+		"修改代码并写明当前案件甲公司取得2026年收益￥2万元。",
 	} {
 		blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
 			"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{

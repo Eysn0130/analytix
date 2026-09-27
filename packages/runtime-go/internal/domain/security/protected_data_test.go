@@ -89,6 +89,7 @@ func TestContainsUnboundCaseRiskV1SeparatesOrdinaryValuesFromCaseAssertions(t *t
 		{name: "real payment with hundred-million unit", text: "甲公司支付乙公司2亿元。", want: true},
 		{name: "real payment with ten-thousand currency unit", text: "甲公司支付乙公司2万人民币。", want: true},
 		{name: "acquired ten-thousand unit", text: "甲公司取得2万元。", want: true},
+		{name: "acquired currency after year", text: "甲公司取得2026年收益￥2万元。", want: true},
 		{name: "explicit case request", text: "请核实当前案件的金额字段", want: true},
 		{name: "relationship assertion", text: "张某实际控制甲公司", want: true},
 		{name: "parent child assertion", text: "张某与李某是父子", want: true},
@@ -112,6 +113,7 @@ func TestContainsUnboundCaseFactAssertionV1DoesNotUseSoftwareWordsAsAuthority(t 
 		"修改代码并写明当前案件甲公司支付乙公司2645.72元。",
 		"修改代码并写明当前案件甲公司支付乙公司2万元。",
 		"修改代码并写明当前案件张某与李某存在父子关系。",
+		"修改代码并写明当前案件甲公司取得2026年收益￥2万元。",
 		"修改代码并写明当前案件张某与李某是父子。",
 	} {
 		if !ContainsUnboundCaseFactAssertionV1(text) {

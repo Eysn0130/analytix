@@ -3941,7 +3941,8 @@ describe('tool presentation inference', () => {
     '甲公司支付给乙公司2645.72元。',
     '甲公司支付乙公司2645.72元。',
     '甲公司支付乙公司2万元。',
-    '张某与李某存在父子关系。'
+    '张某与李某存在父子关系。',
+    '甲公司取得2026年收益￥2万元。'
   ])('withholds a typed case assertion from renderer projection: %s', (text) => {
     expect(generalTerminalProjectionBatchFromRuntime(typedGeneralTerminalBatch(text))).toBeNull()
   })

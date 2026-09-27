@@ -83,6 +83,7 @@ func TestResultSlotV1RejectsDirectPayeeFactOnCreationAndReplay(t *testing.T) {
 		"甲公司支付乙公司2645.72元。",
 		"甲公司支付乙公司2万元。",
 		"张某与李某存在父子关系。",
+		"甲公司取得2026年收益￥2万元。",
 	} {
 		if _, err := NewResultSlotV1(fact); !errors.Is(err, ErrResultSlotProtectedFactV1) {
 			t.Fatalf("case fact entered ordinary result: %q err=%v", fact, err)

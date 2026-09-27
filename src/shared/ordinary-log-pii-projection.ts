@@ -196,6 +196,8 @@ export function containsUnboundCaseRiskV1(text: string): boolean {
   if (containsUnboundRelationshipAssertionV1(normalized)) return true
   return text.split(/[。！？!?；;\n]/u).some((rawClause) => {
     const clause = normalizeCaseFactText(rawClause)
+    const acquiredAt = clause.indexOf('取得')
+    if (acquiredAt >= 0 && containsCurrencyAmount(clause.slice(acquiredAt + '取得'.length))) return true
     return UNBOUND_MONETARY_ACTION_CUES.some((cue) => actionHasAdjacentAmount(clause, cue))
   })
 }

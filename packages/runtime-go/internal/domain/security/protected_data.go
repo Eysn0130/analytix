@@ -124,6 +124,9 @@ func containsUnboundMonetaryFactV1(text string) bool {
 		return strings.ContainsRune("。！？!?；;\n", character)
 	}) {
 		clause := normalizeCaseFactText(rawClause)
+		if index := strings.Index(clause, "取得"); index >= 0 && containsCurrencyAmount(clause[index+len("取得"):]) {
+			return true
+		}
 		for _, cue := range unboundMonetaryActionCues {
 			if actionHasAdjacentAmount(clause, cue) {
 				return true

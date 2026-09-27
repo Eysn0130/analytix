@@ -144,6 +144,7 @@ func TestIsolatedOrdinaryResultKeepsNumericFileAnswerInCaseThread(t *testing.T) 
 		"甲公司支付乙公司2645.72元。",
 		"甲公司支付乙公司2万元。",
 		"张某与李某存在父子关系。",
+		"甲公司取得2026年收益￥2万元。",
 		"6222021234567890123 与张某有关。",
 	} {
 		blocked, withheld, err := CompileIsolatedOrdinaryResultSlot(securityContext, candidate)
