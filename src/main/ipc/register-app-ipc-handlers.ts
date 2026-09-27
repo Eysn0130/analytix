@@ -296,6 +296,7 @@ type RegisterAppIpcHandlersOptions = {
   imChannelAccountLifecycle: ImChannelAccountLifecycle
   installedExtensionAccountLifecycle: InstalledExtensionAccountLifecycle
   providerOAuthAccountManagement: MainOAuthAccountAuthority
+  isProviderOAuthStartupReady: () => boolean
   resolveAnalytixConfigPath: () => string
   onAnalytixMcpConfigWritten?: (path: string, content: string) => Promise<void> | void
   showTurnCompleteNotification: (
@@ -1425,6 +1426,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     imChannelAccountLifecycle,
     installedExtensionAccountLifecycle,
     providerOAuthAccountManagement,
+    isProviderOAuthStartupReady,
     resolveAnalytixConfigPath,
     onAnalytixMcpConfigWritten,
     showTurnCompleteNotification,
@@ -1767,7 +1769,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   )
 
   const oauthAuthority = (event: IpcMainInvokeEvent): { webContentsId: number } | null =>
-    localDisplayRendererIsCurrent(event, getMainWindow)
+    isProviderOAuthStartupReady() && localDisplayRendererIsCurrent(event, getMainWindow)
       ? { webContentsId: event.sender.id }
       : null
   const oauthForbidden = () => ({

@@ -273,6 +273,7 @@ function registerOptions(overrides: Partial<Parameters<typeof import('./register
       replaceProviderSubscription: vi.fn(), revokeMcp: vi.fn(), deleteMcp: vi.fn(),
       revokeExtension: vi.fn(), deleteExtension: vi.fn(), handleNativeCallback: vi.fn()
     } as never,
+    isProviderOAuthStartupReady: () => true,
     resolveAnalytixConfigPath: () => '/tmp/analytix.json',
     showTurnCompleteNotification: vi.fn() as never,
     openThreadInNewWindow: vi.fn(),
@@ -487,6 +488,34 @@ describe('registerAppIpcHandlers', () => {
       phase: 'pending'
     })
     expect(JSON.stringify(result)).not.toMatch(/authorizationUrl|state|nonce|verifier|token|credentialRef/i)
+  })
+
+  it('keeps Provider OAuth IPC unavailable until startup recovery completes', async () => {
+    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+    const mainFrame = {}
+    const sender = { id: 41, mainFrame, isDestroyed: () => false }
+    const mainWindow = { isDestroyed: () => false, webContents: sender }
+    const beginProvider = vi.fn(async () => ({ ok: true as const }))
+    let ready = false
+
+    registerAppIpcHandlers(registerOptions({
+      getMainWindow: () => mainWindow as never,
+      providerOAuthAccountManagement: { beginProvider } as never,
+      isProviderOAuthStartupReady: () => ready
+    }))
+
+    const handler = handlers.get('provider-oauth:begin')
+    const event = { sender, senderFrame: mainFrame }
+    await expect(handler?.(event, { providerId: 'provider-a' })).resolves.toEqual({
+      ok: false,
+      code: 'forbidden',
+      message: 'OAuth account management is unavailable.'
+    })
+    expect(beginProvider).not.toHaveBeenCalled()
+
+    ready = true
+    await expect(handler?.(event, { providerId: 'provider-a' })).resolves.toEqual({ ok: true })
+    expect(beginProvider).toHaveBeenCalledWith({ providerId: 'provider-a' }, { webContentsId: 41 })
   })
 
   it('rejects invalid settings patches at the handler boundary', async () => {

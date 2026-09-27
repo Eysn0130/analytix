@@ -2121,19 +2121,26 @@ app.whenReady().then(async () => {
     await providerOAuthAccountManagement.handleNativeCallback(callbackUrl)
   })
   traceStartup('OAuth callback router:done')
-  await providerOAuthLifecycle.sweepAuthorizationStates().catch(() => {
-    publicConsoleWarn('provider-oauth', 'Protected OAuth authorization recovery remains pending.')
+  let providerOAuthStartupReady = false
+  void (async () => {
+    await providerOAuthLifecycle.sweepAuthorizationStates().catch(() => {
+      publicConsoleWarn('provider-oauth', 'Protected OAuth authorization recovery remains pending.')
+    })
+    traceStartup('OAuth authorization sweep:done')
+    const oauthRefreshScheduler = createProviderOAuthRefreshScheduler({
+      refreshInventory: (refreshWindowMs) =>
+        providerOAuthLifecycle.refreshExpiringAccounts(refreshWindowMs),
+      onError: () => {
+        publicConsoleWarn('provider-oauth', 'Protected OAuth refresh remains pending.')
+      }
+    })
+    providerOAuthRefreshScheduler = oauthRefreshScheduler
+    await oauthRefreshScheduler.start()
+    traceStartup('OAuth refresh scheduler:done')
+    providerOAuthStartupReady = true
+  })().catch(() => {
+    publicConsoleWarn('provider-oauth', 'Protected OAuth startup remains pending.')
   })
-  traceStartup('OAuth authorization sweep:done')
-  providerOAuthRefreshScheduler = createProviderOAuthRefreshScheduler({
-    refreshInventory: (refreshWindowMs) =>
-      providerOAuthLifecycle.refreshExpiringAccounts(refreshWindowMs),
-    onError: () => {
-      publicConsoleWarn('provider-oauth', 'Protected OAuth refresh remains pending.')
-    }
-  })
-  await providerOAuthRefreshScheduler.start()
-  traceStartup('OAuth refresh scheduler:done')
   configureWeixinBridgeAccountCredentialResolver(async (accountId) => {
     const settings = await store.load()
     const channels = settings.claw.channels.filter(
@@ -2462,6 +2469,7 @@ app.whenReady().then(async () => {
       }
     },
     providerOAuthAccountManagement,
+    isProviderOAuthStartupReady: () => providerOAuthStartupReady,
     resolveAnalytixConfigPath: () => resolveAnalytixMcpJsonPath(desktopStateHomeRoot),
     onAnalytixMcpConfigWritten: async () => {
       const settings = await store.load()
