@@ -71,7 +71,7 @@ func BeginCurrentTaskJobSteerAuthorityV1(
 		return TaskJobSteerAuthorization{}, "", errors.New("child frozen security authority is invalid")
 	}
 	lexicalCaseRisk := apploop.PromptRequiresCaseRiskAdmission(message.Text)
-	protectedCaseData := domainsecurity.ContainsProtectedCaseFactCandidate(message.Text)
+	protectedCaseData := domainsecurity.ContainsProtectedCaseData(message.Text)
 	effectBinding := controlapp.TaskJobSteerLogicalEffectBindingV1(
 		message.Text, frozen, childTurnStarted,
 		record.SecurityBinding.ParentCaseID != domainsecurity.UnboundCaseID,

@@ -128,6 +128,18 @@ const CASE_FACT_ASSERTION_PHRASES = [
   'mac地址', '设备标识', '设备指纹'
 ]
 const MONETARY_CASE_CUES = ['金额', '余额', '转账', '收款', '付款', '支付', '收入', '支出', '流水', '报价', '价款', '涉案']
+const UNBOUND_CASE_ASSERTION_PHRASES = [
+  '实际控制', '控制关系', '关联关系', '人员关系', '亲属', '配偶', '夫妻',
+  '是父子', '为父子', '系父子',
+  '是父女', '为父女', '系父女',
+  '是母子', '为母子', '系母子',
+  '是母女', '为母女', '系母女',
+  '是兄弟', '为兄弟', '系兄弟',
+  '是姐妹', '为姐妹', '系姐妹',
+  '串通投标', '围标',
+  '行贿', '利益输送', '具备立案条件', '当前案件', '案件账户', '案件账号', '涉案'
+]
+const UNBOUND_MONETARY_ACTION_CUES = ['支付', '转账', '收款', '付款', '汇入', '汇出']
 
 type PublicPIITraversalState = {
   active: WeakSet<object>
@@ -173,6 +185,46 @@ export function containsProtectedCaseFactCandidate(text: string): boolean {
   if (!/[0-9]/.test(normalized)) return false
   if (containsCurrencyAmount(normalized) || /人民币|美元|欧元|英镑/.test(normalized)) return true
   return MONETARY_CASE_CUES.some((phrase) => normalized.includes(phrase))
+}
+
+/** Mirrors the Go unbound ordinary-turn/result risk signal. Case authority is host-owned. */
+export function containsUnboundCaseRiskV1(text: string): boolean {
+  if (containsOrdinaryPublicPII(text)) return true
+  const normalized = normalizeCaseFactText(text)
+  if (UNBOUND_CASE_ASSERTION_PHRASES.some((phrase) => normalized.includes(phrase))) return true
+  return text.split(/[。！？!?；;\n]/u).some((rawClause) => {
+    const clause = normalizeCaseFactText(rawClause)
+    const acquiredAt = clause.indexOf('取得')
+    if (acquiredAt >= 0 && containsCurrencyAmount(clause.slice(acquiredAt + '取得'.length))) return true
+    return UNBOUND_MONETARY_ACTION_CUES.some((cue) => actionHasAdjacentAmount(clause, cue))
+  })
+}
+
+function actionHasAdjacentAmount(clause: string, cue: string): boolean {
+  let offset = 0
+  while (offset < clause.length) {
+    const index = clause.indexOf(cue, offset)
+    if (index < 0) return false
+    offset = index + cue.length
+    const rawTail = clause.slice(offset).trimStart().replace(/^了/u, '').trimStart()
+    const currencyPrefix = /^(?:人民币|￥|¥|\$|€|£)/u.test(rawTail)
+    const tail = rawTail.replace(/^(?:人民币|￥|¥|\$|€|£)/u, '').trimStart()
+    if (/^[0-9]/u.test(tail) && (currencyPrefix || amountHasCurrencyUnit(tail))) return true
+    // A bounded payee may follow directly or after 给/向; a bare count stays ordinary.
+    const payeeAndAmount = tail.replace(/^(?:给|向)/u, '').trim()
+    const digitIndex = payeeAndAmount.search(/[0-9]/u)
+    if (digitIndex > 0 && Array.from(payeeAndAmount.slice(0, digitIndex)).length <= 16) {
+      const beforeAmount = payeeAndAmount.slice(0, digitIndex).trim()
+      if (/[￥¥$€£]$/u.test(beforeAmount) || amountHasCurrencyUnit(payeeAndAmount.slice(digitIndex))) return true
+    }
+  }
+  return false
+}
+
+function amountHasCurrencyUnit(text: string): boolean {
+  if (!/^[0-9]/u.test(text)) return false
+  const afterAmount = text.replace(/^[0-9][0-9,.]*/u, '').trimStart()
+  return /^(?:元|人民币|美元|欧元|英镑)/u.test(afterAmount)
 }
 
 function decodeASCIIJSONUnicodeEscapes(text: string): string {

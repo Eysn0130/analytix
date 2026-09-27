@@ -34,11 +34,30 @@ func CompileOrdinaryResultSlot(
 	securityContext domainsecurity.TurnSecurityContext,
 	candidate string,
 ) (domainordinaryresult.ResultSlotV1, bool, error) {
+	return compileOrdinaryResultSlot(securityContext, candidate, false)
+}
+
+// CompileIsolatedOrdinaryResultSlot is only for a provider step whose current
+// input was built from the ordinary-only lane. The caller must prove that
+// provenance before calling; the thread's frozen case risk remains unchanged.
+func CompileIsolatedOrdinaryResultSlot(
+	securityContext domainsecurity.TurnSecurityContext,
+	candidate string,
+) (domainordinaryresult.ResultSlotV1, bool, error) {
+	return compileOrdinaryResultSlot(securityContext, candidate, true)
+}
+
+func compileOrdinaryResultSlot(
+	securityContext domainsecurity.TurnSecurityContext,
+	candidate string,
+	isolatedOrdinaryInput bool,
+) (domainordinaryresult.ResultSlotV1, bool, error) {
 	if domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(securityContext) != nil {
 		return domainordinaryresult.ResultSlotV1{}, false, errors.New("ordinary output publication authority is invalid")
 	}
 	if domainsecurity.TurnSecurityContextIsCaseSensitive(securityContext) &&
-		domainsecurity.ContainsProtectedCaseFactCandidate(candidate) {
+		(domainsecurity.ContainsProtectedCaseData(candidate) ||
+			(!isolatedOrdinaryInput && domainsecurity.ContainsProtectedCaseFactCandidate(candidate))) {
 		fallback, fallbackErr := domainordinaryresult.NewHostFixedResultSlotV1(GeneralCaseFactCandidateBlockedText)
 		if fallbackErr != nil {
 			return domainordinaryresult.ResultSlotV1{}, false, fallbackErr

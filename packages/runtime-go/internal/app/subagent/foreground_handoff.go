@@ -176,7 +176,7 @@ func (registry *ForegroundSubmissionRegistry) Submit(
 	if err != nil {
 		return nil, errors.New("foreground child submission contains private reasoning")
 	}
-	if domainsecurity.ContainsProtectedCaseFactCandidate(public) {
+	if domainsecurity.ContainsUnboundCaseRiskV1(public) {
 		return nil, errors.New("foreground child submission contains a protected case fact candidate")
 	}
 	projected := strings.TrimSpace(domainordinary.ProjectTextV1(public))
@@ -773,7 +773,7 @@ func (capability *ForegroundParentResultCapabilityV1) OpenForParent(
 		foregroundHandoffString(output["submissionDigest"]) != capability.receipt.SubmissionDigest ||
 		foregroundHandoffString(output["privacyProjectionDigest"]) != capability.receipt.PrivacyProjectionDigest ||
 		domainsecurity.SHA256Hex([]byte(result)) != capability.receipt.PrivacyProjectionDigest ||
-		domainsecurity.ContainsProtectedCaseFactCandidate(result) {
+		domainsecurity.ContainsUnboundCaseRiskV1(result) {
 		return "", false
 	}
 	public, err := domainevent.FilterPublicText(result)

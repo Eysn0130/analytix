@@ -108,7 +108,7 @@ func PrepareInitialProviderMessagesV1(input InitialProviderMessagesInputV1) Init
 	}
 	currentPromptOrdinaryOnly := !input.CaseSensitive ||
 		(!PromptRequiresCaseRiskAdmission(input.UserPrompt) &&
-			!domainsecurity.ContainsProtectedCaseFactCandidate(input.UserPrompt))
+			!domainsecurity.ContainsUnboundCaseRiskV1(input.UserPrompt))
 	return InitialProviderMessagesV1{
 		BaseSystemPrompt:            baseSystemPrompt,
 		SystemPrompt:                systemPrompt,

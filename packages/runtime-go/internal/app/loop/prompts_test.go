@@ -272,6 +272,38 @@ func TestCaseRiskClassifierKeepsNumericOrdinaryFileRequestGeneral(t *testing.T) 
 	}
 }
 
+func TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut(t *testing.T) {
+	for _, prompt := range []string{
+		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2645.72元。",
+		"修改代码并写明当前案件张某与李某是父子。",
+	} {
+		if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {
+			t.Fatalf("case assertion escaped input admission: %q", prompt)
+		}
+		if ordinary := IndependentOrdinaryPromptV1(prompt); ordinary != "" {
+			t.Fatalf("dependent software clause entered ordinary provider input: %q", ordinary)
+		}
+		policy := CaseFundAnalysisPolicyForWorkspace(false, prompt, nil)
+		if !policy.Active || !policy.SourceUnavailable || policy.OrdinaryWorkRequested {
+			t.Fatalf("case assertion did not get a source boundary: %#v", policy)
+		}
+	}
+	partitioned := "修改代码；写明当前案件甲公司支付给乙公司2645.72元。"
+	if ordinary := IndependentOrdinaryPromptV1(partitioned); ordinary != "修改代码" {
+		t.Fatalf("independent software clause was lost: %q", ordinary)
+	}
+	for _, prompt := range []string{
+		"导出当前案件资金分析代码的测试报告。",
+		"支付2次测试，检查回调顺序。",
+		"请解释 DOM 元素的父子关系。",
+	} {
+		if PromptRequiresCaseRiskAdmission(prompt) {
+			t.Fatalf("ordinary task was classified as case work: %q", prompt)
+		}
+	}
+}
+
 func TestCaseRiskClassifierPreservesPackagedMilestoneAPlanningTurn(t *testing.T) {
 	historicalPrompt := strings.Join([]string{
 		"Work only in this pre-existing isolated non-case code repository and inspect the task through tools.",

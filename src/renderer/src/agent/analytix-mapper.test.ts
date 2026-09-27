@@ -3927,6 +3927,24 @@ describe('tool presentation inference', () => {
   })
 
   it.each([
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+    '请解释 DOM 元素的父子关系。'
+  ])('projects an ordinary answer without case fact authority: %s', async (answer) => {
+    const batch = typedGeneralTerminalBatch(answer)
+    expect(generalTerminalProjectionBatchFromRuntime(batch)).toMatchObject({
+      terminalItem: { kind: 'assistant', text: answer }
+    })
+  })
+
+  it.each([
+    '张某与李某是父子。',
+    '甲公司支付给乙公司2645.72元。',
+    '甲公司支付乙公司2645.72元。'
+  ])('withholds a typed case assertion from renderer projection: %s', (text) => {
+    expect(generalTerminalProjectionBatchFromRuntime(typedGeneralTerminalBatch(text))).toBeNull()
+  })
+
+  it.each([
     ['fabricated amount', '该案涉案金额为 2,645,472 元。'],
     ['fabricated account', '资金已流入银行账号 6222020200001234567。']
   ])('rejects general terminal renderer projection containing %s', async (_label, text) => {

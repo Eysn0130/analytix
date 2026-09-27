@@ -258,6 +258,27 @@ describe('verifiedGeneralTerminalDeliveryBatchV1', () => {
   })
 
   it.each([
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+    '请解释 DOM 元素的父子关系。'
+  ])('keeps an ordinary answer across the sealed Main boundary: %s', (answer) => {
+    const batch = typedFixture(answer)
+    expect(verifiedGeneralTerminalDeliveryBatchV1(batch)?.events[0]).toMatchObject({
+      item: { text: answer, ordinaryResult: { text: answer, candidateOrigin: 'provider_ordinary_only' } }
+    })
+  })
+
+  it.each([
+    '张某与李某是父子。',
+    '甲公司支付给乙公司2645.72元。',
+    '甲公司支付乙公司2645.72元。'
+  ])('rejects a sealed ordinary result containing a case assertion: %s', (text) => {
+    expect(generalTerminalDeliveryBatchVerificationV1(typedFixture(text))).toEqual({
+      verified: null,
+      reason: 'general_terminal_batch_ordinary_result_invalid'
+    })
+  })
+
+  it.each([
     ['ordinary PII', () => typedFixture('Read http://127.0.0.1:8899 for the result.'),
       'general_terminal_batch_ordinary_pii'],
     ['private reasoning', () => {

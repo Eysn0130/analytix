@@ -67,6 +67,34 @@ func TestResultSlotV1RejectsCaseFactsAndInternalReferences(t *testing.T) {
 	}
 }
 
+func TestResultSlotV1KeepsOrdinaryNumericFileAnswer(t *testing.T) {
+	answer := "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。"
+	slot, err := NewResultSlotV1(answer)
+	if err != nil || slot.Text != answer {
+		t.Fatalf("ordinary numeric answer was withheld: %#v err=%v", slot, err)
+	}
+	if err := ValidateResultSlotV1(slot); err != nil {
+		t.Fatalf("ordinary numeric answer failed replay validation: %v", err)
+	}
+}
+
+func TestResultSlotV1RejectsDirectPayeeFactOnCreationAndReplay(t *testing.T) {
+	const fact = "甲公司支付乙公司2645.72元。"
+	if _, err := NewResultSlotV1(fact); !errors.Is(err, ErrResultSlotProtectedFactV1) {
+		t.Fatalf("direct payee fact entered ordinary result: %v", err)
+	}
+	slot, err := NewResultSlotV1("普通代码修改完成。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot.Text = fact
+	slot.TextSHA256 = domainsecurity.SHA256Hex([]byte(fact))
+	slot.ResultDigest = resultSlotDigestV1(slot)
+	if err := ValidateResultSlotV1(slot); err == nil {
+		t.Fatal("sealed direct payee fact survived ordinary result replay")
+	}
+}
+
 func TestHostFixedResultSlotRejectsArbitraryText(t *testing.T) {
 	if _, err := NewHostFixedResultSlotV1("arbitrary provider prose"); err == nil {
 		t.Fatal("arbitrary prose was relabeled as host fixed")

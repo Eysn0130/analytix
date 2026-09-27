@@ -260,6 +260,30 @@ describe('public runtime SSE boundary', () => {
     }
   })
 
+  it.each([
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+    '请解释 DOM 元素的父子关系。'
+  ])('admits a typed ordinary answer in a public SSE batch: %s', (answer) => {
+    const batch = typedGeneralTerminalBatch(answer)
+    expect(projectPublicRuntimeSseBlock(
+      frame(String(batch.seq), 'general_terminal_batch', batch),
+      'thread-strict', new PublicRuntimeEventFilter()
+    )).toEqual({ status: 'emit', seq: 13, event: batch })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'stream-strict', events: [batch] })).toBe(true)
+  })
+
+  it.each([
+    '张某与李某是父子。',
+    '甲公司支付给乙公司2645.72元。',
+    '甲公司支付乙公司2645.72元。'
+  ])('withholds a typed case assertion from public SSE: %s', (text) => {
+    const batch = typedGeneralTerminalBatch(text)
+    expect(projectPublicRuntimeSseBlock(
+      frame(String(batch.seq), 'general_terminal_batch', batch),
+      'thread-strict', new PublicRuntimeEventFilter()
+    )).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+  })
+
   it.each(['approval_denied', 'input_cancelled'])('admits canonical completed %s boundary failure', (reason) => {
     const batch = generalTerminalBatch()
     const terminal = (batch.events as Array<Record<string, unknown>>)[2]

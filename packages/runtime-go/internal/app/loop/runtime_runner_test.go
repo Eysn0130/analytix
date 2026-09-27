@@ -2180,13 +2180,14 @@ func TestRuntimeRunnerDynamicFundsDowngradePauseRetainsSourceBoundaryAcrossResum
 
 func TestRuntimeRunnerOrdinarySteerRemovesProtectedToolPair(t *testing.T) {
 	workspace := t.TempDir()
+	const ordinaryNumericAnswer = "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。"
 	securityContext := newLoopCaseContextV2(t, "thread-ordinary-projection", "turn-ordinary-projection", workspace, "case-ordinary-projection")
 	protectedCall := domainmodel.ToolCall{
 		ID: "funds-call", Name: "mcp__analytix_funds__analyze_account_flow", Arguments: []byte(`{"entity":"entity_ref"}`),
 	}
 	provider := &providerStreamStub{responses: []providerStreamResponse{
 		{callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "funds draft"}}},
-		{callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "ordinary final"}}},
+		{callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: ordinaryNumericAnswer}}},
 	}}
 	deps := runtimeRunnerTestDependencies(provider, &runtimeLoopEventRecorderStub{})
 	promotions := 0
@@ -2212,7 +2213,8 @@ func TestRuntimeRunnerOrdinarySteerRemovesProtectedToolPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.requests) != 2 || result.AssistantText != "ordinary final" {
+	if len(provider.requests) != 2 || result.AssistantText != ordinaryNumericAnswer ||
+		result.OrdinaryResult == nil || result.OrdinaryResult.Text != ordinaryNumericAnswer {
 		t.Fatalf("ordinary projection sequence mismatch: calls=%d result=%#v", len(provider.requests), result)
 	}
 	if provider.requests[0].PrivateProviderTelemetry == nil || provider.requests[0].PrivateProviderTelemetry.OrdinaryEffect {

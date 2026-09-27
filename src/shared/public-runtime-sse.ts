@@ -21,7 +21,7 @@ import {
 } from '../../packages/runtime/src/contracts/items.js'
 import {
   containsInternalCaseEntityReference,
-  containsProtectedCaseFactCandidate
+  containsUnboundCaseRiskV1
 } from './ordinary-log-pii-projection'
 
 export type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
@@ -1236,7 +1236,7 @@ function isClosedGeneralTerminalDeliveryBatch(event: Record<string, unknown>): b
       const item = isRecord(nested.item) ? nested.item : null
       if (!item) return false
       if (item.kind === 'assistant_text' && isRecord(item.ordinaryResult) &&
-          (typeof item.text !== 'string' || containsProtectedCaseFactCandidate(item.text))) return false
+          (typeof item.text !== 'string' || containsUnboundCaseRiskV1(item.text))) return false
       if (item.kind === 'error' && (!isClosedHostError(item.code, item.message) ||
           (item.details !== undefined && !isClosedGeneralTerminalErrorDetails(item.details)))) return false
     }

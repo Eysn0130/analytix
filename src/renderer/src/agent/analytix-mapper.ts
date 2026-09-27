@@ -35,7 +35,7 @@ import {
 import { redactSecrets, redactSecretText } from '@shared/secret-redaction'
 import {
   containsInternalCaseEntityReference,
-  containsProtectedCaseFactCandidate,
+  containsUnboundCaseRiskV1,
   projectOrdinaryPublicText
 } from '@shared/ordinary-log-pii-projection'
 import { sanitizePublicSerializedText } from '@shared/public-runtime-content'
@@ -2203,7 +2203,7 @@ export function generalTerminalProjectionBatchFromRuntime(
     const itemEvent = batch.events[0]
     if (itemEvent.kind !== 'item_completed') return null
     if (itemEvent.item.kind === 'assistant_text' && 'ordinaryResult' in itemEvent.item &&
-        containsProtectedCaseFactCandidate(itemEvent.item.text)) return null
+        containsUnboundCaseRiskV1(itemEvent.item.text)) return null
     const projected = chatBlockFromItem(itemEvent.item as CoreTurnItemJson)
     if (!projected || (projected.kind !== 'assistant' && projected.kind !== 'system')) return null
     terminalItem = projected

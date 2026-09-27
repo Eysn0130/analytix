@@ -108,7 +108,7 @@ func CaseFundAnalysisPolicyForWorkspace(hasCaseBinding bool, prompt string, tool
 	// treating such a prompt as a mixed request.
 	if PromptLooksLikeLocalFilesystemTask(prompt) &&
 		!PromptExplicitlyRequestsCaseFundAnalysis(prompt) &&
-		!domainsecurity.ContainsProtectedCaseFactCandidate(prompt) &&
+		!domainsecurity.ContainsUnboundCaseRiskV1(prompt) &&
 		!containsAnyFold(prompt, []string{"当前案件", "案件账户", "案件账号", "current case", "current-case"}) {
 		return CaseFundAnalysisPolicy{}
 	}
@@ -256,7 +256,7 @@ func caseRiskFileReferenceV1(value string) bool {
 	if caseReferenceLooksLikeSourceCodeV1(body) {
 		return false
 	}
-	if domainsecurity.ContainsProtectedCaseFactCandidate(body) {
+	if domainsecurity.ContainsUnboundCaseRiskV1(body) {
 		return true
 	}
 	normalized := strings.NewReplacer("_", " ", "-", " ").Replace(body)
@@ -584,10 +584,11 @@ func PromptRequiresCaseRiskAdmission(prompt string) bool {
 		return true
 	}
 	explicitFundsRequest := PromptExplicitlyRequestsCaseFundAnalysis(body)
-	if promptContainsOnlySoftwareWorkV1(body) && !explicitFundsRequest {
+	if promptContainsOnlySoftwareWorkV1(body) && !explicitFundsRequest &&
+		!domainsecurity.ContainsUnboundCaseFactAssertionV1(body) {
 		return false
 	}
-	if domainsecurity.ContainsProtectedCaseFactCandidate(body) {
+	if domainsecurity.ContainsUnboundCaseRiskV1(body) {
 		return true
 	}
 	if explicitFundsRequest || PromptLooksLikeCaseFundAnalysis(body) {
@@ -823,7 +824,7 @@ func independentOrdinaryPromptV1(prompt string, rejectFileReferenceDependence bo
 			promptDependsOnProtectedResultV1(fragment) ||
 			PromptLooksLikeBoundCaseFundFollowupV1(fragment) ||
 			PromptRequiresCaseRiskAdmission(fragment) ||
-			domainsecurity.ContainsProtectedCaseFactCandidate(fragment) {
+			domainsecurity.ContainsUnboundCaseRiskV1(fragment) {
 			continue
 		}
 		if promptProhibitsOrdinaryWorkV1(fragment) {
@@ -909,7 +910,7 @@ func PromptExplicitlyRequestsCaseFundAnalysis(prompt string) bool {
 		return false
 	}
 	if promptLooksLikeSoftwareWorkV1(body) &&
-		!domainsecurity.ContainsProtectedCaseFactCandidate(body) &&
+		!domainsecurity.ContainsUnboundCaseRiskV1(body) &&
 		!containsAnyFold(body, []string{"当前案件", "案件账户", "案件账号", "current case", "current-case"}) {
 		return false
 	}

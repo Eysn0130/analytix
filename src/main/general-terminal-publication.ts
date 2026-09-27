@@ -7,7 +7,7 @@ import type { OrdinaryResultSlotV1 } from '../../packages/runtime/src/contracts/
 import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
-  containsProtectedCaseFactCandidate
+  containsUnboundCaseRiskV1
 } from '../shared/ordinary-log-pii-projection.js'
 import { containsPrivateReasoningContent } from '../shared/public-runtime-content.js'
 import { containsRestrictedEvidence } from '../shared/restricted-evidence-projection.js'
@@ -166,7 +166,7 @@ function ordinaryResultDigestJSON(slot: OrdinaryResultSlotV1): string {
 
 export function validOrdinaryResultSlotV1(slot: OrdinaryResultSlotV1): boolean {
   if (!isExactGoText(slot.text) || containsInternalCaseEntityReference(slot.text) ||
-      containsProtectedCaseFactCandidate(slot.text)) return false
+      containsUnboundCaseRiskV1(slot.text)) return false
   if (createHash('sha256').update(slot.text, 'utf8').digest('hex') !== slot.textSha256) return false
   return sha256Domain(ORDINARY_RESULT_DIGEST_DOMAIN, ordinaryResultDigestJSON(slot)) === slot.resultDigest
 }

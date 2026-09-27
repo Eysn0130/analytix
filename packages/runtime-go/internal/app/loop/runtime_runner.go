@@ -463,7 +463,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		if domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(input.SecurityContext) != nil {
 			return nil, nil
 		}
-		slot, _, err := appturn.CompileOrdinaryResultSlot(input.SecurityContext, candidateText)
+		slot, _, err := appturn.CompileIsolatedOrdinaryResultSlot(input.SecurityContext, candidateText)
 		if err != nil {
 			return nil, err
 		}
@@ -1612,7 +1612,7 @@ func runtimeOrdinarySteeringPrefixV1(
 		}
 		text := strings.TrimSpace(message.Content)
 		if inputClass == RuntimeCandidateInputClassOrdinaryOnly {
-			slot, _, err := appturn.CompileOrdinaryResultSlot(securityContext, text)
+			slot, _, err := appturn.CompileIsolatedOrdinaryResultSlot(securityContext, text)
 			if err == nil {
 				message.Content = slot.Text
 				projected = append(projected, message)

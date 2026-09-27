@@ -104,7 +104,7 @@ func newResultSlotV1(candidate, origin string) (ResultSlotV1, error) {
 		domainrestrictedevidence.ValidateCanonicalText(text) != nil {
 		return ResultSlotV1{}, ErrResultSlotProjectionV1
 	}
-	if domainsecurity.ContainsProtectedCaseFactCandidate(text) {
+	if domainsecurity.ContainsUnboundCaseRiskV1(text) {
 		return ResultSlotV1{}, ErrResultSlotProtectedFactV1
 	}
 	if domaincaseentity.ContainsInternalReferenceV1(text) {
@@ -143,7 +143,7 @@ func ValidateResultSlotV1(slot ResultSlotV1) error {
 	if err != nil || filtered.PublicText != slot.Text || domainordinaryprojection.ProjectIdentityTextV1(slot.Text) != slot.Text ||
 		domainprivacy.ValidateOrdinaryText(slot.Text) != nil || domainsecret.ValidateValueV1(slot.Text) != nil ||
 		domainrestrictedevidence.ValidateCanonicalText(slot.Text) != nil ||
-		domainsecurity.ContainsProtectedCaseFactCandidate(slot.Text) || domaincaseentity.ContainsInternalReferenceV1(slot.Text) {
+		domainsecurity.ContainsUnboundCaseRiskV1(slot.Text) || domaincaseentity.ContainsInternalReferenceV1(slot.Text) {
 		return ErrResultSlotProjectionV1
 	}
 	return nil

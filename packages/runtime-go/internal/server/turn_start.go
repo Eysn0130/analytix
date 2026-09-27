@@ -170,7 +170,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 	securityAuthority.RiskIntent = request.RiskIntent
 	caseAdmissionText := apploop.CaseAdmissionTextV1(request.Prompt, request.DisplayText, request.FileReferences)
 	securityAuthority.LexicalCaseRisk = queuedLexicalCaseRisk || apploop.PromptRequiresCaseRiskAdmission(caseAdmissionText)
-	securityAuthority.ProtectedCaseData = queuedProtectedCaseData || domainsecurity.ContainsProtectedCaseFactCandidate(caseAdmissionText)
+	securityAuthority.ProtectedCaseData = queuedProtectedCaseData || domainsecurity.ContainsProtectedCaseData(caseAdmissionText)
 	securityAuthority.TrustedCaseThread = h.caseThreads != nil && h.caseThreads.IsCaseThread(threadID)
 	attachmentCarriesCaseBinding, err := h.runtimeAttachmentPipeline().Planner.PreflightCaseRisk(
 		turnContext,
@@ -527,7 +527,7 @@ func runtimeTaskJobQueuedSteerRiskSignals(authority *turnstartapp.ChildTransitio
 			continue
 		}
 		lexicalCaseRisk = lexicalCaseRisk || apploop.PromptRequiresCaseRiskAdmission(message.Text)
-		protectedCaseData = protectedCaseData || domainsecurity.ContainsProtectedCaseFactCandidate(message.Text)
+		protectedCaseData = protectedCaseData || domainsecurity.ContainsProtectedCaseData(message.Text)
 	}
 	return lexicalCaseRisk, protectedCaseData
 }

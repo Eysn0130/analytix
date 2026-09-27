@@ -89,7 +89,7 @@ func (s *InlineCompletionService) Complete(ctx context.Context, request apploop.
 	// The normal turn start raises risk for these admission signals before its
 	// source-boundary policy runs. An auxiliary producer cannot commit that
 	// transition, so it must refuse rather than silently freeze general risk.
-	if apploop.PromptRequiresCaseRiskAdmission(prompt) || domainsecurity.ContainsProtectedCaseFactCandidate(prompt) {
+	if apploop.PromptRequiresCaseRiskAdmission(prompt) || domainsecurity.ContainsUnboundCaseRiskV1(prompt) {
 		return result, apploop.ErrInlineCompletionUnavailable
 	}
 	policy := apploop.CaseFundAnalysisPolicyForWorkspace(false, prompt, nil)

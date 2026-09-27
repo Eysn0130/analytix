@@ -15,7 +15,7 @@ import { containsRestrictedEvidence } from './restricted-evidence-projection'
 import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
-  containsProtectedCaseFactCandidate
+  containsUnboundCaseRiskV1
 } from './ordinary-log-pii-projection'
 import { containsSecretMaterial } from './secret-redaction'
 
@@ -567,7 +567,7 @@ export class PublicRuntimeEventFilter {
           containsInternalCaseEntityReference(payload)) return null
       const itemEvent = parsed.data.events.length === 3 ? parsed.data.events[0] : undefined
       if (itemEvent?.kind === 'item_completed' && itemEvent.item.kind === 'assistant_text' &&
-          'ordinaryResult' in itemEvent.item && containsProtectedCaseFactCandidate(itemEvent.item.text)) return null
+          'ordinaryResult' in itemEvent.item && containsUnboundCaseRiskV1(itemEvent.item.text)) return null
       return payload
     }
 

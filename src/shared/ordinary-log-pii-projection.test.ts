@@ -4,6 +4,7 @@ import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
   containsProtectedCaseFactCandidate,
+  containsUnboundCaseRiskV1,
   projectOrdinaryLogPII,
   projectOrdinaryPublicText
 } from './ordinary-log-pii-projection'
@@ -26,6 +27,37 @@ function canonicalDigits(value: string): string {
 }
 
 describe('ordinary log PII projection', () => {
+  it('separates ordinary numeric file results from case assertions', () => {
+    for (const text of [
+      '请实际读取工作区相对路径「2026年资料/表单 42.txt」的内容，只列出文件中的日期、数量、金额和参考编号；不要猜测。标记 N04-QA-107d-ordinary。',
+      '请读取「表单 42.txt」，列出金额。',
+      '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+      '金额：￥1234.56',
+      '取得版本2.0的说明文件',
+      '解释 DOM 父子节点和兄弟节点的遍历',
+      '支付模块新增 3 个测试',
+      '支付2次测试，检查回调顺序',
+      '支付给测试模块 3 个元件',
+      '为两位姐妹写旅行计划',
+      '解释 DOM 父子节点关系',
+      '请解释 DOM 元素的父子关系。'
+    ]) expect(containsUnboundCaseRiskV1(text)).toBe(false)
+    for (const text of [
+      '甲公司支付2645.72元，见doc/a.txt',
+      '甲公司支付了 2645.72 元',
+      '甲公司支付￥2645.72',
+      '甲公司支付给乙公司2645.72元',
+      '甲公司支付乙公司2645.72元。',
+      '甲公司取得￥2645.72，见doc/a.txt',
+      '请核实当前案件的金额字段',
+      '张某实际控制甲公司',
+      '张某与李某是父子',
+      '张某与李某为姐妹',
+      '请查询电话 13800138000'
+    ]) expect(containsUnboundCaseRiskV1(text)).toBe(true)
+    expect(containsProtectedCaseFactCandidate('金额：￥1234.56')).toBe(true)
+  })
+
   it('projects after long incomplete escaped mentions without backtracking', () => {
     const incomplete = '$[](' + String.raw`\!`.repeat(5000)
     expect(projectOrdinaryLogPII(`${incomplete}\n/Users/private-owner/source.csv`)).toBe(`${incomplete}\n[PRIVATE_PATH]`)

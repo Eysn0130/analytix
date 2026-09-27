@@ -19573,7 +19573,7 @@ func assertRuntimeServerTypedOrdinaryTerminal(
 	if slot.Text != expectedText || stringField(item, "text") != expectedText || slot.CandidateOrigin != expectedOrigin {
 		t.Fatalf("turn %s terminal ordinary result mismatch: slot=%#v item=%#v", turnID, slot, item)
 	}
-	if domainsecurity.ContainsProtectedCaseFactCandidate(slot.Text) {
+	if domainsecurity.ContainsUnboundCaseRiskV1(slot.Text) {
 		t.Fatalf("turn %s terminal ordinary result retained protected case or PII text: %#v", turnID, slot)
 	}
 	if strings.Contains(replay, "event: assistant_text_delta") {
