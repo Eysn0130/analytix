@@ -258,6 +258,20 @@ func TestCaseRiskClassifierPreservesOrdinaryWritingSkillsAndMCP(t *testing.T) {
 	}
 }
 
+func TestCaseRiskClassifierKeepsNumericOrdinaryFileRequestGeneral(t *testing.T) {
+	prompt := "请实际读取工作区相对路径「2026年资料/表单 42.txt」的内容，只列出文件中的日期、数量、金额和参考编号；不要猜测。标记 N04-QA-107d-ordinary。"
+	if PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {
+		t.Fatal("ordinary file path digits were promoted into a case fact")
+	}
+	if policy := CaseFundAnalysisPolicyForWorkspace(false, prompt, nil); policy.Active {
+		t.Fatalf("ordinary file request activated a case capability: %#v", policy)
+	}
+	casePrompt := prompt + " 当前案件的交易金额是2645472.00元，请核实。"
+	if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(casePrompt, casePrompt, nil)) {
+		t.Fatal("a concrete case fact in the same file request was not blocked")
+	}
+}
+
 func TestCaseRiskClassifierPreservesPackagedMilestoneAPlanningTurn(t *testing.T) {
 	historicalPrompt := strings.Join([]string{
 		"Work only in this pre-existing isolated non-case code repository and inspect the task through tools.",

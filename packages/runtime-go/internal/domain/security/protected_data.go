@@ -1,6 +1,7 @@
 package security
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -17,7 +18,13 @@ var caseFactAssertionPhrases = []string{
 
 var monetaryCaseCues = []string{
 	"金额", "余额", "转账", "收款", "付款", "支付", "收入", "支出", "流水", "报价", "价款", "涉案",
+	"人民币", "美元", "欧元", "英镑",
 }
+
+// Path digits are identifiers, not a value of another field requested in the
+// same sentence. This is only for the lexical fact-shape signal: structured
+// restricted values above are still checked against the original text.
+var caseFactFilePath = regexp.MustCompile(`[^[:space:]「」“”‘’"']+[/\\][^[:space:]「」“”‘’"']+(?:[ \t]+[^[:space:]「」“”‘’"']+)?\.[A-Za-z0-9]{1,10}`)
 
 // ContainsProtectedCaseData detects structured values whose publication must
 // never depend on a model or a lexical case-intent guess. It is deliberately a
@@ -43,11 +50,18 @@ func ContainsProtectedCaseFactCandidate(text string) bool {
 	if !containsDecimalDigit(normalized) {
 		return false
 	}
-	if containsCurrencyAmount(normalized) || strings.Contains(normalized, "人民币") ||
-		strings.Contains(normalized, "美元") || strings.Contains(normalized, "欧元") || strings.Contains(normalized, "英镑") {
+	if containsCurrencyAmount(normalized) {
 		return true
 	}
-	return containsAnyCaseFactPhrase(normalized, monetaryCaseCues)
+	for _, clause := range strings.FieldsFunc(normalized, func(character rune) bool {
+		return strings.ContainsRune("。！？!?；;\n", character)
+	}) {
+		withoutPaths := caseFactFilePath.ReplaceAllString(clause, " ")
+		if containsDecimalDigit(withoutPaths) && containsAnyCaseFactPhrase(withoutPaths, monetaryCaseCues) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsCurrencyAmount(text string) bool {
