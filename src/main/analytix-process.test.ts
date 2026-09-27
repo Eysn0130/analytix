@@ -1,5 +1,6 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { createServer, type AddressInfo } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -626,6 +627,43 @@ describe('reclaimAnalytixPort', () => {
       await expect(module.reclaimAnalytixPort(resolved.port)).resolves.toEqual({ ok: true })
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('does not terminate a live sibling Analytix runtime on the preferred port', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const runtimePath = join(tempRoot, 'analytix', 'runtime-server')
+    mkdirSync(dirname(runtimePath), { recursive: true })
+    writeFileSync(runtimePath, [
+      '#!/usr/bin/env node',
+      "const server = require('node:net').createServer()",
+      "server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address().port) + '\\n'))"
+    ].join('\n'))
+    chmodSync(runtimePath, 0o700)
+    const sibling = spawn(runtimePath, [
+      '--addr', '127.0.0.1:0', '--runtime-token', 'synthetic-token',
+      '--durable-root', join(tempRoot, 'analytix', 'sibling')
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    try {
+      const preferredPort = await new Promise<number>((resolve, reject) => {
+        sibling.once('error', reject)
+        sibling.once('exit', (code) => reject(new Error(`sibling runtime exited: ${code}`)))
+        sibling.stdout?.once('data', (chunk: Buffer) => resolve(Number(String(chunk).trim())))
+      })
+      expect(preferredPort).toBeGreaterThan(0)
+      const module = await import('./analytix-process')
+
+      await expect(module.reclaimAnalytixPort(preferredPort)).resolves.toEqual({
+        ok: false, message: `port ${preferredPort} is in use`
+      })
+
+      const resolved = await module.resolveAvailableAnalytixPort(preferredPort)
+
+      expect(resolved).toMatchObject({ changed: true, message: `port ${preferredPort} is in use` })
+      expect(resolved.port).not.toBe(preferredPort)
+      expect(sibling.exitCode).toBeNull()
+    } finally {
+      sibling.kill('SIGTERM')
     }
   })
 })

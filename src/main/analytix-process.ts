@@ -1926,9 +1926,9 @@ export async function resolveAvailableAnalytixPort(
  * like our serve entry are touched; anything else keeps the port and we
  * fall back to allocating a different one.
  *
- * Safe by construction on every platform: any failure to positively
- * identify the holder as our own serve-entry leaves it untouched and the
- * caller allocates a different port instead.
+ * A matching command is not enough to establish staleness: another live
+ * Analytix app may own that child. Reclaim only an orphan. If parent ownership
+ * cannot be established, leave the listener alone and use a fallback port.
  */
 async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
   const pids = await listListeningPidsOnPort(port)
@@ -1940,7 +1940,7 @@ async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
     } catch {
       continue
     }
-    if (!commandLooksLikeStaleAnalytixRuntime(command)) continue
+    if (!commandLooksLikeStaleAnalytixRuntime(command) || !(await isOrphanedRuntime(pid))) continue
     void appendManagedChildLogRecord({
       code: 'ANALYTIX_STALE_CHILD_TERMINATION',
       port
@@ -1948,6 +1948,29 @@ async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
     if (await terminateStalePid(pid)) reclaimed = true
   }
   return reclaimed
+}
+
+async function isOrphanedRuntime(pid: number): Promise<boolean> {
+  let parentPid: number
+  try {
+    const { stdout } = process.platform === 'win32'
+      ? await execFileAsync('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId`
+      ], { windowsHide: true, timeout: 5_000 })
+      : await execFileAsync('ps', ['-p', String(pid), '-o', 'ppid='])
+    parentPid = Number(stdout.trim())
+  } catch {
+    return false
+  }
+  if (!Number.isInteger(parentPid) || parentPid < 1) return false
+  if (process.platform !== 'win32' && parentPid === 1) return true
+  try {
+    process.kill(parentPid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
 }
 
 export function commandLooksLikeStaleAnalytixRuntime(command: string): boolean {
