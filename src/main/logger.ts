@@ -93,6 +93,40 @@ const SAFE_SHA256_DETAIL_KEYS = new Set([
   'stderrSha256',
   'stdoutSha256'
 ])
+export const STARTUP_TRACE_STAGES = [
+  'main module evaluated',
+  'legacy data migration barrier ready',
+  'app icon loaded',
+  'single instance lock checked',
+  'createWindow:start',
+  'window:startup-surface-ready',
+  'createWindow:load',
+  'window:ready-to-show',
+  'window:did-finish-load',
+  'window:did-fail-load',
+  'window:fallback-show-timeout',
+  'app.whenReady:start',
+  'install webview guards:start',
+  'install webview guards:done',
+  'settings load:start',
+  'settings load:done',
+  'desktop private history migration:start',
+  'desktop private history migration:done',
+  'logger configured',
+  'native host registration:done',
+  'extension account reconciliation:done',
+  'legacy IM credential migration:done',
+  'IM lifecycle recovery:done',
+  'OAuth callback router:done',
+  'OAuth authorization sweep:done',
+  'OAuth refresh scheduler:done',
+  'Claw and IM runtime composition:done',
+  'ipc registration:start',
+  'ipc registration:done',
+  'createWindow:returned'
+] as const
+export type StartupTraceStage = typeof STARTUP_TRACE_STAGES[number]
+const STARTUP_TRACE_STAGE_SET: ReadonlySet<string> = new Set(STARTUP_TRACE_STAGES)
 
 export function configureLogger(config: Partial<LoggerConfig>): void {
   cfg = { ...cfg, ...config }
@@ -126,10 +160,14 @@ async function pruneOldLogs(): Promise<void> {
   }
 }
 
-function projectFixedDetail(value: unknown): FixedLogDetail | undefined {
+function projectFixedDetail(value: unknown, category: string): FixedLogDetail | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const projected: FixedLogDetail = {}
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'stage' && category === 'startup' && typeof entry === 'string' && STARTUP_TRACE_STAGE_SET.has(entry)) {
+      projected.stage = entry
+      continue
+    }
     if (SAFE_NUMBER_DETAIL_KEYS.has(key)) {
       if (typeof entry === 'number' && Number.isFinite(entry) && entry >= 0) projected[key] = entry
       continue
@@ -152,7 +190,7 @@ function projectMainLog(
 ): FixedLogProjection {
   const fallback = projectMainLogFallback(level, category)
   try {
-    const fixedDetail = projectFixedDetail(detail)
+    const fixedDetail = projectFixedDetail(detail, category)
     if (category === 'renderer-ipc') {
       const candidate = detail && typeof detail === 'object' && !Array.isArray(detail)
         ? (detail as Record<string, unknown>).code

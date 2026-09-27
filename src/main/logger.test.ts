@@ -111,6 +111,32 @@ describe('managed logger closed projection', () => {
     expect(output).toContain(`"sha256":"${sha256}"`)
   })
 
+  it('keeps an allowlisted startup stage and elapsed time without leaking caller text', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    publicConsoleInfo('startup', directCanaries.join(' | '), {
+      stage: 'app.whenReady:start',
+      elapsedMs: 42,
+      path: directCanaries[2]
+    })
+    publicConsoleInfo('startup', 'untrusted stage', {
+      stage: directCanaries[0],
+      elapsedMs: 43
+    })
+    publicConsoleInfo('main', 'wrong category', {
+      stage: 'app.whenReady:start',
+      elapsedMs: 44
+    })
+    const [accepted, rejected, wrongCategory] = info.mock.calls.map((call) => call.join(' '))
+    expect(accepted).toContain('"stage":"app.whenReady:start"')
+    expect(accepted).toContain('"elapsedMs":42')
+    expect(rejected).not.toContain('"stage"')
+    expect(wrongCategory).not.toContain('"stage"')
+    for (const canary of directCanaries) {
+      expect(accepted).not.toContain(canary)
+      expect(rejected).not.toContain(canary)
+    }
+  })
+
   it('fails closed without throwing when hostile details reject enumeration or property reads', async () => {
     testDir = await mkdtemp(join(tmpdir(), 'analytix-logger-hostile-detail-'))
     configureLogger({ dir: testDir, enabled: true, retentionDays: 2 })

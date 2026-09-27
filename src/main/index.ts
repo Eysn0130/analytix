@@ -110,7 +110,8 @@ import {
   pruneOnStartup,
   publicConsoleError,
   publicConsoleInfo,
-  publicConsoleWarn
+  publicConsoleWarn,
+  type StartupTraceStage
 } from './logger'
 import { createClawRuntime, type ClawRuntime } from './claw-runtime'
 import { createScheduleRuntime, type ScheduleRuntime } from './schedule-runtime'
@@ -229,13 +230,17 @@ if (desktopExternalState.isolated) {
 const startupTraceEnabled =
   process.env.ANALYTIX_STARTUP_TRACE === '1'
 const startupTraceStart = Date.now()
+let currentStartupStage: StartupTraceStage = 'main module evaluated'
 const computerUseAgentBaselinePromise = captureOpenComputerUseAgentBaselineV1()
 const nativeOAuthCallbackRouter = createNativeOAuthCallbackRouter()
 
-function traceStartup(label: string, detail?: unknown): void {
+function traceStartup(label: StartupTraceStage, _detail?: unknown): void {
+  currentStartupStage = label
   if (!startupTraceEnabled) return
-  const elapsed = String(Date.now() - startupTraceStart).padStart(6, ' ')
-  publicConsoleInfo('startup', `[+${elapsed}ms] ${label}`, detail)
+  publicConsoleInfo('startup', '', {
+    stage: label,
+    elapsedMs: Date.now() - startupTraceStart
+  })
 }
 
 function isManagedGoRuntimeBackend(): boolean {
@@ -1854,6 +1859,7 @@ app.whenReady().then(async () => {
       reason: chromeNativeHostRegistration.reason
     })
   }
+  traceStartup('native host registration:done')
   scheduleRuntime = createScheduleRuntime({ store, runtimeRequest, logError, powerSaveBlocker })
   scheduleRuntime.sync(initial)
   const mainAccountRuntimeRequest = async (path: string, method?: string, body?: string) => {
@@ -1923,6 +1929,7 @@ app.whenReady().then(async () => {
   await reconcileInstalledExtensionAccounts().catch(() => {
     publicConsoleWarn('extension-account', 'Protected extension account reconciliation remains pending.')
   })
+  traceStartup('extension account reconciliation:done')
   await migrateLegacyImAccountCredentials({
     store,
     requestAccountCredential: manageMainAccountCredential,
@@ -1930,6 +1937,7 @@ app.whenReady().then(async () => {
   }).catch(() => {
     publicConsoleWarn('claw-im', 'Protected legacy IM account migration remains pending.')
   })
+  traceStartup('legacy IM credential migration:done')
   const imChannelAccountLifecycle = new ImChannelAccountLifecycle({
     dataDir: app.getPath('userData'),
     store,
@@ -1944,6 +1952,7 @@ app.whenReady().then(async () => {
   await imChannelAccountLifecycle.recover().catch(() => {
     publicConsoleWarn('claw-im', 'Protected IM channel lifecycle recovery remains pending.')
   })
+  traceStartup('IM lifecycle recovery:done')
   const oauthProfileBinding = createHash('sha256')
     .update(`analytix-oauth-profile-v1\0${app.getPath('userData')}`)
     .digest('hex')
@@ -2107,9 +2116,11 @@ app.whenReady().then(async () => {
   await nativeOAuthCallbackRouter.activate(async (callbackUrl) => {
     await providerOAuthAccountManagement.handleNativeCallback(callbackUrl)
   })
+  traceStartup('OAuth callback router:done')
   await providerOAuthLifecycle.sweepAuthorizationStates().catch(() => {
     publicConsoleWarn('provider-oauth', 'Protected OAuth authorization recovery remains pending.')
   })
+  traceStartup('OAuth authorization sweep:done')
   providerOAuthRefreshScheduler = createProviderOAuthRefreshScheduler({
     refreshInventory: (refreshWindowMs) =>
       providerOAuthLifecycle.refreshExpiringAccounts(refreshWindowMs),
@@ -2118,6 +2129,7 @@ app.whenReady().then(async () => {
     }
   })
   await providerOAuthRefreshScheduler.start()
+  traceStartup('OAuth refresh scheduler:done')
   configureWeixinBridgeAccountCredentialResolver(async (accountId) => {
     const settings = await store.load()
     const channels = settings.claw.channels.filter(
@@ -2239,6 +2251,7 @@ app.whenReady().then(async () => {
   })
   configureManagedWeixinBridgeUrlResolver(ensureWeixinBridgeRpcUrl)
   syncWeixinBridgeRuntime(initial)
+  traceStartup('Claw and IM runtime composition:done')
 
   traceStartup('ipc registration:start')
   const applySettingsPatch = async (partial: AppSettingsPatch): Promise<AppSettingsV1> => {
@@ -2532,7 +2545,11 @@ app.whenReady().then(async () => {
 }).catch((error) => {
   desktopStartupBarrierComplete = false
   const diagnostic = runtimeErrorPublicDiagnosticV1(error)
-  publicConsoleError('startup', 'Startup failed.', { bytes: diagnostic.errorBytes, sha256: diagnostic.errorSha256 })
+  publicConsoleError('startup', 'Startup failed.', {
+    stage: currentStartupStage,
+    bytes: diagnostic.errorBytes,
+    sha256: diagnostic.errorSha256
+  })
   dialog.showErrorBox('Analytix failed to start', 'The desktop application could not complete startup.')
   app.quit()
 })
