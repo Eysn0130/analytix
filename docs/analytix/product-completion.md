@@ -7,18 +7,28 @@ Delivery order is owned by the [Operational execution plan](delivery-execution-p
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-## Current PR28 Core admission — 2026-09-27 PDT
+## Current PR28 Core and Funds admission — 2026-09-27 PDT
 
-The canonical local branch is at product SOURCE
-`c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2` (tree
-`812abaaf4ca947af1166e118c9470a1e08b59481`). Its `a5dc` predecessor
+The canonical local branch has committed product SOURCE
+`0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703` (tree
+`3188bb34567d2c3f0fa76176b28035345d5b13ba`), followed by diagnostic-only
+commit `e0942bd95`; its ordinary/case classifier
+source is the unchanged `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`
+(tree `812abaaf4ca947af1166e118c9470a1e08b59481`). The `a5dc` predecessor
 passed focused checks but missed two explicit case assertions. The `24ff`
 successor repaired those forms but regressed an acquired-currency assertion
 with a preceding year. The `c8fa` repair passed focused Go HTTP, four desktop
 test files (358/358) and typecheck for these bounded examples.
-The separate B1 independent-reference test is still uncommitted and has not
-reached its positive query: three source attempts stopped at signing policy,
-removable-volume, then native Owner-admission preflights. An exact `c8fa`
+The separate B1 independent-integer-CSV oracle was committed as `91a55b236`.
+After earlier signing-policy, removable-volume, native Owner-admission and
+whole-test 10-minute timeout attempts, the positive Go production-chain test
+passed with a fresh isolated authority root and `-timeout 40m` (1642.55s;
+outer exit 0). It crossed baseline and evolved synthetic native results,
+production settlement/claims/Final Gate, durable reopen, missing/corrupt 503
+and exact-byte restoration, ordinary loopback Provider continuity, and a
+fresh OS-process same-thread final/display readback. It does not prove
+installed GUI, external Provider, formal real-case Milestone B or latency.
+An exact `c8fa`
 clean private Core DMG/ZIP was built and copied from the verified DMG into an
 isolated installation. Build and installed copies passed matching
 Main/Go/app.asar hashes, strict deep signature and 1,172-instance mandatory
@@ -33,12 +43,70 @@ Its top-level command remained `PARTIAL` with exit 1 because `--actual-only`
 omitted deterministic checks from that invocation. An earlier
 application-name UI selection coincided with a second process using protected
 user state. That process was incorrectly sent SIGTERM and then SIGKILL; its
-effect on user state is unknown. Application-name UI automation and direct
-live-state access have stopped, and the exact installed GUI seam is blocked
-pending a safe precise binding and the coordinating owner's response. PR #28
+effect on user state is unknown. The user said existing user data need not be
+inspected during development. Application-name UI automation and direct
+live-state access have stopped. A later exact `c8fa` full Funds app run used a
+fresh isolated profile with app-path/Main-PID/CDP-port binding, completed one
+loopback Provider Save and ordinary visible reply, and quit normally. Its one
+local-position timing sample does not establish a comparison distribution;
+the external-position attempt completed onboarding but its variable-marker
+turn entered case-source-unavailable routing without a Provider POST. A
+second fixed-input local sample passed, while three fixed-input external
+attempts did not reach Provider setup: the first lost its initial launch
+error to cleanup, and the latter two timed out waiting for bridge health
+at 120 and 300 seconds. The exact task processes were quiesced. The
+fixed-input four-run comparison, exact ordinary-file GUI journey and
+protected real-Provider repeat remain open. PR #28
 remains Draft/open at remote HEAD `56231ff5e`; its successful CI covers only
 that older commit. No current-HEAD CI exists. See the
 [current continuation ledger](qa/pr28-next-execution-2026-09-26.md).
+
+The separate exact `c8fa` full Funds arm64 development DMG passed build,
+container verification, installed-copy hash equality and strict deep
+signature. Its mandatory legal audit is **blocked** on native Canvas component
+provenance and notices (`EXACT_ARTIFACT_MANDATORY_LEGAL_OBLIGATION`), so no
+full-package legal admission is claimed. The installed Go binary passed the
+focused native Owner-admission test (12.76s, outer exit 0). Full installed
+Funds behavior remains a separate seam. Three development-only packaged
+synthetic Direct Preview attempts stopped before B lanes. A scanner identity
+defect has focused real-process repair evidence, but the full diagnostic has
+not been rerun; neither Direct Preview nor formal B passed.
+
+The newer exact `3f5318` clean full Funds arm64 private DMG removes the
+PDF.js optional Canvas native package from the artifact and passes the
+installed-copy mandatory legal audit with zero admission blockers. DMG
+verification, build/installed Main/Go/app.asar hash equality and deep strict
+signatures pass. Its build authority remains
+`development_non_publishable`, `releaseEligible=false` and
+`publishable=false`. One fresh local-position installed synthetic Provider
+run passed onboarding, a model probe, ordinary chat, visible reply, Hub-zero,
+credential scan and normal quit with Main exit 0 and zero residual processes
+under the stricter diagnostic. That run does not exercise the exact numeric
+ordinary-file read, real Provider, Funds Direct Preview or formal case. The
+new package closes the previous full-artifact mandatory legal blocker only
+for its exact source and artifact; product and public-release gates remain.
+
+The exact `0ff97f7` successor has a clean full arm64 private DMG
+(SHA-256 `4bf4be19f03a5b0ec376721acd7e40b270a3558fa5f5a15c0dd535ad81821204`).
+DMG verification, build/installed hash equality across ten anchors, deep
+strict signatures, and the independent installed mandatory legal audit pass:
+1,172 instances, zero mandatory blockers and parse errors. Its build
+authority remains `development_clean_non_publishable`, with publishable and
+releaseEligible false. One exact-installed fresh-profile synthetic loopback
+Provider journey passed normal onboarding, one model probe, two chat POSTs
+including an actual ordinary file-read result, visible reply, Hub-zero,
+credential scan and normal quit with Main exit 0 and zero residual task
+processes. The trace shows two Go starts, eliminating the extra Renderer IPC
+restart after settings save. The single observed launch→composer interval
+was 112,047 ms with 24,914 ms of process-probe observer time; cold startup
+and Host latency remain open. The new visible local-data path passed focused
+source tests, but the separate installed synthetic Direct Preview diagnostic
+fails after CSV selection with fixed `funds_import_capability_unavailable`,
+before a confirmed snapshot or B fact. The committed diagnostic follow-up
+identifies that failure promptly while preserving exact-process cleanup.
+See the [current continuation ledger](qa/pr28-next-execution-2026-09-26.md)
+for exact reports, hashes and evidence limits. Neither synthetic result nor
+artifact admission proves protected real-Provider or formal real-case B.
 
 The exact `28ed097f2` installed Core copy completed normal protected real
 Provider use and Go/Main restart without credential re-entry. The later exact
@@ -48,10 +116,10 @@ Provider use. Neither result transfers to the committed `c8fa` source repair.
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `false` for the full PR28 delivery: the `c8fa` S1 slice has focused source passes for bounded examples, but B1 and remaining applicable source/assembly checks are open. `74e` and remote `56231ff5e` retain their own earlier 57/57 CI evidence. |
-| PrivateCandidateReady | `false`: exact `c8fa` private package and installed integrity checks pass, and its later isolated synthetic session passed 19/19. Installed ordinary-file/real-Provider continuation acceptance is open; direct visible UI remains stopped after the protected-state incident. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
+| SourceReady | `false` for the full PR28 delivery: the `c8fa` classifier checks, `0ff97f7` focused source and package checks, and committed B1 synthetic positive chain pass in their bounded scopes, but remaining applicable source and product acceptance checks are open. `74e` and remote `56231ff5e` retain their own earlier CI evidence. |
+| PrivateCandidateReady | `false`: exact `0ff97f7` full Funds package integrity and mandatory legal admission pass, as does one installed synthetic ordinary-file Provider journey with normal quit. Its installed Direct Preview fails closed at the import capability gate; protected real-Provider recovery and Funds/formal B acceptance remain open. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
 | MergeReady | `false`: PR28 is Draft, the current local product SOURCE is unpushed, and earlier remote CI does not cover it. |
-| PublicMacReleaseReady | `false`: the exact `c8fa` artifact is `development_clean_non_publishable`; no public-release qualification or publication authority is claimed. |
+| PublicMacReleaseReady | `false`: the exact `0ff97f7` full artifact is development-only and nonpublishable; no public-release qualification or publication authority is claimed. |
 
 ### Earlier exact Core product evidence — 74e
 
@@ -212,7 +280,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused source checks, an exact clean private package with installed integrity checks, and a fresh isolated synthetic session pass at 19/19 after the initial timeout. Exact-source visible ordinary-file/real-Provider recovery and startup/Host latency attribution remain open, with direct UI stopped at the protected-state incident boundary. Public Developer ID/notarization belongs to separate public qualification. |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused classifier checks and a fresh isolated synthetic session at 19/19. Its `0ff97f7` successor has a clean full private artifact with installed hash/signature/legal checks and one exact-installed synthetic ordinary-file read, visible reply, and normal quit. Protected real-Provider recovery and startup/Host latency attribution remain open. Public Developer ID/notarization belongs to separate public qualification. |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 

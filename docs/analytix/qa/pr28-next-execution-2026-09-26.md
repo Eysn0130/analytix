@@ -66,7 +66,7 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   for those forms, but no exact-source package, installed result, current-HEAD
   CI or merge result. The finite grammar is bounded evidence, not a guarantee
   for arbitrary natural-language case assertions.
-- The latest local source successor is `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`,
+- The earlier classifier source successor is `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`,
   tree `812abaaf4ca947af1166e118c9470a1e08b59481`. Review of `24ff`
   exposed a regression in an older acquired-currency shape with a preceding
   year. The narrow `取得` check was restored and the new negative vector passed
@@ -74,6 +74,25 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   Core DMG/ZIP was built from this exact source, mounted and copied to an
   isolated installation; hash, signature and mandatory legal checks passed.
   The installed ordinary-file journey, current-HEAD CI and merge remain open.
+- The later committed packaging/Main diagnostic successor is
+  `3f5318e766512f251037c8ae416dee109f3b496f`. `b79564667` excludes
+  PDF.js's optional Canvas native package from the full artifact and checks
+  the packed result; `3f5318e76` adds allowlisted, opt-in Main startup phase
+  timing. The `c8fa` ordinary/case classifier implementation is unchanged.
+  The exact `3f5318` clean full Funds package and installed copy now pass
+  mandatory legal admission; installed product and formal Funds acceptance
+  remain separate as recorded below.
+- The current local product HEAD is
+  `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`, tree
+  `3188bb34567d2c3f0fa76176b28035345d5b13ba`. The intervening `b5ead0`
+  exact-installed run exposed an unnecessary third Go start and a first-run
+  Provider dialog covering the local Data Import action. `0ff97f7` fixes the
+  source paths and has focused tests, a clean full private package with
+  mandatory legal admission, and one exact-installed ordinary-file synthetic
+  Provider GREEN run with two Go starts and normal quit. The Direct Preview
+  installed diagnostic is tracked separately below. Neither local evidence
+  nor prior-head CI establishes protected real-Provider, formal Funds B,
+  merge or public release readiness.
 
 ## N01–N09 ledger
 
@@ -81,13 +100,13 @@ record's product SOURCE or transfer its installed acceptance to a new build.
 | --- | --- | --- |
 | N01 identity and matrix | DONE_IMPLEMENTED | Fresh branch/PR/main/tree inventory; Current corrected to 74e with e15 history retained. Core/Funds stage scope and artifact exclusion inspected. |
 | N02 installed real Provider | DONE_IMPLEMENTED | The 28ed installed copy reused the credential reference from normal QA onboarding. A new short turn completed with `2 加 3 等于 5。`; after Go PID 66130→67281 another turn completed with `2 + 3 = 5`; after Main PID 55003→89415 and Go PID 797, the same durable thread displayed both prior turns and a third live turn completed with `56`. No credential value was read into this record or re-entered. This applies only to 28ed; a changed final SOURCE needs a bounded repeat. |
-| N03 startup and delivery latency | UNFINISHED | Diagnostic 4e package traced Main settings load 2.4 s and awaited extension account reconciliation through 42.3 s before window creation. The 28ed Main restart still awaited extension reconciliation and OAuth sweep/scheduler before window: 78.2 s from JS evaluation to startup surface. `9faf0ee02` alone did not improve this path. `cf9f1988b` schedules OAuth recovery outside window creation and gates OAuth IPC until ready; `107d68c2e` stops late startup work on confirmed quit. Installed comparison remains. `6c103cc52` protects live sibling runtimes. Host delivery comparison remains. |
-| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms and has an exact-source clean private Core package. A later fresh-profile installed synthetic session passed 19/19, but did not exercise the exact ordinary-file assertion. Its visible GUI/real-Provider confirmation remains open after an unsafe app-name UI selection event; the earlier timed-out expression was not replayed. Absolute local paths continue to be withheld by Main logging rules. |
+| N03 startup and delivery latency | UNFINISHED | The exact `0ff97f7` installed local synthetic ordinary-file journey passed visible reply and normal quit; its trace now has two Go starts rather than `b5ead0`'s redundant third IPC restart. First preflight→materialization was 24.621 s and spawn→ready 31.879 s; settings-apply restart was 2.455 s and 17.239 s. Launch→composer was 112.047 s with 24.914 s of observer process probes; DOM commit trace was absent, though a reply was visible. Earlier fixed-input external `c8fa` attempts failed bridge health at 120/300 s without Provider setup. Cold startup/Host attribution, matched exact-candidate external comparison, four-run distribution, p95 and volume causation remain open. |
+| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms. The exact `0ff97f7` installed synthetic loopback Provider run now observes the actual ordinary file-read result in the second chat request and a visible reply, with no hidden direct runtime turn. Protected real-Provider confirmation and recovery remain open. Absolute local paths continue to be withheld by Main logging rules. |
 | N05 ordinary and Funds continuity | UNFINISHED | Existing General reader enforces current thread/workspace/principal, rune pagination with `totalRunes`/`complete`, and changed-scope refusal; four focused Go continuity tests passed. Private Funds input, case A→B→A and revoked-source recovery are separate unproved seams. |
-| N06 Funds positive data path | UNFINISHED | Existing B1 source test performs normal synthetic CSV import, immutable snapshot, account-flow tool/result, second import and recovery. A direct current-source run stopped before any Provider request because plain `go test` lacks the embedded development signing policy. A second invocation with the exact compiled policy stopped because the test authority was on removable cache storage; neither reached a query. The third run used an isolated 0700 non-removable APFS authority directory but Owner admission returned a generic trust error for an older native package, before any Provider request or query. This is neither an installed Funds candidate nor real-case data access. |
-| N07 exact facts and display | UNFINISHED | Existing B1 assertions are source-bound; current installed Funds fact/display and the full negative set remain unverified. No user statement was promoted to bank fact. |
+| N06 Funds positive data path | UNFINISHED | The independent integer CSV oracle is committed at `91a55b236`. Exact `c8fa` full Funds package native Owner admission passed; the positive synthetic-Host, loopback-Provider Go production chain passed with a fresh nonremovable 0700 authority root and 40-minute whole-test budget (1642.55s). Earlier policy/removable/older-native preflight failures and the first default 10-minute timeout remain separate. Exact `0ff97f7` installed synthetic Direct Preview now opens from visible UI, but selecting CSV receives fixed `funds_import_capability_unavailable` before confirm/snapshot, so the diagnostic fails and formal B lanes remain unrun. Fresh installed authority/native Owner composition needs root-cause repair; fixture-injected Go positives do not supply it. Formal real-case B and installed Funds GUI remain open. |
+| N07 exact facts and display | UNFINISHED | The B1 source test passed baseline/evolved exact facts, public Final Gate, A1/A2 GET 200, durable reopen, missing/corrupt 503 and restored bytes, and fresh-process protected display in its synthetic scope. Current installed Funds GUI fact/display and the full negative set remain unverified. No user statement was promoted to bank fact. |
 | N08 noninterference and secrets | UNFINISHED | Core package exclusion and sibling runtime protection have direct evidence. Six Funds capability states, cross-platform native installation and source revocation remain separate. |
-| N09 freeze, CI, PR/main | UNFINISHED | Clean private Core packages exist at 28ed and now exact `c8fa`, each with own hash/signature/legal receipts. An initial `c8fa` installed synthetic attempt timed out; after the harness repair a fresh-profile segmented run passed 19/19 installed checks. The exact ordinary-file GUI and protected real-Provider checks, current-HEAD CI, PR review/merge gates and public release qualification remain open. |
+| N09 freeze, CI, PR/main | UNFINISHED | Clean private Core packages exist at 28ed and exact `c8fa`. The exact `0ff97f7` full Funds arm64 DMG was built and installed with ten matching hash anchors, strict signature, and zero mandatory legal blockers; the PDF.js optional Canvas package is absent. A fresh installed synthetic ordinary-file Provider run passes at its bounded seam. Its installed Funds Direct Preview fails closed at capability unavailable before snapshot. Protected real-Provider, formal case, current-HEAD CI, PR review/merge and public release qualification remain open. |
 
 Allowed ledger states are `DONE_IMPLEMENTED`, `DONE_EXISTING`,
 `CLOSED_WITH_SUPPORTED_FALLBACK`, `BLOCKED_EXTERNAL`, `FAILED`, and
@@ -494,12 +513,14 @@ on protected user state is unknown. This was an unauthorized process action
 and must not be presented as a clean QA shutdown.
 
 All application-name UI selection and direct live-user-state access stopped.
-The isolated c8fa PID was then stopped separately. The exact installed visible
-GUI ordinary-file journey and real-Provider repeat remain **blocked at this UI
-seam** until a safe precise binding for those journeys and the protected-state
-response are handled by the coordinating owner. Do not retry the timed-out
-mutating CDP expression or infer acceptance from the package, synthetic requests, or
-source tests.
+The isolated c8fa PID was then stopped separately. The user said existing user
+data need not be inspected during development; no live-state inspection or
+backup was performed, so the protected-state effect remains unknown. Further
+QA uses fresh isolated profiles and exact app-path, Main-PID and CDP-port
+binding. The exact installed visible GUI ordinary-file journey and
+real-Provider repeat remain **open** until a safe precise binding is available.
+Do not retry the timed-out mutating CDP expression or infer acceptance from
+the package, synthetic requests, or source tests.
 
 ## 2026-09-27 isolated segmented synthetic retest after harness repair
 
@@ -537,6 +558,423 @@ contract Provider saw 13 requests and no external Provider network was used.
 No diagnostic profile was retained on this successful run. The top-level
 status is `PARTIAL` with exit 1 because `--actual-only` omits the deterministic
 suite; it is not a full final-gate pass. The bounded source checks recorded
-above remain separate. The exact c8fa visible ordinary-file journey,
-protected real-Provider repeat and user-state response remain open. The
+above remain separate. The exact c8fa visible ordinary-file journey and
+protected real-Provider repeat remain open; the protected user-state effect
+remains unknown under the user's no-inspection direction. The
 prior ambiguous expression was never replayed.
+
+## 2026-09-27 exact c8fa full Funds development package and native admission
+
+The clean detached worktree at SOURCE
+`c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2` and snapshot
+`eff2e0ed9c87af8ef925a99f180e8d4e4f68f96337c2ea9d25a38f64ad9f2fc4`
+ran the normal full arm64 development route `npm run dist:mac:arm64`, with the
+required cache helper in the same shell, an isolated cache-volume dist root,
+`ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE=isolated-local-v1`, and
+`CSC_IDENTITY_AUTO_DISCOVERY=false`. It exited 0. The private DMG at
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/dist-funds-c8fa/analytix-1.0.6-mac-arm64.dmg`
+has SHA-256
+`40fe5a6bd81dd09ff89e6ddd1052ce67a5fcdaf348b457851adc48cf68700020`.
+Its authority remains `development_clean_non_publishable`, with full native
+disposition `development_non_publishable`. This is a development artifact,
+not publication or formal release admission.
+
+The DMG passed `hdiutil verify` and a read-only mount. The app copied into a
+new task-created private `0700` directory passed strict deep signature
+verification. Eleven build-versus-installed anchors matched by SHA-256,
+including Main, Info.plist, CodeResources, app.asar, Go `runtime-server`,
+package authority and the native component binaries. The exact installed Go
+binary SHA-256 is
+`3430e4b34dcd84413469d022a5e0119dc35d0602099ff28e35bc3ef99c30abe4`.
+
+The independent mandatory legal audit of this **full** artifact is `blocked`:
+`EXACT_ARTIFACT_MANDATORY_LEGAL_OBLIGATION` at
+`/node_modules/@napi-rs/canvas-darwin-arm64/package.json`, with
+`dependency_legal_native_component_provenance_and_notices_unverified`.
+The exact report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/funds-legal-audit-c8fa.json`.
+The passing 1,172-instance Core audit belongs to the separate Core package
+that excludes Canvas. No full-package private or public legal admission is
+claimed.
+
+With the installed Go executable as the native input, the production-tag
+`TestFundsAccountFlowB1FixedNativeInputAdmission` passed (`12.76s` test time,
+outer command exit 0). It used the existing compiled development signing
+policy and a fresh, nonremovable `0700` authority root. This proves focused
+`InspectPackageV2` and normal local-build Owner admission, not an installed
+Funds GUI journey. The first positive
+`TestFundsAccountFlowB1ProductionPublicChain` attempt reached baseline native
+import, public Final Gate, evolved native aggregate and recovery of two facts,
+then hit Go's default `10m0s` test timeout during durable Runtime reopen.
+The timeout stack was in `SecurePrivateCAS.Read` inventory validation and a
+filesystem `Fstat`; no test assertion failure or positive terminal was
+observed. A single retry with a **new isolated authority root** and explicit
+`-timeout 40m` passed (`1642.55s` test time, outer Go exit 0). It covered the
+same-execution baseline/evolved native result through production settlement,
+claims and Final Gate; A1/A2 GET 200 with original final digests; durable
+reopen/current preview; missing/corrupt 503 and exact-byte restoration;
+ordinary loopback Provider continuity; and a fresh OS-process same-thread
+GET 200, final digest and protected local display. The independent integer
+CSV oracle was committed as `91a55b236`; this is a synthetic-Host,
+loopback-Provider Go source test, not installed GUI or external Provider
+acceptance. The 10-minute limit covered the whole first test, so its reopen
+duration remains unknown. The stack identifies a production CAS validation
+path to investigate; the longer test budget does not establish product
+performance. Exact log:
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/b1-positive-public-chain-c8fa-40m.log`.
+
+## 2026-09-27 installed synthetic Direct Preview diagnostic boundary
+
+A separate development-only packaged diagnostic bound the exact `c8fa` full
+Funds installed app, its source snapshot, Main/Go/app.asar hashes and strict
+signature. It used fresh synthetic case and Provider-audit authorities; it
+did not supply an external real case or network Provider. Three isolated
+attempts exited 1 before any Milestone B lane ran. The first reported
+`packaged_debug_process_identity_lost` after Main launch; the next two made
+no confirmed Main observation. Their audit scanner was ended by exact
+task-owned PID after a bounded period without progress, so the resulting
+`provider_audit_scanner_process_identity_unavailable` identifies the stop,
+not the underlying wait point. All three reports recorded stable source,
+exact artifact revalidation, zero residual task processes, and retained
+diagnostic profiles. No Direct Source Preview pass or formal B admission is
+claimed. Reports:
+
+- `/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/packaged-b-synthetic-direct-preview-report.json`
+- `/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/packaged-b-synthetic-direct-preview-identity-v2-report.json`
+- `/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/packaged-b-synthetic-direct-preview-handshake-v3-report.json`
+
+The subsequent task-owned harness adds bounded scanner/identity/Main phase
+events. A source audit found that packaged-diagnostic Main executable
+identity checks were also applied to the scanner, which has no Main
+executable path; the scanner could not establish identity. That branch is now
+limited to Main. A real scanner process passed the focused identity test,
+and a new owner-private challenge under the retained synthetic authority
+produced READY, a live socket, and stable scanner identity. Scanner failure
+cleanup and residual classification now include the candidate even if the
+launch function never returns. The diagnostic handshake change is scoped to
+packaged synthetic mode; the formal B path retains its prior handshake.
+This focused validation does not prove installed Direct Preview, which still
+needs one fresh full diagnostic. The scanner guard has not been bypassed.
+
+## 2026-09-27 N03 isolated installed timing observations
+
+The exact `c8fa` local DMG-installed and external build app copies have equal
+Main (`084c8962843ba1c89fe86a766c98f73b44df2498b50ecc5a386271ed138792ce`),
+app.asar (`d2c2208ef49ce3203346a58a0e794ab6778cd5f3ec929b557d5699f077f011f1`),
+and Go (`3430e4b34dcd84413469d022a5e0119dc35d0602099ff28e35bc3ef99c30abe4`)
+SHA-256 values. Both passed deep strict signature verification. Each N03
+attempt used a new isolated profile and task Keychain, exact app path, Main
+PID and CDP listener ownership, and a loopback-only Provider. No existing
+user profile was opened.
+
+One local-position development-only run passed normal Provider Save, one
+authorized `GET /v1/models`, one ordinary chat POST, visible reply, normal
+Alt+F4 exit, zero task process residual and privacy scan. Its report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/n03-local-1-v3.jsonl`
+(SHA-256 `5aa8ec98531beb15b3090ba6ddd0874661b24314efb798fbbef05107670356de`).
+For this single run, launch→Main first log was 11,562 ms; Main module→window
+startup surface 5,119 ms; launch→Go spawn observed 18,867 ms; launch→Main
+bridge health 90,008 ms; launch→composer ready 163,578 ms; submit→loopback
+Provider body 4,805 ms; submit→visible reply 7,764 ms. Go spawn is polled,
+bridge health bounds verified readiness, and visible reply is a DOM query,
+not compositor presentation. Core/Main/DOM terminal trace fields were null;
+no internal segment latency is claimed.
+
+The first external-position attempt reached the old 120-second CDP target
+limit before a Main log or runtime materialization; it was stopped by exact
+task process ownership. With a 300-second startup diagnostic window, a fresh
+external attempt reached its Main-owned CDP listener around four minutes,
+completed onboarding and one authorized model probe, then sent a turn that
+durably completed with `case_terminal_source_unavailable` and no Provider
+POST. The harness prompt in these attempts included a varying hexadecimal
+marker, so that case routing is a separate N04 candidate rather than a
+comparable N03 reply sample. The retained external report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/n03-external-1-v2.jsonl`
+(SHA-256 `7ada121d924c691b450ad5b1b8a6838f91ce52f7e10e462536ebaf109388685f`).
+The report preserves no raw prompt or Provider body. The fixed natural-language
+greeting now used by the harness has not yet produced the requested
+local–external–external–local four-run comparison. No p95, volume causation,
+N02 real-Provider, or formal Funds B acceptance follows from these runs.
+
+The fixed-input local-position run exited 0 with an authorized model probe,
+one ordinary chat POST, visible reply, normal quit, zero task residual and
+privacy scan. Its report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/n03-fixed-local-1-20260927.jsonl`
+(SHA-256 `d31bf8bd217fa90be8b1d8e1ea0d6d8289fabf8535e4e4909fb8eedef2466d9d`).
+Launch→Main first log was 11,716 ms, launch→Go spawn observed 18,190 ms,
+launch→Main bridge health 90,563 ms, launch→composer ready 159,384 ms,
+submit→Provider body 4,408 ms, and submit→DOM reply query 6,584 ms.
+The bounded `ps`/`pgrep`/`lsof` probes made 590 calls and occupied 13,658 ms
+in this one run; the elapsed figures include observer overhead. Core/Main/DOM
+terminal trace fields remained absent, so no internal delivery segment is
+claimed.
+
+Three fresh fixed-input external-position attempts did **not** yield a
+comparable reply sample. The first reached the window startup surface at
+Main +4,962 ms but an original launch error was overwritten by a later
+cleanup error. The task-owned Main PID, birth, parent, executable and CDP
+port were then verified; SIGTERM was sent only to that Main PID, and Main,
+Helpers, Go, harness and listener were confirmed absent. Its original
+failure is unknown. The second preserved `ui_wait_timeout` at
+`bridge_health_ready` with the old 120-second health window; the third
+preserved the same stage and reason with a 300-second health window. The
+third window startup surface occurred at Main +2,057 ms; the extension
+reconciliation `done` checkpoint was Main +301,682 ms. That `done` marker
+records a settled `finally` path and does not prove successful extension or
+Go readiness. In the third retained isolated runtime directory, 122 files
+and a Provider Registry path existed, while the Secret Store authority
+selection and credential store had not materialized; this is a bounded
+after-state observation, not Go health. No model probe or chat POST occurred.
+The latter two runs
+exited with zero task residual; all three failed profiles were retained.
+Their report SHA-256 values are, in order:
+
+- `n03-fixed-external-1-20260927.jsonl`:
+  `363f23617c118e32bc66565ee449d929efc5e427a756c08830454363d859fb96`
+- `n03-fixed-external-1-retry-v2-20260927.jsonl`:
+  `c6662dfc5cb142a911cdabee1fe71b4892bd25bfdbfd5f72d8a5b554e26c0e03`
+- `n03-fixed-external-1-retry-v3-20260927.jsonl`:
+  `6110e162e1534829a2fd57161172ecee2b5550da6af599533a1cff0d9b115118`
+
+All three reports are under
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/`.
+Static source inspection shows extension-account reconciliation is scheduled
+without blocking window creation, while its list request and the bridge
+health request both await `ensureRuntime`. The observed timing therefore
+does not establish extension reconciliation as the cause of bridge delay.
+The next diagnostic must preserve partial Go spawn/ready/health timestamps
+on failure and distinguish Main, runtime and observer time before another
+external comparison. The current harness patch adds bounded process probes,
+separate first-error/cleanup classification and partial timing capture, but
+the latest partial-timing change has not been exercised in an installed run.
+Before another installed run, the diagnostic cleanup still needs focused
+review of launch-time Main birth pinning, unknown `ps` results, and Helper/Go
+residual classification; the first fixed-input external run required manual
+exact-PID cleanup after an ambiguous automated cleanup. The packaged B
+synthetic wrapper also still uses an unbounded synchronous child wait, so a
+full B retest needs a bounded owner-verified stop path first.
+
+## 2026-09-27 exact 3f5318 full artifact and local installed seam
+
+The preceding unrun cleanup and unbounded-wrapper statements describe the
+earlier `c8fa` checkpoint. The current K10 script has now run with bounded
+partial-timing and exact-process cleanup; the B wrapper now uses a bounded
+child with identity-verified cleanup, but its full B diagnostic has not yet
+run on this candidate.
+
+The exact `3f5318e766512f251037c8ae416dee109f3b496f` source was packaged
+from a clean local clone on the cache backing volume with the same signed,
+app-owned Computer Use native assets. The normal arm64 full package command
+(`ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE=isolated-local-v1`,
+`CSC_IDENTITY_AUTO_DISCOVERY=false`, `npm run dist:mac:arm64`) exited 0 after
+the cache helper preflight. The private DMG is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-3f5318/dist/analytix-1.0.6-mac-arm64.dmg`
+(SHA-256 `64e6c821202bae7a28db7e65de3b643b7e744881462dafe350e8933ddefebd47`).
+`hdiutil verify`, the build-app and DMG-installed-app deep strict signatures,
+and the exact installed artifact legal audit exited 0. Build and installed
+Main (`c4e292fccaad0ec7da5f466a5dd1cb319c77b10ce1375461a46d95821f98287a`),
+Go (`3430e4b34dcd84413469d022a5e0119dc35d0602099ff28e35bc3ef99c30abe4`),
+and app.asar (`29699f2fda70f6e969010839da1d90b2988a262e9d67738e672dd6ed23f70dbf`)
+SHA-256 values match. The installed-integrity report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-3f5318/installed-integrity.json`
+(SHA-256 `75c29a30b64d457e227cfed4723f72dcd7e248ddb5cd17e3364186f9f8a12ef1`).
+
+The full app resource inventory contains zero `@napi-rs/canvas*` entries.
+The independent installed legal report at
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-3f5318/installed-legal-audit.json`
+(SHA-256 `ea7cfbf83f849a7c94859f87fa859d8895c4febf175855d0bae7000665bc5881`)
+records `passed`, 1,172 package instances and zero mandatory admission
+blockers. Source snapshot digest is
+`5b769135b9d1b6725c652bb89eb6cc4d3a9b8b7b20842acdfccf249842e03ff9`;
+the native disposition is `development_non_publishable`, and publishable and
+releaseEligible are both false. Mandatory artifact legal admission does not
+grant signing, notarization, commercial publication or release authorization.
+
+A byte-matched, strictly signed installed app copy was placed under a new
+task-only `/private/tmp` directory for local-position measurements. Each K10
+run used a fresh 0700 isolated profile and task Keychain with a loopback-only
+synthetic Provider, normal visible onboarding, exact Main/CDP ownership and
+no live user profile. The first run failed at `normal_quit_required_fallback`
+under an older ambiguous fallback/target predicate; the second recorded
+`normal_quit_request_failed` despite Main exit 0 because CDP did not finish
+acknowledging the quit key sequence. Those failed profiles were retained and
+their final task-process residual counts were zero. They do not prove either
+a product quit defect or a close-action root cause.
+
+The fourth fresh run used explicit isolated `closeAction=quit`, treated a CDP
+key sent to the verified target as dispatch even when the app closed before
+acknowledgment, retried transient `/json/list` failures, and distinguished
+actual fallback signals from an already exited Main. It exited 0 with one
+authorized model probe, one ordinary chat POST, a visible synthetic reply,
+Hub activity zero, 185 task files scanned with no raw/base64 credential hit,
+Main exit 0, no fallback signal, and zero task-process residual. The task root
+was cleaned. Its report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-3f5318/n03-local-4.jsonl`
+(SHA-256 `4dd8dba2d7d7021fb5030d7c4d5a4a37bb276c5d9963960f685e8854dc43884b`).
+This is a synthetic local-position installed sample, not a real Provider or
+Funds case journey. It does not identify the root cause of the first quit
+failure or prove default `closeAction=ask` behavior.
+
+In that one run, launch→Main first log was 439 ms, launch→Go spawn observed
+4,167 ms, launch→Main bridge health 58,642 ms, and launch→composer 115,729 ms.
+Submit→first loopback Provider body was 3,531 ms, submit→Core committed
+5,014.88 ms, Core→Main received 747.519 ms, Main→IPC sent 21.311 ms, and
+submit→visible DOM reply query 6,039 ms. DOM commit trace was absent.
+Three Go startup-attempt markers and 3,742 process probes (27,114 ms of
+observer time) limit phase and latency attribution. No matched exact-candidate
+external sample, p95, compositor presentation timing, or volume-causation
+claim follows.
+
+## 2026-09-27 exact b5ead0 ordinary-file and Direct Preview diagnostics
+
+The later exact `b5ead0142750b019dbbf919cb3a9aba44694a904` source adds a
+no-thread compact Data Import entry, bounded packaged B child cleanup, and
+allowlisted Main startup/restart observations. Its focused source checks and
+typecheck passed. A clean-clone full arm64 development build exited 0. The
+private DMG at
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-b5ead0/source/dist/analytix-1.0.6-mac-arm64.dmg`
+has SHA-256 `b2d48ed33dfb59f813a57c28c3d7161da6dcdcc70364a84c93056f12dd554b26`.
+`hdiutil verify`, build and installed app deep strict signatures, and all ten
+build/installed hash anchors passed. The installed integrity report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-b5ead0/installed-integrity.json`
+(SHA-256 `fd2db2149a21809faa61069cfed7f993776421a32a298e3b0ba621cb1ff0c6da`).
+The independent installed legal report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-b5ead0/installed-legal-audit.json`
+(SHA-256 `dd1e596544d2cf38c6bb199b27333e4cc2204fbff02701d4ff079ac6a51b7655`):
+`passed`, 1,172 package instances, zero mandatory blockers and zero parse
+errors. Its authority remains `development_clean_non_publishable`, with
+publishable and releaseEligible both false.
+
+One fresh-profile, exact-installed K10 synthetic loopback Provider run used
+visible onboarding and `--ordinary-file-probe --trace-transitions`. It
+observed one authorized model probe, two Provider chat POSTs, the ordinary
+file-read tool advertisement and its actual result in the second POST, plus
+a visible reply. Hub traffic was zero; Main eventually exited 0 and task
+residual count was zero. The command nevertheless exited 1 at
+`normal_quit_target_stayed_open`: the verified CDP target did not close within
+the 15-second normal-quit window and the subsequent exact-group cleanup met
+`main_identity_changed`. This run is **not GREEN** and does not prove normal
+quit. Its retained report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-b5ead0/n04-ordinary-file-trace-1.jsonl`
+(SHA-256 `481639d00a6cd1380a4612b6c5653e7e16939d274d94dfb65e478fd6159c58f1`).
+The trace shows three Go starts: initial preflight→materialization 25,276 ms
+and spawn→ready 32,739 ms; settings-save apply restart at 75,910–96,943 ms;
+then explicit Renderer IPC restart at 104,904–125,304 ms. The latter was an
+unnecessary second restart after the settings apply. The 4,664 bounded
+process probes consumed 34,680 ms of observer time, so this run is not a
+product latency comparison.
+
+The exact `b5ead0` packaged synthetic B diagnostic used a fresh isolated
+case and no network Provider. It exited 1 with
+`session_actions_control_not_found` before Direct Preview or B lanes. The
+first-run required Provider dialog covered the Data Import control; its
+public health/info/catalog probes passed (45 ordinary tools), while the
+Renderer runtime connection remained `idle`. Main exited 0, residual count
+was zero, and the diagnostic profile was retained. The report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-b5ead0/b-synthetic-local-1.json`
+(SHA-256 `72c5e6826887b8e746607302e1fea1d649e2bd043caa4e061bcb0c5218dc5bbf`).
+Neither the ordinary-file result nor artifact integrity substitutes for a
+completed installed journey or formal real-case B acceptance.
+
+## 2026-09-27 exact 0ff97f7 installed Core continuation
+
+The task-owned `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703` source
+(tree `3188bb34567d2c3f0fa76176b28035345d5b13ba`) gives a required
+first-run user an explicit visible “Open local data tools” route without
+Provider configuration, keeps ordinary Agent/model actions gated, and allows
+Data Import when a workspace exists even if Provider readiness is `idle` or
+`offline`. It also removes the extra Renderer IPC runtime restart after
+settings save and adds opt-in allowlisted quit phases. Related Vitest checks
+passed 197/197, the final affected subset passed 57/57, and `npm run
+typecheck` passed. These source checks alone do not prove the installed UI.
+
+A clean-clone full arm64 development DMG build with the cache helper exited 0.
+The DMG is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/source/dist/analytix-1.0.6-mac-arm64.dmg`
+(SHA-256 `4bf4be19f03a5b0ec376721acd7e40b270a3558fa5f5a15c0dd535ad81821204`).
+`hdiutil verify`, build and installed app deep strict signatures, and all ten
+build/installed hash anchors passed. Installed Main, app.asar and Go SHA-256
+values are respectively
+`a73c9115910aafc9a93e0b708c669f548442d78b320ce199b9e6d321e700dd35`,
+`e1ea57d17c69be55b286e791e8aa74ddac5728b51144f0d09c7d3e2c3d724092`,
+and `3430e4b34dcd84413469d022a5e0119dc35d0602099ff28e35bc3ef99c30abe4`.
+The installed integrity report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/installed-integrity.json`
+(SHA-256 `1a974339ca0a6a046b058f32ef468b63c48d07906cdd291d0a9b62550bdf7409`).
+The independent installed legal report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/installed-legal-audit.json`
+(SHA-256 `f3f2fbc812dd24b4d8803c5a88cd5bce6feeff79f73ed79b0ff5dcae148dffc4`):
+`passed`, 1,172 package instances, zero mandatory blockers and zero parse
+errors. Build authority records a `cf7dc7333488be2d121502274697a2c8b4d2f894869b973133abc0e7f1efa054`
+source snapshot, `development_clean_non_publishable`, and publishable and
+releaseEligible false. This is private development admission, not public
+release qualification.
+
+One fresh-profile exact-installed K10 run with `--ordinary-file-probe
+--trace-transitions` exited 0 and reported
+`LOCAL_NONPUBLISHABLE_PRODUCT_SEAM_GREEN`. It observed one authorized model
+probe, two loopback synthetic Provider chat POSTs, ordinary file-read tool
+advertisement and its result in the second request, a visible reply, Hub
+activity zero, 191 task files scanned with no raw/base64 credential hit, and
+normal quit without fallback: Main exit 0 and zero residual task processes.
+The report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/n04-ordinary-file-trace-1.jsonl`
+(SHA-256 `3aba6233d93a1addff16146be89c013ca14d85cfdc1246f443907f4cea124559`).
+Its trace records **two** Go starts, initial preflight→materialization
+24,621 ms and spawn→ready 31,879 ms, then settings-apply restart at
+72,728–92,438 ms with preflight→materialization 2,455 ms and spawn→ready
+17,239 ms. No additional Renderer IPC restart appears. The normal quit
+markers reach prepared, runtime stopped and committed; CDP target closed,
+Main exited 0 and no fallback signal was sent. Launch→composer was
+112,047 ms and submit→visible reply query 11,653 ms in this one observed
+run; 3,652 process probes consumed 24,914 ms of observer time. Cold startup,
+Host latency and missing DOM-commit trace remain separate performance
+questions. This run uses a synthetic loopback Provider and does not establish
+protected real-Provider recovery or formal Funds B.
+
+The separate exact-installed packaged synthetic B diagnostic used the same
+`0ff97f7` app with a fresh synthetic case, no network Provider and a bounded
+20-minute child. It exited 1, `status=FAIL`, at
+`snapshot_confirm_control_not_ready` before a snapshot or any formal B lane.
+The visible “Open local data tools” path and “Direct source preview” dialog
+were reached. A read-only CDP observation, after checking the listener was
+owned by that task's exact Main PID, showed “Select CSV or ZIP” followed by
+the fixed error “Trusted data import is unavailable in this runtime
+environment”; there was no “Confirm snapshot” button. The Go local-display
+stage returns 503 `funds_import_capability_unavailable` if
+`FundsCSVAdmission` is nil. The public health/info/catalog probes passed
+with 45 ordinary tools, while Funds availability was false. The final Main
+exit was 0, task residual count was zero, and isolated diagnostic profiles
+were retained. This report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/b-synthetic-local-1.json`
+(SHA-256 `18053041b08488d5267efc387ac2e4aa330a502218a09695816944f18c488505`).
+The 20-minute wait came from the diagnostic waiting for an absent confirm
+button; it does not prove a 20-minute product import. No installed Direct
+Preview pass, native snapshot, positive Funds fact or formal real-case B
+admission follows. The live production authority/native Owner composition
+requires separate root-cause repair without bypassing its guards.
+
+Diagnostic harness commit `e0942bd95` adds a prompt fail on the fixed
+capability-unavailable UI text without changing the product package. A fresh
+synthetic run against the same exact `0ff97f7` installed app exited 1 with
+`directSourcePreview.reason=funds_import_capability_unavailable`, rather than
+waiting 20 minutes for a nonexistent confirm control. Its first Main exited
+0 around 36 seconds into the child, task residual count was zero, the source
+and artifact stayed bound, and the isolated profile was retained. The report
+is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/b-synthetic-local-2-fast-fail.json`
+(SHA-256 `19a24ceb75002ac2fb21f0d4ad3d60adbc81ac8c20fd4f9f56c89e10e8d73f2b`).
+This confirms the diagnostic failure category quickly; it is not a product
+repair or a Funds acceptance pass.
+
+The same committed `e0942bd95` harness, with no source edit after the commit,
+ran once more against a new isolated profile and the same installed `0ff97f7`
+package. It exited 1 with the same
+`funds_import_capability_unavailable` reason, Main exit 0 at 36,097 ms,
+zero task residual and stable package source. The retained report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/b-synthetic-local-3-harness-e094.json`
+(SHA-256 `58667daff424c084195d51ed9d822b065587dbf6540c808f08338ab47e1342a2`).
+The report's `harnessCommit` field names the pinned package-authority
+worktree (`0ff97f7`), so `e0942bd95` is recorded separately as the canonical
+executing harness commit. This repeated failure is diagnostic confirmation,
+not a new installed acceptance seam.
