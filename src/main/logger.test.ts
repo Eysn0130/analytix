@@ -127,16 +127,24 @@ describe('managed logger closed projection', () => {
       elapsedMs: 45,
       path: directCanaries[2]
     })
+    publicConsoleInfo('startup', 'safe owner phase', {
+      stage: 'go_semantic_prepared',
+      durationMs: 31000,
+      path: directCanaries[2]
+    })
     publicConsoleInfo('main', 'wrong category', {
       stage: 'app.whenReady:start',
       elapsedMs: 44
     })
-    const [accepted, rejected, transition, wrongCategory] = info.mock.calls.map((call) => call.join(' '))
+    const [accepted, rejected, transition, owner, wrongCategory] = info.mock.calls.map((call) => call.join(' '))
     expect(accepted).toContain('"stage":"app.whenReady:start"')
     expect(accepted).toContain('"elapsedMs":42')
     expect(rejected).not.toContain('"stage"')
     expect(transition).toContain('"stage":"runtime IPC restart:requested"')
     expect(transition).not.toContain(directCanaries[2])
+    expect(owner).toContain('"stage":"go_semantic_prepared"')
+    expect(owner).toContain('"durationMs":31000')
+    expect(owner).not.toContain(directCanaries[2])
     expect(wrongCategory).not.toContain('"stage"')
     for (const canary of directCanaries) {
       expect(accepted).not.toContain(canary)

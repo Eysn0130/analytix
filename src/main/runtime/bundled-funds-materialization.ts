@@ -4,6 +4,10 @@ import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { parseStrictJsonObject } from '../controlled-artifact/strict-json'
+import {
+  parseBundledFundsStartupStderrV1,
+  type StartupOwnerPhaseV1
+} from './startup-owner-trace-v1'
 
 const READY_PREFIX = 'ANALYTIX_BUNDLED_FUNDS_MATERIALIZATION_READY_V1 '
 const READY_PURPOSE = 'analytix.bundled-funds-materialization-ready/v1'
@@ -142,6 +146,7 @@ export async function materializeBundledFundsBeforeRuntimeV1(options: Readonly<{
   }>
   dataDir: string
   runner?: BundledFundsMaterializationCommandRunnerV1
+  onStartupPhase?: (phase: StartupOwnerPhaseV1) => void
 }>): Promise<BundledFundsMaterializationBindingV1 | null> {
   if (!options.appIsPackaged) return null
   if (options.launchTarget.mode !== 'bundled-binary') {
@@ -162,10 +167,17 @@ export async function materializeBundledFundsBeforeRuntimeV1(options: Readonly<{
     { cwd: options.launchTarget.cwd }
   )
   try {
-    if (result.exitCode !== 0 || result.signal !== null || result.timedOut || result.overflow || result.stderr.length !== 0) {
+    const phases = process.env.ANALYTIX_STARTUP_TRACE === '1'
+      ? parseBundledFundsStartupStderrV1(result.stderr)
+      : result.stderr.length === 0 ? [] : null
+    if (result.exitCode !== 0 || result.signal !== null || result.timedOut || result.overflow || phases === null) {
       throw new Error('Packaged funds materialization command failed.')
     }
-    return verifyBundledFundsMaterializationOutputV1(result.stdout, invocationId, options.dataDir)
+    const ready = verifyBundledFundsMaterializationOutputV1(result.stdout, invocationId, options.dataDir)
+    for (const phase of phases) {
+      try { options.onStartupPhase?.(phase) } catch { /* diagnostics cannot gate startup */ }
+    }
+    return ready
   } finally {
     result.stdout.fill(0)
     result.stderr.fill(0)
@@ -407,7 +419,9 @@ async function runCommandV1(
       clearTimeout(timer)
       resolveResult({ exitCode: null, signal: null, stdout, stderr, timedOut, overflow })
     })
-    child.once('exit', (exitCode, signal) => {
+    // `close` follows stdout/stderr EOF; the strict ready and trace parsers
+    // must see every byte before classifying the command result.
+    child.once('close', (exitCode, signal) => {
       clearTimeout(timer)
       resolveResult({ exitCode, signal, stdout, stderr, timedOut, overflow })
     })
@@ -423,5 +437,6 @@ function commandEnvironmentV1(): NodeJS.ProcessEnv {
   env.PATH = process.platform === 'win32'
     ? process.env.PATH
     : '/usr/bin:/bin:/usr/sbin:/sbin'
+  if (process.env.ANALYTIX_STARTUP_TRACE === '1') env.ANALYTIX_STARTUP_TRACE = '1'
   return env
 }

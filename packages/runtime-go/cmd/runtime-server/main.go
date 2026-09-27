@@ -80,6 +80,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if len(args) > 0 && args[0] == "migration" {
 		return runRuntimeMigrationCommand(args[1:], os.Stdout)
 	}
+	started := time.Now()
 	cli, err := parseRuntimeServerCLI(args)
 	if err != nil {
 		return fmt.Errorf("parse flags: %w", err)
@@ -129,6 +130,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err != nil {
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoLeaseAcquiredV1)
 	defer func() {
 		runErr = errors.Join(runErr, lease.Close())
 	}()
@@ -139,6 +141,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		}
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoSemanticPreparedV1)
 	if err := runtimeCtx.Err(); err != nil {
 		return nil
 	}
@@ -149,6 +152,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoListenerBoundV1)
 	defer listener.Close()
 	tcpAddr, _ := listener.Addr().(*net.TCPAddr)
 	if tcpAddr != nil {
@@ -162,6 +166,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		}
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoActivatedV1)
 	authoritySource, ok := handler.(runtimeapp.FinalPublicationAuthorityIdentitySourceV1)
 	if !ok {
 		return errors.New("runtime final publication authority identity is unavailable")
@@ -178,6 +183,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err := runtimeapp.ProbeControlledArtifactHostV2(runtimeCtx, config); err != nil {
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoHostProbedV1)
 	controlledArtifactLaunch, err := runtimeapp.ControlledArtifactSidecarLaunchBindingProofV2(
 		config, runtimeURL, uint64(os.Getpid()), effectiveRuntimeToken != "", false,
 	)
@@ -219,6 +225,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		"datasetSnapshotAdmissionV2AckHmacSha256":         "",
 	}
 	readyJSON, _ := json.Marshal(ready)
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoReadyBuiltV1)
 	fmt.Printf("ANALYTIX_RUNTIME_SERVER_READY %s\n", readyJSON)
 
 	errCh := make(chan error, 1)

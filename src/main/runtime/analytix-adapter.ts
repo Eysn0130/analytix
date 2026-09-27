@@ -66,13 +66,14 @@ import { getAnalytixBaseUrl } from '../analytix-base-url'
 import type { RuntimeHostScheduleMcpBindingV1 } from '../claw-schedule-mcp-config'
 import type { DesktopExternalStateBoundary } from '../desktop-external-state-isolation'
 import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
-import { logWarn, type StartupTraceStage } from '../logger'
+import { logWarn, publicConsoleInfo, type StartupTraceStage } from '../logger'
 import {
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   materializeBundledFundsBeforeRuntimeV1,
   type BundledFundsMaterializationBindingV1
 } from './bundled-funds-materialization'
+import { createStartupOwnerPhaseStreamV1, type StartupOwnerPhaseV1 } from './startup-owner-trace-v1'
 import {
   authorityAnchorProjectionV1,
   takeMainOwnedRuntimeAuthorityEnvelopeV1,
@@ -2560,7 +2561,10 @@ async function startGoConformanceSidecarOnce(
         const materialization = await materializeBundledFundsBeforeRuntimeV1({
           appIsPackaged: app.isPackaged,
           launchTarget,
-          dataDir
+          dataDir,
+          onStartupPhase: (phase: StartupOwnerPhaseV1) => {
+            publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
+          }
         })
         if (materialization) {
           await syncRuntimeConfig(materialization)
@@ -2668,9 +2672,15 @@ async function startGoConformanceSidecarOnce(
   goSidecarFinalPublicationAuthorityPin = null
   const launchGeneration = ++goSidecarGeneration
   const publicationTrace = createRuntimePublicationTraceReceiver(app.getPath('userData'), child.pid ?? 0, launchGeneration)
+  const startupOwnerTrace = process.env.ANALYTIX_STARTUP_TRACE === '1'
+    ? createStartupOwnerPhaseStreamV1((phase) => {
+        publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
+      })
+    : null
   child.stderr?.on('data', (chunk) => {
     appendGoStderrTail(String(chunk))
     publicationTrace.write(chunk)
+    startupOwnerTrace?.accept(chunk)
   })
   child.once('close', () => publicationTrace.close())
   const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })

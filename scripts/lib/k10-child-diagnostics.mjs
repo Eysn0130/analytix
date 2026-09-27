@@ -74,6 +74,26 @@ const goStartupPhases = Object.freeze({
   'go adapter:failed': 'adapterFailed'
 })
 
+const goOwnerPhases = new Set([
+  'funds_package_inspected', 'funds_source_inspected', 'funds_static_admitted',
+  'funds_active_resolved', 'funds_ready_built', 'go_lease_acquired',
+  'go_semantic_prepared', 'go_listener_bound', 'go_activated',
+  'go_host_probed', 'go_ready_built'
+])
+
+export function parseGoOwnerPhase(line) {
+  const match = line.match(/^\[analytix\] \[main\] event=main_info detail=(\{.*\})$/u)
+  if (!match) return null
+  try {
+    const data = JSON.parse(match[1])
+    if (!data || typeof data !== 'object' || Array.isArray(data) ||
+        Object.keys(data).length !== 2 || !goOwnerPhases.has(data.stage) ||
+        !Number.isSafeInteger(data.durationMs) || data.durationMs < 0 ||
+        data.durationMs > 30 * 60_000) return null
+    return { stage: data.stage, durationMs: data.durationMs }
+  } catch { return null }
+}
+
 const runtimeTransitionPhases = new Set([
   'runtime settings apply:queued',
   'runtime settings apply:begin',

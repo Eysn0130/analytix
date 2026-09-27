@@ -7,4 +7,5 @@ export function residualMembersAlreadyPinned(currentPids: number[] | null, pinne
 export function parseRuntimeStartupNumericDiagnostic(line: string): { key: string; value: number } | null
 export function parseRuntimeTransitionPhase(line: string): { phase: string; elapsedMs: number } | null
 export function parseGoStartupPhase(line: string): { phase: string; elapsedMs: number } | null
+export function parseGoOwnerPhase(line: string): { stage: string; durationMs: number } | null
 export function isGoStartupAttemptMarker(line: string): boolean

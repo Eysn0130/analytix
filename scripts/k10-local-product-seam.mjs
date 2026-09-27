@@ -27,6 +27,7 @@ import {
   parseRuntimeStartupNumericDiagnostic,
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
+  parseGoOwnerPhase,
   residualMembersAlreadyPinned,
   processProbeFailureKind
 } from './lib/k10-child-diagnostics.mjs'
@@ -674,13 +675,18 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
       if (index < 0) break
       const completedLine = line.slice(0, index)
       const phase = parseGoStartupPhase(completedLine)
+      const ownerPhase = parseGoOwnerPhase(completedLine)
       const transition = parseRuntimeTransitionPhase(completedLine)
       if (transition && runtimeTransitions.length < 32) runtimeTransitions.push(transition)
       if (phase?.phase === 'preflightBegin') {
         goStartupAttemptCount += 1
-        if (goStartupAttempts.length < 8) goStartupAttempts.push({ preflightBegin: phase.elapsedMs })
+        if (goStartupAttempts.length < 8) goStartupAttempts.push({ preflightBegin: phase.elapsedMs, ownerPhases: [] })
       } else if (phase && goStartupAttempts.length > 0 && goStartupAttemptCount <= 8) {
         goStartupAttempts.at(-1)[phase.phase] = phase.elapsedMs
+      }
+      if (ownerPhase && goStartupAttempts.length > 0 && goStartupAttemptCount <= 8 &&
+          goStartupAttempts.at(-1).ownerPhases.length < 16) {
+        goStartupAttempts.at(-1).ownerPhases.push(ownerPhase)
       }
       const numeric = parseRuntimeStartupNumericDiagnostic(completedLine)
       if (numeric) {

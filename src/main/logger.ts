@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readdir, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { startupOwnerPhasesV1 } from './runtime/startup-owner-trace-v1'
 
 export type LogLevel = 'error' | 'warn' | 'info'
 
@@ -163,7 +164,8 @@ export const STARTUP_TRACE_STAGES = [
   'go ready line:received',
   'go ready identity:verified',
   'go adapter:done',
-  'go adapter:failed'
+  'go adapter:failed',
+  ...startupOwnerPhasesV1
 ] as const
 export type StartupTraceStage = typeof STARTUP_TRACE_STAGES[number]
 const STARTUP_TRACE_STAGE_SET: ReadonlySet<string> = new Set(STARTUP_TRACE_STAGES)

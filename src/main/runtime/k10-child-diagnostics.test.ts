@@ -6,6 +6,7 @@ import {
   parseRuntimeStartupNumericDiagnostic,
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
+  parseGoOwnerPhase,
   isGoStartupAttemptMarker,
   exactMainCommandMatches,
   observedSingleInstanceLockFailure,
@@ -86,6 +87,12 @@ describe('K10 process probe evidence', () => {
     expect(parseGoStartupPhase(`${prefix}{"stage":"go ready line:received","elapsedMs":903,"path":"/private"}`))
       .toBeNull()
     expect(parseGoStartupPhase(`${prefix}{"stage":"unapproved phase","elapsedMs":903}`))
+      .toBeNull()
+    expect(parseGoOwnerPhase(`${prefix}{"stage":"go_semantic_prepared","durationMs":31000}`))
+      .toEqual({ stage: 'go_semantic_prepared', durationMs: 31000 })
+    expect(parseGoOwnerPhase(`${prefix}{"stage":"go_semantic_prepared","durationMs":31000,"path":"/private"}`))
+      .toBeNull()
+    expect(parseGoOwnerPhase(`${prefix}{"stage":"unapproved","durationMs":31000}`))
       .toBeNull()
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime settings apply:begin","elapsedMs":72}`))
       .toEqual({ phase: 'runtime settings apply:begin', elapsedMs: 72 })

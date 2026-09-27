@@ -148,6 +148,42 @@ describe('bundled funds materialization desktop binding', () => {
     expect(stderr.every((value) => value === 0)).toBe(true)
   })
 
+  it('accepts only fixed opt-in owner phases and still rejects other stderr', async () => {
+    const root = testRuntimeHome()
+    const previous = process.env.ANALYTIX_STARTUP_TRACE
+    process.env.ANALYTIX_STARTUP_TRACE = '1'
+    try {
+      const phases: unknown[] = []
+      const options = {
+        appIsPackaged: true,
+        launchTarget: { command: '/tmp/runtime-server', argsPrefix: [], mode: 'bundled-binary' as const },
+        dataDir: join(root, 'data'),
+        onStartupPhase: (phase: unknown) => phases.push(phase)
+      }
+      const ready = await materializeBundledFundsBeforeRuntimeV1({
+        ...options,
+        runner: async (_command, args) => ({
+          ...commandResult(readyFixture(args[5], root)),
+          stderr: Buffer.from('ANALYTIX_STARTUP_OWNER_PHASE_V1 funds_package_inspected 24\n')
+        })
+      })
+      expect(ready?.pluginVersion).toBe('0.16.16')
+      expect(phases).toEqual([{ stage: 'funds_package_inspected', durationMs: 24 }])
+      await expect(materializeBundledFundsBeforeRuntimeV1({
+        ...options,
+        runner: async (_command, args) => ({
+          ...commandResult(readyFixture(args[5], root)),
+          stderr: Buffer.from('ANALYTIX_STARTUP_OWNER_PHASE_V1 funds_package_inspected 24\nprivate detail\n')
+        })
+      })).rejects.toThrow(/command failed/)
+      expect(phases).toHaveLength(1)
+    } finally {
+      if (previous === undefined) delete process.env.ANALYTIX_STARTUP_TRACE
+      else process.env.ANALYTIX_STARTUP_TRACE = previous
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps materialization and config binding ahead of the runtime-server spawn', () => {
     const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
     const start = source.indexOf('async function startGoConformanceSidecarOnce')
