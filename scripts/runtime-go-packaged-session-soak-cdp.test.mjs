@@ -888,23 +888,75 @@ test('missing initial thread id stops before a turn write', async (t) => {
   assert.ok(!fixture.calls.some(({ path }) => path.endsWith('/turns')))
 })
 
-test('explicit diagnostic retention preserves a quiesced full-mode profile', () => {
+test('diagnostic retention preserves quiesced ambiguous CDP state without deleting active profiles', () => {
   const start = source.indexOf('    if (tempHome) {', source.indexOf('async function runActualPackagedSoak('))
   const end = source.indexOf('\n  }\n\n  const providerRequests', start)
   assert.ok(start >= 0 && end > start)
   const cleanup = source.slice(start, end)
-  for (const retainDiagnosticProfile of [false, true]) {
+  const cases = [
+    { retainDiagnosticProfile: false, ambiguousMutatingCdp: false,
+      cleanupQuiesced: true, taskOwnedTempHome: true, retained: false, removed: true },
+    { retainDiagnosticProfile: true, ambiguousMutatingCdp: false,
+      cleanupQuiesced: true, taskOwnedTempHome: true, retained: true, removed: false },
+    { retainDiagnosticProfile: false, ambiguousMutatingCdp: true,
+      cleanupQuiesced: true, taskOwnedTempHome: true, retained: true, removed: false },
+    { retainDiagnosticProfile: false, ambiguousMutatingCdp: true,
+      cleanupQuiesced: false, taskOwnedTempHome: true, retained: false, removed: false },
+    { retainDiagnosticProfile: false, ambiguousMutatingCdp: true,
+      cleanupQuiesced: true, taskOwnedTempHome: false, retained: false, removed: false }
+  ]
+  for (const item of cases) {
     const removed = []
     const result = vm.runInNewContext(`(() => { let diagnosticProfilePath = ''; ${cleanup}
       return diagnosticProfilePath; })()`, {
-      tempHome: '/synthetic/profile', cleanupQuiesced: true, retainDiagnosticProfile,
+      tempHome: '/synthetic/profile', ...item, cleanupError: '',
       join: (...parts) => parts.join('/'), existsSync: () => false,
       readFileSync: () => { throw new Error('absent') },
       rmSync: path => removed.push(path)
     })
-    assert.equal(result, retainDiagnosticProfile ? '/synthetic/profile' : '')
-    assert.deepEqual(removed, retainDiagnosticProfile ? [] : ['/synthetic/profile'])
+    assert.equal(result, item.retained ? '/synthetic/profile' : '', JSON.stringify(item))
+    assert.deepEqual(removed, item.removed ? ['/synthetic/profile'] : [], JSON.stringify(item))
   }
+})
+
+test('segmented observation marks an acknowledged but timed-out journey as ambiguous', async () => {
+  const start = source.indexOf('async function observeRendererJourneyByStage(')
+  const end = source.indexOf('\nfunction buildRelaunchExpression(', start)
+  assert.ok(start >= 0 && end > start)
+  const observe = vm.runInNewContext(`${source.slice(start, end)}\nobserveRendererJourneyByStage`, {
+    Date, Error, Object,
+    evaluateRendererWithRetries: async () => ({ started: true, token: 'synthetic-run' }),
+    readRendererProgress: async () => ({ status: 'observed', stage: 'turn-running',
+      outcomeStatus: 'running', ageMs: 45_001 }),
+    sleep: async () => {}
+  })
+  await assert.rejects(observe({ debugPort: 1, expression: 'mutation()',
+    progressToken: 'synthetic-run', startTimeoutMs: 100 }), (error) => {
+    assert.equal(error.message, 'packaged_stage_observation_timeout')
+    assert.equal(error.cdpOutcome, 'unknown')
+    assert.equal(error.cdpCommandSent, true)
+    return true
+  })
+})
+
+test('installed CDP port must belong to the exact spawned Main process', async () => {
+  const start = source.indexOf('async function waitForOwnedDebugPort(')
+  const end = source.indexOf('\nasync function stopSmokeRuntimeOnPort(', start)
+  assert.ok(start >= 0 && end > start)
+  const run = (owners) => vm.runInNewContext(`${source.slice(start, end)}\nwaitForOwnedDebugPort`, {
+    Date, Error, Number, Set,
+    process: { platform: 'darwin' },
+    listeningPidsOnPort: () => owners,
+    sleep: async () => {}
+  })
+  const child = { pid: 123, exitCode: null, signalCode: null }
+  await run([123])(9222, child, 100)
+  await assert.rejects(run([999])(9222, child, 100),
+    { message: 'packaged_debug_port_owner_mismatch' })
+  await assert.rejects(run([123, 999])(9222, child, 100),
+    { message: 'packaged_debug_port_owner_mismatch' })
+  await assert.rejects(run([123])(9222, { ...child, exitCode: 0 }, 100),
+    { message: 'packaged_debug_process_exited' })
 })
 
 test('progress probe reads only the matching run and fixed stage', async () => {

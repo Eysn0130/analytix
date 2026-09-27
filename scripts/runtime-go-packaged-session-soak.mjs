@@ -693,6 +693,30 @@ function commandLineForPid(pid) {
   }
 }
 
+async function waitForOwnedDebugPort(port, child, timeoutMs) {
+  // macOS installed acceptance must bind CDP to the exact process spawned by
+  // this run before reading a page or sending a renderer expression.
+  if (process.platform !== 'darwin') return
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+    throw new Error('packaged_debug_process_missing')
+  }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode) {
+      throw new Error('packaged_debug_process_exited')
+    }
+    const owners = [...new Set(listeningPidsOnPort(port))]
+    if (owners.length) {
+      if (owners.length !== 1 || owners[0] !== child.pid) {
+        throw new Error('packaged_debug_port_owner_mismatch')
+      }
+      return
+    }
+    await sleep(Math.min(100, Math.max(0, deadline - Date.now())))
+  }
+  throw new Error('packaged_debug_port_owner_timeout')
+}
+
 async function stopSmokeRuntimeOnPort(port, runtimeDataDir) {
   if (!runtimeDataDir) return
   for (const pid of listeningPidsOnPort(port)) {
@@ -874,6 +898,10 @@ async function evaluateCdp(wsUrl, expression, timeoutMs) {
     for (const [name, listener] of listeners) ws.removeEventListener(name, listener)
     try { ws.close() } catch { /* Preserve the original result or refusal. */ }
   }
+}
+
+function hasAmbiguousMutatingCdpOutcome(error) {
+  return error?.cdpCommandSent === true && error?.cdpOutcome === 'unknown'
 }
 
 function isTransientCdpEvaluationError(error) {
@@ -2065,8 +2093,13 @@ async function observeRendererJourneyByStage({ debugPort, expression, progressTo
     if (error?.cdpOutcome !== 'unknown') throw error
     startError = error
   }
+  const unknownOutcome = (error) => Object.assign(error, {
+    cdpCommandSent: true, cdpOutcome: 'unknown'
+  })
   if (acknowledgement && (acknowledgement.started !== true ||
-    acknowledgement.token !== progressToken)) throw new Error('packaged_journey_start_unconfirmed')
+    acknowledgement.token !== progressToken)) {
+    throw unknownOutcome(new Error('packaged_journey_start_unconfirmed'))
+  }
   const deadline = Date.now() + 360_000
   let missingSince = 0
   let lastStage = ''
@@ -2076,25 +2109,28 @@ async function observeRendererJourneyByStage({ debugPort, expression, progressTo
       missingSince = 0
       lastStage = progress.stage
       if (progress.outcomeStatus === 'complete') {
-        if (!progress.result) throw new Error('packaged_journey_result_missing')
+        if (!progress.result) throw unknownOutcome(new Error('packaged_journey_result_missing'))
         return progress.result
       }
       if (progress.outcomeStatus === 'rejected') {
-        throw Object.assign(new Error('packaged_journey_rejected'), { packagedStage: lastStage })
+        throw unknownOutcome(Object.assign(new Error('packaged_journey_rejected'),
+          { packagedStage: lastStage }))
       }
       if (progress.ageMs > 45_000) {
-        throw Object.assign(new Error('packaged_stage_observation_timeout'), { packagedStage: lastStage })
+        throw unknownOutcome(Object.assign(new Error('packaged_stage_observation_timeout'),
+          { packagedStage: lastStage }))
       }
     } else {
       if (!missingSince) missingSince = Date.now()
       if (Date.now() - missingSince > 5_000) {
-        throw Object.assign(startError || new Error('packaged_journey_progress_unavailable'),
-          { packagedStage: lastStage })
+        throw unknownOutcome(Object.assign(startError || new Error('packaged_journey_progress_unavailable'),
+          { packagedStage: lastStage }))
       }
     }
     await sleep(1_000)
   }
-  throw Object.assign(new Error('packaged_journey_observation_timeout'), { packagedStage: lastStage })
+  throw unknownOutcome(Object.assign(new Error('packaged_journey_observation_timeout'),
+    { packagedStage: lastStage }))
 }
 
 function buildRelaunchExpression({ threadId, turnId, providerId, model,
@@ -2452,6 +2488,7 @@ async function runActualPackagedSessionSoak() {
   }
   let child = null
   let tempHome = ''
+  let taskOwnedTempHome = false
   let runtimeDataDir = ''
   let userDataDir = ''
   let renderer = null
@@ -2475,6 +2512,7 @@ async function runActualPackagedSessionSoak() {
   let cleanupError = ''
   let rendererReadinessPassed = false
   let cdpFailure = null
+  let ambiguousMutatingCdp = false
   let goRecovery = null
   let relaunch = null
   const progressToken = randomUUID()
@@ -2485,6 +2523,7 @@ async function runActualPackagedSessionSoak() {
     if (artifactEvidence.ok) {
       contractProvider = await startContractProvider()
       tempHome = mkdtempSync(join(tmpdir(), 'analytix-packaged-session-home-'))
+      taskOwnedTempHome = true
       const taskRoot = join(tempHome, '.analytix')
       const profileHome = join(taskRoot, 'home')
       userDataDir = join(taskRoot, 'packaged-session-user-data')
@@ -2515,11 +2554,13 @@ async function runActualPackagedSessionSoak() {
       child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       try {
         const evaluationDeadline = Date.now() + timeoutMs
+        await waitForOwnedDebugPort(debugPort, child, Math.max(1, evaluationDeadline - Date.now()))
         await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
         rendererReadinessPassed = true
         const journeyOptions = { providerBaseUrl: contractProvider.url, providerId,
           model, runtimePort, runtimeDataDir, workspace, syntheticApiKey, progressToken }
         const startTimeoutMs = Math.max(1, evaluationDeadline - Date.now())
+        await waitForOwnedDebugPort(debugPort, child, startTimeoutMs)
         renderer = segmentedObservation
           ? await observeRendererJourneyByStage({ debugPort, progressToken,
             expression: buildRendererStartExpression(journeyOptions), startTimeoutMs })
@@ -2543,6 +2584,7 @@ async function runActualPackagedSessionSoak() {
             const beforeGoPids = ownedSmokeRuntimePids(runtimeDataDir)
             if (beforeGoPids.length !== 1) throw new Error('first_go_process_not_unique')
             goRecovery.firstGoPid = beforeGoPids[0]
+            await waitForOwnedDebugPort(debugPort, child, Math.max(1, evaluationDeadline - Date.now()))
             const restarted = await evaluateRendererWithRetries({
               debugPort, expression: buildGoRestartExpression(),
               timeoutMs: Math.max(1, evaluationDeadline - Date.now())
@@ -2554,6 +2596,7 @@ async function runActualPackagedSessionSoak() {
               throw new Error('go_process_identity_unchanged')
             }
             goRecovery.secondGoPid = afterGoPids[0]
+            await waitForOwnedDebugPort(debugPort, child, Math.max(1, evaluationDeadline - Date.now()))
             const observed = await evaluateRendererWithRetries({
               debugPort,
               expression: buildRelaunchExpression({
@@ -2585,6 +2628,7 @@ async function runActualPackagedSessionSoak() {
               throw new Error(goRecovery.error || 'go_recovery_not_complete')
             }
           } catch (error) {
+            ambiguousMutatingCdp ||= hasAmbiguousMutatingCdpOutcome(error)
             goRecovery.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
           }
           if (goRecovery.error === '' && goRecovery.continuationCompleted) {
@@ -2614,8 +2658,10 @@ async function runActualPackagedSessionSoak() {
               relaunch.secondMainPid = child.pid || 0
               child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
               child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+              await waitForOwnedDebugPort(debugPort, child, Math.max(1, evaluationDeadline - Date.now()))
               await waitForRendererReady({ debugPort, deadline: evaluationDeadline })
               relaunch.secondRendererReady = true
+              await waitForOwnedDebugPort(debugPort, child, Math.max(1, evaluationDeadline - Date.now()))
               const observed = await evaluateRendererWithRetries({
                 debugPort,
                 expression: buildRelaunchExpression({
@@ -2645,6 +2691,7 @@ async function runActualPackagedSessionSoak() {
               relaunch.httpCode = typeof observed.httpCode === 'string' &&
                 /^[a-z0-9_]{1,64}$/.test(observed.httpCode) ? observed.httpCode : ''
             } catch (error) {
+              ambiguousMutatingCdp ||= hasAmbiguousMutatingCdpOutcome(error)
               relaunch.error = redactSecrets(summarizeError(error instanceof Error ? error.message : String(error)))
               relaunch.remoteKind = error?.cdpRemoteKind || ''
               relaunch.protocolCode = error?.cdpProtocolCode ?? null
@@ -2653,6 +2700,7 @@ async function runActualPackagedSessionSoak() {
           }
         }
       } catch (error) {
+        ambiguousMutatingCdp ||= hasAmbiguousMutatingCdpOutcome(error)
         launchError = error instanceof Error ? error.message : String(error)
         cdpFailure = {
           remoteKind: error?.cdpRemoteKind || '',
@@ -2706,9 +2754,14 @@ async function runActualPackagedSessionSoak() {
       } catch {
         approvalAllowFileMatches = false
       }
-      // Explicit protected-QA retention must also cover failed boolean checks
-      // and successful diagnostic runs, not just exceptions or focused modes.
-      if (!cleanupQuiesced || retainDiagnosticProfile) {
+      // An unknown result after a sent mutation needs its durable state for
+      // diagnosis. Do not classify an active or unowned directory as a safe
+      // diagnostic profile, and never delete it while cleanup is uncertain.
+      if (!cleanupQuiesced) {
+        cleanupError ||= 'owned packaged processes did not stop'
+      } else if (!taskOwnedTempHome) {
+        cleanupError ||= 'temporary profile ownership unconfirmed'
+      } else if (retainDiagnosticProfile || ambiguousMutatingCdp) {
         diagnosticProfilePath = tempHome
       } else {
         rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
@@ -3132,6 +3185,11 @@ async function runActualPackagedSessionSoak() {
       isolatedProfilePath: diagnosticProfilePath,
       isolatedProfileRetained: Boolean(diagnosticProfilePath), cleanupQuiesced, cleanupError,
       rendererReadinessPassed, cdpFailure, relaunch
+    } } : diagnosticProfilePath ? { diagnostic: {
+      retentionReason: 'unknown_mutating_cdp_outcome',
+      isolatedProfilePath: diagnosticProfilePath,
+      isolatedProfileRetained: true,
+      cleanupQuiesced
     } } : {}),
     renderer: rendererEvidence,
     forkDiagnostic,
