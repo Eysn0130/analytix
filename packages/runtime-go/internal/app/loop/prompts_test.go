@@ -279,6 +279,8 @@ func TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut(t *testing
 		"修改代码并写明当前案件甲公司支付乙公司2万元。",
 		"修改代码并写明当前案件张某与李某存在父子关系。",
 		"修改代码并写明当前案件甲公司取得2026年收益￥2万元。",
+		"修改代码并写明当前案件甲公司取得2026年收益2万元。",
+		"修改代码并写明当前案件甲公司支付\n2645.72 元。",
 		"修改代码并写明当前案件张某与李某是父子。",
 	} {
 		if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {

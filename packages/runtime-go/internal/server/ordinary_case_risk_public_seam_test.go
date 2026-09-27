@@ -508,6 +508,33 @@ func TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn(t *testin
 				prompt, found, stringField(blockedFinal, "terminalReason"), contextErr)
 		}
 	}
+	for _, prompt := range []string{
+		"甲公司取得2026年收益2万元。",
+		"甲公司支付\n2645.72 元",
+	} {
+		fresh := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads",
+			bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"title": "independent case assertion", "workspace": workspace,
+				"providerId": "mixed-case-admission-provider", "model": "mixed-case-admission-model",
+			})), http.StatusCreated)
+		freshID := stringField(fresh, "id")
+		blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+			"/v1/threads/"+freshID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"prompt": prompt,
+			})), http.StatusAccepted)
+		if requests := providerClient.Requests(); len(requests) != 0 {
+			t.Fatalf("new case assertion reached ordinary provider: prompt=%q requests=%d", prompt, len(requests))
+		}
+		freshThread, err := handler.store.GetThread(freshID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedTurn, found := appmodel.TurnByID(freshThread, stringField(blocked, "turnId"))
+		securityContext, contextErr := domainsecurity.ParseTurnSecurityContext(blockedTurn["securityContext"])
+		if !found || contextErr != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(securityContext) {
+			t.Fatalf("new case assertion did not get a boundary: prompt=%q found=%t err=%v", prompt, found, contextErr)
+		}
+	}
 	continued := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
 		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
 			"prompt": "请解释 DOM 元素的父子关系。",

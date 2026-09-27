@@ -40,8 +40,10 @@ var unboundConcreteCaseAssertionPhrases = []string{
 }
 
 var unboundMonetaryActionCues = []string{"支付", "转账", "收款", "付款", "汇入", "汇出", "取得"}
+var acquiredYearFinancialCues = []string{"收益", "收入", "利润", "利息", "补助", "货款", "价款"}
 
 var unboundRelationshipAssertion = regexp.MustCompile(`([\p{Han}]{1,4})[与和]([\p{Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系`)
+var acquiredYearPrefix = regexp.MustCompile(`^(?:了\s*)?[0-9]{4}\s*年`)
 
 // ContainsProtectedCaseData detects structured values whose publication must
 // never depend on a model or a lexical case-intent guess. It is deliberately a
@@ -120,18 +122,79 @@ func technicalRelationshipSubjectV1(subject string) bool {
 }
 
 func containsUnboundMonetaryFactV1(text string) bool {
+	if containsLineWrappedMonetaryActionV1(text) {
+		return true
+	}
 	for _, rawClause := range strings.FieldsFunc(text, func(character rune) bool {
 		return strings.ContainsRune("。！？!?；;\n", character)
 	}) {
 		clause := normalizeCaseFactText(rawClause)
-		if index := strings.Index(clause, "取得"); index >= 0 && containsCurrencyAmount(clause[index+len("取得"):]) {
-			return true
+		if index := strings.Index(clause, "取得"); index >= 0 {
+			tail := clause[index+len("取得"):]
+			if containsCurrencyAmount(tail) || acquiredYearHasUnitAmountV1(tail) {
+				return true
+			}
 		}
 		for _, cue := range unboundMonetaryActionCues {
 			if actionHasAdjacentAmount(clause, cue) {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+func containsLineWrappedMonetaryActionV1(text string) bool {
+	// Join only a monetary action at line end with its immediately following
+	// amount; independent lines must not become one broad case assertion.
+	lines := strings.Split(text, "\n")
+	for index := 0; index+1 < len(lines); index++ {
+		left := normalizeCaseFactText(strings.TrimSpace(lines[index]))
+		right := normalizeCaseFactText(strings.TrimSpace(lines[index+1]))
+		for _, cue := range unboundMonetaryActionCues {
+			if (strings.HasSuffix(left, cue) || strings.HasSuffix(left, cue+"了")) &&
+				actionHasAdjacentAmount(cue+right, cue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func acquiredYearHasUnitAmountV1(tail string) bool {
+	// A year after "取得" may be a filename. Require a nearby financial noun
+	// before the bounded unit amount, rather than scanning a whole file request.
+	tail = strings.TrimSpace(tail)
+	prefix := acquiredYearPrefix.FindStringIndex(tail)
+	if prefix == nil {
+		return false
+	}
+	afterYear := tail[prefix[1]:]
+	windowEnd := len(afterYear)
+	windowRunes := 0
+	for byteIndex := range afterYear {
+		if windowRunes >= 64 {
+			windowEnd = byteIndex
+			break
+		}
+		windowRunes++
+	}
+	window := afterYear[:windowEnd]
+	runeIndex := 0
+	for byteIndex, character := range window {
+		if runeIndex > 32 {
+			break
+		}
+		if character >= '0' && character <= '9' && amountHasCurrencyUnit(window[byteIndex:]) {
+			beforeAmount := []rune(window[:byteIndex])
+			if len(beforeAmount) > 8 {
+				beforeAmount = beforeAmount[len(beforeAmount)-8:]
+			}
+			if containsAnyCaseFactPhrase(string(beforeAmount), acquiredYearFinancialCues) {
+				return true
+			}
+		}
+		runeIndex++
 	}
 	return false
 }

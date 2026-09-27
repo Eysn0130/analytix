@@ -140,6 +140,7 @@ const UNBOUND_CASE_ASSERTION_PHRASES = [
   '行贿', '利益输送', '具备立案条件', '当前案件', '案件账户', '案件账号', '涉案'
 ]
 const UNBOUND_MONETARY_ACTION_CUES = ['支付', '转账', '收款', '付款', '汇入', '汇出', '取得']
+const ACQUIRED_YEAR_FINANCIAL_CUES = ['收益', '收入', '利润', '利息', '补助', '货款', '价款']
 const UNBOUND_RELATIONSHIP_ASSERTION = /([\p{Script=Han}]{1,4})[与和]([\p{Script=Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系/gu
 
 type PublicPIITraversalState = {
@@ -194,12 +195,58 @@ export function containsUnboundCaseRiskV1(text: string): boolean {
   const normalized = normalizeCaseFactText(text)
   if (UNBOUND_CASE_ASSERTION_PHRASES.some((phrase) => normalized.includes(phrase))) return true
   if (containsUnboundRelationshipAssertionV1(normalized)) return true
+  if (containsLineWrappedMonetaryActionV1(text)) return true
   return text.split(/[。！？!?；;\n]/u).some((rawClause) => {
     const clause = normalizeCaseFactText(rawClause)
     const acquiredAt = clause.indexOf('取得')
-    if (acquiredAt >= 0 && containsCurrencyAmount(clause.slice(acquiredAt + '取得'.length))) return true
+    if (acquiredAt >= 0) {
+      const tail = clause.slice(acquiredAt + '取得'.length)
+      if (containsCurrencyAmount(tail) || acquiredYearHasUnitAmountV1(tail)) return true
+    }
     return UNBOUND_MONETARY_ACTION_CUES.some((cue) => actionHasAdjacentAmount(clause, cue))
   })
+}
+
+function containsLineWrappedMonetaryActionV1(text: string): boolean {
+  // Join only an action at line end to its immediately following amount.
+  const lines = text.split('\n')
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    const left = normalizeCaseFactText(lines[index].trim())
+    const right = normalizeCaseFactText(lines[index + 1].trim())
+    for (const cue of UNBOUND_MONETARY_ACTION_CUES) {
+      if ((left.endsWith(cue) || left.endsWith(`${cue}了`)) &&
+          actionHasAdjacentAmount(`${cue}${right}`, cue)) return true
+    }
+  }
+  return false
+}
+
+function acquiredYearHasUnitAmountV1(tail: string): boolean {
+  // A year may be a filename; require a nearby financial noun and bound the scan.
+  const trimmed = tail.trim()
+  const year = trimmed.match(/^(?:了\s*)?[0-9]{4}\s*年/u)
+  if (!year) return false
+  const afterYear = trimmed.slice(year[0].length)
+  let window = ''
+  let windowRunes = 0
+  for (const character of afterYear) {
+    if (windowRunes >= 64) break
+    window += character
+    windowRunes += 1
+  }
+  let offset = 0
+  let runeIndex = 0
+  for (const character of window) {
+    if (runeIndex > 32) break
+    if (/^[0-9]$/u.test(character) &&
+        amountHasCurrencyUnit(window.slice(offset))) {
+      const nearAmount = Array.from(window.slice(0, offset)).slice(-8).join('')
+      if (ACQUIRED_YEAR_FINANCIAL_CUES.some((cue) => nearAmount.includes(cue))) return true
+    }
+    offset += character.length
+    runeIndex += 1
+  }
+  return false
 }
 
 function containsUnboundRelationshipAssertionV1(normalized: string): boolean {

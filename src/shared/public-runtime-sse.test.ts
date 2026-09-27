@@ -262,6 +262,7 @@ describe('public runtime SSE boundary', () => {
 
   it.each([
     '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：550e8400-e29b-41d4-a716-44665544a000。',
     '请解释 DOM 元素的父子关系。'
   ])('admits a typed ordinary answer in a public SSE batch: %s', (answer) => {
     const batch = typedGeneralTerminalBatch(answer)
@@ -278,7 +279,9 @@ describe('public runtime SSE boundary', () => {
     '甲公司支付乙公司2645.72元。',
     '甲公司支付乙公司2万元。',
     '张某与李某存在父子关系。',
-    '甲公司取得2026年收益￥2万元。'
+    '甲公司取得2026年收益￥2万元。',
+    '甲公司取得2026年收益2万元。',
+    '甲公司支付\n2645.72 元'
   ])('withholds a typed case assertion from public SSE: %s', (text) => {
     const batch = typedGeneralTerminalBatch(text)
     expect(projectPublicRuntimeSseBlock(
