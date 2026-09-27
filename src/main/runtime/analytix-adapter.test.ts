@@ -23,6 +23,7 @@ import { sanitizePublicRuntimeValue } from '../../shared/public-runtime-content'
 import { createProviderRegistryIpcHandler } from '../ipc/provider-registry-ipc'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../packages/runtime/src/contracts/runtime-info.js'
 import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../packages/runtime/src/contracts/runtime-tools.js'
+import { BundledFundsMaterializationChildUnconfirmedError } from './bundled-funds-materialization'
 import {
   buildDevGoToolchainEnvV1,
   buildDesktopPrivateHistoryMigrationArgsV2,
@@ -116,6 +117,14 @@ describe('desktop private history startup migration', () => {
       async () => 'ready',
       (capability) => unavailable.push(capability)
     )).resolves.toBe('ready')
+    expect(unavailable).toEqual(['bundled_funds'])
+
+    const unconfirmed = new BundledFundsMaterializationChildUnconfirmedError(54321)
+    await expect(settleOptionalRuntimeCapability(
+      'bundled_funds',
+      async () => { throw unconfirmed },
+      (capability) => unavailable.push(capability)
+    )).rejects.toBe(unconfirmed)
     expect(unavailable).toEqual(['bundled_funds'])
   })
 

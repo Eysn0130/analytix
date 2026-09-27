@@ -68,6 +68,7 @@ import type { DesktopExternalStateBoundary } from '../desktop-external-state-iso
 import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
 import { logWarn, publicConsoleInfo, type StartupTraceStage } from '../logger'
 import {
+  BundledFundsMaterializationChildUnconfirmedError,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   materializeBundledFundsBeforeRuntimeV1,
@@ -366,7 +367,11 @@ export async function settleOptionalRuntimeCapability<T>(
 ): Promise<T | null> {
   try {
     return await operation()
-  } catch {
+  } catch (error) {
+    // A still-running materialization writer cannot be treated as an absent
+    // optional capability while the base runtime opens the same data root.
+    if (capability === 'bundled_funds' &&
+        error instanceof BundledFundsMaterializationChildUnconfirmedError) throw error
     try {
       reportUnavailable(capability)
     } catch {

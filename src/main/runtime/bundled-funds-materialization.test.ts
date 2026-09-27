@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  BundledFundsMaterializationChildUnconfirmedError,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   currentBundledFundsMaterializationBindingV1,
@@ -182,6 +183,40 @@ describe('bundled funds materialization desktop binding', () => {
       else process.env.ANALYTIX_STARTUP_TRACE = previous
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  it('settles an overflowing command even when a descendant holds its pipes open', async () => {
+    const code = [
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'],",
+      "  { stdio: ['ignore', 'inherit', 'inherit'] });",
+      "process.stderr.write('x'.repeat(600000));"
+    ].join('\n')
+    const started = Date.now()
+    await expect(materializeBundledFundsBeforeRuntimeV1({
+      appIsPackaged: true,
+      launchTarget: {
+        command: process.execPath,
+        argsPrefix: ['-e', code],
+        mode: 'bundled-binary'
+      },
+      dataDir: '/tmp/analytix-startup-owner-trace/data'
+    })).rejects.toThrow(/command failed/)
+    expect(Date.now() - started).toBeLessThan(3000)
+  })
+
+  it('reports unconfirmed direct-child termination as a fatal startup condition', async () => {
+    await expect(materializeBundledFundsBeforeRuntimeV1({
+      appIsPackaged: true,
+      launchTarget: { command: '/tmp/runtime-server', argsPrefix: [], mode: 'bundled-binary' },
+      dataDir: '/tmp/analytix-startup-owner-trace/data',
+      runner: async () => ({
+        exitCode: null, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0),
+        timedOut: true, overflow: false, terminationConfirmed: false, childPid: 54321
+      })
+    })).rejects.toMatchObject({
+      name: BundledFundsMaterializationChildUnconfirmedError.name,
+      childPid: 54321
+    })
   })
 
   it('keeps materialization and config binding ahead of the runtime-server spawn', () => {
