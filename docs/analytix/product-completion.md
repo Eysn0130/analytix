@@ -9,13 +9,14 @@ history before comparing remote state.
 
 ## Current PR28 Core and Funds admission — 2026-09-27 PDT
 
-The latest committed product SOURCE is source-only startup successor
-`d244036f89dc40c14da7b3e0c3b7edd1bb9c3676` (tree
-`5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`). The latest exact-installed
+The latest committed product SOURCE is source-only N04 successor
+`11e6fff85a72934e30ed805a4fcf5a8638fc7623` (tree
+`6550753fa48a0419e31906bf6adb0c4f0ee31a6b`), following startup successor
+`d244036f89dc40c14da7b3e0c3b7edd1bb9c3676`. The latest exact-installed
 product SOURCE remains `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`
 (tree `3188bb34567d2c3f0fa76176b28035345d5b13ba`), followed by
 diagnostic-only commits `e0942bd95` and `547c94a91`; its ordinary/case classifier
-source is the unchanged `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`
+source is the older `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`
 (tree `812abaaf4ca947af1166e118c9470a1e08b59481`). The `a5dc` predecessor
 passed focused checks but missed two explicit case assertions. The `24ff`
 successor repaired those forms but regressed an acquired-currency assertion
@@ -127,6 +128,22 @@ not excluded by this evidence. No installed artifact or startup timing
 observation exists for either source successor. Their source checks do not
 transfer the `0ff97f7` package integrity or installed acceptance forward.
 
+The `11e6fff85` N04 source successor mirrors a bounded case classifier repair
+in Go and desktop TypeScript: a monetary action and its immediately following
+amount can cross a newline, and `取得` plus year plus unit amount requires a
+nearby financial noun. Before repair, the two case forms failed focused Go
+security vectors and the mirrored TS projection; an initial broader repair
+then failed an ordinary year-path amount vector. The final bounded rule keeps
+ordinary year paths, financial filenames and exact date/count/amount/UUID
+answers available while withholding the observed case assertions at Go
+admission/result and Main/SSE/Renderer publication seams. Focused Go security
+and result packages, Go loop/HTTP public seam, four desktop files (367/367),
+typecheck and diff checks passed. The HTTP tests include fresh case threads
+with zero ordinary Provider requests and a later independent ordinary turn.
+Existing synthetic PII masking tests remain in those suites. No exact-source
+package, installed GUI, protected real-Provider or formal Funds acceptance
+has been established for `11e6fff85`.
+
 The exact `28ed097f2` installed Core copy completed normal protected real
 Provider use and Go/Main restart without credential re-entry. The later exact
 `107d68c2e` installed Core copy passed private package signature/legal checks
@@ -135,7 +152,7 @@ Provider use. Neither result transfers to the committed `c8fa` source repair.
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `false` for the full PR28 delivery: the `c8fa` classifier checks, `0ff97f7` focused source and package checks, and committed B1 synthetic positive chain pass in their bounded scopes, but remaining applicable source and product acceptance checks are open. `74e` and remote `56231ff5e` retain their own earlier CI evidence. |
+| SourceReady | `false` for the full PR28 delivery: the `11e6fff85` N04 classifier checks, `0ff97f7` focused source and package checks, and committed B1 synthetic positive chain pass in their bounded scopes, but remaining applicable source and product acceptance checks are open. `74e` and remote `56231ff5e` retain their own earlier CI evidence. |
 | PrivateCandidateReady | `false`: exact `0ff97f7` full Funds package integrity and mandatory legal admission pass, as does one installed synthetic ordinary-file Provider journey with normal quit. Its installed Direct Preview fails closed at the import capability gate; protected real-Provider recovery and Funds/formal B acceptance remain open. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
 | MergeReady | `false`: PR28 is Draft, the current local product SOURCE is unpushed, and earlier remote CI does not cover it. |
 | PublicMacReleaseReady | `false`: the exact `0ff97f7` full artifact is development-only and nonpublishable; no public-release qualification or publication authority is claimed. |
@@ -299,7 +316,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused classifier checks and a fresh isolated synthetic session at 19/19. Its `0ff97f7` successor has a clean full private artifact with installed hash/signature/legal checks and one exact-installed synthetic ordinary-file read, visible reply, and normal quit. Protected real-Provider recovery and startup/Host latency attribution remain open. Public Developer ID/notarization belongs to separate public qualification. |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused classifier checks and a fresh isolated synthetic session at 19/19. Its `0ff97f7` successor has a clean full private artifact with installed hash/signature/legal checks and one exact-installed synthetic ordinary-file read, visible reply, and normal quit. The later `11e6fff85` N04 repair has focused Go/TS public-seam checks only. Protected real-Provider recovery and startup/Host latency attribution remain open. Public Developer ID/notarization belongs to separate public qualification. |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 

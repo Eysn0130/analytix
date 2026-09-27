@@ -94,21 +94,22 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   installed diagnostic is tracked separately below. Neither local evidence
   nor prior-head CI establishes protected real-Provider, formal Funds B,
   merge or public release readiness.
-- Latest committed product SOURCE `d244036f89dc40c14da7b3e0c3b7edd1bb9c3676`
-  (tree `5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`) includes the fixed
-  opt-in Funds/Go startup owner phase markers and the materialization child
-  exit/retry guard. It has focused source verification but has not been built
-  or measured as an installed product. The `0ff97f7` package and its exact
-  evidence remain a separate earlier candidate.
+- Latest committed product SOURCE `11e6fff85a72934e30ed805a4fcf5a8638fc7623`
+  (tree `6550753fa48a0419e31906bf6adb0c4f0ee31a6b`) follows the
+  `d244036f8` startup owner markers and materialization child exit/retry guard.
+  It closes two additional N04 case-assertion classifier gaps while retaining
+  ordinary paths and exact numeric answers. It has focused source verification
+  but no exact-source package or installed acceptance. The `0ff97f7` package
+  and its exact evidence remain a separate earlier candidate.
 
 ## N01–N09 ledger
 
 | Item | State | Evidence and remaining condition |
 | --- | --- | --- |
-| N01 identity and matrix | DONE_IMPLEMENTED | The earlier matrix correction moved Current from stale e15 to then-current 74e and retained e15 as history. Latest committed product SOURCE is now `d244036f8`; the latest exact-installed artifact is still product SOURCE `0ff97f7`. Core/Funds stage scope and artifact exclusion inspected. |
+| N01 identity and matrix | DONE_IMPLEMENTED | The earlier matrix correction moved Current from stale e15 to then-current 74e and retained e15 as history. Latest committed product SOURCE is now `11e6fff85`; the latest exact-installed artifact recorded here is still product SOURCE `0ff97f7`. Core/Funds stage scope and artifact exclusion inspected. |
 | N02 installed real Provider | DONE_IMPLEMENTED | The 28ed installed copy reused the credential reference from normal QA onboarding. A new short turn completed with `2 加 3 等于 5。`; after Go PID 66130→67281 another turn completed with `2 + 3 = 5`; after Main PID 55003→89415 and Go PID 797, the same durable thread displayed both prior turns and a third live turn completed with `56`. No credential value was read into this record or re-entered. This applies only to 28ed; a changed final SOURCE needs a bounded repeat. |
 | N03 startup and delivery latency | UNFINISHED | The exact `0ff97f7` installed local synthetic ordinary-file journey passed visible reply and normal quit; its trace now has two Go starts rather than `b5ead0`'s redundant third IPC restart. First preflight→materialization was 24.621 s and spawn→ready 31.879 s; settings-apply restart was 2.455 s and 17.239 s. Launch→composer was 112.047 s with 24.914 s of observer process probes; DOM commit trace was absent in that run. A second exact-installed run with `547c94a91` harness enabled Renderer trace in its isolated profile and waited for terminal persistence: Core→Main→IPC→Renderer→DOM events were all present, IPC→DOM 16.234 ms, normal quit and zero residual. Its first materialization/Go ready phases remained 25.414 s/31.424 s, and launch→composer was 102.247 s with 22.833 s of process-probe observer time. These two single local-position samples do not establish cold startup/Host causation, matched external comparison, four-run distribution, p95 or volume causation. Earlier fixed-input external `c8fa` attempts failed bridge health at 120/300 s without Provider setup. |
-| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms. The exact `0ff97f7` installed synthetic loopback Provider run now observes the actual ordinary file-read result in the second chat request and a visible reply, with no hidden direct runtime turn. Protected real-Provider confirmation and recovery remain open. Absolute local paths continue to be withheld by Main logging rules. |
+| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms. `11e6fff85` additionally repairs payment/amount split across a newline and a unit amount after `取得` plus year, with ordinary year paths and exact answers retained; focused Go/HTTP, Main/SSE/Renderer, and typecheck pass. The exact `0ff97f7` installed synthetic loopback Provider run observed the actual ordinary file-read result in the second chat request and a visible reply, with no hidden direct runtime turn; this older installed result does not verify `11e6fff85`. Protected real-Provider confirmation and recovery remain open. Absolute local paths continue to be withheld by Main logging rules. |
 | N05 ordinary and Funds continuity | UNFINISHED | Existing General reader enforces current thread/workspace/principal, rune pagination with `totalRunes`/`complete`, and changed-scope refusal; four focused Go continuity tests passed. Private Funds input, case A→B→A and revoked-source recovery are separate unproved seams. |
 | N06 Funds positive data path | UNFINISHED | The independent integer CSV oracle is committed at `91a55b236`. Exact `c8fa` full Funds package native Owner admission passed; the positive synthetic-Host, loopback-Provider Go production chain passed with a fresh nonremovable 0700 authority root and 40-minute whole-test budget (1642.55s). Earlier policy/removable/older-native preflight failures and the first default 10-minute timeout remain separate. Exact `0ff97f7` installed synthetic Direct Preview now opens from visible UI, but selecting CSV receives fixed `funds_import_capability_unavailable` before confirm/snapshot, so the diagnostic fails and formal B lanes remain unrun. Fresh installed authority/native Owner composition needs root-cause repair; fixture-injected Go positives do not supply it. Formal real-case B and installed Funds GUI remain open. |
 | N07 exact facts and display | UNFINISHED | The B1 source test passed baseline/evolved exact facts, public Final Gate, A1/A2 GET 200, durable reopen, missing/corrupt 503 and restored bytes, and fresh-process protected display in its synthetic scope. Current installed Funds GUI fact/display and the full negative set remain unverified. No user statement was promoted to bank fact. |
@@ -140,6 +141,7 @@ Allowed ledger states are `DONE_IMPLEMENTED`, `DONE_EXISTING`,
 | `a5dc3b0ea` focused source repair | Five Go packages and a related subagent/server pair passed the named regression sets; four changed Vitest files passed 349/349; typecheck and diff check exited 0. Exact details and prior fixture failure are below. No installed or CI conclusion transfers. |
 | `24ff5764e` explicit assertion regression | Before the repair, four named security/loop examples and the shared TypeScript projection failed at `a5dc` for `2万元`, `2亿元`, a relationship assertion, and a mixed software/case prompt. After the repair, four Go packages and three server HTTP journeys exited 0; four changed Vitest files passed 355/355; typecheck, gofmt and diff checks exited 0. This is source evidence for the observed grammar only. |
 | `c8fa02f99` acquired-currency regression | Before the repair, Go security/loop and TypeScript projection failed for a `取得2026年收益￥2万元` case assertion. After restoring the prior narrow suffix currency check, four Go packages and three server HTTP journeys exited 0; four changed Vitest files passed 358/358; typecheck, gofmt and diff checks exited 0. No installed or CI conclusion transfers. |
+| `11e6fff85` N04 line/year assertion regression | Before the repair, Go security failed for `甲公司支付\n2645.72 元` and `甲公司取得2026年收益2万元`; TS shared projection also failed. After the mirrored narrow repair, Go security/ordinaryresult and focused loop/HTTP public seams passed; four desktop Vitest files passed 367/367; typecheck, gofmt and diff checks passed. Ordinary year paths, exact date/count/amount/UUID answers, case admission/result withholding and existing PII corpus remain covered. This is source-only evidence. |
 | Exact `c8fa02f99` Core package and isolated install | After resolving four setup/layout issues, the clean detached package command exited 0 with source snapshot `eff2e0ed...`. DMG/ZIP SHA-256, installed Main/Go/app.asar equality, strict deep signature and exact 1,172-instance legal audit passed. The artifact remains `development_clean_non_publishable`; functional acceptance and current-HEAD CI are separate. |
 | Exact `c8fa02f99` installed synthetic session | The existing packaged-session harness exited 1 with `cdp_evaluation_timeout`. Its loopback Provider recorded 12 requests and some fork responses, so execution did occur; the harness removed its temporary profile before a durable after-state could be read. The timed-out mutating expression was not replayed. This is partial diagnostic evidence, not an installed journey pass. |
 | `931667537` harness regression and exact c8fa segmented run | Two new CDP tests failed before the fix: ambiguous sent expressions lost their isolated profile, and segmented observation timeout lacked an unknown-outcome marker. After repair, 57/57 focused Node tests, syntax and diff checks passed. The first retest from the advanced canonical worktree was blocked by exact package/worktree snapshot mismatch before app launch or expression send. A second run used the clean c8fa worktree, the updated harness, an exact installed app path, macOS CDP-port ownership checks and a new isolated profile. Its actual installed synthetic checks passed 19/19, with 13 loopback Provider requests, redaction pass and process cleanup pass. The top-level command reported `PARTIAL` and exit 1 by `--actual-only` design, since the deterministic suite was not run in that invocation; the nested `actualPackagedSessionSoak.passed` is `true`. This is not an ordinary-file or real-Provider acceptance result. |
@@ -1071,3 +1073,39 @@ Main exit followed by a new Main with an orphan materialization writer is not
 excluded by these checks; the Go store's observed mutex is process-local. No
 installed fault-injection or cross-Main exclusion claim is made. No package or
 new installed latency measurement exists for `d244036f8`.
+
+## 2026-09-27 N04 line/year case assertion source repair
+
+Local product SOURCE `11e6fff85a72934e30ed805a4fcf5a8638fc7623` (tree
+`6550753fa48a0419e31906bf6adb0c4f0ee31a6b`) mirrors a bounded classifier
+repair in production Go and desktop TypeScript. A monetary action ending one
+line now joins only the immediately following amount; a `取得` plus four-digit
+year plus unit amount requires a nearby financial noun within a bounded scan.
+It does not add a General lane, file-path or software-task bypass. Existing
+case risk admission and ordinary result publication guards continue to call
+the shared respective classifiers. Main, public SSE and Renderer retain the
+negative publication checks.
+
+The before-fix candidate was the prior `df21140a3` HEAD plus new tests, not a
+committed product SOURCE. Go security failed for `甲公司支付\n2645.72 元` and
+`甲公司取得2026年收益2万元`; the TypeScript shared classifier failed the mirrored
+case vector. The first repair also misclassified `请取得2026年资料/表单 42.txt，核对金额：1234.56 元。`;
+the bounded financial-noun requirement corrected that observed regression.
+The final Go security and shared TypeScript suites passed both this path and
+the `2026年收入表` filename variant as ordinary. Existing direct-payee payment,
+mixed software/case and ordinary DOM relationship audit vectors also pass on
+the current source; they were old-candidate findings, not new failures here.
+
+With `./scripts/use-analytix-cache.sh` sourced in each test shell, final
+`go test ./internal/domain/security ./internal/domain/ordinaryresult -count=1`
+passed, as did
+`go test ./internal/app/loop ./internal/server -run 'TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut|TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn|TestOrdinaryNumericFileHTTPPublicSeamReadsChangedContent' -count=1`.
+The HTTP tests cover a real synthetic file whose date/amount change is read
+twice, fresh case-assertion threads with zero ordinary Provider requests and
+boundary-only security context, and a later independent ordinary DOM turn.
+Four desktop Vitest files passed 367/367; `npm run typecheck`, `gofmt` and
+`git diff --cached --check` passed. The shared corpus still includes
+account/identity/phone masking and ordinary UUID/date/amount examples. These
+are focused source and synthetic public-seam results. No `11e6fff85` package,
+installed GUI, protected real-Provider, formal Funds B, current-HEAD CI or
+release conclusion follows from them.
