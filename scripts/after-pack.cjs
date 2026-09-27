@@ -1,4 +1,4 @@
-const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent, assertCoreOptionalAssetsAbsent } = require('./core-package-profile.cjs')
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent, assertPdfJsNodeRasterAbsent, assertCoreOptionalAssetsAbsent } = require('./core-package-profile.cjs')
 const { execFileSync } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
@@ -4558,6 +4558,7 @@ async function afterPack(context) {
   const legalReader = createArtifactReaderFromPath(
     context.electronPlatformName === 'darwin' ? appBundlePath(context) : context.appOutDir
   )
+  assertPdfJsNodeRasterAbsent(legalReader)
   if (isCoreContext(context)) assertCoreOptionalAssetsAbsent(legalReader)
   legal.verifyPackagedLegalMaterials(legalReader, legalInputs, { ...legalTarget, allowSigned: false })
   legalReader.assertStable?.()

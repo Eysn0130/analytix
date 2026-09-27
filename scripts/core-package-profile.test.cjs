@@ -10,13 +10,24 @@ test('core profile excludes professional resources while full retains them', () 
   const config = () => ({ files: ['out/**/*', 'node_modules/pdfjs-dist/**/*'], extraResources: [{ to: 'backend' }, { to: 'plugins/analytix-fund-analysis' }, { to: 'runtime' }, { to: 'LICENSE' }], artifactName: 'analytix-${version}.dmg' })
   const full = profile.applyReleaseProfile(config(), 'full')
   assert.equal(full.extraResources.length, 4)
-  assert.deepEqual(full.files, config().files)
+  assert.deepEqual(full.files.slice(-2), profile.PDFJS_NODE_RASTER_EXCLUSIONS)
+  assert.equal(full.files.includes('node_modules/pdfjs-dist/**/*'), true)
   const core = profile.applyReleaseProfile(config(), 'core')
   assert.deepEqual(core.extraResources.map(x => x.to), ['runtime', 'LICENSE'])
   assert.deepEqual(core.files.slice(-3), profile.CORE_OPTIONAL_ASSET_EXCLUSIONS)
   assert.equal(core.extraMetadata.releaseProfile, 'core')
   assert.equal(core.artifactName, 'analytix-core-${version}.dmg')
   assert.throws(() => profile.applyReleaseProfile(config(), 'unknown'))
+})
+
+test('full and core packages reject PDF.js optional Node raster payload in ASAR and unpacked resources', () => {
+  const reader = entries => ({ entries: () => entries })
+  profile.assertPdfJsNodeRasterAbsent(reader(['node_modules/pdfjs-dist/legacy/build/pdf.mjs']))
+  for (const entry of [
+    'node_modules/@napi-rs/canvas/package.json',
+    'node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node',
+    'packaged-root/Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node'
+  ]) assert.throws(() => profile.assertPdfJsNodeRasterAbsent(reader([entry])), /pdfjs_node_raster_present/)
 })
 
 test('core closure rejects optional native canvas and unused KaTeX font build input', () => {
@@ -30,7 +41,7 @@ test('core closure rejects optional native canvas and unused KaTeX font build in
     'node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node',
     'packaged-root/Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node',
     'node_modules/katex/src/fonts/lib/Extra.otf'
-  ]) assert.throws(() => profile.assertCoreOptionalAssetsAbsent(reader([entry])), /core_optional_asset_present/)
+  ]) assert.throws(() => profile.assertCoreOptionalAssetsAbsent(reader([entry])), /(?:pdfjs_node_raster_present|core_optional_asset_present)/)
 })
 
 test('core closure rejects every excluded resource, including dangling symlinks', () => {
