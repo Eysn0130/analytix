@@ -82,7 +82,7 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   The exact `3f5318` clean full Funds package and installed copy now pass
   mandatory legal admission; installed product and formal Funds acceptance
   remain separate as recorded below.
-- The current local product SOURCE is
+- The latest exact-installed product SOURCE is
   `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`, tree
   `3188bb34567d2c3f0fa76176b28035345d5b13ba`; local diagnostic successor
   `547c94a91` changes only the installed K10 harness. The intervening `b5ead0`
@@ -94,12 +94,18 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   installed diagnostic is tracked separately below. Neither local evidence
   nor prior-head CI establishes protected real-Provider, formal Funds B,
   merge or public release readiness.
+- Latest committed product SOURCE `d244036f89dc40c14da7b3e0c3b7edd1bb9c3676`
+  (tree `5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`) includes the fixed
+  opt-in Funds/Go startup owner phase markers and the materialization child
+  exit/retry guard. It has focused source verification but has not been built
+  or measured as an installed product. The `0ff97f7` package and its exact
+  evidence remain a separate earlier candidate.
 
 ## N01–N09 ledger
 
 | Item | State | Evidence and remaining condition |
 | --- | --- | --- |
-| N01 identity and matrix | DONE_IMPLEMENTED | Fresh branch/PR/main/tree inventory; Current corrected to 74e with e15 history retained. Core/Funds stage scope and artifact exclusion inspected. |
+| N01 identity and matrix | DONE_IMPLEMENTED | The earlier matrix correction moved Current from stale e15 to then-current 74e and retained e15 as history. Latest committed product SOURCE is now `d244036f8`; the latest exact-installed artifact is still product SOURCE `0ff97f7`. Core/Funds stage scope and artifact exclusion inspected. |
 | N02 installed real Provider | DONE_IMPLEMENTED | The 28ed installed copy reused the credential reference from normal QA onboarding. A new short turn completed with `2 加 3 等于 5。`; after Go PID 66130→67281 another turn completed with `2 + 3 = 5`; after Main PID 55003→89415 and Go PID 797, the same durable thread displayed both prior turns and a third live turn completed with `56`. No credential value was read into this record or re-entered. This applies only to 28ed; a changed final SOURCE needs a bounded repeat. |
 | N03 startup and delivery latency | UNFINISHED | The exact `0ff97f7` installed local synthetic ordinary-file journey passed visible reply and normal quit; its trace now has two Go starts rather than `b5ead0`'s redundant third IPC restart. First preflight→materialization was 24.621 s and spawn→ready 31.879 s; settings-apply restart was 2.455 s and 17.239 s. Launch→composer was 112.047 s with 24.914 s of observer process probes; DOM commit trace was absent in that run. A second exact-installed run with `547c94a91` harness enabled Renderer trace in its isolated profile and waited for terminal persistence: Core→Main→IPC→Renderer→DOM events were all present, IPC→DOM 16.234 ms, normal quit and zero residual. Its first materialization/Go ready phases remained 25.414 s/31.424 s, and launch→composer was 102.247 s with 22.833 s of process-probe observer time. These two single local-position samples do not establish cold startup/Host causation, matched external comparison, four-run distribution, p95 or volume causation. Earlier fixed-input external `c8fa` attempts failed bridge health at 120/300 s without Provider setup. |
 | N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms. The exact `0ff97f7` installed synthetic loopback Provider run now observes the actual ordinary file-read result in the second chat request and a visible reply, with no hidden direct runtime turn. Protected real-Provider confirmation and recovery remain open. Absolute local paths continue to be withheld by Main logging rules. |
@@ -1009,3 +1015,59 @@ process probes that consumed 22,833 ms of observer time. Existing markers
 bound but do not subdivide package/source validation, materialization,
 persistence preparation, activation or Host probe. No performance readiness,
 real-Provider acceptance, external-position comparison or formal B follows.
+
+## 2026-09-27 N03 source-only startup owner phase markers
+
+Local commit `53c5fdd454884476115364de29371582a80c5cd1` (tree
+`ea7b975b04624d609988f9eef4f3d515f765b345`) adds opt-in fixed Go
+owner markers for packaged Funds package inspection, source-tree inspection,
+static admission, active-generation resolution and ready binding, and for
+runtime persistence lease, semantic preparation, listener bind, activation,
+controlled artifact Host probe and ready payload. Each marker contains only
+a fixed stage and monotonic integer milliseconds. Main forwards only
+whitelisted phases through its closed startup logger. The materialization
+command's signed, nonce-bound stdout ready contract remains unchanged; its
+stderr permits only bounded fixed trace lines while explicitly opted in,
+and unknown or mixed stderr still fails the command. The child command
+waits for stdout/stderr close before classifying output. The K10 diagnostic
+can report these phase durations under the owning Go startup attempt.
+
+Focused Vitest passed 25/25 across four files, `npm run typecheck` passed,
+K10 `node --check` passed, and focused Go runtime-server tests passed both
+without and with `analytix_prod`. `git diff --cached --check` passed before
+the local commit. These are source checks for this exact commit. No full
+package has been built from `53c5fdd45`, so the owner phase readings and
+any resulting cold-start attribution remain **unverified in the installed
+product**. The next accurate installed candidate should measure once after
+its source and artifact are frozen; no additional `0ff97f7` run can exercise
+this change.
+
+## 2026-09-27 N03 materialization child exit and retry guard
+
+Local product SOURCE `d244036f89dc40c14da7b3e0c3b7edd1bb9c3676` (tree
+`5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`) follows the source-only
+owner markers. On a normal command result Main now waits for child `close`,
+which follows stdout/stderr EOF, before parsing the strict ready/phase output.
+On output overflow or the 120-second command timeout, Main sends `SIGKILL`
+to its exact direct child, closes its pipes, and requires that child's `exit`
+before treating Funds as optional-unavailable. A descendant retaining inherited
+pipes cannot hold that abort forever. If direct-child termination remains
+unconfirmed after a further three seconds, Main retains the exact child handle,
+fails the general Go runtime startup, and refuses another materialization in
+the same Main process until the child's exit is observed. This is a safety
+exception for a possible same-root writer, not ordinary Funds degradation.
+
+The focused process regression covers the unconfirmed branch, same-Main retry
+refusal and later exit release; the real subprocess regression covers an
+overflowing direct child whose descendant keeps inherited pipes. Focused
+Vitest passed 120/120 across three files, `npm run typecheck` passed, and the
+staged source diff passed `git diff --cached --check`. Both commands sourced
+the required cache helper. `startGoConformanceSidecarOnce` awaits materialization
+before the Go runtime spawn; the unconfirmed error crosses optional settlement
+and `ensureGoDefaultBackend` without a runtime fallback. These are source
+checks only. The retained handle and refusal are process-local. Electron's
+single-instance lock covers simultaneous normal Main instances, but an abrupt
+Main exit followed by a new Main with an orphan materialization writer is not
+excluded by these checks; the Go store's observed mutex is process-local. No
+installed fault-injection or cross-Main exclusion claim is made. No package or
+new installed latency measurement exists for `d244036f8`.

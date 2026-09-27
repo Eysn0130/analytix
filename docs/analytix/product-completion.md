@@ -9,10 +9,12 @@ history before comparing remote state.
 
 ## Current PR28 Core and Funds admission — 2026-09-27 PDT
 
-The canonical local branch has committed product SOURCE
-`0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703` (tree
-`3188bb34567d2c3f0fa76176b28035345d5b13ba`), followed by diagnostic-only
-commits `e0942bd95` and `547c94a91`; its ordinary/case classifier
+The latest committed product SOURCE is source-only startup successor
+`d244036f89dc40c14da7b3e0c3b7edd1bb9c3676` (tree
+`5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`). The latest exact-installed
+product SOURCE remains `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`
+(tree `3188bb34567d2c3f0fa76176b28035345d5b13ba`), followed by
+diagnostic-only commits `e0942bd95` and `547c94a91`; its ordinary/case classifier
 source is the unchanged `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`
 (tree `812abaaf4ca947af1166e118c9470a1e08b59481`). The `a5dc` predecessor
 passed focused checks but missed two explicit case assertions. The `24ff`
@@ -111,6 +113,19 @@ identifies that failure promptly while preserving exact-process cleanup.
 See the [current continuation ledger](qa/pr28-next-execution-2026-09-26.md)
 for exact reports, hashes and evidence limits. Neither synthetic result nor
 artifact admission proves protected real-Provider or formal real-case B.
+
+The `53c5fdd45` source successor adds opt-in, fixed-value Go owner timing
+markers for packaged Funds admission and runtime persistence/activation;
+focused TS/Go checks and typecheck passed. `d244036f8` additionally waits for
+complete child output on success, requires direct-child exit after timeout or
+output overflow, and blocks same-Main retry if termination remains unconfirmed.
+The unconfirmed writer is a fatal startup exception rather than ordinary Funds
+unavailability. Focused Vitest passed 120/120 across three files and typecheck
+passed for `d244036f8`. Its in-memory exclusion is scoped to the current Main
+process; an abrupt Main exit followed by a new Main with an orphan writer is
+not excluded by this evidence. No installed artifact or startup timing
+observation exists for either source successor. Their source checks do not
+transfer the `0ff97f7` package integrity or installed acceptance forward.
 
 The exact `28ed097f2` installed Core copy completed normal protected real
 Provider use and Go/Main restart without credential re-entry. The later exact
