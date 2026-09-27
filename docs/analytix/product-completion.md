@@ -23,8 +23,14 @@ clean private Core DMG/ZIP was built and copied from the verified DMG into an
 isolated installation. Build and installed copies passed matching
 Main/Go/app.asar hashes, strict deep signature and 1,172-instance mandatory
 legal audit. The bundle remains `development_clean_non_publishable`.
-An installed synthetic loopback Provider session timed out in CDP after local
-requests; it supplies no completed ordinary-file or recovery journey. A later
+An initial installed synthetic loopback Provider session timed out in CDP
+after local requests. Harness commit `931667537` now preserves quiesced
+diagnostic state after an unknown sent expression and binds macOS CDP to its
+spawned Main PID. A fresh-profile segmented run on the exact c8fa installed
+copy passed 19/19 synthetic session checks, including process cleanup, but
+did not exercise the exact ordinary-file or protected real-Provider journey.
+Its top-level command remained `PARTIAL` with exit 1 because `--actual-only`
+omitted deterministic checks from that invocation. An earlier
 application-name UI selection coincided with a second process using protected
 user state. That process was incorrectly sent SIGTERM and then SIGKILL; its
 effect on user state is unknown. Application-name UI automation and direct
@@ -43,7 +49,7 @@ Provider use. Neither result transfers to the committed `c8fa` source repair.
 | Exit | Current status and scope |
 | --- | --- |
 | SourceReady | `false` for the full PR28 delivery: the `c8fa` S1 slice has focused source passes for bounded examples, but B1 and remaining applicable source/assembly checks are open. `74e` and remote `56231ff5e` retain their own earlier 57/57 CI evidence. |
-| PrivateCandidateReady | `false`: exact `c8fa` private package and installed integrity checks pass, but its synthetic session timed out and installed ordinary-file/real-Provider continuation acceptance is open; the current UI seam is blocked after the protected-state incident. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
+| PrivateCandidateReady | `false`: exact `c8fa` private package and installed integrity checks pass, and its later isolated synthetic session passed 19/19. Installed ordinary-file/real-Provider continuation acceptance is open; direct visible UI remains stopped after the protected-state incident. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
 | MergeReady | `false`: PR28 is Draft, the current local product SOURCE is unpushed, and earlier remote CI does not cover it. |
 | PublicMacReleaseReady | `false`: the exact `c8fa` artifact is `development_clean_non_publishable`; no public-release qualification or publication authority is claimed. |
 
@@ -206,7 +212,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused source checks and an exact clean private package with installed hash, signature and legal integrity checks; its synthetic session timed out. Exact-source installed ordinary-file/recovery and startup/Host latency attribution remain open, with UI blocked at the protected-state incident boundary. Public Developer ID/notarization belongs to separate public qualification. |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused source checks, an exact clean private package with installed integrity checks, and a fresh isolated synthetic session pass at 19/19 after the initial timeout. Exact-source visible ordinary-file/real-Provider recovery and startup/Host latency attribution remain open, with direct UI stopped at the protected-state incident boundary. Public Developer ID/notarization belongs to separate public qualification. |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 

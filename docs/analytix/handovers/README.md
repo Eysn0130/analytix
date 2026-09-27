@@ -7,8 +7,8 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 ## 当前恢复点 — 2026-09-27 PDT
 
-- 最新本地产品提交是 `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`，tree `812abaaf4ca947af1166e118c9470a1e08b59481`。它恢复 `取得` 后有年份再出现带币种符号金额的窄检查，保留 `24ff` 对金额单位和亲属关系断言的修复；聚焦 Go、HTTP、Main/SSE/Renderer 及 typecheck 已通过。原 `81b`、`a5dc` 和 `24ff` 各有已证实反例。准确 SOURCE 的干净私有 Core DMG/ZIP 已构建，DMG 安装副本的哈希、严格签名及 1,172 项强制许可审计通过；制品仍是 `development_clean_non_publishable`。安装版合成会话在 CDP 超时后没有完成回执，普通文件/真实 Provider 的当前版安装验收与当前 HEAD CI 均未取得。准确命令、制品哈希和边界见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。以下 `74e` 是此前独立产品 SOURCE，不能覆盖新候选。
-- 03:56 PDT 左右，按应用名选择 UI 后出现使用既有用户 profile 的第二个 Main PID 58648；选择操作是否导致启动未证实。Agent 错误地将该进程当作隔离 QA 进程，向该 PID 发送 SIGTERM，约五秒后又发送 SIGKILL。短暂观察到子进程可能触及受保护用户状态；没有备份、回滚或完整性证据，实际影响未知。已停止按名选择 UI 和直接访问 live 用户状态；协调 Owner 处理受保护状态的后续响应。当前安装 GUI seam 须先有安全的精确绑定，不能把合成请求或包完整性当成验收，也不能重放超时的可变 CDP 表达式。
+- 最新本地产品提交是 `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`，tree `812abaaf4ca947af1166e118c9470a1e08b59481`。它恢复 `取得` 后有年份再出现带币种符号金额的窄检查，保留 `24ff` 对金额单位和亲属关系断言的修复；聚焦 Go、HTTP、Main/SSE/Renderer 及 typecheck 已通过。原 `81b`、`a5dc` 和 `24ff` 各有已证实反例。准确 SOURCE 的干净私有 Core DMG/ZIP 已构建，DMG 安装副本的哈希、严格签名及 1,172 项强制许可审计通过；制品仍是 `development_clean_non_publishable`。初次安装版合成会话在 CDP 超时；`931667537` 修复诊断保留并精确绑定端口后，全新隔离 profile 的分段合成会话安装态检查 19/19 通过；`--actual-only` 的顶层状态仍为 `PARTIAL`、退出 1。普通文件可见 GUI/真实 Provider 的当前版安装验收与当前 HEAD CI 均未取得。准确命令、制品哈希和边界见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。以下 `74e` 是此前独立产品 SOURCE，不能覆盖新候选。
+- 03:56 PDT 左右，按应用名选择 UI 后出现使用既有用户 profile 的第二个 Main PID 58648；选择操作是否导致启动未证实。Agent 错误地将该进程当作隔离 QA 进程，向该 PID 发送 SIGTERM，约五秒后又发送 SIGKILL。短暂观察到子进程可能触及受保护用户状态；没有备份、回滚或完整性证据，实际影响未知。已停止按名选择 UI 和直接访问 live 用户状态；协调 Owner 处理受保护状态的后续响应。普通文件可见 GUI/真实 Provider seam 仍须安全精确绑定与相应的受保护状态处置，不能把合成请求或包完整性当成验收，也不能重放超时的可变 CDP 表达式。
 - B1 合成 CSV 两次正常导入的独立整数参考计算仍是未提交测试改动，尚缺当前干净 Funds 原生包及正向查询运行。用户的 development runbook 编辑和两份 2026-09-25 QA 草稿未纳入 S1 提交。Core 与 Funds 各自的安装/阶段门槛仍分别开放。
 
 - D01–D08 前序产品检查点：`74e4316eabff41ad72878001b5be3b89db020a1d`，

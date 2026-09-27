@@ -82,12 +82,12 @@ record's product SOURCE or transfer its installed acceptance to a new build.
 | N01 identity and matrix | DONE_IMPLEMENTED | Fresh branch/PR/main/tree inventory; Current corrected to 74e with e15 history retained. Core/Funds stage scope and artifact exclusion inspected. |
 | N02 installed real Provider | DONE_IMPLEMENTED | The 28ed installed copy reused the credential reference from normal QA onboarding. A new short turn completed with `2 加 3 等于 5。`; after Go PID 66130→67281 another turn completed with `2 + 3 = 5`; after Main PID 55003→89415 and Go PID 797, the same durable thread displayed both prior turns and a third live turn completed with `56`. No credential value was read into this record or re-entered. This applies only to 28ed; a changed final SOURCE needs a bounded repeat. |
 | N03 startup and delivery latency | UNFINISHED | Diagnostic 4e package traced Main settings load 2.4 s and awaited extension account reconciliation through 42.3 s before window creation. The 28ed Main restart still awaited extension reconciliation and OAuth sweep/scheduler before window: 78.2 s from JS evaluation to startup surface. `9faf0ee02` alone did not improve this path. `cf9f1988b` schedules OAuth recovery outside window creation and gates OAuth IPC until ready; `107d68c2e` stops late startup work on confirmed quit. Installed comparison remains. `6c103cc52` protects live sibling runtimes. Host delivery comparison remains. |
-| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms and has an exact-source clean private Core package. Installed ordinary-file confirmation remains open after a CDP timeout and an unsafe app-name UI selection event; no mutating expression was replayed. Absolute local paths continue to be withheld by Main logging rules. |
+| N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms and has an exact-source clean private Core package. A later fresh-profile installed synthetic session passed 19/19, but did not exercise the exact ordinary-file assertion. Its visible GUI/real-Provider confirmation remains open after an unsafe app-name UI selection event; the earlier timed-out expression was not replayed. Absolute local paths continue to be withheld by Main logging rules. |
 | N05 ordinary and Funds continuity | UNFINISHED | Existing General reader enforces current thread/workspace/principal, rune pagination with `totalRunes`/`complete`, and changed-scope refusal; four focused Go continuity tests passed. Private Funds input, case A→B→A and revoked-source recovery are separate unproved seams. |
 | N06 Funds positive data path | UNFINISHED | Existing B1 source test performs normal synthetic CSV import, immutable snapshot, account-flow tool/result, second import and recovery. A direct current-source run stopped before any Provider request because plain `go test` lacks the embedded development signing policy. A second invocation with the exact compiled policy stopped because the test authority was on removable cache storage; neither reached a query. The third run used an isolated 0700 non-removable APFS authority directory but Owner admission returned a generic trust error for an older native package, before any Provider request or query. This is neither an installed Funds candidate nor real-case data access. |
 | N07 exact facts and display | UNFINISHED | Existing B1 assertions are source-bound; current installed Funds fact/display and the full negative set remain unverified. No user statement was promoted to bank fact. |
 | N08 noninterference and secrets | UNFINISHED | Core package exclusion and sibling runtime protection have direct evidence. Six Funds capability states, cross-platform native installation and source revocation remain separate. |
-| N09 freeze, CI, PR/main | UNFINISHED | Clean private Core packages exist at 28ed and now exact `c8fa`, each with own hash/signature/legal receipts. The `c8fa` installed synthetic session attempt timed out after local Provider activity, and its exact ordinary-file GUI acceptance is open. Current-HEAD CI, PR review/merge gates and public release qualification remain open. |
+| N09 freeze, CI, PR/main | UNFINISHED | Clean private Core packages exist at 28ed and now exact `c8fa`, each with own hash/signature/legal receipts. An initial `c8fa` installed synthetic attempt timed out; after the harness repair a fresh-profile segmented run passed 19/19 installed checks. The exact ordinary-file GUI and protected real-Provider checks, current-HEAD CI, PR review/merge gates and public release qualification remain open. |
 
 Allowed ledger states are `DONE_IMPLEMENTED`, `DONE_EXISTING`,
 `CLOSED_WITH_SUPPORTED_FALLBACK`, `BLOCKED_EXTERNAL`, `FAILED`, and
@@ -116,6 +116,7 @@ Allowed ledger states are `DONE_IMPLEMENTED`, `DONE_EXISTING`,
 | `c8fa02f99` acquired-currency regression | Before the repair, Go security/loop and TypeScript projection failed for a `取得2026年收益￥2万元` case assertion. After restoring the prior narrow suffix currency check, four Go packages and three server HTTP journeys exited 0; four changed Vitest files passed 358/358; typecheck, gofmt and diff checks exited 0. No installed or CI conclusion transfers. |
 | Exact `c8fa02f99` Core package and isolated install | After resolving four setup/layout issues, the clean detached package command exited 0 with source snapshot `eff2e0ed...`. DMG/ZIP SHA-256, installed Main/Go/app.asar equality, strict deep signature and exact 1,172-instance legal audit passed. The artifact remains `development_clean_non_publishable`; functional acceptance and current-HEAD CI are separate. |
 | Exact `c8fa02f99` installed synthetic session | The existing packaged-session harness exited 1 with `cdp_evaluation_timeout`. Its loopback Provider recorded 12 requests and some fork responses, so execution did occur; the harness removed its temporary profile before a durable after-state could be read. The timed-out mutating expression was not replayed. This is partial diagnostic evidence, not an installed journey pass. |
+| `931667537` harness regression and exact c8fa segmented run | Two new CDP tests failed before the fix: ambiguous sent expressions lost their isolated profile, and segmented observation timeout lacked an unknown-outcome marker. After repair, 57/57 focused Node tests, syntax and diff checks passed. The first retest from the advanced canonical worktree was blocked by exact package/worktree snapshot mismatch before app launch or expression send. A second run used the clean c8fa worktree, the updated harness, an exact installed app path, macOS CDP-port ownership checks and a new isolated profile. Its actual installed synthetic checks passed 19/19, with 13 loopback Provider requests, redaction pass and process cleanup pass. The top-level command reported `PARTIAL` and exit 1 by `--actual-only` design, since the deterministic suite was not run in that invocation; the nested `actualPackagedSessionSoak.passed` is `true`. This is not an ordinary-file or real-Provider acceptance result. |
 | Current-source B1 third preflight | With the isolated non-removable 0700 authority root and correct compiled signing policy, the retained older native package failed normal Owner admission with `native_component_host_trust_invalid` before Provider or DuckDB query. Its bundle is `development_dirty_non_publishable` at old SOURCE `b07eef...`, but the Owner folds multiple inspection failures into this error and the registry accepts both clean and dirty development classes. The exact rejection branch is undetermined; no trust bypass was made. A current clean Funds package and a focused admission preflight are needed for the separate stage. |
 
 The earlier competing 4e, 28ed and 107d QA instances were quit before the
@@ -493,9 +494,49 @@ on protected user state is unknown. This was an unauthorized process action
 and must not be presented as a clean QA shutdown.
 
 All application-name UI selection and direct live-user-state access stopped.
-The isolated c8fa PID was then stopped separately. The exact installed GUI
-ordinary-file journey and real-Provider repeat remain **blocked at this UI
-seam** until a safe precise binding and the protected-state response are
-handled by the coordinating owner. Do not retry the timed-out mutating CDP
-expression or infer acceptance from the package, synthetic requests, or
+The isolated c8fa PID was then stopped separately. The exact installed visible
+GUI ordinary-file journey and real-Provider repeat remain **blocked at this UI
+seam** until a safe precise binding for those journeys and the protected-state
+response are handled by the coordinating owner. Do not retry the timed-out
+mutating CDP expression or infer acceptance from the package, synthetic requests, or
 source tests.
+
+## 2026-09-27 isolated segmented synthetic retest after harness repair
+
+Local harness commit `931667537361c597e082b6c63e5d5ec9d94e9d0d` retains a
+task-created temporary profile after a sent CDP expression has an unknown
+result, but classifies it as a diagnostic profile only after owned processes
+are quiesced. The automatic report adds only the profile path and fixed status
+fields; explicit protected diagnostic output retains its separate detail
+mode. On macOS the harness verifies that its debug port belongs to its exact
+spawned Main PID before CDP use. The two new targeted regression assertions
+failed before repair; after repair the CDP test file passed 57/57, both
+script syntax checks and `git diff --check` exited 0. A rejected renderer
+promise is conservatively classed as an unknown durable result for retention,
+not permission to resend the journey.
+
+The first retest invoked the new harness from canonical HEAD `931667537`
+against the older c8fa package. Artifact authority refused a mismatched
+current worktree snapshot before an app launch, profile or expression; that
+attempt was `LIVE_BLOCKED` and proves no installed behavior. The retest then
+used the clean detached c8fa worktree as its authority context and the
+committed newer harness by absolute path. The command used the existing
+DMG-installed c8fa app, `--actual --actual-only --segmented-observation`,
+`--expected-source-commit c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`,
+and a fresh task-owned profile. The installed app authority matched c8fa;
+macOS CDP-port ownership preflight passed without application-name UI
+selection or direct access to live user state.
+
+The second report at
+`/Volumes/AnalytixCache/development-v3/builds/pr28-core-s1-a5dc/c8fa-installed-session-soak-segmented-931667-v2.json`
+records `actualPackagedSessionSoak.passed=true` with 19/19 passed
+checks: artifact, launch, renderer bridge, settings, synthetic Provider
+profile, runtime restart, thread/turn, SSE, tool timeline, plan, attachment,
+approval/input, fork/resume, list, redaction and process cleanup. The local
+contract Provider saw 13 requests and no external Provider network was used.
+No diagnostic profile was retained on this successful run. The top-level
+status is `PARTIAL` with exit 1 because `--actual-only` omits the deterministic
+suite; it is not a full final-gate pass. The bounded source checks recorded
+above remain separate. The exact c8fa visible ordinary-file journey,
+protected real-Provider repeat and user-state response remain open. The
+prior ambiguous expression was never replayed.
