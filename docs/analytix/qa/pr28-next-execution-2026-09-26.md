@@ -82,9 +82,10 @@ record's product SOURCE or transfer its installed acceptance to a new build.
   The exact `3f5318` clean full Funds package and installed copy now pass
   mandatory legal admission; installed product and formal Funds acceptance
   remain separate as recorded below.
-- The current local product HEAD is
+- The current local product SOURCE is
   `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`, tree
-  `3188bb34567d2c3f0fa76176b28035345d5b13ba`. The intervening `b5ead0`
+  `3188bb34567d2c3f0fa76176b28035345d5b13ba`; local diagnostic successor
+  `547c94a91` changes only the installed K10 harness. The intervening `b5ead0`
   exact-installed run exposed an unnecessary third Go start and a first-run
   Provider dialog covering the local Data Import action. `0ff97f7` fixes the
   source paths and has focused tests, a clean full private package with
@@ -100,7 +101,7 @@ record's product SOURCE or transfer its installed acceptance to a new build.
 | --- | --- | --- |
 | N01 identity and matrix | DONE_IMPLEMENTED | Fresh branch/PR/main/tree inventory; Current corrected to 74e with e15 history retained. Core/Funds stage scope and artifact exclusion inspected. |
 | N02 installed real Provider | DONE_IMPLEMENTED | The 28ed installed copy reused the credential reference from normal QA onboarding. A new short turn completed with `2 加 3 等于 5。`; after Go PID 66130→67281 another turn completed with `2 + 3 = 5`; after Main PID 55003→89415 and Go PID 797, the same durable thread displayed both prior turns and a third live turn completed with `56`. No credential value was read into this record or re-entered. This applies only to 28ed; a changed final SOURCE needs a bounded repeat. |
-| N03 startup and delivery latency | UNFINISHED | The exact `0ff97f7` installed local synthetic ordinary-file journey passed visible reply and normal quit; its trace now has two Go starts rather than `b5ead0`'s redundant third IPC restart. First preflight→materialization was 24.621 s and spawn→ready 31.879 s; settings-apply restart was 2.455 s and 17.239 s. Launch→composer was 112.047 s with 24.914 s of observer process probes; DOM commit trace was absent, though a reply was visible. Earlier fixed-input external `c8fa` attempts failed bridge health at 120/300 s without Provider setup. Cold startup/Host attribution, matched exact-candidate external comparison, four-run distribution, p95 and volume causation remain open. |
+| N03 startup and delivery latency | UNFINISHED | The exact `0ff97f7` installed local synthetic ordinary-file journey passed visible reply and normal quit; its trace now has two Go starts rather than `b5ead0`'s redundant third IPC restart. First preflight→materialization was 24.621 s and spawn→ready 31.879 s; settings-apply restart was 2.455 s and 17.239 s. Launch→composer was 112.047 s with 24.914 s of observer process probes; DOM commit trace was absent in that run. A second exact-installed run with `547c94a91` harness enabled Renderer trace in its isolated profile and waited for terminal persistence: Core→Main→IPC→Renderer→DOM events were all present, IPC→DOM 16.234 ms, normal quit and zero residual. Its first materialization/Go ready phases remained 25.414 s/31.424 s, and launch→composer was 102.247 s with 22.833 s of process-probe observer time. These two single local-position samples do not establish cold startup/Host causation, matched external comparison, four-run distribution, p95 or volume causation. Earlier fixed-input external `c8fa` attempts failed bridge health at 120/300 s without Provider setup. |
 | N04 production contract and ordinary content | UNFINISHED | `49d066ef2` and `28ed097f2` extend the shared TS/Go conformance corpus for Chinese years, counts, dates, exact ordinary amounts, UUID/hash, relative numeric/Chinese paths, and synthetic account/identity/phone masking. TS 68/68 and Go shared corpus passed at 28ed. On 107d, an exact installed ordinary file task in a fresh workspace falsely entered the case lane before Provider invocation. The 81b classifier's focused test passed but independent negative vectors invalidated that candidate. `a5dc` passed focused source checks but missed two explicit case assertions; `24ff` repaired those but regressed an acquired-currency form. The `c8fa` successor passed focused Go HTTP/public and Main/shared/Renderer checks for the observed forms. The exact `0ff97f7` installed synthetic loopback Provider run now observes the actual ordinary file-read result in the second chat request and a visible reply, with no hidden direct runtime turn. Protected real-Provider confirmation and recovery remain open. Absolute local paths continue to be withheld by Main logging rules. |
 | N05 ordinary and Funds continuity | UNFINISHED | Existing General reader enforces current thread/workspace/principal, rune pagination with `totalRunes`/`complete`, and changed-scope refusal; four focused Go continuity tests passed. Private Funds input, case A→B→A and revoked-source recovery are separate unproved seams. |
 | N06 Funds positive data path | UNFINISHED | The independent integer CSV oracle is committed at `91a55b236`. Exact `c8fa` full Funds package native Owner admission passed; the positive synthetic-Host, loopback-Provider Go production chain passed with a fresh nonremovable 0700 authority root and 40-minute whole-test budget (1642.55s). Earlier policy/removable/older-native preflight failures and the first default 10-minute timeout remain separate. Exact `0ff97f7` installed synthetic Direct Preview now opens from visible UI, but selecting CSV receives fixed `funds_import_capability_unavailable` before confirm/snapshot, so the diagnostic fails and formal B lanes remain unrun. Fresh installed authority/native Owner composition needs root-cause repair; fixture-injected Go positives do not supply it. Formal real-case B and installed Funds GUI remain open. |
@@ -927,9 +928,10 @@ Its trace records **two** Go starts, initial preflight→materialization
 markers reach prepared, runtime stopped and committed; CDP target closed,
 Main exited 0 and no fallback signal was sent. Launch→composer was
 112,047 ms and submit→visible reply query 11,653 ms in this one observed
-run; 3,652 process probes consumed 24,914 ms of observer time. Cold startup,
-Host latency and missing DOM-commit trace remain separate performance
-questions. This run uses a synthetic loopback Provider and does not establish
+run; 3,652 process probes consumed 24,914 ms of observer time. This run did not
+capture the Renderer/DOM terminal trace; a later diagnostic successor did.
+Cold startup and Host latency remain separate performance questions. This run
+uses a synthetic loopback Provider and does not establish
 protected real-Provider recovery or formal Funds B.
 
 The separate exact-installed packaged synthetic B diagnostic used the same
@@ -978,3 +980,32 @@ The report's `harnessCommit` field names the pinned package-authority
 worktree (`0ff97f7`), so `e0942bd95` is recorded separately as the canonical
 executing harness commit. This repeated failure is diagnostic confirmation,
 not a new installed acceptance seam.
+
+## 2026-09-27 exact 0ff97f7 installed N03 Renderer/DOM trace follow-up
+
+Diagnostic-only commit `547c94a91` enables the existing Renderer trace switch
+once through CDP in a fresh task-owned profile after bridge health, checks
+read-only state if the mutating CDP response is ambiguous, and waits at most
+6 seconds after the visible reply for the persisted DOM event before normal
+quit. It changes neither the installed `0ff97f7` app nor the Provider path.
+`node --check scripts/k10-local-product-seam.mjs` and `git diff --check`
+passed. One exact-installed `--packaged --latency-observation
+--trace-transitions --ordinary-file-probe` run against the same app exited 0,
+`LOCAL_NONPUBLISHABLE_PRODUCT_SEAM_GREEN`, with synthetic loopback Provider,
+normal Main exit 0 and zero task residual. Its report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-0ff97f/n03-renderer-dom-trace-1.jsonl`
+(SHA-256 `173b40796030ac660d63a2177632892d678d5ea0c85b8b6f178126b345029257`).
+
+The opt-in trace now contains Core committed, Main received, IPC sent,
+Renderer committed and DOM committed. In this single run, IPC→Renderer was
+12.034 ms, Renderer→DOM 4.200 ms, IPC→DOM 16.234 ms, submit→DOM 10,268.3 ms,
+and submit→visible reply query 10,615 ms. DOM commit is not compositor
+presentation. The earlier missing DOM event is consistent with the Renderer
+switch or immediate post-reply quit; the combined diagnostic change cannot
+attribute it to only one. The first preflight→Funds materialization and Go
+spawn→READY intervals were 25,414 ms and 31,424 ms; settings-apply restart
+was 2,625 ms and 17,951 ms. Launch→composer was 102,247 ms, including 3,378
+process probes that consumed 22,833 ms of observer time. Existing markers
+bound but do not subdivide package/source validation, materialization,
+persistence preparation, activation or Host probe. No performance readiness,
+real-Provider acceptance, external-position comparison or formal B follows.

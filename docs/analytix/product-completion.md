@@ -12,7 +12,7 @@ history before comparing remote state.
 The canonical local branch has committed product SOURCE
 `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703` (tree
 `3188bb34567d2c3f0fa76176b28035345d5b13ba`), followed by diagnostic-only
-commit `e0942bd95`; its ordinary/case classifier
+commits `e0942bd95` and `547c94a91`; its ordinary/case classifier
 source is the unchanged `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`
 (tree `812abaaf4ca947af1166e118c9470a1e08b59481`). The `a5dc` predecessor
 passed focused checks but missed two explicit case assertions. The `24ff`
@@ -98,8 +98,12 @@ including an actual ordinary file-read result, visible reply, Hub-zero,
 credential scan and normal quit with Main exit 0 and zero residual task
 processes. The trace shows two Go starts, eliminating the extra Renderer IPC
 restart after settings save. The single observed launch→composer interval
-was 112,047 ms with 24,914 ms of process-probe observer time; cold startup
-and Host latency remain open. The new visible local-data path passed focused
+was 112,047 ms with 24,914 ms of process-probe observer time. A second
+exact-installed local synthetic run with the updated diagnostic captured the
+full Core→Main→IPC→Renderer→DOM trace, including 16.234 ms IPC→DOM commit;
+its first materialization and Go READY phases still took 25.414 s and
+31.424 s. These single-run observations do not establish cold startup or Host
+performance readiness. The new visible local-data path passed focused
 source tests, but the separate installed synthetic Direct Preview diagnostic
 fails after CSV selection with fixed `funds_import_capability_unavailable`,
 before a confirmed snapshot or B fact. The committed diagnostic follow-up
