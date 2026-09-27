@@ -9,25 +9,31 @@ history before comparing remote state.
 
 ## Current PR28 Core admission — 2026-09-26 PDT
 
-Exact product SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473` has
-57/57 successful PR checks. A clean e15 private Core DMG/ZIP was built from
-that SOURCE; the installed macOS 26.5.2 arm64 app passed visible synthetic
-Provider Save, Go and Main restart continuation, 120 consecutive GUI turns,
-post-120 GUI continuation, older-thread readback/continuation, a two-page PDF
-fixture, and e13→e15 rejected-upgrade preservation followed by restored
-continuation. The current protected real development authority was also
-reused through a separate new source Core process without key re-entry. These
-are separate evidence seams. The exact installed-app legal audit passed with
-1,172 package instances and zero artifact admission blockers. See the
-[exact e15 checkpoint](qa/pr28-e15-credential-authority-2026-09-26.md)
-for source, artifact hashes, C01–C18 limits and private receipt.
+Exact product SOURCE `74e4316eabff41ad72878001b5be3b89db020a1d`
+(tree `7f0c6b5a47a9349916b90d8b1adbf84216783c3a`) has 57/57 successful
+PR checks. Documentation successor `56231ff5e6b7dd8d321d1356b7208587df0841e9`
+also has 57/57 successful checks; it does not change the packaged product
+SOURCE. The private Core DMG and ZIP SHA-256 values are respectively
+`edd32919b070b8314b65de1e2b5eed079096261f9c9b22ddfe31b7cd98a87cf8`
+and `687450b61cb642309a705c5cf6ed4015b809f3223b5384b89ce88efc97707618`.
+The installed macOS 26.5.2 arm64 copy passed strict signature and 1,172-instance
+legal checks, visible synthetic Provider Save, Go/Main restart continuation,
+120 consecutive GUI turns plus a post-Main-restart 121st turn, older-thread
+recovery, a two-page PDF fixture, and two bounded upgrades. The observed cold
+window delay and Host/publication latency remain performance follow-ups. These
+synthetic results do not establish installed real-Provider acceptance or positive
+Funds facts. See the [exact post-c8 checkpoint](qa/pr28-post-c8-completion-2026-09-26.md).
 
 | Exit | Current status and scope |
 | --- | --- |
-| SourceReady | `true` for exact product SOURCE `96294a314` and its checks. A later documentation HEAD must be checked on its own terms. |
-| PrivateCandidateReady | `false`: protected real-Provider recovery in the packaged app remains unverified without an approved packaged QA handle. Synthetic installed acceptance and source Core real reuse do not substitute for it. |
-| MergeReady | `false`: PR28 remains Draft with the private-candidate gate open. GitHub mergeability and green CI alone are insufficient. |
-| PublicMacReleaseReady | `false`: e15 is ad hoc and `development_clean_non_publishable`; no public distribution claim. |
+| SourceReady | `true` for exact product SOURCE `74e4316ea` and its 57/57 checks; the documentation HEAD `56231ff5e` separately has 57/57 checks. |
+| PrivateCandidateReady | `false`: X01 packaged real-Provider Save, use and Go/Main restart reuse remain unverified. Synthetic installed acceptance does not substitute for this seam. |
+| MergeReady | `false`: PR28 is Draft and the private-candidate gate is open. The required Development gate passed for the current documentation HEAD, but mergeability and checks alone are insufficient. |
+| PublicMacReleaseReady | `false`: this ad-hoc candidate is `development_clean_non_publishable`, without notarization or publication authority. |
+
+The earlier e15 SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473` and
+its distinct installed results remain [historical evidence](qa/pr28-e15-credential-authority-2026-09-26.md),
+not the current PR28 product admission.
 
 Windows native DPAPI/ACL/Registry tests and the development-launcher test pass
 on the Windows 2022 CI runner; a Windows installed desktop run and a distinct
@@ -168,7 +174,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: newb2cf1179e private Core app/DMG/ZIP and exact source/seal/container/installed-copy checks pass; actual package scan leaves2 blockers, with embedded asset admission separate. Controlled Core software qualification remains implemented. Complete resource licenses, Developer ID/publication authority, installed GUI/normal Provider/long-history/update-data journeys and stage admission remain outstanding |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. Installed real-Provider Save/use/Go/Main reuse (X01), observed startup/Host latency attribution, and stage admission remain open. Public Developer ID/notarization belongs to separate public qualification. |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 
