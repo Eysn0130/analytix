@@ -1926,10 +1926,14 @@ app.whenReady().then(async () => {
       }))
     return installedExtensionAccountLifecycle.reconcileManagedAccounts(bindings)
   }
-  await reconcileInstalledExtensionAccounts().catch(() => {
+  // Credential cleanup may need to start the packaged Go runtime. Keep it
+  // running, but do not make the first honest startup window wait for it.
+  traceStartup('extension account reconciliation:scheduled')
+  const startupExtensionAccountReconciliation = reconcileInstalledExtensionAccounts().catch(() => {
     publicConsoleWarn('extension-account', 'Protected extension account reconciliation remains pending.')
+  }).finally(() => {
+    traceStartup('extension account reconciliation:done')
   })
-  traceStartup('extension account reconciliation:done')
   await migrateLegacyImAccountCredentials({
     store,
     requestAccountCredential: manageMainAccountCredential,
@@ -2320,6 +2324,7 @@ app.whenReady().then(async () => {
     ).catch((error) => {
       publicConsoleError('claw-schedule-mcp', 'Failed to sync config after settings change.', error)
     })
+    await startupExtensionAccountReconciliation
     await reconcileInstalledExtensionAccounts().catch(() => {
       publicConsoleWarn('extension-account', 'Protected extension account reconciliation remains pending.')
     })
@@ -2448,7 +2453,14 @@ app.whenReady().then(async () => {
     startWeixinInstallQrcode,
     pollWeixinInstall,
     imChannelAccountLifecycle,
-    installedExtensionAccountLifecycle,
+    installedExtensionAccountLifecycle: {
+      ...installedExtensionAccountLifecycle,
+      // Plugin removal must not race the startup inventory/delete pass.
+      deleteVerifiedPluginAccounts: async (pluginId) => {
+        await startupExtensionAccountReconciliation
+        return installedExtensionAccountLifecycle.deleteVerifiedPluginAccounts(pluginId)
+      }
+    },
     providerOAuthAccountManagement,
     resolveAnalytixConfigPath: () => resolveAnalytixMcpJsonPath(desktopStateHomeRoot),
     onAnalytixMcpConfigWritten: async () => {

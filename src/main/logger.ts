@@ -114,6 +114,7 @@ export const STARTUP_TRACE_STAGES = [
   'desktop private history migration:done',
   'logger configured',
   'native host registration:done',
+  'extension account reconciliation:scheduled',
   'extension account reconciliation:done',
   'legacy IM credential migration:done',
   'IM lifecycle recovery:done',
