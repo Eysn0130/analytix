@@ -24,6 +24,7 @@ import { ThreadDetailResponseV1Schema } from '../../packages/runtime/src/contrac
 import type { AnalytixRuntimeApi } from '../shared/analytix-api'
 import { buildPlanRelativePath, planFeatureNameFromRequest } from '../shared/gui-plan'
 import { isStrictPublicRuntimeSseIpcPayload } from '../shared/public-runtime-sse'
+import { publicConsoleInfo } from './logger'
 import {
   findKeyboardShortcutCommand,
   keyboardEventToShortcut,
@@ -1038,7 +1039,30 @@ afterEach(() => {
 describe('packaged general Agent Milestone A public-seam harness', () => {
   it('retains only allowlisted packaged startup checkpoints without raw process output', async () => {
     const { createPackagedStartupTraceRecorder } = await milestoneModule()
-    const recorder = createPackagedStartupTraceRecorder()
+    const checkpoints: Array<{ checkpoint: string; elapsedMs: number }> = []
+    const recorder = createPackagedStartupTraceRecorder((checkpoint: typeof checkpoints[number]) => {
+      checkpoints.push(checkpoint)
+    })
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    let firstLine: string
+    let extensionLine: string
+    try {
+      publicConsoleInfo('startup', 'untrusted /Users/private', {
+        stage: 'main module evaluated',
+        elapsedMs: 0,
+        path: '/Users/private'
+      })
+      publicConsoleInfo('startup', '', {
+        stage: 'extension account reconciliation:scheduled',
+        elapsedMs: 17
+      })
+      ;[firstLine, extensionLine] = info.mock.calls.map((call) => call.join(' '))
+    } finally {
+      info.mockRestore()
+    }
+    expect(firstLine!).toBe(
+      '[analytix] [main] event=main_info detail={"stage":"main module evaluated","elapsedMs":0}'
+    )
 
     recorder.accept(
       'stdout',
@@ -1046,27 +1070,27 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     )
     recorder.accept(
       'stderr',
-      Buffer.from('[analytix] [startup] [+    17ms] settings load:', 'utf8')
+      Buffer.from(firstLine!.slice(0, 34), 'utf8')
     )
     recorder.accept(
       'stderr',
-      Buffer.from('start — detail: {"path":"/Users/private"}\n', 'utf8')
+      Buffer.from(`${firstLine!.slice(34)}\n`, 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    29ms] not an allowlisted stage\n', 'utf8')
+      Buffer.from('[analytix] [main] event=main_info detail={"stage":"not an allowlisted stage","elapsedMs":29}\n', 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    30ms] toString\n', 'utf8')
+      Buffer.from('[analytix] [startup] [+    30ms] settings load:start\n', 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from(`private-fragment-${'x'.repeat(4096)}`, 'utf8')
+      Buffer.from(`private-fragment-${'x'.repeat(4096)}${extensionLine}\n`, 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    41ms] desktop private history migration:start\n', 'utf8')
+      Buffer.from(`${extensionLine}\n${firstLine}\n`, 'utf8')
     )
     recorder.finish('stdout')
     recorder.finish('stderr')
@@ -1076,20 +1100,55 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       enabled: true,
       checkpointCount: 2,
       observedCheckpointCodes: [
-        'settings_load_start',
-        'desktop_private_history_migration_start'
+        'main_module_evaluated',
+        'extension_account_reconciliation_scheduled'
       ],
-      lastCheckpoint: 'desktop_private_history_migration_start',
-      lastElapsedMs: 41,
+      lastCheckpoint: 'extension_account_reconciliation_scheduled',
+      lastElapsedMs: 17,
       checkpointElapsedMs: {
-        settings_load_start: 17,
-        desktop_private_history_migration_start: 41
+        main_module_evaluated: 0,
+        extension_account_reconciliation_scheduled: 17
       }
     })
     expect(JSON.stringify(evidence)).not.toContain('/Users/private')
     expect(JSON.stringify(evidence)).not.toContain('do-not-retain')
     expect(JSON.stringify(evidence)).not.toContain('not an allowlisted stage')
     expect(JSON.stringify(evidence)).not.toContain('toString')
+    expect(checkpoints).toEqual([
+      { checkpoint: 'main_module_evaluated', elapsedMs: 0 },
+      { checkpoint: 'extension_account_reconciliation_scheduled', elapsedMs: 17 }
+    ])
+  })
+
+  it('rejects malformed, unsafe and oversized startup lines and recovers at the next line', async () => {
+    const { createPackagedStartupTraceRecorder } = await milestoneModule()
+    const recorder = createPackagedStartupTraceRecorder()
+    const prefix = '[analytix] [main] event=main_info detail='
+    const invalid = [
+      '{"stage":"settings load:start","elapsedMs":-1}',
+      '{"stage":"settings load:start","elapsedMs":1.5}',
+      '{"stage":"settings load:start","elapsedMs":9007199254740992}',
+      '{"stage":"settings load:start","elapsedMs":"12"}',
+      '{"stage":"settings load:start","elapsedMs":12,"path":"/Users/private"}',
+      '{"stage":"settings load:start"}',
+      '{"stage":"settings load:start","elapsedMs":12'
+    ]
+    recorder.accept('stdout', invalid.map((value) => `${prefix}${value}\n`).join(''))
+    recorder.accept('stdout', `${prefix}${'x'.repeat(4096)}`)
+    recorder.accept('stdout', `${prefix}{"stage":"settings load:start","elapsedMs":12}\n`)
+    expect(recorder.evidence().checkpointCount).toBe(0)
+
+    recorder.accept('stdout', `${prefix}{"stage":"settings load:start","elapsedMs":12}\r\n`)
+    recorder.finish('stdout')
+    expect(recorder.evidence()).toEqual({
+      enabled: true,
+      checkpointCount: 1,
+      observedCheckpointCodes: ['settings_load_start'],
+      lastCheckpoint: 'settings_load_start',
+      lastElapsedMs: 12,
+      checkpointElapsedMs: { settings_load_start: 12 }
+    })
+    expect(JSON.stringify(recorder.evidence())).not.toContain('/Users/private')
   })
 
   it('wires bounded sanitized startup tracing into both packaged launches and stable defaults', () => {

@@ -435,7 +435,15 @@ const PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES = Object.freeze({
   'window:did-finish-load': 'window_did_finish_load',
   'window:did-fail-load': 'window_did_fail_load',
   'window:startup-surface-ready': 'window_startup_surface_ready',
-  'window:fallback-show-timeout': 'window_fallback_show_timeout'
+  'window:fallback-show-timeout': 'window_fallback_show_timeout',
+  'native host registration:done': 'native_host_registration_done',
+  'extension account reconciliation:scheduled':
+    'extension_account_reconciliation_scheduled',
+  'extension account reconciliation:done':
+    'extension_account_reconciliation_done',
+  'OAuth callback router:done': 'oauth_callback_router_done',
+  'OAuth authorization sweep:done': 'oauth_authorization_sweep_done',
+  'OAuth refresh scheduler:done': 'oauth_refresh_scheduler_done'
 })
 const PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH = 4096
 const repositoryContextMarkers = new WeakMap()
@@ -13911,8 +13919,9 @@ export function emptyPackagedStartupTraceEvidence(enabled = false) {
   })
 }
 
-export function createPackagedStartupTraceRecorder() {
+export function createPackagedStartupTraceRecorder(onCheckpoint) {
   const partial = { stdout: '', stderr: '' }
+  const discardingLongLine = { stdout: false, stderr: false }
   const observedCheckpointCodes = []
   const checkpointElapsedMs = Object.create(null)
   let checkpointCount = 0
@@ -13920,41 +13929,70 @@ export function createPackagedStartupTraceRecorder() {
   let lastElapsedMs = 0
 
   const acceptLine = (line) => {
-    if (typeof line !== 'string' || line.length === 0) return
-    const safePrefix = line.slice(0, 256)
-    const match = safePrefix.match(
-      /^\[analytix\] \[startup\] \[\+\s*([0-9]{1,9})ms\] (.+?)(?: — detail: |$)/u
+    if (typeof line !== 'string' || line.length === 0 ||
+        line.length > PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH) return
+    const match = line.match(
+      /^\[analytix\] \[main\] event=main_info detail=(\{.*\})$/u
     )
     if (!match) return
-    if (!Object.hasOwn(PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES, match[2])) return
-    const checkpoint = PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES[match[2]]
-    const elapsedMs = Number(match[1])
-    if (typeof checkpoint !== 'string' ||
-        !Number.isSafeInteger(elapsedMs) || elapsedMs < 0) return
-    checkpointCount = Math.min(checkpointCount + 1, Number.MAX_SAFE_INTEGER)
-    if (!Object.hasOwn(checkpointElapsedMs, checkpoint)) {
-      observedCheckpointCodes.push(checkpoint)
+    let detail
+    try {
+      detail = JSON.parse(match[1])
+    } catch {
+      return
     }
-    checkpointElapsedMs[checkpoint] = elapsedMs
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail) ||
+        Object.keys(detail).length !== 2 ||
+        !Object.hasOwn(detail, 'stage') ||
+        !Object.hasOwn(detail, 'elapsedMs') ||
+        typeof detail.stage !== 'string' ||
+        !Object.hasOwn(PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES, detail.stage) ||
+        !Number.isSafeInteger(detail.elapsedMs) || detail.elapsedMs < 0) return
+    const checkpoint = PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES[detail.stage]
+    if (Object.hasOwn(checkpointElapsedMs, checkpoint)) return
+    checkpointCount += 1
+    observedCheckpointCodes.push(checkpoint)
+    checkpointElapsedMs[checkpoint] = detail.elapsedMs
     lastCheckpoint = checkpoint
-    lastElapsedMs = elapsedMs
+    lastElapsedMs = detail.elapsedMs
+    if (typeof onCheckpoint === 'function') {
+      try { onCheckpoint({ checkpoint, elapsedMs: detail.elapsedMs }) } catch {
+        // Optional observers cannot affect installed product diagnostics.
+      }
+    }
   }
 
   const accept = (source, chunk) => {
     if (source !== 'stdout' && source !== 'stderr') return
     const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '')
-    const lines = `${partial[source]}${text}`.split(/\r?\n/u)
-    const remainder = lines.pop() || ''
-    partial[source] = remainder.length <= PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH
-      ? remainder
-      : ''
-    for (const line of lines) acceptLine(line)
+    let offset = 0
+    while (offset < text.length) {
+      const newline = text.indexOf('\n', offset)
+      const fragment = text.slice(offset, newline < 0 ? undefined : newline)
+      if (!discardingLongLine[source]) {
+        if (partial[source].length + fragment.length >
+            PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH) {
+          partial[source] = ''
+          discardingLongLine[source] = true
+        } else {
+          partial[source] += fragment
+        }
+      }
+      if (newline < 0) break
+      if (!discardingLongLine[source]) {
+        acceptLine(partial[source].replace(/\r$/u, ''))
+      }
+      partial[source] = ''
+      discardingLongLine[source] = false
+      offset = newline + 1
+    }
   }
 
   const finish = (source) => {
     if (source !== 'stdout' && source !== 'stderr') return
-    acceptLine(partial[source])
+    if (!discardingLongLine[source]) acceptLine(partial[source].replace(/\r$/u, ''))
     partial[source] = ''
+    discardingLongLine[source] = false
   }
 
   const evidence = () => Object.freeze({
