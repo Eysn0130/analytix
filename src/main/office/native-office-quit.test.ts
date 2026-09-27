@@ -23,6 +23,7 @@ function setup(){
     stopRuntimeWatchdog:vi.fn(()=>trace.push('watchdog-stop')),
     startRuntimeWatchdog:vi.fn(()=>trace.push('watchdog-start')),
     stopManagedRuntimesForQuit:vi.fn(async()=>{trace.push('core-stop');context.managedRuntimesStoppedForQuit=true}),
+    traceStartup:vi.fn(),
     publicConsoleWarn:vi.fn(),app:{quit:vi.fn(()=>trace.push('app-quit'))},
     beforeQuit:undefined as undefined|((event:{preventDefault:()=>void})=>void)}
   Object.assign(context, { writeShutdown: { prepareQuit: (...args: []) => context.prepareNativeOfficeQuit(...args), cancel: (...args: []) => context.cancelNativeOfficeQuit(...args) } })
