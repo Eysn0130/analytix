@@ -93,6 +93,8 @@ describe('K10 process probe evidence', () => {
       .toEqual({ phase: 'runtime settings apply:restart begin', elapsedMs: 74 })
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime IPC restart:requested","elapsedMs":85}`))
       .toEqual({ phase: 'runtime IPC restart:requested', elapsedMs: 85 })
+    expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"app before quit:runtime stopped","elapsedMs":95}`))
+      .toEqual({ phase: 'app before quit:runtime stopped', elapsedMs: 95 })
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime IPC restart:requested","elapsedMs":85,"path":"/private"}`))
       .toBeNull()
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime unknown restart","elapsedMs":85}`))

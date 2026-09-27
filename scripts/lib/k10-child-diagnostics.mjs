@@ -85,7 +85,15 @@ const runtimeTransitionPhases = new Set([
   'runtime IPC restart:done',
   'runtime restart:begin',
   'runtime restart:after settings apply',
-  'runtime restart:done'
+  'runtime restart:done',
+  'window close:requested',
+  'window all closed',
+  'app before quit:begin',
+  'app before quit:prepared',
+  'app before quit:blocked',
+  'app before quit:runtime stopped',
+  'app before quit:committed',
+  'app before quit:cancelled'
 ])
 
 export function parseRuntimeTransitionPhase(line) {

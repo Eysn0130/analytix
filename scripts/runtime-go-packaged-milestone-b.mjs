@@ -4861,6 +4861,11 @@ end tell
 }
 
 async function openDataImportDialog(debugPort) {
+  // Fresh profiles may choose the explicit local-data path before configuring
+  // a Provider. This leaves Agent and model actions behind their normal gate.
+  await clickVisibleByLabels(debugPort, [
+    'Open local data tools', '打开本地数据工具'
+  ], 2000)
   let importEntry = await clickVisibleByLabels(debugPort, [
     'Data import', '数据导入'
   ], 3000, '.session-header-compact')

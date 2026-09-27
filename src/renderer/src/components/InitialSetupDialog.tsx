@@ -148,7 +148,9 @@ export async function completeInitialSetupAfterSave(input: {
     return true
   }
 
-  await input.probeRuntime('user', { restart: true })
+  // Saving runtime settings already queues the managed restart when needed.
+  // The committed Provider selection is read by Go from the Registry.
+  await input.probeRuntime('user')
   const state = input.getState()
   if (state.runtimeConnection !== 'ready') {
     input.setDialogError(firstRunRuntimeError({
@@ -226,6 +228,13 @@ export function InitialSetupDialog(): ReactElement {
 
   const handleClose = () => {
     if (!closeAllowed) return
+    setError(null)
+    closeInitialSetup()
+    void reloadUiSettings()
+  }
+
+  const handleOpenLocalData = () => {
+    if (saving) return
     setError(null)
     closeInitialSetup()
     void reloadUiSettings()
@@ -614,7 +623,7 @@ export function InitialSetupDialog(): ReactElement {
             </div>
           )}
 
-          <div className={closeAllowed ? 'flex flex-col-reverse gap-3 sm:grid sm:grid-cols-[0.85fr_1fr]' : 'grid gap-3'}>
+          <div className="flex flex-col-reverse gap-3 sm:grid sm:grid-cols-[0.85fr_1fr]">
             {closeAllowed ? (
               <button
                 type="button"
@@ -623,7 +632,16 @@ export function InitialSetupDialog(): ReactElement {
               >
                 {t('firstRunClose')}
               </button>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleOpenLocalData}
+                className="min-h-11 rounded-xl border border-slate-300/80 bg-white/75 px-4 py-2 text-[15px] font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:border-white/16 dark:hover:bg-white/[0.06]"
+              >
+                {t('firstRunOpenLocalData')}
+              </button>
+            )}
             <button
               type="button"
               disabled={saving}
@@ -635,7 +653,7 @@ export function InitialSetupDialog(): ReactElement {
           </div>
 
           <p className="text-center text-[12.5px] leading-6 text-slate-400 dark:text-slate-500">
-            {t(isPreview ? 'firstRunPreviewHint' : 'firstRunChangeLater')}
+            {t(isPreview ? 'firstRunPreviewHint' : 'firstRunLocalDataHint')}
           </p>
         </div>
         </section>

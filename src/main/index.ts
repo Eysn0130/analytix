@@ -873,6 +873,7 @@ async function promptWindowCloseAction(window: BrowserWindow): Promise<void> {
 }
 
 function handleMainWindowClose(window: BrowserWindow, event: Electron.Event): void {
+  traceStartup('window close:requested')
   if (isQuitting) return
   if (appBehavior.closeAction === 'quit') return
 
@@ -2637,6 +2638,7 @@ app.whenReady().then(async () => {
 }
 
 app.on('window-all-closed', () => {
+  traceStartup('window all closed')
   void stopManagedRuntimes().catch((error) => {
     publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
   })
@@ -2646,6 +2648,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  traceStartup(managedRuntimesStoppedForQuit ? 'app before quit:committed' : 'app before quit:begin')
   isQuitting = true
   if (managedRuntimesStoppedForQuit) return
   event.preventDefault()
@@ -2653,9 +2656,11 @@ app.on('before-quit', (event) => {
   nativeOfficeQuitPending = true
   void (async () => {
     if (!await writeShutdown.prepareQuit()) {
+      traceStartup('app before quit:blocked')
       isQuitting = false
       return
     }
+    traceStartup('app before quit:prepared')
     // Native drafts and unresolved file outcomes use the existing Core session.
     // Confirm and drain them before stopping that runtime, not at window close.
     stopRuntimeWatchdog()
@@ -2663,8 +2668,10 @@ app.on('before-quit', (event) => {
       publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
       managedRuntimesStoppedForQuit = true
     }
+    traceStartup('app before quit:runtime stopped')
     app.quit()
   })().catch(async () => {
+    traceStartup('app before quit:cancelled')
     await writeShutdown.cancel().catch(() => undefined)
     isQuitting = false
     if (desktopStartupBarrierComplete) startRuntimeWatchdog()

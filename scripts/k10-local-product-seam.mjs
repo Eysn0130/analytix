@@ -1215,11 +1215,13 @@ function sameExactGoIdentity(identity) {
 async function normalQuit(debugPort, launched) {
   let quitRequestOk = false
   let quitRequestAcknowledged = false
+  let quitTargetObserved = false
   let fallbackUsed = false
   let fallbackSigkillSent = false
   if (latencyObservation) pinExactTaskGroupMembers(launched.child)
   try {
     const target = await waitForTarget(debugPort, 10_000)
+    quitTargetObserved = true
     await dispatchCdp(target.webSocketDebuggerUrl, [
       { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'F4', code: 'F4', modifiers: 1 } },
       { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'F4', code: 'F4', modifiers: 1 } }
@@ -1232,6 +1234,12 @@ async function normalQuit(debugPort, launched) {
     // Exact-child exit and residual checks below still determine success.
   }
   let targetClosed = await waitForTargetClosed(debugPort, 15_000)
+  lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk,
+    quitRequestAcknowledged, targetClosed,
+    mainExitedBeforeFallback: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+    fallbackSignalSent: false, fallbackSigkillSent: false,
+    mainExitCode: launched.child.exitCode,
+    mainSignaled: Boolean(launched.child.signalCode), residualProcessCount: null }
   if (!targetClosed) {
     try {
       if (latencyObservation) {
@@ -1248,6 +1256,10 @@ async function normalQuit(debugPort, launched) {
         ? 'normal_quit_target_stayed_open' : 'normal_quit_request_failed')
     }
     targetClosed = await waitForTargetClosed(debugPort, 10_000)
+    lastNormalQuitFacts = { ...lastNormalQuitFacts, targetClosed,
+      fallbackSignalSent: fallbackUsed, fallbackSigkillSent,
+      mainExitCode: launched.child.exitCode,
+      mainSignaled: Boolean(launched.child.signalCode) }
     if (latencyObservation) {
       throw new Error(quitRequestOk
         ? 'normal_quit_target_stayed_open' : 'normal_quit_request_failed')
@@ -1280,7 +1292,7 @@ async function normalQuit(debugPort, launched) {
     }
   }
   const residualProcessCount = latencyObservation ? taskOwnedResidualProcessCount() : 0
-  lastNormalQuitFacts = { quitRequestSent: quitRequestOk, quitRequestAcknowledged,
+  lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk, quitRequestAcknowledged,
     targetClosed, mainExitedBeforeFallback, fallbackSignalSent: fallbackUsed,
     fallbackSigkillSent, mainExitCode: launched.child.exitCode,
     mainSignaled: Boolean(launched.child.signalCode), residualProcessCount }

@@ -42,6 +42,7 @@ describe('SessionHeader provider-independent data import entry', () => {
   })
 
   it('opens the existing preview dialog without an active thread or Provider turn', async () => {
+    useChatStore.setState({ runtimeConnection: 'idle' })
     await act(async () => root.render(createElement(SessionHeader, { compact: true })))
     const entry = container.querySelector<HTMLButtonElement>('button[aria-label="Data import"]')
     expect(entry).not.toBeNull()
@@ -51,11 +52,12 @@ describe('SessionHeader provider-independent data import entry', () => {
       .not.toBeNull()
   })
 
-  it('keeps the entry disabled while runtime is offline and hidden without a workspace', async () => {
+  it('keeps local preview available after a model connection failure but requires a workspace', async () => {
     useChatStore.setState({ runtimeConnection: 'offline' })
     await act(async () => root.render(createElement(SessionHeader, { compact: true })))
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Data import"]')?.disabled)
-      .toBe(true)
+      .toBe(false)
+    expect(container.querySelector('button[aria-label="Chat actions"]')).toBeNull()
 
     await act(async () => useChatStore.setState({
       runtimeConnection: 'ready', workspaceRoot: ''

@@ -2132,6 +2132,7 @@
   "acceptedSlotDisplayTitle": "Verified source value",
   "directSourcePreviewTitle": "Direct source preview",
   "sessionActionDataImport": "Data import",
+  "sessionActionDataImportNeedsWorkspace": "Choose a workspace before importing data.",
   "fundsCSVStageButton": "Select CSV or ZIP",
   "fundsCSVReselectButton": "Reselect source",
   "fundsCSVStageRunning": "Staging import…",

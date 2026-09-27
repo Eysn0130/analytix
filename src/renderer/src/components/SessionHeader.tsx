@@ -310,7 +310,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   }
 
   const openSourcePreview = (): void => {
-    if (!workspaceRoot.trim() || runtimeConnection !== 'ready') return
+    if (!workspaceRoot.trim()) return
     closeActionsMenu()
     setSourcePreviewOpen(true)
   }
@@ -468,7 +468,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const activePinned = active ? pinnedThreadIds.has(active.id) : false
   const archived = active?.archived === true
   const threadActionsDisabled = !active || runtimeConnection !== 'ready'
-  const sourcePreviewDisabled = runtimeConnection !== 'ready' || !workspaceRoot.trim()
+  const sourcePreviewDisabled = !workspaceRoot.trim()
 
   const renderThreadActionsMenu = (floating = false): ReactElement | null => {
     if (!active) return null
@@ -528,7 +528,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           icon={<TableProperties className="h-5 w-5" strokeWidth={1.9} />}
           label={t('sessionActionDataImport')}
           disabled={sourcePreviewDisabled}
-          title={sourcePreviewDisabled ? t('runtimeActionNeedsConnection') : undefined}
+          title={sourcePreviewDisabled ? t('sessionActionDataImportNeedsWorkspace') : undefined}
           onClick={openSourcePreview}
           onPointerEnter={() => setActionsSubmenu(null)}
         />

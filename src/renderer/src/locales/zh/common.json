@@ -2132,6 +2132,7 @@
   "acceptedSlotDisplayTitle": "已验证来源值",
   "directSourcePreviewTitle": "来源直览",
   "sessionActionDataImport": "数据导入",
+  "sessionActionDataImportNeedsWorkspace": "请先选择工作区，再导入数据。",
   "fundsCSVStageButton": "选择 CSV 或 ZIP",
   "fundsCSVReselectButton": "重新选择来源",
   "fundsCSVStageRunning": "正在预接纳导入…",
