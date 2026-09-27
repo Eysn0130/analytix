@@ -1,35 +1,67 @@
 # Analytix product completion
 
-Status: Operational current matrix, 2026-09-26 PDT. Accepted targets remain in the
+Status: Operational current matrix, 2026-09-27 PDT. Accepted targets remain in the
 [spec registry](specs/README.md) and scoped OpenSpec requirements. This matrix does
 not shrink the original A–M/P0–P5 outcome or declare product/release acceptance.
 Delivery order is owned by the [Operational execution plan](delivery-execution-plan.md).
 Resume from the [canonical handover](handovers/README.md), preserving newer local
 history before comparing remote state.
 
-## Current PR28 Core admission — 2026-09-26 PDT
+## Current PR28 Core admission — 2026-09-27 PDT
 
-Exact product SOURCE `74e4316eabff41ad72878001b5be3b89db020a1d`
-(tree `7f0c6b5a47a9349916b90d8b1adbf84216783c3a`) has 57/57 successful
-PR checks. Documentation successor `56231ff5e6b7dd8d321d1356b7208587df0841e9`
-also has 57/57 successful checks; it does not change the packaged product
-SOURCE. The private Core DMG and ZIP SHA-256 values are respectively
+The canonical local branch is at product SOURCE
+`c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2` (tree
+`812abaaf4ca947af1166e118c9470a1e08b59481`). Its `a5dc` predecessor
+passed focused checks but missed two explicit case assertions. The `24ff`
+successor repaired those forms but regressed an acquired-currency assertion
+with a preceding year. The `c8fa` repair passed focused Go HTTP, four desktop
+test files (358/358) and typecheck for these bounded examples.
+The separate B1 independent-reference test is still uncommitted and has not
+reached its positive query: three source attempts stopped at signing policy,
+removable-volume, then native Owner-admission preflights. An exact `c8fa`
+clean private Core DMG/ZIP was built and copied from the verified DMG into an
+isolated installation. Build and installed copies passed matching
+Main/Go/app.asar hashes, strict deep signature and 1,172-instance mandatory
+legal audit. The bundle remains `development_clean_non_publishable`.
+An installed synthetic loopback Provider session timed out in CDP after local
+requests; it supplies no completed ordinary-file or recovery journey. A later
+application-name UI selection coincided with a second process using protected
+user state. That process was incorrectly sent SIGTERM and then SIGKILL; its
+effect on user state is unknown. Application-name UI automation and direct
+live-state access have stopped, and the exact installed GUI seam is blocked
+pending a safe precise binding and the coordinating owner's response. PR #28
+remains Draft/open at remote HEAD `56231ff5e`; its successful CI covers only
+that older commit. No current-HEAD CI exists. See the
+[current continuation ledger](qa/pr28-next-execution-2026-09-26.md).
+
+The exact `28ed097f2` installed Core copy completed normal protected real
+Provider use and Go/Main restart without credential re-entry. The later exact
+`107d68c2e` installed Core copy passed private package signature/legal checks
+but falsely classified an ordinary numeric-file task as a case task before
+Provider use. Neither result transfers to the committed `c8fa` source repair.
+
+| Exit | Current status and scope |
+| --- | --- |
+| SourceReady | `false` for the full PR28 delivery: the `c8fa` S1 slice has focused source passes for bounded examples, but B1 and remaining applicable source/assembly checks are open. `74e` and remote `56231ff5e` retain their own earlier 57/57 CI evidence. |
+| PrivateCandidateReady | `false`: exact `c8fa` private package and installed integrity checks pass, but its synthetic session timed out and installed ordinary-file/real-Provider continuation acceptance is open; the current UI seam is blocked after the protected-state incident. `28ed` real-Provider evidence belongs only to its earlier installed copy. |
+| MergeReady | `false`: PR28 is Draft, the current local product SOURCE is unpushed, and earlier remote CI does not cover it. |
+| PublicMacReleaseReady | `false`: the exact `c8fa` artifact is `development_clean_non_publishable`; no public-release qualification or publication authority is claimed. |
+
+### Earlier exact Core product evidence — 74e
+
+Product SOURCE `74e4316eabff41ad72878001b5be3b89db020a1d`
+(tree `7f0c6b5a47a9349916b90d8b1adbf84216783c3a`) and its documentation
+successor `56231ff5e6b7dd8d321d1356b7208587df0841e9` each had 57/57
+successful checks. The private Core DMG and ZIP SHA-256 values were
 `edd32919b070b8314b65de1e2b5eed079096261f9c9b22ddfe31b7cd98a87cf8`
 and `687450b61cb642309a705c5cf6ed4015b809f3223b5384b89ce88efc97707618`.
 The installed macOS 26.5.2 arm64 copy passed strict signature and 1,172-instance
 legal checks, visible synthetic Provider Save, Go/Main restart continuation,
 120 consecutive GUI turns plus a post-Main-restart 121st turn, older-thread
-recovery, a two-page PDF fixture, and two bounded upgrades. The observed cold
-window delay and Host/publication latency remain performance follow-ups. These
-synthetic results do not establish installed real-Provider acceptance or positive
-Funds facts. See the [exact post-c8 checkpoint](qa/pr28-post-c8-completion-2026-09-26.md).
-
-| Exit | Current status and scope |
-| --- | --- |
-| SourceReady | `true` for exact product SOURCE `74e4316ea` and its 57/57 checks; the documentation HEAD `56231ff5e` separately has 57/57 checks. |
-| PrivateCandidateReady | `false`: X01 packaged real-Provider Save, use and Go/Main restart reuse remain unverified. Synthetic installed acceptance does not substitute for this seam. |
-| MergeReady | `false`: PR28 is Draft and the private-candidate gate is open. The required Development gate passed for the current documentation HEAD, but mergeability and checks alone are insufficient. |
-| PublicMacReleaseReady | `false`: this ad-hoc candidate is `development_clean_non_publishable`, without notarization or publication authority. |
+recovery, a two-page PDF fixture, and two bounded upgrades. Its cold-window
+delay and Host/publication latency remained follow-ups. Those synthetic results
+did not establish installed real-Provider acceptance or positive Funds facts.
+See the [exact post-c8 checkpoint](qa/pr28-post-c8-completion-2026-09-26.md).
 
 The earlier e15 SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473` and
 its distinct installed results remain [historical evidence](qa/pr28-e15-credential-authority-2026-09-26.md),
@@ -174,7 +206,7 @@ currently accepted. The existing source branch remains the sole writer.
 
 | Stage | Included outcome | Excluded from this stage's feature completion, retained in full product | Current admission |
 | --- | --- | --- | --- |
-| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. Installed real-Provider Save/use/Go/Main reuse (X01), observed startup/Host latency attribution, and stage admission remain open. Public Developer ID/notarization belongs to separate public qualification. |
+| CORE_STAGE | Ordinary project/thread, Provider selection, controlled tools and approvals, cancellation/terminal, persistence/restart, file/terminal policy and first-party Host; usable without Funds | Funds account flow and advanced Office features are NOT_INCLUDED_IN_THIS_STAGE targets; their currently reachable code and shipped assets still require safety, isolation and license checks | partial: `74e4316ea` private Core DMG/ZIP and installed copy pass exact hash, signature, legal audit and bounded synthetic GUI/recovery journeys, including 120+121 turns. The later `28ed097f2` installed copy passed normal protected real-Provider use and Go/Main reuse; `107d68c2e` exposed the ordinary-file misclassification. `c8fa02f99` has focused source checks and an exact clean private package with installed hash, signature and legal integrity checks; its synthetic session timed out. Exact-source installed ordinary-file/recovery and startup/Host latency attribution remain open, with UI blocked at the protected-state incident boundary. Public Developer ID/notarization belongs to separate public qualification. |
 | FUNDS_ACCOUNT_FLOW_STAGE | The same Core plus admitted first-party account-flow import, immutable DuckDB snapshot, exact facts, model-safe Provider request, Final Gate, protected local display and recovery/revocation | Wider investigation/report/export, arbitrary remote archives and advanced Office remain in COMPLETE_PRODUCT | partial: original single-snapshot/new-Go-process evidence retained; current A1/A2 public/fault/new-process chain passes at its source boundary. Exact aac3 native components are reused only at their verified unchanged source boundary. Synthetic Host/loopback evidence does not qualify installed GUI, external Provider or all case/revocation journeys |
 | COMPLETE_PRODUCT | Original P0–P5, Office/Browser/Canvas/images, imported pivot/chart, archive lifecycle and broader accepted Funds scope | Nothing is silently removed | original matrix below remains applicable |
 
