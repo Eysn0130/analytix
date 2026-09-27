@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import {
   chmodSync,
@@ -15,6 +14,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { runBoundedDiagnosticChild } from './lib/bounded-diagnostic-child.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rawArgs = process.argv.slice(2)
@@ -259,9 +259,22 @@ function createProviderAuditAuthority(ownerRoot) {
   }
 }
 
-const runtimeServer = resolve(optionValue('--runtime-server'))
-if (!optionValue('--runtime-server') || !existsSync(runtimeServer)) {
-  throw new Error('pass --runtime-server with the current-source Go runtime binary')
+const packagedAppOption = optionValue('--packaged-app')
+const packagedSynthetic = packagedAppOption !== ''
+const packagedApp = packagedSynthetic ? realpathSync(packagedAppOption) : ''
+const authorityWorktree = packagedSynthetic
+  ? realpathSync(optionValue('--authority-worktree'))
+  : repositoryRoot
+const worktreeExcludesFile = packagedSynthetic
+  ? realpathSync(optionValue('--worktree-excludes-file'))
+  : ''
+const runtimeServer = packagedSynthetic
+  ? join(packagedApp, 'Contents', 'Resources', 'runtime-go', 'bin', 'runtime-server')
+  : resolve(optionValue('--runtime-server'))
+if (!existsSync(runtimeServer)) {
+  throw new Error(packagedSynthetic
+    ? 'packaged diagnostic requires an installed Go runtime binary'
+    : 'pass --runtime-server with the current-source Go runtime binary')
 }
 const sourceCommit = optionValue('--source-commit')
 if (!/^[0-9a-f]{40}$/u.test(sourceCommit)) {
@@ -276,19 +289,27 @@ const caseOwnerRoot = privateTempRoot(
   trustedCacheTempRoot()
 )
 const providerOwnerRoot = privateTempRoot('analytix-b1-diagnostic-provider-')
+let retainPackagedDiagnosticRoots = packagedSynthetic
 try {
   const product = createManagedProductAuthority(productOwnerRoot)
   const caseAuthority = createSyntheticCase(caseOwnerRoot)
   const providerAudit = createProviderAuditAuthority(providerOwnerRoot)
   const scannerPath = resolve(repositoryRoot, 'scripts/provider-request-audit-scanner.mjs')
-  const result = spawnSync(process.execPath, [
+  const configuredTimeout = Number(optionValue('--timeout-ms', '1200000'))
+  if (!Number.isSafeInteger(configuredTimeout) || configuredTimeout < 60_000 ||
+      configuredTimeout > 60 * 60 * 1000) {
+    throw new Error('diagnostic_timeout_invalid')
+  }
+  const result = await runBoundedDiagnosticChild({ command: process.execPath, args: [
     resolve(repositoryRoot, 'scripts/runtime-go-packaged-milestone-b.mjs'),
-    '--diagnostic-unpackaged',
+    packagedSynthetic ? '--diagnostic-packaged-synthetic-case' : '--diagnostic-unpackaged',
     '--json',
     '--no-write',
     '--no-gate',
-    '--source-commit', sourceCommit,
-    '--diagnostic-runtime-server', runtimeServer,
+    '--expected-source-commit', sourceCommit,
+    ...(packagedSynthetic
+      ? ['--app-path', packagedApp]
+      : ['--diagnostic-runtime-server', runtimeServer]),
     '--product-data-owner-root', productOwnerRoot,
     '--authority-bootstrap', product.bootstrapPath,
     '--installation-authority-key', product.installationAuthorityKeyPath,
@@ -302,34 +323,81 @@ try {
     '--provider-audit-public-key', providerAudit.publicKeyPath,
     '--provider-audit-private-key', providerAudit.privateKeyPath,
     '--provider-audit-socket', providerAudit.socketPath,
-    '--timeout-ms', optionValue('--timeout-ms', '1200000')
-  ], {
-    cwd: repositoryRoot,
+    '--timeout-ms', String(configuredTimeout)
+  ],
+    cwd: authorityWorktree,
     env: {
       ...diagnosticEnvironment(),
+      ...(packagedSynthetic ? {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'core.excludesFile',
+        GIT_CONFIG_VALUE_0: worktreeExcludesFile
+      } : {}),
       ANALYTIX_RUNTIME_GO_PACKAGED_SOURCE_COMMIT: sourceCommit,
       ANALYTIX_MILESTONE_B_PROVIDER_AUDIT_TRUSTED_PUBLIC_KEY_SHA256: providerAudit.publicKeySha256,
       ANALYTIX_MILESTONE_B_PROVIDER_AUDIT_SCANNER_BUILD_SHA256: sha256(readFileSync(scannerPath))
     },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 16 * 1024 * 1024
+    timeoutMs: configuredTimeout + 120_000,
+    maxBuffer: 16 * 1024 * 1024,
+    allowedResidualCommand: (command) =>
+      command.startsWith(`${process.execPath} ${scannerPath} --private-startup-frame-v1`) ||
+      (packagedSynthetic && command.startsWith(`${packagedApp}/Contents/`)) ||
+      (!packagedSynthetic && (
+        command.startsWith(`${runtimeServer} `) ||
+        command.startsWith(`${repositoryRoot}/node_modules/electron/dist/`)
+      ))
   })
-  if (result.error) throw result.error
   let report
   try {
     report = JSON.parse(String(result.stdout || '').trim())
   } catch {
-    throw new Error('unpackaged diagnostic did not return a JSON report')
+    throw new Error(packagedSynthetic
+      ? 'packaged synthetic diagnostic did not return a JSON report'
+      : 'unpackaged diagnostic did not return a JSON report')
   }
   process.stdout.write(`${JSON.stringify(report)}\n`)
-  if (result.status !== 0 || report?.diagnostic?.passed !== true || report?.passed === true ||
+  if (packagedSynthetic) {
+    const localPreviewPassed = result.status === 0 &&
+      report?.diagnostic?.directPreviewPassed === true && report?.passed === false &&
+      report?.acceptanceClass === 'development-only-packaged-synthetic-case-diagnostic' &&
+      report?.fixtureUsed === true && report?.artifact?.ok === true &&
+      report?.runtimeBlocker === '' &&
+      !report?.checks?.some((item) => item.status === 'FAIL') &&
+      report?.exit?.residualProcessCount === 0 &&
+      report?.checks?.some((item) => item.id === 'sandbox-cleanup-and-case-preservation' && item.status === 'PASS')
+    retainPackagedDiagnosticRoots = !localPreviewPassed
+    if (!localPreviewPassed) process.exitCode = 1
+  } else if (result.status !== 0 || report?.diagnostic?.passed !== true || report?.passed === true ||
       report?.acceptanceClass !== 'development-only-unpackaged-synthetic-case-diagnostic' ||
       report?.fixtureUsed !== true || report?.syntheticProviderUsed !== false) {
     process.exitCode = 1
   }
+} catch (error) {
+  retainPackagedDiagnosticRoots = true
+  const allowed = new Set([
+    'diagnostic_child_timeout', 'diagnostic_child_output_limit',
+    'diagnostic_child_spawn_failed', 'diagnostic_timeout_invalid',
+    'diagnostic_child_bound_invalid'
+  ])
+  process.stdout.write(`${JSON.stringify({
+    schemaVersion: 1,
+    classification: 'DEVELOPMENT_SYNTHETIC_DIAGNOSTIC_FAILED',
+    failureReasonCode: error instanceof Error && allowed.has(error.message)
+      ? error.message : 'other',
+    cleanupVerified: error?.cleanup?.verified === true,
+    cleanupReasonCode: typeof error?.cleanup?.reason === 'string'
+      ? error.cleanup.reason : 'not_observed',
+    rawErrorRetained: false
+  })}\n`)
+  process.exitCode = 1
 } finally {
-  for (const root of [providerOwnerRoot, caseOwnerRoot, productOwnerRoot]) {
-    rmSync(root, { recursive: true, force: true })
+  if (retainPackagedDiagnosticRoots) {
+    process.stderr.write(`Packaged synthetic diagnostic roots retained: ${JSON.stringify({
+      productOwnerRoot, caseOwnerRoot, providerOwnerRoot
+    })}\n`)
+  } else {
+    for (const root of [providerOwnerRoot, caseOwnerRoot, productOwnerRoot]) {
+      rmSync(root, { recursive: true, force: true })
+    }
   }
 }

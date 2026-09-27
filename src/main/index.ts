@@ -1204,15 +1204,19 @@ function queueRuntimeSettingsApply(
   const startupConfigChanged = runtimeStartupConfigChanged(anchor, next)
   if (!startupConfigChanged) return runtimeSettingsApplyPromise
   runtimeReadyFingerprint = null
+  traceStartup('runtime settings apply:queued')
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
     .catch(() => undefined)
     .then(async () => {
       const current = lastAppliedSettings ?? next
+      traceStartup('runtime settings apply:begin')
       await restartManagedRuntimeForSettingsChange(anchor, current)
+      traceStartup('runtime settings apply:done')
     })
     .catch((error: unknown) => {
+      traceStartup('runtime settings apply:failed')
       logWarn(
         'settings-apply',
         'Failed to apply Analytix runtime settings in background',
@@ -1422,7 +1426,9 @@ async function restartRuntime(settings: AppSettingsV1): Promise<void> {
 }
 
 async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
+  traceStartup('runtime restart:begin')
   await waitForQueuedRuntimeSettingsApply()
+  traceStartup('runtime restart:after settings apply')
   const runtime = getAnalytixRuntimeSettings(settings)
 
   if (!runtime.autoStart) {
@@ -1461,6 +1467,7 @@ async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
     throw runtimeJsonError(threadApi.error, threadApi.message)
   }
   noteRuntimeHealthy('restart')
+  traceStartup('runtime restart:done')
 }
 
 function createWindow(options: { suppressInitialShow?: boolean; initialThreadId?: string; primary?: boolean } = {}): BrowserWindow | null {
@@ -1627,6 +1634,7 @@ async function restartManagedRuntimeForSettingsChange(
   if (!wasRunning) return
 
   await waitForManagedRuntimeReadyBeforeStop(prev, 'settings-apply')
+  traceStartup('runtime settings apply:restart begin')
   terminalPtyController?.disposeAll()
   await adapter.stopAndWait()
   if (!runtime.autoStart) {
@@ -1646,6 +1654,7 @@ async function restartManagedRuntimeForSettingsChange(
       throw new Error('Analytix did not become healthy after the settings change')
     }
     noteRuntimeHealthy('settings-apply')
+    traceStartup('runtime settings apply:restart done')
   } catch (e) {
     const diagnostic = runtimeErrorPublicDiagnosticV1(e)
     logWarn('settings-apply', 'Analytix restart failed after settings change', diagnostic)
@@ -2499,8 +2508,10 @@ app.whenReady().then(async () => {
       return localDisplayRuntimeRequest(settings, path, body, signal)
     },
     restartRuntime: async () => {
+      traceStartup('runtime IPC restart:requested')
       const settings = await store.load()
       await restartRuntime(settings)
+      traceStartup('runtime IPC restart:done')
     },
     fetchUpstreamModels: fetchModels,
     getClawRuntime: () => clawRuntime,

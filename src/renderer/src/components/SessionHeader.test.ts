@@ -70,6 +70,12 @@ describe('SessionHeader', () => {
     expect(sessionHeaderSource).not.toContain('entityRef')
   })
 
+  it('keeps the existing action menu for an active titled thread', () => {
+    const active = renderToStaticMarkup(createElement(SessionHeader, { compact: true }))
+    expect(active).toContain('aria-label="Chat actions"')
+    expect(active).not.toContain('aria-label="Data import"')
+  })
+
   it('offers Main-owned staging and selector-only status, confirm, and cancel actions', () => {
     expect(sessionHeaderSource).toContain("label={t('sessionActionDataImport')}")
     expect(sessionHeaderSource).toContain("t('fundsCSVStageButton')")
