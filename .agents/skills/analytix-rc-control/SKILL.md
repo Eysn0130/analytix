@@ -24,6 +24,12 @@ first-runnable track, fixed task order, model choice, command budget, or stale
 PASS. Keep one compact working record: outcome, current candidate/HEAD, writer,
 remaining requirement or blocker, evidence, and next useful action.
 
+When continuing from a chat or attachment, retrieve the relevant original and
+resolve which requirements it supersedes before using its summary. In the same
+record, connect each still-required outcome to its implementation, actual
+consumer, evidence or gap. A later repair list must not silently replace the
+original delivery scope; an old research suggestion must not become a new gate.
+
 Choose a coherent delivery bundle that crosses every producer, consumer,
 migration and public seam required by that outcome. It may contain several
 related OpenSpec tasks. Split where work is independently acceptable, where
@@ -93,6 +99,13 @@ required authorization is missing. Check prior and standing grants first.
 Present a concrete reviewable result before a final reserved approval when
 independent preparation can be completed safely.
 
+Before escalating an apparent spec/implementation conflict, identify the exact
+accepted invariant, current dependency and smallest compatible repair. Distinguish
+an existing mechanism from a deferred replacement that shares its terminology.
+The authorized Owner decides routine engineering choices; ask the user only for
+the unresolved product or authority change, with a recommendation and its cost.
+Do not present a rewrite-versus-bypass choice before checking an in-scope repair.
+
 Preserve credential, real-user-data, external-write, destructive, release and
 formal-acceptance boundaries. A changed architecture or contract requires Owner
 alignment only when it is an unsettled change to the accepted target; implementing
@@ -115,6 +128,13 @@ permission for live effects. Expand to integration, migration, UI, package or
 formal evidence when those surfaces determine success, not because a skill
 contains a checklist.
 
+Before an expensive build or installed run, check its cheap prerequisites using
+the owning scripts: source/Git identity, required inputs, cache and output
+locations, execution authority and resource conflicts. An archive without Git
+metadata is not automatically a valid package checkout. Keep diagnostic and
+acceptance candidates distinct; consolidate product fixes before final packaging
+unless an earlier installed observation is needed to select the next fix.
+
 Bind each reusable evidence result to the candidate fingerprint (including
 relevant uncommitted/generated inputs), command, environment, owner, exit state
 and supported claim. The coordinating agent separately reviews the task-owned
@@ -127,8 +147,13 @@ Reassess the nearest product checkpoint after a bundle; execute it again when
 its result can change the next decision. Do not repeatedly run an unchanged
 suite merely to restate success, satisfy each role, or fill a progress report.
 Research and diagnostics end when enough evidence selects the next action.
-Repeated failures require a new hypothesis or adjustment; investigate or change
-approach instead of retrying blindly. Missing evidence still limits the claim.
+For a recurring failure family, retain the trigger, hypothesis, discriminating
+check and result in the existing record. A retry needs a changed input, fix or
+new hypothesis that can change the decision; a longer timeout alone is not one.
+If each repair creates a neighboring regression, review the shared invariant
+and its producer/consumer boundary before adding more exceptions. Return to the
+delivery outcome after that detour. Neither a retry count nor fatigue proves
+the architecture wrong or the defect closed. Missing evidence limits the claim.
 For an unattributed historical failure, separate the incident's unknown cause
 from the current invariant that must be proved. Follow the protocol's
 [failure disposition](references/control-protocol.md#unattributed-failure-disposition):
