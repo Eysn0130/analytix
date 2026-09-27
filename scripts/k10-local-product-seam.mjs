@@ -912,6 +912,27 @@ async function evaluate(debugPort, expression, timeoutMs = 20_000) {
   return result?.result?.value
 }
 
+async function enableRendererThreadTrace(debugPort) {
+  // Main inherits the opt-in environment variable; a packaged renderer may not.
+  // Write once in this task's isolated profile, then inspect state if CDP did
+  // not acknowledge the write. Never replay an ambiguous mutating expression.
+  try {
+    if (await evaluate(debugPort, `(() => {
+      try {
+        localStorage.setItem('ANALYTIX_THREAD_TRACE', '1');
+        return localStorage.getItem('ANALYTIX_THREAD_TRACE') === '1';
+      } catch { return false; }
+    })()`)) return
+  } catch {
+    // A lost CDP response does not tell us whether the write took effect.
+  }
+  const observed = await evaluate(debugPort, `(() => {
+    try { return localStorage.getItem('ANALYTIX_THREAD_TRACE') === '1'; }
+    catch { return false; }
+  })()`).catch(() => false)
+  if (observed !== true) throw new Error('renderer_thread_trace_enable_unverified')
+}
+
 function geometryExpression(kind) {
   const selector = kind === 'credential'
     ? 'input[type="password"]'
@@ -1332,7 +1353,8 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
   const timing = { goSpawnObservedAtMs: 0, bridgeHealth200AtMs: 0,
     credentialSurfaceReadyAtMs: 0, credentialSaveClickedAtMs: 0,
     credentialSaveOutcomeAtMs: 0, registryReadyAtMs: 0,
-    composerReadyAtMs: 0, submitAtMs: 0, domReplyObservedAtMs: 0 }
+    composerReadyAtMs: 0, submitAtMs: 0, domReplyObservedAtMs: 0,
+    rendererTraceEnabled: false, terminalDomTraceObservedBeforeQuit: false }
   const goProbe = latencyObservation ? setInterval(() => {
     const pid = ownedGoPid(launched.child.pid)
     if (pid === null && lastTaskMainIdentity?.pid === launched.child.pid) {
@@ -1361,6 +1383,9 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
         STARTUP_TARGET_TIMEOUT_MS
       )
       timing.bridgeHealth200AtMs = Date.now()
+      stage = 'renderer_thread_trace_enable'
+      await enableRendererThreadTrace(debugPort)
+      timing.rendererTraceEnabled = true
     }
     if (enterCredential) {
       stage = 'credential_surface_ready'
@@ -1452,6 +1477,10 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
       submittedProviderRequestArmed = false
       if (latencyObservation) timing.domReplyObservedAtMs = Date.now()
       replyObservedInRenderer = true
+      if (latencyObservation) {
+        stage = 'terminal_dom_trace_observation'
+        timing.terminalDomTraceObservedBeforeQuit = await waitForTerminalDomTrace(userDataDir)
+      }
     }
     stage = 'normal_quit'
     const processObservation = await normalQuit(debugPort, launched)
@@ -1508,7 +1537,7 @@ function stageElapsed(start, end, stages) {
 function taskTraceTiming(userDataDir) {
   const dir = join(userDataDir, 'traces')
   const timing = { coreCommittedAtMs: 0, mainReceivedAtMs: 0,
-    ipcSentAtMs: 0, domCommittedAtMs: 0 }
+    ipcSentAtMs: 0, rendererCommittedAtMs: 0, domCommittedAtMs: 0 }
   if (!existsSync(dir)) return timing
   for (const entry of readdirSync(dir)) {
     if (!/^thread-ref-[a-f0-9]{64}\.jsonl$/u.test(entry)) continue
@@ -1529,12 +1558,27 @@ function taskTraceTiming(userDataDir) {
         timing.mainReceivedAtMs = absolute(data.mainTimeOrigin, data.mainReceivedMonotonicMs)
       } else if (event.name === 'thread.terminal.ipc_sent' && !timing.ipcSentAtMs) {
         timing.ipcSentAtMs = absolute(data.timeOrigin, data.monotonicMs)
+      } else if (event.name === 'thread.terminal.renderer_committed' && !timing.rendererCommittedAtMs) {
+        timing.rendererCommittedAtMs = absolute(data.timeOrigin, data.monotonicMs)
       } else if (event.name === 'thread.terminal.dom_committed' && !timing.domCommittedAtMs) {
         timing.domCommittedAtMs = absolute(data.timeOrigin, data.monotonicMs)
       }
     }
   }
   return timing
+}
+
+async function waitForTerminalDomTrace(userDataDir) {
+  const deadline = Date.now() + 6_000
+  while (Date.now() < deadline) {
+    try {
+      if (taskTraceTiming(userDataDir).domCommittedAtMs > 0) return true
+    } catch {
+      // The diagnostic writer may rotate a trace file during this read.
+    }
+    await sleep(250)
+  }
+  try { return taskTraceTiming(userDataDir).domCommittedAtMs > 0 } catch { return false }
 }
 
 function packagedLatencyEvidence(userDataDir, launch) {
@@ -1547,6 +1591,8 @@ function packagedLatencyEvidence(userDataDir, launch) {
   return {
     classification: 'development_only_single_run_observation',
     normalQuit: launch.processObservation.normalQuit ?? null,
+    rendererTraceEnabled: at.rendererTraceEnabled,
+    terminalDomTraceObservedBeforeQuit: at.terminalDomTraceObservedBeforeQuit,
     processProbe: { ...processProbe },
     goProbeUnknownCount,
     mainEventLoopLagMaxMs: launch.processObservation.startupNumericDiagnostics?.maxEventLoopLagMs ?? null,
@@ -1590,6 +1636,8 @@ function packagedLatencyEvidence(userDataDir, launch) {
     submitToCoreCommittedMs: boundedElapsed(at.submitAtMs, terminal.coreCommittedAtMs),
     coreCommittedToMainReceivedMs: boundedElapsed(terminal.coreCommittedAtMs, terminal.mainReceivedAtMs),
     mainReceivedToIpcSentMs: boundedElapsed(terminal.mainReceivedAtMs, terminal.ipcSentAtMs),
+    ipcSentToRendererCommittedMs: boundedElapsed(terminal.ipcSentAtMs, terminal.rendererCommittedAtMs),
+    rendererCommittedToDomCommittedMs: boundedElapsed(terminal.rendererCommittedAtMs, terminal.domCommittedAtMs),
     ipcSentToDomCommittedMs: boundedElapsed(terminal.ipcSentAtMs, terminal.domCommittedAtMs),
     submitToDomCommittedMs: boundedElapsed(at.submitAtMs, terminal.domCommittedAtMs),
     submitToVisibleReplyObservedMs: boundedElapsed(at.submitAtMs, at.domReplyObservedAtMs),
@@ -1597,6 +1645,7 @@ function packagedLatencyEvidence(userDataDir, launch) {
       coreCommitted: terminal.coreCommittedAtMs > 0,
       mainReceived: terminal.mainReceivedAtMs > 0,
       ipcSent: terminal.ipcSentAtMs > 0,
+      rendererCommitted: terminal.rendererCommittedAtMs > 0,
       domCommitted: terminal.domCommittedAtMs > 0
     },
     limits: [
