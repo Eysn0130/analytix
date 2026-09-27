@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -294,6 +295,15 @@ type b1PublicChainDriver struct {
 
 func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePath, authorityKeyID string, model *b1PublicChainModel, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
 	t.Helper()
+	baselineSource, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineReference := b1ReferenceFlowFromCSV(t, baselineSource)
+	if baselineReference.transactionCount != 1 {
+		t.Fatal("B1 baseline reference did not select one source transaction")
+	}
+	model.setReference(baselineReference, false)
 	client := &http.Client{Timeout: 45 * time.Second}
 	request := func(method, path string, body map[string]any, expected int) map[string]any {
 		t.Helper()
@@ -331,7 +341,7 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 		if err != nil || record.HostAuthority == nil || record.HostAuthority.SelectionContentDigest == "" || record.AuthorityKeyID != authorityKeyID {
 			t.Fatal("B1 actual prepared record lost signed content or installation authority")
 		}
-		b1AssertPreparedFlow(t, record, "1250", "0", "1")
+		b1AssertPreparedFlow(t, record, baselineReference)
 		preparedRecords = append(preparedRecords, record)
 	}
 	capsuleBodies := b1PrivateCASRecords(t, filepath.Join(config.DataDir, "private", "evidence-registry", "capsules"))
@@ -471,6 +481,16 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 	if err := os.WriteFile(evolvedSource, b1EvolvedCSV(t), 0600); err != nil {
 		t.Fatal(err)
 	}
+	evolvedSourceBytes, err := os.ReadFile(evolvedSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evolvedReference := b1ReferenceFlowFromCSV(t, evolvedSourceBytes)
+	if evolvedReference.transactionCount != 2 || evolvedReference.outflowMinor == baselineReference.outflowMinor ||
+		evolvedReference.netMinor == baselineReference.netMinor {
+		t.Fatal("B1 changed source did not change the independent reference result")
+	}
+	model.setReference(evolvedReference, true)
 	evolvedStage := request(http.MethodPost, "/v1/local-display/funds-import/stage", map[string]any{"workspaceRoot": workspace, "sourcePath": evolvedSource}, http.StatusOK)
 	evolvedItems, _ := evolvedStage["items"].([]any)
 	if len(evolvedItems) != 1 {
@@ -501,7 +521,7 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 			evolved = candidate
 		}
 	}
-	b1AssertPreparedFlow(t, evolved, "1250", "225", "2")
+	b1AssertPreparedFlow(t, evolved, evolvedReference)
 	b1AssertActualFinal(t, config.DataDir, evolved, evolvedFinal.AcceptedFinalDigest, false)
 	evolvedMaterial, _ := domainevidence.ParseCanonicalEvidenceMaterial(evolved.CanonicalEvidence)
 	evolvedBinding := evolvedMaterial.AcceptedSlotSourceBindings[0]
@@ -693,6 +713,18 @@ type b1PublicChainModel struct {
 	t                  *testing.T
 	mu                 sync.Mutex
 	requests           [][]byte
+	baselineReference  b1ReferenceFlow
+	evolvedReference   b1ReferenceFlow
+}
+
+func (model *b1PublicChainModel) setReference(reference b1ReferenceFlow, evolved bool) {
+	model.mu.Lock()
+	defer model.mu.Unlock()
+	if evolved {
+		model.evolvedReference = reference
+	} else {
+		model.baselineReference = reference
+	}
 }
 
 func b1WaitAsyncCompletion(t *testing.T, guard *runtimeAsyncTurnGuardV1, threadID, turnID string) {
@@ -747,7 +779,10 @@ func (model *b1PublicChainModel) serve(w http.ResponseWriter, r *http.Request) {
 		runtimeOptionalLifecycleModelResponseV1(w, "", nil, "B1_ORDINARY_COMPLETE: Clear writing makes one point at a time.")
 		return
 	}
-	if b1HasCurrentSemantic(model.t, body) {
+	model.mu.Lock()
+	baselineReference, evolvedReference := model.baselineReference, model.evolvedReference
+	model.mu.Unlock()
+	if b1HasCurrentSemantic(model.t, body, baselineReference, evolvedReference) {
 		runtimeOptionalLifecycleModelResponseV1(w, "", nil, "B1 synthetic analysis complete")
 		return
 	}
@@ -911,7 +946,94 @@ func b1PrivateCASRecords(t *testing.T, root string) [][]byte {
 	return bodies
 }
 
-func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSettlement, inflow, outflow, count string) {
+// The reference reads only the CSV supplied to the normal import route. It does
+// not call the native query, its compiler, or the model-safe projection.
+type b1ReferenceFlow struct {
+	currency         string
+	inflowMinor      string
+	outflowMinor     string
+	netMinor         string
+	transactionCount int
+}
+
+func b1ReferenceFlowFromCSV(t *testing.T, source []byte) b1ReferenceFlow {
+	t.Helper()
+	rows, err := csv.NewReader(bytes.NewReader(source)).ReadAll()
+	if err != nil || len(rows) < 2 {
+		t.Fatal("B1 reference source is not a complete CSV")
+	}
+	columns := make(map[string]int, len(rows[0]))
+	for index, name := range rows[0] {
+		if _, duplicate := columns[name]; duplicate {
+			t.Fatal("B1 reference source has duplicate columns")
+		}
+		columns[name] = index
+	}
+	column := func(name string) int {
+		index, ok := columns[name]
+		if !ok {
+			t.Fatal("B1 reference source is missing a required column")
+		}
+		return index
+	}
+	account, timestamp, amount, direction, currency := column("交易账号"), column("交易时间"), column("交易金额"), column("收付标志"), column("交易币种")
+	var inflow, outflow big.Int
+	count := 0
+	for _, row := range rows[1:] {
+		if row[account] != rev14PrivateAccount || !strings.HasPrefix(row[timestamp], "2026-08-27 ") {
+			continue
+		}
+		if row[currency] != "CNY" {
+			t.Fatal("B1 reference transaction changed currency")
+		}
+		minor, ok := b1ReferenceMinorUnits(row[amount])
+		if !ok {
+			t.Fatal("B1 reference transaction has invalid exact amount")
+		}
+		switch row[direction] {
+		case "进":
+			inflow.Add(&inflow, minor)
+		case "出":
+			outflow.Add(&outflow, minor)
+		default:
+			t.Fatal("B1 reference transaction has unknown direction")
+		}
+		count++
+	}
+	if count == 0 {
+		t.Fatal("B1 reference selected no source transactions")
+	}
+	return b1ReferenceFlow{
+		currency: "CNY", inflowMinor: inflow.String(), outflowMinor: outflow.String(),
+		netMinor: new(big.Int).Sub(&inflow, &outflow).String(), transactionCount: count,
+	}
+}
+
+func b1ReferenceMinorUnits(value string) (*big.Int, bool) {
+	whole, fraction, decimal := strings.Cut(value, ".")
+	if whole == "" || strings.Trim(whole, "0123456789") != "" ||
+		(decimal && (fraction == "" || len(fraction) > 2 || strings.Trim(fraction, "0123456789") != "")) {
+		return nil, false
+	}
+	major, ok := new(big.Int).SetString(whole, 10)
+	if !ok {
+		return nil, false
+	}
+	minor := new(big.Int).Mul(major, big.NewInt(100))
+	if decimal {
+		if len(fraction) == 1 {
+			fraction += "0"
+		}
+		cents, ok := new(big.Int).SetString(fraction, 10)
+		if !ok {
+			return nil, false
+		}
+		minor.Add(minor, cents)
+	}
+	return minor, true
+}
+
+func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) {
 	t.Helper()
 	material, err := domainevidence.ParseCanonicalEvidenceMaterial(record.CanonicalEvidence)
 	if err != nil || len(material.Facts) != 3 || len(material.AcceptedSlotSourceBindings) != 1 {
@@ -920,7 +1042,7 @@ func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSe
 	values := map[string]string{}
 	for _, fact := range material.Facts {
 		if fact.ClaimType == domainevidence.ClaimAmount {
-			if fact.NormalizedPayload.Currency != "CNY" {
+			if fact.NormalizedPayload.Currency != reference.currency {
 				t.Fatal("B1 native aggregate changed currency")
 			}
 			values[fact.NormalizedPayload.Direction] = fact.NormalizedPayload.AmountMinor
@@ -928,7 +1050,7 @@ func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSe
 			values["count"] = fact.NormalizedPayload.Count
 		}
 	}
-	if values["in"] != inflow || values["out"] != outflow || values["count"] != count {
+	if values["in"] != reference.inflowMinor || values["out"] != reference.outflowMinor || values["count"] != fmt.Sprint(reference.transactionCount) {
 		t.Fatal("B1 native exact minor units or transaction count changed")
 	}
 	binding := material.AcceptedSlotSourceBindings[0]
@@ -955,7 +1077,7 @@ func b1EvolvedCSV(t *testing.T) []byte {
 	return body.Bytes()
 }
 
-func b1HasCurrentSemantic(t *testing.T, body []byte) bool {
+func b1HasCurrentSemantic(t *testing.T, body []byte, baselineReference, evolvedReference b1ReferenceFlow) bool {
 	t.Helper()
 	var request struct {
 		Messages []struct {
@@ -1020,13 +1142,14 @@ func b1HasCurrentSemantic(t *testing.T, body []byte) bool {
 		return true
 	}
 	data := found[0]
-	count := uint64(1)
-	outflow := "0"
+	reference := baselineReference
 	if evolved {
-		count = 2
-		outflow = "225"
+		reference = evolvedReference
 	}
-	if data.SubjectAlias != "acct:1" || data.InflowMinor != "1250" || data.OutflowMinor != outflow || data.TransactionCount != count ||
+	if reference.currency == "" || data.SubjectAlias != "acct:1" || data.Currency != reference.currency || data.MinorUnitScale != 2 ||
+		data.InflowMinor != reference.inflowMinor || data.OutflowMinor != reference.outflowMinor ||
+		data.NetMinor != reference.netMinor || data.TransactionCount != uint64(reference.transactionCount) ||
+		data.StartInclusive != "2026-08-27T00:00:00.000000Z" || data.EndInclusive != "2026-08-27T23:59:59.999999Z" ||
 		!data.AggregateComplete || data.EvidenceRowsComplete == evolved || data.EvidenceTransactionCount != 1 || data.EvidenceRowLimit != 1 || len(data.Transactions) != 1 {
 		t.Error("B1 actual native semantics lost stable alias, exact aggregate, or independent row coverage")
 	}
