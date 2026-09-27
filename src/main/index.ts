@@ -2122,11 +2122,18 @@ app.whenReady().then(async () => {
   })
   traceStartup('OAuth callback router:done')
   let providerOAuthStartupReady = false
+  let providerOAuthStartupCancelled = false
+  app.once('will-quit', () => {
+    providerOAuthStartupCancelled = true
+    providerOAuthStartupReady = false
+    providerOAuthRefreshScheduler?.stop()
+  })
   void (async () => {
     await providerOAuthLifecycle.sweepAuthorizationStates().catch(() => {
       publicConsoleWarn('provider-oauth', 'Protected OAuth authorization recovery remains pending.')
     })
     traceStartup('OAuth authorization sweep:done')
+    if (providerOAuthStartupCancelled) return
     const oauthRefreshScheduler = createProviderOAuthRefreshScheduler({
       refreshInventory: (refreshWindowMs) =>
         providerOAuthLifecycle.refreshExpiringAccounts(refreshWindowMs),
@@ -2136,6 +2143,10 @@ app.whenReady().then(async () => {
     })
     providerOAuthRefreshScheduler = oauthRefreshScheduler
     await oauthRefreshScheduler.start()
+    if (providerOAuthStartupCancelled) {
+      oauthRefreshScheduler.stop()
+      return
+    }
     traceStartup('OAuth refresh scheduler:done')
     providerOAuthStartupReady = true
   })().catch(() => {
