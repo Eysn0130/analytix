@@ -4913,12 +4913,8 @@ async function stageSnapshotThroughNativeUI({ debugPort, sourcePath, timeoutMs }
   }
   const selected = nativeSelectFile(sourcePath, debugPort)
   if (!selected.ok) return { ok: false, blocked: true, blocker: selected.blocker }
-  const confirm = await clickVisibleByLabels(debugPort, [
-    'Confirm snapshot', '确认建立快照'
-  ], timeoutMs)
-  if (!confirm.ok) {
-    return { ok: false, blocked: false, blocker: 'snapshot_confirm_control_not_ready' }
-  }
+  const confirm = await clickSnapshotConfirmOrCapabilityFailure(debugPort, timeoutMs)
+  if (!confirm.ok) return confirm
   const success = await waitForAnyBodyTextState(
     debugPort,
     successMessages,
@@ -4931,6 +4927,24 @@ async function stageSnapshotThroughNativeUI({ debugPort, sourcePath, timeoutMs }
     blocked: false,
     blocker: success ? '' : 'native_snapshot_staging_success_not_observed'
   }
+}
+
+async function clickSnapshotConfirmOrCapabilityFailure(debugPort, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const confirm = await clickVisibleByLabels(debugPort, [
+      'Confirm snapshot', '确认建立快照'
+    ], Math.min(2000, deadline - Date.now()))
+    if (confirm.ok) return { ok: true, blocked: false, blocker: '' }
+    const unavailable = await waitForAnyBodyTextState(debugPort, [
+      'Trusted data import is unavailable in this runtime environment.',
+      '当前运行环境未提供受信任的数据导入能力。'
+    ], true, Math.min(1000, Math.max(250, deadline - Date.now())))
+    if (unavailable) {
+      return { ok: false, blocked: false, blocker: 'funds_import_capability_unavailable' }
+    }
+  }
+  return { ok: false, blocked: false, blocker: 'snapshot_confirm_control_not_ready' }
 }
 
 async function reopenThreadInRenderer(debugPort, threadTitle, timeoutMs = 20_000) {
