@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import type { BrowserWindow, Event, IpcMain, WebFrameMain } from 'electron'
 import { WRITE_SHUTDOWN_ACK, WRITE_SHUTDOWN_REQUEST, writeShutdownAckSchema } from '../shared/write-shutdown'
 
+export type QuitCloseDecision = 'allowed' | 'veto-prior' | 'veto-not-prepared' | 'veto-frame' | 'veto-loading' | 'veto-late' | 'closed'
+
 /** One owner for both window destruction and application shutdown. Core must
  * remain running until prepareQuit succeeds. Only app renderer windows enroll. */
 export function createWriteShutdownCoordinator(options: {
@@ -9,6 +11,7 @@ export function createWriteShutdownCoordinator(options: {
   prepareNative: (window?: BrowserWindow) => Promise<boolean>
   cancelNative: (window?: BrowserWindow) => Promise<void>
   notifyBlocked: (window: BrowserWindow) => Promise<void>
+  onQuitCloseDecision?: (decision: QuitCloseDecision) => void
   timeoutMs?: number
 }) {
   const windows = new Set<BrowserWindow>()
@@ -20,6 +23,9 @@ export function createWriteShutdownCoordinator(options: {
   let quitReady = false
   let replay: BrowserWindow | undefined
   let replayEvent: Event | undefined
+  const reportQuitCloseDecision = (decision: QuitCloseDecision) => {
+    try { options.onQuitCloseDecision?.(decision) } catch { /* Observation cannot decide shutdown. */ }
+  }
   const canCreateWindow = () => !quitRequested && !quitReady
   const canNavigateWindow = (window: BrowserWindow) => canCreateWindow() && !prepared.has(window) && !cancellations.has(window)
   const preparedFrameIsCurrent = (window: BrowserWindow) => {
@@ -113,10 +119,26 @@ export function createWriteShutdownCoordinator(options: {
     window.on('close', event => {
       if (replay === window) replayEvent = event
       // The earlier tray/ask policy retains ownership of non-destructive close.
-      if (event.defaultPrevented) return
-      if ((replay === window || quitReady) && preparedFrameIsCurrent(window)) return
+      if (event.defaultPrevented) {
+        if (quitRequested) reportQuitCloseDecision('veto-prior')
+        return
+      }
+      const attempt = prepared.get(window)
+      if (quitRequested) {
+        if ((replay === window || quitReady) && attempt && current(window, attempt.frame) &&
+            !window.webContents.isLoadingMainFrame()) {
+          reportQuitCloseDecision('allowed')
+          queueMicrotask(() => { if (event.defaultPrevented) reportQuitCloseDecision('veto-late') })
+          return
+        }
+        event.preventDefault()
+        reportQuitCloseDecision(!attempt || !quitReady ? 'veto-not-prepared' :
+          !current(window, attempt.frame) ? 'veto-frame' : 'veto-loading')
+        return
+      }
+      if (replay === window && preparedFrameIsCurrent(window)) return
       event.preventDefault()
-      if (operation || quitRequested) return
+      if (operation) return
       const closing = prepare([window], false)
       operation = closing
       void closing.then(async accepted => {
@@ -130,6 +152,7 @@ export function createWriteShutdownCoordinator(options: {
       }).catch(() => cancel()).finally(() => { if (operation === closing) operation = undefined })
     })
     window.once('closed', () => {
+      if (quitRequested) reportQuitCloseDecision('closed')
       windows.delete(window)
       prepared.delete(window)
       cancellations.delete(window)

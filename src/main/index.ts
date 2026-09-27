@@ -14,8 +14,8 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { existsSync } from 'node:fs'
-import { createWriteShutdownCoordinator } from './write-shutdown'
-import { prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './office/native-office-ipc'
+import { createWriteShutdownCoordinator, type QuitCloseDecision } from './write-shutdown'
+import { prepareNativeOfficeQuit, cancelNativeOfficeQuit, waitForNativeOfficeQuitTeardown } from './office/native-office-ipc'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
@@ -432,11 +432,43 @@ let trayMenu: Menu | null = null
 let trayMenuOpenPromise: Promise<void> | null = null
 let loadTrayProviderObservation: (() => Promise<TrayProviderObservation | null>) | null = null
 let isQuitting = false
-let nativeOfficeQuitPending = false
+type NativeOfficeQuitPhase = 'idle' | 'preparing' | 'closing' | 'unknown' | 'cancelling' | 'draining' | 'stopping' | 'committed' | 'failed'
+let nativeOfficeQuitPhase: NativeOfficeQuitPhase = 'idle'
+let quitCloseObservationTimer: ReturnType<typeof setTimeout> | null = null
+const clearQuitCloseObservation = (): void => {
+  if (quitCloseObservationTimer) clearTimeout(quitCloseObservationTimer)
+  quitCloseObservationTimer = null
+}
+const quitCloseTraceStage: Record<QuitCloseDecision, StartupTraceStage> = {
+  allowed: 'app before quit:close allowed',
+  'veto-prior': 'app before quit:close veto prior',
+  'veto-not-prepared': 'app before quit:close veto unprepared',
+  'veto-frame': 'app before quit:close veto frame',
+  'veto-loading': 'app before quit:close veto loading',
+  'veto-late': 'app before quit:close veto late',
+  closed: 'app before quit:window closed'
+}
+const onQuitCloseDecision = (decision: QuitCloseDecision): void => {
+  traceStartup(quitCloseTraceStage[decision])
+  if (!decision.startsWith('veto-') || (nativeOfficeQuitPhase !== 'closing' && nativeOfficeQuitPhase !== 'unknown')) return
+  nativeOfficeQuitPhase = 'cancelling'
+  clearQuitCloseObservation()
+  queueMicrotask(() => {
+    void writeShutdown.cancel().then(() => {
+      nativeOfficeQuitPhase = 'idle'
+      isQuitting = false
+      traceStartup('app before quit:blocked')
+    }).catch(() => {
+      nativeOfficeQuitPhase = 'failed'
+      traceStartup('app before quit:cancelled')
+    })
+  })
+}
 const writeShutdown = createWriteShutdownCoordinator({
   ipc: ipcMain,
   prepareNative: prepareNativeOfficeQuit,
   cancelNative: cancelNativeOfficeQuit,
+  onQuitCloseDecision,
   notifyBlocked: async window => {
     await dialog.showMessageBox(window, { type: 'warning', message: '文档尚未保存，已取消关闭',
       detail: '草稿仍保留在当前窗口。请完成输入、导出或处理保存提示后重试。', buttons: ['返回文档'], noLink: true })
@@ -2172,7 +2204,8 @@ app.whenReady().then(async () => {
   traceStartup('OAuth callback router:done')
   let providerOAuthStartupReady = false
   let providerOAuthStartupCancelled = false
-  app.once('will-quit', () => {
+  app.on('will-quit', () => {
+    if (nativeOfficeQuitPhase !== 'committed') return
     providerOAuthStartupCancelled = true
     providerOAuthStartupReady = false
     providerOAuthRefreshScheduler?.stop()
@@ -2639,41 +2672,88 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   traceStartup('window all closed')
-  void stopManagedRuntimes().catch((error) => {
-    publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
-  })
-  if (process.platform !== 'darwin') {
+  if (nativeOfficeQuitPhase !== 'idle') return
+  void (async () => {
+    await waitForNativeOfficeQuitTeardown()
+    if (nativeOfficeQuitPhase !== 'idle' || BrowserWindow.getAllWindows().length > 0) return
+    if (process.platform === 'darwin') {
+      await stopManagedRuntimes()
+      return
+    }
+    await stopManagedRuntimesForQuit()
+    nativeOfficeQuitPhase = 'committed'
     app.quit()
-  }
+  })().catch((error) => {
+    publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', runtimeErrorPublicDiagnosticV1(error))
+  })
 })
 
 app.on('before-quit', (event) => {
-  traceStartup(managedRuntimesStoppedForQuit ? 'app before quit:committed' : 'app before quit:begin')
   isQuitting = true
-  if (managedRuntimesStoppedForQuit) return
+  // The updater can stop owned runtimes before its special quit sequence.
+  if (managedRuntimesStoppedForQuit) {
+    nativeOfficeQuitPhase = 'committed'
+    traceStartup('app before quit:committed')
+    return
+  }
+  if (nativeOfficeQuitPhase === 'closing') {
+    traceStartup('app before quit:closing')
+    return
+  }
   event.preventDefault()
-  if (nativeOfficeQuitPending) return
-  nativeOfficeQuitPending = true
-  void (async () => {
-    if (!await writeShutdown.prepareQuit()) {
+  if (nativeOfficeQuitPhase !== 'idle') return
+  nativeOfficeQuitPhase = 'preparing'
+  traceStartup('app before quit:begin')
+  void writeShutdown.prepareQuit().then((ready) => {
+    if (!ready) {
+      nativeOfficeQuitPhase = 'idle'
       traceStartup('app before quit:blocked')
       isQuitting = false
       return
     }
+    nativeOfficeQuitPhase = 'closing'
     traceStartup('app before quit:prepared')
-    // Native drafts and unresolved file outcomes use the existing Core session.
-    // Confirm and drain them before stopping that runtime, not at window close.
-    stopRuntimeWatchdog()
-    try { await stopManagedRuntimesForQuit() } catch (error) {
-      publicConsoleWarn('runtime', 'Failed to stop Analytix runtime.', error)
-      managedRuntimesStoppedForQuit = true
-    }
-    traceStartup('app before quit:runtime stopped')
+    quitCloseObservationTimer = setTimeout(() => {
+      if (nativeOfficeQuitPhase !== 'closing') return
+      nativeOfficeQuitPhase = 'unknown'
+      traceStartup('app before quit:close unknown')
+    }, 15_000)
     app.quit()
-  })().catch(async () => {
+  }).catch(async () => {
+    clearQuitCloseObservation()
     traceStartup('app before quit:cancelled')
     await writeShutdown.cancel().catch(() => undefined)
+    nativeOfficeQuitPhase = 'idle'
     isQuitting = false
-    if (desktopStartupBarrierComplete) startRuntimeWatchdog()
-  }).finally(() => { nativeOfficeQuitPending = false })
+  })
+})
+
+app.on('will-quit', (event) => {
+  if (managedRuntimesStoppedForQuit) {
+    nativeOfficeQuitPhase = 'committed'
+    return
+  }
+  event.preventDefault()
+  if (nativeOfficeQuitPhase !== 'closing' && nativeOfficeQuitPhase !== 'unknown') return
+  clearQuitCloseObservation()
+  nativeOfficeQuitPhase = 'draining'
+  traceStartup('app before quit:windows closed')
+  void (async () => {
+    // Window closure starts Office's asynchronous close-object cleanup. Its
+    // settled state is required before Core stops; it is not a success receipt.
+    await waitForNativeOfficeQuitTeardown()
+    traceStartup('app before quit:office teardown settled')
+    nativeOfficeQuitPhase = 'stopping'
+    stopRuntimeWatchdog()
+    await stopManagedRuntimesForQuit()
+    traceStartup('app before quit:runtime stopped')
+    nativeOfficeQuitPhase = 'committed'
+    app.quit()
+  })().catch((error) => {
+    const failureStage = nativeOfficeQuitPhase === 'draining'
+      ? 'app before quit:office teardown failed' : 'app before quit:stop failed'
+    nativeOfficeQuitPhase = 'failed'
+    traceStartup(failureStage)
+    publicConsoleWarn('runtime', 'Failed to complete Analytix shutdown.', runtimeErrorPublicDiagnosticV1(error))
+  })
 })

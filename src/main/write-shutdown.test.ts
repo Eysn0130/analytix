@@ -6,8 +6,9 @@ import { createWriteShutdownCoordinator } from './write-shutdown'
 function setup() {
   const handlers = new Map<string, (...args: any[]) => any>()
   const native = vi.fn(async () => true), cancel = vi.fn(async () => undefined), notify = vi.fn(async () => undefined)
+  const decisions: string[] = []
   const coordinator = createWriteShutdownCoordinator({ ipc: { handle: (name, handler) => handlers.set(name, handler) } as Pick<IpcMain,'handle'>,
-    prepareNative: native, cancelNative: cancel, notifyBlocked: notify, timeoutMs: 50 })
+    prepareNative: native, cancelNative: cancel, notifyBlocked: notify, onQuitCloseDecision: decision => decisions.push(decision), timeoutMs: 50 })
   const window = () => {
     let destroyed = false
     const main = Object.assign(new EventEmitter(), { isDestroyed: () => destroyed, webContents: Object.assign(new EventEmitter(), { mainFrame: {}, send: vi.fn(), isLoadingMainFrame: vi.fn(() => false), setWindowOpenHandler: vi.fn() }), close: vi.fn() })
@@ -27,7 +28,7 @@ function setup() {
     })
     return { main, close, ack, autoCancel }
   }
-  return { coordinator, native, cancel, notify, window }
+  return { coordinator, native, cancel, notify, decisions, window }
 }
 afterEach(() => vi.useRealTimers())
 test('one close owner waits for text ACK, then native, and replays close once', async () => {
@@ -116,9 +117,29 @@ test('a late unprepared window and a replaced prepared frame cannot inherit quit
   const late=h.window()
   expect(late.main.webContents.send).not.toHaveBeenCalled()
   expect(late.close().defaultPrevented).toBe(true)
+  expect(h.decisions.at(-1)).toBe('veto-not-prepared')
   a.main.webContents.mainFrame={}
   expect(a.close().defaultPrevented).toBe(true)
+  expect(h.decisions.at(-1)).toBe('veto-frame')
   expect(h.native).toHaveBeenCalledOnce()
+})
+test.each(['prior', 'later', 'loading'] as const)('quit observes a %s close veto without admitting Core shutdown',async kind=>{
+  const h=setup(),w=h.window()
+  const preparing=h.coordinator.prepareQuit();w.ack();expect(await preparing).toBe(true)
+  if(kind==='prior')w.main.prependListener('close',event=>event.preventDefault())
+  if(kind==='later')w.main.on('close',event=>event.preventDefault())
+  if(kind==='loading')w.main.webContents.isLoadingMainFrame.mockReturnValue(true)
+  expect(w.close().defaultPrevented).toBe(true)
+  await Promise.resolve()
+  expect(h.decisions).toContain(kind==='prior'?'veto-prior':kind==='later'?'veto-late':'veto-loading')
+  expect(w.main.isDestroyed()).toBe(false)
+})
+test('a prepared window reports closed only after its close succeeds',async()=>{
+  const h=setup(),w=h.window()
+  const preparing=h.coordinator.prepareQuit();w.ack();expect(await preparing).toBe(true)
+  w.main.close()
+  expect(h.decisions).toContain('allowed')
+  expect(h.decisions.at(-1)).toBe('closed')
 })
 test('quit preparation closes creation and main-frame navigation admission until explicit cancel',async()=>{
   const h=setup(),w=h.window();w.autoCancel()

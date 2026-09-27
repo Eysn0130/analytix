@@ -10,12 +10,23 @@ import { captureNativeRendererDocument } from '../ipc/native-renderer-document'
 import type { PluginPackageHostRequest, PluginPackageHostResponse } from '../../../packages/runtime/src/contracts/plugin-package-host'
 
 let quitGuard: {window: BrowserWindow; prepare:() => Promise<boolean>; cancel:() => Promise<void>} | undefined
+const nativeOfficeTeardowns = new Set<Promise<void>>()
+let nativeOfficeTeardownFailed = false
 /** Must run while the existing Core and its native sessions are still alive. */
 export async function prepareNativeOfficeQuit(window?: BrowserWindow): Promise<boolean> {
   if (window && quitGuard?.window !== window) return true
   try { return await quitGuard?.prepare() ?? true } catch { await cancelNativeOfficeQuit(); return false }
 }
 export async function cancelNativeOfficeQuit(): Promise<void> { await quitGuard?.cancel() }
+/** Wait for cleanup attempts, not a successful close-object receipt. */
+export async function waitForNativeOfficeQuitTeardown(): Promise<void> {
+  while (nativeOfficeTeardowns.size > 0) {
+    await Promise.allSettled([...nativeOfficeTeardowns])
+  }
+  const failed = nativeOfficeTeardownFailed
+  nativeOfficeTeardownFailed = false
+  if (failed) throw new Error('native Office teardown did not settle cleanly')
+}
 
 /** The Office view never receives this IPC or the generic desktop bridge. */
 export function registerNativeOfficeIpc(
@@ -168,7 +179,12 @@ export function registerNativeOfficeIpc(
           if (controller === current) delivery?.release()
           if (quitGuard === guard) quitGuard = undefined
           for (const pending of freezes.values()) if (pending.main === main) pending.finish(false)
-          void current.destroy()
+          const teardown = Promise.resolve().then(() => current.destroy())
+          nativeOfficeTeardowns.add(teardown)
+          void teardown.then(
+            () => nativeOfficeTeardowns.delete(teardown),
+            () => { nativeOfficeTeardownFailed = true; nativeOfficeTeardowns.delete(teardown) }
+          )
           if (controller === current) { controller = undefined; controllerPrivate = false; owner = undefined }
         })
       }

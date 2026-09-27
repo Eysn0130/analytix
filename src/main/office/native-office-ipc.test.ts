@@ -17,7 +17,7 @@ vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (..
 } }))
 import { createWriteShutdownCoordinator } from '../write-shutdown'
 import { createOfficePrivateAdmissionProvider, type OfficePrivateAdmission } from './office-private-admission'
-import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit } from './native-office-ipc'
+import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit, waitForNativeOfficeQuitTeardown } from './native-office-ipc'
 beforeEach(() => {
   vi.clearAllMocks(); state.packaged = false; state.handlers.clear(); state.lifecycle.clear()
   state.request.mockResolvedValue({ ok: true, view: null }); state.getView.mockReturnValue(null)
@@ -191,8 +191,29 @@ it('closing a readonly preview freezes and flushes before releasing without a sa
   expect(state.flushAnnotations).toHaveBeenCalledOnce()
   expect(state.dialog).not.toHaveBeenCalled()
   h.main.emit('closed')
-  expect(state.destroy).toHaveBeenCalledOnce()
+  await vi.waitFor(()=>expect(state.destroy).toHaveBeenCalledOnce())
   expect(state.request.mock.calls.some(([request]) => request.action === 'save')).toBe(false)
+})
+it('keeps Core teardown pending after closed until Office destroy settles', async () => {
+  const h=setup();await h.invoke()
+  let finish!:()=>void
+  state.destroy.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve}))
+  h.main.emit('closed')
+  let settled=false
+  const waiting=waitForNativeOfficeQuitTeardown().then(()=>{settled=true})
+  expect(settled).toBe(false)
+  await vi.waitFor(()=>expect(state.destroy).toHaveBeenCalledOnce())
+  expect(await prepareNativeOfficeQuit(h.main as any)).toBe(true)
+  expect(settled).toBe(false)
+  finish();await waiting
+  expect(settled).toBe(true)
+})
+it('reports a failed cleanup once without poisoning a later teardown attempt', async () => {
+  const h=setup();await h.invoke()
+  state.destroy.mockRejectedValueOnce(Error('teardown failed'))
+  h.main.emit('closed')
+  await expect(waitForNativeOfficeQuitTeardown()).rejects.toThrow('native Office teardown did not settle cleanly')
+  await expect(waitForNativeOfficeQuitTeardown()).resolves.toBeUndefined()
 })
 
 it('dirty native close is cancelled by default and preserves the working copy', async () => {
