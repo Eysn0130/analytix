@@ -299,6 +299,11 @@ func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any)
 
 func (projection TerminalTelemetryV1) PublicUsageMap() map[string]any {
 	usage := projection.usage
+	if usage.costEstimateStatus == "" {
+		// Host-only boundary, cancellation, and restart terminals use the
+		// zero-value projection and have no physical attempt cost evidence.
+		usage.costEstimateStatus = "unknown"
+	}
 	out := terminalUsagePublicMapV1(usage)
 	currencies := make([]string, 0, 2)
 	if usage.costKnownUSD {

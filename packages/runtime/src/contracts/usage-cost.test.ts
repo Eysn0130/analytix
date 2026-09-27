@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RuntimeUsageResponseSchema } from './usage.js'
+import { RuntimeUsageResponseSchema, UsageSnapshotSchema } from './usage.js'
 
 const completeZeroUsd = {
   promptTokens: 1,
@@ -36,5 +36,18 @@ describe('usage cost coverage contract', () => {
     Reflect.deleteProperty(legacy, 'costEstimateStatus')
     Reflect.deleteProperty(legacy, 'costKnownCurrencies')
     expect(RuntimeUsageResponseSchema.safeParse({ total: legacy, perThread: [], bySource: [] }).success).toBe(true)
+  })
+
+  it('accepts host-only zero usage as unknown and rejects an empty status enum', () => {
+    const hostOnly = {
+      promptTokens: 0, completionTokens: 0, reasoningTokens: 0, totalTokens: 0,
+      cacheHitRate: null, cacheableTokenHitRate: null, totalInputTokenHitRate: null,
+      cacheMissReasons: [], cacheSuggestions: [], turns: 1,
+      costUsd: 0, costCny: 0, priceConfigured: false,
+      cacheSavingsUsd: 0, cacheSavingsCny: 0, tokenEconomySavingsTokens: 0,
+      costEstimateStatus: 'unknown', costKnownCurrencies: []
+    }
+    expect(UsageSnapshotSchema.strict().safeParse(hostOnly).success).toBe(true)
+    expect(UsageSnapshotSchema.strict().safeParse({ ...hostOnly, costEstimateStatus: '' }).success).toBe(false)
   })
 })

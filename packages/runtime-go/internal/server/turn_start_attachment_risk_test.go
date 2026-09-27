@@ -10,6 +10,7 @@ import (
 
 	apploop "analytix.local/runtime-go/internal/app/loop"
 	appturn "analytix.local/runtime-go/internal/app/turn"
+	contracts "analytix.local/runtime-go/internal/contracts"
 	domainattachment "analytix.local/runtime-go/internal/domain/attachment"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -188,6 +189,27 @@ func TestTurnStartCaseBoundAttachmentWithoutAuthorityUsesHostBoundary(t *testing
 		stringField(accepted, "variant") != string(domainevidence.SourceUnavailableAnswer) ||
 		stringField(accepted, "terminalReason") != "source_unavailable" {
 		t.Fatalf("case attachment lost its source-unavailable boundary: turn=%#v context=%#v err=%v", turn, securityContext, parseErr)
+	}
+	replay, err := handler.store.LoadEventsSince(threadID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usageSeen := false
+	for _, event := range replay.Events {
+		if stringField(event, "kind") != "usage" || stringField(event, "turnId") != stringField(response, "turnId") {
+			continue
+		}
+		usage, _ := event["usage"].(map[string]any)
+		usd, usdOK := contracts.NumericSeq(usage["costUsd"])
+		cny, cnyOK := contracts.NumericSeq(usage["costCny"])
+		if usage == nil || usage["costEstimateStatus"] != "unknown" || len(listAny(usage["costKnownCurrencies"])) != 0 ||
+			usage["priceConfigured"] != false || !usdOK || usd != 0 || !cnyOK || cny != 0 {
+			t.Fatalf("host-only boundary published invalid cost coverage: %#v", event)
+		}
+		usageSeen = true
+	}
+	if !usageSeen {
+		t.Fatalf("host-only boundary did not publish a usage event: %#v", replay.Events)
 	}
 }
 

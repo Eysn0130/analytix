@@ -692,6 +692,22 @@ describe('public runtime content', () => {
     expect(JSON.stringify(admitted)).toContain('案件分析已结束；仅发布通过宿主证据门的固定边界答复。')
     expect(JSON.stringify(admitted)).toContain(record.recordDigest)
 
+    const hostOnlyBatch = structuredClone(batch) as Record<string, any>
+    hostOnlyBatch.events[2].usage = {
+      ...hostOnlyBatch.events[2].usage,
+      costUsd: 0, costCny: 0, priceConfigured: false,
+      costEstimateStatus: 'unknown', costKnownCurrencies: []
+    }
+    hostOnlyBatch.events[2].cacheDiagnostics = {
+      terminalCacheDiagnosticsSchema: 'terminal-cache-diagnostics.v1',
+      terminalCacheDiagnosticsValid: false,
+      terminalCacheDiagnosticsDisposition: 'rejected'
+    }
+    expect(new PublicRuntimeEventFilter().push(hostOnlyBatch)).toBe(hostOnlyBatch)
+    const emptyStatusBatch = structuredClone(hostOnlyBatch) as Record<string, any>
+    emptyStatusBatch.events[2].usage.costEstimateStatus = ''
+    expect(new PublicRuntimeEventFilter().push(emptyStatusBatch)).toBeNull()
+
     for (const effort of ['', ' high ', 'HIGH', 'SOL_PRIVATE_REASONING_SENTINEL_7F3C']) {
       const invalidEffortBatch = structuredClone(batch) as Record<string, any>
       invalidEffortBatch.events[2].effort = effort

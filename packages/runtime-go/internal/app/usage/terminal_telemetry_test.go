@@ -85,6 +85,19 @@ func TestTerminalTelemetryV1AcceptsOnlyClosedHostDiagnostics(t *testing.T) {
 	}
 }
 
+func TestTerminalTelemetryV1ZeroValueHostBoundaryHasUnknownCostCoverage(t *testing.T) {
+	projection := TerminalTelemetryV1{}
+	usage := projection.PublicUsageMap()
+	if usage["costEstimateStatus"] != "unknown" ||
+		!reflect.DeepEqual(usage["costKnownCurrencies"], []string{}) ||
+		usage["priceConfigured"] != false || usage["costUsd"] != float64(0) || usage["costCny"] != float64(0) {
+		t.Fatalf("zero-value host terminal emitted invalid cost coverage: %#v", usage)
+	}
+	if !ValidateTerminalTelemetryPublicMapsV1(usage, projection.PublicCacheDiagnosticsMap()) {
+		t.Fatalf("zero-value host terminal could not replay: usage=%#v diagnostics=%#v", usage, projection.PublicCacheDiagnosticsMap())
+	}
+}
+
 func TestTerminalTelemetryV1ReplaysOldSignedCostShapeWithoutReminting(t *testing.T) {
 	observation := cacheObservationFixture(1, "succeeded", 0, 0, "2026-07-13T00:00:00Z", "2026-07-13T00:00:01Z")
 	observation.Usage.EstimatedCost.Known = true
