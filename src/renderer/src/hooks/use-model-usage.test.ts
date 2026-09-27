@@ -51,6 +51,10 @@ describe('model usage helpers', () => {
           output_tokens: 30,
           total_tokens: 130,
           price_configured: true,
+          cost_usd: 0,
+          cost_cny: 0,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['USD'],
           cache_savings_usd: 0.006,
           cache_savings_cny: 0.0432,
           token_economy_savings_tokens: 2048,
@@ -62,10 +66,10 @@ describe('model usage helpers', () => {
         }
       ],
       days: [
-        { date: '2026-05-01', total_tokens: 130, turns: 2, priceConfigured: true },
+        { date: '2026-05-01', total_tokens: 130, turns: 2, cost_usd: 0, cost_cny: 0, priceConfigured: true, cost_estimate_status: 'complete', cost_known_currencies: ['USD'] },
         { date: '2026-05-02', total_tokens: 0, turns: 0 }
       ],
-      totals: { total_tokens: 130, turns: 2, days: 2, active_days: 1, thread_count: 1, price_configured: true }
+      totals: { total_tokens: 130, turns: 2, days: 2, active_days: 1, thread_count: 1, cost_usd: 0, cost_cny: 0, price_configured: true, cost_estimate_status: 'complete', cost_known_currencies: ['USD'] }
     })
 
     expect(normalized.buckets[0]).toMatchObject({
@@ -120,9 +124,9 @@ describe('model usage helpers', () => {
         active_days: 1
       }
     })
-    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Cost unavailable')
-    expect(formatCost(unpriced.days[0]?.costUsd, 'zh-CN', unpriced.days[0]?.costCny, unpriced.days[0]?.priceConfigured)).toBe('费用未知')
-    expect(formatCost(unpriced.totals.costUsd, 'en', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('Cost unavailable')
+    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.costEstimateStatus, unpriced.buckets[0]?.costKnownCurrencies)).toBe('Cost unavailable')
+    expect(formatCost(unpriced.days[0]?.costUsd, 'zh-CN', unpriced.days[0]?.costCny, unpriced.days[0]?.costEstimateStatus, unpriced.days[0]?.costKnownCurrencies)).toBe('费用未知')
+    expect(formatCost(unpriced.totals.costUsd, 'en', unpriced.totals.costCny, unpriced.totals.costEstimateStatus, unpriced.totals.costKnownCurrencies)).toBe('Cost unavailable')
 
     const freeConfigured = normalizeModelUsageResponse({
       group_by: 'model',
@@ -134,6 +138,8 @@ describe('model usage helpers', () => {
           cost_usd: 0,
           cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['USD'],
           turns: 2
         }
       ],
@@ -144,6 +150,8 @@ describe('model usage helpers', () => {
           cost_usd: 0,
           cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['CNY'],
           turns: 2
         }
       ],
@@ -152,14 +160,16 @@ describe('model usage helpers', () => {
         cost_usd: 0,
         cost_cny: 0,
         price_configured: true,
+        cost_estimate_status: 'complete',
+        cost_known_currencies: ['USD'],
         turns: 2,
         days: 1,
         active_days: 1
       }
     })
-    expect(formatCost(freeConfigured.buckets[0]?.costUsd, 'en', freeConfigured.buckets[0]?.costCny, freeConfigured.buckets[0]?.priceConfigured)).toBe('$0.0000')
-    expect(formatCost(freeConfigured.days[0]?.costUsd, 'zh-CN', freeConfigured.days[0]?.costCny, freeConfigured.days[0]?.priceConfigured)).toBe('￥0.0000')
-    expect(formatCost(freeConfigured.totals.costUsd, 'en', freeConfigured.totals.costCny, freeConfigured.totals.priceConfigured)).toBe('$0.0000')
+    expect(formatCost(freeConfigured.buckets[0]?.costUsd, 'en', freeConfigured.buckets[0]?.costCny, freeConfigured.buckets[0]?.costEstimateStatus, freeConfigured.buckets[0]?.costKnownCurrencies)).toBe('$0.0000')
+    expect(formatCost(freeConfigured.days[0]?.costUsd, 'zh-CN', freeConfigured.days[0]?.costCny, freeConfigured.days[0]?.costEstimateStatus, freeConfigured.days[0]?.costKnownCurrencies)).toBe('￥0.0000')
+    expect(formatCost(freeConfigured.totals.costUsd, 'en', freeConfigured.totals.costCny, freeConfigured.totals.costEstimateStatus, freeConfigured.totals.costKnownCurrencies)).toBe('$0.0000')
   })
 
   it('loads model usage from the runtime request bridge', async () => {

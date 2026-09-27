@@ -30,14 +30,16 @@ func ProviderAttemptDiagnostics(observations []domaincache.ProviderCallObservati
 		return invalidProviderAttemptDiagnostics()
 	}
 	return map[string]any{
-		"providerAttemptTelemetrySchema": ProviderAttemptTelemetrySchemaV1,
-		"providerAttemptTelemetryValid":  true,
-		"providerLogicalCallCount":       aggregate.LogicalCallCount,
-		"providerAttemptCount":           aggregate.AttemptCount,
-		"providerCostKnownAttemptCount":  aggregate.CostKnownAttempts,
-		"providerKnownCostUsdNanos":      aggregate.CostUSDNanos,
-		"providerKnownCostCnyNanos":      aggregate.CostCNYNanos,
-		"providerCostEstimateComplete":   aggregate.AttemptCount > 0 && aggregate.CostKnownAttempts == aggregate.AttemptCount,
+		"providerAttemptTelemetrySchema":   ProviderAttemptTelemetrySchemaV1,
+		"providerAttemptTelemetryValid":    true,
+		"providerLogicalCallCount":         aggregate.LogicalCallCount,
+		"providerAttemptCount":             aggregate.AttemptCount,
+		"providerCostKnownAttemptCount":    aggregate.CostKnownAttempts,
+		"providerKnownCostUsdAttemptCount": aggregate.CostKnownUSDAttempts,
+		"providerKnownCostCnyAttemptCount": aggregate.CostKnownCNYAttempts,
+		"providerKnownCostUsdNanos":        aggregate.CostUSDNanos,
+		"providerKnownCostCnyNanos":        aggregate.CostCNYNanos,
+		"providerCostEstimateComplete":     aggregate.AttemptCount > 0 && aggregate.CostKnownAttempts == aggregate.AttemptCount,
 		"providerAttemptStatuses": map[string]any{
 			"succeeded": aggregate.Statuses.Succeeded, "failed": aggregate.Statuses.Failed,
 			"cancelled": aggregate.Statuses.Cancelled, "timedOut": aggregate.Statuses.TimedOut,

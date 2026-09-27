@@ -210,6 +210,8 @@ describe('FloatingComposer usage footer helpers', () => {
       costUsd: 0,
       costCny: 0,
       priceConfigured: false,
+      costEstimateStatus: 'unknown',
+      costKnownCurrencies: [],
       turns: 2,
       tokenEconomySavingsTokens: 4096
     }, 'en')
@@ -243,6 +245,8 @@ describe('FloatingComposer usage footer helpers', () => {
       costUsd: 0,
       costCny: null,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['USD'],
       turns: 1,
       tokenEconomySavingsTokens: 0
     }, 'en')
@@ -267,6 +271,8 @@ describe('FloatingComposer usage footer helpers', () => {
       costUsd: 0,
       costCny: 0,
       priceConfigured: false,
+      costEstimateStatus: 'unknown',
+      costKnownCurrencies: [],
       turns: 3,
       tokenEconomySavingsTokens: 0
     }, 'zh')

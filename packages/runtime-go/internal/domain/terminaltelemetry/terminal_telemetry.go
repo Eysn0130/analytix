@@ -86,6 +86,8 @@ const (
 	terminalContextEpochV1
 	terminalModelInputPrefixBytesV1
 	terminalCostKnownAttemptsV1
+	terminalCostKnownUSDAttemptsV1
+	terminalCostKnownCNYAttemptsV1
 	terminalCostUSDNanosV1
 	terminalCostCNYNanosV1
 	terminalNumberFieldCountV1
@@ -93,7 +95,7 @@ const (
 
 var terminalNumberFieldNamesV1 = [terminalNumberFieldCountV1]string{
 	"toolSchemaTokens", "toolCount", "firstTokenLatencyMs", "durationMs", "cacheHitTokens", "cacheMissTokens",
-	"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos",
+	"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdAttemptCount", "providerKnownCostCnyAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos",
 }
 
 type terminalUsageV1 struct {
@@ -102,6 +104,8 @@ type terminalUsageV1 struct {
 	hasCacheHit, hasCacheMiss                                    bool
 	costUSD, costCNY, cacheSavingsUSD, cacheSavingsCNY           float64
 	priceConfigured                                              bool
+	costEstimateStatus                                           string
+	costKnownUSD, costKnownCNY                                   bool
 }
 
 type terminalTokenAggregateV1 struct {
@@ -186,6 +190,7 @@ type terminalCacheDiagnosticsV1 struct {
 // The zero value represents deterministic host-only terminal telemetry.
 type TerminalTelemetryV1 struct {
 	usage       terminalUsageV1
+	legacyUsage terminalUsageV1
 	diagnostics terminalCacheDiagnosticsV1
 }
 
@@ -241,7 +246,7 @@ func ProviderUsageMap(usage domainmodel.Usage) map[string]any {
 
 func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any) TerminalTelemetryV1 {
 	normalized := domainmodel.NormalizeUsage(usage)
-	projection := TerminalTelemetryV1{usage: terminalUsageV1{
+	legacyUsage := terminalUsageV1{
 		promptTokens: normalized.PromptTokens, completionTokens: normalized.CompletionTokens,
 		reasoningTokens: normalized.ReasoningTokens, totalTokens: normalized.TotalTokens,
 		cacheHitTokens: normalized.CacheHitTokens, cacheMissTokens: normalized.CacheMissTokens,
@@ -249,7 +254,12 @@ func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any)
 		costUSD: normalized.CostUSD, costCNY: normalized.CostCNY,
 		cacheSavingsUSD: normalized.CacheSavingsUSD, cacheSavingsCNY: normalized.CacheSavingsCNY,
 		priceConfigured: normalized.PriceConfigured,
-	}}
+	}
+	projection := TerminalTelemetryV1{usage: legacyUsage, legacyUsage: legacyUsage}
+	projection.usage.costUSD, projection.usage.costCNY = 0, 0
+	projection.usage.cacheSavingsUSD, projection.usage.cacheSavingsCNY = 0, 0
+	projection.usage.priceConfigured = false
+	projection.usage.costEstimateStatus = "unknown"
 	if len(diagnostics) == 0 {
 		return projection
 	}
@@ -260,12 +270,27 @@ func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any)
 	}
 	if validated.boolPresent[terminalProviderCostCompleteV1] {
 		// Never display the last attempt's price as the complete turn cost.
-		projection.usage.costUSD, projection.usage.costCNY = 0, 0
-		projection.usage.cacheSavingsUSD, projection.usage.cacheSavingsCNY = 0, 0
-		projection.usage.priceConfigured = validated.bools[terminalProviderCostCompleteV1]
-		if projection.usage.priceConfigured {
-			projection.usage.costUSD = float64(validated.numbers[terminalCostUSDNanosV1]) / 1e9
-			projection.usage.costCNY = float64(validated.numbers[terminalCostCNYNanosV1]) / 1e9
+		projection.legacyUsage.costUSD, projection.legacyUsage.costCNY = 0, 0
+		projection.legacyUsage.cacheSavingsUSD, projection.legacyUsage.cacheSavingsCNY = 0, 0
+		projection.legacyUsage.priceConfigured = validated.bools[terminalProviderCostCompleteV1]
+		if projection.legacyUsage.priceConfigured {
+			projection.legacyUsage.costUSD = float64(validated.numbers[terminalCostUSDNanosV1]) / 1e9
+			projection.legacyUsage.costCNY = float64(validated.numbers[terminalCostCNYNanosV1]) / 1e9
+		}
+		if validated.numPresent[terminalCostKnownUSDAttemptsV1] && validated.numPresent[terminalCostKnownCNYAttemptsV1] {
+			known := validated.numbers[terminalCostKnownAttemptsV1]
+			total := validated.numbers[terminalProviderAttemptCountV1]
+			projection.usage.costKnownUSD = validated.numbers[terminalCostKnownUSDAttemptsV1] > 0
+			projection.usage.costKnownCNY = validated.numbers[terminalCostKnownCNYAttemptsV1] > 0
+			switch {
+			case known > 0 && known == total:
+				projection.usage.costEstimateStatus = "complete"
+				projection.usage.priceConfigured = true
+				projection.usage.costUSD = float64(validated.numbers[terminalCostUSDNanosV1]) / 1e9
+				projection.usage.costCNY = float64(validated.numbers[terminalCostCNYNanosV1]) / 1e9
+			case known > 0:
+				projection.usage.costEstimateStatus = "partial"
+			}
 		}
 	}
 	projection.diagnostics = validated
@@ -274,6 +299,24 @@ func NewTerminalTelemetryV1(usage domainmodel.Usage, diagnostics map[string]any)
 
 func (projection TerminalTelemetryV1) PublicUsageMap() map[string]any {
 	usage := projection.usage
+	out := terminalUsagePublicMapV1(usage)
+	currencies := make([]string, 0, 2)
+	if usage.costKnownUSD {
+		currencies = append(currencies, "USD")
+	}
+	if usage.costKnownCNY {
+		currencies = append(currencies, "CNY")
+	}
+	out["costEstimateStatus"] = usage.costEstimateStatus
+	out["costKnownCurrencies"] = currencies
+	return out
+}
+
+func (projection TerminalTelemetryV1) legacyPublicUsageMap() map[string]any {
+	return terminalUsagePublicMapV1(projection.legacyUsage)
+}
+
+func terminalUsagePublicMapV1(usage terminalUsageV1) map[string]any {
 	return ProviderUsageMap(domainmodel.Usage{
 		PromptTokens: usage.promptTokens, CompletionTokens: usage.completionTokens,
 		ReasoningTokens: usage.reasoningTokens, TotalTokens: usage.totalTokens,
@@ -317,8 +360,26 @@ func ValidateTerminalTelemetryPublicMapsV1(usageMap, diagnosticsMap map[string]a
 		return false
 	}
 	projection := NewTerminalTelemetryV1(usage, diagnosticsMap)
-	return terminalCanonicalMapEqualV1(usageMap, projection.PublicUsageMap()) &&
-		terminalCanonicalMapEqualV1(diagnosticsMap, projection.PublicCacheDiagnosticsMap())
+	if !terminalCanonicalMapEqualV1(diagnosticsMap, projection.PublicCacheDiagnosticsMap()) {
+		return false
+	}
+	newFields := [2]string{"costEstimateStatus", "costKnownCurrencies"}
+	present := 0
+	for _, field := range newFields {
+		if _, exists := usageMap[field]; exists {
+			present++
+		}
+	}
+	if present == 0 {
+		if _, newDiagnostics := diagnosticsMap["providerKnownCostUsdAttemptCount"]; newDiagnostics {
+			return false
+		}
+		if _, newDiagnostics := diagnosticsMap["providerKnownCostCnyAttemptCount"]; newDiagnostics {
+			return false
+		}
+		return terminalCanonicalMapEqualV1(usageMap, projection.legacyPublicUsageMap())
+	}
+	return present == len(newFields) && terminalCanonicalMapEqualV1(usageMap, projection.PublicUsageMap())
 }
 
 func terminalPublicUsageFromMapV1(value map[string]any) (domainmodel.Usage, bool) {
@@ -512,7 +573,7 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			}
 			out.boolPresent[field], out.bools[field] = true, flag
 		case "toolSchemaTokens", "toolCount", "firstTokenLatencyMs", "durationMs", "cacheHitTokens", "cacheMissTokens",
-			"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos":
+			"providerLogicalCallCount", "providerAttemptCount", "contextEpoch", "modelInputComparablePrefixBytes", "providerCostKnownAttemptCount", "providerKnownCostUsdAttemptCount", "providerKnownCostCnyAttemptCount", "providerKnownCostUsdNanos", "providerKnownCostCnyNanos":
 			field, ok := terminalNumberFieldForNameV1(key)
 			number, valid := terminalUnsignedNumber(value)
 			if !ok || !valid || out.numPresent[field] {
@@ -589,6 +650,16 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 		if known > total || out.bools[terminalProviderCostCompleteV1] != (total > 0 && known == total) || (known == 0 && (out.numbers[terminalCostUSDNanosV1] != 0 || out.numbers[terminalCostCNYNanosV1] != 0)) {
 			return terminalCacheDiagnosticsV1{}, false
 		}
+	}
+	usdPresent := out.numPresent[terminalCostKnownUSDAttemptsV1]
+	cnyPresent := out.numPresent[terminalCostKnownCNYAttemptsV1]
+	if usdPresent != cnyPresent || (usdPresent &&
+		(!out.numPresent[terminalCostKnownAttemptsV1] ||
+			out.numbers[terminalCostKnownUSDAttemptsV1] > out.numbers[terminalCostKnownAttemptsV1] ||
+			out.numbers[terminalCostKnownCNYAttemptsV1] != out.numbers[terminalCostKnownAttemptsV1]-out.numbers[terminalCostKnownUSDAttemptsV1] ||
+			(out.numbers[terminalCostKnownUSDAttemptsV1] == 0 && out.numbers[terminalCostUSDNanosV1] != 0) ||
+			(out.numbers[terminalCostKnownCNYAttemptsV1] == 0 && out.numbers[terminalCostCNYNanosV1] != 0))) {
+		return terminalCacheDiagnosticsV1{}, false
 	}
 	if !out.validateCrossField(observedCacheRatePresent, observedCacheRate) {
 		return terminalCacheDiagnosticsV1{}, false

@@ -49,6 +49,81 @@ func TestStoreBuildsCumulativeUsageAndRejectsCorruptIndex(t *testing.T) {
 	}
 }
 
+func TestStoreCostCoverageSurvivesReopenAndCanonicalRebuild(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-cost"
+	if err := os.MkdirAll(filepath.Join(root, "threads", threadID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	events := []map[string]any{
+		usageEvent(threadID, "legacy", 1, 10, 1),
+		usageEvent(threadID, "known-zero", 2, 5, 1),
+		usageEvent(threadID, "partial", 3, 7, 1),
+	}
+	legacyUsage := events[0]["usage"].(map[string]any)
+	legacyUsage["costUsd"], legacyUsage["priceConfigured"] = 0.7, true
+	knownUsage := events[1]["usage"].(map[string]any)
+	knownUsage["costUsd"], knownUsage["costCny"], knownUsage["priceConfigured"] = 0, 0, true
+	knownUsage["costEstimateStatus"], knownUsage["costKnownCurrencies"] = "complete", []string{"CNY"}
+	partialUsage := events[2]["usage"].(map[string]any)
+	partialUsage["costUsd"], partialUsage["costCny"], partialUsage["priceConfigured"] = 0, 0, false
+	partialUsage["costEstimateStatus"], partialUsage["costKnownCurrencies"] = "partial", []string{"USD"}
+	owner := &sync.Mutex{}
+	newStore := func() *Store {
+		return newUsageIndexStoreForTest(t, root, owner, map[string]map[string]any{
+			threadID: {"id": threadID, "model": "test-model"},
+		}, func(string, int) (eventlog.LoadResult, error) {
+			return eventlog.LoadResult{Events: cloneEvents(events)}, nil
+		}, nil, nil)
+	}
+	store := newStore()
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	assertCoverage := func(phase string, candidate *Store) {
+		t.Helper()
+		records, err := candidate.LoadRecords(threadID)
+		if err != nil || len(records) != 3 {
+			t.Fatalf("%s lost or duplicated usage: records=%#v err=%v", phase, records, err)
+		}
+		for index, want := range []string{"unknown", "complete", "partial"} {
+			if got := records[index].Usage.Map()["costEstimateStatus"]; got != want {
+				t.Fatalf("%s record %d coverage=%v, want %s", phase, index, got, want)
+			}
+		}
+		if got := records[1].Usage.Map()["costKnownCurrencies"]; !hasUsageCurrency(got, "CNY") {
+			t.Fatalf("%s lost known zero CNY: %#v", phase, got)
+		}
+		response := usageapp.RuntimeResponse(records, []string{threadID})
+		total := response["total"].(map[string]any)
+		if total["turns"] != 3 || total["costEstimateStatus"] != "partial" || total["priceConfigured"] != false ||
+			total["costUsd"] != float64(0) || total["costCny"] != float64(0) ||
+			!hasUsageCurrency(total["costKnownCurrencies"], "USD") || !hasUsageCurrency(total["costKnownCurrencies"], "CNY") {
+			t.Fatalf("%s produced misleading aggregate cost: %#v", phase, total)
+		}
+	}
+	assertCoverage("initial", store)
+	reopened := newStore()
+	assertCoverage("reopen", reopened)
+	if err := reopened.Ensure(); err != nil {
+		t.Fatalf("canonical rebuild: %v", err)
+	}
+	assertCoverage("rebuild", reopened)
+}
+
+func hasUsageCurrency(value any, currency string) bool {
+	entries, ok := value.([]string)
+	if !ok {
+		return false
+	}
+	for _, entry := range entries {
+		if entry == currency {
+			return true
+		}
+	}
+	return false
+}
+
 func TestStoreUsageRebuildMergesConcurrentCanonicalEventExactlyOnce(t *testing.T) {
 	root := t.TempDir()
 	threadID := "thread-a"

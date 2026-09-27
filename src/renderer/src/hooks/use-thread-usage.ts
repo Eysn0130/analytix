@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { parseUsageResponse } from './usage-response'
+import {
+  normalizeUsageCost,
+  type CostEstimateStatus,
+  type CostKnownCurrency,
+  type UsageCostCoverage
+} from '../agent/usage-cost'
 
-export type ThreadUsageSummary = {
+export type ThreadUsageSummary = UsageCostCoverage & {
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
@@ -13,9 +19,6 @@ export type ThreadUsageSummary = {
   /** Cache hit rate of the most recent turn; preferred for the usage chip. */
   lastTurnCacheHitRate: number | null
   totalTokens: number
-  costUsd: number | null
-  costCny: number | null
-  priceConfigured: boolean
   tokenEconomySavingsTokens: number
   turns: number
 }
@@ -67,21 +70,17 @@ export function formatCost(
   costUsd: number | null | undefined,
   locale = fallbackLocale(),
   costCny?: number | null,
-  priceConfigured?: boolean
+  status?: CostEstimateStatus,
+  currencies: readonly CostKnownCurrency[] = []
 ): string {
-  const hasUsd = typeof costUsd === 'number' && Number.isFinite(costUsd) && costUsd > 0
-  const hasCny = typeof costCny === 'number' && Number.isFinite(costCny) && costCny > 0
-  const usdValue = hasUsd ? costUsd : null
-  const cnyValue = hasCny ? costCny : null
-  if (!hasUsd && !hasCny && priceConfigured) {
-    return isChineseLocale(locale) ? '￥0.0000' : '$0.0000'
-  }
-  if (!hasUsd && !hasCny) return formatUnconfiguredCost(locale)
-  const usd = usdValue == null ? null : `$${formatMoneyValue(usdValue)}`
-  const cny = cnyValue == null ? null : `￥${formatMoneyValue(cnyValue)}`
+  if (status === 'partial') return isChineseLocale(locale) ? '费用未完整估计' : 'Cost partially unknown'
+  if (status !== 'complete') return formatUnconfiguredCost(locale)
+  const usd = currencies.includes('USD') && costUsd != null && Number.isFinite(costUsd)
+    ? `$${formatMoneyValue(costUsd)}` : null
+  const cny = currencies.includes('CNY') && costCny != null && Number.isFinite(costCny)
+    ? `￥${formatMoneyValue(costCny)}` : null
   // Different currencies are separate estimates, never a fixed FX conversion.
-  return (isChineseLocale(locale) ? [cny, usd] : [usd, cny]).filter(Boolean).join(' + ')
-
+  return (isChineseLocale(locale) ? [cny, usd] : [usd, cny]).filter(Boolean).join(' + ') || formatUnconfiguredCost(locale)
 }
 
 export function formatPercent(value: number | null): string {
@@ -129,18 +128,14 @@ export async function loadThreadUsage(threadId: string): Promise<ThreadUsageSumm
   const lastTurnCacheHitRate = usageRate(bucket.last_turn_cache_hit_rate)
   const explicitTotalTokens = usageNumber(bucket.total_tokens)
   const totalTokens = explicitTotalTokens > 0 ? explicitTotalTokens : inputTokens + outputTokens
-  const rawCostUsd = hasFiniteNumber(bucket, 'cost_usd') ? usageNumber(bucket.cost_usd) : null
-  const rawCostCny = hasFiniteNumber(bucket, 'cost_cny') ? usageNumber(bucket.cost_cny) : null
-  const costUsd = rawCostUsd != null && rawCostUsd > 0 ? rawCostUsd : null
-  const costCny = rawCostCny != null && rawCostCny > 0 ? rawCostCny : null
-  const priceConfigured = bucket.price_configured === true || bucket.priceConfigured === true
+  const cost = normalizeUsageCost(bucket, 'snake')
   const tokenEconomySavingsTokens = usageNumber(bucket.token_economy_savings_tokens)
   const turns = usageNumber(bucket.turns)
   if (
     totalTokens <= 0 &&
     cachedTokens <= 0 &&
-    (costUsd ?? 0) <= 0 &&
-    (costCny ?? 0) <= 0 &&
+    (cost.costUsd ?? 0) <= 0 &&
+    (cost.costCny ?? 0) <= 0 &&
     tokenEconomySavingsTokens <= 0 &&
     turns <= 0
   ) return null
@@ -153,9 +148,7 @@ export async function loadThreadUsage(threadId: string): Promise<ThreadUsageSumm
     cacheHitRate,
     lastTurnCacheHitRate,
     totalTokens,
-    costUsd,
-    costCny,
-    priceConfigured,
+    ...cost,
     tokenEconomySavingsTokens,
     turns
   }

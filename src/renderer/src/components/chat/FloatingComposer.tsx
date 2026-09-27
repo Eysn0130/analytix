@@ -647,7 +647,7 @@ export function buildComposerThreadUsageDisplay(
 ): ComposerThreadUsageDisplay {
   return {
     tokens: formatCompactNumber(threadUsage.totalTokens),
-    cost: formatCost(threadUsage.costUsd, locale, threadUsage.costCny, threadUsage.priceConfigured),
+    cost: formatCost(threadUsage.costUsd, locale, threadUsage.costCny, threadUsage.costEstimateStatus, threadUsage.costKnownCurrencies),
     saved: formatCompactNumber(threadUsage.tokenEconomySavingsTokens),
     cache: formatPercent(threadUsage.cacheHitRate),
     primaryCache: formatPercent(primaryCacheHitRate(threadUsage)),

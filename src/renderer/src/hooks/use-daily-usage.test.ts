@@ -61,7 +61,10 @@ describe('daily usage helpers', () => {
           output_tokens: 30,
           total_tokens: 130,
           cost_usd: 0.02,
+          cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['USD'],
           cache_savings_usd: 0.006,
           cache_savings_cny: 0.0432,
           token_economy_savings_tokens: 2048,
@@ -74,7 +77,11 @@ describe('daily usage helpers', () => {
       ],
       totals: {
         total_tokens: 130,
+        cost_usd: 0.02,
+        cost_cny: 0,
         priceConfigured: true,
+        cost_estimate_status: 'complete',
+        cost_known_currencies: ['USD'],
         cache_savings_usd: 0.006,
         token_economy_savings_tokens: 2048,
         token_economy_savings_usd: 0.0009,
@@ -124,8 +131,8 @@ describe('daily usage helpers', () => {
         active_days: 1
       }
     })
-    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.priceConfigured)).toBe('Cost unavailable')
-    expect(formatCost(unpriced.totals.costUsd, 'zh-CN', unpriced.totals.costCny, unpriced.totals.priceConfigured)).toBe('费用未知')
+    expect(formatCost(unpriced.buckets[0]?.costUsd, 'en', unpriced.buckets[0]?.costCny, unpriced.buckets[0]?.costEstimateStatus, unpriced.buckets[0]?.costKnownCurrencies)).toBe('Cost unavailable')
+    expect(formatCost(unpriced.totals.costUsd, 'zh-CN', unpriced.totals.costCny, unpriced.totals.costEstimateStatus, unpriced.totals.costKnownCurrencies)).toBe('费用未知')
 
     const freeConfigured = normalizeDailyUsageResponse({
       group_by: 'day',
@@ -136,6 +143,8 @@ describe('daily usage helpers', () => {
           cost_usd: 0,
           cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['USD'],
           turns: 2
         }
       ],
@@ -144,13 +153,15 @@ describe('daily usage helpers', () => {
         cost_usd: 0,
         cost_cny: 0,
         price_configured: true,
+        cost_estimate_status: 'complete',
+        cost_known_currencies: ['CNY'],
         turns: 2,
         days: 1,
         active_days: 1
       }
     })
-    expect(formatCost(freeConfigured.buckets[0]?.costUsd, 'en', freeConfigured.buckets[0]?.costCny, freeConfigured.buckets[0]?.priceConfigured)).toBe('$0.0000')
-    expect(formatCost(freeConfigured.totals.costUsd, 'zh-CN', freeConfigured.totals.costCny, freeConfigured.totals.priceConfigured)).toBe('￥0.0000')
+    expect(formatCost(freeConfigured.buckets[0]?.costUsd, 'en', freeConfigured.buckets[0]?.costCny, freeConfigured.buckets[0]?.costEstimateStatus, freeConfigured.buckets[0]?.costKnownCurrencies)).toBe('$0.0000')
+    expect(formatCost(freeConfigured.totals.costUsd, 'zh-CN', freeConfigured.totals.costCny, freeConfigured.totals.costEstimateStatus, freeConfigured.totals.costKnownCurrencies)).toBe('￥0.0000')
   })
 
   it('loads daily usage from the runtime request bridge', async () => {

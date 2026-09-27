@@ -353,6 +353,48 @@ describe('public runtime SSE boundary', () => {
     }
   })
 
+  it('binds new terminal cost coverage to physical attempt counts while retaining old signed shape', () => {
+    const legacy = generalTerminalBatch()
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(legacy).success).toBe(true)
+    const batch = generalTerminalBatch()
+    const usageEvent = (batch.events as Array<Record<string, unknown>>)[1]
+    const usage = usageEvent.usage as Record<string, unknown>
+    usage.costEstimateStatus = 'partial'
+    usage.costKnownCurrencies = ['USD']
+    usageEvent.cacheDiagnostics = {
+      providerAttemptTelemetrySchema: 'provider-attempt-telemetry.v1',
+      providerAttemptTelemetryValid: true,
+      providerLogicalCallCount: 1,
+      providerAttemptCount: 2,
+      providerAttemptStatuses: { succeeded: 1, failed: 1, cancelled: 0, timedOut: 0, streamAborted: 0 },
+      providerAttemptInputTokens: { complete: false, knownObservationCount: 0, observationCount: 2 },
+      providerAttemptOutputTokens: { complete: false, knownObservationCount: 0, observationCount: 2 },
+      providerAttemptCacheHitTokens: { complete: false, knownObservationCount: 0, observationCount: 2 },
+      providerAttemptCacheMissTokens: { complete: false, knownObservationCount: 0, observationCount: 2 },
+      providerAttemptCacheRate: { known: false, numerator: 0, denominator: 0 },
+      providerCostEstimateComplete: false,
+      providerCostKnownAttemptCount: 1,
+      providerKnownCostUsdAttemptCount: 1,
+      providerKnownCostCnyAttemptCount: 0,
+      providerKnownCostUsdNanos: 12,
+      providerKnownCostCnyNanos: 0
+    }
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(batch).success).toBe(true)
+    for (const mutation of [
+      { costKnownCurrencies: ['CNY'] },
+      { costKnownCurrencies: ['USD', 'USD'] },
+      { costKnownCurrencies: undefined },
+      { costEstimateStatus: 'complete' },
+      { costUsd: 12 / 1e9 }
+    ]) {
+      usageEvent.usage = { ...usage, ...mutation }
+      expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(batch).success).toBe(false)
+    }
+    usageEvent.usage = usage
+    usageEvent.cacheDiagnostics = { ...(usageEvent.cacheDiagnostics as Record<string, unknown>), providerKnownCostUsdAttemptCount: 0 }
+    expect(GeneralTerminalDeliveryBatchV1Schema.safeParse(batch).success).toBe(false)
+  })
+
   it('admits only exact hash-and-enum diagnostics for an unadvertised-tool terminal', () => {
     const batch = toolNotAdvertisedTerminalBatch()
     const parsed = GeneralTerminalDeliveryBatchV1Schema.safeParse(batch)

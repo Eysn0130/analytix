@@ -90,17 +90,23 @@ func TestProviderAttemptCostsIncludeFailureRetryAndCancellationWithoutMixingCurr
 	second.Usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: "CNY", NanoUnits: 30}
 	observations := []domaincache.ProviderCallObservationV1{first, second, third, second}
 	d := ProviderAttemptDiagnostics(observations)
-	if d["providerAttemptCount"] != uint64(3) || d["providerCostKnownAttemptCount"] != uint64(2) || d["providerCostEstimateComplete"] != false || d["providerKnownCostUsdNanos"] != uint64(12) || d["providerKnownCostCnyNanos"] != uint64(30) {
+	if d["providerAttemptCount"] != uint64(3) || d["providerCostKnownAttemptCount"] != uint64(2) || d["providerKnownCostUsdAttemptCount"] != uint64(1) || d["providerKnownCostCnyAttemptCount"] != uint64(1) || d["providerCostEstimateComplete"] != false || d["providerKnownCostUsdNanos"] != uint64(12) || d["providerKnownCostCnyNanos"] != uint64(30) {
 		t.Fatalf("cost accounting drift: %#v", d)
 	}
 	projected := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{CostUSD: 999, PriceConfigured: true}, d).PublicUsageMap()
 	if projected["priceConfigured"] != false || projected["costUsd"] == 999 {
 		t.Fatalf("unknown attempt exposed last-attempt cost as total: %#v", projected)
 	}
+	if projected["costEstimateStatus"] != "partial" || projected["costUsd"] != float64(0) || projected["costCny"] != float64(0) {
+		t.Fatalf("partial known subtotal was lost: %#v", projected)
+	}
 	third.Usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: "USD", NanoUnits: 0}
 	d = ProviderAttemptDiagnostics([]domaincache.ProviderCallObservationV1{first, second, third})
 	projected = domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{}, d).PublicUsageMap()
 	if projected["priceConfigured"] != true || projected["costUsd"] != float64(12)/1e9 || projected["costCny"] != float64(30)/1e9 {
 		t.Fatalf("known total unavailable: %#v", projected)
+	}
+	if projected["costEstimateStatus"] != "complete" {
+		t.Fatalf("complete currency provenance unavailable: %#v", projected)
 	}
 }

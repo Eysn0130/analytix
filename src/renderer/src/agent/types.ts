@@ -22,6 +22,7 @@ import type { ApprovalPolicy, SandboxMode } from '@shared/app-settings'
 import type { ModelReasoningEffort as SharedModelReasoningEffort } from '@shared/app-settings'
 import type { PublicProjectionRevokedEvent } from '../../../../packages/runtime/src/contracts/events.js'
 import type { ModelReasoningEffort } from '../../../../packages/runtime/src/contracts/capabilities.js'
+import type { CostEstimateStatus, CostKnownCurrency } from './usage-cost'
 
 export type ToolItemKind = 'tool_call' | 'command_execution' | 'file_change' | 'subagent'
 export type RuntimeErrorSeverity = 'info' | 'warning' | 'error'
@@ -299,6 +300,8 @@ export type RuntimeCacheDiagnosticsMetadata = {
   modelInputComparablePrefixBytes?: number
   providerAttemptCount?: number
   providerCostKnownAttemptCount?: number
+  providerKnownCostUsdAttemptCount?: number
+  providerKnownCostCnyAttemptCount?: number
   providerKnownCostUsdNanos?: number
   providerKnownCostCnyNanos?: number
   providerCostEstimateComplete?: boolean
@@ -898,6 +901,8 @@ export type ThreadUsageSnapshot = {
   costUsd: number | null
   costCny: number | null
   priceConfigured: boolean
+  costEstimateStatus?: CostEstimateStatus
+  costKnownCurrencies?: CostKnownCurrency[]
   cacheSavingsUsd?: number
   cacheSavingsCny?: number
   tokenEconomySavingsTokens: number

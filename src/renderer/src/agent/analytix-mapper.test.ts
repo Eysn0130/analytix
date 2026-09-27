@@ -3569,6 +3569,8 @@ describe('usage event mapping', () => {
           costUsd: 0,
           costCny: 0,
           priceConfigured: true,
+          costEstimateStatus: 'complete',
+          costKnownCurrencies: ['USD'],
           cacheSavingsUsd: 0.0001,
           turns: 1
         }
@@ -3580,12 +3582,15 @@ describe('usage event mapping', () => {
     expect(captured[0]).toMatchObject({
       costUsd: null,
       costCny: null,
-      priceConfigured: false
+      priceConfigured: false,
+      costEstimateStatus: 'unknown'
     })
     expect(captured[1]).toMatchObject({
       costUsd: 0,
-      costCny: 0,
+      costCny: null,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['USD'],
       cacheSavingsUsd: 0.0001
     })
   })
@@ -3616,6 +3621,8 @@ describe('usage event mapping', () => {
           cost_usd: 0,
           cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['CNY'],
           cache_savings_usd: 0.0002,
           token_economy_savings_tokens: 5,
           cache_miss_reasons: ['tool schema changed'],
@@ -3637,9 +3644,11 @@ describe('usage event mapping', () => {
       cachedTokens: 6,
       cacheMissTokens: 4,
       cacheHitRate: 0.6,
-      costUsd: 0,
+      costUsd: null,
       costCny: 0,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['CNY'],
       cacheSavingsUsd: 0.0002,
       tokenEconomySavingsTokens: 5
     })

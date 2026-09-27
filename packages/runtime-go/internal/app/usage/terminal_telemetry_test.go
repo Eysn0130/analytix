@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
@@ -81,6 +82,43 @@ func TestTerminalTelemetryV1AcceptsOnlyClosedHostDiagnostics(t *testing.T) {
 	if err := decoder.Decode(&replay); err != nil ||
 		!ValidateTerminalTelemetryPublicMapsV1(replay["usage"], replay["diagnostics"]) {
 		t.Fatalf("accepted persisted terminal telemetry was rejected: replay=%#v err=%v", replay, err)
+	}
+}
+
+func TestTerminalTelemetryV1ReplaysOldSignedCostShapeWithoutReminting(t *testing.T) {
+	observation := cacheObservationFixture(1, "succeeded", 0, 0, "2026-07-13T00:00:00Z", "2026-07-13T00:00:01Z")
+	observation.Usage.EstimatedCost.Known = true
+	observation.Usage.EstimatedCost.Currency = "USD"
+	observation.Usage.EstimatedCost.NanoUnits = 12
+	diagnostics := ProviderAttemptDiagnostics([]domaincache.ProviderCallObservationV1{observation})
+	delete(diagnostics, "providerKnownCostUsdAttemptCount")
+	delete(diagnostics, "providerKnownCostCnyAttemptCount")
+	legacyUsage := ProviderUsageMap(domainmodel.Usage{CostUSD: float64(12) / 1e9, PriceConfigured: true})
+	if !ValidateTerminalTelemetryPublicMapsV1(legacyUsage, diagnostics) {
+		t.Fatalf("old signed terminal usage shape could not replay: usage=%#v diagnostics=%#v", legacyUsage, diagnostics)
+	}
+	if _, exists := legacyUsage["costEstimateStatus"]; exists {
+		t.Fatalf("legacy usage was reminted: %#v", legacyUsage)
+	}
+	partial := map[string]any{}
+	for key, value := range legacyUsage {
+		partial[key] = value
+	}
+	partial["costEstimateStatus"] = "complete"
+	if ValidateTerminalTelemetryPublicMapsV1(partial, diagnostics) {
+		t.Fatalf("one-sided coverage field was accepted: %#v", partial)
+	}
+	newDiagnostics := ProviderAttemptDiagnostics([]domaincache.ProviderCallObservationV1{observation})
+	current := NewTerminalTelemetryV1(domainmodel.Usage{}, newDiagnostics)
+	usage := current.PublicUsageMap()
+	if usage["costEstimateStatus"] != "complete" || !ValidateTerminalTelemetryPublicMapsV1(usage, current.PublicCacheDiagnosticsMap()) {
+		t.Fatalf("current coverage failed closed replay: %#v", usage)
+	}
+	newDiagnostics["providerKnownCostUsdAttemptCount"] = uint64(0)
+	rejected := NewTerminalTelemetryV1(domainmodel.Usage{}, newDiagnostics)
+	if rejected.PublicCacheDiagnosticsMap()["terminalCacheDiagnosticsDisposition"] != terminalCacheDiagnosticsRejected ||
+		rejected.PublicUsageMap()["costEstimateStatus"] != "unknown" {
+		t.Fatal("inconsistent currency attempt count was accepted")
 	}
 }
 

@@ -63,6 +63,7 @@ type CacheRateV1 struct {
 
 type AggregateV1 struct {
 	CostKnownAttempts, CostUSDNanos, CostCNYNanos uint64
+	CostKnownUSDAttempts, CostKnownCNYAttempts    uint64
 	LogicalCallCount                              uint64
 	AttemptCount                                  uint64
 	Statuses                                      ProviderStatusCountsV1
@@ -233,6 +234,9 @@ func aggregateObservations(observations []domaincache.ProviderCallObservationV1)
 			total := &aggregate.CostUSDNanos
 			if cost.Currency == "CNY" {
 				total = &aggregate.CostCNYNanos
+				aggregate.CostKnownCNYAttempts++
+			} else {
+				aggregate.CostKnownUSDAttempts++
 			}
 			if *total > 9007199254740991-cost.NanoUnits {
 				return AggregateV1{}, ErrAggregateOverflow

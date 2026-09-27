@@ -916,6 +916,10 @@ export type CoreUsageSnapshotJson = {
   cost_cny?: number
   priceConfigured?: boolean
   price_configured?: boolean
+  costEstimateStatus?: 'none' | 'complete' | 'partial' | 'unknown'
+  cost_estimate_status?: 'none' | 'complete' | 'partial' | 'unknown'
+  costKnownCurrencies?: Array<'USD' | 'CNY'>
+  cost_known_currencies?: Array<'USD' | 'CNY'>
   cacheSavingsUsd?: number
   cache_savings_usd?: number
   cacheSavingsCny?: number
@@ -933,6 +937,8 @@ export type CoreCacheDiagnosticsJson = {
   modelInputComparablePrefixBytes?: number
   providerAttemptCount?: number
   providerCostKnownAttemptCount?: number
+  providerKnownCostUsdAttemptCount?: number
+  providerKnownCostCnyAttemptCount?: number
   providerKnownCostUsdNanos?: number
   providerKnownCostCnyNanos?: number
   providerCostEstimateComplete?: boolean

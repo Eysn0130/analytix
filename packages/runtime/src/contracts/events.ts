@@ -15,7 +15,7 @@ import {
   CheckpointRewindRescueRecordSchema
 } from './checkpoints.js'
 import { ThreadGoalSchema, ThreadTodoListSchema } from './threads.js'
-import { UsageSnapshotSchema } from './usage.js'
+import { isConsistentCostCoverage, UsageSnapshotSchema } from './usage.js'
 import { RuntimeErrorSeverity } from './errors.js'
 import { ApprovalPolicySchema, SandboxModeSchema } from './policy.js'
 import { ModelReasoningEffort, SubagentToolPolicy } from './capabilities.js'
@@ -1020,6 +1020,17 @@ function isCanonicalGeneralTerminalDiagnostics(diagnostics: Record<string, unkno
     if (known > total || diagnostics.providerCostEstimateComplete !== (total > 0 && known === total) ||
         (known === 0 && (diagnostics.providerKnownCostUsdNanos !== 0 || diagnostics.providerKnownCostCnyNanos !== 0))) return false
   }
+  const currencyCountKeys = ['providerKnownCostUsdAttemptCount', 'providerKnownCostCnyAttemptCount'] as const
+  if (currencyCountKeys.some((key) => diagnostics[key] !== undefined)) {
+    if (currencyCountKeys.some((key) => diagnostics[key] === undefined) ||
+        costKeys.some((key) => diagnostics[key] === undefined)) return false
+    const usd = diagnostics.providerKnownCostUsdAttemptCount as number
+    const cny = diagnostics.providerKnownCostCnyAttemptCount as number
+    const known = diagnostics.providerCostKnownAttemptCount as number
+    if (usd > known || cny !== known - usd ||
+        (usd === 0 && diagnostics.providerKnownCostUsdNanos !== 0) ||
+        (cny === 0 && diagnostics.providerKnownCostCnyNanos !== 0)) return false
+  }
 
   if (diagnostics.cacheBaselineSchema !== undefined &&
       (typeof diagnostics.cacheContinuityDigest !== 'string' || diagnostics.cacheContinuityDigest.length === 0 ||
@@ -1052,6 +1063,8 @@ const GeneralTerminalCacheDiagnosticsV1Schema = z.object({
   modelInputComparablePrefixBytes: generalTerminalCanonicalUnsignedV1Schema().optional(),
   providerCostEstimateComplete: z.boolean().optional(),
   providerCostKnownAttemptCount: generalTerminalCanonicalUnsignedV1Schema().optional(),
+  providerKnownCostUsdAttemptCount: generalTerminalCanonicalUnsignedV1Schema().optional(),
+  providerKnownCostCnyAttemptCount: generalTerminalCanonicalUnsignedV1Schema().optional(),
   providerKnownCostUsdNanos: generalTerminalCanonicalUnsignedV1Schema().optional(),
   providerKnownCostCnyNanos: generalTerminalCanonicalUnsignedV1Schema().optional(),
   route: z.enum(['direct_answer', 'light_agent', 'tool_agent', 'subagent_agent']).optional(),
@@ -1112,6 +1125,7 @@ const GENERAL_TERMINAL_USAGE_REQUIRED_KEYS = [
   'tokenEconomySavingsTokens', 'turns'
 ] as const
 const GENERAL_TERMINAL_USAGE_CACHE_KEYS = ['cachedTokens', 'cacheHitTokens', 'cacheMissTokens'] as const
+const GENERAL_TERMINAL_USAGE_COST_COVERAGE_KEYS = ['costEstimateStatus', 'costKnownCurrencies'] as const
 
 function isCanonicalGeneralTerminalUsage(usage: Record<string, unknown>): boolean {
   const keys = Object.keys(usage)
@@ -1121,9 +1135,16 @@ function isCanonicalGeneralTerminalUsage(usage: Record<string, unknown>): boolea
   if (GENERAL_TERMINAL_USAGE_CACHE_KEYS.some((key) =>
     Object.prototype.hasOwnProperty.call(usage, key)
   ) !== hasCache) return false
-  const expectedKeys = hasCache
+  const hasCoverage = GENERAL_TERMINAL_USAGE_COST_COVERAGE_KEYS.every((key) =>
+    Object.prototype.hasOwnProperty.call(usage, key)
+  )
+  if (GENERAL_TERMINAL_USAGE_COST_COVERAGE_KEYS.some((key) =>
+    Object.prototype.hasOwnProperty.call(usage, key)
+  ) !== hasCoverage) return false
+  const expectedKeys: string[] = hasCache
     ? [...GENERAL_TERMINAL_USAGE_REQUIRED_KEYS, ...GENERAL_TERMINAL_USAGE_CACHE_KEYS]
     : [...GENERAL_TERMINAL_USAGE_REQUIRED_KEYS]
+  if (hasCoverage) expectedKeys.push(...GENERAL_TERMINAL_USAGE_COST_COVERAGE_KEYS)
   if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !keys.includes(key))) return false
 
   const prompt = usage.promptTokens as number
@@ -1143,6 +1164,7 @@ function isCanonicalGeneralTerminalUsage(usage: Record<string, unknown>): boolea
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > 1e12) return false
   }
   if (typeof usage.priceConfigured !== 'boolean') return false
+  if (hasCoverage && !isConsistentCostCoverage(usage, 'camel')) return false
 
   let hit = 0
   let miss = 0
@@ -1179,6 +1201,29 @@ const GeneralTerminalUsageEventV1Schema = z.object({
   const usage = event.usage
   if (!isCanonicalGeneralTerminalUsage(usage)) {
     ctx.addIssue({ code: 'custom', path: ['usage'], message: 'general terminal usage is not canonical' })
+  }
+  if (usage.costEstimateStatus === undefined &&
+      (event.cacheDiagnostics.providerKnownCostUsdAttemptCount !== undefined ||
+        event.cacheDiagnostics.providerKnownCostCnyAttemptCount !== undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['usage'], message: 'current terminal diagnostics require cost coverage' })
+  }
+  if (usage.costEstimateStatus !== undefined) {
+    const diagnostics = event.cacheDiagnostics
+    const count = diagnostics.providerAttemptCount
+    const known = diagnostics.providerCostKnownAttemptCount
+    const usd = diagnostics.providerKnownCostUsdAttemptCount
+    const cny = diagnostics.providerKnownCostCnyAttemptCount
+    const expected = count !== undefined && known !== undefined && usd !== undefined && cny !== undefined
+      ? known === count && count > 0 ? 'complete' : known > 0 ? 'partial' : 'unknown'
+      : 'unknown'
+    const expectedCurrencies = [usd && usd > 0 ? 'USD' : null, cny && cny > 0 ? 'CNY' : null]
+      .filter((currency): currency is string => currency !== null)
+    if (usage.costEstimateStatus !== expected ||
+        JSON.stringify(usage.costKnownCurrencies) !== JSON.stringify(expectedCurrencies) ||
+        (expected === 'complete' && (usage.costUsd !== diagnostics.providerKnownCostUsdNanos! / 1e9 ||
+          usage.costCny !== diagnostics.providerKnownCostCnyNanos! / 1e9))) {
+      ctx.addIssue({ code: 'custom', path: ['usage'], message: 'terminal cost coverage is not diagnostic-bound' })
+    }
   }
   const telemetryPresent = event.cacheDiagnostics.cacheTelemetryPresent
   const hasCache = event.usage.cacheHitTokens !== undefined

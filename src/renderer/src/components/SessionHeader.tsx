@@ -897,7 +897,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                     </span>
                     <span className="inline-flex items-center rounded-full border border-ds-border bg-ds-card/70 px-2.5 py-1 font-medium text-ds-muted">
                       {t('sessionUsageCost', {
-                        cost: formatCost(threadUsage.costUsd, i18n.language, threadUsage.costCny, threadUsage.priceConfigured)
+                        cost: formatCost(threadUsage.costUsd, i18n.language, threadUsage.costCny, threadUsage.costEstimateStatus, threadUsage.costKnownCurrencies)
                       })}
                     </span>
                     <span

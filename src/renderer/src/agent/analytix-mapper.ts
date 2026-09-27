@@ -28,6 +28,7 @@ import type {
   ToolEventPayload,
   UserInputQuestion
 } from './types'
+import { normalizeUsageCost } from './usage-cost'
 import {
   acceptedFinalProjectionReceiptFromBatch,
   acceptedFinalProjectionReceiptsEqual
@@ -357,10 +358,6 @@ function readRuntimeEventBoolean(event: CoreRuntimeEventJson, ...keys: string[])
 
 function readUsageNumber(usage: CoreUsageSnapshotJson, ...keys: string[]): number | undefined {
   return readStructuredNumber(usage as Record<string, unknown>, ...keys)
-}
-
-function readUsageBoolean(usage: CoreUsageSnapshotJson, ...keys: string[]): boolean | undefined {
-  return readStructuredBoolean(usage as Record<string, unknown>, ...keys)
 }
 
 const FILE_PATH_KEYS = [
@@ -1125,7 +1122,7 @@ function normalizeCacheDiagnostics(value: CoreCacheDiagnosticsJson | undefined):
     const flag = rendererBoolean(value[key])
     if (flag !== undefined) normalized[key] = flag
   }
-  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
+  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdAttemptCount', 'providerKnownCostCnyAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
     const count = rendererNumber(value[key])
     if (count !== undefined) normalized[key] = count
   }
@@ -1154,11 +1151,8 @@ export function usageFromCore(
   const missTokens = readUsageNumber(usage, 'cacheMissTokens', 'cache_miss_tokens')
   const hasHitTokens = hitTokens !== undefined
   const hasMissTokens = missTokens !== undefined
-  const priceConfigured = readUsageBoolean(usage, 'priceConfigured', 'price_configured') === true
-  const rawCostUsd = readUsageNumber(usage, 'costUsd', 'cost_usd')
-  const rawCostCny = readUsageNumber(usage, 'costCny', 'cost_cny')
-  const costUsd = rawCostUsd != null && (rawCostUsd > 0 || priceConfigured) ? rawCostUsd : null
-  const costCny = rawCostCny != null && (rawCostCny > 0 || priceConfigured) ? rawCostCny : null
+  const { costUsd, costCny, priceConfigured, costEstimateStatus, costKnownCurrencies } =
+    normalizeUsageCost(usage as Record<string, unknown>, 'camel')
   const cachedTokens = hasHitTokens ? hitTokens ?? 0 : 0
   const cacheMissTokens = hasMissTokens ? missTokens ?? 0 : 0
   const cacheTotal = cachedTokens + cacheMissTokens
@@ -1199,6 +1193,8 @@ export function usageFromCore(
     costUsd,
     costCny,
     priceConfigured,
+    costEstimateStatus,
+    costKnownCurrencies,
     ...(cacheSavingsUsd !== undefined ? { cacheSavingsUsd } : {}),
     ...(cacheSavingsCny !== undefined ? { cacheSavingsCny } : {}),
     tokenEconomySavingsTokens,
