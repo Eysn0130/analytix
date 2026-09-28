@@ -2069,8 +2069,9 @@ function appendGoStderrTail(chunk: string): void {
   goSidecarStderrTail = `${goSidecarStderrTail}${chunk}`.slice(-16_384)
 }
 
-const CORE_FUNDS_CSV_ADMISSION_PREFIX_V1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
-const CORE_FUNDS_CSV_ADMISSION_CODES_V1: ReadonlySet<string> = new Set([
+const CORE_FUNDS_CSV_ADMISSION_PREFIX_V2 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V2 '
+const CORE_FUNDS_CSV_ADMISSION_ANOMALY_PREFIX_V1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_ANOMALY_V1 '
+const CORE_FUNDS_CSV_ACTIVATION_CODES_V2: ReadonlySet<string> = new Set([
   'native_owner_unavailable',
   'shared_evidence_enrollment_absent',
   'shared_evidence_credential_unavailable',
@@ -2081,18 +2082,20 @@ const CORE_FUNDS_CSV_ADMISSION_CODES_V1: ReadonlySet<string> = new Set([
 const MAX_CORE_FUNDS_CSV_ADMISSION_LINE_V1 = 128
 
 // This stream is attached only to the actual Core child, after Funds
-// materialization has finished. It retains at most one bounded partial line
-// and emits only a fixed code, never the child's raw stderr.
-export function createCoreFundsCSVAdmissionTraceStreamV1(
+// materialization has finished. It retains one bounded partial line and
+// forwards at most one fixed observation and one duplicate signal per phase.
+// Semantic preparation never describes the activated native owner.
+export function createCoreFundsCSVAdmissionTraceStreamV2(
   enabled: boolean,
   onFixedLine: (line: string) => void
 ): Readonly<{ accept(chunk: Buffer | string): void }> {
   let pending = ''
   let dropping = false
-  let emitted = false
+  const observed = new Set<string>()
+  const duplicateSignaled = new Set<string>()
   return {
     accept(chunk) {
-      if (!enabled || emitted) return
+      if (!enabled) return
       const parts = String(chunk).split('\n')
       for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index]
@@ -2103,16 +2106,26 @@ export function createCoreFundsCSVAdmissionTraceStreamV1(
           dropping = true
         }
         if (index === parts.length - 1) break
-        if (!dropping && pending.startsWith(CORE_FUNDS_CSV_ADMISSION_PREFIX_V1)) {
-          const code = pending.slice(CORE_FUNDS_CSV_ADMISSION_PREFIX_V1.length)
-          if (CORE_FUNDS_CSV_ADMISSION_CODES_V1.has(code)) {
-            emitted = true
-            try { onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_PREFIX_V1}${code}\n`) } catch { /* optional diagnostics cannot gate startup */ }
+        if (!dropping && pending.startsWith(CORE_FUNDS_CSV_ADMISSION_PREFIX_V2)) {
+          const fixed = pending.slice(CORE_FUNDS_CSV_ADMISSION_PREFIX_V2.length)
+          const separator = fixed.indexOf(' ')
+          const phase = fixed.slice(0, separator)
+          const code = fixed.slice(separator + 1)
+          if (separator > 0 && ((phase === 'semantic_preparation' && code === 'not_evaluated') ||
+              (phase === 'activation' && CORE_FUNDS_CSV_ACTIVATION_CODES_V2.has(code)))) {
+            try {
+              if (!observed.has(phase)) {
+                observed.add(phase)
+                onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_PREFIX_V2}${phase} ${code}\n`)
+              } else if (!duplicateSignaled.has(phase)) {
+                duplicateSignaled.add(phase)
+                onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_ANOMALY_PREFIX_V1}${phase}\n`)
+              }
+            } catch { /* optional diagnostics cannot gate startup */ }
           }
         }
         pending = ''
         dropping = false
-        if (emitted) return
       }
     }
   }
@@ -2789,7 +2802,7 @@ async function startGoConformanceSidecarOnce(
         publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
       })
     : null
-  const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV1(
+  const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV2(
     isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1',
     (line) => { process.stdout.write(line) }
   )

@@ -52,6 +52,15 @@ export function normalQuitFailureCode({ quitRequestOk, targetClosed, mainExited,
   return ''
 }
 
+export function classifyExactTargetList(targets, capturedTargetId) {
+  if (typeof capturedTargetId !== 'string' || capturedTargetId.length === 0 ||
+      capturedTargetId.length > 128 || !Array.isArray(targets) ||
+      targets.some((target) => !target || typeof target !== 'object' ||
+        typeof target.id !== 'string')) return 'malformed'
+  return targets.some((target) => target.id === capturedTargetId)
+    ? 'target_present' : 'target_absent'
+}
+
 export function residualMembersAlreadyPinned(currentPids, pinnedPids) {
   return Array.isArray(currentPids) && currentPids.every((pid) => pinnedPids.has(pid))
 }
@@ -120,6 +129,19 @@ const runtimeTransitionPhases = new Set([
   'window all closed',
   'app before quit:begin',
   'app before quit:prepared',
+  'app before quit:closing',
+  'app before quit:close allowed',
+  'app before quit:close veto prior',
+  'app before quit:close veto unprepared',
+  'app before quit:close veto frame',
+  'app before quit:close veto loading',
+  'app before quit:close veto late',
+  'app before quit:window closed',
+  'app before quit:close unknown',
+  'app before quit:windows closed',
+  'app before quit:office teardown settled',
+  'app before quit:office teardown failed',
+  'app before quit:stop failed',
   'app before quit:blocked',
   'app before quit:runtime stopped',
   'app before quit:committed',
@@ -155,8 +177,9 @@ export function isGoStartupAttemptMarker(line) {
   return parseGoStartupPhase(line)?.phase === 'preflightBegin'
 }
 
-const fundsCSVAdmissionPrefixV1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
-const fundsCSVAdmissionCodesV1 = new Set([
+const fundsCSVAdmissionPrefixV2 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V2 '
+const fundsCSVAdmissionAnomalyPrefixV1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_ANOMALY_V1 '
+const fundsCSVActivationCodesV2 = new Set([
   'native_owner_unavailable',
   'shared_evidence_enrollment_absent',
   'shared_evidence_credential_unavailable',
@@ -165,15 +188,27 @@ const fundsCSVAdmissionCodesV1 = new Set([
   'other_unavailable'
 ])
 
-export function parseFundsCSVAdmissionCodeV1(line) {
-  if (typeof line !== 'string' || line.length > 128 || !line.startsWith(fundsCSVAdmissionPrefixV1)) return null
-  const code = line.slice(fundsCSVAdmissionPrefixV1.length)
-  return fundsCSVAdmissionCodesV1.has(code) ? code : null
+export function parseFundsCSVAdmissionMarkerV2(line) {
+  if (typeof line !== 'string' || line.length > 128 || !line.startsWith(fundsCSVAdmissionPrefixV2)) return null
+  const fixed = line.slice(fundsCSVAdmissionPrefixV2.length)
+  if (fixed === 'semantic_preparation not_evaluated') {
+    return { phase: 'semantic_preparation', code: 'not_evaluated' }
+  }
+  const activationPrefix = 'activation '
+  if (!fixed.startsWith(activationPrefix)) return null
+  const code = fixed.slice(activationPrefix.length)
+  return fundsCSVActivationCodesV2.has(code) ? { phase: 'activation', code } : null
+}
+
+function parseFundsCSVAdmissionAnomalyV1(line) {
+  if (typeof line !== 'string' || line.length > 128 || !line.startsWith(fundsCSVAdmissionAnomalyPrefixV1)) return null
+  const phase = line.slice(fundsCSVAdmissionAnomalyPrefixV1.length)
+  return phase === 'semantic_preparation' || phase === 'activation' ? phase : null
 }
 
 // K10 sees Main's stdout, not Core's private stderr. Only a complete Main
 // stdout line after the actual Core spawn can be attributed to that attempt.
-export function createFundsCSVAdmissionAttemptRecorderV1(enabled) {
+export function createFundsCSVAdmissionAttemptRecorderV2(enabled) {
   let attemptCount = 0
   let current = null
   const attempts = []
@@ -184,7 +219,7 @@ export function createFundsCSVAdmissionAttemptRecorderV1(enabled) {
       if (phase === 'preflightBegin') {
         attemptCount = Math.min(attemptCount + 1, 9)
         current = attemptCount <= 8
-          ? { coreAttemptOrdinal: attemptCount, spawned: false, code: null, duplicate: false }
+          ? { coreAttemptOrdinal: attemptCount, spawned: false, semanticPreparationCode: null, activationCode: null, duplicate: false }
           : null
         if (current) attempts.push(current)
         return
@@ -199,25 +234,36 @@ export function createFundsCSVAdmissionAttemptRecorderV1(enabled) {
         return
       }
       if (!current.spawned) return
-      const code = parseFundsCSVAdmissionCodeV1(line)
-      if (!code) return
-      if (current.code) current.duplicate = true
-      else current.code = code
+      if (parseFundsCSVAdmissionAnomalyV1(line)) {
+        current.duplicate = true
+        return
+      }
+      const marker = parseFundsCSVAdmissionMarkerV2(line)
+      if (!marker) return
+      const key = marker.phase === 'activation' ? 'activationCode' : 'semanticPreparationCode'
+      if (current[key]) current.duplicate = true
+      else current[key] = marker.code
     },
     evidence() {
-      return attempts.filter((attempt) => attempt.code && !attempt.duplicate)
-        .map(({ coreAttemptOrdinal, code }) => ({ coreAttemptOrdinal, code }))
+      return attempts.filter((attempt) => attempt.spawned)
+        .map(({ coreAttemptOrdinal, semanticPreparationCode, activationCode, duplicate }) => {
+          const status = semanticPreparationCode === 'not_evaluated' && activationCode && !duplicate
+            ? 'complete' : 'incomplete'
+          const nativeOwner = status !== 'complete' ? 'unknown'
+            : activationCode === 'native_owner_unavailable' ? 'unavailable' : 'available'
+          return { coreAttemptOrdinal, status, semanticPreparationCode, code: activationCode, nativeOwner }
+        })
     }
   }
 }
 
-export function projectFundsCSVAdmissionDiagnosticV1(launchRecorders) {
+export function projectFundsCSVAdmissionDiagnosticV2(launchRecorders) {
   const observations = []
   for (const [index, recorder] of launchRecorders.entries()) {
     for (const entry of recorder.evidence()) {
       if (!Number.isSafeInteger(entry.coreAttemptOrdinal) || entry.coreAttemptOrdinal < 1 ||
-          entry.coreAttemptOrdinal > 8 || !fundsCSVAdmissionCodesV1.has(entry.code)) continue
-      observations.push({ launchOrdinal: index + 1, coreAttemptOrdinal: entry.coreAttemptOrdinal, code: entry.code })
+          entry.coreAttemptOrdinal > 8) continue
+      observations.push({ launchOrdinal: index + 1, ...entry })
     }
   }
   return observations.length > 0 ? { fundsCSVAdmissionDiagnostic: observations } : {}

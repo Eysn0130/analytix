@@ -92,11 +92,12 @@ type Config = server.RuntimeServerConfig
 
 const DefaultRuntimeToken = server.DefaultRuntimeToken
 
-const fundsCSVAdmissionTracePrefixV1 = "ANALYTIX_FUNDS_CSV_ADMISSION_V1 "
+const fundsCSVAdmissionTracePrefixV2 = "ANALYTIX_FUNDS_CSV_ADMISSION_V2 "
 
 type fundsCSVAdmissionTraceCodeV1 string
 
 const (
+	fundsCSVNotEvaluatedV1               fundsCSVAdmissionTraceCodeV1 = "not_evaluated"
 	fundsCSVNativeOwnerUnavailableV1     fundsCSVAdmissionTraceCodeV1 = "native_owner_unavailable"
 	fundsCSVEnrollmentAbsentV1           fundsCSVAdmissionTraceCodeV1 = "shared_evidence_enrollment_absent"
 	fundsCSVCredentialUnavailableV1      fundsCSVAdmissionTraceCodeV1 = "shared_evidence_credential_unavailable"
@@ -109,15 +110,23 @@ const (
 // Production always uses stderr, and no request or config can supply a writer.
 type fundsCSVAdmissionTraceWriterContextKeyV1 struct{}
 
-func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, nativeOwner *nativecomponenthost.Owner,
+func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, simulation bool, nativeOwner *nativecomponenthost.Owner,
 	configured bool, shared runtimeSharedEvidenceDatasetSnapshotV2) {
 	if os.Getenv("ANALYTIX_STARTUP_TRACE") != "1" {
 		return
+	}
+	// Semantic simulation deliberately has no native owner. Its observation
+	// cannot describe the activated runtime's Funds capability.
+	phase := "activation"
+	if simulation {
+		phase = "semantic_preparation"
 	}
 	// Report the first known missing prerequisite at the existing Funds CSV
 	// assembly guard. "ready" describes these inputs, not a completed import.
 	code := fundsCSVOtherUnavailableV1
 	switch {
+	case simulation:
+		code = fundsCSVNotEvaluatedV1
 	case nativeOwner == nil:
 		code = fundsCSVNativeOwnerUnavailableV1
 	case !configured && !shared.credentialsUnavailable && shared.evidence == nil && shared.snapshot == nil:
@@ -135,7 +144,7 @@ func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, nativeOwner *nativeco
 			output = captured
 		}
 	}
-	_, _ = io.WriteString(output, fundsCSVAdmissionTracePrefixV1+string(code)+"\n")
+	_, _ = io.WriteString(output, fundsCSVAdmissionTracePrefixV2+phase+" "+string(code)+"\n")
 }
 
 type runtimeEvidenceRegistryAuthority interface {
@@ -1619,7 +1628,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 		activateImportRegistry = sharedEvidenceDatasetSnapshotV2.registryOwner.ActivateAfterImport
 	}
-	traceFundsCSVAdmissionAssemblyV1(ctx, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)
+	traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)
 	if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&
 		sharedEvidenceDatasetSnapshotV2.snapshot != nil {
 		immutableSource, sourceErr := fundsquerysourceadapter.NewHostExactSource(config.UserDataDir)

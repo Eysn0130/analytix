@@ -26,7 +26,7 @@ import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../pac
 import { BundledFundsMaterializationChildUnconfirmedError } from './bundled-funds-materialization'
 import {
   buildDevGoToolchainEnvV1,
-  createCoreFundsCSVAdmissionTraceStreamV1,
+  createCoreFundsCSVAdmissionTraceStreamV2,
   buildDesktopInstallationKeyPreflightArgsV1,
   buildDesktopPrivateHistoryMigrationArgsV2,
   buildGoRuntimeStartupUserDataArgsV1,
@@ -75,45 +75,51 @@ vi.mock('electron', () => ({ app: electronApp }))
 afterEach(() => { electronApp.isPackaged = false })
 
 describe('Core Funds CSV admission startup trace', () => {
-  const prefix = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+  const prefix = 'ANALYTIX_FUNDS_CSV_ADMISSION_V2 '
+  const anomaly = 'ANALYTIX_FUNDS_CSV_ADMISSION_ANOMALY_V1 '
   const codes = [
     'native_owner_unavailable', 'shared_evidence_enrollment_absent',
     'shared_evidence_credential_unavailable', 'dataset_snapshot_unavailable',
     'ready', 'other_unavailable'
   ]
 
-  it('forwards only one complete fixed line from the Core stderr stream', () => {
+  it('forwards one bounded fixed observation per semantic and activation phase', () => {
     for (const code of codes) {
       const output: string[] = []
-      const trace = createCoreFundsCSVAdmissionTraceStreamV1(true, (line) => output.push(line))
-      const line = Buffer.from(`${prefix}${code}\n`)
+      const trace = createCoreFundsCSVAdmissionTraceStreamV2(true, (line) => output.push(line))
+      const semantic = Buffer.from(`${prefix}semantic_preparation not_evaluated\n`)
+      for (const byte of semantic) trace.accept(Buffer.from([byte]))
+      const line = Buffer.from(`${prefix}activation ${code}\n`)
       for (const byte of line) trace.accept(Buffer.from([byte]))
-      trace.accept(`${prefix}ready\n`)
-      expect(output).toEqual([`${prefix}${code}\n`])
+      expect(output).toEqual([`${prefix}semantic_preparation not_evaluated\n`, `${prefix}activation ${code}\n`])
     }
   })
 
-  it('stays silent when disabled and rejects partial, mixed or unsafe lines', () => {
+  it('signals duplicates once and rejects partial, mixed or unsafe lines', () => {
     const output: string[] = []
-    const disabled = createCoreFundsCSVAdmissionTraceStreamV1(false, (line) => output.push(line))
-    disabled.accept(`${prefix}ready\n`)
+    const disabled = createCoreFundsCSVAdmissionTraceStreamV2(false, (line) => output.push(line))
+    disabled.accept(`${prefix}activation ready\n`)
     expect(output).toEqual([])
-    const trace = createCoreFundsCSVAdmissionTraceStreamV1(true, (line) => output.push(line))
+    const trace = createCoreFundsCSVAdmissionTraceStreamV2(true, (line) => output.push(line))
     for (const unsafe of [
-      `${prefix}ready`, `${prefix}ready path=/private/case\n`,
-      `error=/private/case ${prefix}ready\n`, `${prefix}ready\r\n`,
-      `${prefix}ready${prefix}other_unavailable\n`,
-      `${prefix}unknown\n`, `${'x'.repeat(200)}${prefix}ready\n`
+      `${prefix}activation ready path=/private/case\n`,
+      `error=/private/case ${prefix}activation ready\n`, `${prefix}activation ready\r\n`,
+      `${prefix}activation ready${prefix}activation other_unavailable\n`,
+      `${prefix}activation unknown\n`, `${prefix}semantic_preparation ready\n`,
+      `${prefix}activation not_evaluated\n`, `${'x'.repeat(200)}${prefix}activation ready\n`
     ]) trace.accept(unsafe)
     expect(output).toEqual([])
-    trace.accept(`${prefix}ready\n`)
-    expect(output).toEqual([`${prefix}ready\n`])
+    trace.accept(`${prefix}activation ready`)
+    expect(output).toEqual([])
+    trace.accept('\n')
+    trace.accept(`${prefix}activation ready\n${prefix}activation native_owner_unavailable\n`)
+    expect(output).toEqual([`${prefix}activation ready\n`, `${anomaly}activation\n`])
   })
 
   it('binds the fixed forwarder to the Core child, after materialization', () => {
     const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
     expect(source.indexOf('materializeBundledFundsBeforeRuntimeV1({'))
-      .toBeLessThan(source.indexOf('const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV1('))
+      .toBeLessThan(source.indexOf('const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV2('))
     expect(source).toContain("isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1'")
     expect(source).toContain('    fundsCSVAdmissionTrace.accept(chunk)')
   })

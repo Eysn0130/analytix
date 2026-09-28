@@ -93,7 +93,7 @@ func TestFundsImportAndCleaningProductionCompositionReuseOneDSV2DataPlane(t *tes
 		"if sharedEvidenceDatasetSnapshotV2.snapshot != nil {",
 		"sharedEvidenceConfiguredV2 && sharedEvidenceDatasetSnapshotV2.registryOwner == nil",
 		"evidenceStore = runtimeUnavailableEvidenceRegistryV1{}",
-		"traceFundsCSVAdmissionAssemblyV1(ctx, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)",
+		"traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)",
 		"if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&\n\t\tsharedEvidenceDatasetSnapshotV2.snapshot != nil {",
 	} {
 		if !strings.Contains(source, required) {

@@ -20,7 +20,8 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createK10DarwinExplicitTaskKeychain } from './k10-darwin-explicit-keychain.mjs'
 import {
-  createFundsCSVAdmissionAttemptRecorderV1,
+  classifyExactTargetList,
+  createFundsCSVAdmissionAttemptRecorderV2,
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
   exactTaskGroupMembers,
@@ -30,7 +31,7 @@ import {
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
   parseGoOwnerPhase,
-  projectFundsCSVAdmissionDiagnosticV1,
+  projectFundsCSVAdmissionDiagnosticV2,
   residualMembersAlreadyPinned,
   processProbeFailureKind
 } from './lib/k10-child-diagnostics.mjs'
@@ -648,7 +649,7 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     }
   }
   const childEnvironment = safeChildEnvironment(userDataDir, denyProxyPort)
-  const fundsCSVAdmission = createFundsCSVAdmissionAttemptRecorderV1(
+  const fundsCSVAdmission = createFundsCSVAdmissionAttemptRecorderV2(
     childEnvironment.ANALYTIX_STARTUP_TRACE === '1'
   )
   const child = spawn(command, args, {
@@ -814,28 +815,51 @@ function ownedDebugPortReady(port) {
   return true
 }
 
-async function waitForTargetClosed(debugPort, timeoutMs) {
+async function waitForTargetClosed(debugPort, capturedTargetId, timeoutMs) {
   const deadline = Date.now() + timeoutMs
-  let emptyPageObservations = 0
+  const counts = { targetPresent: 0, targetAbsent: 0, httpError: 0,
+    fetchError: 0, malformed: 0, mainExited: 0, timeout: 0 }
+  const count = (key) => { counts[key] = Math.min(counts[key] + 1, 128) }
+  let consecutiveAbsences = 0
   while (Date.now() < deadline) {
     if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
-      processDefinitelyExited(activeChild.pid))) return true
+      processDefinitelyExited(activeChild.pid))) {
+      count('mainExited')
+      return { closed: true, reason: 'main_exited', counts }
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
         signal: AbortSignal.timeout(1000)
       })
-      const targets = response.ok ? await response.json() : null
-      if (Array.isArray(targets) && !targets.some((target) => target?.type === 'page')) {
-        emptyPageObservations += 1
-        if (emptyPageObservations >= 2) return true
-      } else emptyPageObservations = 0
+      if (!response.ok) {
+        count('httpError')
+        consecutiveAbsences = 0
+      } else {
+        let targets
+        try { targets = await response.json() } catch { targets = null }
+        const category = classifyExactTargetList(targets, capturedTargetId)
+        if (category === 'target_absent') {
+          count('targetAbsent')
+          consecutiveAbsences += 1
+          if (consecutiveAbsences >= 2) return { closed: true, reason: 'target_absent', counts }
+        } else {
+          count(category === 'target_present' ? 'targetPresent' : 'malformed')
+          consecutiveAbsences = 0
+        }
+      }
     } catch {
-      emptyPageObservations = 0
+      count('fetchError')
+      consecutiveAbsences = 0
     }
     await sleep(250)
   }
-  return Boolean(activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
-    processDefinitelyExited(activeChild.pid)))
+  if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
+    processDefinitelyExited(activeChild.pid))) {
+    count('mainExited')
+    return { closed: true, reason: 'main_exited', counts }
+  }
+  count('timeout')
+  return { closed: false, reason: 'timeout', counts }
 }
 
 async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000, onCommandSent = () => {}) {
@@ -1253,34 +1277,61 @@ function sameExactGoIdentity(identity) {
 }
 
 async function normalQuit(debugPort, launched) {
+  const quitStartedAtMs = Date.now()
+  const relativeMs = () => Date.now() - quitStartedAtMs
   let quitRequestOk = false
   let quitRequestAcknowledged = false
   let quitTargetObserved = false
   let fallbackUsed = false
   let fallbackSigkillSent = false
+  let capturedTargetId = null
+  let quitRequestSentAtMs = null
+  let quitRequestAcknowledgedAtMs = null
+  let mainExitObservedAtMs = null
+  let fallbackStartedAtMs = null
+  let fallbackSignalSentAtMs = null
+  let targetObservationAfterFallback = null
   if (latencyObservation) pinExactTaskGroupMembers(launched.child)
   try {
     const target = await waitForTarget(debugPort, 10_000)
+    if (typeof target.id !== 'string' || target.id.length === 0 || target.id.length > 128) {
+      throw new Error('exact_main_debug_target_untrusted')
+    }
+    capturedTargetId = target.id
+    launched.quitTargetId = capturedTargetId
     quitTargetObserved = true
     await dispatchCdp(target.webSocketDebuggerUrl, [
       { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'F4', code: 'F4', modifiers: 1 } },
       { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'F4', code: 'F4', modifiers: 1 } }
     ], 10_000, (command) => {
-      if (command.params.type === 'rawKeyDown') quitRequestOk = true
+      if (command.params.type === 'rawKeyDown') {
+        quitRequestOk = true
+        quitRequestSentAtMs = relativeMs()
+      }
     })
     quitRequestAcknowledged = true
+    quitRequestAcknowledgedAtMs = relativeMs()
   } catch {
     // The app can exit and close CDP before acknowledging the key event.
     // Exact-child exit and residual checks below still determine success.
   }
-  let targetClosed = await waitForTargetClosed(debugPort, 15_000)
+  const targetObservationBeforeFallback = capturedTargetId
+    ? await waitForTargetClosed(debugPort, capturedTargetId, 15_000)
+    : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+        reason: launched.child.exitCode !== null || launched.child.signalCode
+          ? 'main_exited' : 'target_unavailable', counts: null }
+  let targetClosed = targetObservationBeforeFallback.closed
+  const mainExitedBeforeFallback = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+  if (mainExitedBeforeFallback) mainExitObservedAtMs = relativeMs()
   lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk,
-    quitRequestAcknowledged, targetClosed,
-    mainExitedBeforeFallback: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+    quitRequestAcknowledged, quitRequestSentAtMs, quitRequestAcknowledgedAtMs,
+    targetClosed, targetObservationBeforeFallback, targetObservationAfterFallback,
+    mainExitedBeforeFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
     fallbackSignalSent: false, fallbackSigkillSent: false,
     mainExitCode: launched.child.exitCode,
     mainSignaled: Boolean(launched.child.signalCode), residualProcessCount: null }
   if (!targetClosed) {
+    fallbackStartedAtMs = relativeMs()
     try {
       if (latencyObservation) {
         const stopped = await stopExactPackagedTaskGroup(launched.child)
@@ -1290,13 +1341,22 @@ async function normalQuit(debugPort, launched) {
         terminateTaskProcessGroup(launched.child)
         fallbackUsed = true
       }
+      if (fallbackUsed) fallbackSignalSentAtMs = relativeMs()
     } catch {
       taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+      lastNormalQuitFacts = { ...lastNormalQuitFacts, fallbackStartedAtMs, fallbackSignalSentAtMs }
       throw new Error(quitRequestOk
         ? 'normal_quit_target_stayed_open' : 'normal_quit_request_failed')
     }
-    targetClosed = await waitForTargetClosed(debugPort, 10_000)
+    targetObservationAfterFallback = capturedTargetId
+      ? await waitForTargetClosed(debugPort, capturedTargetId, 10_000)
+      : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+          reason: 'target_unavailable', counts: null }
+    targetClosed = targetObservationAfterFallback.closed
+    if (targetClosed && mainExitObservedAtMs === null &&
+        (launched.child.exitCode !== null || launched.child.signalCode)) mainExitObservedAtMs = relativeMs()
     lastNormalQuitFacts = { ...lastNormalQuitFacts, targetClosed,
+      targetObservationAfterFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
       fallbackSignalSent: fallbackUsed, fallbackSigkillSent,
       mainExitCode: launched.child.exitCode,
       mainSignaled: Boolean(launched.child.signalCode) }
@@ -1311,8 +1371,9 @@ async function normalQuit(debugPort, launched) {
     await sleep(250)
     mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
   }
-  const mainExitedBeforeFallback = mainExited
+  if (mainExited && mainExitObservedAtMs === null) mainExitObservedAtMs = relativeMs()
   if (!mainExited) {
+    fallbackStartedAtMs ??= relativeMs()
     try {
       if (latencyObservation) {
         const stopped = await stopExactPackagedTaskGroup(launched.child)
@@ -1322,18 +1383,24 @@ async function normalQuit(debugPort, launched) {
         terminateTaskProcessGroup(launched.child)
         fallbackUsed = true
       }
+      if (fallbackUsed && fallbackSignalSentAtMs === null) fallbackSignalSentAtMs = relativeMs()
     } catch {
       taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+      lastNormalQuitFacts = { ...lastNormalQuitFacts, fallbackStartedAtMs, fallbackSignalSentAtMs }
       throw new Error('exact_main_process_did_not_exit')
     }
     for (let attempt = 0; attempt < 40 && !mainExited; attempt += 1) {
       await sleep(250)
       mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
     }
+    if (mainExited && mainExitObservedAtMs === null) mainExitObservedAtMs = relativeMs()
   }
   const residualProcessCount = latencyObservation ? taskOwnedResidualProcessCount() : 0
   lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk, quitRequestAcknowledged,
-    targetClosed, mainExitedBeforeFallback, fallbackSignalSent: fallbackUsed,
+    quitRequestSentAtMs, quitRequestAcknowledgedAtMs, targetClosed,
+    targetObservationBeforeFallback, targetObservationAfterFallback,
+    mainExitedBeforeFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
+    fallbackSignalSent: fallbackUsed,
     fallbackSigkillSent, mainExitCode: launched.child.exitCode,
     mainSignaled: Boolean(launched.child.signalCode), residualProcessCount }
   if (latencyObservation) {
@@ -1514,7 +1581,7 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
       try {
         if (latencyObservation) await stopExactPackagedTaskGroup(launched.child)
         else terminateTaskProcessGroup(launched.child)
-        await waitForTargetClosed(debugPort, 10_000)
+        if (launched.quitTargetId) await waitForTargetClosed(debugPort, launched.quitTargetId, 10_000)
         if (latencyObservation) await stopExactTaskOwnedResiduals()
       } catch (error) {
         taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
@@ -1990,7 +2057,7 @@ async function main() {
       externalProviderUsed: false,
       denyProxyConnectionCount
     },
-    ...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch),
+    ...projectFundsCSVAdmissionDiagnosticV2(fundsCSVAdmissionByLaunch),
     ...(latency ? { latency } : {})
   })
   if (!green) {
@@ -2042,7 +2109,7 @@ try {
     provider: providerObservationFacts(),
     network: { denyProxyConnectionCount },
     runtimeMaterialization: runtimeFailureMaterializationFacts(),
-    ...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch),
+    ...projectFundsCSVAdmissionDiagnosticV2(fundsCSVAdmissionByLaunch),
     ...(partialLatencyEvidence
       ? { latency: { ...partialLatencyEvidence, normalQuitObserved: false } }
       : {}),

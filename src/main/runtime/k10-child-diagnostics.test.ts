@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  createFundsCSVAdmissionAttemptRecorderV1,
+  classifyExactTargetList,
+  createFundsCSVAdmissionAttemptRecorderV2,
   exactTaskGroupMembers,
   normalQuitFailureCode,
   residualMembersAlreadyPinned,
@@ -9,8 +10,8 @@ import {
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
   parseGoOwnerPhase,
-  parseFundsCSVAdmissionCodeV1,
-  projectFundsCSVAdmissionDiagnosticV1,
+  parseFundsCSVAdmissionMarkerV2,
+  projectFundsCSVAdmissionDiagnosticV2,
   isGoStartupAttemptMarker,
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
@@ -19,7 +20,8 @@ import {
 } from '../../../scripts/lib/k10-child-diagnostics.mjs'
 
 describe('K10 Core Funds CSV admission report', () => {
-  const marker = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+  const marker = 'ANALYTIX_FUNDS_CSV_ADMISSION_V2 '
+  const anomaly = 'ANALYTIX_FUNDS_CSV_ADMISSION_ANOMALY_V1 '
   const phase = (stage: string, elapsedMs: number) =>
     `[analytix] [main] event=main_info detail=${JSON.stringify({ stage, elapsedMs })}`
 
@@ -28,52 +30,72 @@ describe('K10 Core Funds CSV admission report', () => {
       'native_owner_unavailable', 'shared_evidence_enrollment_absent',
       'shared_evidence_credential_unavailable', 'dataset_snapshot_unavailable',
       'ready', 'other_unavailable'
-    ]) expect(parseFundsCSVAdmissionCodeV1(`${marker}${code}`)).toBe(code)
+    ]) expect(parseFundsCSVAdmissionMarkerV2(`${marker}activation ${code}`))
+      .toEqual({ phase: 'activation', code })
+    expect(parseFundsCSVAdmissionMarkerV2(`${marker}semantic_preparation not_evaluated`))
+      .toEqual({ phase: 'semantic_preparation', code: 'not_evaluated' })
     for (const line of [
-      `${marker}ready path=/private/case`, `${marker}ready\r`, `${marker}ready\n`,
-      `error=/private/case ${marker}ready`, `${marker}unknown`,
-      `${marker}ready${marker}ready`, `x${marker}ready`, `${'x'.repeat(200)}${marker}ready`
-    ]) expect(parseFundsCSVAdmissionCodeV1(line)).toBeNull()
+      `${marker}activation ready path=/private/case`, `${marker}activation ready\r`, `${marker}activation ready\n`,
+      `error=/private/case ${marker}activation ready`, `${marker}activation unknown`,
+      `${marker}semantic_preparation ready`, `${marker}activation not_evaluated`,
+      `${marker}activation ready${marker}activation ready`, `x${marker}activation ready`,
+      `${'x'.repeat(200)}${marker}activation ready`
+    ]) expect(parseFundsCSVAdmissionMarkerV2(line)).toBeNull()
   })
 
-  it('requires a complete Main stdout line after the Core spawn and emits at most once per attempt', () => {
-    const recorder = createFundsCSVAdmissionAttemptRecorderV1(true)
-    const ready = `${marker}ready`
-    recorder.acceptLine('stdout', ready)
+  it('attributes both phases to the exact Core attempt and uses activation for owner reachability', () => {
+    const recorder = createFundsCSVAdmissionAttemptRecorderV2(true)
+    const semantic = `${marker}semantic_preparation not_evaluated`
+    const activation = `${marker}activation shared_evidence_enrollment_absent`
+    recorder.acceptLine('stdout', activation)
     recorder.acceptLine('stdout', phase('go preflight:begin', 1))
-    recorder.acceptLine('stdout', ready)
-    recorder.acceptLine('stderr', ready)
+    recorder.acceptLine('stdout', activation)
     recorder.acceptLine('stdout', phase('go process:spawned', 2))
-    recorder.acceptLine('stdout', ready, false)
-    recorder.acceptLine('stdout', `${ready} error=/private/case`)
-    recorder.acceptLine('stdout', ready)
-    expect(recorder.evidence()).toEqual([{ coreAttemptOrdinal: 1, code: 'ready' }])
-    recorder.acceptLine('stdout', `${marker}native_owner_unavailable`)
-    expect(recorder.evidence()).toEqual([])
+    recorder.acceptLine('stdout', semantic)
+    recorder.acceptLine('stdout', activation, false)
+    recorder.acceptLine('stderr', activation)
+    recorder.acceptLine('stdout', `${activation} error=/private/case`)
+    recorder.acceptLine('stdout', activation)
+    expect(recorder.evidence()).toEqual([{
+      coreAttemptOrdinal: 1, status: 'complete', semanticPreparationCode: 'not_evaluated',
+      code: 'shared_evidence_enrollment_absent', nativeOwner: 'available'
+    }])
     recorder.acceptLine('stdout', phase('go adapter:done', 3))
-    recorder.acceptLine('stdout', ready)
+    recorder.acceptLine('stdout', activation)
     recorder.acceptLine('stdout', phase('go preflight:begin', 4))
     recorder.acceptLine('stdout', phase('go process:spawned', 5))
-    recorder.acceptLine('stdout', `${marker}dataset_snapshot_unavailable`)
-    expect(projectFundsCSVAdmissionDiagnosticV1([
-      createFundsCSVAdmissionAttemptRecorderV1(false), recorder
+    recorder.acceptLine('stdout', semantic)
+    recorder.acceptLine('stdout', `${marker}activation native_owner_unavailable`)
+    expect(projectFundsCSVAdmissionDiagnosticV2([
+      createFundsCSVAdmissionAttemptRecorderV2(false), recorder
     ])).toEqual({
       fundsCSVAdmissionDiagnostic: [
-        { launchOrdinal: 2, coreAttemptOrdinal: 2, code: 'dataset_snapshot_unavailable' }
+        { launchOrdinal: 2, coreAttemptOrdinal: 1, status: 'complete',
+          semanticPreparationCode: 'not_evaluated', code: 'shared_evidence_enrollment_absent', nativeOwner: 'available' },
+        { launchOrdinal: 2, coreAttemptOrdinal: 2, status: 'complete',
+          semanticPreparationCode: 'not_evaluated', code: 'native_owner_unavailable', nativeOwner: 'unavailable' }
       ]
     })
   })
 
-  it('omits the report when trace is off or no exact Core line is present', () => {
-    const disabled = createFundsCSVAdmissionAttemptRecorderV1(false)
+  it('marks missing or duplicate phase evidence incomplete without retaining child text', () => {
+    const disabled = createFundsCSVAdmissionAttemptRecorderV2(false)
     disabled.acceptLine('stdout', phase('go preflight:begin', 1))
     disabled.acceptLine('stdout', phase('go process:spawned', 2))
-    disabled.acceptLine('stdout', `${marker}ready`)
-    expect(projectFundsCSVAdmissionDiagnosticV1([disabled])).toEqual({})
-    const materializer = createFundsCSVAdmissionAttemptRecorderV1(true)
-    materializer.acceptLine('stdout', phase('go preflight:begin', 1))
-    materializer.acceptLine('stdout', `${marker}ready`)
-    expect(projectFundsCSVAdmissionDiagnosticV1([materializer])).toEqual({})
+    expect(projectFundsCSVAdmissionDiagnosticV2([disabled])).toEqual({})
+    const recorder = createFundsCSVAdmissionAttemptRecorderV2(true)
+    recorder.acceptLine('stdout', phase('go preflight:begin', 1))
+    recorder.acceptLine('stdout', `${marker}activation ready`)
+    expect(recorder.evidence()).toEqual([])
+    recorder.acceptLine('stdout', phase('go process:spawned', 2))
+    recorder.acceptLine('stdout', `${marker}semantic_preparation not_evaluated`)
+    expect(recorder.evidence()).toEqual([{
+      coreAttemptOrdinal: 1, status: 'incomplete', semanticPreparationCode: 'not_evaluated',
+      code: null, nativeOwner: 'unknown'
+    }])
+    recorder.acceptLine('stdout', `${marker}activation ready`)
+    recorder.acceptLine('stdout', `${anomaly}activation`)
+    expect(recorder.evidence()[0]).toMatchObject({ status: 'incomplete', code: 'ready', nativeOwner: 'unknown' })
   })
 
   it('reads only packaged Main stdout and projects codes in both final outcomes', () => {
@@ -85,7 +107,7 @@ describe('K10 Core Funds CSV admission report', () => {
     expect(source.slice(stdoutStart, stderrStart)).toContain("fundsCSVAdmission.acceptLine('stdout', completedLine, !lineOverflowed)")
     expect(source.slice(stderrStart, source.indexOf('const closed =', stderrStart)))
       .not.toContain('fundsCSVAdmission.acceptLine')
-    expect(source.split('...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch)').length - 1).toBe(2)
+    expect(source.split('...projectFundsCSVAdmissionDiagnosticV2(fundsCSVAdmissionByLaunch)').length - 1).toBe(2)
   })
 })
 
@@ -97,6 +119,18 @@ describe('K10 single-instance diagnostic', () => {
 })
 
 describe('K10 process probe evidence', () => {
+  it('compares only the captured CDP target id and keeps malformed responses unknown', () => {
+    expect(classifyExactTargetList([
+      { id: 'unrelated', type: 'page', url: 'unsafe' },
+      { id: 'captured', type: 'other', title: 'unsafe' }
+    ], 'captured')).toBe('target_present')
+    expect(classifyExactTargetList([{ id: 'unrelated', type: 'page' }], 'captured'))
+      .toBe('target_absent')
+    expect(classifyExactTargetList([{ type: 'page' }], 'captured')).toBe('malformed')
+    expect(classifyExactTargetList(null, 'captured')).toBe('malformed')
+    expect(classifyExactTargetList([], '')).toBe('malformed')
+  })
+
   it('does not turn an unknown ps error into an exited process or zero residuals', () => {
     expect(processProbeFailureKind({ status: 1 }, 'ps')).toBe('unknown')
     expect(processProbeFailureKind({ status: 1 }, 'pgrep')).toBe('no_match')
@@ -190,6 +224,18 @@ describe('K10 process probe evidence', () => {
       .toEqual({ phase: 'runtime IPC restart:requested', elapsedMs: 85 })
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"app before quit:runtime stopped","elapsedMs":95}`))
       .toEqual({ phase: 'app before quit:runtime stopped', elapsedMs: 95 })
+    for (const phase of [
+      'app before quit:closing', 'app before quit:close allowed',
+      'app before quit:close veto prior', 'app before quit:close veto unprepared',
+      'app before quit:close veto frame', 'app before quit:close veto loading',
+      'app before quit:close veto late', 'app before quit:window closed',
+      'app before quit:close unknown', 'app before quit:windows closed',
+      'app before quit:office teardown settled', 'app before quit:office teardown failed',
+      'app before quit:stop failed'
+    ]) {
+      expect(parseRuntimeTransitionPhase(`${prefix}${JSON.stringify({ stage: phase, elapsedMs: 96 })}`))
+        .toEqual({ phase, elapsedMs: 96 })
+    }
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime IPC restart:requested","elapsedMs":85,"path":"/private"}`))
       .toBeNull()
     expect(parseRuntimeTransitionPhase(`${prefix}{"stage":"runtime unknown restart","elapsedMs":85}`))

@@ -23,23 +23,29 @@ func TestFundsCSVAdmissionTraceUsesOnlyFixedAssemblyCategories(t *testing.T) {
 	snapshot := &datasetsnapshotapp.SealedServiceV2{}
 	for _, test := range []struct {
 		name       string
+		simulation bool
 		native     *nativecomponenthost.Owner
 		configured bool
 		shared     runtimeSharedEvidenceDatasetSnapshotV2
 		want       fundsCSVAdmissionTraceCodeV1
 	}{
-		{"native", nil, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence, snapshot: snapshot}, fundsCSVNativeOwnerUnavailableV1},
-		{"enrollment", native, false, runtimeSharedEvidenceDatasetSnapshotV2{}, fundsCSVEnrollmentAbsentV1},
-		{"credentials", native, true, runtimeSharedEvidenceDatasetSnapshotV2{credentialsUnavailable: true}, fundsCSVCredentialUnavailableV1},
-		{"snapshot", native, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence}, fundsCSVDatasetSnapshotUnavailableV1},
-		{"other", native, true, runtimeSharedEvidenceDatasetSnapshotV2{snapshot: snapshot}, fundsCSVOtherUnavailableV1},
-		{"ready", native, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence, snapshot: snapshot}, fundsCSVReadyV1},
+		{"simulation", true, nil, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence, snapshot: snapshot}, fundsCSVNotEvaluatedV1},
+		{"native", false, nil, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence, snapshot: snapshot}, fundsCSVNativeOwnerUnavailableV1},
+		{"enrollment", false, native, false, runtimeSharedEvidenceDatasetSnapshotV2{}, fundsCSVEnrollmentAbsentV1},
+		{"credentials", false, native, true, runtimeSharedEvidenceDatasetSnapshotV2{credentialsUnavailable: true}, fundsCSVCredentialUnavailableV1},
+		{"snapshot", false, native, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence}, fundsCSVDatasetSnapshotUnavailableV1},
+		{"other", false, native, true, runtimeSharedEvidenceDatasetSnapshotV2{snapshot: snapshot}, fundsCSVOtherUnavailableV1},
+		{"ready", false, native, true, runtimeSharedEvidenceDatasetSnapshotV2{evidence: evidence, snapshot: snapshot}, fundsCSVReadyV1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			ctx := context.WithValue(context.Background(), fundsCSVAdmissionTraceWriterContextKeyV1{}, &output)
-			traceFundsCSVAdmissionAssemblyV1(ctx, test.native, test.configured, test.shared)
-			if got, want := output.String(), fundsCSVAdmissionTracePrefixV1+string(test.want)+"\n"; got != want {
+			traceFundsCSVAdmissionAssemblyV1(ctx, test.simulation, test.native, test.configured, test.shared)
+			phase := "activation"
+			if test.simulation {
+				phase = "semantic_preparation"
+			}
+			if got, want := output.String(), fundsCSVAdmissionTracePrefixV2+phase+" "+string(test.want)+"\n"; got != want {
 				t.Fatalf("fixed assembly category = %q, want %q", got, want)
 			}
 		})
@@ -52,7 +58,7 @@ func TestFundsCSVAdmissionTraceIsSilentUnlessExplicitlyEnabled(t *testing.T) {
 			t.Setenv("ANALYTIX_STARTUP_TRACE", value)
 			var output bytes.Buffer
 			ctx := context.WithValue(context.Background(), fundsCSVAdmissionTraceWriterContextKeyV1{}, &output)
-			traceFundsCSVAdmissionAssemblyV1(ctx, nil, false, runtimeSharedEvidenceDatasetSnapshotV2{})
+			traceFundsCSVAdmissionAssemblyV1(ctx, false, nil, false, runtimeSharedEvidenceDatasetSnapshotV2{})
 			if output.Len() != 0 {
 				t.Fatalf("trace was emitted while disabled: %q", output.String())
 			}
@@ -66,7 +72,7 @@ func TestFundsCSVAdmissionTraceRunsAtRealHandlerAssemblyWithoutUnsafeError(t *te
 		env  string
 		want string
 	}{
-		{"1", fundsCSVAdmissionTracePrefixV1 + string(fundsCSVNativeOwnerUnavailableV1) + "\n"},
+		{"1", fundsCSVAdmissionTracePrefixV2 + "activation " + string(fundsCSVNativeOwnerUnavailableV1) + "\n"},
 		{"0", ""},
 	} {
 		t.Run("trace="+trace.env, func(t *testing.T) {
