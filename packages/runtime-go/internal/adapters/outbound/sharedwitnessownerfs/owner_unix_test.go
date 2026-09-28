@@ -113,7 +113,7 @@ func (fixture ownerFixture) resolveRequest(t *testing.T, advance domainsecurity.
 	return request
 }
 
-func (fixture ownerFixture) observe(t *testing.T, owner *Owner) domainsecurity.MonotonicHeadObservationV1 {
+func (fixture ownerFixture) observeRequest(t *testing.T) domainsecurity.MonotonicHeadObserveRequestV1 {
 	t.Helper()
 	request, err := domainsecurity.NewMonotonicHeadObserveRequestV1(domainsecurity.MonotonicHeadObserveRequestInputV1{
 		InstallationID: fixture.anchor.InstallationID, EnrollmentID: fixture.anchor.EnrollmentID,
@@ -124,6 +124,12 @@ func (fixture ownerFixture) observe(t *testing.T, owner *Owner) domainsecurity.M
 	if err != nil {
 		t.Fatal(err)
 	}
+	return request
+}
+
+func (fixture ownerFixture) observe(t *testing.T, owner *Owner) domainsecurity.MonotonicHeadObservationV1 {
+	t.Helper()
+	request := fixture.observeRequest(t)
 	observation, err := owner.Observe(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +257,147 @@ func TestOwnerReplayFailsWhenPinnedRootChanges(t *testing.T) {
 	}
 	if _, err := owner.Advance(context.Background(), request); !errors.Is(err, monotonichead.ErrUnavailable) {
 		t.Fatalf("replay succeeded after owner root identity changed: %v", err)
+	}
+}
+
+func TestOwnerRejectsOldStateDirectoryWhileRootRemainsPinned(t *testing.T) {
+	fixture := newOwnerFixture(t)
+	owner := fixture.create(t)
+	defer owner.Close()
+	first := fixture.advanceRequest(t, fixture.anchor.GenesisCheckpoint, "committed before state swap", "state one")
+	firstReceipt, err := owner.Advance(context.Background(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentDir := filepath.Join(fixture.root, stateDirectoryName)
+	staleDir := filepath.Join(fixture.root, "stale-state")
+	if err := os.Mkdir(staleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	genesis, err := os.ReadFile(filepath.Join(currentDir, genesisFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, genesisFileName), genesis, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clear(genesis)
+	if err := os.Rename(currentDir, filepath.Join(fixture.root, "held-current-state")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staleDir, currentDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.lease.WithRootAccess(context.Background(), func(access *persistencefs.SeparateOwnerRootAccess) error {
+		_, err := access.Directory()
+		return err
+	}); err != nil {
+		t.Fatalf("root changed during state-only replacement: %v", err)
+	}
+	if _, err := owner.Observe(context.Background(), fixture.observeRequest(t)); !errors.Is(err, monotonichead.ErrUnavailable) {
+		t.Fatalf("Observe served an old state directory: %v", err)
+	}
+	if _, err := owner.Advance(context.Background(), first); !errors.Is(err, monotonichead.ErrUnavailable) {
+		t.Fatalf("replay served an old state directory: %v", err)
+	}
+	next := fixture.advanceRequest(t, firstReceipt.Checkpoint, "new mutation after state swap", "state two")
+	if _, err := owner.Advance(context.Background(), next); !errors.Is(err, monotonichead.ErrUnavailable) {
+		t.Fatalf("Advance wrote into an old state directory: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(currentDir, journalName(2))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Advance created a successor without its predecessor: %v", err)
+	}
+	if _, err := owner.ResolveMutation(context.Background(), fixture.resolveRequest(t, first)); !errors.Is(err, monotonichead.ErrUnavailable) {
+		t.Fatalf("Resolve served an old state directory: %v", err)
+	}
+}
+
+func TestOwnerRecoverySyncsPublishedRecordBeforeServing(t *testing.T) {
+	fixture := newOwnerFixture(t)
+	owner := fixture.create(t)
+	request := fixture.advanceRequest(t, fixture.anchor.GenesisCheckpoint, "published before directory sync", "state one")
+	owner.writeFault = func(stage string) error {
+		if stage == "after_publish" {
+			return errors.New("injected crash before directory sync")
+		}
+		return nil
+	}
+	if _, err := owner.Advance(context.Background(), request); !errors.Is(err, monotonichead.ErrIndeterminate) {
+		t.Fatalf("write cut: %v", err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	syncCalled := false
+	if opened, err := openExistingWithRecoverySync(context.Background(), fixture.userData, fixture.anchor,
+		func(*persistencefs.SeparateOwnerDirectory) error {
+			syncCalled = true
+			return errors.New("injected directory sync failure")
+		}); err == nil {
+		opened.Close()
+		t.Fatal("recovery served a visible record without durable directory sync")
+	}
+	if !syncCalled {
+		t.Fatal("recovery did not reach directory sync")
+	}
+	syncCalled = false
+	owner, err := openExistingWithRecoverySync(context.Background(), fixture.userData, fixture.anchor,
+		func(directory *persistencefs.SeparateOwnerDirectory) error {
+			syncCalled = true
+			return directory.Sync()
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if !syncCalled {
+		t.Fatal("recovery did not sync the published directory entry")
+	}
+	resolution, err := owner.ResolveMutation(context.Background(), fixture.resolveRequest(t, request))
+	if err != nil || resolution.Status != domainsecurity.MonotonicHeadMutationResolutionCommittedV1 || resolution.Committed == nil {
+		t.Fatalf("synced recovery did not resolve committed request: %v", err)
+	}
+}
+
+func TestOwnerRecoveryLeavesTempsUntouchedWhenInventoryIsInvalid(t *testing.T) {
+	fixture := newOwnerFixture(t)
+	owner := fixture.create(t)
+	request := fixture.advanceRequest(t, fixture.anchor.GenesisCheckpoint, "unpublished temp", "state one")
+	owner.writeFault = func(stage string) error {
+		if stage == "after_temp_sync" {
+			return errors.New("injected unpublished temp")
+		}
+		return nil
+	}
+	if _, err := owner.Advance(context.Background(), request); !errors.Is(err, monotonichead.ErrIndeterminate) {
+		t.Fatalf("write cut: %v", err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(fixture.root, stateDirectoryName)
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validTemp := ""
+	for _, entry := range entries {
+		if persistencefs.IsSeparateOwnerAtomicTempName(journalName(1), entry.Name()) {
+			validTemp = entry.Name()
+		}
+	}
+	if validTemp == "" {
+		t.Fatal("crash cut did not leave an unpublished temp")
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "zz-invalid.tmp"), []byte("invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := OpenExisting(context.Background(), fixture.userData, fixture.anchor); err == nil {
+		opened.Close()
+		t.Fatal("invalid temp inventory was accepted")
+	}
+	if _, err := os.Lstat(filepath.Join(stateDir, validTemp)); err != nil {
+		t.Fatalf("valid temp was deleted before full inventory validation: %v", err)
 	}
 }
 

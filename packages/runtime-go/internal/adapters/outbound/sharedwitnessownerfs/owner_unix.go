@@ -79,6 +79,7 @@ type Owner struct {
 	lease            *persistencefs.SeparateOwnerLifetimeLease
 	anchor           Anchor
 	private          ed25519.PrivateKey
+	stateDirectory   persistencefs.SeparateOwnerDirectoryState
 	checkpoint       domainsecurity.MonotonicHeadCheckpointV1
 	lastRecordDigest string
 	committed        map[string]committedMutation
@@ -136,7 +137,7 @@ func createForIsolatedFixture(ctx context.Context, userDataDir string, anchor An
 	if err != nil {
 		return nil, err
 	}
-	owner, err := recoverOwner(ctx, lease, anchor)
+	owner, err := recoverOwner(ctx, lease, anchor, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +148,12 @@ func createForIsolatedFixture(ctx context.Context, userDataDir string, anchor An
 // OpenExisting strictly recovers the exact enrolled owner; no missing or
 // partial state is repaired by generating fresh identity or a new head.
 func OpenExisting(ctx context.Context, userDataDir string, anchor Anchor) (*Owner, error) {
+	return openExistingWithRecoverySync(ctx, userDataDir, anchor, nil)
+}
+
+// A non-nil syncDirectory is used only by isolated recovery fault tests.
+func openExistingWithRecoverySync(ctx context.Context, userDataDir string, anchor Anchor,
+	syncDirectory func(*persistencefs.SeparateOwnerDirectory) error) (*Owner, error) {
 	root, err := ownerRootPath(userDataDir)
 	if err != nil || validateAnchor(anchor) != nil {
 		return nil, errors.New("shared witness owner enrollment anchor is invalid")
@@ -155,7 +162,7 @@ func OpenExisting(ctx context.Context, userDataDir string, anchor Anchor) (*Owne
 	if err != nil {
 		return nil, err
 	}
-	owner, err := recoverOwner(ctx, lease, anchor)
+	owner, err := recoverOwner(ctx, lease, anchor, syncDirectory)
 	if err != nil {
 		return nil, errors.Join(err, lease.Close())
 	}
@@ -217,7 +224,8 @@ func strictRecord(body []byte, target any) error {
 	return nil
 }
 
-func recoverOwner(ctx context.Context, lease *persistencefs.SeparateOwnerLifetimeLease, anchor Anchor) (*Owner, error) {
+func recoverOwner(ctx context.Context, lease *persistencefs.SeparateOwnerLifetimeLease, anchor Anchor,
+	syncDirectory func(*persistencefs.SeparateOwnerDirectory) error) (*Owner, error) {
 	owner := &Owner{lease: lease, anchor: Anchor{
 		InstallationID: anchor.InstallationID, AuthorityKeyID: anchor.AuthorityKeyID,
 		AuthorityPublicKey: append(ed25519.PublicKey(nil), anchor.AuthorityPublicKey...),
@@ -323,7 +331,9 @@ func recoverOwner(ctx context.Context, lease *persistencefs.SeparateOwnerLifetim
 			owner.committed[record.AdvanceRequest.MutationID] = committedMutation{record.AdvanceRequest, record.AdvanceReceipt}
 		}
 		// An unpublished atomic-write temp cannot be a committed generation.
-		// Remove only the exact next-generation temp after the chain is valid.
+		// Validate the entire temp inventory before deleting any residue. An
+		// unexpected later entry must leave the original evidence untouched.
+		verifiedTemps := make(map[string]persistencefs.SeparateOwnerFileState, len(temps))
 		for _, name := range temps {
 			if !persistencefs.IsSeparateOwnerAtomicTempName(journalName(owner.checkpoint.Generation+1), name) {
 				return errors.New("shared witness owner has an unexpected temporary file")
@@ -332,9 +342,23 @@ func recoverOwner(ctx context.Context, lease *persistencefs.SeparateOwnerLifetim
 			if err != nil || !present {
 				return errors.New("shared witness owner temporary file is unsafe")
 			}
-			if err := stateDir.RemoveKnownTempFiles(ctx, map[string]persistencefs.SeparateOwnerFileState{name: state}); err != nil {
-				return err
-			}
+			verifiedTemps[name] = state
+		}
+		if err := stateDir.RemoveKnownTempFiles(ctx, verifiedTemps); err != nil {
+			return err
+		}
+		// A record may have been published before the writer could fsync its
+		// directory. Recovery must make every accepted directory entry durable
+		// before this owner can sign or return the recovered head.
+		if syncDirectory == nil {
+			syncDirectory = (*persistencefs.SeparateOwnerDirectory).Sync
+		}
+		if err := syncDirectory(stateDir); err != nil {
+			return err
+		}
+		owner.stateDirectory = stateDir.State()
+		if !owner.stateDirectory.Valid() || !owner.stateDirectory.Protected {
+			return errors.New("shared witness owner state directory changed during recovery")
 		}
 		return nil
 	})
@@ -350,7 +374,33 @@ func (owner *Owner) sign(message []byte) ([]byte, error) {
 }
 
 func (owner *Owner) liveLocked() bool {
-	return owner != nil && !owner.closed && !owner.poisoned && owner.lease != nil && len(owner.private) == ed25519.PrivateKeySize
+	return owner != nil && !owner.closed && !owner.poisoned && owner.lease != nil &&
+		owner.stateDirectory.Valid() && owner.stateDirectory.Protected && len(owner.private) == ed25519.PrivateKeySize
+}
+
+func (owner *Owner) withStateAccess(ctx context.Context, access func(*persistencefs.SeparateOwnerDirectory) error) error {
+	return owner.lease.WithRootAccess(ctx, func(rootAccess *persistencefs.SeparateOwnerRootAccess) error {
+		rootDir, err := rootAccess.Directory()
+		if err != nil {
+			return err
+		}
+		stateDir, present, err := rootDir.OpenDirectory(ctx, stateDirectoryName, true)
+		if err != nil || !present {
+			return errors.New("shared witness owner state directory is unavailable")
+		}
+		defer stateDir.Close()
+		if stateDir.State() != owner.stateDirectory {
+			return errors.New("shared witness owner state directory identity changed")
+		}
+		var accessErr error
+		if access != nil {
+			accessErr = access(stateDir)
+		}
+		if err := stateDir.Validate(); err != nil {
+			return errors.New("shared witness owner state directory changed during access")
+		}
+		return accessErr
+	})
 }
 
 func (owner *Owner) Observe(ctx context.Context, request domainsecurity.MonotonicHeadObserveRequestV1) (domainsecurity.MonotonicHeadObservationV1, error) {
@@ -367,10 +417,15 @@ func (owner *Owner) Observe(ctx context.Context, request domainsecurity.Monotoni
 		request.EnrollmentID != owner.anchor.EnrollmentID || request.Namespace != domainenrollment.SharedEvidenceNamespaceV1 {
 		return domainsecurity.MonotonicHeadObservationV1{}, monotonichead.ErrInvalidReceipt
 	}
-	if err := owner.lease.WithRootAccess(ctx, func(*persistencefs.SeparateOwnerRootAccess) error { return nil }); err != nil {
+	var observation domainsecurity.MonotonicHeadObservationV1
+	if err := owner.withStateAccess(ctx, func(*persistencefs.SeparateOwnerDirectory) error {
+		var signErr error
+		observation, signErr = domainsecurity.NewMonotonicHeadObservationV1(request, owner.checkpoint, owner.sign)
+		return signErr
+	}); err != nil {
 		return domainsecurity.MonotonicHeadObservationV1{}, errors.Join(monotonichead.ErrUnavailable, err)
 	}
-	return domainsecurity.NewMonotonicHeadObservationV1(request, owner.checkpoint, owner.sign)
+	return observation, nil
 }
 
 func (owner *Owner) Advance(ctx context.Context, request domainsecurity.MonotonicHeadAdvanceRequestV1) (domainsecurity.MonotonicHeadAdvanceReceiptV1, error) {
@@ -387,14 +442,24 @@ func (owner *Owner) Advance(ctx context.Context, request domainsecurity.Monotoni
 		request.EnrollmentID != owner.anchor.EnrollmentID || request.Namespace != domainenrollment.SharedEvidenceNamespaceV1 {
 		return domainsecurity.MonotonicHeadAdvanceReceiptV1{}, monotonichead.ErrInvalidReceipt
 	}
-	if err := owner.lease.WithRootAccess(ctx, func(*persistencefs.SeparateOwnerRootAccess) error { return nil }); err != nil {
-		return domainsecurity.MonotonicHeadAdvanceReceiptV1{}, errors.Join(monotonichead.ErrUnavailable, err)
-	}
-	if stored, exists := owner.committed[request.MutationID]; exists {
-		if stored.request != request {
+	var replay *domainsecurity.MonotonicHeadAdvanceReceiptV1
+	if err := owner.withStateAccess(ctx, func(*persistencefs.SeparateOwnerDirectory) error {
+		if stored, exists := owner.committed[request.MutationID]; exists {
+			if stored.request != request {
+				return monotonichead.ErrMutationConflict
+			}
+			original := stored.receipt
+			replay = &original
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, monotonichead.ErrMutationConflict) {
 			return domainsecurity.MonotonicHeadAdvanceReceiptV1{}, monotonichead.ErrMutationConflict
 		}
-		return stored.receipt, nil
+		return domainsecurity.MonotonicHeadAdvanceReceiptV1{}, errors.Join(monotonichead.ErrUnavailable, err)
+	}
+	if replay != nil {
+		return *replay, nil
 	}
 	current := owner.checkpoint
 	if current.Generation >= maxJournalFiles {
@@ -434,16 +499,7 @@ func (owner *Owner) Advance(ctx context.Context, request domainsecurity.Monotoni
 		return domainsecurity.MonotonicHeadAdvanceReceiptV1{}, errors.Join(monotonichead.ErrUnavailable, err)
 	}
 	defer clear(body)
-	err = owner.lease.WithRootAccess(ctx, func(access *persistencefs.SeparateOwnerRootAccess) error {
-		rootDir, err := access.Directory()
-		if err != nil {
-			return err
-		}
-		stateDir, present, err := rootDir.OpenDirectory(ctx, stateDirectoryName, true)
-		if err != nil || !present {
-			return errors.New("shared witness owner state directory disappeared")
-		}
-		defer stateDir.Close()
+	err = owner.withStateAccess(ctx, func(stateDir *persistencefs.SeparateOwnerDirectory) error {
 		return stateDir.WriteExclusiveAtomic(ctx, journalName(next.Generation), body, maxRecordBytes, owner.writeFault)
 	})
 	if err != nil {
@@ -472,17 +528,25 @@ func (owner *Owner) ResolveMutation(ctx context.Context, request domainsecurity.
 		request.AdvanceRequest.EnrollmentID != owner.anchor.EnrollmentID || request.AdvanceRequest.Namespace != domainenrollment.SharedEvidenceNamespaceV1 {
 		return domainsecurity.MonotonicHeadMutationResolutionV1{}, monotonichead.ErrInvalidReceipt
 	}
-	if err := owner.lease.WithRootAccess(ctx, func(*persistencefs.SeparateOwnerRootAccess) error { return nil }); err != nil {
-		return domainsecurity.MonotonicHeadMutationResolutionV1{}, errors.Join(monotonichead.ErrUnavailable, err)
-	}
-	var committed *domainsecurity.MonotonicHeadCommittedMutationV1
-	if stored, exists := owner.committed[request.AdvanceRequest.MutationID]; exists {
-		if stored.request != request.AdvanceRequest {
+	var resolution domainsecurity.MonotonicHeadMutationResolutionV1
+	if err := owner.withStateAccess(ctx, func(*persistencefs.SeparateOwnerDirectory) error {
+		var committed *domainsecurity.MonotonicHeadCommittedMutationV1
+		if stored, exists := owner.committed[request.AdvanceRequest.MutationID]; exists {
+			if stored.request != request.AdvanceRequest {
+				return monotonichead.ErrMutationConflict
+			}
+			committed = &domainsecurity.MonotonicHeadCommittedMutationV1{AdvanceRequest: stored.request, AdvanceReceipt: stored.receipt}
+		}
+		var signErr error
+		resolution, signErr = domainsecurity.NewMonotonicHeadMutationResolutionV1(request, owner.checkpoint, committed, owner.sign)
+		return signErr
+	}); err != nil {
+		if errors.Is(err, monotonichead.ErrMutationConflict) {
 			return domainsecurity.MonotonicHeadMutationResolutionV1{}, monotonichead.ErrMutationConflict
 		}
-		committed = &domainsecurity.MonotonicHeadCommittedMutationV1{AdvanceRequest: stored.request, AdvanceReceipt: stored.receipt}
+		return domainsecurity.MonotonicHeadMutationResolutionV1{}, errors.Join(monotonichead.ErrUnavailable, err)
 	}
-	return domainsecurity.NewMonotonicHeadMutationResolutionV1(request, owner.checkpoint, committed, owner.sign)
+	return resolution, nil
 }
 
 func (owner *Owner) Close() error {
