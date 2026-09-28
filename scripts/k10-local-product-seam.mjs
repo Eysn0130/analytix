@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { createK10DarwinExplicitTaskKeychain } from './k10-darwin-explicit-keychain.mjs'
 import {
   exactMainCommandMatches,
+  exactCoreRuntimeCommandMatches,
   exactTaskGroupMembers,
   observedSingleInstanceLockFailure,
   normalQuitFailureCode,
@@ -1213,9 +1214,7 @@ function ownedGoPid(mainPid) {
       const match = row.match(/^(\d+)\s+(\d+)\s+(.+)$/u)
       const executable = `${resolve(packagedAppPath, '../..')}/Resources/runtime-go/bin/runtime-server`
       if (match && Number(match[1]) === mainPid &&
-          match[3].startsWith(`${executable} `) &&
-          (match[3].includes(`--data-dir ${runtimeDataDirPath} `) ||
-            match[3].endsWith(`--data-dir ${runtimeDataDirPath}`))) {
+          exactCoreRuntimeCommandMatches(match[3], executable, runtimeDataDirPath)) {
         const born = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'lstart=']).trim()
         if (born && boundedProcessProbe('ps', ['-p', String(pid), '-o', 'lstart=']).trim() === born) {
           ownedGoIdentity = { pid, pgid: Number(match[2]), born, command: match[3] }

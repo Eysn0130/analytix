@@ -30,6 +30,16 @@ export function exactMainCommandMatches(commandRow, parentPid, mainPid, executab
     match[3].startsWith(`${executable} --remote-debugging-port=${debugPort} `))
 }
 
+export function exactCoreRuntimeCommandMatches(command, executable, runtimeDataDir) {
+  if (!command || !executable || !runtimeDataDir) return false
+  const args = command.trim().split(/\s+/u)
+  if (args[0] !== executable || args[1] !== '--addr' || !args[2]) return false
+  if (args.filter((arg) => arg === '--data-dir').length !== 1 ||
+      args.filter((arg) => arg === '--private-startup-frame-v1').length !== 1) return false
+  const dataDirIndex = args.indexOf('--data-dir')
+  return args[dataDirIndex + 1] === runtimeDataDir
+}
+
 export function normalQuitFailureCode({ quitRequestOk, targetClosed, mainExited, mainExitCode,
   mainSignal, fallbackUsed, residualProcessCount }) {
   if (fallbackUsed) return 'normal_quit_required_fallback'

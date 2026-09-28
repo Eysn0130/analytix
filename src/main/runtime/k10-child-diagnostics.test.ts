@@ -9,6 +9,7 @@ import {
   parseGoOwnerPhase,
   isGoStartupAttemptMarker,
   exactMainCommandMatches,
+  exactCoreRuntimeCommandMatches,
   observedSingleInstanceLockFailure,
   processProbeFailureKind
 } from '../../../scripts/lib/k10-child-diagnostics.mjs'
@@ -50,6 +51,18 @@ describe('K10 process probe evidence', () => {
     expect(matches(command.replace('42 100', '1 100'))).toBe(false)
     expect(matches(command.replace('42 100', '42 101'))).toBe(false)
     expect(matches(command.replace('port=1234', 'port=4321'))).toBe(false)
+  })
+
+  it('does not count the Funds materializer as the Core runtime spawn', () => {
+    const executable = '/Applications/analytix.app/Contents/Resources/runtime-go/bin/runtime-server'
+    const dataDir = '/private/tmp/task/runtime-data'
+    const matches = (command: string) => exactCoreRuntimeCommandMatches(command, executable, dataDir)
+    const core = `${executable} --addr 127.0.0.1:8899 --data-dir ${dataDir} --private-startup-frame-v1`
+    const materializer = `${executable} bundled-plugin materialize-funds-v1 --data-dir ${dataDir}`
+    expect(matches(core)).toBe(true)
+    expect(matches(materializer)).toBe(false)
+    expect(matches(core.replace(dataDir, `${dataDir}-other`))).toBe(false)
+    expect(matches(core.replace('--private-startup-frame-v1', ''))).toBe(false)
   })
 
   it('does not certify a normal quit after fallback or unknown Helper/Go residuals', () => {
