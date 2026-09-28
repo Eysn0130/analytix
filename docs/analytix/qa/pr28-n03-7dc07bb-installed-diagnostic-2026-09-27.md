@@ -62,3 +62,27 @@ installed run closes that symptom on this candidate. It does not identify all
 cold-start causes, establish an acceptable latency percentile, or transfer to
 the later Funds/authority source. A final frozen candidate needs its own
 installed and applicable live-Provider/Funds acceptance.
+
+## Observer correction and second run
+
+The first K10 run's `launchToGoSpawnObserved` counter was later found to be
+ambiguous: the process probe matched the bundled Funds materializer because it
+uses the same `runtime-server` executable and data directory. Commit
+`032b8a147` corrected the K10 observer to require the Core `--addr` command
+role and exact private startup frame. The defect failed a focused regression
+before the correction; afterwards Vitest passed 8/8, TypeScript typecheck and
+Node syntax checks passed. The installed product bytes were not changed.
+
+The same `7dc07bb` installed app then completed a second fresh isolated K10
+run with the corrected observer, exit 0, `green=true`, normal quit without
+fallback, and zero residual processes. Its report is
+`/Volumes/AnalytixCache/development-v3/builds/pr28-full-7dc-n03/n03-7dc-k10-observer-032b.jsonl`,
+SHA-256 `8fb912798af6ef48af6b5c9b57338ecdafdf98272b6ca13075295b17e60430c1`.
+The corrected first Core spawn observation was 66,847 ms after launch, versus
+19,512 ms in the prior report's materializer-contaminated metric. The actual
+first Core process spawn-to-ready-line phase was 53,613 ms. This second run's
+launch-to-composer was 181,462 ms; first materialization was 49,990 ms, and
+the observer made 4,512 probes totaling 32,060 ms. The variation between two
+same-product runs reinforces that current evidence cannot claim a stable cold
+startup improvement or assign the difference to one owner. Further N03 work
+requires narrower bounded subspans and matched observation conditions.
