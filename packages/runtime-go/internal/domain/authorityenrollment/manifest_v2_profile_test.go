@@ -101,6 +101,25 @@ func TestSharedEvidenceOnlyManifestBindsOnlyItsExactCredentialProfile(t *testing
 	if err := ValidateCredentialProfileForManifestV2(anchored, dualProfile); err == nil {
 		t.Fatal("shared-only manifest accepted a dual credential profile")
 	}
+	overclaimedInput := input
+	overclaimedInput.CredentialProfileDigest = dualProfile.ProfileDigest
+	overclaimedManifest, err := NewSharedEvidenceOnlyManifestV2(overclaimedInput, fixture.sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overclaimedAnchor, err := AnchorManifestForInstallationV2(
+		overclaimedManifest, overclaimedInput.InstallationID, overclaimedInput.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, overclaimedManifest.ManifestDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCredentialProfileForManifestV2(overclaimedAnchor, dualProfile); err == nil {
+		t.Fatal("shared-only manifest accepted an unsigned ThreadRisk namespace with a matching profile digest")
+	}
+	if _, err := BindCredentialProfileForManifestV2(overclaimedAnchor, dualProfile); err == nil {
+		t.Fatal("shared-only manifest bound an unsigned ThreadRisk namespace with a matching profile digest")
+	}
 	dualInput := manifestInputV2(t, fixture)
 	dualInput.CredentialProfileDigest = sharedProfile.ProfileDigest
 	dualManifest, err := NewManifestV2(dualInput, fixture.sign)
