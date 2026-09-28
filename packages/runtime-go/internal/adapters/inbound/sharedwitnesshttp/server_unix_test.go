@@ -82,14 +82,19 @@ func (source *testAnchorSource) rotateAt(load int, digest string) {
 }
 
 func newWitnessFixture(t *testing.T) witnessFixture {
-	return newWitnessFixtureWithOptions(t, time.Time{}, false)
+	return newWitnessFixtureWithOptions(t, time.Time{}, false, time.Time{})
 }
 
 func newWitnessFixtureWithClientExpiry(t *testing.T, clientExpiry time.Time) witnessFixture {
-	return newWitnessFixtureWithOptions(t, clientExpiry, false)
+	return newWitnessFixtureWithOptions(t, clientExpiry, false, time.Time{})
 }
 
-func newWitnessFixtureWithOptions(t *testing.T, clientExpiry time.Time, clientIntermediate bool) witnessFixture {
+func newWitnessFixtureWithServerIntermediateExpiry(t *testing.T, expiry time.Time) witnessFixture {
+	return newWitnessFixtureWithOptions(t, time.Time{}, false, expiry)
+}
+
+func newWitnessFixtureWithOptions(t *testing.T, clientExpiry time.Time,
+	clientIntermediate bool, serverIntermediateExpiry time.Time) witnessFixture {
 	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -124,7 +129,16 @@ func newWitnessFixtureWithOptions(t *testing.T, clientExpiry time.Time, clientIn
 		AuthorityPublicKey: installationPublic, EnrollmentID: enrollmentID, GenesisCheckpoint: checkpoint,
 	}
 	root, rootPrivate, rootDER := makeTestRoot(t)
-	serverCertificate, _, _ := makeTestLeaf(t, root, rootPrivate, x509.ExtKeyUsageServerAuth)
+	serverIssuer, serverIssuerPrivate := root, rootPrivate
+	var serverIntermediateDER []byte
+	if !serverIntermediateExpiry.IsZero() {
+		serverIssuer, serverIssuerPrivate, serverIntermediateDER = makeTestIntermediateWithExpiry(
+			t, root, rootPrivate, x509.ExtKeyUsageServerAuth, serverIntermediateExpiry)
+	}
+	serverCertificate, _, _ := makeTestLeaf(t, serverIssuer, serverIssuerPrivate, x509.ExtKeyUsageServerAuth)
+	if len(serverIntermediateDER) != 0 {
+		serverCertificate.Certificate = append(serverCertificate.Certificate, serverIntermediateDER)
+	}
 	clientIssuer, clientIssuerPrivate := root, rootPrivate
 	var clientIntermediateDER []byte
 	if clientIntermediate {
@@ -459,12 +473,58 @@ func TestAnchorRotationAfterCommitReturnsIndeterminateForResolution(t *testing.T
 }
 
 func TestServerAcceptsLoaderStyleClientIntermediateChain(t *testing.T) {
-	fixture := newWitnessFixtureWithOptions(t, time.Time{}, true)
+	fixture := newWitnessFixtureWithOptions(t, time.Time{}, true, time.Time{})
 	fixture.createExistingOwner(t)
 	fixture.start(t)
 	observation, err := fixture.client(t).Observe(context.Background(), fixture.observeRequest(t))
 	if err != nil || observation.Checkpoint != fixture.anchor.GenesisCheckpoint {
 		t.Fatalf("enrolled intermediate client chain = %+v, %v", observation, err)
+	}
+}
+
+func TestServerRejectsAlternateCrossSignedClientIntermediate(t *testing.T) {
+	fixture := newWitnessFixtureWithOptions(t, time.Time{}, true, time.Time{})
+	fixture.createExistingOwner(t)
+	fixture.start(t)
+	enrolledIntermediate, err := x509.ParseCertificate(fixture.config.ClientChainDER[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	alternateDER := makeTestAlternateIntermediate(t, fixture.root, fixture.rootPrivate, enrolledIntermediate)
+	alternateIntermediate, err := x509.ParseCertificate(alternateDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(alternateDER, enrolledIntermediate.Raw) ||
+		!bytes.Equal(alternateIntermediate.RawSubject, enrolledIntermediate.RawSubject) ||
+		!bytes.Equal(alternateIntermediate.RawSubjectPublicKeyInfo, enrolledIntermediate.RawSubjectPublicKeyInfo) {
+		t.Fatal("alternate intermediate is not the intended same-subject same-key replacement")
+	}
+	leaf, err := x509.ParseCertificate(fixture.config.ClientChainDER[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(fixture.root)
+	intermediates := x509.NewCertPool()
+	intermediates.AddCert(alternateIntermediate)
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Fatalf("alternate chain is not otherwise valid: %v", err)
+	}
+	observeBody, err := domainsecurity.MonotonicHeadObserveRequestV1Bytes(fixture.observeRequest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alternateClient := fixture.rawClientChain(t, [][]byte{fixture.config.ClientChainDER[0], alternateDER},
+		fixture.clientPrivate, tls.VersionTLS13)
+	if response, err := fixture.uncheckedPost(alternateClient, monotonicheadhttp.ObservePath, observeBody); err == nil {
+		_ = response.Body.Close()
+		t.Fatal("alternate cross-signed client chain completed mTLS handshake")
+	}
+	if observation, err := fixture.client(t).Observe(context.Background(), fixture.observeRequest(t)); err != nil ||
+		observation.Checkpoint.Generation != 0 {
+		t.Fatalf("enrolled chain was rejected after alternate: %+v, %v", observation, err)
 	}
 }
 
@@ -516,6 +576,16 @@ func TestServerRejectsUnenrolledClientAndMalformedHTTP(t *testing.T) {
 
 func TestExpiredClientCannotAdvanceOnReusedTLSConnection(t *testing.T) {
 	fixture := newWitnessFixtureWithClientExpiry(t, time.Now().Add(4*time.Second))
+	assertExpiredChainRejectsAdvance(t, fixture, fixture.config.ClientChainDER[0])
+}
+
+func TestExpiredServerIntermediateCannotAdvanceOnReusedTLSConnection(t *testing.T) {
+	fixture := newWitnessFixtureWithServerIntermediateExpiry(t, time.Now().Add(4*time.Second))
+	assertExpiredChainRejectsAdvance(t, fixture, fixture.config.ServerCertificate.Certificate[1])
+}
+
+func assertExpiredChainRejectsAdvance(t *testing.T, fixture witnessFixture, expiringDER []byte) {
+	t.Helper()
 	fixture.createExistingOwner(t)
 	server := fixture.start(t)
 	roots := x509.NewCertPool()
@@ -545,11 +615,11 @@ func TestExpiredClientCannotAdvanceOnReusedTLSConnection(t *testing.T) {
 	if err := first.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	clientLeaf, err := x509.ParseCertificate(fixture.config.ClientChainDER[0])
+	expiringCertificate, err := x509.ParseCertificate(expiringDER)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wait := time.Until(clientLeaf.NotAfter.Add(150 * time.Millisecond)); wait > 0 {
+	if wait := time.Until(expiringCertificate.NotAfter.Add(150 * time.Millisecond)); wait > 0 {
 		time.Sleep(wait)
 	}
 	advance := fixture.advanceRequest(t, fixture.anchor.GenesisCheckpoint, "expired client mutation", "forbidden state")
@@ -590,6 +660,11 @@ func TestExpiredClientCannotAdvanceOnReusedTLSConnection(t *testing.T) {
 }
 
 func (fixture witnessFixture) rawClient(t *testing.T, leafDER []byte, private ed25519.PrivateKey, maxTLS uint16) *http.Client {
+	return fixture.rawClientChain(t, [][]byte{leafDER}, private, maxTLS)
+}
+
+func (fixture witnessFixture) rawClientChain(t *testing.T, chainDER [][]byte,
+	private ed25519.PrivateKey, maxTLS uint16) *http.Client {
 	t.Helper()
 	roots := x509.NewCertPool()
 	roots.AddCert(fixture.root)
@@ -597,7 +672,7 @@ func (fixture witnessFixture) rawClient(t *testing.T, leafDER []byte, private ed
 		Proxy: nil, DisableKeepAlives: true,
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, MaxVersion: maxTLS,
 			RootCAs: roots, ServerName: "127.0.0.1",
-			Certificates: []tls.Certificate{{Certificate: [][]byte{leafDER}, PrivateKey: private}}},
+			Certificates: []tls.Certificate{{Certificate: chainDER, PrivateKey: private}}},
 	}}
 }
 
@@ -695,17 +770,26 @@ func makeTestRoot(t *testing.T) (*x509.Certificate, ed25519.PrivateKey, []byte) 
 
 func makeTestIntermediate(t *testing.T, root *x509.Certificate,
 	rootPrivate ed25519.PrivateKey) (*x509.Certificate, ed25519.PrivateKey, []byte) {
+	return makeTestIntermediateWithExpiry(t, root, rootPrivate, x509.ExtKeyUsageClientAuth, time.Time{})
+}
+
+func makeTestIntermediateWithExpiry(t *testing.T, root *x509.Certificate,
+	rootPrivate ed25519.PrivateKey, usage x509.ExtKeyUsage,
+	expiry time.Time) (*x509.Certificate, ed25519.PrivateKey, []byte) {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if expiry.IsZero() {
+		expiry = time.Now().Add(24 * time.Hour)
+	}
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "isolated shared witness client CA"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: expiry,
 		BasicConstraintsValid: true, IsCA: true,
 		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage: []x509.ExtKeyUsage{usage},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, root, public, rootPrivate)
 	if err != nil {
@@ -716,6 +800,22 @@ func makeTestIntermediate(t *testing.T, root *x509.Certificate,
 		t.Fatal(err)
 	}
 	return intermediate, private, der
+}
+
+func makeTestAlternateIntermediate(t *testing.T, root *x509.Certificate,
+	rootPrivate ed25519.PrivateKey, enrolled *x509.Certificate) []byte {
+	t.Helper()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(901), Subject: enrolled.Subject,
+		NotBefore: enrolled.NotBefore, NotAfter: enrolled.NotAfter.Add(-time.Hour),
+		BasicConstraintsValid: true, IsCA: true,
+		KeyUsage: enrolled.KeyUsage, ExtKeyUsage: append([]x509.ExtKeyUsage(nil), enrolled.ExtKeyUsage...),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, root, enrolled.PublicKey, rootPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
 
 func makeTestLeaf(t *testing.T, root *x509.Certificate, rootPrivate ed25519.PrivateKey,

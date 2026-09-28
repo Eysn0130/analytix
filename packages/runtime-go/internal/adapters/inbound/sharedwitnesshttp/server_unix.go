@@ -111,12 +111,12 @@ func Start(ctx context.Context, config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientLeaf, err := pinnedClientChain(config.ClientChainDER,
+	clientChainDER, err := pinnedClientChain(config.ClientChainDER,
 		enrollment.MTLSClientIdentityCertificateSHA256, root, rootPool)
 	if err != nil {
 		return nil, err
 	}
-	serverCertificate, err := pinnedServerCertificate(config.ServerCertificate, rootPool, enrollment.ServerName)
+	serverCertificate, serverChain, err := pinnedServerCertificate(config.ServerCertificate, rootPool, enrollment.ServerName)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,6 @@ func Start(ctx context.Context, config Config) (*Server, error) {
 	if err != nil {
 		return nil, errors.Join(errors.New("shared witness fixed listener is unavailable"), err, owner.Close())
 	}
-	clientDER := append([]byte(nil), clientLeaf.Raw...)
 	tlsConfig := &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{serverCertificate},
@@ -155,7 +154,7 @@ func Start(ctx context.Context, config Config) (*Server, error) {
 		ClientCAs:    rootPool,
 		NextProtos:   []string{"http/1.1"},
 		VerifyConnection: func(state tls.ConnectionState) error {
-			if !validEnrolledClientConnection(state, clientDER, root.Raw) {
+			if !validEnrolledClientConnection(state, clientChainDER, root.Raw) {
 				return errors.New("shared witness client certificate is not enrolled")
 			}
 			return nil
@@ -163,8 +162,8 @@ func Start(ctx context.Context, config Config) (*Server, error) {
 	}
 	timeout := time.Duration(enrollment.TimeoutMS) * time.Millisecond
 	handler := &protocolHandler{owner: owner, endpointHost: address,
-		clientDER: clientDER, rootDER: append([]byte(nil), root.Raw...),
-		serverLeaf: serverCertificate.Leaf, anchorSource: config.AnchorSource,
+		clientChainDER: clientChainDER, rootDER: append([]byte(nil), root.Raw...),
+		serverChain: serverChain, anchorSource: config.AnchorSource,
 		expectedAnchor: expectedAnchor}
 	httpServer := &http.Server{
 		Handler:           handler,
@@ -230,9 +229,9 @@ func (server *Server) Close(ctx context.Context) error {
 type protocolHandler struct {
 	owner          *sharedwitnessownerfs.Owner
 	endpointHost   string
-	clientDER      []byte
+	clientChainDER [][]byte
 	rootDER        []byte
-	serverLeaf     *x509.Certificate
+	serverChain    []*x509.Certificate
 	anchorSource   authorityanchorport.Source
 	expectedAnchor authorityanchorport.AnchorV1
 }
@@ -247,8 +246,8 @@ func (handler *protocolHandler) ServeHTTP(writer http.ResponseWriter, request *h
 		request.Header.Get("Content-Encoding") != "" ||
 		!exactHeader(request.Header, "Accept", protocolContentType) ||
 		!exactHeader(request.Header, "Content-Type", protocolContentType) ||
-		request.TLS == nil || !validEnrolledClientConnection(*request.TLS, handler.clientDER, handler.rootDER) ||
-		!validCertificateTime(handler.serverLeaf, now) || !validPeerCertificateTime(*request.TLS, now) {
+		request.TLS == nil || !validEnrolledClientConnection(*request.TLS, handler.clientChainDER, handler.rootDER) ||
+		!validCertificateChainTime(handler.serverChain, now) || !validPeerCertificateTime(*request.TLS, now) {
 		writeError(writer, http.StatusForbidden, "invalid_receipt")
 		return
 	}
@@ -346,7 +345,7 @@ func (handler *protocolHandler) stillAuthorized(ctx context.Context, connection 
 		return false
 	}
 	now := time.Now()
-	return validCertificateTime(handler.serverLeaf, now) && validPeerCertificateTime(*connection, now) &&
+	return validCertificateChainTime(handler.serverChain, now) && validPeerCertificateTime(*connection, now) &&
 		currentAnchorMatches(ctx, handler.anchorSource, handler.expectedAnchor)
 }
 
@@ -449,7 +448,7 @@ func pinnedRoot(der []byte, enrolledDigest string) (*x509.Certificate, *x509.Cer
 }
 
 func pinnedClientChain(chainDER [][]byte, enrolledLeafDigest string, root *x509.Certificate,
-	roots *x509.CertPool) (*x509.Certificate, error) {
+	roots *x509.CertPool) ([][]byte, error) {
 	if len(chainDER) == 0 || len(chainDER) > domaincredentials.MaxClientChainCertificatesV1 {
 		return nil, errors.New("shared witness client chain length is invalid")
 	}
@@ -521,18 +520,22 @@ func pinnedClientChain(chainDER [][]byte, enrolledLeafDigest string, root *x509.
 	if !bytes.Equal(verified[0][len(certificates)].Raw, root.Raw) {
 		return nil, errors.New("shared witness verified client root differs from enrollment")
 	}
-	return leaf, nil
+	pinned := make([][]byte, len(certificates))
+	for index, certificate := range certificates {
+		pinned[index] = append([]byte(nil), certificate.Raw...)
+	}
+	return pinned, nil
 }
 
-func validEnrolledClientConnection(state tls.ConnectionState, leafDER, rootDER []byte) bool {
-	if len(state.PeerCertificates) == 0 || len(state.VerifiedChains) != 1 ||
-		len(state.VerifiedChains[0]) != len(state.PeerCertificates)+1 ||
-		!bytes.Equal(state.PeerCertificates[0].Raw, leafDER) ||
-		!bytes.Equal(state.VerifiedChains[0][len(state.PeerCertificates)].Raw, rootDER) {
+func validEnrolledClientConnection(state tls.ConnectionState, chainDER [][]byte, rootDER []byte) bool {
+	if len(chainDER) == 0 || len(state.PeerCertificates) != len(chainDER) || len(state.VerifiedChains) != 1 ||
+		len(state.VerifiedChains[0]) != len(chainDER)+1 ||
+		!bytes.Equal(state.VerifiedChains[0][len(chainDER)].Raw, rootDER) {
 		return false
 	}
 	for index, certificate := range state.PeerCertificates {
-		if !bytes.Equal(state.VerifiedChains[0][index].Raw, certificate.Raw) {
+		if !bytes.Equal(certificate.Raw, chainDER[index]) ||
+			!bytes.Equal(state.VerifiedChains[0][index].Raw, certificate.Raw) {
 			return false
 		}
 	}
@@ -555,18 +558,31 @@ func validCertificateTime(certificate *x509.Certificate, now time.Time) bool {
 	return certificate != nil && !now.Before(certificate.NotBefore) && !now.After(certificate.NotAfter)
 }
 
-func pinnedServerCertificate(certificate tls.Certificate, roots *x509.CertPool, serverName string) (tls.Certificate, error) {
+func validCertificateChainTime(chain []*x509.Certificate, now time.Time) bool {
+	if len(chain) < 2 {
+		return false
+	}
+	for _, certificate := range chain {
+		if !validCertificateTime(certificate, now) {
+			return false
+		}
+	}
+	return true
+}
+
+func pinnedServerCertificate(certificate tls.Certificate, roots *x509.CertPool,
+	serverName string) (tls.Certificate, []*x509.Certificate, error) {
 	signer, signerOK := certificate.PrivateKey.(crypto.Signer)
 	if len(certificate.Certificate) == 0 || len(certificate.Certificate) > domaincredentials.MaxClientChainCertificatesV1 ||
 		!signerOK || signer == nil {
-		return tls.Certificate{}, errors.New("shared witness server certificate is incomplete")
+		return tls.Certificate{}, nil, errors.New("shared witness server certificate is incomplete")
 	}
 	chainDER := make([][]byte, 0, len(certificate.Certificate))
 	certificates := make([]*x509.Certificate, 0, len(certificate.Certificate))
 	var totalBytes uint64
 	for _, supplied := range certificate.Certificate {
 		if len(supplied) == 0 || uint64(len(supplied)) > domaincredentials.MaxClientChainBytesV1-totalBytes {
-			return tls.Certificate{}, errors.New("shared witness server chain size is invalid")
+			return tls.Certificate{}, nil, errors.New("shared witness server chain size is invalid")
 		}
 		totalBytes += uint64(len(supplied))
 		der := append([]byte(nil), supplied...)
@@ -574,7 +590,7 @@ func pinnedServerCertificate(certificate tls.Certificate, roots *x509.CertPool, 
 		if err != nil || parsed == nil || !bytes.Equal(parsed.Raw, der) ||
 			!validCertificateSignatureAlgorithm(parsed.SignatureAlgorithm) ||
 			!validCertificatePublicKey(parsed.PublicKey) {
-			return tls.Certificate{}, errors.New("shared witness server chain contains an invalid certificate")
+			return tls.Certificate{}, nil, errors.New("shared witness server chain contains an invalid certificate")
 		}
 		chainDER = append(chainDER, der)
 		certificates = append(certificates, parsed)
@@ -583,7 +599,7 @@ func pinnedServerCertificate(certificate tls.Certificate, roots *x509.CertPool, 
 	if !leaf.BasicConstraintsValid || leaf.IsCA || leaf.KeyUsage != x509.KeyUsageDigitalSignature ||
 		len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth ||
 		len(leaf.UnknownExtKeyUsage) != 0 {
-		return tls.Certificate{}, errors.New("shared witness server certificate policy is invalid")
+		return tls.Certificate{}, nil, errors.New("shared witness server certificate policy is invalid")
 	}
 	intermediates := x509.NewCertPool()
 	for _, intermediate := range certificates[1:] {
@@ -593,30 +609,30 @@ func pinnedServerCertificate(certificate tls.Certificate, roots *x509.CertPool, 
 			len(intermediate.UnknownExtKeyUsage) != 0 ||
 			(len(intermediate.ExtKeyUsage) != 0 &&
 				(len(intermediate.ExtKeyUsage) != 1 || intermediate.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth)) {
-			return tls.Certificate{}, errors.New("shared witness server intermediate policy is invalid")
+			return tls.Certificate{}, nil, errors.New("shared witness server intermediate policy is invalid")
 		}
 		intermediates.AddCert(intermediate)
 	}
 	verified, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates,
 		DNSName: serverName, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
 	if err != nil || len(verified) != 1 || len(verified[0]) != len(certificates)+1 {
-		return tls.Certificate{}, errors.New("shared witness server certificate cannot be verified")
+		return tls.Certificate{}, nil, errors.New("shared witness server certificate cannot be verified")
 	}
 	for index, parsed := range certificates {
 		if !bytes.Equal(verified[0][index].Raw, parsed.Raw) {
-			return tls.Certificate{}, errors.New("shared witness verified server chain differs from supplied chain")
+			return tls.Certificate{}, nil, errors.New("shared witness verified server chain differs from supplied chain")
 		}
 	}
 	leafKey, leafKeyErr := x509.MarshalPKIXPublicKey(leaf.PublicKey)
 	signerKey, signerKeyErr := x509.MarshalPKIXPublicKey(signer.Public())
 	if leafKeyErr != nil || signerKeyErr != nil || !bytes.Equal(leafKey, signerKey) {
-		return tls.Certificate{}, errors.New("shared witness server private key does not match certificate")
+		return tls.Certificate{}, nil, errors.New("shared witness server private key does not match certificate")
 	}
 	// tls.Certificate carries a signer interface, which cannot be deep-copied.
 	// Copy the public DER and retain the explicitly provided signer for this
 	// server lifetime; TLS itself proves that it matches the leaf at handshake.
 	return tls.Certificate{Certificate: chainDER,
-		PrivateKey: certificate.PrivateKey, Leaf: leaf}, nil
+		PrivateKey: certificate.PrivateKey, Leaf: leaf}, verified[0], nil
 }
 
 func validCertificateSignatureAlgorithm(algorithm x509.SignatureAlgorithm) bool {
