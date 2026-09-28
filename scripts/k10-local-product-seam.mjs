@@ -25,6 +25,7 @@ import {
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
   exactTargetDeadlineReason,
+  normalQuitDeadlineFailureCode,
   exactTaskGroupMembers,
   observedSingleInstanceLockFailure,
   normalQuitFailureCode,
@@ -1358,8 +1359,7 @@ async function normalQuit(debugPort, launched) {
     } catch {
       taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
       lastNormalQuitFacts = { ...lastNormalQuitFacts, fallbackStartedAtMs, fallbackSignalSentAtMs }
-      throw new Error(quitRequestOk
-        ? 'normal_quit_target_stayed_open' : 'normal_quit_request_failed')
+      throw new Error(normalQuitDeadlineFailureCode(quitRequestOk, targetObservationBeforeFallback))
     }
     targetObservationAfterFallback = capturedTargetId
       ? await waitForTargetClosed(debugPort, capturedTargetId, 10_000)
@@ -1375,8 +1375,7 @@ async function normalQuit(debugPort, launched) {
       mainExitCode: launched.child.exitCode,
       mainSignaled: Boolean(launched.child.signalCode) }
     if (latencyObservation) {
-      throw new Error(quitRequestOk
-        ? 'normal_quit_target_stayed_open' : 'normal_quit_request_failed')
+      throw new Error(normalQuitDeadlineFailureCode(quitRequestOk, targetObservationBeforeFallback))
     }
   }
   if (!targetClosed) throw new Error('electron_task_process_group_did_not_close')
@@ -2086,7 +2085,8 @@ try {
 } catch (error) {
   latencyFailed = true
   const allowedFailureCodes = new Set([
-    'normal_quit_target_stayed_open', 'normal_quit_request_failed',
+    'normal_quit_target_stayed_open', 'normal_quit_target_state_unknown',
+    'normal_quit_request_failed',
     'normal_quit_main_abnormal_exit', 'normal_quit_required_fallback',
     'exact_main_process_did_not_exit',
     'electron_task_process_group_did_not_close',

@@ -66,6 +66,12 @@ export function exactTargetDeadlineReason(lastCategory) {
     ? 'target_present_at_deadline' : 'target_state_unknown_at_deadline'
 }
 
+export function normalQuitDeadlineFailureCode(quitRequestOk, observation) {
+  if (!quitRequestOk) return 'normal_quit_request_failed'
+  return observation?.reason === 'target_present_at_deadline'
+    ? 'normal_quit_target_stayed_open' : 'normal_quit_target_state_unknown'
+}
+
 export function residualMembersAlreadyPinned(currentPids, pinnedPids) {
   return Array.isArray(currentPids) && currentPids.every((pid) => pinnedPids.has(pid))
 }

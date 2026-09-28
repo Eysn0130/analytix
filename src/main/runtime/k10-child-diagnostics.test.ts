@@ -5,6 +5,7 @@ import {
   createFundsCSVAdmissionAttemptRecorderV2,
   exactTaskGroupMembers,
   exactTargetDeadlineReason,
+  normalQuitDeadlineFailureCode,
   normalQuitFailureCode,
   residualMembersAlreadyPinned,
   parseRuntimeStartupNumericDiagnostic,
@@ -134,6 +135,13 @@ describe('K10 process probe evidence', () => {
     for (const last of ['target_absent', 'http_error', 'fetch_error', 'malformed', null]) {
       expect(exactTargetDeadlineReason(last)).toBe('target_state_unknown_at_deadline')
     }
+    expect(normalQuitDeadlineFailureCode(true, { reason: 'target_present_at_deadline' }))
+      .toBe('normal_quit_target_stayed_open')
+    expect(normalQuitDeadlineFailureCode(true, { reason: 'target_state_unknown_at_deadline' }))
+      .toBe('normal_quit_target_state_unknown')
+    expect(normalQuitDeadlineFailureCode(true, null)).toBe('normal_quit_target_state_unknown')
+    expect(normalQuitDeadlineFailureCode(false, { reason: 'target_present_at_deadline' }))
+      .toBe('normal_quit_request_failed')
   })
 
   it('does not turn an unknown ps error into an exited process or zero residuals', () => {
