@@ -26,6 +26,7 @@ import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../pac
 import { BundledFundsMaterializationChildUnconfirmedError } from './bundled-funds-materialization'
 import {
   buildDevGoToolchainEnvV1,
+  createCoreFundsCSVAdmissionTraceStreamV1,
   buildDesktopInstallationKeyPreflightArgsV1,
   buildDesktopPrivateHistoryMigrationArgsV2,
   buildGoRuntimeStartupUserDataArgsV1,
@@ -72,6 +73,51 @@ import type {
 const electronApp = vi.hoisted(() => ({ isPackaged: false, getAppPath: () => process.cwd() }))
 vi.mock('electron', () => ({ app: electronApp }))
 afterEach(() => { electronApp.isPackaged = false })
+
+describe('Core Funds CSV admission startup trace', () => {
+  const prefix = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+  const codes = [
+    'native_owner_unavailable', 'shared_evidence_enrollment_absent',
+    'shared_evidence_credential_unavailable', 'dataset_snapshot_unavailable',
+    'ready', 'other_unavailable'
+  ]
+
+  it('forwards only one complete fixed line from the Core stderr stream', () => {
+    for (const code of codes) {
+      const output: string[] = []
+      const trace = createCoreFundsCSVAdmissionTraceStreamV1(true, (line) => output.push(line))
+      const line = Buffer.from(`${prefix}${code}\n`)
+      for (const byte of line) trace.accept(Buffer.from([byte]))
+      trace.accept(`${prefix}ready\n`)
+      expect(output).toEqual([`${prefix}${code}\n`])
+    }
+  })
+
+  it('stays silent when disabled and rejects partial, mixed or unsafe lines', () => {
+    const output: string[] = []
+    const disabled = createCoreFundsCSVAdmissionTraceStreamV1(false, (line) => output.push(line))
+    disabled.accept(`${prefix}ready\n`)
+    expect(output).toEqual([])
+    const trace = createCoreFundsCSVAdmissionTraceStreamV1(true, (line) => output.push(line))
+    for (const unsafe of [
+      `${prefix}ready`, `${prefix}ready path=/private/case\n`,
+      `error=/private/case ${prefix}ready\n`, `${prefix}ready\r\n`,
+      `${prefix}ready${prefix}other_unavailable\n`,
+      `${prefix}unknown\n`, `${'x'.repeat(200)}${prefix}ready\n`
+    ]) trace.accept(unsafe)
+    expect(output).toEqual([])
+    trace.accept(`${prefix}ready\n`)
+    expect(output).toEqual([`${prefix}ready\n`])
+  })
+
+  it('binds the fixed forwarder to the Core child, after materialization', () => {
+    const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
+    expect(source.indexOf('materializeBundledFundsBeforeRuntimeV1({'))
+      .toBeLessThan(source.indexOf('const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV1('))
+    expect(source).toContain("isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1'")
+    expect(source).toContain('    fundsCSVAdmissionTrace.accept(chunk)')
+  })
+})
 
 function mainOwnedAuthorityFixtureV1(): MainOwnedRuntimeAuthorityEnvelopeV1 {
   const publicKey = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1))

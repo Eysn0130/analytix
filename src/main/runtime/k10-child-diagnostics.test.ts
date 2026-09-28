@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  createFundsCSVAdmissionAttemptRecorderV1,
   exactTaskGroupMembers,
   normalQuitFailureCode,
   residualMembersAlreadyPinned,
@@ -7,12 +9,85 @@ import {
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
   parseGoOwnerPhase,
+  parseFundsCSVAdmissionCodeV1,
+  projectFundsCSVAdmissionDiagnosticV1,
   isGoStartupAttemptMarker,
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
   observedSingleInstanceLockFailure,
   processProbeFailureKind
 } from '../../../scripts/lib/k10-child-diagnostics.mjs'
+
+describe('K10 Core Funds CSV admission report', () => {
+  const marker = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+  const phase = (stage: string, elapsedMs: number) =>
+    `[analytix] [main] event=main_info detail=${JSON.stringify({ stage, elapsedMs })}`
+
+  it('parses only exact fixed codes, without retaining child text', () => {
+    for (const code of [
+      'native_owner_unavailable', 'shared_evidence_enrollment_absent',
+      'shared_evidence_credential_unavailable', 'dataset_snapshot_unavailable',
+      'ready', 'other_unavailable'
+    ]) expect(parseFundsCSVAdmissionCodeV1(`${marker}${code}`)).toBe(code)
+    for (const line of [
+      `${marker}ready path=/private/case`, `${marker}ready\r`, `${marker}ready\n`,
+      `error=/private/case ${marker}ready`, `${marker}unknown`,
+      `${marker}ready${marker}ready`, `x${marker}ready`, `${'x'.repeat(200)}${marker}ready`
+    ]) expect(parseFundsCSVAdmissionCodeV1(line)).toBeNull()
+  })
+
+  it('requires a complete Main stdout line after the Core spawn and emits at most once per attempt', () => {
+    const recorder = createFundsCSVAdmissionAttemptRecorderV1(true)
+    const ready = `${marker}ready`
+    recorder.acceptLine('stdout', ready)
+    recorder.acceptLine('stdout', phase('go preflight:begin', 1))
+    recorder.acceptLine('stdout', ready)
+    recorder.acceptLine('stderr', ready)
+    recorder.acceptLine('stdout', phase('go process:spawned', 2))
+    recorder.acceptLine('stdout', ready, false)
+    recorder.acceptLine('stdout', `${ready} error=/private/case`)
+    recorder.acceptLine('stdout', ready)
+    expect(recorder.evidence()).toEqual([{ coreAttemptOrdinal: 1, code: 'ready' }])
+    recorder.acceptLine('stdout', `${marker}native_owner_unavailable`)
+    expect(recorder.evidence()).toEqual([])
+    recorder.acceptLine('stdout', phase('go adapter:done', 3))
+    recorder.acceptLine('stdout', ready)
+    recorder.acceptLine('stdout', phase('go preflight:begin', 4))
+    recorder.acceptLine('stdout', phase('go process:spawned', 5))
+    recorder.acceptLine('stdout', `${marker}dataset_snapshot_unavailable`)
+    expect(projectFundsCSVAdmissionDiagnosticV1([
+      createFundsCSVAdmissionAttemptRecorderV1(false), recorder
+    ])).toEqual({
+      fundsCSVAdmissionDiagnostic: [
+        { launchOrdinal: 2, coreAttemptOrdinal: 2, code: 'dataset_snapshot_unavailable' }
+      ]
+    })
+  })
+
+  it('omits the report when trace is off or no exact Core line is present', () => {
+    const disabled = createFundsCSVAdmissionAttemptRecorderV1(false)
+    disabled.acceptLine('stdout', phase('go preflight:begin', 1))
+    disabled.acceptLine('stdout', phase('go process:spawned', 2))
+    disabled.acceptLine('stdout', `${marker}ready`)
+    expect(projectFundsCSVAdmissionDiagnosticV1([disabled])).toEqual({})
+    const materializer = createFundsCSVAdmissionAttemptRecorderV1(true)
+    materializer.acceptLine('stdout', phase('go preflight:begin', 1))
+    materializer.acceptLine('stdout', `${marker}ready`)
+    expect(projectFundsCSVAdmissionDiagnosticV1([materializer])).toEqual({})
+  })
+
+  it('reads only packaged Main stdout and projects codes in both final outcomes', () => {
+    const source = readFileSync(new URL('../../../scripts/k10-local-product-seam.mjs', import.meta.url), 'utf8')
+    const stdoutStart = source.indexOf("child.stdout.on('data', (chunk) => {")
+    const stderrStart = source.indexOf("child.stderr.on('data', (chunk) => {")
+    expect(stdoutStart).toBeGreaterThan(0)
+    expect(stderrStart).toBeGreaterThan(stdoutStart)
+    expect(source.slice(stdoutStart, stderrStart)).toContain("fundsCSVAdmission.acceptLine('stdout', completedLine, !lineOverflowed)")
+    expect(source.slice(stderrStart, source.indexOf('const closed =', stderrStart)))
+      .not.toContain('fundsCSVAdmission.acceptLine')
+    expect(source.split('...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch)').length - 1).toBe(2)
+  })
+})
 
 describe('K10 single-instance diagnostic', () => {
   it('ignores the normal startup checkpoint and recognizes an explicit lock refusal', () => {

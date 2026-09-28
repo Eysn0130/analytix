@@ -2069,6 +2069,55 @@ function appendGoStderrTail(chunk: string): void {
   goSidecarStderrTail = `${goSidecarStderrTail}${chunk}`.slice(-16_384)
 }
 
+const CORE_FUNDS_CSV_ADMISSION_PREFIX_V1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+const CORE_FUNDS_CSV_ADMISSION_CODES_V1: ReadonlySet<string> = new Set([
+  'native_owner_unavailable',
+  'shared_evidence_enrollment_absent',
+  'shared_evidence_credential_unavailable',
+  'dataset_snapshot_unavailable',
+  'ready',
+  'other_unavailable'
+])
+const MAX_CORE_FUNDS_CSV_ADMISSION_LINE_V1 = 128
+
+// This stream is attached only to the actual Core child, after Funds
+// materialization has finished. It retains at most one bounded partial line
+// and emits only a fixed code, never the child's raw stderr.
+export function createCoreFundsCSVAdmissionTraceStreamV1(
+  enabled: boolean,
+  onFixedLine: (line: string) => void
+): Readonly<{ accept(chunk: Buffer | string): void }> {
+  let pending = ''
+  let dropping = false
+  let emitted = false
+  return {
+    accept(chunk) {
+      if (!enabled || emitted) return
+      const parts = String(chunk).split('\n')
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index]
+        if (!dropping && pending.length + part.length <= MAX_CORE_FUNDS_CSV_ADMISSION_LINE_V1) {
+          pending += part
+        } else {
+          pending = ''
+          dropping = true
+        }
+        if (index === parts.length - 1) break
+        if (!dropping && pending.startsWith(CORE_FUNDS_CSV_ADMISSION_PREFIX_V1)) {
+          const code = pending.slice(CORE_FUNDS_CSV_ADMISSION_PREFIX_V1.length)
+          if (CORE_FUNDS_CSV_ADMISSION_CODES_V1.has(code)) {
+            emitted = true
+            try { onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_PREFIX_V1}${code}\n`) } catch { /* optional diagnostics cannot gate startup */ }
+          }
+        }
+        pending = ''
+        dropping = false
+        if (emitted) return
+      }
+    }
+  }
+}
+
 export function resolveGoRuntimeConfiguredDurableRoot(options: {
   backend: AnalytixRuntimeGoBackendId
   dataDir: string
@@ -2740,10 +2789,15 @@ async function startGoConformanceSidecarOnce(
         publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
       })
     : null
+  const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV1(
+    isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1',
+    (line) => { process.stdout.write(line) }
+  )
   child.stderr?.on('data', (chunk) => {
     appendGoStderrTail(String(chunk))
     publicationTrace.write(chunk)
     startupOwnerTrace?.accept(chunk)
+    fundsCSVAdmissionTrace.accept(chunk)
   })
   child.once('close', () => publicationTrace.close())
   const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })

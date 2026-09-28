@@ -154,3 +154,71 @@ export function parseGoStartupPhase(line) {
 export function isGoStartupAttemptMarker(line) {
   return parseGoStartupPhase(line)?.phase === 'preflightBegin'
 }
+
+const fundsCSVAdmissionPrefixV1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V1 '
+const fundsCSVAdmissionCodesV1 = new Set([
+  'native_owner_unavailable',
+  'shared_evidence_enrollment_absent',
+  'shared_evidence_credential_unavailable',
+  'dataset_snapshot_unavailable',
+  'ready',
+  'other_unavailable'
+])
+
+export function parseFundsCSVAdmissionCodeV1(line) {
+  if (typeof line !== 'string' || line.length > 128 || !line.startsWith(fundsCSVAdmissionPrefixV1)) return null
+  const code = line.slice(fundsCSVAdmissionPrefixV1.length)
+  return fundsCSVAdmissionCodesV1.has(code) ? code : null
+}
+
+// K10 sees Main's stdout, not Core's private stderr. Only a complete Main
+// stdout line after the actual Core spawn can be attributed to that attempt.
+export function createFundsCSVAdmissionAttemptRecorderV1(enabled) {
+  let attemptCount = 0
+  let current = null
+  const attempts = []
+  return {
+    acceptLine(channel, line, complete = true) {
+      if (!enabled || channel !== 'stdout' || !complete) return
+      const phase = parseGoStartupPhase(line)?.phase
+      if (phase === 'preflightBegin') {
+        attemptCount = Math.min(attemptCount + 1, 9)
+        current = attemptCount <= 8
+          ? { coreAttemptOrdinal: attemptCount, spawned: false, code: null, duplicate: false }
+          : null
+        if (current) attempts.push(current)
+        return
+      }
+      if (!current) return
+      if (phase === 'processSpawned') {
+        current.spawned = true
+        return
+      }
+      if (phase === 'adapterDone' || phase === 'adapterFailed') {
+        current = null
+        return
+      }
+      if (!current.spawned) return
+      const code = parseFundsCSVAdmissionCodeV1(line)
+      if (!code) return
+      if (current.code) current.duplicate = true
+      else current.code = code
+    },
+    evidence() {
+      return attempts.filter((attempt) => attempt.code && !attempt.duplicate)
+        .map(({ coreAttemptOrdinal, code }) => ({ coreAttemptOrdinal, code }))
+    }
+  }
+}
+
+export function projectFundsCSVAdmissionDiagnosticV1(launchRecorders) {
+  const observations = []
+  for (const [index, recorder] of launchRecorders.entries()) {
+    for (const entry of recorder.evidence()) {
+      if (!Number.isSafeInteger(entry.coreAttemptOrdinal) || entry.coreAttemptOrdinal < 1 ||
+          entry.coreAttemptOrdinal > 8 || !fundsCSVAdmissionCodesV1.has(entry.code)) continue
+      observations.push({ launchOrdinal: index + 1, coreAttemptOrdinal: entry.coreAttemptOrdinal, code: entry.code })
+    }
+  }
+  return observations.length > 0 ? { fundsCSVAdmissionDiagnostic: observations } : {}
+}

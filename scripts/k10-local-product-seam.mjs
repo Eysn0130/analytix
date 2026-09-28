@@ -20,6 +20,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createK10DarwinExplicitTaskKeychain } from './k10-darwin-explicit-keychain.mjs'
 import {
+  createFundsCSVAdmissionAttemptRecorderV1,
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
   exactTaskGroupMembers,
@@ -29,6 +30,7 @@ import {
   parseRuntimeTransitionPhase,
   parseGoStartupPhase,
   parseGoOwnerPhase,
+  projectFundsCSVAdmissionDiagnosticV1,
   residualMembersAlreadyPinned,
   processProbeFailureKind
 } from './lib/k10-child-diagnostics.mjs'
@@ -96,6 +98,7 @@ let goProbeUnknownCount = 0
 let primaryFailureReasonCode = ''
 const processProbe = { count: 0, elapsedMs: 0, timeoutCount: 0 }
 const launchEvidence = []
+const fundsCSVAdmissionByLaunch = []
 const providerObservations = []
 const providerProbeObservations = []
 let denyProxyConnectionCount = 0
@@ -587,6 +590,7 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     : [`--remote-debugging-port=${debugPort}`, ...chromiumArgs]
   const observations = []
   let line = ''
+  let lineOverflowed = false
   let stdoutBytes = 0
   let stderrBytes = 0
   let diagnosticTail = ''
@@ -643,12 +647,17 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
       if (diagnosticTail.includes(label)) traceStages.add(label)
     }
   }
+  const childEnvironment = safeChildEnvironment(userDataDir, denyProxyPort)
+  const fundsCSVAdmission = createFundsCSVAdmissionAttemptRecorderV1(
+    childEnvironment.ANALYTIX_STARTUP_TRACE === '1'
+  )
   const child = spawn(command, args, {
     cwd: repoRoot,
-    env: safeChildEnvironment(userDataDir, denyProxyPort),
+    env: childEnvironment,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   })
+  fundsCSVAdmissionByLaunch.push(fundsCSVAdmission)
   child.analytixDebugPort = debugPort
   activeChild = child
   activeChildFailureSnapshot = () => ({
@@ -670,11 +679,15 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     stdoutBytes += chunk.length
     classifyDiagnostic(chunk)
     line += chunk.toString('utf8')
-    if (Buffer.byteLength(line) > MAX_CHILD_LINE_BYTES) line = line.slice(-MAX_CHILD_LINE_BYTES)
+    if (Buffer.byteLength(line) > MAX_CHILD_LINE_BYTES) {
+      line = line.slice(-MAX_CHILD_LINE_BYTES)
+      lineOverflowed = true
+    }
     for (;;) {
       const index = line.indexOf('\n')
       if (index < 0) break
       const completedLine = line.slice(0, index)
+      fundsCSVAdmission.acceptLine('stdout', completedLine, !lineOverflowed)
       const phase = parseGoStartupPhase(completedLine)
       const ownerPhase = parseGoOwnerPhase(completedLine)
       const transition = parseRuntimeTransitionPhase(completedLine)
@@ -704,6 +717,7 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
       if (completedLine.includes('dev server running for the electron renderer process')) eventCounts.launcherRendererReady += 1
       if (completedLine.includes('start electron app')) eventCounts.launcherElectronStarted += 1
       line = line.slice(index + 1)
+      lineOverflowed = false
     }
   })
   child.stderr.on('data', (chunk) => {
@@ -1976,6 +1990,7 @@ async function main() {
       externalProviderUsed: false,
       denyProxyConnectionCount
     },
+    ...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch),
     ...(latency ? { latency } : {})
   })
   if (!green) {
@@ -2027,6 +2042,7 @@ try {
     provider: providerObservationFacts(),
     network: { denyProxyConnectionCount },
     runtimeMaterialization: runtimeFailureMaterializationFacts(),
+    ...projectFundsCSVAdmissionDiagnosticV1(fundsCSVAdmissionByLaunch),
     ...(partialLatencyEvidence
       ? { latency: { ...partialLatencyEvidence, normalQuitObserved: false } }
       : {}),

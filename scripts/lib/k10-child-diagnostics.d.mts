@@ -10,3 +10,13 @@ export function parseRuntimeTransitionPhase(line: string): { phase: string; elap
 export function parseGoStartupPhase(line: string): { phase: string; elapsedMs: number } | null
 export function parseGoOwnerPhase(line: string): { stage: string; durationMs: number } | null
 export function isGoStartupAttemptMarker(line: string): boolean
+export type FundsCSVAdmissionCodeV1 = 'native_owner_unavailable' | 'shared_evidence_enrollment_absent' | 'shared_evidence_credential_unavailable' | 'dataset_snapshot_unavailable' | 'ready' | 'other_unavailable'
+export type FundsCSVAdmissionAttemptEvidenceV1 = { coreAttemptOrdinal: number; code: FundsCSVAdmissionCodeV1 }
+export function parseFundsCSVAdmissionCodeV1(line: string): FundsCSVAdmissionCodeV1 | null
+export function createFundsCSVAdmissionAttemptRecorderV1(enabled: boolean): {
+  acceptLine(channel: string, line: string, complete?: boolean): void
+  evidence(): FundsCSVAdmissionAttemptEvidenceV1[]
+}
+export function projectFundsCSVAdmissionDiagnosticV1(
+  launchRecorders: ReturnType<typeof createFundsCSVAdmissionAttemptRecorderV1>[]
+): { fundsCSVAdmissionDiagnostic?: { launchOrdinal: number; coreAttemptOrdinal: number; code: FundsCSVAdmissionCodeV1 }[] }
