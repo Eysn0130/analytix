@@ -1032,11 +1032,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 	} else {
-		// Domain unavailability cannot bypass the shared enrollment/key anchor.
+		// Domain unavailability cannot bypass the signed enrollment/key anchor;
+		// only private credential failure disables the optional capability.
 		_, sharedEvidenceConfiguredV2, err = loadRuntimeSharedEvidenceEnrollmentV2(ctx, config, finalAuthority)
-		if err != nil {
+		if err != nil && !errors.Is(err, errRuntimeOptionalAuthorityCredentialsUnavailable) {
 			return nil, err
 		}
+		err = nil
 	}
 	// Composition is local-only. Protected operations reach this shared
 	// authority and perform their own fresh witness challenge; absent enrollment

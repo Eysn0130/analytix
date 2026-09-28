@@ -84,6 +84,7 @@ var _ runtimeEvidenceRegistryAuthority = (*evidenceregistryapp.Service)(nil)
 var _ evidenceregistryport.FactFinalWitnessIssuer = (*evidenceregistryapp.Service)(nil)
 
 var errRuntimeCaseEvidenceAuthorityUnavailableV1 = errors.New("case evidence authority is unavailable")
+var errRuntimeOptionalAuthorityCredentialsUnavailable = errors.New("optional authority credentials are unavailable")
 
 // Turn admission cannot use a snapshot when its evidence registry is locally
 // unavailable. Reject before the shared witness challenge. Import admission
@@ -161,6 +162,11 @@ func newRuntimeSharedEvidenceDatasetSnapshotV2(
 	registryPreservation *runtimeRegistrySemanticPreservationV1,
 ) (runtimeSharedEvidenceDatasetSnapshotV2, bool, error) {
 	enrolled, configured, err := loadRuntimeSharedEvidenceEnrollmentV2(ctx, config, installationAuthority)
+	if errors.Is(err, errRuntimeOptionalAuthorityCredentialsUnavailable) {
+		// The signed manifest and existing installation key were already
+		// checked; no protected operation receives a partial credential.
+		return runtimeSharedEvidenceDatasetSnapshotV2{}, true, nil
+	}
 	if err != nil || !configured {
 		return runtimeSharedEvidenceDatasetSnapshotV2{}, configured, err
 	}
@@ -301,21 +307,18 @@ func loadRuntimeSharedEvidenceEnrollmentV2(
 	config Config,
 	installationAuthority finalauthorityport.Authority,
 ) (runtimeSharedEvidenceEnrollmentV2, bool, error) {
-	enrolled, configured, err := loadRuntimeSharedEvidenceEnrollmentConfigV2(ctx, config)
-	if err != nil || !configured {
-		return enrolled, configured, err
-	}
-	if installationAuthority == nil || enrolled.projection.InstallationAuthorityKeyID != installationAuthority.KeyID() ||
-		!bytes.Equal(enrolled.projection.InstallationAuthorityPublicKey, installationAuthority.PublicKey()) {
-		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.New("runtime installation authority does not match protected enrollment")
-	}
-	return enrolled, true, nil
-}
-
-func loadRuntimeSharedEvidenceEnrollmentConfigV2(ctx context.Context, config Config) (runtimeSharedEvidenceEnrollmentV2, bool, error) {
 	anchored, projection, configured, err := loadRuntimeSharedEvidenceManifestV2(ctx, config)
 	if err != nil || !configured {
 		return runtimeSharedEvidenceEnrollmentV2{}, configured, err
+	}
+	if installationAuthority == nil || projection.InstallationAuthorityKeyID != installationAuthority.KeyID() ||
+		!bytes.Equal(projection.InstallationAuthorityPublicKey, installationAuthority.PublicKey()) {
+		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.New("runtime installation authority does not match protected enrollment")
+	}
+	witnessKey, err := base64.RawURLEncoding.DecodeString(projection.Enrollment.WitnessPublicKey)
+	if err != nil || base64.RawURLEncoding.EncodeToString(witnessKey) != projection.Enrollment.WitnessPublicKey ||
+		projection.Enrollment.WitnessKeyID != domainsecurity.SHA256Hex(witnessKey) {
+		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.New("runtime shared evidence witness key is invalid")
 	}
 	source := authorityanchorenv.Source{Lookup: func(name string) (string, bool) {
 		if name != authorityanchorenv.AnchorEnvelopeV1Variable {
@@ -327,17 +330,15 @@ func loadRuntimeSharedEvidenceEnrollmentConfigV2(ctx context.Context, config Con
 		ProfileRoot: strings.TrimSpace(config.AuthorityCredentialProfileRoot), BundleRoot: strings.TrimSpace(config.AuthorityCredentialBundleRoot), Anchor: source,
 	}).LoadCurrent(ctx, anchored)
 	if err != nil {
-		return runtimeSharedEvidenceEnrollmentV2{}, true, err
+		if ctx.Err() != nil {
+			return runtimeSharedEvidenceEnrollmentV2{}, true, ctx.Err()
+		}
+		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.Join(errRuntimeOptionalAuthorityCredentialsUnavailable, err)
 	}
 	if credentials.ManifestDigest != projection.ManifestDigest ||
 		credentials.ProfileDigest != projection.CredentialProfileDigest ||
 		credentials.ProfileGeneration != projection.CredentialProfileGeneration {
-		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.New("runtime authority credentials do not match anchored profile")
-	}
-	witnessKey, err := base64.RawURLEncoding.DecodeString(projection.Enrollment.WitnessPublicKey)
-	if err != nil || base64.RawURLEncoding.EncodeToString(witnessKey) != projection.Enrollment.WitnessPublicKey ||
-		projection.Enrollment.WitnessKeyID != domainsecurity.SHA256Hex(witnessKey) {
-		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.New("runtime shared evidence witness key is invalid")
+		return runtimeSharedEvidenceEnrollmentV2{}, true, errors.Join(errRuntimeOptionalAuthorityCredentialsUnavailable, errors.New("runtime authority credentials do not match anchored profile"))
 	}
 	return runtimeSharedEvidenceEnrollmentV2{
 		projection: projection, credentials: credentials, witnessKey: witnessKey,

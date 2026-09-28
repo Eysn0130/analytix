@@ -190,11 +190,11 @@ func prepareRuntimeOptionalDomainCapabilitiesForOwnersV1(ctx context.Context, da
 }
 
 func loadRuntimeOptionalDomainInstallation(ctx context.Context, config Config, roots persistencefs.RootSet, rootAuthority *persistencefs.RootAuthority) (*finalauthority.AnchoredFileAuthority, error) {
-	enrolled, configured, err := loadRuntimeSharedEvidenceEnrollmentConfigV2(ctx, config)
+	_, projection, configured, err := loadRuntimeSharedEvidenceManifestV2(ctx, config)
 	if err != nil || !configured {
 		return nil, err
 	}
-	anchor, err := finalauthority.NewExistingFileAuthorityAnchor(rootAuthority, enrolled.projection.InstallationAuthorityKeyID, enrolled.projection.InstallationAuthorityPublicKey)
+	anchor, err := finalauthority.NewExistingFileAuthorityAnchor(rootAuthority, projection.InstallationAuthorityKeyID, projection.InstallationAuthorityPublicKey)
 	if err != nil {
 		return nil, err
 	}
