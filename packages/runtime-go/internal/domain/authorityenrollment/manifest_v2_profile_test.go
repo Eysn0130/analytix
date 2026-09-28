@@ -55,6 +55,70 @@ func TestCredentialProfileRequiresExactAnchoredManifestV2Selection(t *testing.T)
 	}
 }
 
+func TestSharedEvidenceOnlyManifestBindsOnlyItsExactCredentialProfile(t *testing.T) {
+	fixture := newManifestFixtureV1(t)
+	dualProfile := selectedCredentialProfileFixtureV2(t, fixture)
+	sharedProfile, err := domaincredentials.NewCredentialProfileV1(domaincredentials.CredentialProfileInputV1{
+		InstallationID:    fixture.input.InstallationID,
+		AuthorityKeyID:    fixture.input.InstallationAuthorityKeyID,
+		ProfileGeneration: dualProfile.ProfileGeneration,
+		Files:             credentialProfileInputsV2(fixture)[3:],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := SharedEvidenceOnlyManifestInputV2{
+		InstallationID:                 fixture.input.InstallationID,
+		InstallationAuthorityKeyID:     fixture.input.InstallationAuthorityKeyID,
+		InstallationAuthorityPublicKey: fixture.installationPublicKey,
+		CredentialProfileGeneration:    sharedProfile.ProfileGeneration,
+		CredentialProfileDigest:        sharedProfile.ProfileDigest,
+		IssuedAt:                       fixture.input.IssuedAt,
+		SharedEvidence:                 fixture.input.SharedEvidence,
+	}
+	manifest, err := NewSharedEvidenceOnlyManifestV2(input, fixture.sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchored, err := AnchorManifestForInstallationV2(
+		manifest, input.InstallationID, input.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, manifest.ManifestDigest,
+	)
+	if err != nil || ValidateCredentialProfileForManifestV2(anchored, sharedProfile) != nil {
+		t.Fatalf("exact shared-only profile was rejected: %v", err)
+	}
+	bound, err := BindCredentialProfileForManifestV2(anchored, sharedProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := ProjectBoundCredentialProfileForNamespaceV1(bound, SharedEvidenceNamespaceV1)
+	if err != nil || len(projection.Files) != 1 || projection.Manifest.Enrollment.EnrollmentID != input.SharedEvidence.EnrollmentID {
+		t.Fatalf("shared-only projection = %#v err=%v", projection, err)
+	}
+	if _, err := ProjectBoundCredentialProfileForNamespaceV1(bound, ThreadRiskNamespaceV1); err == nil {
+		t.Fatal("unenrolled ThreadRisk projected credential material")
+	}
+	if err := ValidateCredentialProfileForManifestV2(anchored, dualProfile); err == nil {
+		t.Fatal("shared-only manifest accepted a dual credential profile")
+	}
+	dualInput := manifestInputV2(t, fixture)
+	dualInput.CredentialProfileDigest = sharedProfile.ProfileDigest
+	dualManifest, err := NewManifestV2(dualInput, fixture.sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dualAnchor, err := AnchorManifestForInstallationV2(
+		dualManifest, dualInput.InstallationID, dualInput.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, dualManifest.ManifestDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCredentialProfileForManifestV2(dualAnchor, sharedProfile); err == nil {
+		t.Fatal("dual manifest accepted a downgraded shared-only profile")
+	}
+}
+
 func TestCredentialProfileRejectsCrossNamespaceRootOrMTLSSwap(t *testing.T) {
 	fixture := newManifestFixtureV1(t)
 	inputs := credentialProfileInputsV2(fixture)

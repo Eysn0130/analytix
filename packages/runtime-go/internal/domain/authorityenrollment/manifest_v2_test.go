@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,8 +22,14 @@ func TestManifestV2CanonicalAnchorAndCredentialSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if domainsecurity.SHA256Hex(body) != "e9f7d5e032ada0df5650916d0e85dcefa506daeb7ce9a2b17716661c914a2e65" ||
+		domainsecurity.SHA256Hex(ManifestSigningBytesV2(manifest)) != "ae7ae4a4004eefe6c17a75afcbd6b8bfd8e67f77973c809b4b757de24e443afa" ||
+		manifest.ManifestDigest != "f4649c2a9cca8b7c2950bf6400a96c34115b19652ff851dabff281c569f4fa21" ||
+		manifest.InstallationAuthoritySignature != "PN7xdDBemKo_qoJLowgQBqISu32BH9WsKLCqmgmfZvfoGjIv36remqY_t0zMPPZZy3A9bvZDAxXHlq9ARtZ3DA" {
+		t.Fatal("dual V2 canonical JSON, signing bytes, digest, or signature changed")
+	}
 	parsed, err := ParseManifestV2(body)
-	if err != nil || parsed != manifest {
+	if err != nil || !reflect.DeepEqual(parsed, manifest) {
 		t.Fatalf("manifest V2 round trip mismatch: %#v err=%v", parsed, err)
 	}
 	anchored, err := ParseAnchoredManifestV2(
@@ -45,6 +52,90 @@ func TestManifestV2CanonicalAnchorAndCredentialSelection(t *testing.T) {
 	}
 	if _, err := ProjectAnchoredManifestForNamespaceV2(AnchoredManifestV2{}, ThreadRiskNamespaceV1); err == nil {
 		t.Fatal("unanchored manifest V2 projected credential authority")
+	}
+	directAnchor, err := AnchorManifestForInstallationV2(
+		manifest, input.InstallationID, input.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, manifest.ManifestDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.ThreadRisk.EnrollmentID = domainsecurity.SHA256Hex([]byte("caller-mutated"))
+	retained, err := ProjectAnchoredManifestForNamespaceV2(directAnchor, ThreadRiskNamespaceV1)
+	if err != nil || retained.Enrollment.EnrollmentID != input.ThreadRisk.EnrollmentID {
+		t.Fatal("anchored dual manifest retained a caller-owned pointer")
+	}
+}
+
+func TestManifestV2SharedEvidenceOnlyRequiresExactSignedOmission(t *testing.T) {
+	fixture := newManifestFixtureV1(t)
+	dual := manifestInputV2(t, fixture)
+	input := SharedEvidenceOnlyManifestInputV2{
+		InstallationID: dual.InstallationID, InstallationAuthorityKeyID: dual.InstallationAuthorityKeyID,
+		InstallationAuthorityPublicKey: dual.InstallationAuthorityPublicKey,
+		CredentialProfileGeneration:    dual.CredentialProfileGeneration,
+		CredentialProfileDigest:        dual.CredentialProfileDigest,
+		IssuedAt:                       dual.IssuedAt, SharedEvidence: dual.SharedEvidence,
+	}
+	manifest, err := NewSharedEvidenceOnlyManifestV2(input, fixture.sign)
+	if err != nil || manifest.ThreadRisk != nil {
+		t.Fatalf("shared-only manifest enrolled ThreadRisk: %#v err=%v", manifest.ThreadRisk, err)
+	}
+	body, err := ManifestV2Bytes(manifest)
+	if err != nil || bytes.Contains(body, []byte(`"threadRisk"`)) {
+		t.Fatalf("shared-only manifest serialized ThreadRisk: %v", err)
+	}
+	parsed, err := ParseManifestV2(body)
+	if err != nil || !reflect.DeepEqual(parsed, manifest) {
+		t.Fatalf("shared-only manifest round trip failed: %v", err)
+	}
+	anchored, err := ParseAnchoredManifestV2(
+		body, input.InstallationID, input.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, manifest.ManifestDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespaces, err := CredentialNamespacesForManifestV2(anchored)
+	if err != nil || !reflect.DeepEqual(namespaces, []string{SharedEvidenceNamespaceV1}) {
+		t.Fatalf("shared-only namespace selection = %#v err=%v", namespaces, err)
+	}
+	if _, err := ProjectAnchoredManifestForNamespaceV2(anchored, ThreadRiskNamespaceV1); err == nil {
+		t.Fatal("absent ThreadRisk gained signed projection")
+	}
+	if _, err := ProjectAnchoredManifestForNamespaceV2(anchored, SharedEvidenceNamespaceV1); err != nil {
+		t.Fatalf("selected SharedEvidence projection failed: %v", err)
+	}
+	dualManifest, err := NewManifestV2(dual, fixture.sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AnchorManifestForInstallationV2(
+		manifest, input.InstallationID, input.InstallationAuthorityKeyID,
+		fixture.installationPublicKey, dualManifest.ManifestDigest,
+	); err == nil {
+		t.Fatal("shared-only document replaced a selected dual manifest")
+	}
+	for name, candidate := range map[string][]byte{
+		"null thread":  bytes.Replace(body, []byte(`"sharedEvidence":`), []byte(`"threadRisk":null,"sharedEvidence":`), 1),
+		"empty thread": bytes.Replace(body, []byte(`"sharedEvidence":`), []byte(`"threadRisk":{},"sharedEvidence":`), 1),
+		"unknown":      append([]byte(`{"unknown":true,`), body[1:]...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseManifestV2(candidate); err == nil {
+				t.Fatal("unsigned or invalid namespace shape gained authority")
+			}
+		})
+	}
+	changed := manifest
+	changed.SharedEvidence.EnrollmentID = domainsecurity.SHA256Hex([]byte("other-enrollment"))
+	if ValidateManifestV2(changed) == nil ||
+		bytes.Equal(ManifestSigningBytesV2(changed), ManifestSigningBytesV2(manifest)) {
+		t.Fatal("shared-only enrollment tamper retained its signature")
+	}
+	dual.ThreadRisk = WitnessEnrollmentInputV1{}
+	if _, err := NewManifestV2(dual, fixture.sign); err == nil {
+		t.Fatal("dual constructor silently produced shared-only enrollment")
 	}
 }
 

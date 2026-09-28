@@ -109,7 +109,7 @@ func ValidateCredentialProfileV1(profile CredentialProfileV1) error {
 	if profile.SchemaVersion != CredentialProfileSchemaVersionV1 || profile.Purpose != CredentialProfilePurposeV1 ||
 		!canonicalSHA256V1(profile.InstallationID) || !canonicalSHA256V1(profile.AuthorityKeyID) ||
 		profile.ProfileGeneration == 0 || profile.ProfileGeneration > MaxSafeJSONIntegerV1 ||
-		len(profile.Files) < 2 || len(profile.Files) > 6 {
+		len(profile.Files) < 1 || len(profile.Files) > 6 {
 		return errors.New("authority credential profile is incomplete")
 	}
 	encoded, err := json.Marshal(profile)
@@ -154,13 +154,15 @@ func ValidateCredentialProfileV1(profile CredentialProfileV1) error {
 			}
 		}
 	}
-	for _, namespace := range []string{domainsecurity.ThreadRiskAuthorityNamespaceV1, domainsecurity.EvidenceRegistryAuthorityNamespaceV1} {
-		roles := namespaceRoles[namespace]
-		if roles == nil || !roles[RoleWitnessRootCA] || roles[RoleWitnessMTLSClientChain] != roles[RoleWitnessMTLSClientPrivateKey] {
+	for namespace, roles := range namespaceRoles {
+		if namespace != domainsecurity.ThreadRiskAuthorityNamespaceV1 &&
+			namespace != domainsecurity.EvidenceRegistryAuthorityNamespaceV1 ||
+			!roles[RoleWitnessRootCA] || roles[RoleWitnessMTLSClientChain] != roles[RoleWitnessMTLSClientPrivateKey] {
 			return errors.New("authority credential profile namespace inventory is incomplete")
 		}
 	}
-	if len(namespaceRoles) != 2 || totalBytes == 0 || totalBytes > MaxBundleBytesV1 {
+	if namespaceRoles[domainsecurity.EvidenceRegistryAuthorityNamespaceV1] == nil ||
+		len(namespaceRoles) > 2 || totalBytes == 0 || totalBytes > MaxBundleBytesV1 {
 		return errors.New("authority credential profile namespace or aggregate inventory is invalid")
 	}
 	if !canonicalSHA256V1(profile.ProfileDigest) || profile.ProfileDigest != credentialProfileDigestV1(profile) {

@@ -71,9 +71,11 @@ func (loader Loader) loadCurrentWithReads(
 	if err := ctx.Err(); err != nil {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, err
 	}
-	manifestProjection, err := domainenrollment.ProjectAnchoredManifestForNamespaceV2(
-		anchored, domainenrollment.ThreadRiskNamespaceV1,
-	)
+	namespaces, err := domainenrollment.CredentialNamespacesForManifestV2(anchored)
+	if err != nil || len(namespaces) == 0 {
+		return authoritycredentialsport.EnrolledWitnessesV1{}, ErrInvalid
+	}
+	manifestProjection, err := domainenrollment.ProjectAnchoredManifestForNamespaceV2(anchored, namespaces[0])
 	if err != nil {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, ErrInvalid
 	}
@@ -102,7 +104,7 @@ func (loader Loader) loadCurrentWithReads(
 	if err != nil {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, errors.Join(ErrInvalid, err)
 	}
-	descriptors, bundleInput, err := bundleReadInputV1(bound, loader.BundleRoot)
+	descriptors, bundleInput, err := bundleReadInputV1(bound, loader.BundleRoot, namespaces)
 	if err != nil {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, errors.Join(ErrInvalid, err)
 	}
@@ -122,9 +124,12 @@ func (loader Loader) loadCurrentWithReads(
 	if now.IsZero() {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, ErrInvalid
 	}
-	threadMaterial, err := parseNamespaceMaterialV1(bound, domainenrollment.ThreadRiskNamespaceV1, files, now)
-	if err != nil {
-		return authoritycredentialsport.EnrolledWitnessesV1{}, err
+	var threadMaterial namespaceMaterialV1
+	if len(namespaces) == 2 {
+		threadMaterial, err = parseNamespaceMaterialV1(bound, domainenrollment.ThreadRiskNamespaceV1, files, now)
+		if err != nil {
+			return authoritycredentialsport.EnrolledWitnessesV1{}, err
+		}
 	}
 	sharedMaterial, err := parseNamespaceMaterialV1(bound, domainenrollment.SharedEvidenceNamespaceV1, files, now)
 	if err != nil {
@@ -140,9 +145,12 @@ func (loader Loader) loadCurrentWithReads(
 	if !sameAnchorV1(before, after) || !anchorSelectsManifestV1(after, manifestProjection) {
 		return authoritycredentialsport.EnrolledWitnessesV1{}, ErrInvalid
 	}
-	threadWitness, err := newWitnessV1(threadMaterial, loader.Anchor, before, clock)
-	if err != nil {
-		return authoritycredentialsport.EnrolledWitnessesV1{}, err
+	var threadWitness monotonicheadport.MutationRecoveryWitness
+	if len(namespaces) == 2 {
+		threadWitness, err = newWitnessV1(threadMaterial, loader.Anchor, before, clock)
+		if err != nil {
+			return authoritycredentialsport.EnrolledWitnessesV1{}, err
+		}
 	}
 	sharedWitness, err := newWitnessV1(sharedMaterial, loader.Anchor, before, clock)
 	if err != nil {
@@ -161,11 +169,12 @@ func (loader Loader) loadCurrentWithReads(
 func bundleReadInputV1(
 	bound domainenrollment.BoundCredentialProfileV1,
 	root string,
+	namespaces []string,
 ) (map[string]domaincredentials.FileDescriptorV1, secureconfigfs.ReadBundleInput, error) {
 	descriptors := make(map[string]domaincredentials.FileDescriptorV1, 6)
 	files := make([]secureconfigfs.BundleFile, 0, 6)
 	var total int64
-	for _, namespace := range []string{domainenrollment.ThreadRiskNamespaceV1, domainenrollment.SharedEvidenceNamespaceV1} {
+	for _, namespace := range namespaces {
 		projection, err := domainenrollment.ProjectBoundCredentialProfileForNamespaceV1(bound, namespace)
 		if err != nil {
 			return nil, secureconfigfs.ReadBundleInput{}, err

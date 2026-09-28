@@ -13,6 +13,10 @@ func TestCredentialProfileV1CanonicalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if domainsecurity.SHA256Hex(body) != "66e160442e4afb68bef088b085df5223bd60939e11fe34c58caf72a3068dceaf" ||
+		profile.ProfileDigest != "1fc454c6f3ae6e279de833cd85a78fa0850bbfc946dfa9871c26639d63e058c9" {
+		t.Fatal("dual credential profile canonical bytes or digest changed")
+	}
 	parsed, err := ParseCredentialProfileV1(body)
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +28,57 @@ func TestCredentialProfileV1CanonicalRoundTrip(t *testing.T) {
 	if len(parsed.Files) != 6 || parsed.Files[0].FixedName != "thread-risk-root-ca.der" ||
 		parsed.Files[3].FixedName != "shared-evidence-root-ca.der" {
 		t.Fatalf("credential descriptors are not deterministically ordered: %#v", parsed.Files)
+	}
+}
+
+func TestCredentialProfileV1SharedEvidenceOnlyClosedInventory(t *testing.T) {
+	dual := profileFixtureV1(t, true)
+	files := make([]FileDescriptorInputV1, 0, 3)
+	for _, descriptor := range dual.Files {
+		if descriptor.Namespace != domainsecurity.EvidenceRegistryAuthorityNamespaceV1 {
+			continue
+		}
+		files = append(files, FileDescriptorInputV1{
+			Role: descriptor.Role, Namespace: descriptor.Namespace, EnrollmentID: descriptor.EnrollmentID,
+			SizeBytes: descriptor.SizeBytes, FileSHA256: descriptor.FileSHA256,
+			SemanticSHA256: descriptor.SemanticSHA256,
+		})
+	}
+	profile, err := NewCredentialProfileV1(CredentialProfileInputV1{
+		InstallationID: dual.InstallationID, AuthorityKeyID: dual.AuthorityKeyID,
+		ProfileGeneration: dual.ProfileGeneration, Files: files,
+	})
+	if err != nil || len(profile.Files) != 3 {
+		t.Fatalf("shared-only profile was rejected: files=%d err=%v", len(profile.Files), err)
+	}
+	body, err := CredentialProfileV1Bytes(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseCredentialProfileV1(body)
+	if err != nil {
+		t.Fatalf("shared-only profile canonical round trip failed: %v", err)
+	}
+	parsedBody, err := CredentialProfileV1Bytes(parsed)
+	if err != nil || !bytes.Equal(body, parsedBody) {
+		t.Fatalf("shared-only profile canonical bytes changed: %v", err)
+	}
+	threadOnly := append([]FileDescriptorInputV1(nil), files...)
+	for index := range threadOnly {
+		threadOnly[index].Namespace = domainsecurity.ThreadRiskAuthorityNamespaceV1
+	}
+	if _, err := NewCredentialProfileV1(CredentialProfileInputV1{
+		InstallationID: dual.InstallationID, AuthorityKeyID: dual.AuthorityKeyID,
+		ProfileGeneration: dual.ProfileGeneration, Files: threadOnly,
+	}); err == nil {
+		t.Fatal("thread-only credential inventory was accepted")
+	}
+	missingKey := append([]FileDescriptorInputV1(nil), files[:2]...)
+	if _, err := NewCredentialProfileV1(CredentialProfileInputV1{
+		InstallationID: dual.InstallationID, AuthorityKeyID: dual.AuthorityKeyID,
+		ProfileGeneration: dual.ProfileGeneration, Files: missingKey,
+	}); err == nil {
+		t.Fatal("shared-only incomplete mTLS inventory was accepted")
 	}
 }
 

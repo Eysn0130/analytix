@@ -30,19 +30,19 @@ var (
 // verify the canonical profile and every exact/semantic file binding; a V1
 // manifest or a caller-constructed projection cannot select credentials.
 type ManifestV2 struct {
-	SchemaVersion                  int                 `json:"schemaVersion"`
-	Purpose                        string              `json:"purpose"`
-	InstallationID                 string              `json:"installationId"`
-	InstallationAuthorityAlgorithm string              `json:"installationAuthorityAlgorithm"`
-	InstallationAuthorityKeyID     string              `json:"installationAuthorityKeyId"`
-	InstallationAuthorityPublicKey string              `json:"installationAuthorityPublicKey"`
-	CredentialProfileGeneration    uint64              `json:"credentialProfileGeneration"`
-	CredentialProfileDigest        string              `json:"credentialProfileDigest"`
-	IssuedAt                       time.Time           `json:"issuedAt"`
-	ThreadRisk                     WitnessEnrollmentV1 `json:"threadRisk"`
-	SharedEvidence                 WitnessEnrollmentV1 `json:"sharedEvidence"`
-	InstallationAuthoritySignature string              `json:"installationAuthoritySignature"`
-	ManifestDigest                 string              `json:"manifestDigest"`
+	SchemaVersion                  int                  `json:"schemaVersion"`
+	Purpose                        string               `json:"purpose"`
+	InstallationID                 string               `json:"installationId"`
+	InstallationAuthorityAlgorithm string               `json:"installationAuthorityAlgorithm"`
+	InstallationAuthorityKeyID     string               `json:"installationAuthorityKeyId"`
+	InstallationAuthorityPublicKey string               `json:"installationAuthorityPublicKey"`
+	CredentialProfileGeneration    uint64               `json:"credentialProfileGeneration"`
+	CredentialProfileDigest        string               `json:"credentialProfileDigest"`
+	IssuedAt                       time.Time            `json:"issuedAt"`
+	ThreadRisk                     *WitnessEnrollmentV1 `json:"threadRisk,omitempty"`
+	SharedEvidence                 WitnessEnrollmentV1  `json:"sharedEvidence"`
+	InstallationAuthoritySignature string               `json:"installationAuthoritySignature"`
+	ManifestDigest                 string               `json:"manifestDigest"`
 }
 
 type ManifestInputV2 struct {
@@ -53,6 +53,18 @@ type ManifestInputV2 struct {
 	CredentialProfileDigest        string
 	IssuedAt                       time.Time
 	ThreadRisk                     WitnessEnrollmentInputV1
+	SharedEvidence                 WitnessEnrollmentInputV1
+}
+
+// SharedEvidenceOnlyManifestInputV2 enrolls the optional case witness without
+// inventing a ThreadRisk witness for the first-stage host-policy risk path.
+type SharedEvidenceOnlyManifestInputV2 struct {
+	InstallationID                 string
+	InstallationAuthorityKeyID     string
+	InstallationAuthorityPublicKey []byte
+	CredentialProfileGeneration    uint64
+	CredentialProfileDigest        string
+	IssuedAt                       time.Time
 	SharedEvidence                 WitnessEnrollmentInputV1
 }
 
@@ -75,11 +87,29 @@ type ManifestAnchorProjectionV2 struct {
 }
 
 func NewManifestV2(input ManifestInputV2, sign ManifestSignFuncV2) (ManifestV2, error) {
+	return newManifestV2(input, true, sign)
+}
+
+func NewSharedEvidenceOnlyManifestV2(input SharedEvidenceOnlyManifestInputV2, sign ManifestSignFuncV2) (ManifestV2, error) {
+	return newManifestV2(ManifestInputV2{
+		InstallationID: input.InstallationID, InstallationAuthorityKeyID: input.InstallationAuthorityKeyID,
+		InstallationAuthorityPublicKey: input.InstallationAuthorityPublicKey,
+		CredentialProfileGeneration:    input.CredentialProfileGeneration,
+		CredentialProfileDigest:        input.CredentialProfileDigest,
+		IssuedAt:                       input.IssuedAt, SharedEvidence: input.SharedEvidence,
+	}, false, sign)
+}
+
+func newManifestV2(input ManifestInputV2, includeThreadRisk bool, sign ManifestSignFuncV2) (ManifestV2, error) {
 	installationPublicKey := append([]byte(nil), input.InstallationAuthorityPublicKey...)
 	installationID := strings.TrimSpace(input.InstallationID)
-	threadRisk, err := newWitnessEnrollmentV1(installationID, ThreadRiskNamespaceV1, input.ThreadRisk)
-	if err != nil {
-		return ManifestV2{}, err
+	var threadRisk *WitnessEnrollmentV1
+	if includeThreadRisk {
+		selected, err := newWitnessEnrollmentV1(installationID, ThreadRiskNamespaceV1, input.ThreadRisk)
+		if err != nil {
+			return ManifestV2{}, err
+		}
+		threadRisk = &selected
 	}
 	sharedEvidence, err := newWitnessEnrollmentV1(installationID, SharedEvidenceNamespaceV1, input.SharedEvidence)
 	if err != nil {
@@ -164,6 +194,10 @@ func AnchorManifestForInstallationV2(
 		!isCanonicalSHA256(expectedManifestDigest) || manifest.ManifestDigest != expectedManifestDigest {
 		return AnchoredManifestV2{}, errors.New("authority enrollment V2 current manifest anchor mismatch")
 	}
+	if manifest.ThreadRisk != nil {
+		threadRisk := *manifest.ThreadRisk
+		manifest.ThreadRisk = &threadRisk
+	}
 	return AnchoredManifestV2{manifest: manifest, anchorDigest: expectedManifestDigest}, nil
 }
 
@@ -225,12 +259,28 @@ func EnrollmentForNamespaceV2(anchored AnchoredManifestV2, namespace string) (Wi
 	}
 	switch namespace {
 	case ThreadRiskNamespaceV1:
-		return manifest.ThreadRisk, nil
+		if manifest.ThreadRisk != nil {
+			return *manifest.ThreadRisk, nil
+		}
+		return WitnessEnrollmentV1{}, errors.New("authority enrollment V2 namespace is not enrolled")
 	case SharedEvidenceNamespaceV1:
 		return manifest.SharedEvidence, nil
 	default:
 		return WitnessEnrollmentV1{}, errors.New("authority enrollment V2 namespace is unsupported")
 	}
+}
+
+// CredentialNamespacesForManifestV2 reports only namespaces selected by the
+// exact anchored signature. A credential profile cannot add another namespace.
+func CredentialNamespacesForManifestV2(anchored AnchoredManifestV2) ([]string, error) {
+	manifest := anchored.manifest
+	if anchored.anchorDigest == "" || anchored.anchorDigest != manifest.ManifestDigest || ValidateManifestV2(manifest) != nil {
+		return nil, errors.New("authority enrollment V2 manifest is not independently anchored")
+	}
+	if manifest.ThreadRisk != nil {
+		return []string{ThreadRiskNamespaceV1, SharedEvidenceNamespaceV1}, nil
+	}
+	return []string{SharedEvidenceNamespaceV1}, nil
 }
 
 func ProjectAnchoredManifestForNamespaceV2(
@@ -272,16 +322,20 @@ func validateManifestPayloadV2(manifest ManifestV2) error {
 	if err != nil || manifest.InstallationAuthorityKeyID != domainsecurity.SHA256Hex(installationPublicKey) {
 		return errors.New("authority enrollment V2 installation public key is invalid")
 	}
-	if err := validateWitnessEnrollmentV1(manifest.ThreadRisk, manifest.InstallationID, ThreadRiskNamespaceV1); err != nil {
-		return err
-	}
 	if err := validateWitnessEnrollmentV1(manifest.SharedEvidence, manifest.InstallationID, SharedEvidenceNamespaceV1); err != nil {
 		return err
 	}
-	if manifest.ThreadRisk.EnrollmentID == manifest.SharedEvidence.EnrollmentID ||
-		manifest.ThreadRisk.WitnessKeyID == manifest.InstallationAuthorityKeyID ||
-		manifest.SharedEvidence.WitnessKeyID == manifest.InstallationAuthorityKeyID {
+	if manifest.SharedEvidence.WitnessKeyID == manifest.InstallationAuthorityKeyID {
 		return errors.New("authority enrollment V2 witness roles or namespace enrollment IDs conflict")
+	}
+	if manifest.ThreadRisk != nil {
+		if err := validateWitnessEnrollmentV1(*manifest.ThreadRisk, manifest.InstallationID, ThreadRiskNamespaceV1); err != nil {
+			return err
+		}
+		if manifest.ThreadRisk.EnrollmentID == manifest.SharedEvidence.EnrollmentID ||
+			manifest.ThreadRisk.WitnessKeyID == manifest.InstallationAuthorityKeyID {
+			return errors.New("authority enrollment V2 witness roles or namespace enrollment IDs conflict")
+		}
 	}
 	return nil
 }
@@ -308,14 +362,16 @@ func validateManifestJSONShapeV2(body []byte) error {
 	required := [...]string{
 		"schemaVersion", "purpose", "installationId", "installationAuthorityAlgorithm",
 		"installationAuthorityKeyId", "installationAuthorityPublicKey", "credentialProfileGeneration",
-		"credentialProfileDigest", "issuedAt", "threadRisk", "sharedEvidence",
+		"credentialProfileDigest", "issuedAt", "sharedEvidence",
 		"installationAuthoritySignature", "manifestDigest",
 	}
-	if err := requireExactFieldsV1(object, required[:], nil, "authority enrollment V2 manifest"); err != nil {
+	if err := requireExactFieldsV1(object, required[:], []string{"threadRisk"}, "authority enrollment V2 manifest"); err != nil {
 		return err
 	}
-	if err := validateWitnessEnrollmentJSONShapeV1(object["threadRisk"], "thread risk authority enrollment"); err != nil {
-		return err
+	if threadRisk, exists := object["threadRisk"]; exists {
+		if err := validateWitnessEnrollmentJSONShapeV1(threadRisk, "thread risk authority enrollment"); err != nil {
+			return err
+		}
 	}
 	return validateWitnessEnrollmentJSONShapeV1(object["sharedEvidence"], "shared evidence authority enrollment")
 }

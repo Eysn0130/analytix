@@ -64,7 +64,7 @@ func ValidateCredentialProfileForManifestV2(
 	if err := domaincredentials.ValidateCredentialProfileV1(profile); err != nil {
 		return err
 	}
-	threadProjection, err := ProjectAnchoredManifestForNamespaceV2(anchored, ThreadRiskNamespaceV1)
+	namespaces, err := CredentialNamespacesForManifestV2(anchored)
 	if err != nil {
 		return err
 	}
@@ -72,19 +72,29 @@ func ValidateCredentialProfileForManifestV2(
 	if err != nil {
 		return err
 	}
-	if threadProjection.ManifestDigest != sharedProjection.ManifestDigest ||
-		threadProjection.InstallationID != profile.InstallationID ||
-		threadProjection.InstallationAuthorityKeyID != profile.AuthorityKeyID ||
-		threadProjection.CredentialProfileGeneration != profile.ProfileGeneration ||
-		threadProjection.CredentialProfileDigest != profile.ProfileDigest ||
+	if sharedProjection.InstallationID != profile.InstallationID ||
+		sharedProjection.InstallationAuthorityKeyID != profile.AuthorityKeyID ||
 		sharedProjection.CredentialProfileGeneration != profile.ProfileGeneration ||
 		sharedProjection.CredentialProfileDigest != profile.ProfileDigest {
 		return errors.New("authority credential profile is not selected by the anchored manifest")
 	}
-	if err := validateCredentialNamespaceForEnrollmentV2(profile, threadProjection.Enrollment); err != nil {
-		return err
+	for _, file := range profile.Files {
+		if len(namespaces) == 1 && file.Namespace != SharedEvidenceNamespaceV1 {
+			return errors.New("authority credential profile adds an unenrolled namespace")
+		}
 	}
-	return validateCredentialNamespaceForEnrollmentV2(profile, sharedProjection.Enrollment)
+	for _, namespace := range namespaces {
+		projection, err := ProjectAnchoredManifestForNamespaceV2(anchored, namespace)
+		if err != nil || projection.ManifestDigest != sharedProjection.ManifestDigest ||
+			projection.CredentialProfileGeneration != profile.ProfileGeneration ||
+			projection.CredentialProfileDigest != profile.ProfileDigest {
+			return errors.New("authority credential profile is not selected by the anchored manifest")
+		}
+		if err := validateCredentialNamespaceForEnrollmentV2(profile, projection.Enrollment); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateCredentialNamespaceForEnrollmentV2(
