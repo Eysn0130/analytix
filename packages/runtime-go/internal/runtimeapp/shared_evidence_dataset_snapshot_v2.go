@@ -74,10 +74,11 @@ type runtimeSharedEvidenceEnrollmentV2 struct {
 }
 
 type runtimeSharedEvidenceDatasetSnapshotV2 struct {
-	evidence      *evidenceauthorityapp.Authority
-	snapshot      *datasetsnapshotapp.SealedServiceV2
-	registry      *evidenceregistryapp.Service
-	registryOwner *runtimeImportActivatedRegistryV1
+	evidence               *evidenceauthorityapp.Authority
+	snapshot               *datasetsnapshotapp.SealedServiceV2
+	registry               *evidenceregistryapp.Service
+	registryOwner          *runtimeImportActivatedRegistryV1
+	credentialsUnavailable bool
 }
 
 var _ runtimeEvidenceRegistryAuthority = (*evidenceregistryapp.Service)(nil)
@@ -165,7 +166,7 @@ func newRuntimeSharedEvidenceDatasetSnapshotV2(
 	if errors.Is(err, errRuntimeOptionalAuthorityCredentialsUnavailable) {
 		// The signed manifest and existing installation key were already
 		// checked; no protected operation receives a partial credential.
-		return runtimeSharedEvidenceDatasetSnapshotV2{}, true, nil
+		return runtimeSharedEvidenceDatasetSnapshotV2{credentialsUnavailable: true}, true, nil
 	}
 	if err != nil || !configured {
 		return runtimeSharedEvidenceDatasetSnapshotV2{}, configured, err
