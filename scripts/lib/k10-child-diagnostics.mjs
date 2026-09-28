@@ -61,6 +61,11 @@ export function classifyExactTargetList(targets, capturedTargetId) {
     ? 'target_present' : 'target_absent'
 }
 
+export function exactTargetDeadlineReason(lastCategory) {
+  return lastCategory === 'target_present'
+    ? 'target_present_at_deadline' : 'target_state_unknown_at_deadline'
+}
+
 export function residualMembersAlreadyPinned(currentPids, pinnedPids) {
   return Array.isArray(currentPids) && currentPids.every((pid) => pinnedPids.has(pid))
 }

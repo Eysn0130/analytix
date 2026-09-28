@@ -4,6 +4,7 @@ import {
   classifyExactTargetList,
   createFundsCSVAdmissionAttemptRecorderV2,
   exactTaskGroupMembers,
+  exactTargetDeadlineReason,
   normalQuitFailureCode,
   residualMembersAlreadyPinned,
   parseRuntimeStartupNumericDiagnostic,
@@ -129,6 +130,10 @@ describe('K10 process probe evidence', () => {
     expect(classifyExactTargetList([{ type: 'page' }], 'captured')).toBe('malformed')
     expect(classifyExactTargetList(null, 'captured')).toBe('malformed')
     expect(classifyExactTargetList([], '')).toBe('malformed')
+    expect(exactTargetDeadlineReason('target_present')).toBe('target_present_at_deadline')
+    for (const last of ['target_absent', 'http_error', 'fetch_error', 'malformed', null]) {
+      expect(exactTargetDeadlineReason(last)).toBe('target_state_unknown_at_deadline')
+    }
   })
 
   it('does not turn an unknown ps error into an exited process or zero residuals', () => {

@@ -24,6 +24,7 @@ import {
   createFundsCSVAdmissionAttemptRecorderV2,
   exactMainCommandMatches,
   exactCoreRuntimeCommandMatches,
+  exactTargetDeadlineReason,
   exactTaskGroupMembers,
   observedSingleInstanceLockFailure,
   normalQuitFailureCode,
@@ -816,50 +817,61 @@ function ownedDebugPortReady(port) {
 }
 
 async function waitForTargetClosed(debugPort, capturedTargetId, timeoutMs) {
+  const startedAtMs = Date.now()
   const deadline = Date.now() + timeoutMs
   const counts = { targetPresent: 0, targetAbsent: 0, httpError: 0,
     fetchError: 0, malformed: 0, mainExited: 0, timeout: 0 }
-  const count = (key) => { counts[key] = Math.min(counts[key] + 1, 128) }
+  let lastObservationCategory = null
+  let lastObservationAtMs = null
+  const count = (key, category = null) => {
+    counts[key] = Math.min(counts[key] + 1, 128)
+    if (category) {
+      lastObservationCategory = category
+      lastObservationAtMs = Math.max(0, Date.now() - startedAtMs)
+    }
+  }
+  const result = (closed, reason) => ({ closed, reason, counts,
+    lastObservationCategory, lastObservationAtMs })
   let consecutiveAbsences = 0
   while (Date.now() < deadline) {
     if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
       processDefinitelyExited(activeChild.pid))) {
-      count('mainExited')
-      return { closed: true, reason: 'main_exited', counts }
+      count('mainExited', 'main_exited')
+      return result(true, 'main_exited')
     }
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
         signal: AbortSignal.timeout(1000)
       })
       if (!response.ok) {
-        count('httpError')
+        count('httpError', 'http_error')
         consecutiveAbsences = 0
       } else {
         let targets
         try { targets = await response.json() } catch { targets = null }
         const category = classifyExactTargetList(targets, capturedTargetId)
         if (category === 'target_absent') {
-          count('targetAbsent')
+          count('targetAbsent', category)
           consecutiveAbsences += 1
-          if (consecutiveAbsences >= 2) return { closed: true, reason: 'target_absent', counts }
+          if (consecutiveAbsences >= 2) return result(true, 'target_absent')
         } else {
-          count(category === 'target_present' ? 'targetPresent' : 'malformed')
+          count(category === 'target_present' ? 'targetPresent' : 'malformed', category)
           consecutiveAbsences = 0
         }
       }
     } catch {
-      count('fetchError')
+      count('fetchError', 'fetch_error')
       consecutiveAbsences = 0
     }
     await sleep(250)
   }
   if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
     processDefinitelyExited(activeChild.pid))) {
-    count('mainExited')
-    return { closed: true, reason: 'main_exited', counts }
+    count('mainExited', 'main_exited')
+    return result(true, 'main_exited')
   }
   count('timeout')
-  return { closed: false, reason: 'timeout', counts }
+  return result(false, exactTargetDeadlineReason(lastObservationCategory))
 }
 
 async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000, onCommandSent = () => {}) {
@@ -1319,9 +1331,10 @@ async function normalQuit(debugPort, launched) {
     ? await waitForTargetClosed(debugPort, capturedTargetId, 15_000)
     : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
         reason: launched.child.exitCode !== null || launched.child.signalCode
-          ? 'main_exited' : 'target_unavailable', counts: null }
+          ? 'main_exited' : 'target_unavailable', counts: null,
+        lastObservationCategory: null, lastObservationAtMs: null }
   let targetClosed = targetObservationBeforeFallback.closed
-  const mainExitedBeforeFallback = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+  let mainExitedBeforeFallback = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
   if (mainExitedBeforeFallback) mainExitObservedAtMs = relativeMs()
   lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk,
     quitRequestAcknowledged, quitRequestSentAtMs, quitRequestAcknowledgedAtMs,
@@ -1351,7 +1364,8 @@ async function normalQuit(debugPort, launched) {
     targetObservationAfterFallback = capturedTargetId
       ? await waitForTargetClosed(debugPort, capturedTargetId, 10_000)
       : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
-          reason: 'target_unavailable', counts: null }
+          reason: 'target_unavailable', counts: null,
+          lastObservationCategory: null, lastObservationAtMs: null }
     targetClosed = targetObservationAfterFallback.closed
     if (targetClosed && mainExitObservedAtMs === null &&
         (launched.child.exitCode !== null || launched.child.signalCode)) mainExitObservedAtMs = relativeMs()
@@ -1372,6 +1386,7 @@ async function normalQuit(debugPort, launched) {
     mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
   }
   if (mainExited && mainExitObservedAtMs === null) mainExitObservedAtMs = relativeMs()
+  if (mainExited && fallbackStartedAtMs === null) mainExitedBeforeFallback = true
   if (!mainExited) {
     fallbackStartedAtMs ??= relativeMs()
     try {

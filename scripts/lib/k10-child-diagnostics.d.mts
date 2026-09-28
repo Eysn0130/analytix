@@ -5,6 +5,7 @@ export function exactMainCommandMatches(commandRow: string, parentPid: number, m
 export function exactCoreRuntimeCommandMatches(command: string, executable: string, runtimeDataDir: string): boolean
 export function normalQuitFailureCode(evidence: { quitRequestOk: boolean; targetClosed: boolean; mainExited: boolean; mainExitCode: number | null; mainSignal: string | null; fallbackUsed: boolean; residualProcessCount: number | null }): string
 export function classifyExactTargetList(targets: unknown, capturedTargetId: string): 'target_present' | 'target_absent' | 'malformed'
+export function exactTargetDeadlineReason(lastCategory: string | null): 'target_present_at_deadline' | 'target_state_unknown_at_deadline'
 export function residualMembersAlreadyPinned(currentPids: number[] | null, pinnedPids: Set<number>): boolean
 export function parseRuntimeStartupNumericDiagnostic(line: string): { key: string; value: number } | null
 export function parseRuntimeTransitionPhase(line: string): { phase: string; elapsedMs: number } | null
