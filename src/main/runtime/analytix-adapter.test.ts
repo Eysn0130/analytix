@@ -26,16 +26,19 @@ import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../pac
 import { BundledFundsMaterializationChildUnconfirmedError } from './bundled-funds-materialization'
 import {
   buildDevGoToolchainEnvV1,
+  buildDesktopInstallationKeyPreflightArgsV1,
   buildDesktopPrivateHistoryMigrationArgsV2,
   buildGoRuntimeStartupUserDataArgsV1,
   buildDesktopPrivateHistoryMigrationEnvV2,
   buildGoRuntimeProviderArgs,
   buildGoRuntimeSidecarEnv,
   DESKTOP_PRIVATE_HISTORY_MIGRATION_TIMEOUT_MS_V2,
+  DesktopInstallationKeyPreflightChildUnconfirmedError,
   ensureGoDefaultBackend,
   getAnalytixRuntimeBackendStatus,
   GO_RUNTIME_SERVER_STARTUP_TIMEOUT_MS_V1,
   isExactDesktopPrivateHistoryMigrationReadyV2,
+  isExactDesktopInstallationKeyPreflightReadyV1,
   type GoRuntimeG6ReadinessStatus,
   observeGoSidecarExit,
   probeGoConformanceRuntimeCanary,
@@ -58,6 +61,7 @@ import {
   takeExactGoRuntimeReadyLine,
   verifyWitnessedAuthorityStartupIdentity,
   waitForDesktopPrivateHistoryMigrationV2,
+  waitForDesktopInstallationKeyPreflightV1,
   runtimeRequestTimeoutMs,
   runtimeRequestViaHost
 } from './analytix-adapter'
@@ -416,6 +420,56 @@ describe('desktop private history startup migration', () => {
     const outcome = waitForDesktopPrivateHistoryMigrationV2(child.process, 1, 5)
     await expect(outcome).rejects.toThrow('termination could not be confirmed')
     expect(child.killCalls).toBe(1)
+  })
+})
+
+describe('desktop installation key preflight child contract', () => {
+  it('builds a fixed command from the exact selected roots', () => {
+    const dataDir = join(tmpdir(), 'analytix-key-data')
+    const durableRoot = join(tmpdir(), 'analytix-key-durable')
+    const userDataDir = join(tmpdir(), 'analytix-key-user-data')
+    expect(buildDesktopInstallationKeyPreflightArgsV1(dataDir, durableRoot, userDataDir)).toEqual([
+      'migration', 'prepare-desktop-installation-key-v1',
+      '--data-dir', dataDir, '--durable-root', durableRoot,
+      '--user-data-dir', userDataDir
+    ])
+  })
+
+  it('accepts only the exact fixed marker after confirmed process close', async () => {
+    const marker = Buffer.from('ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1\n')
+    expect(isExactDesktopInstallationKeyPreflightReadyV1(marker)).toBe(true)
+    expect(isExactDesktopInstallationKeyPreflightReadyV1(marker.subarray(0, -1))).toBe(false)
+    expect(isExactDesktopInstallationKeyPreflightReadyV1(Buffer.concat([marker, Buffer.from('extra')]))).toBe(false)
+    const child = fakeMigrationChild()
+    const outcome = waitForDesktopInstallationKeyPreflightV1(child.process, 1_000)
+    child.stdout.write(marker)
+    child.process.emit('exit', 0, null)
+    let settled = false
+    outcome.then(() => { settled = true })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+    child.process.emit('close', 0, null)
+    await expect(outcome).resolves.toBeUndefined()
+  })
+
+  it('rejects late output and propagates an unconfirmed writer through optional settlement', async () => {
+    const marker = 'ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1\n'
+    const late = fakeMigrationChild()
+    const lateOutcome = waitForDesktopInstallationKeyPreflightV1(late.process, 1_000)
+    late.stdout.write(marker)
+    late.process.emit('exit', 0, null)
+    late.stdout.write('late')
+    late.process.emit('close', 0, null)
+    await expect(lateOutcome).rejects.toThrow('did not complete')
+
+    const unknown = fakeMigrationChild(false)
+    const unknownOutcome = waitForDesktopInstallationKeyPreflightV1(unknown.process, 1, 5)
+    await expect(unknownOutcome).rejects.toBeInstanceOf(DesktopInstallationKeyPreflightChildUnconfirmedError)
+    expect(unknown.killCalls).toBe(1)
+    const unconfirmed = new DesktopInstallationKeyPreflightChildUnconfirmedError()
+    await expect(settleOptionalRuntimeCapability(
+      'case_authority', async () => { throw unconfirmed }
+    )).rejects.toBe(unconfirmed)
   })
 })
 

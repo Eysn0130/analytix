@@ -30,6 +30,7 @@ const defaultRuntimeServerShutdownTimeout = 30 * time.Second
 
 const backendGenerationConsumedMarkerV1 = "ANALYTIX_BACKEND_GENERATION_CONSUMED "
 const desktopPrivateHistoryMigrationReadyMarkerV2 = "ANALYTIX_DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2"
+const desktopInstallationKeyPreflightReadyMarkerV1 = "ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1"
 
 type runtimeServerStartup interface {
 	ActivateContext(context.Context, runtimeapp.Config) (http.Handler, error)
@@ -248,6 +249,9 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 }
 
 func runRuntimeMigrationCommand(args []string, output io.Writer) error {
+	if len(args) > 0 && args[0] == "prepare-desktop-installation-key-v1" {
+		return runRuntimeInstallationKeyPreflightCommand(args[1:], output)
+	}
 	if len(args) == 0 || args[0] != "migrate-desktop-private-history-v2" || output == nil {
 		return errors.New("runtime migration command is invalid")
 	}
@@ -274,6 +278,51 @@ func runRuntimeMigrationCommand(args []string, output io.Writer) error {
 		return errors.New("runtime migration marker write failed")
 	}
 	return nil
+}
+
+func runRuntimeInstallationKeyPreflightCommand(args []string, output io.Writer) error {
+	if output == nil || !exactlyOneCLIFlagV1(args, "--data-dir") ||
+		!exactlyOneCLIFlagV1(args, "--user-data-dir") ||
+		(exactlyOneCLIFlagV1(args, "--durable-root") == exactlyOneCLIFlagV1(args, "--runtime-durable-root")) ||
+		!exactlyZeroCLIFlagV1(args, "--durable-temp-dir") {
+		return errors.New("desktop installation key preflight command is invalid")
+	}
+	cli, err := parseRuntimeServerCLI(args)
+	if err != nil || cli.PrivateStartupFrameV1 || cli.UserDataDir == "" ||
+		!exactAbsoluteCLIPath(firstNonEmpty(cli.ProductionDurableRoot, cli.RuntimeDurableRoot)) ||
+		cli.RuntimeToken == "" || cli.Insecure {
+		return errors.New("desktop installation key preflight command is invalid")
+	}
+	preflightCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := runtimeapp.RunDesktopInstallationKeyPreflightV1(
+		preflightCtx, runtimeConfigFromCLI(cli, cli.RuntimeToken, 0),
+	); err != nil {
+		return errors.New("desktop installation key preflight failed")
+	}
+	if _, err := fmt.Fprintln(output, desktopInstallationKeyPreflightReadyMarkerV1); err != nil {
+		return errors.New("desktop installation key preflight marker write failed")
+	}
+	return nil
+}
+
+func exactlyOneCLIFlagV1(args []string, name string) bool {
+	count := 0
+	for _, argument := range args {
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			count++
+		}
+	}
+	return count == 1
+}
+
+func exactlyZeroCLIFlagV1(args []string, name string) bool {
+	for _, argument := range args {
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			return false
+		}
+	}
+	return true
 }
 
 func exactAbsoluteCLIPath(value string) bool {

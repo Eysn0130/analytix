@@ -199,6 +199,7 @@ function traceRuntimeStartup(stage: StartupTraceStage): void {
   try { runtimeStartupTraceObserver?.(stage) } catch { /* diagnostics never gate startup */ }
 }
 const DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2 = 'ANALYTIX_DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2\n'
+const DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1 = 'ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1\n'
 const GO_CONFORMANCE_STARTUP_TIMEOUT_MS = 60_000
 const MAX_GO_READY_STDOUT_BYTES = 64 << 10
 const MAX_GO_MIGRATION_OUTPUT_BYTES = 4 << 10
@@ -370,8 +371,9 @@ export async function settleOptionalRuntimeCapability<T>(
   } catch (error) {
     // A still-running materialization writer cannot be treated as an absent
     // optional capability while the base runtime opens the same data root.
-    if (capability === 'bundled_funds' &&
-        error instanceof BundledFundsMaterializationChildUnconfirmedError) throw error
+    if ((capability === 'bundled_funds' &&
+        error instanceof BundledFundsMaterializationChildUnconfirmedError) ||
+        error instanceof DesktopInstallationKeyPreflightChildUnconfirmedError) throw error
     try {
       reportUnavailable(capability)
     } catch {
@@ -1839,6 +1841,23 @@ export function buildDesktopPrivateHistoryMigrationArgsV2(
   ]
 }
 
+// The Main startup owner may use this controlled seam after the persistent
+// enrollment transaction exists. Merely building these arguments never runs
+// another semantic Prepare during ordinary startup.
+export function buildDesktopInstallationKeyPreflightArgsV1(
+  dataDir: string,
+  durableRoot: string,
+  userDataDir: string
+): string[] {
+  return [
+    'migration',
+    'prepare-desktop-installation-key-v1',
+    '--data-dir', resolve(dataDir),
+    '--durable-root', resolve(durableRoot),
+    ...buildGoRuntimeStartupUserDataArgsV1(userDataDir)
+  ]
+}
+
 export function buildGoRuntimeStartupUserDataArgsV1(userDataDir: string): string[] {
   return ['--user-data-dir', resolve(userDataDir)]
 }
@@ -1876,6 +1895,18 @@ export function isExactDesktopPrivateHistoryMigrationReadyV2(stdout: Buffer): bo
     stdout.equals(Buffer.from(DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2, 'utf8'))
 }
 
+export function isExactDesktopInstallationKeyPreflightReadyV1(stdout: Buffer): boolean {
+  return Buffer.isBuffer(stdout) &&
+    stdout.equals(Buffer.from(DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1, 'utf8'))
+}
+
+export class DesktopInstallationKeyPreflightChildUnconfirmedError extends Error {
+  constructor() {
+    super('Desktop installation key preflight termination could not be confirmed.')
+    this.name = 'DesktopInstallationKeyPreflightChildUnconfirmedError'
+  }
+}
+
 export async function migrateDesktopPrivateHistoryBeforeStartV2(
   settings: AppSettingsV1,
   userDataDir: string
@@ -1903,88 +1934,115 @@ export function waitForDesktopPrivateHistoryMigrationV2(
   timeoutMs = DESKTOP_PRIVATE_HISTORY_MIGRATION_TIMEOUT_MS_V2,
   terminationGraceMs = 5_000
 ): Promise<void> {
-	return new Promise((resolveReady, rejectReady) => {
-		let stdout = Buffer.alloc(0)
-		let stderrBytes = 0
-		let settled = false
-		let failureRequested = false
-		let timeout: NodeJS.Timeout | undefined
-		let terminationTimeout: NodeJS.Timeout | undefined
-		const cleanup = (): void => {
-			if (timeout) clearTimeout(timeout)
-			if (terminationTimeout) clearTimeout(terminationTimeout)
-			child.stdout?.off('data', onStdout)
-			child.stderr?.off('data', onStderr)
-			child.off('error', onError)
-			child.off('close', onClose)
-		}
-		const finishAfterClose = (error?: Error): void => {
-			if (settled) return
-			settled = true
-			cleanup()
-			stdout.fill(0)
-			stdout = Buffer.alloc(0)
-			if (error) rejectReady(error)
-			else resolveReady()
-		}
-		const requestFailure = (): void => {
-			if (failureRequested || settled) return
-			failureRequested = true
-			if (child.exitCode === null && child.signalCode === null) {
-				try {
-					child.kill('SIGKILL')
-				} catch {
-					// The bounded termination deadline below still keeps startup fail-closed.
-				}
-			}
-			terminationTimeout = setTimeout(() => {
-				if (settled) return
-				child.stdout?.destroy()
-				child.stderr?.destroy()
-				try {
-					child.unref()
-				} catch {
-					// Rejection remains authoritative even for incomplete ChildProcess test doubles.
-				}
-				finishAfterClose(new Error('Desktop private history migration termination could not be confirmed.'))
-			}, Math.max(1, terminationGraceMs))
-		}
-		const onStdout = (chunk: Buffer | string): void => {
-			const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
-			if (settled) {
-				incoming.fill(0)
-				return
-			}
-			if (failureRequested || stdout.length + incoming.length > MAX_GO_MIGRATION_OUTPUT_BYTES) {
-				incoming.fill(0)
-				requestFailure()
-				return
-			}
-			const combined = Buffer.concat([stdout, incoming])
-			stdout.fill(0)
-			incoming.fill(0)
-			stdout = combined
-		}
-		const onStderr = (chunk: Buffer | string): void => {
-			if (settled) return
-			stderrBytes = Math.min(
-				MAX_GO_MIGRATION_OUTPUT_BYTES + 1,
-				stderrBytes + Buffer.byteLength(chunk)
-			)
-			if (stderrBytes > MAX_GO_MIGRATION_OUTPUT_BYTES) requestFailure()
-		}
-		const onError = (): void => requestFailure()
-		const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
-			const valid = !failureRequested && code === 0 && signal === null && stderrBytes === 0 &&
-				isExactDesktopPrivateHistoryMigrationReadyV2(stdout)
-			finishAfterClose(valid ? undefined : new Error('Desktop private history migration did not complete.'))
-		}
-		child.stdout?.on('data', onStdout)
-		child.stderr?.on('data', onStderr)
-		child.once('error', onError)
-		child.once('close', onClose)
-		timeout = setTimeout(requestFailure, Math.max(1, timeoutMs))
-	})
+  return waitForFixedDesktopPreflightExitV1(
+    child, isExactDesktopPrivateHistoryMigrationReadyV2,
+    () => new Error('Desktop private history migration termination could not be confirmed.'),
+    'Desktop private history migration did not complete.', timeoutMs, terminationGraceMs
+  )
+}
+
+export function waitForDesktopInstallationKeyPreflightV1(
+  child: ChildProcess,
+  timeoutMs = DESKTOP_PRIVATE_HISTORY_MIGRATION_TIMEOUT_MS_V2,
+  terminationGraceMs = 5_000
+): Promise<void> {
+  return waitForFixedDesktopPreflightExitV1(
+    child, isExactDesktopInstallationKeyPreflightReadyV1,
+    () => new DesktopInstallationKeyPreflightChildUnconfirmedError(),
+    'Desktop installation key preflight did not complete.', timeoutMs, terminationGraceMs
+  )
+}
+
+function waitForFixedDesktopPreflightExitV1(
+  child: ChildProcess,
+  ready: (stdout: Buffer) => boolean,
+  unconfirmed: () => Error,
+  incompleteMessage: string,
+  timeoutMs: number,
+  terminationGraceMs: number
+): Promise<void> {
+  return new Promise((resolveReady, rejectReady) => {
+    let stdout = Buffer.alloc(0)
+    let stderrBytes = 0
+    let settled = false
+    let failureRequested = false
+    let timeout: NodeJS.Timeout | undefined
+    let terminationTimeout: NodeJS.Timeout | undefined
+    const cleanup = (): void => {
+      if (timeout) clearTimeout(timeout)
+      if (terminationTimeout) clearTimeout(terminationTimeout)
+      child.stdout?.off('data', onStdout)
+      child.stderr?.off('data', onStderr)
+      child.off('error', onError)
+      child.off('close', onClose)
+    }
+    const finishAfterClose = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      stdout.fill(0)
+      stdout = Buffer.alloc(0)
+      if (error) rejectReady(error)
+      else resolveReady()
+    }
+    const requestFailure = (): void => {
+      if (failureRequested || settled) return
+      failureRequested = true
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // The bounded termination deadline below still keeps startup fail-closed.
+        }
+      }
+      terminationTimeout = setTimeout(() => {
+        if (settled) return
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        try {
+          child.unref()
+        } catch {
+          // Rejection remains authoritative even for incomplete ChildProcess test doubles.
+        }
+        finishAfterClose(unconfirmed())
+      }, Math.max(1, terminationGraceMs))
+    }
+    const onStdout = (chunk: Buffer | string): void => {
+      const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
+      if (settled) {
+        incoming.fill(0)
+        return
+      }
+      if (failureRequested || stdout.length + incoming.length > MAX_GO_MIGRATION_OUTPUT_BYTES) {
+        incoming.fill(0)
+        requestFailure()
+        return
+      }
+      const combined = Buffer.concat([stdout, incoming])
+      stdout.fill(0)
+      incoming.fill(0)
+      stdout = combined
+    }
+    const onStderr = (chunk: Buffer | string): void => {
+      if (settled) return
+      stderrBytes = Math.min(
+        MAX_GO_MIGRATION_OUTPUT_BYTES + 1,
+        stderrBytes + Buffer.byteLength(chunk)
+      )
+      if (stderrBytes > MAX_GO_MIGRATION_OUTPUT_BYTES) requestFailure()
+    }
+    const onError = (): void => requestFailure()
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      const valid = !failureRequested && code === 0 && signal === null && stderrBytes === 0 &&
+        ready(stdout)
+      finishAfterClose(valid ? undefined : new Error(incompleteMessage))
+    }
+    child.stdout?.on('data', onStdout)
+    child.stderr?.on('data', onStderr)
+    child.once('error', onError)
+    child.once('close', onClose)
+    timeout = setTimeout(requestFailure, Math.max(1, timeoutMs))
+  })
 }
 
 function isGoSidecarRunning(): boolean {
