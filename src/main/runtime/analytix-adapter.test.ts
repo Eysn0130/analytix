@@ -24,6 +24,7 @@ import { createProviderRegistryIpcHandler } from '../ipc/provider-registry-ipc'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../packages/runtime/src/contracts/runtime-info.js'
 import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../packages/runtime/src/contracts/runtime-tools.js'
 import { BundledFundsMaterializationChildUnconfirmedError } from './bundled-funds-materialization'
+import { BundledFundsDispatchDeferredV1 } from './bundled-funds-on-demand'
 import {
   buildDevGoToolchainEnvV1,
   createCoreFundsCSVAdmissionTraceStreamV2,
@@ -1610,6 +1611,27 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('defers a mutation before transport and sends it once after admission reopens', async () => {
+    let requests = 0
+    const port = await listen((_req, res) => {
+      requests += 1
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ id: 'thread_once' }))
+    })
+    const settings = settingsForPort(port)
+    let open = false
+    const sendOnce = () => runtimeRequestViaHost(
+      settings, '/v1/threads', { method: 'POST', body: '{"title":"Once"}' },
+      async () => undefined,
+      (send) => { if (!open) throw new BundledFundsDispatchDeferredV1(); return send() }
+    )
+    await expect(sendOnce()).rejects.toBeInstanceOf(BundledFundsDispatchDeferredV1)
+    expect(requests).toBe(0)
+    open = true
+    await sendOnce()
+    expect(requests).toBe(1)
+  })
+
   it('allows protected Provider Registry mutations to finish beyond the ordinary read deadline', () => {
     expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek', 'PATCH')).toBe(60_000)
     expect(runtimeRequestTimeoutMs('/v1/provider-registry/providers/deepseek/credential', 'PUT')).toBe(60_000)

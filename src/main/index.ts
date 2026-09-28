@@ -76,6 +76,7 @@ import { isAuthorizedPrototypeFileUrl } from './services/prototype-embed-registr
 import { fetchUpstreamModelIds } from './upstream-models'
 import {
   analytixRuntimeAdapter,
+  armBundledFundsActivationForNextGoStartV1,
   configureRuntimeStartupTraceObserver,
   captureCurrentFinalPublicationAuthorityPin,
   configureGoRuntimeDesktopExternalStateBoundary,
@@ -87,6 +88,15 @@ import {
   runtimeRequestViaHost,
   setGoRuntimeUnexpectedExitHandler
 } from './runtime/analytix-adapter'
+import { currentBundledFundsMaterializationBindingV1 } from './runtime/bundled-funds-materialization'
+import {
+  BundledFundsDispatchDeferredV1,
+  createBundledFundsOnDemandActivationV1,
+  runBundledFundsDispatchWithRefreshV1,
+  withCommittedBundledFundsStopV1
+} from './runtime/bundled-funds-on-demand'
+import { currentRuntimeMaintenancePinV1, prepareCurrentRuntimeMaintenanceV1 } from './runtime/runtime-maintenance'
+import { packagedReleaseProfile } from './release-profile'
 import { waitForRuntimeTurnsIdle } from './runtime/managed-runtime-idle'
 import {
   listManagedMcpAccountCredentialBindings,
@@ -163,6 +173,7 @@ import {
 import { registerRuntimeSseIpc } from './runtime-sse-ipc'
 import { appendThreadTraceEvent } from './services/thread-trace-service'
 import {
+  disposeTerminalPtysForRuntimeRestartV1,
   registerTerminalPtyIpc,
   type TerminalPtyIpcController
 } from './terminal/terminal-pty-ipc'
@@ -504,6 +515,7 @@ async function stopManagedRuntimes(): Promise<void> {
       telegramRuntime?.stop()
       const dataAnalysisStop = dataAnalysisBackendManager?.stopAndWait() ?? Promise.resolve()
       stopWeixinBridgeRuntime()
+      await bundledFundsActivation.waitForInFlight()
       const results = await Promise.allSettled([dataAnalysisStop, analytixRuntimeAdapter.stopAndWait()])
       const computerUseAgentStop = await stopOwnedOpenComputerUseAppAgentV1({
         command: resolveBuiltInComputerUseMcpCommand(),
@@ -1061,6 +1073,48 @@ let supervisedRestartInFlight = false
 let runtimeWatchdogTimer: NodeJS.Timeout | null = null
 let runtimeWatchdogFailures = 0
 let runtimeWatchdogTickInFlight = false
+let hubStandaloneStopInFlight = false
+const bundledFundsActivation = createBundledFundsOnDemandActivationV1({
+  isReady: () => analytixRuntimeAdapter.isChildRunning() &&
+    !runtimeRestartPromise && currentRuntimeMaintenancePinV1() !== null &&
+    currentBundledFundsMaterializationBindingV1() !== null,
+  isManaged: () => app.isPackaged && packagedReleaseProfile(app.getAppPath()) === 'full' &&
+    isManagedGoRuntimeBackend() && analytixRuntimeAdapter.isChildRunning() &&
+    currentRuntimeMaintenancePinV1() !== null &&
+    !runtimeRestartPromise && !runtimeEnsurePromise && !runtimeSettingsApplyPromise &&
+    !runtimeWatchdogTickInFlight && !supervisedRestartInFlight && !hubStandaloneStopInFlight,
+  isShuttingDown: () => isQuitting || managedRuntimesStoppedForQuit || Boolean(managedRuntimesStopPromise),
+  prepare: async () => {
+    const settings = await store.load()
+    if (runtimeReadyFingerprint !== runtimeFingerprint(settings)) return null
+    const pin = currentRuntimeMaintenancePinV1()
+    return pin ? prepareCurrentRuntimeMaintenanceV1(settings, pin) : null
+  },
+  restartWithFunds: async (lease) => {
+    const settings = await store.load()
+    if (!lease.isCurrent() || runtimeReadyFingerprint !== runtimeFingerprint(settings) ||
+      runtimeRestartPromise || runtimeEnsurePromise || runtimeSettingsApplyPromise ||
+      isQuitting) return
+    let disarm: () => void = () => undefined
+    try {
+      await withCommittedBundledFundsStopV1(lease, () => restartRuntime(settings, {
+        activationOwned: true,
+        skipQueuedSettingsApply: true,
+        onStopped: async () => {
+          try {
+            const current = await store.load()
+            if (!isQuitting && !managedRuntimesStoppedForQuit && !managedRuntimesStopPromise &&
+              runtimeFingerprint(current) === runtimeFingerprint(settings)) {
+              disarm = armBundledFundsActivationForNextGoStartV1()
+            }
+          } catch { /* Start the ordinary Go runtime without optional Funds. */ }
+        }
+      }))
+    } finally {
+      disarm()
+    }
+  }
+})
 
 function publishRuntimeStatus(input: RuntimeStatusPublicV1Input): void {
   const full = createRuntimeStatusPublicV1(input)
@@ -1184,6 +1238,7 @@ async function runtimeWatchdogTick(): Promise<void> {
   if (managedRuntimesStoppedForQuit || isQuitting) return
   if (
     supervisedRestartInFlight ||
+    bundledFundsActivation.isInFlight() ||
     runtimeRestartPromise ||
     runtimeSettingsApplyPromise ||
     runtimeEnsurePromise
@@ -1243,6 +1298,7 @@ function queueRuntimeSettingsApply(
   const task = previousTask
     .catch(() => undefined)
     .then(async () => {
+      await bundledFundsActivation.waitForInFlight()
       const current = lastAppliedSettings ?? next
       traceStartup('runtime settings apply:begin')
       await restartManagedRuntimeForSettingsChange(anchor, current)
@@ -1274,6 +1330,7 @@ function queueRuntimeMcpConfigApply(settings: AppSettingsV1): void {
   const task = previousTask
     .catch(() => undefined)
     .then(async () => {
+      await bundledFundsActivation.waitForInFlight()
       const current = lastAppliedSettings ?? settings
       await restartManagedRuntimeForMcpConfigChange(current)
     })
@@ -1310,6 +1367,7 @@ function runtimeFingerprint(settings: AppSettingsV1): string {
 }
 
 async function ensureRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
+  await bundledFundsActivation.waitForInFlight()
   const restart = runtimeRestartPromise
   if (restart) {
     try {
@@ -1441,14 +1499,23 @@ async function ensureAnalytixRuntime(settings: AppSettingsV1): Promise<AppSettin
   return launchSettings
 }
 
-async function restartRuntime(settings: AppSettingsV1): Promise<void> {
+type RuntimeRestartOptions = {
+  activationOwned?: boolean
+  skipQueuedSettingsApply?: boolean
+  onStopped?: () => Promise<void> | void
+}
+
+async function restartRuntime(settings: AppSettingsV1, options: RuntimeRestartOptions = {}): Promise<void> {
+  if (!options.activationOwned && bundledFundsActivation.isInFlight()) {
+    return bundledFundsActivation.runAfterInFlight(() => restartRuntime(settings, options))
+  }
   runtimeReadyFingerprint = null
-  terminalPtyController?.disposeAll()
+  disposeTerminalPtysForRuntimeRestartV1(terminalPtyController, options.activationOwned === true)
   if (runtimeRestartPromise) return runtimeRestartPromise
   const pendingEnsure = runtimeEnsurePromise
   runtimeEnsurePromise = null
   runtimeEnsureFingerprint = null
-  const task = restartAfterPendingEnsure(pendingEnsure, () => restartRuntimeOnce(settings))
+  const task = restartAfterPendingEnsure(pendingEnsure, () => restartRuntimeOnce(settings, options))
     .finally(() => {
       if (runtimeRestartPromise === task) {
         runtimeRestartPromise = null
@@ -1458,9 +1525,9 @@ async function restartRuntime(settings: AppSettingsV1): Promise<void> {
   return task
 }
 
-async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
+async function restartRuntimeOnce(settings: AppSettingsV1, options: RuntimeRestartOptions): Promise<void> {
   traceStartup('runtime restart:begin')
-  await waitForQueuedRuntimeSettingsApply()
+  if (!options.skipQueuedSettingsApply) await waitForQueuedRuntimeSettingsApply()
   traceStartup('runtime restart:after settings apply')
   const runtime = getAnalytixRuntimeSettings(settings)
 
@@ -1474,6 +1541,10 @@ async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
   const adapter = analytixRuntimeAdapter
   publishRuntimeStatus({ code: 'runtime_starting', source: 'restart' })
   await adapter.stopAndWait()
+  if (isQuitting || managedRuntimesStoppedForQuit || managedRuntimesStopPromise) {
+    throw runtimeJsonError('runtime_unavailable', 'Analytix is shutting down.')
+  }
+  await options.onStopped?.()
   const launchSettings = await resolveManagedAnalytixLaunchSettings(settings, 'runtime-restart')
 
   try {
@@ -1806,22 +1877,34 @@ async function runtimeRequest(
   pathAndQuery: string,
   init: { method?: string; body?: string; headers?: Record<string, string> }
 ): Promise<{ ok: boolean; status: number; body: string }> {
-  try {
-    return await runtimeRequestViaHost(settings, pathAndQuery, init, ensureRuntime)
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
-    const publicPath = pathAndQuery.split('?', 1)[0] || '/'
-    logError(
-      'runtime-request',
-      `HTTP request to ${publicPath} failed`,
-      runtimeErrorPublicDiagnosticV1(e)
-    )
-    const parsed = parseRuntimeErrorBody(message, 'The Analytix runtime is unavailable.')
-    if (parsed.code !== 'unknown') {
-      return runtimeFailure(parsed.code, parsed.message)
+  let requestSettings = settings
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await runtimeRequestViaHost(
+        requestSettings, pathAndQuery, init, ensureRuntime, bundledFundsActivation.runDispatch
+      )
+    } catch (error) {
+      if (error instanceof BundledFundsDispatchDeferredV1 && attempt < 2) {
+        await bundledFundsActivation.waitForInFlight()
+        requestSettings = await store.load()
+        continue
+      }
+      const e = error
+      const message = e instanceof Error ? e.message : String(e)
+      const publicPath = pathAndQuery.split('?', 1)[0] || '/'
+      logError(
+        'runtime-request',
+        `HTTP request to ${publicPath} failed`,
+        runtimeErrorPublicDiagnosticV1(e)
+      )
+      const parsed = parseRuntimeErrorBody(message, 'The Analytix runtime is unavailable.')
+      if (parsed.code !== 'unknown') {
+        return runtimeFailure(parsed.code, parsed.message)
+      }
+      return runtimeFailure('fetch_failed', 'The Analytix runtime is unavailable.')
     }
-    return runtimeFailure('fetch_failed', 'The Analytix runtime is unavailable.')
   }
+  return runtimeFailure('runtime_unavailable', 'The Analytix runtime is unavailable.')
 }
 
 /**
@@ -1842,35 +1925,59 @@ async function localDisplayRuntimeRequest(
     if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const ensuredSettings = await ensureRuntime(settings)
     if (signal?.aborted) return { ok: false, status: 499, body: '' }
-    const requestSettings = ensuredSettings ?? settings
-    const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()
-    if (!runtimeAuthority) return { ok: false, status: 503, body: '' }
-    const baseUrl = getRuntimeBaseUrlForSettings(requestSettings)
-    const headers = runtimeAuthHeaders(requestSettings)
-    headers.set('Accept', 'application/json')
-    headers.set('Content-Type', 'application/json')
-    headers.set('X-Analytix-Local-Display', 'typed-v1')
-    const response = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.any([
-        ...(signal ? [signal] : []),
-        AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
-          path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
-      ])
-    })
-    const responseBody = await response.text()
-    if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
-      return { ok: false, status: 409, body: '' }
+    const activatesBundledFunds = path === '/v1/local-display/funds-import/stage' ||
+      path === '/v1/local-display/direct-source-preview'
+    if (app.isPackaged && activatesBundledFunds) {
+      if (!await bundledFundsActivation.activate(signal)) {
+        return { ok: false, status: 503, body: '' }
+      }
+      if (signal?.aborted) return { ok: false, status: 499, body: '' }
     }
-    return {
-      ok: response.ok,
-      status: response.status,
-      body: responseBody
-    }
+    let requestSettings = activatesBundledFunds && app.isPackaged
+      ? await store.load()
+      : ensuredSettings ?? settings
+    return await runBundledFundsDispatchWithRefreshV1(
+      bundledFundsActivation,
+      async () => { requestSettings = await store.load() },
+      async () => {
+        if (activatesBundledFunds && app.isPackaged &&
+          currentBundledFundsMaterializationBindingV1() === null) {
+          return { ok: false, status: 503, body: '' }
+        }
+        const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()
+        if (!runtimeAuthority) return { ok: false, status: 503, body: '' }
+        const baseUrl = getRuntimeBaseUrlForSettings(requestSettings)
+        if (new URL(baseUrl).origin !== runtimeAuthority.runtimeUrl) {
+          return { ok: false, status: 503, body: '' }
+        }
+        const headers = runtimeAuthHeaders(requestSettings)
+        headers.set('Accept', 'application/json')
+        headers.set('Content-Type', 'application/json')
+        headers.set('X-Analytix-Local-Display', 'typed-v1')
+        const response = await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers,
+          body,
+          signal: AbortSignal.any([
+            ...(signal ? [signal] : []),
+            AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
+              path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
+          ])
+        })
+        const responseBody = await response.text()
+        if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
+          return { ok: false, status: 409, body: '' }
+        }
+        return {
+          ok: response.ok,
+          status: response.status,
+          body: responseBody
+        }
+      },
+      signal
+    )
   } catch {
-    return { ok: false, status: 503, body: '' }
+    return { ok: false, status: signal?.aborted ? 499 : 503, body: '' }
   }
 }
 
@@ -2461,11 +2568,18 @@ app.whenReady().then(async () => {
               await restartRuntime(settings)
               return
             }
-            terminalPtyController?.disposeAll()
-            await analytixRuntimeAdapter.stopAndWait()
-            publishRuntimeStatus({
-              code: 'hub_account_signed_out',
-              source: 'hub-account'
+            await bundledFundsActivation.runAfterInFlight(async () => {
+              hubStandaloneStopInFlight = true
+              try {
+                terminalPtyController?.disposeAll()
+                await analytixRuntimeAdapter.stopAndWait()
+                publishRuntimeStatus({
+                  code: 'hub_account_signed_out',
+                  source: 'hub-account'
+                })
+              } finally {
+                hubStandaloneStopInFlight = false
+              }
             })
           }
         }))

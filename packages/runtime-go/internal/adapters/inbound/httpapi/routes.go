@@ -22,6 +22,7 @@ const (
 	RouteUnknown               RuntimeRoute = ""
 	RouteHealth                RuntimeRoute = "health"
 	RouteRuntimeInfo           RuntimeRoute = "runtime_info"
+	RouteRuntimeQuiescence     RuntimeRoute = "runtime_quiescence"
 	RouteRuntimeTools          RuntimeRoute = "runtime_tools"
 	RouteToolExecutionObserve  RuntimeRoute = "tool_execution_observe"
 	RouteRuntimeTaskJobs       RuntimeRoute = "runtime_task_jobs"
@@ -61,6 +62,8 @@ func MatchRuntimeRoute(path string) RuntimeRouteMatch {
 		return RuntimeRouteMatch{Route: RouteHealth}
 	case path == "/v1/runtime/info":
 		return RuntimeRouteMatch{Route: RouteRuntimeInfo}
+	case path == "/v1/runtime/quiescence":
+		return RuntimeRouteMatch{Route: RouteRuntimeQuiescence}
 	case path == "/v1/runtime/tools":
 		return RuntimeRouteMatch{Route: RouteRuntimeTools}
 	case path == toolExecutionObservationPathV1:

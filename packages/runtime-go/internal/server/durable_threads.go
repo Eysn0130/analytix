@@ -71,6 +71,93 @@ func (s *DurableEventSessionStore) ListThreads(archivedOnly bool, includeArchive
 	return threads, nil
 }
 
+// RuntimeTurnsIdleForMaintenance scans every canonical thread under the
+// durable writer lock. It does not use the public, potentially limited list.
+func (s *DurableEventSessionStore) RuntimeTurnsIdleForMaintenance(ctx context.Context) (bool, error) {
+	if s == nil {
+		return false, errors.New("durable thread store is unavailable")
+	}
+	if ctx == nil {
+		return false, errors.New("maintenance context is unavailable")
+	}
+	for !s.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if len(s.pendingEvents) != 0 || len(s.pendingCaseCompactions) != 0 {
+		return false, nil
+	}
+	if s.beforeMaintenanceReadHook != nil {
+		s.beforeMaintenanceReadHook()
+	}
+	entries, err := os.ReadDir(s.threadsDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return ctx.Err() == nil, ctx.Err()
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		id := entry.Name()
+		if !entry.IsDir() || safeDurableID(id) != id {
+			return false, errors.New("durable thread inventory contains an unknown entry")
+		}
+		thread, readErr := s.readThreadNoLock(id)
+		if readErr != nil || thread == nil || stringField(thread, "id") != id {
+			return false, errors.Join(readErr, errors.New("canonical thread is unavailable"))
+		}
+		status, ok := thread["status"].(string)
+		if !ok {
+			return false, errors.New("canonical thread status is unavailable")
+		}
+		switch status {
+		case "running":
+			return false, nil
+		case "idle", "archived", "deleted":
+		default:
+			return false, errors.New("canonical thread status is unknown")
+		}
+		turns, ok := thread["turns"].([]any)
+		if !ok {
+			return false, errors.New("canonical turns are unavailable")
+		}
+		for _, raw := range turns {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			turn, ok := raw.(map[string]any)
+			if !ok {
+				return false, errors.New("canonical turn is invalid")
+			}
+			turnStatus, ok := turn["status"].(string)
+			if !ok {
+				return false, errors.New("canonical turn status is unavailable")
+			}
+			switch turnStatus {
+			case "queued", "running", "waiting":
+				return false, nil
+			case "completed", "failed", "aborted", "interrupted", "killed":
+			default:
+				return false, errors.New("canonical turn status is unknown")
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *DurableEventSessionStore) ListThreadsLimited(archivedOnly bool, includeArchived bool, includeSide bool, search string, limit int) ([]map[string]any, error) {
 	if limit <= 0 || strings.TrimSpace(search) != "" {
 		return s.ListThreads(archivedOnly, includeArchived, includeSide, search)

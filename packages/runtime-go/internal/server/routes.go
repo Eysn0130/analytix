@@ -13,11 +13,11 @@ import (
 )
 
 func (h *runtimeServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	httpapi.RuntimeHandler{
+	h.serveWithRuntimeMaintenanceAdmission(w, r, httpapi.RuntimeHandler{
 		RuntimeToken: h.runtimeToken,
 		Insecure:     h.insecure,
 		Dispatcher:   runtimeHTTPDispatcher{handler: h},
-	}.ServeHTTP(w, r)
+	})
 }
 
 type runtimeHTTPDispatcher struct {
@@ -26,6 +26,10 @@ type runtimeHTTPDispatcher struct {
 
 func (d runtimeHTTPDispatcher) RuntimeInfo(w http.ResponseWriter, r *http.Request) {
 	d.handler.handleRuntimeInfo(w, r)
+}
+
+func (d runtimeHTTPDispatcher) RuntimeQuiescence(w http.ResponseWriter, r *http.Request) {
+	d.handler.handleRuntimeQuiescence(w, r)
 }
 
 func (d runtimeHTTPDispatcher) RuntimeTools(w http.ResponseWriter, r *http.Request) {

@@ -88,6 +88,7 @@ type DurableEventSessionStore struct {
 	caseCompactionCommitHook     func(string, string)
 	generalTerminalAtomicAppend  func(string, []map[string]any) error
 	beforeTerminalWrite          func() error
+	beforeMaintenanceReadHook    func()
 	acceptedFinalEvents          *acceptedfinaleventadapter.Store
 	childThreadCounterFloor      int
 	childForkCounterFloor        int

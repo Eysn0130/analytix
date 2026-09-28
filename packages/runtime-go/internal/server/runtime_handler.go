@@ -121,11 +121,24 @@ type runtimeServerHandler struct {
 
 	asyncTurnPhaseObserver func(string)
 
-	mu                 sync.Mutex
-	gateCancellationMu sync.Mutex
-	turnSeq            int
-	readRegistry       *filetoolsapp.ReadRegistry
-	cachePrefixShapes  map[string]appusage.PrefixBaseline
+	mu                           sync.Mutex
+	maintenanceMu                sync.Mutex
+	maintenanceClosed            bool
+	maintenanceLease             string
+	maintenanceLastReleasedLease string
+	maintenanceCommitted         bool
+	maintenanceTimer             *time.Timer
+	maintenanceExpiresAt         time.Time
+	maintenanceAttempt           uint64
+	maintenancePrepareDeadline   time.Time
+	mutatingRequests             int
+	maintenanceSSE               map[uint64]context.CancelFunc
+	maintenanceNextID            uint64
+	maintenanceDrained           chan struct{}
+	gateCancellationMu           sync.Mutex
+	turnSeq                      int
+	readRegistry                 *filetoolsapp.ReadRegistry
+	cachePrefixShapes            map[string]appusage.PrefixBaseline
 }
 
 func (h *runtimeServerHandler) resolveRuntimeTurnExecution(

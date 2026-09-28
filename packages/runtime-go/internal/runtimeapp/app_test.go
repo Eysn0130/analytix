@@ -34,6 +34,46 @@ func TestNewRuntimeServerHandlerAssemblesRunnableHandler(t *testing.T) {
 	}
 }
 
+func TestProductionMuxMaintenanceFencesPrivateLocalDisplayRoutes(t *testing.T) {
+	handler, err := NewRuntimeServerHandlerE(Config{
+		RuntimeToken:   DefaultRuntimeToken,
+		DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdownOwnedRuntimeHandler(t, handler)
+	request := httptest.NewRequest(http.MethodPost, "/v1/runtime/quiescence", bytes.NewBufferString(`{"operation":"prepare"}`))
+	request.Header.Set("Authorization", "Bearer "+DefaultRuntimeToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("prepare status = %d", response.Code)
+	}
+	var ready struct {
+		Lease string `json:"lease"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &ready); err != nil || len(ready.Lease) != 43 {
+		t.Fatalf("prepare lease unavailable: %v", err)
+	}
+	private := httptest.NewRequest(http.MethodPost, "/v1/local-display/funds-import/confirm", bytes.NewBufferString(`{}`))
+	private.Header.Set("Authorization", "Bearer "+DefaultRuntimeToken)
+	private.Header.Set("X-Analytix-Local-Display", "typed-v1")
+	blocked := httptest.NewRecorder()
+	handler.ServeHTTP(blocked, private)
+	if blocked.Code != http.StatusServiceUnavailable {
+		t.Fatalf("private route bypassed production maintenance fence: %d", blocked.Code)
+	}
+	release := httptest.NewRequest(http.MethodPost, "/v1/runtime/quiescence",
+		bytes.NewBufferString(`{"operation":"release","lease":"`+ready.Lease+`"}`))
+	release.Header.Set("Authorization", "Bearer "+DefaultRuntimeToken)
+	released := httptest.NewRecorder()
+	handler.ServeHTTP(released, release)
+	if released.Code != http.StatusOK {
+		t.Fatalf("release status = %d", released.Code)
+	}
+}
+
 func TestRuntimeAppRequiresTokenUnlessInsecureIsExplicit(t *testing.T) {
 	if _, err := NewRuntimeServerHandlerE(Config{
 		DurableTempDir: t.TempDir(), DataDir: t.TempDir(),

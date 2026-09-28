@@ -69,6 +69,7 @@ import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
 import { logWarn, publicConsoleInfo, type StartupTraceStage } from '../logger'
 import {
   BundledFundsMaterializationChildUnconfirmedError,
+  assertNoUnconfirmedMaterializationChildV1,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   materializeBundledFundsBeforeRuntimeV1,
@@ -331,6 +332,20 @@ let goSidecarRuntimeToken = ''
 let goSidecarDurableTempDir: string | null = null
 let goSidecarOwnsDurableRoot = false
 let goSidecarStderrTail = ''
+let bundledFundsActivationArmedV1 = false
+
+export function armBundledFundsActivationForNextGoStartV1(): () => void {
+  if (bundledFundsActivationArmedV1) {
+    throw new Error('Bundled Funds activation is already armed.')
+  }
+  bundledFundsActivationArmedV1 = true
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    bundledFundsActivationArmedV1 = false
+  }
+}
 export type ManagedFinalPublicationAuthorityPinV1 = FinalPublicationAuthorityPinV1 & Readonly<{
   runtimePid: number
   runtimeUrl: string
@@ -2645,6 +2660,7 @@ async function startGoConformanceSidecarOnce(
   backend: AnalytixRuntimeGoBackendId,
   fallbackAlreadyUsed = false
 ): Promise<void> {
+  assertNoUnconfirmedMaterializationChildV1()
   traceRuntimeStartup('go preflight:begin')
   const runtime = resolveAnalytixRuntimeSettings(settings)
   const dataDir = resolveAnalytixDataDir(runtime)
@@ -2667,6 +2683,7 @@ async function startGoConformanceSidecarOnce(
   const syncRuntimeConfig = async (
     bundledFundsMaterialization?: BundledFundsMaterializationBindingV1
   ): Promise<void> => {
+    assertNoUnconfirmedMaterializationChildV1()
     const synced = await syncGuiManagedAnalytixConfig(dataDir, runtime, {
       scheduleMcp: {
         settings,
@@ -2681,7 +2698,8 @@ async function startGoConformanceSidecarOnce(
     hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1
   }
   let bundledFundsConfigSynced = false
-  const bundledFundsMaterialization = isRuntimeServer && (!app.isPackaged || packagedReleaseProfile(app.getAppPath()) !== 'core')
+  const bundledFundsMaterialization = isRuntimeServer && bundledFundsActivationArmedV1 &&
+    app.isPackaged && packagedReleaseProfile(app.getAppPath()) !== 'core'
     ? await settleOptionalRuntimeCapability('bundled_funds', async () => {
         const materialization = await materializeBundledFundsBeforeRuntimeV1({
           appIsPackaged: app.isPackaged,
@@ -2767,6 +2785,7 @@ async function startGoConformanceSidecarOnce(
   } else {
     args.push('--durable-temp-dir', durableRoot)
   }
+  assertNoUnconfirmedMaterializationChildV1()
   const child = spawn(
     launchTarget.command,
     args,
@@ -4596,7 +4615,8 @@ export async function runtimeRequestViaHost(
   settings: AppSettingsV1,
   pathAndQuery: string,
   init: RuntimeRequestInit,
-  ensureRuntime: (settings: AppSettingsV1) => Promise<AppSettingsV1 | void>
+  ensureRuntime: (settings: AppSettingsV1) => Promise<AppSettingsV1 | void>,
+  dispatch?: <T>(send: () => Promise<T>) => Promise<T>
 ): Promise<{ ok: boolean; status: number; body: string }> {
   const ensuredSettings = await ensureRuntime(settings)
   const requestSettings = ensuredSettings ?? settings
@@ -4617,51 +4637,54 @@ export async function runtimeRequestViaHost(
   }
   const packagedThreadReadDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
     (init.method ?? 'GET').toUpperCase() === 'GET' && /^\/v1\/threads\/[^/]+$/.test(pathNorm)
-  let rawResponseSeen = false
-  try {
-    const res = await fetch(url, {
-      method: init.method ?? 'GET',
-      headers: hdrs,
-      body: init.body,
-      signal: AbortSignal.timeout(runtimeRequestTimeoutMs(pathNorm, init.method ?? 'GET'))
-    })
-    const body = await res.text()
-    rawResponseSeen = true
-    if (packagedThreadReadDiagnostic && !res.ok) {
-      let code = 'unclassified'
-      try {
-        const candidate = (JSON.parse(body) as { code?: unknown }).code
-        if (candidate === 'public_projection_pending' ||
-          candidate === 'accepted_final_hydration_unavailable' ||
-          candidate === 'internal_error') code = candidate
-      } catch { /* Response contents remain private. */ }
-      const rawHydrationClass = res.headers.get('X-Analytix-QA-Hydration-Class')
-      const hydrationClass = code === 'accepted_final_hydration_unavailable' && [
-        'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
-        'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
-        'seal_rejected', 'batch_invalid', 'retained_authority',
-        'authority_mismatch', 'delivery_bound', 'other'
-      ].includes(rawHydrationClass || '') ? rawHydrationClass : null
-      console.error('[packaged-thread-read] ' + JSON.stringify({
-        status: res.status, code, ...(hydrationClass ? { hydrationClass } : {})
+  const send = async (): Promise<{ ok: boolean; status: number; body: string }> => {
+    let rawResponseSeen = false
+    try {
+      const res = await fetch(url, {
+        method: init.method ?? 'GET',
+        headers: hdrs,
+        body: init.body,
+        signal: AbortSignal.timeout(runtimeRequestTimeoutMs(pathNorm, init.method ?? 'GET'))
+      })
+      const body = await res.text()
+      rawResponseSeen = true
+      if (packagedThreadReadDiagnostic && !res.ok) {
+        let code = 'unclassified'
+        try {
+          const candidate = (JSON.parse(body) as { code?: unknown }).code
+          if (candidate === 'public_projection_pending' ||
+            candidate === 'accepted_final_hydration_unavailable' ||
+            candidate === 'internal_error') code = candidate
+        } catch { /* Response contents remain private. */ }
+        const rawHydrationClass = res.headers.get('X-Analytix-QA-Hydration-Class')
+        const hydrationClass = code === 'accepted_final_hydration_unavailable' && [
+          'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+          'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+          'seal_rejected', 'batch_invalid', 'retained_authority',
+          'authority_mismatch', 'delivery_bound', 'other'
+        ].includes(rawHydrationClass || '') ? rawHydrationClass : null
+        console.error('[packaged-thread-read] ' + JSON.stringify({
+          status: res.status, code, ...(hydrationClass ? { hydrationClass } : {})
+        }))
+      }
+      return sanitizeRuntimeResponse({
+        ok: res.ok,
+        status: res.status,
+        body
+      }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
+    } catch {
+      if (packagedThreadReadDiagnostic) {
+        console.error('[packaged-thread-read] ' + JSON.stringify({
+          status: 0, code: rawResponseSeen ? 'sanitizer_failed' : 'transport_unavailable'
+        }))
+      }
+      throw new Error(JSON.stringify({
+        code: 'runtime_unavailable',
+        message: 'The Analytix runtime is unavailable.'
       }))
     }
-    return sanitizeRuntimeResponse({
-      ok: res.ok,
-      status: res.status,
-      body
-    }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
-  } catch {
-    if (packagedThreadReadDiagnostic) {
-      console.error('[packaged-thread-read] ' + JSON.stringify({
-        status: 0, code: rawResponseSeen ? 'sanitizer_failed' : 'transport_unavailable'
-      }))
-    }
-    throw new Error(JSON.stringify({
-      code: 'runtime_unavailable',
-      message: 'The Analytix runtime is unavailable.'
-    }))
   }
+  return dispatch ? dispatch(send) : send()
 }
 
 export { buildAnalytixServeArgs, resolveAnalytixExecutable }

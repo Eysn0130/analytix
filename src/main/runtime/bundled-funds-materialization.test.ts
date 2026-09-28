@@ -1,14 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import type { ChildProcess } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   BundledFundsMaterializationChildUnconfirmedError,
+  assertNoUnconfirmedMaterializationChildV1,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   currentBundledFundsMaterializationBindingV1,
   materializeBundledFundsBeforeRuntimeV1,
+  retainUnconfirmedMaterializationChildV1,
   verifyBundledFundsMaterializationOutputV1,
   type BundledFundsMaterializationCommandResultV1
 } from './bundled-funds-materialization'
@@ -217,6 +220,28 @@ describe('bundled funds materialization desktop binding', () => {
       name: BundledFundsMaterializationChildUnconfirmedError.name,
       childPid: 54321
     })
+  })
+
+  it('holds every later Go startup until the exact materializer child exits', () => {
+    const child = { pid: 54321, exitCode: null as number | null, signalCode: null }
+    retainUnconfirmedMaterializationChildV1(child as ChildProcess)
+    expect(() => assertNoUnconfirmedMaterializationChildV1()).toThrow(
+      BundledFundsMaterializationChildUnconfirmedError
+    )
+    child.exitCode = 0
+    expect(() => assertNoUnconfirmedMaterializationChildV1()).not.toThrow()
+
+    const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('async function startGoConformanceSidecarOnce')
+    const body = source.slice(start, source.indexOf('async function stopGoConformanceSidecarOnce', start))
+    const firstBarrier = body.indexOf('assertNoUnconfirmedMaterializationChildV1()')
+    const configBarrier = body.indexOf('assertNoUnconfirmedMaterializationChildV1()', firstBarrier + 1)
+    const configSync = body.indexOf('await syncGuiManagedAnalytixConfig(')
+    const spawnBarrier = body.lastIndexOf('assertNoUnconfirmedMaterializationChildV1()')
+    const spawn = body.indexOf('const child = spawn(')
+    expect(firstBarrier).toBeGreaterThanOrEqual(0)
+    expect(configBarrier).toBeLessThan(configSync)
+    expect(spawnBarrier).toBeLessThan(spawn)
   })
 
   it('keeps materialization and config binding ahead of the runtime-server spawn', () => {

@@ -144,7 +144,7 @@ export class BundledFundsMaterializationChildUnconfirmedError extends Error {
   }
 }
 
-function assertNoUnconfirmedMaterializationChildV1(): void {
+export function assertNoUnconfirmedMaterializationChildV1(): void {
   for (const child of unconfirmedMaterializationChildren) {
     if (child.exitCode !== null || child.signalCode !== null) {
       unconfirmedMaterializationChildren.delete(child)
@@ -152,6 +152,12 @@ function assertNoUnconfirmedMaterializationChildV1(): void {
     }
     throw new BundledFundsMaterializationChildUnconfirmedError(child.pid)
   }
+}
+
+// Keep the direct child until its own exit is observed. A later ordinary Go
+// startup must not pass the previous materializer's unconfirmed writer.
+export function retainUnconfirmedMaterializationChildV1(child: ChildProcess): void {
+  unconfirmedMaterializationChildren.add(child)
 }
 
 export type BundledFundsMaterializationCommandRunnerV1 = (
@@ -445,7 +451,7 @@ async function runCommandV1(
         child.stdout?.destroy()
         child.stderr?.destroy()
       }
-      if (!terminationConfirmed) unconfirmedMaterializationChildren.add(child)
+      if (!terminationConfirmed) retainUnconfirmedMaterializationChildV1(child)
       resolveResult({ exitCode, signal, stdout, stderr, timedOut, overflow,
         terminationConfirmed, childPid: child.pid })
     }

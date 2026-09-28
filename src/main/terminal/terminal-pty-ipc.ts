@@ -157,6 +157,13 @@ export type TerminalPtyIpcController = Readonly<{
   withCreatesSuspended: <T>(operation: () => Promise<T>) => Promise<T>
 }>
 
+export function disposeTerminalPtysForRuntimeRestartV1(
+  controller: Pick<TerminalPtyIpcController, 'disposeAll'> | null,
+  activationOwned: boolean
+): void {
+  if (!activationOwned) controller?.disposeAll()
+}
+
 export function registerTerminalPtyIpc(
   options: RegisterTerminalPtyIpcOptions
 ): TerminalPtyIpcController {

@@ -203,6 +203,10 @@ func (d *recordingRuntimeDispatcher) RuntimeInfo(http.ResponseWriter, *http.Requ
 	d.mark(RouteRuntimeInfo)
 }
 
+func (d *recordingRuntimeDispatcher) RuntimeQuiescence(http.ResponseWriter, *http.Request) {
+	d.mark(RouteRuntimeQuiescence)
+}
+
 func (d *recordingRuntimeDispatcher) RuntimeTools(http.ResponseWriter, *http.Request) {
 	d.mark(RouteRuntimeTools)
 }

@@ -19,7 +19,7 @@ func (c *Controller) BeginAuxiliary(ctx context.Context, threadID string) (conte
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		return ctx, nil, ErrRuntimeShuttingDown
 	}
 	if c.auxiliary[threadID] != nil || c.foregroundPreparing[threadID] > 0 || c.threadTerminalActiveLocked(threadID) {
@@ -63,7 +63,7 @@ func (c *Controller) PrepareForeground(ctx context.Context, threadID string) (fu
 		return nil, ErrTurnExecutionConflict
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return nil, ErrRuntimeShuttingDown
 	}

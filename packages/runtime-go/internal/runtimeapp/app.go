@@ -1800,6 +1800,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
+	maintenanceOwner := handler
 	artifactResolver, ok := handler.(interface {
 		ResolveGeneratedArtifact(context.Context, string, string) (generationapp.Resolved, error)
 	})
@@ -1897,7 +1898,11 @@ func newRuntimeServerHandlerWithRootsModeE(
 			},
 		},
 	}
-	boundHandler, err := bindFinalPublicationAuthorityIdentityV1(localDisplayHandler, finalAuthority)
+	maintenanceHandler, err := server.WrapRuntimeMaintenanceAdmissionV1(maintenanceOwner, localDisplayHandler)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
+	}
+	boundHandler, err := bindFinalPublicationAuthorityIdentityV1(maintenanceHandler, finalAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}

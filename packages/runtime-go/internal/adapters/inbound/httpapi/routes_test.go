@@ -12,6 +12,7 @@ func TestMatchRuntimeRoutePreservesAnalytixProductionSurface(t *testing.T) {
 		{path: "/v1/runtime/info", route: RouteRuntimeInfo},
 		{path: "/v1/runtime/tools", route: RouteRuntimeTools},
 		{path: "/v1/runtime/task-jobs/job_1/wait", route: RouteRuntimeTaskJobs},
+		{path: "/v1/runtime/quiescence", route: RouteRuntimeQuiescence},
 		{path: "/v1/usage", route: RouteUsage},
 		{path: "/v1/skills", route: RouteSkills},
 		{path: "/v1/attachments", route: RouteAttachments},

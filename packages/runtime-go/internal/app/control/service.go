@@ -47,6 +47,7 @@ type Controller struct {
 	threadTransitions     map[string]struct{}
 	turnStateChanged      chan struct{}
 	shuttingDown          bool
+	maintenance           bool
 	activeTurnOperations  int
 	idle                  chan struct{}
 }
@@ -286,7 +287,7 @@ func (c *Controller) ReserveSteerAdmission(threadID, turnID string) (func(), err
 		return nil, ErrTerminalArbitration
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return nil, ErrRuntimeShuttingDown
 	}
@@ -353,7 +354,7 @@ func (c *Controller) RegisterTurnCancelAfterThreadTail(
 			return err
 		}
 		c.mu.Lock()
-		if c.shuttingDown {
+		if c.shuttingDown || c.maintenance {
 			c.mu.Unlock()
 			return ErrRuntimeShuttingDown
 		}
@@ -397,7 +398,7 @@ func (c *Controller) RegisterTurnCancelWithError(threadID, turnID string, cancel
 		return ErrTurnExecutionConflict
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return ErrRuntimeShuttingDown
 	}
@@ -448,7 +449,7 @@ func (c *Controller) BeginTurnOperation() (done func(), admitted bool) {
 		return func() {}, false
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return func() {}, false
 	}
@@ -473,6 +474,37 @@ func (c *Controller) finishTurnOperation() {
 	if c.activeTurnOperations == 0 {
 		close(c.idle)
 	}
+}
+
+// BeginMaintenanceIfIdle closes new turn admission without cancelling accepted
+// work. Its caller must hold the HTTP mutation fence until EndMaintenance.
+func (c *Controller) BeginMaintenanceIfIdle() bool {
+	if c == nil {
+		return false
+	}
+	if !c.mu.TryLock() {
+		return false
+	}
+	defer c.mu.Unlock()
+	if c.shuttingDown || c.maintenance || c.activeTurnOperations != 0 ||
+		len(c.turnCancels) != 0 || len(c.auxiliary) != 0 ||
+		len(c.foregroundPreparing) != 0 || len(c.interruptReservations) != 0 ||
+		len(c.cancelReservations) != 0 || len(c.candidateTerminals) != 0 ||
+		len(c.candidateTokens) != 0 || len(c.steerAdmissions) != 0 ||
+		len(c.threadTransitions) != 0 {
+		return false
+	}
+	c.maintenance = true
+	return true
+}
+
+func (c *Controller) EndMaintenance() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.maintenance = false
+	c.mu.Unlock()
 }
 
 // BeginShutdown atomically closes turn admission before cancelling all
