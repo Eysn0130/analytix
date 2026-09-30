@@ -107,6 +107,15 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 - 本切片生产源码净 +1 字节，测试净 +7,086 字节；维护收益是失败处理
   修改点 7 → 1，不能以总 LOC/字节下降代替覆盖或收益。没有新增治理工具。
 
+已启动的第二生产 owner 切片将 adapter 六条路由的 body/schema 注册合为一处，
+summary 的 schema、identity 和精确投影选择由同一私有 resolver 负责；
+严格 canonical equality、AcceptedFinal/currentMain pin 与两边 sanitation 未迁移。
+同一 `runtimeRequestViaHost` 测试组 before/after 各 43 通过、73 未选，
+最终候选 44 通过（包含两项实际 HTTP 回归）；组内其余项目混合直接 sanitizer
+与 HTTP 测试，不称为全组真实 transport 证据。精确投影相关三文件 43/43、
+web/node typecheck 通过；独立只读 review 无具体缺陷。该切片生产 +601 字节、
+测试 +2,477 字节，不宣称整个 adapter 或系统技术债已收口。
+
 本机小 receipt 在 `/private/tmp/analytix-debt-resource-matched-{before,after}-20260930.json`
 及 `analytix-quarantine-{red,green}-20260930.json`；前者是明示范围的读取 proxy，
 后者保留五项 RED 与执行式发现结果，不复制大型 inventory。

@@ -1611,6 +1611,54 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it('binds summary identity and exact public fields at the host boundary', async () => {
+    const summary = {
+      threadId: 'thread-1', generatedAt: '2026-09-30T00:00:00Z', latestSeq: 0,
+      subagents: [], tasks: [], outputs: [], sources: [], sideChats: [], backgroundProcesses: []
+    }
+    let body: unknown = summary
+    const port = await listen((_req, res) => {
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(body))
+    })
+    const settings = settingsForPort(port)
+    const request = (threadId: string) => runtimeRequestViaHost(
+      settings, `/v1/threads/${threadId}/summary?view=public`, { method: 'GET' }, async () => undefined
+    )
+    expect(await request('thread%2D1')).toEqual({ ok: true, status: 200, body: JSON.stringify(summary) })
+    for (const threadId of ['thread-2', 'thread%2F1', 'thread%5C1', '%ZZ']) {
+      expect(await request(threadId)).toEqual({
+        ok: false, status: 502,
+        body: JSON.stringify({ code: 'runtime_response_not_public', message: 'Runtime response was blocked at the public boundary.' })
+      })
+    }
+    body = { ...summary, unexpected: 'SYNTHETIC_PRIVATE_CANARY' }
+    const rejected = await request('thread-1')
+    expect(rejected).toMatchObject({ ok: false, status: 502 })
+    expect(rejected.body).not.toContain('SYNTHETIC_PRIVATE_CANARY')
+  })
+
+  it('keeps required-body admission independent of route verbs through the host transport', async () => {
+    const port = await listen((_req, res) => {
+      res.statusCode = 200
+      res.end(' \n')
+    })
+    const settings = settingsForPort(port)
+    for (const [path, method] of [
+      ['/v1/runtime/info', 'GET'], ['/v1/runtime/tools', 'GET'],
+      ['/v1/runtime/tool-executions/observe', 'POST'], ['/v1/runtime/tool-executions/observe', 'GET'],
+      ['/v1/skills', 'GET'], ['/v1/attachments/diagnostics', 'GET'], ['/v1/memory/diagnostics', 'GET']
+    ]) {
+      const rejected = await runtimeRequestViaHost(settings, `${path}?view=public`, { method }, async () => undefined)
+      expect(rejected, `${method} ${path}`).toEqual({
+        ok: false, status: 502,
+        body: JSON.stringify({ code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.' })
+      })
+    }
+    const optional = await runtimeRequestViaHost(settings, '/v1/threads/thread-1/summary', { method: 'GET' }, async () => undefined)
+    expect(optional).toEqual({ ok: true, status: 200, body: ' \n' })
+  })
+
   it('defers a mutation before transport and sends it once after admission reopens', async () => {
     let requests = 0
     const port = await listen((_req, res) => {

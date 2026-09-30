@@ -4134,15 +4134,6 @@ function verifiedThreadAcceptedFinalDeliveriesV1(
   }
 }
 
-function runtimeResponseRequiresBody(path: string): boolean {
-  return path === '/v1/runtime/info' ||
-    path === '/v1/runtime/tools' ||
-    path === ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH ||
-    path === '/v1/skills' ||
-    path === '/v1/attachments/diagnostics' ||
-    path === '/v1/memory/diagnostics'
-}
-
 const PublicThreadHTTPResponseV1Schema = ThreadSchema.extend({
   historyAuthority: z.literal('case_boundary_only_v1').optional()
 }).strict()
@@ -4175,16 +4166,46 @@ const MemoryMutationResponseV1Schema = z.object({
 
 type RuntimeResponseSchemaV1 = z.ZodTypeAny
 
-function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponseSchemaV1[] | null {
-  if (path === '/health') return [RuntimeHealthResponseV1Schema]
-  if (path === '/v1/runtime/info') return [RuntimeInfoResponseSchema]
-  if (path === '/v1/runtime/tools') return [RuntimeToolsResponseSchema]
-  if (path === ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH && method === 'POST') {
-    return [SuccessfulToolExecutionObservationResponseV1Schema]
+// Body admission and schema selection share one registration. Observation still
+// requires a body for every verb, while only POST has an admitted response schema.
+const runtimeRequiredBodyContractsV1 = new Map<string, { schema: RuntimeResponseSchemaV1; method?: string }>([
+  ['/v1/runtime/info', { schema: RuntimeInfoResponseSchema }],
+  ['/v1/runtime/tools', { schema: RuntimeToolsResponseSchema }],
+  [ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH, { schema: SuccessfulToolExecutionObservationResponseV1Schema, method: 'POST' }],
+  ['/v1/skills', { schema: RuntimeSkillsResponseSchema }],
+  ['/v1/attachments/diagnostics', { schema: AttachmentDiagnosticsResponseSchema }],
+  ['/v1/memory/diagnostics', { schema: MemoryDiagnosticsResponseSchema }]
+])
+
+type RuntimeResponseContractV1 = {
+  schemas: RuntimeResponseSchemaV1[] | null
+  requiresBody: boolean
+  requiresExactPublicProjection: boolean
+  isThreadSummaryRoute: boolean
+  summaryIdentity: ThreadSummaryRouteIdentityV1 | null
+}
+
+function runtimeResponseContractV1(path: string, method: string): RuntimeResponseContractV1 {
+  const requiredBody = runtimeRequiredBodyContractsV1.get(path)
+  const summaryMatch = /^\/v1\/threads\/([^/]+)\/summary(?:\/tasks\/([^/]+)\/(output|kill|restart))?$/.exec(path)
+  const isThreadSummaryRoute = /^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
+  const schemas = requiredBody
+    ? (!requiredBody.method || requiredBody.method === method ? [requiredBody.schema] : null)
+    : summaryMatch
+      ? [!summaryMatch[2] ? ThreadSummaryResponseSchema
+          : summaryMatch[3] === 'output' ? ThreadSummaryTaskOutputResponseV1Schema : ThreadSummaryTaskMutationResponseSchema]
+      : runtimeOtherResponseSchemasV1(path, method)
+  return {
+    schemas,
+    requiresBody: Boolean(requiredBody),
+    requiresExactPublicProjection: path.startsWith('/v1/runtime/task-jobs/') || isThreadSummaryRoute,
+    isThreadSummaryRoute,
+    summaryIdentity: summaryMatch ? threadSummaryRouteIdentityV1(summaryMatch) : null
   }
-  if (path === '/v1/skills') return [RuntimeSkillsResponseSchema]
-  if (path === '/v1/attachments/diagnostics') return [AttachmentDiagnosticsResponseSchema]
-  if (path === '/v1/memory/diagnostics') return [MemoryDiagnosticsResponseSchema]
+}
+
+function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeResponseSchemaV1[] | null {
+  if (path === '/health') return [RuntimeHealthResponseV1Schema]
   if (path === '/v1/memory') {
     if (method === 'GET') return [MemoryListResponseV1Schema]
     if (method === 'POST') return [MemoryMutationResponseV1Schema]
@@ -4201,18 +4222,11 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (path === '/v1/case-projects') return [CaseProjectListResponseV1Schema]
   if (/^\/v1\/case-projects\/[^/]+\/threads$/.test(path)) return [CaseProjectThreadsResponseV1Schema]
   if (/^\/v1\/case-projects\/[^/]+\/detail$/.test(path)) return [CaseProjectDetailResponseV1Schema]
-  if (/^\/v1\/threads\/[^/]+\/summary$/.test(path)) return [ThreadSummaryResponseSchema]
   if (/^\/v1\/threads\/[^/]+\/todos$/.test(path)) {
     if (method === 'DELETE') return [ClearThreadTodosResponse]
     return [ThreadTodosResponse]
   }
   if (/^\/v1\/threads\/[^/]+\/compact$/.test(path)) return [CompactResponse]
-  if (/^\/v1\/threads\/[^/]+\/summary\/tasks\/[^/]+\/(kill|restart)$/.test(path)) {
-    return [ThreadSummaryTaskMutationResponseSchema]
-  }
-  if (/^\/v1\/threads\/[^/]+\/summary\/tasks\/[^/]+\/output$/.test(path)) {
-    return [ThreadSummaryTaskOutputResponseV1Schema]
-  }
   if (path === '/v1/threads') {
     if (method === 'GET') return [ListThreadsResponse]
     if (method === 'POST') return [PublicThreadHTTPResponseV1Schema]
@@ -4403,9 +4417,7 @@ function decodeClosedRuntimeRouteSegmentV1(value: string): string | null {
   }
 }
 
-function threadSummaryRouteIdentityV1(path: string): ThreadSummaryRouteIdentityV1 | null {
-  const match = /^\/v1\/threads\/([^/]+)\/summary(?:\/tasks\/([^/]+)\/(output|kill|restart))?$/.exec(path)
-  if (!match) return null
+function threadSummaryRouteIdentityV1(match: RegExpExecArray): ThreadSummaryRouteIdentityV1 | null {
   const threadId = decodeClosedRuntimeRouteSegmentV1(match[1])
   if (!threadId) return null
   if (!match[2]) return { threadId }
@@ -4414,9 +4426,12 @@ function threadSummaryRouteIdentityV1(path: string): ThreadSummaryRouteIdentityV
   return { threadId, taskId, action: match[3] as ThreadSummaryRouteIdentityV1['action'] }
 }
 
-function threadSummaryResponseIdentityMatchesV1(path: string, value: unknown): boolean {
-  const route = threadSummaryRouteIdentityV1(path)
-  if (!route) return !/^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
+function threadSummaryResponseIdentityMatchesV1(
+  route: ThreadSummaryRouteIdentityV1 | null,
+  isThreadSummaryRoute: boolean,
+  value: unknown
+): boolean {
+  if (!route) return !isThreadSummaryRoute
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   if (!route.taskId) return record.threadId === route.threadId
@@ -4437,6 +4452,7 @@ export function sanitizeRuntimeResponse(
 ): { ok: boolean; status: number; body: string } {
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
+  const contract = runtimeResponseContractV1(path, method)
   const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
     (/^\/v1\/threads\/[^/]+\/fork$/.test(path) || (path === '/v1/threads' && method === 'GET'))
   if (packagedForkDiagnostic) {
@@ -4445,7 +4461,7 @@ export function sanitizeRuntimeResponse(
     }))
   }
   if (!response.body.trim()) {
-    if (response.ok && !runtimeResponseRequiresBody(path)) return response
+    if (response.ok && !contract.requiresBody) return response
     return response.ok
       ? {
           ok: false,
@@ -4484,7 +4500,7 @@ export function sanitizeRuntimeResponse(
       canonicalValue = sanitizeLlmDebugResponse(parsed)
       schemaValidated = true
     } else {
-      const outputSchemas = runtimeResponseSchemasV1(path, method)
+      const outputSchemas = contract.schemas
       if (!outputSchemas) {
         return {
           ok: false,
@@ -4547,13 +4563,11 @@ export function sanitizeRuntimeResponse(
           })
         }
       }
-      const requiresExactPublicProjection = path.startsWith('/v1/runtime/task-jobs/') ||
-        /^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
-      if (requiresExactPublicProjection) {
+      if (contract.requiresExactPublicProjection) {
         const sanitized = sanitizePublicRuntimeValue(validated)
         const sanitizedMatches = sanitized !== undefined &&
           canonicalRuntimeBoundaryValue(sanitized) === canonicalRuntimeBoundaryValue(validated)
-        if (!sanitizedMatches || !threadSummaryResponseIdentityMatchesV1(path, validated)) {
+        if (!sanitizedMatches || !threadSummaryResponseIdentityMatchesV1(contract.summaryIdentity, contract.isThreadSummaryRoute, validated)) {
           return {
             ok: false,
             status: 502,
