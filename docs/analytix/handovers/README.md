@@ -11,11 +11,11 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 | 项目 | 当前观察与边界 |
 | --- | --- |
 | 继承 HEAD / tree | `c2cd3e29174e701569220e1c39076e0acff24a53` / `55893ead1fc3a6bce73ede22a251005a14810532`；延迟 bundled Funds activation。入口整理已在 `39250cafa` 本机提交；实时 HEAD 以 Git 为准。 |
-| writer | 本轮唯一主施工线程 `01a0f08d-4ef4-7f82-a30b-8a94c014ac26`，保存的 local analytix 项目，实际 `gpt-6.1-sol / max`。协调桥只读。其他历史 worktree 不在本轮写入范围；不能把残留锁或进程等同于 active writer。 |
+| writer | 本轮唯一主施工线程 `01a0f08d-4ef4-7f82-a30b-8a94c014ac26`，保存的 local analytix 项目；最新运行记录已核实 `gpt-6.1-sol / ultra`、Full access。协调桥只读。其他历史 worktree 不在本轮写入范围；不能把残留锁或进程等同于 active writer。 |
 | 继承 dirty | 开始时 34 tracked 修改、26 untracked 文件、0 staged；主要为 B1 host-local，另有用户 runbook 和 QA 草稿。保留原字节，按 hunk 来源审查，不 reset/clean/stash/跨分支迁移。该数量是开始快照，后续施工会增加任务自有修改。 |
 | 最新安装证据 | 精确 SOURCE `7dc07bb0973e2c5e6a5e5c9235bd585c9c3a1495`，两轮隔离合成 K10 正常退出、零残留；`032b8a147` 是 observer 修正，产品字节未改变。见[准确诊断](../qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md)。不转移到 c2cd/B1。 |
-| 当前 B1 | [host-local source checkpoint](../qa/pr28-b1-host-local-currentness-source-2026-09-27.md)：empty-lineage mode、DSV2、Registry CAS 与部分重启已有未提交候选；Final/recovery、清洗前驱、CAS loser 认证恢复及安装完整旅程仍缺。N06/B16 开放，整 profile 回滚 `UNVERIFIED`。 |
-| 远端 / main | 本轮尚未 fresh 取得 PR/head/main/CI。旧 56231 的 CI 不覆盖较新本机源码；Draft/open 是前序记录，当前状态必须独立读取。 |
+| 当前 B1 | [原始 host-local checkpoint](../qa/pr28-b1-host-local-currentness-source-2026-09-27.md) 的继承候选已续补[清洗前驱与真实磁盘重开源码闭环](../qa/pr28-host-local-cleaning-successor-2026-09-29.md)，由包含该记录的聚焦本机提交交付，待 archive 验证。Final/recovery、完整清洗/epoch 链路、CAS loser 认证恢复及安装旅程仍缺。N06/B16 开放，整 profile 回滚 `UNVERIFIED`。 |
+| 远端 / main | 2026-09-29 PDT 已 fresh 读取：PR28 open/Draft，head `56231ff5e6b7dd8d321d1356b7208587df0841e9`，该 head 的 Development gate 通过；main `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。远端 CI 不覆盖较新本机候选，提交后仍须更新 PR 并取得新证据。 |
 
 ## 下一依赖有效动作
 
@@ -24,7 +24,7 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
    它不选掉测试，不宣称 token、时间、正确率或分析收益已改善。
 2. [投影保真源码检查点](../qa/pr28-account-flow-projection-fidelity-2026-09-29.md)
    已记录主体/对手方身份错配修复、独立金额真值与调用方验证；不等于分析收益。
-   保留并核查 host-local 未提交合同与适用 OpenSpec；在隔离数据上补最小缺失
+   从已审查 host-local 合同与适用 OpenSpec 继续；在隔离数据上补最小缺失
    行为和独立语义 oracle。所有安全/撤权/恢复检查针对实际稳定候选；普通
    Agent 不依赖 Funds 初始化。命令先按 [runbook](../development-runbook.md)
    同 shell 加载缓存 helper，任务资源隔离；不触碰既有用户 profile。

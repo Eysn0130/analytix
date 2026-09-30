@@ -93,8 +93,11 @@ func TestFundsImportAndCleaningProductionCompositionReuseOneDSV2DataPlane(t *tes
 		"if sharedEvidenceDatasetSnapshotV2.snapshot != nil {",
 		"sharedEvidenceConfiguredV2 && sharedEvidenceDatasetSnapshotV2.registryOwner == nil",
 		"evidenceStore = runtimeUnavailableEvidenceRegistryV1{}",
-		"traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)",
-		"if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&\n\t\tsharedEvidenceDatasetSnapshotV2.snapshot != nil {",
+		"traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2,",
+		"sharedEvidenceDatasetSnapshotV2, hostLocalEvidenceOwnersV1 != nil)",
+		"if nativeOwner != nil && (sharedEvidenceDatasetSnapshotV2.evidence != nil &&",
+		"sharedEvidenceDatasetSnapshotV2.snapshot != nil || hostLocalEvidenceOwnersV1 != nil) {",
+		"ensureHostLocal = hostLocalEvidenceOwnersV1.EnsureForFundsImport",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("cold-registry Funds composition lost %q", required)

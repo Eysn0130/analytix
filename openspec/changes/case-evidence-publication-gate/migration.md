@@ -27,15 +27,30 @@ Canonical hash serialization uses stable field order, explicit null/unknown sema
 
 ## Evidence Registry And MCP Authority Migration
 
+First-stage `host_local` admission is a one-time, signed mode commitment only
+for a complete, read-only-inventoried empty protected lineage. Its marker is
+durable and read back before the first case authority write. A crash after the
+marker but before any DSV2/evidence write resumes as empty `host_local`; a
+crash before marker commit cannot be inferred from a prepared file. After an
+immutable child/head write but before selector CAS, the orphan stays
+non-authoritative and protected work remains boundary-only until separately
+authorized exact recovery. An indeterminate selector CAS keeps the live process
+poisoned; visible target/mutation readback alone cannot prove directory sync.
+Recovery requires a fresh startup fixed point or a separately proved
+authenticated recovery plan. Existing enrolled witness
+records, historical signed bytes, and their replay/repair path are unchanged;
+missing enrollment with any protected, legacy, or orphan residue never
+converts to `host_local`. No dual-write or automatic profile migration occurs.
+
 1. New registries first create and sign the complete capsule and next global index in memory, then durably install the content-addressed capsule blob, and finally atomically replace the installation-key-signed root index. The root index is the only membership commit point. Per-turn capsule/JSONL projections are written afterwards and are never promoted on their own.
 2. The signed index binds installation id, generation, previous-index digest, canonical ordered entries, and exact single-entry registry extension. A foreign-key capsule, sequence jump, alternate prefix, duplicate/projection-key collision, non-canonical JSON, or changed predecessor rejects before replacement. A provable pre-replace failure removes only the exact uncommitted blob and is retryable; an ambiguous post-replace failure poisons the live store until restart revalidates persisted authority.
 3. A trusted legacy signed head plus an exactly matching ledger may be upgraded only by the global read-only startup plan without changing membership or sequence. A non-empty unsealed legacy ledger cannot be signed as current: after settlement/marker verification, every active legacy receipt is deterministically revoked with `legacy_unsealed_registry_cutover` before new authority is issued. Empty unsealed residue and mismatched dual files remain boundary-only.
 4. Missing or complete-record exact-prefix projections may be rebuilt from the unchanged indexed capsule after the global startup preflight. Mid-record, longer, divergent, wrong-key, symlinked, unsafe-hard-linked, or unknown state aborts before repair. Recognized same-inode CAS link/unlink temps and rename temps are non-authoritative repair residue; cleanup occurs only after the global read-only inventory.
 5. Superseded content-addressed capsules are garbage-collected only after the new root index is durable. Any retained orphan must validate under the installation key and be an exact historical prefix of the indexed current capsule; a newer/divergent orphan blocks as rollback evidence.
-6. Enroll an independent monotonic witness before enabling executable high-risk V2 contexts. Advance signed authority indexes only by exact expected-generation/digest CAS; persist immutable intent and receipt records, then repair the local head projection from the live witness. Signatures, local generations, Keychain/DPAPI/libsecret, or maximum-directory scans are not latest-state proof.
-7. If the witness is unavailable, invalid, replayed, equivocated, ahead of missing local material, behind a local projection, or enrollment state is inconsistent, startup and every later effect/publication check keep high-risk work boundary-only. They never re-enroll over existing state or promote a local candidate by generation.
-6. Historical `mcpv1` identities and MCP 2024 records remain parseable only in the legacy audit/replay projection. New source probes, grants, outcomes, receipts, membership resolution, and publication require a fact-capable negotiated MCP revision bound into `mcpv2`.
-7. Migration is journaled and idempotent. Authenticated recovery of an already-issued old transaction is a distinct pre-baseline phase; after it settles, every owner root is recaptured from scratch. No new registry, settlement, accepted-final, event, memory, reasoning cleanup, authority namespace/bootstrap, or MCP connection may occur until every security-relevant root has passed the composite read-only fixed-point inventory. Acquiring an OS coordination lock may be effectful but creates no product authority; creating a journal, marker, retirement, control, or signing namespace is not a lock exception.
+6. For an already enrolled witnessed profile, retain the independent monotonic witness requirement. Advance signed authority indexes only by exact expected-generation/digest CAS; persist immutable intent and receipt records, then repair the local head projection from the live witness. Signatures, local generations, Keychain/DPAPI/libsecret, or maximum-directory scans are not latest-state proof.
+7. If an enrolled witness is unavailable, invalid, replayed, equivocated, ahead of missing local material, behind a local projection, or enrollment state is inconsistent, startup and every later effect/publication check keep high-risk work boundary-only. They never re-enroll over existing state or promote a local candidate by generation.
+8. Historical `mcpv1` identities and MCP 2024 records remain parseable only in the legacy audit/replay projection. New source probes, grants, outcomes, receipts, membership resolution, and publication require a fact-capable negotiated MCP revision bound into `mcpv2`.
+9. Migration is journaled and idempotent. Authenticated recovery of an already-issued old transaction is a distinct pre-baseline phase; after it settles, every owner root is recaptured from scratch. No new registry, settlement, accepted-final, event, memory, reasoning cleanup, authority namespace/bootstrap, or MCP connection may occur until every security-relevant root has passed the composite read-only fixed-point inventory. Acquiring an OS coordination lock may be effectful but creates no product authority; creating a journal, marker, retirement, control, or signing namespace is not a lock exception.
 
 ## Authority Advance Journal V1 To V2
 

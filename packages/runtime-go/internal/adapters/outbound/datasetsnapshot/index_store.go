@@ -32,10 +32,10 @@ func NewIndexStore(root string, access finalauthorityadapter.SecurePrivateCASAcc
 }
 
 func (store *IndexStore) PutIfAbsent(ctx context.Context, index domainsecurity.DatasetSnapshotIndexV1) error {
-	if store == nil || store.cas == nil || domainsecurity.ValidateDatasetSnapshotIndexV1(index) != nil {
+	if store == nil || store.cas == nil || domainsecurity.ValidateVersionedDatasetSnapshotIndex(index) != nil {
 		return errors.New("dataset snapshot index is invalid")
 	}
-	body, err := domainsecurity.DatasetSnapshotIndexV1Bytes(index)
+	body, err := domainsecurity.VersionedDatasetSnapshotIndexBytes(index)
 	if err != nil || len(body) == 0 || len(body) > maxDatasetSnapshotIndexBytes {
 		return errors.New("dataset snapshot index bytes are invalid")
 	}
@@ -74,11 +74,11 @@ func parseIndex(digest string, body []byte) (domainsecurity.DatasetSnapshotIndex
 	if len(body) == 0 || len(body) > maxDatasetSnapshotIndexBytes {
 		return domainsecurity.DatasetSnapshotIndexV1{}, errors.New("dataset snapshot index CAS body is invalid")
 	}
-	index, err := domainsecurity.ParseDatasetSnapshotIndexV1(body)
+	index, err := domainsecurity.ParseVersionedDatasetSnapshotIndex(body)
 	if err != nil || index.IndexDigest != digest {
 		return domainsecurity.DatasetSnapshotIndexV1{}, errors.New("dataset snapshot index filename or content is invalid")
 	}
-	canonical, err := domainsecurity.DatasetSnapshotIndexV1Bytes(index)
+	canonical, err := domainsecurity.VersionedDatasetSnapshotIndexBytes(index)
 	if err != nil || !bytes.Equal(canonical, body) {
 		return domainsecurity.DatasetSnapshotIndexV1{}, errors.New("dataset snapshot index bytes are not canonical")
 	}

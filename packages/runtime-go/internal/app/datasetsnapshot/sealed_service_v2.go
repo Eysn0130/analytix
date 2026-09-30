@@ -494,7 +494,7 @@ func (service *SealedServiceV2) verifyCurrentSelectionMaterialV2(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	input datasetsnapshotport.ResolveInputV2,
 ) error {
-	node, err := service.resolveVersionedNodeV2(ctx, selection.SelectedIndex)
+	node, err := service.resolveVersionedNodeV2(ctx, selection.SelectedIndex, false, "")
 	if err != nil {
 		return err
 	}
@@ -539,7 +539,7 @@ func (service *SealedServiceV2) resolveRetainedSelectionV2(
 		return datasetsnapshotport.RetainedSelectionV2{}, ctx.Err()
 	}
 	for _, index := range current.DatasetIndexPath {
-		node, err := service.resolveVersionedNodeV2(ctx, index)
+		node, err := service.resolveVersionedNodeV2(ctx, index, false, "")
 		if err != nil {
 			return datasetsnapshotport.RetainedSelectionV2{}, err
 		}
@@ -739,6 +739,7 @@ func (service *SealedServiceV2) validateCurrentSelectionV2(
 	securityContext domainsecurity.TurnSecurityContext,
 ) error {
 	if service == nil || validateCurrentResolveInputV2(input, securityContext) != nil ||
+		selection.HostLocalHead != nil ||
 		service.validateHead(selection.Head) != nil ||
 		len(selection.DatasetIndexPath) == 0 ||
 		len(selection.DatasetIndexPath) > maxDatasetSnapshotIndexDepth ||
@@ -832,6 +833,10 @@ func currentSelectionDigestV2(selection datasetsnapshotport.CurrentSelectionV2) 
 
 func cloneCurrentSelectionV2(selection datasetsnapshotport.CurrentSelectionV2) datasetsnapshotport.CurrentSelectionV2 {
 	selection.DatasetIndexPath = append([]domainsecurity.DatasetSnapshotIndexV1(nil), selection.DatasetIndexPath...)
+	if selection.HostLocalHead != nil {
+		head := *selection.HostLocalHead
+		selection.HostLocalHead = &head
+	}
 	return selection
 }
 
@@ -897,15 +902,27 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 	desired *domainsecurity.DatasetSnapshotBindingKeyV1,
 	input datasetsnapshotport.ResolveInputV2,
 ) (versionedChainStateV2, error) {
+	if err := service.validateHead(head); err != nil {
+		return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, err)
+	}
+	return service.loadVersionedChainFromRootV2(ctx, head.Bundle.DatasetSnapshotIndexDigest,
+		head.Bundle.DatasetSnapshotCount, false, "", desired, input)
+}
+
+func (service *SealedServiceV2) loadVersionedChainFromRootV2(
+	ctx context.Context,
+	root string,
+	count uint64,
+	hostLocal bool,
+	modeCommitmentDigest string,
+	desired *domainsecurity.DatasetSnapshotBindingKeyV1,
+	input datasetsnapshotport.ResolveInputV2,
+) (versionedChainStateV2, error) {
 	state := versionedChainStateV2{
 		indexDigests: map[string]bool{}, recordDigests: map[string]bool{}, snapshotIDs: map[string]bool{},
 		producerIDs: map[string]bool{}, mutationIDs: map[string]bool{}, latestByBinding: map[string]versionedSnapshotNodeV2{},
 	}
-	if err := service.validateHead(head); err != nil {
-		return state, errors.Join(datasetsnapshotport.ErrCorrupt, err)
-	}
-	count := head.Bundle.DatasetSnapshotCount
-	currentDigest := head.Bundle.DatasetSnapshotIndexDigest
+	currentDigest := root
 	if count == 0 {
 		if currentDigest != domainsecurity.DatasetSnapshotIndexGenesisDigestV1() {
 			return state, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("empty dataset snapshot v2 root is invalid"))
@@ -925,15 +942,35 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index cycle detected"))
 		}
 		index, err := service.indexes.Resolve(ctx, currentDigest)
-		if err != nil || domainsecurity.ValidateDatasetSnapshotIndexForInstallationV1(
-			index, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
-		) != nil || index.Generation != expectedGeneration || index.IndexDigest != currentDigest {
+		validIndex := false
+		if hostLocal {
+			validIndex = domainsecurity.ValidateDatasetSnapshotIndexForHostLocalV2(
+				index, service.installationID, modeCommitmentDigest, service.authorityKeyID, service.authorityKey,
+			) == nil
+		} else {
+			validIndex = domainsecurity.ValidateDatasetSnapshotIndexForInstallationV1(
+				index, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
+			) == nil
+		}
+		if err != nil || !validIndex || index.Generation != expectedGeneration || index.IndexDigest != currentDigest {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index ancestry is unavailable"), err)
 		}
-		if expectedGeneration == count && domainsecurity.ValidateDatasetSnapshotIndexWitnessRootV1(index, currentDigest, count) != nil {
+		rootValid := domainsecurity.ValidateDatasetSnapshotIndexWitnessRootV1(index, currentDigest, count) == nil
+		if hostLocal {
+			rootValid = domainsecurity.ValidateDatasetSnapshotIndexHostLocalRootV2(index, currentDigest, count) == nil
+		}
+		if expectedGeneration == count && !rootValid {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index does not match witness root"))
 		}
-		if newerIndex != nil && domainsecurity.ValidateDatasetSnapshotIndexTransitionV1(index, *newerIndex) != nil {
+		validTransition := true
+		if newerIndex != nil {
+			if hostLocal {
+				validTransition = domainsecurity.ValidateDatasetSnapshotIndexHostLocalTransitionV2(index, *newerIndex) == nil
+			} else {
+				validTransition = domainsecurity.ValidateDatasetSnapshotIndexTransitionV1(index, *newerIndex) == nil
+			}
+		}
+		if !validTransition {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index lineage is invalid"))
 		}
 		if state.mutationIDs[index.MutationID] || state.recordDigests[index.SnapshotRecordDigest] {
@@ -943,7 +980,7 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 		state.mutationIDs[index.MutationID] = true
 		state.recordDigests[index.SnapshotRecordDigest] = true
 		state.indexPath = append(state.indexPath, index)
-		node, err := service.resolveVersionedNodeV2(ctx, index)
+		node, err := service.resolveVersionedNodeV2(ctx, index, hostLocal, modeCommitmentDigest)
 		if err != nil {
 			return versionedChainStateV2{}, err
 		}
@@ -998,6 +1035,8 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 func (service *SealedServiceV2) resolveVersionedNodeV2(
 	ctx context.Context,
 	index domainsecurity.DatasetSnapshotIndexV1,
+	hostLocal bool,
+	modeCommitmentDigest string,
 ) (versionedSnapshotNodeV2, error) {
 	bundle, bundleErr := service.bundles.Resolve(ctx, index.SnapshotRecordDigest)
 	legacy, legacyErr := service.records.Resolve(ctx, index.SnapshotRecordDigest)
@@ -1011,9 +1050,14 @@ func (service *SealedServiceV2) resolveVersionedNodeV2(
 		return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot record store failed closed"), bundleErr, legacyErr)
 	}
 	if bundleFound {
-		if domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV2(
+		validRecord := domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV2(
 			index, bundle.Record, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
-		) != nil || domainsecurity.ValidateDatasetSnapshotAuthorityRecordForManifestV2(bundle.Record, bundle.Manifest) != nil {
+		) == nil
+		if hostLocal {
+			validRecord = domainsecurity.ValidateDatasetSnapshotIndexRecordForHostLocalV2(index, bundle.Record,
+				service.installationID, modeCommitmentDigest, service.authorityKeyID, service.authorityKey) == nil
+		}
+		if !validRecord || domainsecurity.ValidateDatasetSnapshotAuthorityRecordForManifestV2(bundle.Record, bundle.Manifest) != nil {
 			return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 record is invalid"))
 		}
 		record := bundle.Record
@@ -1022,7 +1066,7 @@ func (service *SealedServiceV2) resolveVersionedNodeV2(
 		}
 		return versionedSnapshotNodeV2{index: index, record: versioned, bundle: &bundle, binding: bundle.Record.Binding}, nil
 	}
-	if domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV1(
+	if hostLocal || domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV1(
 		index, legacy, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
 	) != nil {
 		return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("legacy dataset snapshot record is invalid"))

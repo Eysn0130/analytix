@@ -160,6 +160,32 @@ verification consequences.
   effects remain available, and the runtime does not silently compose a new
   witness or authority family
 
+#### Scenario: Empty protected lineage starts local case currentness
+- **WHEN** the full read-only startup inventory proves no prior protected,
+  enrolled, legacy, pending, or orphan case authority state and the host
+  prepares the first case authority write
+- **THEN** the existing installation authority signs one durable `host_local`
+  mode commitment before that write; one exact expected-head CAS selector
+  chooses the current DSV2/evidence/publication child roots, and every
+  protected effect, evidence settlement, Final Gate, and retained source read
+  revalidates its exact mode, generation, and immutable lineage
+
+#### Scenario: Existing protected lineage cannot be downgraded
+- **WHEN** a witnessed/enrolled profile or any legacy, orphan, conflicting,
+  indeterminate, or unrecognized protected record exists, or a nonempty
+  profile lacks its signed mode commitment
+- **THEN** the runtime does not create or infer `host_local` state; the
+  affected case operation remains boundary-only while ordinary Agent work
+  continues, and historical witnessed bytes and validation remain unchanged
+
+#### Scenario: Local currentness has a bounded claim
+- **WHEN** `host_local` mode successfully verifies its signed selector and
+  complete referenced chain across a normal restart
+- **THEN** it may authorize only the exact current case effect under the
+  existing TSCV2/DSV2/receipt/Final contracts; it never emits a fabricated
+  independent-witness observation or claims to detect complete-profile
+  rollback, whose acceptance row remains `UNVERIFIED`
+
 ### Requirement: Risk Cannot Change Inside A Frozen Turn
 External start and steer contracts SHALL be strict and MAY only request a case-risk raise. A steer, attachment, file reference, case binding change, fork, resume, or restart SHALL NOT reuse a frozen general context for a protected case effect when the host observes case risk or a context-changing source. The host SHALL reject/cancel the stale protected continuation and require a newly admitted V2 case augmentation under the current host-derived risk/publication policy, while preserving independently authorized ordinary work.
 
@@ -309,7 +335,7 @@ The funds tool's host-private evidence carrier SHALL be consumed or discarded
 exactly once during evidence settlement and SHALL never enter provider,
 message, event, log, telemetry, or display state. AcceptedSlotDisplay SHALL
 perform a separate callback-scoped retained source-row/field read against the
-accepted result's original witnessed immutable DSV2 snapshot. A canonical
+accepted result's original current-authorized immutable DSV2 snapshot. A canonical
 private binding or current database value SHALL NOT substitute for source-exact
 display; unavailable or invalid retained material SHALL fail closed without
 current-snapshot substitution.

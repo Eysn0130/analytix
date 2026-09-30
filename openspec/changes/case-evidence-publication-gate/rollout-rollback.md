@@ -10,7 +10,7 @@ Ship only after the incident path, Agent-mode tool allowlist, draft/reasoning le
 
 ### P1 evidence kernel
 
-Enable executable case analysis only after the shared Context Epoch, V2 security context, strict binding observer, independent monotonic risk/evidence authority witness, live source probe, grant, outcome, receipt registry, claim verifier, every-terminal finalizer, pending-gate revalidation, and persistence/restart behavior pass without skips. Until then the host publishes only a fixed boundary and invokes no case effects.
+Enable executable case analysis only after the shared Context Epoch, V2 security context, strict binding observer, current host-derived risk policy, an explicitly admitted currentness profile for DSV2/evidence/publication, live source probe, grant, outcome, receipt registry, claim verifier, every-terminal finalizer, pending-gate revalidation, and persistence/restart behavior pass without skips. Existing enrolled witnessed profiles continue to require their independent live witness. An empty-lineage `host_local` profile requires its signed mode commitment, unique exact-CAS selector, cross-process/restart and crash-cut checks, and explicit downstream mode validation; a local selector never satisfies an independent-witness or whole-profile rollback claim. Until the applicable profile is proven, the host publishes only a fixed case boundary and invokes no case effects.
 
 P1 additionally requires the exact-root `PublicToolResultProjectionV1` at every Go/TypeScript/Electron/renderer boundary, a journaled migration that removes legacy raw tool results from ordinary durable stores, a separate closed durable projection for tool-call arguments, and owner/use/effect-lease authority for tool-originated media. Read-time `legacy_output_withheld` containment is necessary incident protection but is not migration completion. Any raw-result sentinel, binding mismatch, unknown/remote code, inline media/path promotion, stale media lease, upload/owner crash ambiguity, or red/ skipped cross-layer test keeps case execution boundary-only.
 
@@ -33,6 +33,9 @@ Complete provider families, real desktop bridge/UI, cold/disconnected/spoofed/re
 - Final evidence and report gates are always on.
 - There is no ordinary user disable switch.
 - Missing/misconfigured components produce boundary-only answers.
+- A missing or conflicting `host_local` commitment, selector, or protected
+  inventory blocks the affected case effect; it never downgrades witnessed
+  history or blocks unrelated ordinary work.
 - Strict provider schemas assist but never replace the local gate.
 - Ordinary non-case functionality uses its ordinary Core execution policy and
   grants. Optional case/funds/registry/witness failure does not become a startup

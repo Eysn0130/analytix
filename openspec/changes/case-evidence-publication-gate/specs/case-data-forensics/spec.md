@@ -618,7 +618,7 @@ principal. The funds execution's host-private evidence carrier SHALL already
 have been consumed or discarded exactly once before claim settlement and SHALL
 never enter display or generic state. AcceptedSlotDisplay SHALL instead
 re-resolve the accepted result's original source file/row/field lineage through
-one callback-scoped exact read against its original witnessed immutable DSV2
+one callback-scoped exact read against its original current-authorized immutable DSV2
 snapshot. A private canonical value, current database value, reparsed
 approximation, display label, suffix, or model alias SHALL NOT substitute for
 that source-exact field.

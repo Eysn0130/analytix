@@ -771,10 +771,9 @@ func DescriptorForCurrentSelectionV1(
 		securityContext.UserID,
 		observation,
 	) != nil ||
-		domainsecurity.ValidateDatasetSnapshotIndexRecordV2(
-			selection.SelectedIndex,
-			snapshot.Record,
-		) != nil ||
+		(selection.HostLocalHead != nil && datasetsnapshotport.ValidateCurrentSelectionChildBindingV2(selection) != nil) ||
+		(selection.HostLocalHead == nil && domainsecurity.ValidateDatasetSnapshotIndexRecordV2(
+			selection.SelectedIndex, snapshot.Record) != nil) ||
 		snapshot.Manifest.Binding != binding ||
 		selection.SelectedIndex.Binding != binding ||
 		selection.SelectedIndex.SnapshotRecordDigest != snapshot.Record.RecordDigest ||

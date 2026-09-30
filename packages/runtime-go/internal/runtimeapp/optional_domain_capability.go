@@ -18,7 +18,7 @@ var errRuntimeOptionalDomainInstallationRequired = errors.New("unavailable signe
 
 func runtimeOptionalDomainOwner(name string) bool {
 	switch name {
-	case "evidence-authority", "dataset-snapshot-authority", "pii-authorization",
+	case "evidence-authority", "evidence-authority-host-local", "dataset-snapshot-authority", "pii-authorization",
 		"report-publication", "controlled-artifact-access", "controlled-artifact-access-v2":
 		return true
 	default:

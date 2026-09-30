@@ -11,15 +11,17 @@ Resume with the [canonical handover](handovers/README.md) and fresh Git state.
 The inherited source checkpoint is `c2cd3e29174e701569220e1c39076e0acff24a53`, tree
 `55893ead1fc3a6bce73ede22a251005a14810532`, on the existing PR28 branch. Entry
 routing was committed locally as `39250cafa`; refresh current HEAD from Git.
-The inherited 34 tracked modifications and 26 untracked files include a
-**partial, uncommitted host-local B1 candidate**. HEAD alone does not identify
-that working-tree candidate; no frozen source or installation is claimed for it.
+The inherited 34 tracked modifications and 26 untracked files included a
+partial host-local B1 candidate. Its reviewed dependency closure and new
+[expected-predecessor/disk-reopen checkpoint](qa/pr28-host-local-cleaning-successor-2026-09-29.md)
+are delivered by the focused local commit containing that record. Final and
+installed readiness remain independent gaps.
 
 | Capability / stage | Candidate / owner | Evidence | Gap / next validation |
 | --- | --- | --- | --- |
 | Ordinary Core, independent of Funds | c2cd composition; production Go Core, Electron boundary | Current code and inherited history; no new behavioral validation in this entry repair. Exact installed `7dc07bb` plus corrected `032b8a147` observer has two synthetic K10 runs, normal quit and zero residuals in [its dated record](qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md) | Freeze and verify the delivered candidate; matched startup attribution and applicable installed/live Provider recovery remain independent. Do not reopen the already closed 7dc quit symptom without new evidence. |
-| Funds import / snapshot / Registry | c2cd plus inherited host-local empty-lineage candidate | [Source checkpoint](qa/pr28-b1-host-local-currentness-source-2026-09-27.md) covers bounded signed-head, DSV2, actual Registry CAS and restart; not a fresh pass on this worktree | N06/B16: Final issuance/recovery, cleaning predecessor, authenticated CAS-loser recovery, and installed import→query→Final→display→restart. Whole-profile rollback remains `UNVERIFIED`. |
-| Exact facts / privacy / local display | Existing Go/DuckDB, aliases, snapshot, egress and typed continuity owners | Earlier exact-source synthetic chains retain their own evidence in [N01–N09](qa/pr28-next-execution-2026-09-26.md); neither aliases nor historical facts grant current authority | Independent semantic oracle, current authorization at each effect/outlet, revocation and source-version validity; verify approved projection while raw stays protected-local. |
+| Funds import / snapshot / Registry | Reviewed host-local dependency closure in the focused commit containing the checkpoint | [Current source checkpoint](qa/pr28-host-local-cleaning-successor-2026-09-29.md): expected-predecessor guard, actual owner/store successor and disk reopen, plus 13 dependency packages and runtime selections pass in ordinary / production modes | Archive verification; N06/B16 Final issuance/recovery, complete cleaning/epoch chain, authenticated CAS-loser recovery, and installed import→query→Final→display→restart. Whole-profile rollback remains `UNVERIFIED`. |
+| Exact facts / privacy / local display | Existing Go/DuckDB, aliases, snapshot, egress and typed continuity owners | [7ad835 projection fidelity](qa/pr28-account-flow-projection-fidelity-2026-09-29.md) has a source-isolated decimal/identity oracle and rejects subject-alias substitution. Earlier synthetic chains retain their own evidence in [N01–N09](qa/pr28-next-execution-2026-09-26.md) | Actual computation and entity-matching truth; current authorization at each effect/outlet, revocation and source-version validity. Raw remains protected-local; aliases and historical facts grant no authority. |
 | Cross-thread context / comparative analysis | Accepted scoped continuity and memory requirements; implementation evidence must be read at its owner | No fresh A/B/C/D pilot, noninferiority result or gain claim | Memory must retain source/scope/version/invalidity and be data rather than instructions or permission. Same-model/task/tool/total-budget pilot needs independent truth, holdout isolation and authorized model execution. |
 
 ## Delivery scope

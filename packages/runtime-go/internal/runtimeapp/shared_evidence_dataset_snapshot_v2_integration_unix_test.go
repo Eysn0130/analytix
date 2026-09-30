@@ -774,6 +774,24 @@ func TestRuntimeWitnessedEvidenceRegistryV2RestartAndOptionalCapabilityRecovery(
 	})
 }
 
+func TestRuntimeWitnessedRestartDoesNotCreateHostLocalRecoveryOwner(t *testing.T) {
+	_, config := runtimeWitnessedRegistryConfigV2(t)
+	hostOwner := filepath.Join(config.DataDir, "private", "evidence-authority-host-local")
+	hostSelector := filepath.Join(config.DataDir, "private", "evidence-authority-host-local-projection")
+	for run := 0; run < 2; run++ {
+		handler, err := NewRuntimeServerHandlerE(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shutdownOwnedRuntimeHandler(t, handler)
+		for _, path := range []string{hostOwner, hostSelector} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("witnessed restart created host-local mode state at %s: %v", path, err)
+			}
+		}
+	}
+}
+
 func runtimeWitnessedRegistryDirectCompositionV2(
 	t *testing.T,
 	fixture *authoritycompositionfixture.Service,

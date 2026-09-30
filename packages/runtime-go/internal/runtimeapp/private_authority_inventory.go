@@ -11,6 +11,7 @@ type privateAuthorityInventoryV1 struct {
 	AttachmentAuthority    bool
 	AuthorityAdvance       bool
 	EvidenceAuthority      bool
+	HostLocalEvidence      bool
 	DatasetSnapshot        bool
 	ThreadRiskPolicy       bool
 	CheckpointAuthority    bool
@@ -27,7 +28,7 @@ func (inventory privateAuthorityInventoryV1) Required() bool {
 	return inventory.FinalRecords || inventory.Settlements || inventory.EvidenceRegistry ||
 		inventory.Continuations || inventory.PendingWork || inventory.ProviderCacheTelemetry ||
 		inventory.TurnTerminal || inventory.AttachmentAuthority || inventory.AuthorityAdvance ||
-		inventory.EvidenceAuthority || inventory.DatasetSnapshot || inventory.ThreadRiskPolicy || inventory.CheckpointAuthority || inventory.PIIAuthorization || inventory.ReportPublication ||
+		inventory.EvidenceAuthority || inventory.HostLocalEvidence || inventory.DatasetSnapshot || inventory.ThreadRiskPolicy || inventory.CheckpointAuthority || inventory.PIIAuthorization || inventory.ReportPublication ||
 		inventory.ControlledAccessV1 || inventory.ControlledAccessV2 || inventory.CaseEntity ||
 		inventory.CaseThreadAuthority || inventory.SteeringAuthority
 }

@@ -69,12 +69,12 @@ func (store *AuthorityIndexStoreV2) PutIfAbsent(ctx context.Context, index domai
 	if store == nil || store.cas == nil {
 		return errors.New("evidence registry authority index V2 store is unavailable")
 	}
-	body, err := domainevidence.EvidenceRegistryAuthorityIndexV2Bytes(index)
+	body, err := domainevidence.VersionedEvidenceRegistryAuthorityIndexBytes(index)
 	if err != nil || len(body) == 0 || len(body) > maxEvidenceRegistryAuthorityIndexV2Bytes {
 		return errors.New("evidence registry authority index V2 is invalid")
 	}
 	return putCanonicalAuthorityRecord(ctx, store.cas, index.IndexDigest, body, func(stored []byte) (string, error) {
-		parsed, parseErr := domainevidence.ParseEvidenceRegistryAuthorityIndexV2(stored)
+		parsed, parseErr := domainevidence.ParseVersionedEvidenceRegistryAuthorityIndex(stored)
 		return parsed.IndexDigest, parseErr
 	})
 }
@@ -87,7 +87,7 @@ func (store *AuthorityIndexStoreV2) Resolve(ctx context.Context, digest string) 
 	if err != nil {
 		return domainevidence.EvidenceRegistryAuthorityIndexV2{}, err
 	}
-	index, err := domainevidence.ParseEvidenceRegistryAuthorityIndexV2(body)
+	index, err := domainevidence.ParseVersionedEvidenceRegistryAuthorityIndex(body)
 	if err != nil || index.IndexDigest != digest {
 		return domainevidence.EvidenceRegistryAuthorityIndexV2{}, errors.New("evidence registry authority index V2 content address mismatch")
 	}

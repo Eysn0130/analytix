@@ -49,7 +49,12 @@ Every command below sourced `./scripts/use-analytix-cache.sh` in the same shell.
 | `go test -race ./internal/domain/nativecomponent -run '^TestAccountFlowProjection(MatchesIndependentDecimalAndIdentityOracle\|BindsSubjectAndCounterpartyAliasIdentity)$' -count=1 -timeout=90s` | pass |
 | `go test ./internal/app/nativecomponent -run 'AccountFlow' -count=1 -timeout=120s` | pass |
 
-Working-tree tests included inherited, uncommitted B1 files outside this scope.
-No source-isolated, current remote CI, main, release or installed verdict follows
-from these runs. Cleaning predecessor, Final/recovery and installed acceptance
+The initial working-tree tests included inherited, uncommitted B1 files outside
+this scope. A fresh `git archive` of committed source
+`7ad8351340f4dce08c0756093faf169afba8b7ef` then passed the full domain package
+in ordinary/production tags and the app `AccountFlow` selection above. The
+immutable extraction is `analytix-projection-7ad835134.NIO7HX` under the configured
+cache's temporary storage. This proves those source seams without the dirty B1
+dependency; it does not establish current remote CI, main, release or installed
+readiness. Cleaning predecessor, Final/recovery and installed acceptance
 remain separately routed through the [canonical handover](../handovers/README.md).

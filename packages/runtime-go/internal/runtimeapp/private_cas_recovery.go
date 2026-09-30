@@ -20,6 +20,7 @@ import (
 	continuationstore "analytix.local/runtime-go/internal/adapters/outbound/continuationstore"
 	datasetsnapshotstore "analytix.local/runtime-go/internal/adapters/outbound/datasetsnapshot"
 	evidenceauthoritystore "analytix.local/runtime-go/internal/adapters/outbound/evidenceauthority"
+	evidenceauthorityhostlocal "analytix.local/runtime-go/internal/adapters/outbound/evidenceauthorityhostlocal"
 	evidenceregistrystore "analytix.local/runtime-go/internal/adapters/outbound/evidenceregistry"
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
@@ -409,6 +410,7 @@ func runtimePrivateCASOwnerRecoveries(
 	attachmentAuthority := filepath.Join(dataDir, "private", "attachment-authority")
 	authorityAdvance := filepath.Join(dataDir, "private", "authority-advance")
 	evidenceAuthority := filepath.Join(dataDir, "private", "evidence-authority")
+	hostLocalEvidenceAuthority := filepath.Join(dataDir, "private", "evidence-authority-host-local")
 	evidenceRegistry := filepath.Join(dataDir, "private", "evidence-registry")
 	datasetSnapshotAuthority := filepath.Join(dataDir, "private", "dataset-snapshot-authority")
 	threadRiskPolicy := filepath.Join(dataDir, "private", "thread-risk-policy")
@@ -496,6 +498,13 @@ func runtimePrivateCASOwnerRecoveries(
 			expectedRoots: runtimePrivateCASExpectedRoots(dataDir, "evidence-authority"),
 			prepare: func(ctx context.Context) (runtimePreparedPrivateCASOwnerRecovery, error) {
 				return evidenceauthoritystore.PrepareRecoveryV1(ctx, evidenceAuthority, access)
+			},
+		},
+		{
+			name:          "evidence-authority-host-local",
+			expectedRoots: runtimePrivateCASExpectedRoots(dataDir, "evidence-authority-host-local"),
+			prepare: func(ctx context.Context) (runtimePreparedPrivateCASOwnerRecovery, error) {
+				return evidenceauthorityhostlocal.PrepareRecoveryV1(ctx, hostLocalEvidenceAuthority, access)
 			},
 		},
 		{

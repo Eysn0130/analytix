@@ -70,16 +70,17 @@ type ImportSourceReaderV1 func(
 ) error
 
 type ConfigV1 struct {
-	Diagnostics      io.Writer
-	Observer         casecontextport.Observer
-	Identity         identityport.Authority
-	Evidence         *evidenceauthorityapp.Authority
-	Snapshots        SnapshotAuthorityV2
-	Materials        MaterialWriterV1
-	Native           NativeOwnerV1
-	Source           ImmutableSourceV1
-	ReadImportSource ImportSourceReaderV1
-	CaseCreator      ImportCaseCreatorV1
+	Diagnostics           io.Writer
+	Observer              casecontextport.Observer
+	Identity              identityport.Authority
+	Evidence              *evidenceauthorityapp.Authority
+	EnsureEvidenceCurrent func(context.Context) error
+	Snapshots             SnapshotAuthorityV2
+	Materials             MaterialWriterV1
+	Native                NativeOwnerV1
+	Source                ImmutableSourceV1
+	ReadImportSource      ImportSourceReaderV1
+	CaseCreator           ImportCaseCreatorV1
 	// Called only after a confirmed exact import has admitted its real snapshot.
 	ActivateEvidenceRegistry func(context.Context, domainsecurity.CaseBindingObservationV1, string) error
 	Now                      func() time.Time
@@ -91,6 +92,7 @@ type ServiceV1 struct {
 	observer                 casecontextport.Observer
 	identity                 identityport.Authority
 	evidence                 *evidenceauthorityapp.Authority
+	ensureEvidenceCurrent    func(context.Context) error
 	snapshots                SnapshotAuthorityV2
 	materials                MaterialWriterV1
 	native                   NativeOwnerV1
@@ -161,7 +163,9 @@ type admissionResultV1 struct {
 }
 
 func NewServiceV1(config ConfigV1) (*ServiceV1, error) {
-	if config.Observer == nil || config.Identity == nil || config.Evidence == nil || config.Snapshots == nil ||
+	if config.Observer == nil || config.Identity == nil ||
+		(config.Evidence == nil && config.EnsureEvidenceCurrent == nil) ||
+		(config.Evidence != nil && config.EnsureEvidenceCurrent != nil) || config.Snapshots == nil ||
 		config.Materials == nil || config.Native == nil || config.Source == nil || config.ReadImportSource == nil {
 		return nil, ErrUnavailable
 	}
@@ -173,7 +177,8 @@ func NewServiceV1(config ConfigV1) (*ServiceV1, error) {
 	}
 	service := &ServiceV1{
 		diagnostics: config.Diagnostics,
-		observer:    config.Observer, identity: config.Identity, evidence: config.Evidence, snapshots: config.Snapshots,
+		observer:    config.Observer, identity: config.Identity, evidence: config.Evidence,
+		ensureEvidenceCurrent: config.EnsureEvidenceCurrent, snapshots: config.Snapshots,
 		materials: config.Materials, native: config.Native, source: config.Source,
 		readImportSource:         config.ReadImportSource,
 		caseCreator:              config.CaseCreator,
@@ -268,7 +273,11 @@ func (service *ServiceV1) admitExactWithOptionsV1(
 	if err != nil {
 		return admissionResultV1{}, ErrInvalidRequest
 	}
-	if _, err := service.evidence.Initialize(ctx); err != nil &&
+	if service.ensureEvidenceCurrent != nil {
+		if err := service.ensureEvidenceCurrent(ctx); err != nil {
+			return admissionResultV1{}, errors.Join(ErrUnavailable, err)
+		}
+	} else if _, err := service.evidence.Initialize(ctx); err != nil &&
 		!errors.Is(err, evidenceauthorityapp.ErrAlreadyInitialized) {
 		return admissionResultV1{}, errors.Join(ErrUnavailable, err)
 	}

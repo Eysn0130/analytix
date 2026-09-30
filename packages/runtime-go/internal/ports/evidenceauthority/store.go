@@ -4,6 +4,7 @@ import (
 	"context"
 
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainhost "analytix.local/runtime-go/internal/domain/hostcurrentness"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -115,4 +116,20 @@ type RegistryCoordinator interface {
 type PublicationCoordinator interface {
 	FreshHeadReader
 	AdvancePublication(context.Context, PublicationAdvanceInput) (FreshHead, error)
+}
+
+// HostLocalHeadCoordinator is the explicitly selected host-local profile. It
+// is distinct from FreshHead and carries no witness observation or enrollment.
+// Runtime admission must first prove an empty protected lineage or an exact
+// previously committed host-local profile under the process-owner lease.
+type HostLocalHeadCoordinator interface {
+	Current(context.Context) (domainhost.HeadV1, bool, error)
+	CurrentModeCommitment(context.Context) (domainhost.HeadV1, error)
+	WithProtectedMutation(context.Context, func(context.Context, HostLocalMutation) error) error
+}
+
+// HostLocalMutation is callback-scoped under the single head-owner serializer.
+// Dataset, registry, and publication child writers share this same capability.
+type HostLocalMutation interface {
+	AdvanceExact(context.Context, domainhost.HeadV1, domainhost.HeadV1) error
 }

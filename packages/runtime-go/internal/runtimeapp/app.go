@@ -111,7 +111,7 @@ const (
 type fundsCSVAdmissionTraceWriterContextKeyV1 struct{}
 
 func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, simulation bool, nativeOwner *nativecomponenthost.Owner,
-	configured bool, shared runtimeSharedEvidenceDatasetSnapshotV2) {
+	configured bool, shared runtimeSharedEvidenceDatasetSnapshotV2, hostLocalEligible bool) {
 	if os.Getenv("ANALYTIX_STARTUP_TRACE") != "1" {
 		return
 	}
@@ -129,6 +129,8 @@ func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, simulation bool, nati
 		code = fundsCSVNotEvaluatedV1
 	case nativeOwner == nil:
 		code = fundsCSVNativeOwnerUnavailableV1
+	case hostLocalEligible:
+		code = fundsCSVReadyV1
 	case !configured && !shared.credentialsUnavailable && shared.evidence == nil && shared.snapshot == nil:
 		code = fundsCSVEnrollmentAbsentV1
 	case configured && shared.credentialsUnavailable && shared.evidence == nil && shared.snapshot == nil:
@@ -648,8 +650,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var authorityAdvanceIntents authorityadvanceport.IntentInventoryStore = authorityAdvanceStartup.inventory
 	var authorityAdvanceSettlements authorityadvanceport.SettlementInventoryStore = authorityAdvanceStartup.inventory
 	privateAuthorityAdvanceExists := authorityAdvanceStartup.inventory.HasRecords()
+	var authorityAdvanceStore *authorityadvancefs.Store
 	if !reportRestartPreservation.publication.recoveryDeferredV1() {
-		authorityAdvanceStore, err := authorityadvancefs.NewStore(filepath.Join(config.DataDir, "private", "authority-advance"), privateCASAccessAuthority)
+		authorityAdvanceStore, err = authorityadvancefs.NewStore(filepath.Join(config.DataDir, "private", "authority-advance"), privateCASAccessAuthority)
 		if err != nil {
 			return nil, err
 		}
@@ -806,6 +809,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	privateDatasetSnapshotExists := optionalDomains["dataset-snapshot-authority"].hasRecords
 	privateEvidenceAuthorityExists := optionalDomains["evidence-authority"].hasRecords
+	privateHostLocalEvidenceExists := optionalDomains["evidence-authority-host-local"].hasRecords
 	privateCaseEntityExists := caseEntityCapability.hasRecords
 	privateThreadRiskPolicyExists, err := threadRiskPolicyStore.HasRecords(ctx)
 	if err != nil {
@@ -829,6 +833,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		PendingWork: privatePendingWorkExists, ProviderCacheTelemetry: privateProviderCacheTelemetryExists,
 		TurnTerminal: privateTurnTerminalExists, AttachmentAuthority: privateAttachmentAuthorityExists,
 		AuthorityAdvance: privateAuthorityAdvanceExists, EvidenceAuthority: privateEvidenceAuthorityExists,
+		HostLocalEvidence:   privateHostLocalEvidenceExists,
 		DatasetSnapshot:     privateDatasetSnapshotExists,
 		ThreadRiskPolicy:    privateThreadRiskPolicyExists,
 		CheckpointAuthority: privateCheckpointAuthorityExists,
@@ -1073,17 +1078,33 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	var sharedEvidenceDatasetSnapshotV2 runtimeSharedEvidenceDatasetSnapshotV2
+	var hostLocalEvidenceOwnersV1 *runtimeHostLocalEvidenceOwnersV1
 	defer func() {
 		if !evidenceResourcesOwnedByHandler && sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 			resultErr = errors.Join(resultErr, sharedEvidenceDatasetSnapshotV2.registryOwner.Close())
 		}
+		if !evidenceResourcesOwnedByHandler && hostLocalEvidenceOwnersV1 != nil {
+			resultErr = errors.Join(resultErr, hostLocalEvidenceOwnersV1.Close())
+		}
 	}()
+	hostSelectorPresent, hostHeadPresent, err := runtimeHostLocalProfileRootsPresentV1(config.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	var sharedEvidenceConfiguredV2 bool
-	if evidenceDomainAvailable {
+	if evidenceDomainAvailable && !hostSelectorPresent && !hostHeadPresent {
 		sharedEvidenceDatasetSnapshotV2, sharedEvidenceConfiguredV2, err = newRuntimeSharedEvidenceDatasetSnapshotV2(
 			ctx, config, finalAuthority, datasetSnapshotStoresV2, evidenceAuthorityStoresV2,
 			privateCASAccessAuthority, filestore.CaseBindingReader{}, reportRestartPreservation.registry,
 		)
+		if err != nil {
+			return nil, err
+		}
+	} else if hostSelectorPresent || hostHeadPresent {
+		// A host-local marker and witnessed enrollment are mutually exclusive.
+		// Inspect the manifest without loading witness credentials or composing a
+		// second case authority against the same protected children.
+		_, _, sharedEvidenceConfiguredV2, err = loadRuntimeSharedEvidenceManifestV2(ctx, config)
 		if err != nil {
 			return nil, err
 		}
@@ -1097,6 +1118,61 @@ func newRuntimeServerHandlerWithRootsModeE(
 		}
 		err = nil
 	}
+	if !simulation && evidenceDomainAvailable && publicationDomainAvailable &&
+		!sharedEvidenceConfiguredV2 && datasetSnapshotStoresV2 != nil &&
+		(reportRestartPreservation.registry == nil || !reportRestartPreservation.registry.unavailable) {
+		protectedLineage := privateAuthorityExists || privateSettlementExists || privateRegistryExists ||
+			privateContinuationExists || privatePendingWorkExists || privateTurnTerminalExists ||
+			privateAuthorityAdvanceExists || privateEvidenceAuthorityExists || privateDatasetSnapshotExists ||
+			privateThreadRiskPolicyExists || privateCheckpointAuthorityExists || privatePIIAuthorizationExists ||
+			privateReportPublicationExists || privateControlledAccessExists || privateControlledAccessV2Exists ||
+			caseThreadAuthorityExists || publicSteeringAuthorityExists || publicAuthorityExists || publicSettlementExists
+		decision := classifyRuntimeHostLocalProfileV1(false, protectedLineage,
+			hostSelectorPresent, hostHeadPresent, simulation)
+		if decision != runtimeHostLocalProfileUnavailableV1 {
+			freshCheck := func(checkCtx context.Context) error {
+				if rootAuthority.Validate() != nil || authorityAdvanceStore == nil ||
+					piiAuthorizationStore == nil || reportPublicationStores == nil ||
+					controlledAccessStore == nil || controlledAccessStoreV2 == nil {
+					return errRuntimeCaseEvidenceAuthorityUnavailableV1
+				}
+				checks := []func(context.Context) (bool, error){
+					privateFinalStore.HasRecords, settlementStore.HasRecords,
+					caseThreadStore.HasRecords, continuationStore.HasRecords, pendingWorkStore.HasRecords,
+					turnTerminalStore.HasRecords, threadRiskPolicyStore.HasRecords,
+					checkpointAuthorityStore.HasRecords, datasetSnapshotStoresV2.HasRecords,
+					evidenceAuthorityStoresV2.hasRecords, authorityAdvanceStore.HasRecords,
+					piiAuthorizationStore.HasRecords, reportPublicationStores.HasRecords,
+					controlledAccessStore.HasRecords, controlledAccessStoreV2.HasRecordsV2,
+					func(c context.Context) (bool, error) {
+						return evidenceregistry.HasState(c, evidenceRegistryRoot, privateCASAccessAuthority)
+					},
+					func(c context.Context) (bool, error) { return evidenceapp.HasPublicAcceptedFinalAuthority(store) },
+					func(c context.Context) (bool, error) { return evidenceapp.HasPublicEvidenceSettlementAuthority(store) },
+					func(c context.Context) (bool, error) { return steeringauthorityapp.HasPublicAuthorityStateV1(store) },
+				}
+				for _, check := range checks {
+					found, checkErr := check(checkCtx)
+					if checkErr != nil || found {
+						return errors.Join(errRuntimeCaseEvidenceAuthorityUnavailableV1, checkErr)
+					}
+				}
+				return nil
+			}
+			hostLocalEvidenceOwnersV1, err = newRuntimeHostLocalEvidenceOwnersV1(config,
+				rootAuthority, privateCASAccessAuthority, finalAuthority, datasetSnapshotStoresV2,
+				decision, freshCheck)
+			if err != nil {
+				return nil, err
+			}
+			if decision == runtimeHostLocalProfileResumeV1 {
+				// A committed profile is read before restart inventory consumes the
+				// Registry marker. Invalid local authority stays a case-only
+				// boundary; it cannot prevent the ordinary Agent from starting.
+				_ = hostLocalEvidenceOwnersV1.ensureRead(ctx)
+			}
+		}
+	}
 	// Composition is local-only. Protected operations reach this shared
 	// authority and perform their own fresh witness challenge; absent enrollment
 	// leaves only the case effect fail-closed while the general Agent still runs.
@@ -1107,6 +1183,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 			snapshot: sharedEvidenceDatasetSnapshotV2.snapshot, registry: sharedEvidenceDatasetSnapshotV2.registryOwner,
 		}
 		datasetSnapshotCurrentAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
+	} else if hostLocalEvidenceOwnersV1 != nil {
+		datasetSnapshotAuthorityV2 = hostLocalEvidenceOwnersV1
+		datasetSnapshotCurrentAuthorityV2 = hostLocalEvidenceOwnersV1
 	}
 	identityAuthority, err := newRuntimeHostIdentityAuthority(finalAuthority)
 	if err != nil {
@@ -1141,6 +1220,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 			}
 			return nil, errors.New("evidence registry authority inventory changed during startup")
 		}
+	} else if hostLocalEvidenceOwnersV1 != nil {
+		evidenceStore = hostLocalEvidenceOwnersV1
 	} else {
 		legacyPlan, prepareErr := evidenceregistry.PrepareRecoveryV2(ctx, evidenceRegistryRoot, privateCASAccessAuthority)
 		if prepareErr != nil {
@@ -1628,18 +1709,25 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 		activateImportRegistry = sharedEvidenceDatasetSnapshotV2.registryOwner.ActivateAfterImport
 	}
-	traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2, sharedEvidenceDatasetSnapshotV2)
-	if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&
-		sharedEvidenceDatasetSnapshotV2.snapshot != nil {
+	traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2,
+		sharedEvidenceDatasetSnapshotV2, hostLocalEvidenceOwnersV1 != nil)
+	if nativeOwner != nil && (sharedEvidenceDatasetSnapshotV2.evidence != nil &&
+		sharedEvidenceDatasetSnapshotV2.snapshot != nil || hostLocalEvidenceOwnersV1 != nil) {
 		immutableSource, sourceErr := fundsquerysourceadapter.NewHostExactSource(config.UserDataDir)
 		if sourceErr != nil {
 			return nil, errors.Join(sourceErr, nativeAuthority.Close())
 		}
+		snapshotForImport := fundscsvadmissionapp.SnapshotAuthorityV2(sharedEvidenceDatasetSnapshotV2.snapshot)
+		var ensureHostLocal func(context.Context) error
+		if hostLocalEvidenceOwnersV1 != nil {
+			snapshotForImport = hostLocalEvidenceOwnersV1
+			ensureHostLocal = hostLocalEvidenceOwnersV1.EnsureForFundsImport
+		}
 		fundsCSVAdmission, err = fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
 			Diagnostics: os.Stderr,
 			Observer:    filestore.CaseBindingReader{}, Identity: identityAuthority,
-			Evidence:  sharedEvidenceDatasetSnapshotV2.evidence,
-			Snapshots: sharedEvidenceDatasetSnapshotV2.snapshot,
+			Evidence: sharedEvidenceDatasetSnapshotV2.evidence, EnsureEvidenceCurrent: ensureHostLocal,
+			Snapshots: snapshotForImport,
 			Materials: datasetSnapshotStoresV2,
 			Native:    nativeOwner, Source: immutableSource,
 			ReadImportSource:         fundscsvsourceadapter.ReadImportExactV1,
@@ -1825,6 +1913,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if !simulation && evidenceDomainAvailable {
 		if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 			handler, err = bindRuntimeOwnedResourceV1(handler, sharedEvidenceDatasetSnapshotV2.registryOwner)
+			if err != nil {
+				return nil, errors.Join(err, nativeAuthority.Close())
+			}
+		}
+		if hostLocalEvidenceOwnersV1 != nil {
+			handler, err = bindRuntimeOwnedResourceV1(handler, hostLocalEvidenceOwnersV1)
 			if err != nil {
 				return nil, errors.Join(err, nativeAuthority.Close())
 			}
