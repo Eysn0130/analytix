@@ -1,9 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import http from 'node:http'
 import vm from 'node:vm'
 import { cdpNormalQuit, dispatchCdpCommands } from './runtime-go-packaged-milestone-b.mjs'
-import { currentAccountFlow, exactAccountFlow, ownedPackagedRenderer, syntheticCleaningCSV } from './runtime-go-host-local-funds-installed.mjs'
+import { currentAccountFlow, exactAccountFlow, ownedPackagedRenderer, syntheticCleaningCSV, syntheticProvider } from './runtime-go-host-local-funds-installed.mjs'
 
 // Exercise the existing owner's actual functions without importing the CLI
 // entry point (which would run Go/native/Mac acceptance as an import effect).
@@ -1118,4 +1119,60 @@ test('a read-only ownership failure is never attributed to normal quit input', a
   })
   assert.equal(result.ok, false)
   assert.equal(result.cdpOutcome, 'not_sent')
+})
+
+test('the installed privacy receipt also accounts for refused unclassified Provider requests', async (t) => {
+  const provider = await syntheticProvider()
+  t.after(() => provider.close())
+  const response = await fetch(`${provider.url}/chat/completions`, { method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer host-local-installed-synthetic-key' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: '6222021234567890' }] }) })
+  assert.equal(response.status, 503)
+  assert.equal(provider.requests.length, 1)
+  assert.deepEqual(provider.requests[0], { round: 'unclassified', safe: false, authorized: true,
+    advertised: false, semantic: false, exact: null, accepted: false })
+})
+
+test('safe malformed bodies and unexpected routes remain refused in the installed receipt', async (t) => {
+  const provider = await syntheticProvider()
+  t.after(() => provider.close())
+  for (const [path, body, status] of [['/chat/completions', '{', 503], ['/unexpected', '{}', 404]]) {
+    const response = await fetch(`${provider.url}${path}`, { method: 'POST',
+      headers: { authorization: 'Bearer host-local-installed-synthetic-key' }, body })
+    assert.equal(response.status, status)
+  }
+  assert.equal(provider.requests.length, 2)
+  assert.equal(provider.requests[0].safe, true)
+  assert.equal(provider.requests[1].safe, null)
+  assert.ok(provider.requests.every((receipt) => receipt.authorized && !receipt.accepted))
+})
+
+test('the installed Provider closes only after an in-flight refused request is accounted for', async (t) => {
+  const provider = await syntheticProvider()
+  let request
+  t.after(() => { request?.destroy(); return provider.close() })
+  const response = new Promise((resolve, reject) => {
+    request = http.request(`${provider.url}/chat/completions`, { method: 'POST',
+      headers: { authorization: 'Bearer host-local-installed-synthetic-key' } }, (incoming) => {
+      incoming.resume()
+      incoming.on('end', () => resolve(incoming.statusCode))
+    })
+    request.on('error', reject)
+    request.write('{')
+  })
+  const deadline = Date.now() + 1000
+  while (!provider.requests.length && Date.now() < deadline) await pause(1)
+  assert.equal(provider.requests.length, 1)
+  assert.equal(provider.requests[0].safe, null)
+  const closing = provider.close()
+  assert.equal(provider.close(), closing)
+  let closed = false
+  closing.then(() => { closed = true })
+  await pause(1)
+  assert.equal(closed, false)
+  request.end('}')
+  assert.equal(await response, 503)
+  await closing
+  assert.equal(provider.requests[0].safe, true)
+  assert.equal(provider.requests[0].accepted, false)
 })

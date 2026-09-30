@@ -95,10 +95,15 @@ export function currentAccountFlow(messages, toolCallId = '') {
   return semanticEnvelope(result?.content)
 }
 
-async function syntheticProvider() {
+export async function syntheticProvider() {
   const requests = []
   const issued = new Map()
+  let closing
   const server = http.createServer((request, response) => {
+    const receipt = { round: 'unclassified', safe: null,
+      authorized: request.headers.authorization === `Bearer ${syntheticKey}`,
+      advertised: false, semantic: false, exact: null, accepted: false }
+    requests.push(receipt)
     if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
       response.writeHead(404).end()
       return
@@ -110,6 +115,7 @@ async function syntheticProvider() {
       if (Buffer.byteLength(raw) > 4 * 1024 * 1024) request.destroy()
     })
     request.on('end', () => {
+      receipt.safe = ![account, '9000-001 23', '9000-002 34', '900000123', '900000234', '900000345'].some((value) => raw.includes(value))
       try {
         const body = JSON.parse(raw)
         const user = (body.messages || []).findLast((message) => message?.role === 'user')
@@ -119,12 +125,11 @@ async function syntheticProvider() {
         const expectedCall = issued.get(round)
         const semantic = expectedCall ? currentAccountFlow(body.messages, expectedCall) : null
         const tools = (body.tools || []).map((tool) => tool.function?.name)
-        const safe = ![account, '9000-001 23', '9000-002 34', '900000123', '900000234', '900000345'].some((value) => raw.includes(value))
-        const authorized = request.headers.authorization === `Bearer ${syntheticKey}`
         const advertised = tools.includes(flowTool) && !tools.includes('mcp__analytix_funds__count_case_rows')
         const valid = expectedCall ? !!semantic && exactAccountFlow(semantic) : advertised
-        requests.push({ round, safe, authorized, advertised, semantic: !!semantic, exact: semantic ? valid : null })
-        requireCondition(safe && authorized && valid, 'synthetic_provider_request_refused')
+        Object.assign(receipt, { round, advertised, semantic: !!semantic, exact: semantic ? valid : null })
+        requireCondition(receipt.safe && receipt.authorized && valid, 'synthetic_provider_request_refused')
+        receipt.accepted = true
         const callId = `call_host_local_${requests.length}`
         if (!semantic) issued.set(round, callId)
         const delta = semantic ? { content: 'HOST_LOCAL_INSTALLED_SYNTHETIC_TERMINAL' } : {
@@ -143,7 +148,7 @@ async function syntheticProvider() {
   })
   await new Promise((done) => server.listen(0, '127.0.0.1', done))
   return { url: `http://127.0.0.1:${server.address().port}/v1`, requests,
-    close: () => new Promise((done) => server.close(done)) }
+    close: () => closing ||= new Promise((done) => server.close(done)) }
 }
 
 export async function runHostLocalInstalled(appPath, cacheRoot) {
@@ -353,7 +358,8 @@ export async function runHostLocalInstalled(appPath, cacheRoot) {
     check('successor-current-after-relaunch', recoveredSource.datasetSnapshotId === secondSource.datasetSnapshotId)
     await normalQuit()
     check('normal-second-exit-and-listener-close', true)
-    check('synthetic-provider-exact-safe-results', provider.requests.length >= 4 && provider.requests.every((request) => request.safe && request.authorized) &&
+    await provider.close()
+    check('synthetic-provider-exact-safe-results', provider.requests.length >= 4 && provider.requests.every((request) => request.safe && request.authorized && request.accepted) &&
       provider.requests.filter((request) => request.semantic && request.exact).length === 2)
     report.identities = { importedSnapshotSHA256: hash(firstSource.datasetSnapshotId), successorSnapshotSHA256: hash(secondSource.datasetSnapshotId),
       firstPublication: firstFinal.acceptedFinalView.acceptedFinalDigest, secondPublication: secondFinal.acceptedFinalView.acceptedFinalDigest }
