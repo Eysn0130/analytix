@@ -2881,15 +2881,16 @@ async function evaluateReadonlyCdp(wsUrl, expression, timeoutMs) {
   }
 }
 
-async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
+export async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
   if (typeof WebSocket === 'undefined') throw new Error('node_websocket_unavailable')
   assertPackagedDiagnosticTargetOwner(wsUrl)
   const socket = new WebSocket(wsUrl)
   let commandSent = false
   try {
     await new Promise((resolvePromise, reject) => {
-      socket.addEventListener('open', resolvePromise, { once: true })
-      socket.addEventListener('error', reject, { once: true })
+      const timer = setTimeout(() => reject(new Error('cdp_handshake_timeout')), timeoutMs)
+      socket.addEventListener('open', () => { clearTimeout(timer); resolvePromise() }, { once: true })
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('cdp_connection_error')) }, { once: true })
     })
     assertPackagedDiagnosticTargetOwner(wsUrl)
     const results = []
@@ -2913,6 +2914,8 @@ async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
     }
     return results
   } catch (error) {
+    error.cdpCommandSent = commandSent
+    error.cdpOutcome = commandSent ? 'unknown' : 'not_sent'
     throw markPackagedDiagnosticCdpFailure(error, commandSent, diagnosticPackagedSynthetic)
   } finally {
     socket.close()
@@ -3063,13 +3066,14 @@ async function cdpComposerSubmitToTarget(
   }
 }
 
-async function cdpComposerSubmit(debugPort, text, acceptedButtonLabels = []) {
+export async function cdpComposerSubmit(debugPort, text, acceptedButtonLabels = [], resolveTarget = null) {
+  const currentTarget = resolveTarget || (() => waitForDebugTarget(debugPort, 5000))
   try {
     return await cdpComposerSubmitToTarget(
-      await waitForDebugTarget(debugPort, 20_000),
+      await (resolveTarget ? currentTarget() : waitForDebugTarget(debugPort, 20_000)),
       text,
       acceptedButtonLabels,
-      () => waitForDebugTarget(debugPort, 5000)
+      currentTarget
     )
   } catch (error) {
     if (!packagedDiagnosticCdpMayRetry(error, diagnosticPackagedSynthetic)) throw error
@@ -4999,9 +5003,11 @@ async function forkCurrentThreadInRenderer(debugPort, workspace, parentThreadId,
   return { ok: false, blocker: 'forked_thread_not_observed' }
 }
 
-async function cdpNormalQuit(debugPort) {
+export async function cdpNormalQuit(debugPort, resolveTarget = null) {
+  let quitDispatch = false
   try {
-    const target = await waitForDebugTarget(debugPort, 20_000)
+    const target = await (resolveTarget ? resolveTarget() : waitForDebugTarget(debugPort, 20_000))
+    quitDispatch = true
     await dispatchCdpCommands(target.webSocketDebuggerUrl, [
       { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'q', code: 'KeyQ', modifiers: 4 } },
       { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'q', code: 'KeyQ', modifiers: 4 } }
@@ -5010,7 +5016,8 @@ async function cdpNormalQuit(debugPort) {
   } catch (error) {
     return {
       ok: false,
-      blocker: error instanceof Error ? error.message : 'normal_app_quit_input_failed'
+      blocker: error instanceof Error ? error.message : 'normal_app_quit_input_failed',
+      cdpOutcome: quitDispatch ? error?.cdpOutcome || 'not_sent' : 'not_sent'
     }
   }
 }

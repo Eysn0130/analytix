@@ -292,6 +292,9 @@ func TestPublicationSnapshotProofBindsFactAcceptedFinalAndRejectsTampering(t *te
 	if !bytes.Equal(recordBody, bytes.TrimSpace(acceptedFinalV5FactWitnessAdmissionV2Fixture)) {
 		t.Fatalf("Go V2 accepted-final fixture drifted: %s", recordBody)
 	}
+	t.Run("host_local_v6_closed_grammar", func(t *testing.T) {
+		testHostLocalFactFinalV6(t, admissionInput, intent, sign)
+	})
 	resignAcceptedFinal := func(candidate *AcceptedFinalRecord) {
 		candidate.AuthoritySignature = ""
 		candidate.RecordDigest = ""

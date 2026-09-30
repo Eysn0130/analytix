@@ -14,6 +14,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainhost "analytix.local/runtime-go/internal/domain/hostcurrentness"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	casecontextport "analytix.local/runtime-go/internal/ports/casecontext"
 	datasetsnapshotport "analytix.local/runtime-go/internal/ports/datasetsnapshot"
 	evidenceauthorityport "analytix.local/runtime-go/internal/ports/evidenceauthority"
 	registryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
@@ -27,6 +28,7 @@ type HostLocalConfigV3 struct {
 	Indexes          registryport.AuthorityIndexStore
 	Capsules         registryport.AuthorityCapsuleStore
 	DatasetAuthority datasetsnapshotport.CurrentAuthorityV2
+	BindingObserver  casecontextport.Observer
 	Random           io.Reader
 	Now              func() time.Time
 }
@@ -68,7 +70,8 @@ func NewHostLocalV3(ctx context.Context, config HostLocalConfigV3) (*HostLocalSe
 		installationID: config.InstallationID, authority: config.Authority,
 		keyID: config.Authority.KeyID(), publicKey: append([]byte(nil), config.Authority.PublicKey()...),
 		indexes: config.Indexes, capsules: config.Capsules, datasetAuthority: config.DatasetAuthority,
-		random: config.Random, now: config.Now,
+		bindingObserver: config.BindingObserver,
+		random:          config.Random, now: config.Now,
 	}
 	return &HostLocalServiceV3{base: base, heads: config.Heads,
 		modeCommitmentDigest: genesis.RecordDigest, rootBindingDigest: genesis.RootBindingDigest}, nil

@@ -58,6 +58,7 @@ const PRIVATE_RUNTIME_DIAGNOSTIC_KEYS = new Set([
 const PRIVATE_ACCEPTED_FINAL_STRONG_KEYS = new Set([
   'acceptedfinal',
   'factfinalwitnessadmission',
+  'factfinalhostlocaladmission',
   'publicationsnapshotproof',
   'publicationsnapshotproofdigest'
 ])

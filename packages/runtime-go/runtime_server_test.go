@@ -2627,22 +2627,22 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 	durableRoot := t.TempDir()
 	dataDir := t.TempDir()
 	workspace := workspacetest.New(t)
+	var providerRequests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerRequests.Add(1)
+		http.Error(w, "unexpected synthetic Provider transport", http.StatusServiceUnavailable)
+	}))
+	defer provider.Close()
 	config := RuntimeServerContractConfig{
-		RuntimeToken:   g1.RuntimeToken,
-		StartedAt:      g1.StartedAt,
-		DurableTempDir: durableRoot,
-		Host:           "127.0.0.1",
-		Port:           0,
-		DataDir:        dataDir,
+		RuntimeToken:       g1.RuntimeToken,
+		StartedAt:          g1.StartedAt,
+		DurableTempDir:     durableRoot,
+		Host:               "127.0.0.1",
+		Port:               0,
+		DataDir:            dataDir,
+		ModelProvidersJSON: testModelProvidersJSON(provider.URL+"/v1", "rewind-unconfigured-provider", "deepseek-chat"),
 	}
-	firstHandler := newRuntimeServerTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken:   config.RuntimeToken,
-		StartedAt:      config.StartedAt,
-		DurableTempDir: config.DurableTempDir,
-		Host:           config.Host,
-		Port:           config.Port,
-		DataDir:        config.DataDir,
-	})
+	firstHandler := newRuntimeServerTestHandler(t, config)
 	server := httptest.NewServer(firstHandler)
 
 	created := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", g1.RuntimeToken, mustJSON(t, map[string]any{
@@ -2696,6 +2696,9 @@ func TestRuntimeServerCommittedFinalRewindRejected(t *testing.T) {
 	restartedTurns, _ := restartedDetail["turns"].([]any)
 	if len(restartedTurns) != 2 {
 		t.Fatalf("rejected rewind must leave accepted-final authority restartable: %#v", restartedDetail)
+	}
+	if providerRequests.Load() != 0 {
+		t.Fatalf("source-unavailable case verification entered Provider transport: %d", providerRequests.Load())
 	}
 }
 

@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"analytix.local/runtime-go/internal/adapters/outbound/monotonicheadhttp"
-	"analytix.local/runtime-go/internal/adapters/outbound/sharedwitnessownerfs"
 	domaincredentials "analytix.local/runtime-go/internal/domain/authoritycredentials"
 	domainenrollment "analytix.local/runtime-go/internal/domain/authorityenrollment"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -59,13 +57,14 @@ type Config struct {
 	RootCADER         []byte
 	ClientChainDER    [][]byte
 	ServerCertificate tls.Certificate
+	OpenExistingOwner monotonichead.ExistingOwnerOpenerV1
 }
 
 // Server owns one fixed loopback listener and one persistent owner lifetime
 // lease. Close drains requests before releasing the owner.
 type Server struct {
 	server   *http.Server
-	owner    *sharedwitnessownerfs.Owner
+	owner    monotonichead.ExistingOwnerV1
 	done     chan struct{}
 	serveMu  sync.Mutex
 	serveErr error
@@ -129,15 +128,18 @@ func Start(ctx context.Context, config Config) (*Server, error) {
 	if err != nil || len(witnessPublic) != ed25519.PublicKeySize {
 		return nil, errors.New("shared witness enrolled key is invalid")
 	}
-	anchor := sharedwitnessownerfs.Anchor{
+	anchor := monotonichead.OwnerAnchorV1{
 		InstallationID:     projection.InstallationID,
 		AuthorityKeyID:     projection.InstallationAuthorityKeyID,
 		AuthorityPublicKey: append(ed25519.PublicKey(nil), projection.InstallationAuthorityPublicKey...),
 		EnrollmentID:       enrollment.EnrollmentID,
 		GenesisCheckpoint:  enrollment.InitialCheckpoint,
 	}
-	owner, err := sharedwitnessownerfs.OpenExisting(ctx, config.UserDataDir, anchor)
-	if err != nil {
+	if config.OpenExistingOwner == nil {
+		return nil, errors.New("shared witness existing owner opener is unavailable")
+	}
+	owner, err := config.OpenExistingOwner(ctx, config.UserDataDir, anchor)
+	if err != nil || owner == nil {
 		return nil, fmt.Errorf("shared witness existing owner is unavailable: %w", err)
 	}
 	if !currentAnchorMatches(ctx, config.AnchorSource, expectedAnchor) {
@@ -227,7 +229,7 @@ func (server *Server) Close(ctx context.Context) error {
 }
 
 type protocolHandler struct {
-	owner          *sharedwitnessownerfs.Owner
+	owner          monotonichead.ExistingOwnerV1
 	endpointHost   string
 	clientChainDER [][]byte
 	rootDER        []byte
@@ -252,8 +254,8 @@ func (handler *protocolHandler) ServeHTTP(writer http.ResponseWriter, request *h
 		return
 	}
 	path := request.URL.Path
-	if path != monotonicheadhttp.ObservePath && path != monotonicheadhttp.AdvancePath &&
-		path != monotonicheadhttp.MutationResolvePath {
+	if path != monotonichead.ObservePathV1 && path != monotonichead.AdvancePathV1 &&
+		path != monotonichead.MutationResolvePathV1 {
 		writeError(writer, http.StatusNotFound, "not_enrolled")
 		return
 	}
@@ -271,11 +273,11 @@ func (handler *protocolHandler) ServeHTTP(writer http.ResponseWriter, request *h
 		return
 	}
 	switch path {
-	case monotonicheadhttp.ObservePath:
+	case monotonichead.ObservePathV1:
 		handler.observe(writer, request.Context(), request.TLS, body)
-	case monotonicheadhttp.AdvancePath:
+	case monotonichead.AdvancePathV1:
 		handler.advance(writer, request.Context(), request.TLS, body)
-	case monotonicheadhttp.MutationResolvePath:
+	case monotonichead.MutationResolvePathV1:
 		handler.resolveMutation(writer, request.Context(), request.TLS, body)
 	}
 }

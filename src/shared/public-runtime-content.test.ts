@@ -742,6 +742,7 @@ describe('public runtime content', () => {
     const strongMarkers = [
       'acceptedFinal',
       'factFinalWitnessAdmission',
+      'factFinalHostLocalAdmission',
       'publicationSnapshotProof',
       'publicationSnapshotProofDigest'
     ] as const
@@ -754,6 +755,17 @@ describe('public runtime content', () => {
       expect(sanitizePublicRuntimeValue(event)).toBeUndefined()
       expect(new PublicRuntimeEventFilter().push(event)).toBeNull()
       expect(isPublicSseIpcPayload({ streamId: `stream-${marker}`, events: [event] })).toBe(false)
+    }
+
+    for (const admission of [null, {}, 'truncated']) {
+      const event = {
+        kind: 'runtime_status',
+        seq: 1,
+        nested: [{ detached: { factFinalHostLocalAdmission: admission } }]
+      }
+      expect(sanitizePublicRuntimeValue(event)).toBeUndefined()
+      expect(new PublicRuntimeEventFilter().push(event)).toBeNull()
+      expect(isPublicSseIpcPayload({ streamId: 'stream-host-local-fragment', events: [event] })).toBe(false)
     }
 
     const generic = {

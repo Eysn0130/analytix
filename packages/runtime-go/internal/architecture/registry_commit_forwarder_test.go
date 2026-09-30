@@ -33,6 +33,43 @@ func (owner *runtimeImportActivatedRegistryV1) current() (*evidenceregistryapp.S
 	return owner.registry, owner.mu.RUnlock, nil
 }`
 
+const hostLocalRegistryCommitForwarderContract = `
+func (owner *runtimeHostLocalEvidenceOwnersV1) CommitPrepared(ctx context.Context, input evidenceregistryport.CommitPreparedInput) (domainevidence.EvidenceReceipt, error) {
+	_, registry, release, err := owner.borrow(ctx)
+	if err != nil { return domainevidence.EvidenceReceipt{}, err }
+	defer release()
+	return registry.CommitPrepared(ctx, input)
+}`
+
+const hostLocalRegistryBorrowGuardContract = `
+func (owner *runtimeHostLocalEvidenceOwnersV1) borrow(ctx context.Context) (*datasetsnapshotapp.HostLocalSealedServiceV2, *evidenceregistryapp.HostLocalServiceV3, func(), error) {
+	if err := owner.ensureRead(ctx); err != nil { return nil, nil, nil, err }
+	owner.mu.Lock()
+	if owner.closed || owner.snapshot == nil || owner.registry == nil {
+		owner.mu.Unlock()
+		return nil, nil, nil, errRuntimeCaseEvidenceAuthorityUnavailableV1
+	}
+	owner.active++
+	snapshot, registry := owner.snapshot, owner.registry
+	owner.mu.Unlock()
+	return snapshot, registry, func() {
+		owner.mu.Lock()
+		owner.active--
+		if owner.active == 0 { owner.idle.Broadcast() }
+		owner.mu.Unlock()
+	}, nil
+}`
+
+func hasExactHostLocalRegistryBorrowGuard(file *ast.File) bool {
+	count := 0
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && exactRegistryMethod(function, hostLocalRegistryBorrowGuardContract) {
+			count++
+		}
+	}
+	return count == 1
+}
+
 func exactRegistryMethod(function *ast.FuncDecl, contract string) bool {
 	parsed, err := parser.ParseFile(token.NewFileSet(), "contract.go", "package contract\n"+contract, parser.SkipObjectResolution)
 	if err != nil || len(parsed.Decls) != 1 {
@@ -55,7 +92,7 @@ func hasExactRegistryCurrentGuard(file *ast.File) bool {
 }
 
 func TestRegistryForwarderGuardRejectsAuthorityAndInputDrift(t *testing.T) {
-	for _, contract := range []string{registryCommitForwarderContract, registryCurrentGuardContract} {
+	for _, contract := range []string{registryCommitForwarderContract, registryCurrentGuardContract, hostLocalRegistryCommitForwarderContract, hostLocalRegistryBorrowGuardContract} {
 		parsed, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package fixture\n"+contract, parser.SkipObjectResolution)
 		if err != nil || !exactRegistryMethod(parsed.Decls[0].(*ast.FuncDecl), contract) {
 			t.Fatal("exact forwarding contract was rejected")
@@ -66,6 +103,12 @@ func TestRegistryForwarderGuardRejectsAuthorityAndInputDrift(t *testing.T) {
 			{"defer release()", "release()"},
 			{"return domainevidence.EvidenceReceipt{}, err", "return domainevidence.EvidenceReceipt{}, nil"},
 			{"owner.current()", "another.current()"},
+			{"owner.borrow(ctx)", "another.borrow(ctx)"},
+			{"owner.ensureRead(ctx)", "owner.EnsureForFundsImport(ctx)"},
+			{"owner.active++", ""},
+			{"owner.active--", ""},
+			{"owner.idle.Broadcast()", ""},
+			{"owner.closed || owner.snapshot == nil || owner.registry == nil", "owner.registry == nil"},
 			{"owner.mu.RLock()", ""},
 			{"owner.closed || owner.registry == nil", "owner.registry == nil"},
 			{"owner.registry, owner.mu.RUnlock", "another.registry, owner.mu.RUnlock"},

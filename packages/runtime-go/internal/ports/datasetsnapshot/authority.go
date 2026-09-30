@@ -363,3 +363,10 @@ type IndexStore interface {
 type HistoricalFactAuthorityV2 interface {
 	WithHistoricalFactSelectionV2(context.Context, ResolveInputV2, domainsecurity.TurnSecurityContext, evidenceauthorityport.FreshHead, func(CurrentSelectionV2) error) error
 }
+
+// HostLocalHistoricalFactAuthorityV1 keeps the original frozen context and
+// material separate from current analytical selection. It issues no effect
+// capability and cannot represent a host-local head as a witness observation.
+type HostLocalHistoricalFactAuthorityV1 interface {
+	WithHostLocalHistoricalFactSelectionV1(context.Context, ResolveInputV2, domainsecurity.TurnSecurityContext, domainhost.HeadV1, func(CurrentSelectionV2) error) error
+}

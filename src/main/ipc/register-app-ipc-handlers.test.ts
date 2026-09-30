@@ -2638,7 +2638,8 @@ describe('registerAppIpcHandlers', () => {
   it('keeps the local-display runtime header and generation pin in the main-owned narrow dependency', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/main/index.ts'), 'utf8')
     expect(source).toContain('localDisplayRequest: async (path, body, signal) =>')
-    expect(source).toContain('const requestSettings = ensuredSettings ?? settings')
+    expect(source).toMatch(/let requestSettings = activatesBundledFunds && app\.isPackaged\s+\? await store\.load\(\)\s+: ensuredSettings \?\? settings/)
+    expect(source).toContain('async () => { requestSettings = await store.load() }')
     expect(source).toContain('const runtimeAuthority = captureCurrentFinalPublicationAuthorityPin()')
     expect(source).toContain('if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority))')
     expect(source).toContain("headers.set('X-Analytix-Local-Display', 'typed-v1')")

@@ -139,6 +139,9 @@ func TestBootstrapOpaqueAnchorAndKeyRolesV1(t *testing.T) {
 
 func TestRejectOldBindingUnderRotatedManifestSameEnrollmentV1(t *testing.T) {
 	fixture := newBootstrapFixture(t, "rotated-manifest")
+	if fixture.manifest.ThreadRisk == nil {
+		t.Fatal("rotated witnessed fixture lacks ThreadRisk enrollment")
+	}
 	rotatedPublic, rotatedPrivate := deterministicKeyV1("rotated-installation-authority")
 	rotatedManifest, err := domainenrollment.NewManifestV2(domainenrollment.ManifestInputV2{
 		InstallationID:                 fixture.binding.InstallationID,
@@ -147,7 +150,7 @@ func TestRejectOldBindingUnderRotatedManifestSameEnrollmentV1(t *testing.T) {
 		CredentialProfileGeneration:    fixture.manifest.CredentialProfileGeneration,
 		CredentialProfileDigest:        fixture.manifest.CredentialProfileDigest,
 		IssuedAt:                       fixture.manifest.IssuedAt.Add(time.Minute),
-		ThreadRisk:                     manifestEnrollmentInputV1(t, fixture.manifest.ThreadRisk),
+		ThreadRisk:                     manifestEnrollmentInputV1(t, *fixture.manifest.ThreadRisk),
 		SharedEvidence:                 manifestEnrollmentInputV1(t, fixture.manifest.SharedEvidence),
 	}, func(message []byte) ([]byte, error) {
 		return ed25519.Sign(rotatedPrivate, message), nil
@@ -155,7 +158,7 @@ func TestRejectOldBindingUnderRotatedManifestSameEnrollmentV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rotatedManifest.ThreadRisk != fixture.manifest.ThreadRisk ||
+	if !reflect.DeepEqual(rotatedManifest.ThreadRisk, fixture.manifest.ThreadRisk) ||
 		rotatedManifest.SharedEvidence != fixture.manifest.SharedEvidence ||
 		rotatedManifest.ManifestDigest == fixture.manifest.ManifestDigest ||
 		rotatedManifest.InstallationAuthorityKeyID == fixture.manifest.InstallationAuthorityKeyID {

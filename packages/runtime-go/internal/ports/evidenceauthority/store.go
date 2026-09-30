@@ -128,6 +128,19 @@ type HostLocalHeadCoordinator interface {
 	WithProtectedMutation(context.Context, func(context.Context, HostLocalMutation) error) error
 }
 
+// HostLocalHeadHistoryV1 resolves an exact ancestor only on the newly read,
+// complete selected chain. A signed unselected candidate is never authority.
+type HostLocalHeadHistoryV1 interface {
+	ResolveRetainedHeadV1(context.Context, string) (domainhost.HeadV1, error)
+}
+
+// HostLocalFinalReadGuardV1 holds selected authority across a Final callback
+// without granting a selector mutation. It must fail before entering the
+// callback when busy, since history verification may hold the session mutex.
+type HostLocalFinalReadGuardV1 interface {
+	WithProtectedFinalReadV1(context.Context, func(context.Context) error) error
+}
+
 // HostLocalMutation is callback-scoped under the single head-owner serializer.
 // Dataset, registry, and publication child writers share this same capability.
 type HostLocalMutation interface {

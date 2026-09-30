@@ -2567,6 +2567,10 @@ func privateCASUnixReadStableAtWithHook(
 }
 
 func privateCASUnixRecordIdentityAt(parent int, name string, maxBytes int, expectedDevice uint64) (unix.Stat_t, error) {
+	name, err := privateCASUnixLeafName(name)
+	if err != nil {
+		return unix.Stat_t{}, err
+	}
 	fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return unix.Stat_t{}, os.ErrNotExist
@@ -2579,6 +2583,10 @@ func privateCASUnixRecordIdentityAt(parent int, name string, maxBytes int, expec
 }
 
 func privateCASUnixReadOnceAt(parent int, name string, maxBytes int, expectedDevice uint64) ([]byte, unix.Stat_t, error) {
+	name, err := privateCASUnixLeafName(name)
+	if err != nil {
+		return nil, unix.Stat_t{}, err
+	}
 	fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return nil, unix.Stat_t{}, os.ErrNotExist
@@ -2586,7 +2594,9 @@ func privateCASUnixReadOnceAt(parent int, name string, maxBytes int, expectedDev
 	if err != nil {
 		return nil, unix.Stat_t{}, err
 	}
-	file := os.NewFile(uintptr(fd), name)
+	// NewFile's name is a diagnostic label; the pinned Openat handle above
+	// already owns the file. Keep request-derived record names out of the label.
+	file := os.NewFile(uintptr(fd), "private-cas-record")
 	if file == nil {
 		_ = unix.Close(fd)
 		return nil, unix.Stat_t{}, errors.New("private CAS record handle is invalid")
@@ -2605,6 +2615,14 @@ func privateCASUnixReadOnceAt(parent int, name string, maxBytes int, expectedDev
 		return nil, unix.Stat_t{}, errors.New("private CAS record changed during read")
 	}
 	return body, initial, nil
+}
+
+func privateCASUnixLeafName(name string) (string, error) {
+	leaf := filepath.Base(name)
+	if leaf != name || leaf == "." || leaf == ".." || strings.ContainsAny(leaf, "/\\\x00") {
+		return "", errors.New("private CAS record name is not a single component")
+	}
+	return leaf, nil
 }
 
 func privateCASUnixRecordStat(fd int, maxBytes int, expectedDevice uint64) (unix.Stat_t, error) {

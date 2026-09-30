@@ -74,7 +74,7 @@ func TestFundsCSVAdmissionTraceRunsAtRealHandlerAssemblyWithoutUnsafeError(t *te
 		env  string
 		want string
 	}{
-		{"1", fundsCSVAdmissionTracePrefixV2 + "activation " + string(fundsCSVNativeOwnerUnavailableV1) + "\n"},
+		{"1", fundsCSVAdmissionTracePrefixV2 + "semantic_preparation not_evaluated\n" + fundsCSVAdmissionTracePrefixV2 + "activation " + string(fundsCSVNativeOwnerUnavailableV1) + "\n"},
 		{"0", ""},
 	} {
 		t.Run("trace="+trace.env, func(t *testing.T) {

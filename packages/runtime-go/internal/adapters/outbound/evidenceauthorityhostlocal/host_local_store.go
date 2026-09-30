@@ -170,8 +170,55 @@ func (store *HostLocalStore) CurrentModeCommitment(ctx context.Context) (domainh
 	return head, nil
 }
 
+// WithProtectedFinalReadV1 holds the child-writer serializer for the callback.
+func (store *HostLocalStore) WithProtectedFinalReadV1(ctx context.Context, use func(context.Context) error) error {
+	if store == nil || ctx == nil || use == nil || ctx.Err() != nil {
+		return ErrHostLocalConflict
+	}
+	// Never wait while a caller may hold the durable session mutex. A Final
+	// writer owns this same serializer before entering its terminal CAS.
+	if !store.mutationMu.TryLock() {
+		return errors.New("host-local Final authority is busy")
+	}
+	defer store.mutationMu.Unlock()
+	lease, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return errors.Join(use(lease), lease.Err())
+}
+
+func (store *HostLocalStore) ResolveRetainedHeadV1(ctx context.Context, digest string) (domainhost.HeadV1, error) {
+	if ctx == nil || !domainsecurity.IsSHA256Hex(digest) {
+		return domainhost.HeadV1{}, ErrHostLocalConflict
+	}
+	selected, found, err := store.Current(ctx)
+	if err != nil || !found {
+		return domainhost.HeadV1{}, errors.Join(ErrHostLocalConflict, err)
+	}
+	head := selected
+	for head.RecordDigest != digest {
+		if head.Generation == 0 {
+			return domainhost.HeadV1{}, ErrHostLocalConflict
+		}
+		body, err := store.history.Read(ctx, head.PreviousHeadDigest)
+		if err != nil {
+			return domainhost.HeadV1{}, err
+		}
+		previous, err := domainhost.ParseHeadV1(body)
+		if err != nil || previous.RecordDigest != head.PreviousHeadDigest || store.validate(previous) != nil || domainhost.ValidateHeadTransitionV1(previous, head) != nil {
+			return domainhost.HeadV1{}, errors.Join(ErrHostLocalConflict, err)
+		}
+		head = previous
+	}
+	current, currentFound, err := store.Current(ctx)
+	if err != nil || !currentFound || current != selected {
+		return domainhost.HeadV1{}, errors.Join(ErrHostLocalIndeterminate, err)
+	}
+	return head, ctx.Err()
+}
+
 // currentLocked runs while the process-local state lock is held. An exact
 // selector read can never race this process's unresolved write into a success.
+// It verifies every signed record belongs to the selected chain.
 func (store *HostLocalStore) currentLocked(ctx context.Context) (domainhost.HeadV1, bool, error) {
 	if store.poisoned {
 		return domainhost.HeadV1{}, false, ErrHostLocalIndeterminate

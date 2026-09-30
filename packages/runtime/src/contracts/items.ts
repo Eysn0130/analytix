@@ -769,20 +769,107 @@ export const AcceptedFinalRecordV5Schema = z.union([
 ])
 export type AcceptedFinalRecordV5 = z.infer<typeof AcceptedFinalRecordV5Schema>
 
+const HostLocalEvidenceHeadV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  purpose: z.literal('analytix.host-local-evidence-head/v1'),
+  mode: z.literal('host_local'),
+  installationId: Sha256HexSchema,
+  rootBindingDigest: Sha256HexSchema,
+  generation: z.number().int().positive().safe(),
+  previousHeadDigest: Sha256HexSchema,
+  mutationId: Sha256HexSchema,
+  datasetSnapshotIndexDigest: Sha256HexSchema,
+  datasetSnapshotCount: z.number().int().positive().safe(),
+  evidenceRegistryIndexDigest: Sha256HexSchema,
+  evidenceRegistryCount: z.number().int().positive().safe(),
+  publicationIndexDigest: Sha256HexSchema,
+  publicationCount: z.number().int().nonnegative().safe(),
+  authorityAlgorithm: z.literal('Ed25519'),
+  authorityKeyId: Sha256HexSchema,
+  authorityPublicKey: Ed25519PublicKeySchema,
+  authoritySignature: Ed25519SignatureSchema,
+  recordDigest: Sha256HexSchema
+}).strict()
+
+/** Private audit material; local signatures do not establish independent freshness. */
+export const FactFinalHostLocalAdmissionV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  purpose: z.literal('analytix.fact-final-host-local-admission/v1'),
+  contextDigest: Sha256HexSchema,
+  datasetSnapshotId: z.string().regex(/^dsv2_[0-9a-f]{64}$/),
+  sourceManifestHash: Sha256HexSchema,
+  envelopeDigest: Sha256HexSchema,
+  renderedTextSha256: Sha256HexSchema,
+  publicationSnapshotProofDigest: Sha256HexSchema,
+  registrySequence: z.number().int().positive().safe(),
+  registryStateDigest: Sha256HexSchema,
+  evidenceReceiptIdsDigest: Sha256HexSchema,
+  evidenceReceiptCount: z.number().int().positive().safe(),
+  hostLocalHead: HostLocalEvidenceHeadV1Schema,
+  modeCommitmentDigest: Sha256HexSchema,
+  selectedRegistryIndexDigest: Sha256HexSchema,
+  selectedRegistryIndexGeneration: z.number().int().positive().safe(),
+  selectedRegistryCapsuleDigest: Sha256HexSchema,
+  selectedDatasetSnapshotIndexDigest: Sha256HexSchema,
+  selectedDatasetSnapshotIndexGeneration: z.number().int().positive().safe(),
+  selectedDatasetSnapshotRecordDigest: Sha256HexSchema,
+  datasetSnapshotManifestDigest: Sha256HexSchema,
+  fundsProducerContentId: z.string().regex(/^fpc1_[0-9a-f]{64}$/),
+  fundsProducerContentManifestSha256: Sha256HexSchema,
+  admittedAt: CanonicalUtcRFC3339NanoSchema,
+  admissionDigest: Sha256HexSchema
+}).strict().superRefine((admission, ctx) => {
+  if (admission.selectedRegistryIndexGeneration > admission.hostLocalHead.evidenceRegistryCount ||
+      admission.selectedDatasetSnapshotIndexGeneration > admission.hostLocalHead.datasetSnapshotCount ||
+      admission.datasetSnapshotId !== `dsv2_${admission.datasetSnapshotManifestDigest}`) {
+    ctx.addIssue({ code: 'custom', message: 'host-local selection is detached from its signed root' })
+  }
+})
+export type FactFinalHostLocalAdmissionV1 = z.infer<typeof FactFinalHostLocalAdmissionV1Schema>
+
+export const HostLocalFactAcceptedFinalRecordV6Schema = z.object({
+  schemaVersion: z.literal(6),
+  ...AcceptedFinalRecordAuthorityV5Shape,
+  variant: AcceptedFinalFactVariantSchema,
+  finalGateVersion: z.literal('analytix.final-evidence-gate/v4'),
+  verifierVersion: z.literal('analytix.claim-verifier-policy/v1'),
+  publicView: AcceptedFinalPublicViewCoreV2Schema,
+  publicViewDigest: Sha256HexSchema,
+  publicationSnapshotProofDigest: Sha256HexSchema,
+  factFinalHostLocalAdmission: FactFinalHostLocalAdmissionV1Schema,
+  ...AcceptedFinalRecordPrivateShape,
+  acceptedAt: CanonicalUtcRFC3339NanoSchema,
+  ...AcceptedFinalRecordSignatureShape
+}).strict().superRefine((record, ctx) => {
+  refineAcceptedFinalRecordV5PublicBinding(record, ctx)
+  const admission = record.factFinalHostLocalAdmission
+  if (admission.contextDigest !== record.contextDigest || admission.datasetSnapshotId !== record.datasetSnapshotId ||
+      admission.envelopeDigest !== record.envelopeDigest || admission.renderedTextSha256 !== record.renderedTextSha256 ||
+      admission.publicationSnapshotProofDigest !== record.publicationSnapshotProofDigest || admission.registrySequence !== record.registrySequence ||
+      admission.registryStateDigest !== record.registryStateDigest || admission.hostLocalHead.authorityKeyId !== record.authorityKeyId ||
+      admission.hostLocalHead.authorityPublicKey !== record.authorityPublicKey || admission.evidenceReceiptCount !== record.publicView.receiptMetadata.count ||
+      canonicalUtcRFC3339NanoSortKey(record.acceptedAt) < canonicalUtcRFC3339NanoSortKey(admission.admittedAt)) {
+    ctx.addIssue({ code: 'custom', path: ['factFinalHostLocalAdmission'], message: 'host-local admission is detached from V6 authority' })
+  }
+})
+export type HostLocalFactAcceptedFinalRecordV6 = z.infer<typeof HostLocalFactAcceptedFinalRecordV6Schema>
+
 /** Forensic parser only. Never use this schema on public/live projections. */
 export const AcceptedFinalAuditRecordSchema = z.union([
 
   AcceptedFinalRecordV2Schema,
   AcceptedFinalRecordV3Schema,
   WitnessedFactAcceptedFinalRecordV4Schema,
-  AcceptedFinalRecordV5Schema
+  AcceptedFinalRecordV5Schema,
+  HostLocalFactAcceptedFinalRecordV6Schema
 ])
 export type AcceptedFinalAuditRecord = z.infer<typeof AcceptedFinalAuditRecordSchema>
 
 /** Private/CAS and audit-only current record. Never admit this schema on public turn, item, event, or detail paths. */
 export const AcceptedFinalPrivateRecordSchema = z.union([
   BoundaryAcceptedFinalRecordV5Schema,
-  WitnessedFactAcceptedFinalRecordV5Schema
+  WitnessedFactAcceptedFinalRecordV5Schema,
+  HostLocalFactAcceptedFinalRecordV6Schema
 ])
 export type AcceptedFinalPrivateRecord = z.infer<typeof AcceptedFinalPrivateRecordSchema>
 

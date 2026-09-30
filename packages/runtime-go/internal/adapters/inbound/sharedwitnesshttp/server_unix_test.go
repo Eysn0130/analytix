@@ -182,7 +182,8 @@ func newWitnessFixtureWithOptions(t *testing.T, clientExpiry time.Time,
 	}}
 	return witnessFixture{
 		config: Config{UserDataDir: userData, Manifest: anchored,
-			AnchorSource: anchorSource, RootCADER: rootDER,
+			OpenExistingOwner: sharedwitnessownerfs.OpenExistingOwnerV1,
+			AnchorSource:      anchorSource, RootCADER: rootDER,
 			ClientChainDER: clientChainDER, ServerCertificate: serverCertificate},
 		anchor: anchor, installationPrivate: installationPrivate, witnessPrivate: witnessPrivate,
 		root: root, rootPrivate: rootPrivate, clientPrivate: clientPrivate,
@@ -395,6 +396,11 @@ func TestStartRequiresExistingOwnerAndEnrolledTLSMaterial(t *testing.T) {
 		t.Fatalf("missing owner root changed: %v", err)
 	}
 	fixture.createExistingOwner(t)
+	missingOpener := fixture.config
+	missingOpener.OpenExistingOwner = nil
+	if _, err := Start(context.Background(), missingOpener); err == nil {
+		t.Fatal("missing existing-owner opener was accepted")
+	}
 	wrongRoot := fixture.config
 	wrongRoot.RootCADER = append([]byte(nil), fixture.config.RootCADER...)
 	wrongRoot.RootCADER[len(wrongRoot.RootCADER)-1] ^= 1

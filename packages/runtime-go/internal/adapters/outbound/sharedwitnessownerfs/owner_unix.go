@@ -41,12 +41,10 @@ const (
 // Anchor must come from the accepted installation enrollment, not from the
 // owner root being opened. In particular, opening a missing owner never creates
 // a new seed or substitutes its own genesis for the enrolled checkpoint.
-type Anchor struct {
-	InstallationID     string
-	AuthorityKeyID     string
-	AuthorityPublicKey ed25519.PublicKey
-	EnrollmentID       string
-	GenesisCheckpoint  domainsecurity.MonotonicHeadCheckpointV1
+type Anchor = monotonichead.OwnerAnchorV1
+
+func OpenExistingOwnerV1(ctx context.Context, userDataDir string, anchor Anchor) (monotonichead.ExistingOwnerV1, error) {
+	return OpenExisting(ctx, userDataDir, anchor)
 }
 
 type genesisRecord struct {

@@ -486,7 +486,8 @@ func validateWitnessedPrivateFinalV1(
 		!reflect.DeepEqual(record.Envelope, boundary.Envelope) || record.RenderedText != boundary.Text ||
 		!reflect.DeepEqual(record.PublicationIntent, intent) ||
 		record.PublicationSnapshotProof == nil || !reflect.DeepEqual(*record.PublicationSnapshotProof, proof) ||
-		record.AcceptedFinal.FactFinalWitnessAdmission == nil {
+		(record.AcceptedFinal.FactFinalWitnessAdmission == nil && record.AcceptedFinal.FactFinalHostLocalAdmission == nil) ||
+		domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) != nil {
 		return errors.New("fact final witness private record is not exact")
 	}
 	keyID, publicKey, signature, err := domainevidence.AcceptedFinalAuthorityMaterial(record.AcceptedFinal)

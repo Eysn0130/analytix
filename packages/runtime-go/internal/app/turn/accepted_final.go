@@ -237,8 +237,7 @@ func validateAcceptedFinalCASPayload(
 	}
 	acceptedFinal, parseErr := domainevidence.ParseAcceptedFinalRecord(fields["acceptedFinal"])
 	if parseErr != nil || domainevidence.ValidatePrivateAcceptedFinalRecord(privateFinal) != nil ||
-		privateFinal.SchemaVersion != domainevidence.PrivateAcceptedFinalRecordVersion ||
-		privateFinal.AcceptedFinal.SchemaVersion != domainevidence.AcceptedFinalRecordVersion ||
+		domainevidence.ValidateAcceptedFinalForCurrentWriteV1(privateFinal.AcceptedFinal) != nil ||
 		privateFinal.SecurityContext.ThreadID != threadID || privateFinal.SecurityContext.TurnID != turnID ||
 		!reflect.DeepEqual(privateFinal.AcceptedFinal, acceptedFinal) {
 		return true, errors.Join(errors.New("accepted final CAS lacks exact private authority"), parseErr)

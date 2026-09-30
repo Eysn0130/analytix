@@ -1,6 +1,7 @@
-import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
+import { createHash, createPrivateKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { AcceptedFinalPrivateRecordSchema, AcceptedFinalRecordV5Schema } from '../../packages/runtime/src/contracts/items'
 import {
   acceptedFinalPublicationEventId,
   acceptedFinalPublicationPayloadDigest,
@@ -321,6 +322,55 @@ function signedWitnessedFactEvent(
 }
 
 describe('accepted final publication authority', () => {
+  it('verifies the byte-exact Go-issued host-local V6 private record and rejects detached modes', () => {
+    const record = JSON.parse(readFileSync(new URL(
+      '../../packages/runtime-go/internal/domain/evidence/testdata/accepted-final-v6-host-local.json',
+      import.meta.url
+    ), 'utf8')) as Record<string, any>
+    const pin = { keyId: record.authorityKeyId, publicKey: record.authorityPublicKey }
+    expect(AcceptedFinalPrivateRecordSchema.safeParse(record).success).toBe(true)
+    expect(AcceptedFinalRecordV5Schema.safeParse(record).success).toBe(false)
+    expect(verifyAcceptedFinalRecordIntegrity(record, pin)).toBe(true)
+    const reverseKeys = (value: any): any => {
+      if (Array.isArray(value)) return value.map(reverseKeys)
+      if (value === null || typeof value !== 'object') return value
+      return Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reverseKeys(value[key])]))
+    }
+    expect(verifyAcceptedFinalRecordIntegrity(reverseKeys(record), pin)).toBe(true)
+    const mutations: Array<(value: Record<string, any>) => void> = [
+      (value) => { delete value.publicView },
+      (value) => { delete value.factFinalHostLocalAdmission },
+      (value) => { value.factFinalWitnessAdmission = {} },
+      (value) => { value.schemaVersion = 5 },
+      (value) => { value.variant = 'GeneralGuidanceAnswer' },
+      (value) => { value.factFinalHostLocalAdmission.hostLocalHead.mode = 'witnessed' },
+      (value) => { value.factFinalHostLocalAdmission.hostLocalHead.datasetSnapshotCount++ },
+      (value) => { value.factFinalHostLocalAdmission.selectedDatasetSnapshotIndexGeneration++ },
+      (value) => { value.factFinalHostLocalAdmission.fundsProducerContentId = `fpc1_${'a'.repeat(64)}` },
+      (value) => { value.factFinalHostLocalAdmission.hostLocalHead.authoritySignature = 'A'.repeat(86) }
+    ]
+    for (const mutate of mutations) {
+      const candidate = structuredClone(record)
+      mutate(candidate)
+      expect(verifyAcceptedFinalRecordIntegrity(candidate, pin)).toBe(false)
+    }
+    const fixturePrivateKey = createPrivateKey({
+      key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.alloc(32, 0x41)]),
+      format: 'der',
+      type: 'pkcs8'
+    })
+    const badInnerSignature = structuredClone(record)
+    const admission = badInnerSignature.factFinalHostLocalAdmission
+    admission.hostLocalHead.authoritySignature = Buffer.alloc(64).toString('base64url')
+    admission.hostLocalHead.recordDigest = sha256(goJSONStringify({ ...admission.hostLocalHead, recordDigest: '' }))
+    admission.admissionDigest = sha256(goJSONStringify({ ...admission, admissionDigest: '' }))
+    const reSigned = signAcceptedFinalRecord({ ...badInnerSignature, authoritySignature: '', recordDigest: '' }, fixturePrivateKey)
+    expect(AcceptedFinalPrivateRecordSchema.safeParse(reSigned).success).toBe(true)
+    expect(verifyAcceptedFinalRecordIntegrity(reSigned, pin)).toBe(false)
+    expect(verifyAcceptedFinalRecordIntegrity(record, null)).toBe(false)
+    expect(verifyAcceptedFinalRecordIntegrity(record, { ...pin, keyId: 'a'.repeat(64) })).toBe(false)
+  })
+
   it('verifies the exact Go-issued V5 record with a strict V2 fact-final witness admission', () => {
     const record = JSON.parse(readFileSync(new URL(
       '../../packages/runtime-go/internal/domain/evidence/testdata/accepted-final-v5-fact-witness-admission-v2.json',

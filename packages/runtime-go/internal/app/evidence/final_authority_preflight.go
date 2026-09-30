@@ -362,8 +362,7 @@ func validateAcceptedFinalPublicationItems(turn map[string]any, privateRecord do
 }
 
 func buildAcceptedFinalPreflightPlan(record domainevidence.PrivateAcceptedFinalRecord) (appturn.AcceptedFinalPublicationPlan, error) {
-	if record.SchemaVersion == domainevidence.PrivateAcceptedFinalRecordVersion &&
-		record.AcceptedFinal.SchemaVersion == domainevidence.AcceptedFinalRecordVersion {
+	if domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) == nil {
 		return appturn.BuildAcceptedFinalPublicationPlan(record.AcceptedFinal, record.RenderedText, record.PublicationIntent)
 	}
 	return appturn.BuildAcceptedFinalAuditPublicationPlan(record.AcceptedFinal, record.RenderedText, record.PublicationIntent)
@@ -508,6 +507,7 @@ func validateAcceptedFinalItems(turn map[string]any, expected *domainevidence.Ac
 
 func replayableAcceptedFinalAuthorityVersion(version int) bool {
 	return version == domainevidence.AcceptedFinalRecordVersion ||
+		version == domainevidence.HostLocalAcceptedFinalRecordVersionV6 ||
 		version == domainevidence.BoundaryAcceptedFinalRecordVersion ||
 		version == domainevidence.WitnessedFactAcceptedFinalRecordVersion ||
 		version == domainevidence.PreviousAcceptedFinalRecordVersion

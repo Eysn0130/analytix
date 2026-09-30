@@ -29,7 +29,7 @@ import (
 )
 
 func TestRuntimeHostLocalPreparedReceiptUsesActualRegistryCASAndRestarts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	config := Config{DataDir: t.TempDir(), DurableTempDir: t.TempDir(), UserDataDir: t.TempDir()}
 	privateRoot := filepath.Join(config.DataDir, "private")
@@ -112,7 +112,7 @@ func TestRuntimeHostLocalPreparedReceiptUsesActualRegistryCASAndRestarts(t *test
 		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID,
 		Observation: observation, ExpectedDatasetSnapshotID: selected.Record.DatasetSnapshotID,
 	}
-	securityContext := runtimeHostLocalFactContextV1(t, workspace, observation, selected)
+	securityContext, durable := runtimeHostLocalPrepareFinalTurnV6(t, config, workspace, observation, selected)
 	var prepared domainevidence.PreparedEvidenceSettlement
 	var receipt domainevidence.EvidenceReceipt
 	err = owner.WithCurrentSelectionV2(ctx, resolve, securityContext,
@@ -149,9 +149,26 @@ func TestRuntimeHostLocalPreparedReceiptUsesActualRegistryCASAndRestarts(t *test
 	if err != nil || !found || before.DatasetSnapshotCount != 1 || before.EvidenceRegistryCount != 1 {
 		t.Fatalf("host-local exact child counts are wrong: %v", err)
 	}
+	originalFinal := runtimeHostLocalIssueAndPersistFinalV6(t, ctx, owner, access, privateRoot, securityContext, resolve, prepared, receipt, config, key, durable)
 	if err := owner.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err := stores.Close(); err != nil {
+		t.Fatal(err)
+	}
+	access, err = privatecastest.NewAccessAuthority(privateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err = finalauthority.OpenOrCreateFileAuthority(filepath.Join(privateRoot, "authority", "final-answer-ed25519-v1.json"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores, err = datasetsnapshotstore.OpenStoresV2(filepath.Join(privateRoot, "dataset-snapshot-authority"), access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
 	resumed, err := newRuntimeHostLocalEvidenceOwnersV1(config, freeze(), access, key, stores,
 		runtimeHostLocalProfileResumeV1, func(context.Context) error { t.Fatal("resume re-entered fresh admission"); return nil })
 	if err != nil {
@@ -168,14 +185,17 @@ func TestRuntimeHostLocalPreparedReceiptUsesActualRegistryCASAndRestarts(t *test
 	if err != nil || !found || after != before {
 		t.Fatalf("host-local restart changed signed head: %v", err)
 	}
+	runtimeHostLocalRecoverFinalAfterSuccessorV6(t, ctx, resumed, access, privateRoot, selected, resolve, originalFinal, func() {
+		runtimeHostLocalRestoreFinalDeliveryV6(t, ctx, config, resumed, key, access, originalFinal)
+	})
 }
 
 func runtimeHostLocalFactContextV1(t *testing.T, workspace string,
 	observation domainsecurity.CaseBindingObservationV1,
-	snapshot datasetsnapshotport.ResolvedSnapshotV2) domainsecurity.TurnSecurityContext {
+	snapshot datasetsnapshotport.ResolvedSnapshotV2, threadID, turnID string) domainsecurity.TurnSecurityContext {
 	t.Helper()
 	input := domainsecurity.TurnSecurityContextInput{
-		ThreadID: "host-local-thread", TurnID: "host-local-turn", WorkspaceRealPath: workspace,
+		ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: workspace,
 		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID,
 		CaseID: observation.CaseID, CaseBindingHash: observation.CaseBindingHash,
 		DatasetSnapshotID:  snapshot.Record.DatasetSnapshotID,

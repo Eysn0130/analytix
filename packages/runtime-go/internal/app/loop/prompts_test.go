@@ -473,6 +473,35 @@ func TestCaseFundBoundaryAuthorityPolicyPreservesOnlyIndependentOrdinaryWork(t *
 	}
 }
 
+func TestCurrentCaseVerificationWithoutSourceStaysBeforeProviderV1(t *testing.T) {
+	if !PromptRequiresCaseRiskAdmission("文本案例参考不提供来源；核验本案银行账号与金额。") {
+		t.Fatal("ordinary example wording hid a later actual case verification")
+	}
+	for _, prompt := range []string{
+		"核验本案银行账号与金额；无同案证据时只输出来源缺口。",
+		"继续核验本案银行账号与金额；无同案证据时只输出来源缺口。",
+	} {
+		t.Run(prompt, func(t *testing.T) {
+			if !PromptRequiresCaseRiskAdmission(prompt) {
+				t.Fatal("current case verification escaped risk admission")
+			}
+			policy := CaseFundBoundaryAuthorityPolicyForCurrentTurnV1(CaseFundAnalysisPolicy{}, true,
+				PromptRequiresCaseRiskAdmission(prompt), false, false, prompt, "")
+			if !policy.Active || !policy.SourceUnavailable || policy.OrdinaryWorkRequested || policy.OrdinaryPrompt != "" || !policy.MustReturnBoundaryBeforeProvider() {
+				t.Fatalf("pure case verification acquired a Provider lane: %#v", policy)
+			}
+		})
+	}
+	for _, prompt := range []string{
+		"读取普通示例文件中的金额列", "修改代码里显示本案金额的普通标签",
+		"读取文本案例文件中的金额列", "读取脚本案例文件里的金额列",
+	} {
+		if PromptRequiresCaseRiskAdmission(prompt) {
+			t.Fatalf("ordinary field/code request acquired case authority: %q", prompt)
+		}
+	}
+}
+
 func TestCaseFundBoundaryAuthorityPolicyPreservesCurrentOrdinaryTurnWithoutLoweringThreadRisk(t *testing.T) {
 	ordinary := CaseFundBoundaryAuthorityPolicyForCurrentTurnV1(
 		CaseFundAnalysisPolicy{}, true, false, false, false, "read the ordinary source file", "",

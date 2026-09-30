@@ -262,9 +262,8 @@ func (coordinator *Coordinator) RecoverV1(ctx context.Context, input RestartReco
 			}
 			consumedTerminal[record.SecurityContext.ContextDigest] = true
 			if !preservedScope.ownsThread(record.SecurityContext.ThreadID) &&
-				record.SchemaVersion == domainevidence.PrivateAcceptedFinalRecordVersion &&
-				record.AcceptedFinal.SchemaVersion == domainevidence.AcceptedFinalRecordVersion &&
-				record.AcceptedFinal.FactFinalWitnessAdmission != nil &&
+				domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) == nil &&
+				(record.AcceptedFinal.FactFinalWitnessAdmission != nil || record.AcceptedFinal.FactFinalHostLocalAdmission != nil) &&
 				domainevidence.FinalAnswerRequiresPublicationSnapshotProof(record.Envelope) &&
 				acceptedDisposition.SchemaVersion == domainevidence.AcceptedFinalDispositionRecordV2 {
 				publication, err := buildRestartRecoveryPublicationPlanV1(record)
@@ -752,8 +751,7 @@ func terminalEventManifestDigestV1(privateFinal domainevidence.PrivateAcceptedFi
 // mutation; audit-only records use it solely to verify existing immutable
 // manifests and dispositions.
 func buildRestartRecoveryPublicationPlanV1(privateFinal domainevidence.PrivateAcceptedFinalRecord) (appturn.AcceptedFinalPublicationPlan, error) {
-	if privateFinal.SchemaVersion == domainevidence.PrivateAcceptedFinalRecordVersion &&
-		privateFinal.AcceptedFinal.SchemaVersion == domainevidence.AcceptedFinalRecordVersion {
+	if domainevidence.ValidateAcceptedFinalForCurrentWriteV1(privateFinal.AcceptedFinal) == nil {
 		return appturn.BuildAcceptedFinalPublicationPlan(
 			privateFinal.AcceptedFinal, privateFinal.RenderedText, privateFinal.PublicationIntent,
 		)

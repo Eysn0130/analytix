@@ -13,6 +13,7 @@ var acceptedFinalPublicationAuthorityFields = map[string]bool{
 var strongPrivateAcceptedFinalAuthorityFields = map[string]bool{
 	"acceptedFinal":                  true,
 	"factFinalWitnessAdmission":      true,
+	"factFinalHostLocalAdmission":    true,
 	"publicationSnapshotProof":       true,
 	"publicationSnapshotProofDigest": true,
 }

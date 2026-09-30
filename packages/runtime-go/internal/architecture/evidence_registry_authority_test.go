@@ -320,11 +320,12 @@ func TestFactFinalWitnessCapabilitiesHaveSingleProductionOwner(t *testing.T) {
 			implementations = append(implementations, key)
 		}
 	}
-	// Live issuance and read-only recovery are separate callback-scoped leases
-	// of the same registry. Neither permits an implementation in another owner.
+	// Witnessed issuance/recovery and host-local Final are separate callback-
+	// scoped leases of the registry. No other owner may implement this authority.
 	expected := map[string]bool{
-		"internal/app/evidenceregistry/service.go#factFinalWitnessCapabilityV1":   true,
-		"internal/app/evidenceregistry/recovered_fact.go#recoveredFactCapability": true,
+		"internal/app/evidenceregistry/service.go#factFinalWitnessCapabilityV1":                true,
+		"internal/app/evidenceregistry/recovered_fact.go#recoveredFactCapability":              true,
+		"internal/app/evidenceregistry/host_local_fact_final_v1.go#hostLocalFinalCapabilityV1": true,
 	}
 	if len(implementations) != len(expected) {
 		t.Fatalf("fact-final witness capability inventory changed: %v", implementations)

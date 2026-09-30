@@ -153,6 +153,7 @@ func TestEvidenceRegistryPreparedCommitHasSingleProductionCaller(t *testing.T) {
 	root := runtimeGoRoot(t)
 	allowed := "internal/app/evidence/receipt_settlement.go"
 	forwarder := "internal/runtimeapp/import_activated_evidence_registry_v1.go"
+	hostForwarder := "internal/runtimeapp/host_local_evidence_owners_v1.go"
 	callers, forwarders := 0, 0
 	for _, file := range goFiles(t, root) {
 		if strings.HasSuffix(file, "_test.go") || hasBuildTag(t, file, "!analytix_prod") {
@@ -162,7 +163,14 @@ func TestEvidenceRegistryPreparedCommitHasSingleProductionCaller(t *testing.T) {
 		if rel(t, root, file) == forwarder && !hasExactRegistryCurrentGuard(parsed) {
 			t.Fatal("registry forwarding no longer holds the current activated owner")
 		}
+		if rel(t, root, file) == hostForwarder && !hasExactHostLocalRegistryBorrowGuard(parsed) {
+			t.Fatal("host-local registry forwarding no longer pins the admitted owner")
+		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
+			if function, ok := node.(*ast.FuncDecl); ok && rel(t, root, file) == hostForwarder && exactRegistryMethod(function, hostLocalRegistryCommitForwarderContract) {
+				forwarders++
+				return false
+			}
 			if function, ok := node.(*ast.FuncDecl); ok && rel(t, root, file) == forwarder &&
 				exactRegistryMethod(function, registryCommitForwarderContract) {
 				// This method cannot produce a new input, select authority, or
@@ -185,8 +193,8 @@ func TestEvidenceRegistryPreparedCommitHasSingleProductionCaller(t *testing.T) {
 			return true
 		})
 	}
-	if callers != 1 || forwarders != 1 {
-		t.Fatalf("prepared registry commit must have one producer and one identity-preserving forwarder: %d, %d", callers, forwarders)
+	if callers != 1 || forwarders != 2 {
+		t.Fatalf("prepared registry commit must have one producer and two exact mode-specific owner forwarders: %d, %d", callers, forwarders)
 	}
 }
 

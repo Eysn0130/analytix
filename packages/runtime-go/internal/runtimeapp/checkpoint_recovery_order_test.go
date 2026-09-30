@@ -31,6 +31,7 @@ func TestCheckpointQuarantineKeepsExistingPrivateCASOwnerRecoveryOrder(t *testin
 		"attachment-authority",
 		"authority-advance",
 		"evidence-authority",
+		"evidence-authority-host-local",
 		"evidence-registry",
 		"dataset-snapshot-authority",
 		"thread-risk-policy",

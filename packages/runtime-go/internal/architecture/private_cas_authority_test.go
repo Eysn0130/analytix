@@ -441,8 +441,8 @@ func TestPrivateCASTopologyCatalogIsTheSingleTypedRootAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	specs := domainprivatecas.RuntimeRootSpecsV1()
-	if len(specs) != 56 {
-		t.Fatalf("runtime private CAS physical root count = %d, want 56", len(specs))
+	if len(specs) != 57 {
+		t.Fatalf("runtime private CAS physical root count = %d, want 57", len(specs))
 	}
 	groups := map[string]int{}
 	opaque := 0
@@ -452,8 +452,20 @@ func TestPrivateCASTopologyCatalogIsTheSingleTypedRootAuthority(t *testing.T) {
 			opaque++
 		}
 	}
-	if len(groups) != 19 || opaque != 4 {
-		t.Fatalf("runtime private CAS topology = %d groups and %d opaque roots, want 19 and 4", len(groups), opaque)
+	if len(groups) != 20 || opaque != 4 {
+		t.Fatalf("runtime private CAS topology = %d groups and %d opaque roots, want 20 and 4", len(groups), opaque)
+	}
+	hostHeads := 0
+	for _, spec := range specs {
+		if spec.RecoveryGroupID == "evidence-authority-host-local" {
+			if spec.RelativeCASRoot != "evidence-authority-host-local/heads" || spec.LayoutKind != domainprivatecas.LayoutOwnerLeafV1 || spec.SnapshotBodyPolicy != domainprivatecas.SnapshotStrictCanonicalJSONV1 {
+				t.Fatal("host-local history root lost its closed catalog contract")
+			}
+			hostHeads++
+		}
+	}
+	if hostHeads != 1 {
+		t.Fatal("host-local history must have exactly one typed CAS root")
 	}
 
 	root := runtimeGoRoot(t)
@@ -684,10 +696,10 @@ func TestPrivateCASDirectoryRecoveryUsesOneTopologyAndNoCreateTraversal(t *testi
 	if err := domainprivatecas.ValidateRuntimeDirectorySlotsV1(); err != nil {
 		t.Fatal(err)
 	}
-	if len(domainprivatecas.FixedDirectorySlotsV1()) != 76 ||
-		len(domainprivatecas.CreateRecoveryScanParentPathsV1()) != 77 ||
-		len(domainprivatecas.RecoverableOwnerDirectoryGroupsV1()) != 15 ||
-		domainprivatecas.MaximumCreateResidueCandidateLocationsV1() != 14_412 {
+	if len(domainprivatecas.FixedDirectorySlotsV1()) != 78 ||
+		len(domainprivatecas.CreateRecoveryScanParentPathsV1()) != 79 ||
+		len(domainprivatecas.RecoverableOwnerDirectoryGroupsV1()) != 16 ||
+		domainprivatecas.MaximumCreateResidueCandidateLocationsV1() != 14_670 {
 		t.Fatal("private CAS directory recovery topology changed")
 	}
 	root := runtimeGoRoot(t)

@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { cdpNormalQuit, dispatchCdpCommands } from './runtime-go-packaged-milestone-b.mjs'
+import { currentAccountFlow, exactAccountFlow, ownedPackagedRenderer, syntheticCleaningCSV } from './runtime-go-host-local-funds-installed.mjs'
 
 // Exercise the existing owner's actual functions without importing the CLI
 // entry point (which would run Go/native/Mac acceptance as an import effect).
@@ -1032,4 +1034,88 @@ test('segmented observer accepts only read-only progress after an ambiguous star
   assert.equal(result.stage, 'complete')
   assert.equal(sends, 1)
   assert.equal(reads, 2)
+})
+
+function installedCompleteFlow() {
+  return { schemaVersion: 3, purpose: 'analytix.account-flow-provider-semantics/v3', semanticStatus: 'success',
+    data: { subjectAlias: 'acct:1', currency: 'CNY', minorUnitScale: 2, currentness: 'current',
+      inflowMinor: '1950', outflowMinor: '250', netMinor: '1700', transactionCount: 3, evidenceTransactionCount: 3,
+      aggregateComplete: true, evidenceRowsComplete: true, coverage: { state: 'complete', gaps: [] } } }
+}
+
+test('the installed fixture admits canonical source cells while retaining two actual cleaning changes', () => {
+  const rows = syntheticCleaningCSV().trimEnd().split('\r\n').map((row) => row.split(','))
+  assert.equal(rows.length, 4)
+  assert.ok(rows.every((row) => row.length === 34 && row.every((cell) => cell === cell.trim())))
+  assert.equal(rows[0][8], '交易对手账卡号')
+  assert.deepEqual(rows.slice(1).map((row) => row[8]), ['9000-001 23', '9000-002 34', '900000345'])
+  assert.ok(rows.slice(1).every((row) => row[12] === '合成银行'))
+})
+
+test('the installed semantic gate refuses partial coverage, wrong totals and stale results', () => {
+  assert.equal(exactAccountFlow(installedCompleteFlow()), true)
+  for (const [field, value] of [['netMinor', '1701'], ['aggregateComplete', false], ['evidenceRowsComplete', false],
+    ['currentness', 'stale'], ['subjectAlias', 'acct:2'], ['evidenceTransactionCount', 2]]) {
+    const candidate = installedCompleteFlow()
+    candidate.data[field] = value
+    assert.equal(exactAccountFlow(candidate), false, field)
+  }
+  const partial = installedCompleteFlow()
+  partial.data.coverage.gaps.push('missing_rows')
+  assert.equal(exactAccountFlow(partial), false)
+})
+
+test('a prior turn semantic result cannot suppress the successor turn real tool execution', () => {
+  const history = [{ role: 'user', content: 'before cleaning' }, { role: 'tool', content: JSON.stringify(installedCompleteFlow()) },
+    { role: 'assistant', content: 'old terminal' }, { role: 'user', content: 'after cleaning' }]
+  assert.equal(currentAccountFlow(history), null)
+  const current = installedCompleteFlow()
+  history.push({ role: 'tool', content: JSON.stringify(current) })
+  assert.deepEqual(currentAccountFlow(history), current)
+})
+
+test('the successor result must match its own advertised tool call identity', () => {
+  const current = installedCompleteFlow()
+  const messages = [{ role: 'user', content: 'AFTER_CLEANING' }, { role: 'assistant', tool_calls: [
+    { id: 'current-call', function: { name: 'mcp__analytix_funds__analyze_account_flows' } }
+  ] }, { role: 'tool', tool_call_id: 'prior-call', content: JSON.stringify(current) }]
+  assert.equal(currentAccountFlow(messages, 'current-call'), null)
+  messages.push({ role: 'tool', tool_call_id: 'current-call', content: JSON.stringify(current) })
+  assert.deepEqual(currentAccountFlow(messages, 'current-call'), current)
+  assert.equal(currentAccountFlow(messages, 'unissued-call'), null)
+})
+
+test('installed CDP refuses another Main, extra pages and non-packaged renderer targets', () => {
+  const page = { type: 'page', url: 'analytix-app://renderer/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/one' }
+  const info = [{ type: 'browser', id: 1234 }]
+  assert.equal(ownedPackagedRenderer(1234, 9222, info, [page]), page)
+  assert.throws(() => ownedPackagedRenderer(4321, 9222, info, [page]), /owned_browser_pid_mismatch/)
+  assert.throws(() => ownedPackagedRenderer(1234, 9222, info, [page, page]), /owned_packaged_renderer_mismatch/)
+  assert.throws(() => ownedPackagedRenderer(1234, 9222, info, [{ ...page, url: 'http://127.0.0.1/index.html' }]), /owned_packaged_renderer_mismatch/)
+  assert.throws(() => ownedPackagedRenderer(1234, 9223, info, [page]), /owned_renderer_endpoint_mismatch/)
+})
+
+test('CDP process binding handshake is bounded before any command is sent', async (t) => {
+  const original = globalThis.WebSocket
+  let sends = 0
+  let closes = 0
+  globalThis.WebSocket = class {
+    addEventListener() {}
+    send() { sends++ }
+    close() { closes++ }
+  }
+  t.after(() => { globalThis.WebSocket = original })
+  await assert.rejects(dispatchCdpCommands('ws://127.0.0.1:9222/devtools/browser/synthetic',
+    [{ method: 'SystemInfo.getProcessInfo' }], 10), (error) =>
+    error.message === 'cdp_handshake_timeout' && error.cdpOutcome === 'not_sent')
+  assert.equal(sends, 0)
+  assert.equal(closes, 1)
+})
+
+test('a read-only ownership failure is never attributed to normal quit input', async () => {
+  const result = await cdpNormalQuit(9222, async () => {
+    throw Object.assign(new Error('owned_pid_read_unknown'), { cdpOutcome: 'unknown' })
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.cdpOutcome, 'not_sent')
 })

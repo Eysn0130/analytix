@@ -11,7 +11,8 @@ import {
   ACCEPTED_FINAL_TERMINAL_STATUS_BY_REASON,
   AcceptedFinalPrivateRecordSchema,
   acceptedFinalDeliveryRequiresErrorItem,
-  type FactFinalWitnessAdmission
+  type FactFinalWitnessAdmission,
+  type FactFinalHostLocalAdmissionV1
 } from '../../packages/runtime/src/contracts/items.js'
 import { containsPrivateReasoningContent } from '../shared/public-runtime-content'
 import { containsInternalCaseEntityReference } from '../shared/ordinary-log-pii-projection'
@@ -77,6 +78,20 @@ function verifyFactFinalWitnessAdmissionIntegrity(
   }
 }
 
+function verifyFactFinalHostLocalAdmissionIntegrity(admission: FactFinalHostLocalAdmissionV1): boolean {
+  const head = admission.hostLocalHead
+  const publicKey = Buffer.from(head.authorityPublicKey, 'base64url')
+  const signature = Buffer.from(head.authoritySignature, 'base64url')
+  if (publicKey.length !== 32 || publicKey.toString('base64url') !== head.authorityPublicKey ||
+      signature.length !== 64 || signature.toString('base64url') !== head.authoritySignature ||
+      sha256Hex(publicKey) !== head.authorityKeyId ||
+      sha256Hex(goJSONStringify({ ...head, recordDigest: '' })) !== head.recordDigest ||
+      sha256Hex(goJSONStringify({ ...admission, admissionDigest: '' })) !== admission.admissionDigest) return false
+  const signingDigest = createHash('sha256').update(goJSONStringify({ ...head, authoritySignature: '', recordDigest: '' })).digest()
+  const key = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, publicKey]), format: 'der', type: 'spki' })
+  return verify(null, Buffer.concat([Buffer.from('analytix.host-local-evidence-head/v1\0'), signingDigest]), key, signature)
+}
+
 export function verifyAcceptedFinalRecordIntegrity(
   value: unknown,
   pin: FinalPublicationAuthorityPinV1 | null
@@ -99,6 +114,7 @@ export function verifyAcceptedFinalRecordIntegrity(
         return false
       }
     }
+    if ('factFinalHostLocalAdmission' in record && !verifyFactFinalHostLocalAdmissionIntegrity(record.factFinalHostLocalAdmission)) return false
     const publicKey = Buffer.from(record.authorityPublicKey, 'base64url')
     const signature = Buffer.from(record.authoritySignature, 'base64url')
     if (publicKey.length !== 32 || publicKey.toString('base64url') !== record.authorityPublicKey ||

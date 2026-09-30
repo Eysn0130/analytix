@@ -9,6 +9,7 @@ import (
 	datasetsnapshotstore "analytix.local/runtime-go/internal/adapters/outbound/datasetsnapshot"
 	evidenceauthorityhostlocal "analytix.local/runtime-go/internal/adapters/outbound/evidenceauthorityhostlocal"
 	evidenceregistrystore "analytix.local/runtime-go/internal/adapters/outbound/evidenceregistry"
+	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	datasetsnapshotapp "analytix.local/runtime-go/internal/app/datasetsnapshot"
@@ -43,6 +44,9 @@ type runtimeHostLocalEvidenceOwnersV1 struct {
 var _ runtimeEvidenceRegistryAuthority = (*runtimeHostLocalEvidenceOwnersV1)(nil)
 var _ datasetsnapshotport.CurrentAuthorityV2 = (*runtimeHostLocalEvidenceOwnersV1)(nil)
 var _ datasetsnapshotport.AuthorityV2 = (*runtimeHostLocalEvidenceOwnersV1)(nil)
+var _ evidenceregistryport.FactFinalWitnessIssuer = (*runtimeHostLocalEvidenceOwnersV1)(nil)
+var _ evidenceregistryport.FactFinalWitnessVerifier = (*runtimeHostLocalEvidenceOwnersV1)(nil)
+var _ evidenceregistryport.RecoveredFactFinalWitnessIssuer = (*runtimeHostLocalEvidenceOwnersV1)(nil)
 
 func newRuntimeHostLocalEvidenceOwnersV1(config Config,
 	rootAuthority *persistencefs.RootAuthority,
@@ -152,6 +156,7 @@ func (owner *runtimeHostLocalEvidenceOwnersV1) ensureLocked(ctx context.Context,
 		registry, err := evidenceregistryapp.NewHostLocalV3(ctx, evidenceregistryapp.HostLocalConfigV3{
 			InstallationID: owner.authority.KeyID(), Authority: owner.authority,
 			Heads: owner.heads, Indexes: indexes, Capsules: capsules, DatasetAuthority: owner.snapshot,
+			BindingObserver: filestore.CaseBindingReader{},
 		})
 		if err != nil {
 			return errors.Join(err, capsules.Close(), indexes.Close())
@@ -275,6 +280,35 @@ func (owner *runtimeHostLocalEvidenceOwnersV1) CommitPrepared(ctx context.Contex
 	}
 	defer release()
 	return registry.CommitPrepared(ctx, input)
+}
+
+func (owner *runtimeHostLocalEvidenceOwnersV1) WithFactFinalWitnessAuthority(ctx context.Context, request evidenceregistryport.FactFinalWitnessRequest,
+	use func(evidenceregistryport.FactFinalWitnessCapability) error) error {
+	_, registry, release, err := owner.borrow(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return registry.WithFactFinalWitnessAuthority(ctx, request, use)
+}
+
+func (owner *runtimeHostLocalEvidenceOwnersV1) VerifyFactFinalWitnessCurrent(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord) error {
+	_, registry, release, err := owner.borrow(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return registry.VerifyFactFinalWitnessCurrent(ctx, record)
+}
+
+func (owner *runtimeHostLocalEvidenceOwnersV1) WithRecoveredFactFinalWitness(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord,
+	use func(evidenceregistryport.FactFinalWitnessCapability) error) error {
+	_, registry, release, err := owner.borrow(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return registry.WithRecoveredFactFinalWitness(ctx, record, use)
 }
 
 func (owner *runtimeHostLocalEvidenceOwnersV1) Resolve(ctx context.Context, query evidenceregistryport.MembershipQuery) (domainevidence.RegisteredEvidence, error) {

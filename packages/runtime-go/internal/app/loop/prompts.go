@@ -595,7 +595,7 @@ func PromptRequiresCaseRiskAdmission(prompt string) bool {
 		return true
 	}
 	caseCues := []string{
-		"案件", "经侦", "侦查", "投标", "围标", "串通", "行贿", "利益输送", "亲属", "关联关系", "mac", "设备标识",
+		"案件", "本案", "同案", "经侦", "侦查", "投标", "围标", "串通", "行贿", "利益输送", "亲属", "关联关系", "mac", "设备标识",
 		"case", "investigation", "bid rigging", "bribery",
 	}
 	factCues := []string{
@@ -623,7 +623,18 @@ func containsLexicalRiskCueFold(body string, needles []string) bool {
 			}
 		}
 		if !ascii {
-			if strings.Contains(body, needle) {
+			for remaining := body; ; {
+				offset := strings.Index(remaining, needle)
+				if offset < 0 {
+					break
+				}
+				end := offset + len(needle)
+				// "文本案例" and "脚本案例" contain the deictic "本案"
+				// across words. A later actual case cue still requires admission.
+				if (needle == "本案" || needle == "同案") && strings.HasPrefix(remaining[end:], "例") {
+					remaining = remaining[end:]
+					continue
+				}
 				return true
 			}
 			continue

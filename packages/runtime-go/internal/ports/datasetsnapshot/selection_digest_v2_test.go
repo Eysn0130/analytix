@@ -22,6 +22,24 @@ func TestCanonicalCurrentSelectionContentDigestV2BindsCompleteDurableGraph(t *te
 			return
 		}
 		switch value.Kind() {
+		case reflect.Ptr:
+			original := reflect.New(value.Type()).Elem()
+			original.Set(value)
+			if value.IsNil() {
+				value.Set(reflect.New(value.Type().Elem()))
+			}
+			pointerBaseline, err := CanonicalCurrentSelectionContentDigestV2(selection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if original.IsNil() && pointerBaseline == baseline {
+				t.Errorf("unbound durable pointer presence %s", path)
+			}
+			previousBaseline := baseline
+			baseline = pointerBaseline
+			check(value.Elem(), path)
+			baseline = previousBaseline
+			value.Set(original)
 		case reflect.Struct:
 			for i := 0; i < value.NumField(); i++ {
 				name := value.Type().Field(i).Name
