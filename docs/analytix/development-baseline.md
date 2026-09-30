@@ -95,7 +95,7 @@ archive ancestry, force push, or push all local branches/tags.
 | --- | --- |
 | `npm run doctor` | Source tools and dependency inputs are available/current. No compiler or app launch. |
 | `npm run doctor -- --native` | Also checks Electron SQLite/terminal module loading, configured host, pinned versions and runtime asset hashes. Native binary/SDK authority is still checked during build. |
-| `npm run verify:baseline` | Doctor, sync/setup regression tests, TypeScript typecheck, Electron + TS launcher build, and built-output layout smoke. |
+| `npm run verify:baseline` | Read-only validation/entry burden report, Doctor, sync/setup regression tests, TypeScript typecheck, Electron + TS launcher build, and built-output layout smoke. |
 | `npm test` | Application/renderer/host/TS-runtime Vitest suite. Not every Go/Rust/Python/script test. |
 | `npm run dev` | Existing native development build, TS launcher build, then Electron with private task state and shared protected development credentials. |
 | `npm run dev:fast` | Reuses already built native/runtime inputs. Not a bootstrap, isolation or acceptance replacement. |

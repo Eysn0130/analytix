@@ -2,7 +2,7 @@
 
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
-Current as of: 2026-09-09
+Current as of: 2026-09-29
 Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
@@ -79,6 +79,15 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 ## 5. 后续整理队列
 
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
+
+当前交接与矩阵的 2026-09-27 叙述已迁入既有
+[日期 QA 的 Historical appendix](qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)，
+保留旧 entry anchors。入口现在区分 c2cd HEAD、继承的未提交 host-local B1、
+7dc 准确安装证据与当前未知远端状态。只读
+`node scripts/validation-burden.mjs --json` 使用
+[小基线 manifest](validation-burden-baseline.json) 比较声明读取字节并盘点静态测试范围，
+接入既有 `verify:baseline`。静态入口重叠不等于 CI 重跑，未知依赖仍走原全量门禁；
+报告不是低价值测试删除列表，也没有实际 token、正确率或首次有效验证时间基线。
 
 | 优先级 | 动作 | 最小完成证据 |
 | --- | --- | --- |

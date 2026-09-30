@@ -1,159 +1,62 @@
 # Analytix 施工交接索引
 
-Status: Operational。唯一恢复入口；PR28 保持单一产品 writer，恢复时先核对当前任务和工作树。
+Status: Operational。唯一恢复入口；以下是 2026-09-29 PDT 的接续快照，
+恢复时重读 Git 与适用验证，不把此页当作实时锁或测试回执。
 
 Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
 branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/Eysn0130/analytix/pull/28)。
 
-## 当前恢复点 — 2026-09-27 PDT
+## 当前恢复点 — 2026-09-29 PDT
 
-- 最新已提交产品 SOURCE 为 `11e6fff85a72934e30ed805a4fcf5a8638fc7623`（tree `6550753fa48a0419e31906bf6adb0c4f0ee31a6b`）。N04 在 Go 和桌面 TypeScript 镜像修复支付动作与金额跨换行、`取得` 后年份及金额单位的两条漏判；普通年份路径、财务字样文件名和日期/数量/金额/UUID 答复仍通行，案件断言在 Go 入场/结果槽及 Main/SSE/Renderer 出口被拦截。修复前 Go/TS 定向向量失败；最终 Go 安全与结果包、loop/HTTP 公共链路、Vitest 367/367、typecheck 和 diff 检查通过。旧审计的收款方金额、软件任务夹带案件事实、普通 DOM 父子关系三条向量在当前源码均通过。该 SOURCE 尚无准确安装包、真实 Provider 或正式 Funds 验收；`0ff97f7` 的安装证据不转移。详细命令和边界见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。
-- 前一产品 SOURCE 为 `d244036f89dc40c14da7b3e0c3b7edd1bb9c3676`（tree `5a4fc6b1e0db74b55d34b52dabc384c5deebce5c`）；更早的 `53c5fdd45` 加入可选固定枚举的 Funds/Go 启动 owner 耗时标记。`d244` 修复物化输出 EOF/超时竞态：正常完成等管道关闭，超时/溢出等直接子进程退出；3 秒后仍未确认退出则阻断普通 runtime 启动，并阻断同一 Main 内再试，直到该精确子进程退出。聚焦 Vitest 120/120 和 typecheck 通过。内存拦截不证明 Main 异常退出后孤儿 writer 的跨进程排除。该 SOURCE 未构建安装包，下一冻结候选才可取得 owner 阶段安装态读数；`0ff97f7` 的准确安装证据不转移。
-- 最近准确安装的产品 SOURCE 为 `0ff97f7ff5c2c5b1bf7179f1d75d5e224557f703`（tree `3188bb34567d2c3f0fa76176b28035345d5b13ba`）；诊断后继 `e0942bd95` 与 `547c94a91` 只改变 B/K10 harness。准确完整 arm64 私有 DMG 构建、容器校验、只读挂载安装副本的 10 项哈希和严格签名、1,172 项强制许可审计均通过；制品仍是 `development_clean_non_publishable`，不可发布。全新隔离 profile 的安装态合成回环 Provider 普通文件读取会话退出 0、GREEN：实际读取结果进入第二次请求、可见回复、正常退出、零残留；设置保存后的 Go 启动从前一候选的额外重启降为两次总启动。第二轮同包独立 profile 的诊断获取 Core→Main→IPC→Renderer→DOM 终端 trace，IPC→DOM 16.234 毫秒，但冷启动物化与 Go READY 大阶段仍约 25/31 秒，只有本地合成单样本。安装态合成 B 经可见 UI 打开 Direct Source Preview，但选择 CSV 后固定返回 `funds_import_capability_unavailable`，尚无快照或正式 B 事实；后继诊断在约 36 秒内给出同一失败并零残留。生产 authority enrollment 的设计须与 accepted DSV2 和 deferred ThreadRisk 边界对齐，不能绕过原生/快照守卫。真实 Provider 恢复、正式 Funds B 和冷启动性能仍开放。准确命令、哈希、时延与边界见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。PR28 仍 Draft/open，当前本地 HEAD 未推送、当前 HEAD CI 未取得；`SourceReady`、`PrivateCandidateReady`、`MergeReady` 和 `PublicMacReleaseReady` 均不得由这一条局部证据置为 true。下述 `c8fa`、`0ecc`、`74e` 是此前检查点，不覆盖新候选。
-- 较早的 `c8fa02f99e7fcd2cdcd037990f3ebd06b66500e2`（tree `812abaaf4ca947af1166e118c9470a1e08b59481`）恢复 `取得` 后有年份再出现带币种符号金额的窄检查，保留 `24ff` 对金额单位和亲属关系断言的修复；聚焦 Go、HTTP、Main/SSE/Renderer 及 typecheck 已通过。原 `81b`、`a5dc` 和 `24ff` 各有已证实反例。该 SOURCE 的干净私有 Core DMG/ZIP 已构建，DMG 安装副本的哈希、严格签名及 1,172 项强制许可审计通过；制品仍是 `development_clean_non_publishable`。初次安装版合成会话在 CDP 超时；`931667537` 修复诊断保留并精确绑定端口后，全新隔离 profile 的分段合成会话安装态检查 19/19 通过；`--actual-only` 的顶层状态仍为 `PARTIAL`、退出 1。准确命令、制品哈希和边界见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。
-- 03:56 PDT 左右，按应用名选择 UI 后出现使用既有用户 profile 的第二个 Main PID 58648；选择操作是否导致启动未证实。Agent 错误地将该进程当作隔离 QA 进程，向该 PID 发送 SIGTERM，约五秒后又发送 SIGKILL。短暂观察到子进程可能触及受保护用户状态；没有备份、回滚或完整性证据，实际影响未知。用户表示开发阶段不需要检查既有用户数据；没有进行 live 状态检查或备份。已停止按名选择 UI 和直接访问 live 用户状态；后续 QA 使用新的隔离 profile 并精确绑定 app 路径、Main PID 和 CDP 端口。普通文件可见 GUI/真实 Provider seam 仍未验收，不能把合成请求或包完整性当成验收，也不能重放超时的可变 CDP 表达式。
-- B1 合成 CSV 两次正常导入的独立整数参考计算已在 `91a55b236` 提交；准确 `c8fa` 安装包 Go binary 的原生 Owner 准入测试通过（12.76 秒），全新隔离 authority root 下生产链正向测试通过（1642.55 秒、外层退出 0）。前次默认 10 分钟整体测试预算超时仍是 CAS reopen 性能线索，不等于正向断言失败或耗时归因。准确 `c8fa` 完整 Funds DMG/安装副本通过构建、哈希与严格签名，但独立强制许可审计因 Canvas 原生组件来源和 notices 未证实而 `blocked`；安装 GUI、真实 Provider、正式真实案件 B 门槛未通过。用户的 development runbook 编辑和两份 2026-09-25 QA 草稿未纳入 S1 提交。Core 与 Funds 各自的安装/阶段门槛仍分别开放。
-- 较早的本地 HEAD `0eccbe945`（B1 oracle 在 `91a55b236`；A 启动 checkpoint recorder 已提交）当时的产品 SOURCE 仍为 `c8fa02f99`。准确完整 Funds 安装版已有两次本机隔离回环 Provider 启动/发送/可见回复/正常退出样本，其中一次使用固定自然语言输入；外置版同输入三次均未取得 Provider 回复，第一轮原始启动错误被清理错误遮蔽，后两轮分别在 120/300 秒的桥接健康诊断窗口超时，未发生 Provider 请求。所有已知任务进程已退出，失败 profile 保留；四轮可比时延分布、Core→Main→DOM 细分仍未取得。随机十六进制提示的旧外置轮次进入 `case_terminal_source_unavailable`，属于另一条 N04 线索。三次安装版合成 B 诊断均在 B lane 前终止；后续发现诊断 Main 身份规则误施于 scanner，真实 scanner READY/身份的聚焦复核通过，但完整 Direct Preview 当时未重跑。准确报告与 SHA 见[接续 QA ledger](../qa/pr28-next-execution-2026-09-26.md)。
+| 项目 | 当前观察与边界 |
+| --- | --- |
+| HEAD / tree | `c2cd3e29174e701569220e1c39076e0acff24a53` / `55893ead1fc3a6bce73ede22a251005a14810532`；延迟 bundled Funds activation，普通 Core 不因专业物化等待而阻塞。源码行为仍须相应验证。 |
+| writer | 本轮唯一主施工线程 `01a0f08d-4ef4-7f82-a30b-8a94c014ac26`，保存的 local analytix 项目，实际 `gpt-6.1-sol / max`。协调桥只读。其他历史 worktree 不在本轮写入范围；不能把残留锁或进程等同于 active writer。 |
+| 继承 dirty | 开始时 34 tracked 修改、26 untracked 文件、0 staged；主要为 B1 host-local，另有用户 runbook 和 QA 草稿。保留原字节，按 hunk 来源审查，不 reset/clean/stash/跨分支迁移。该数量是开始快照，后续施工会增加任务自有修改。 |
+| 最新安装证据 | 精确 SOURCE `7dc07bb0973e2c5e6a5e5c9235bd585c9c3a1495`，两轮隔离合成 K10 正常退出、零残留；`032b8a147` 是 observer 修正，产品字节未改变。见[准确诊断](../qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md)。不转移到 c2cd/B1。 |
+| 当前 B1 | [host-local source checkpoint](../qa/pr28-b1-host-local-currentness-source-2026-09-27.md)：empty-lineage mode、DSV2、Registry CAS 与部分重启已有未提交候选；Final/recovery、清洗前驱、CAS loser 认证恢复及安装完整旅程仍缺。N06/B16 开放，整 profile 回滚 `UNVERIFIED`。 |
+| 远端 / main | 本轮尚未 fresh 取得 PR/head/main/CI。旧 56231 的 CI 不覆盖较新本机源码；Draft/open 是前序记录，当前状态必须独立读取。 |
 
-- D01–D08 前序产品检查点：`74e4316eabff41ad72878001b5be3b89db020a1d`，
-  保留协议、缓存、计时、语义续接与现有连接池修复；后继补齐真实 UI 阶段、
-  压缩历史公共数组、终态后合并帧重放及安全客户端消息 ID。原分支继续。
-  准确新 DMG/ZIP 已构建、安装并通过签名与 1,172 项许可审计；可独立交付项
-  已完成：可见 Save、Go/Main 续答、T01–T08、双页 PDF、连续 120 回合和
-  Main 重启后第 121 回合、c8 原配置及 6d 语义任务原位升级。六项 authority/
-  配置哈希未变，已完成文件效果未重放；整段结束后清理 15 个临时合成目录。
-  `6d29c8634` 的实际历史读取、两次压缩和文件效果作为明确 SOURCE 的前继
-  证据保留，Go 目录树未变；74e 再次验证恢复与无重复效果。
-  产品 SOURCE 的 57/57 CI 检查成功，SourceReady=true；最终文档后继与其
-  检查单独报告，不因文档重包。PrivateCandidateReady / MergeReady /
-  PublicMacReleaseReady 仍 false：X01 缺独立获准的安装版真实 Provider QA
-  入口。下一依赖仅为在准确候选正常设置中获准配置，再做有界真实重启续答。
-  不复制开发密钥；PR28 保持 Draft，制品仍为非公开候选，未合并或发布。
-  实际状态、完整命令与未完成分母见
-  [post-c8 接续记录](../qa/pr28-post-c8-completion-2026-09-26.md)。
+## 下一依赖有效动作
 
-### c8 源码检查点（保留）
+1. 本轮先修薄入口，并运行 `node scripts/validation-burden.mjs`。报告只做
+   stdlib 只读盘点，基线与 matched read 范围见[小 manifest](../validation-burden-baseline.json)；
+   它不选掉测试，不宣称 token、时间、正确率或分析收益已改善。
+2. 保留并核查 host-local 未提交合同与适用 OpenSpec；在隔离数据上补最小缺失
+   行为和独立语义 oracle。所有安全/撤权/恢复检查针对实际稳定候选；普通
+   Agent 不依赖 Funds 初始化。命令先按 [runbook](../development-runbook.md)
+   同 shell 加载缓存 helper，任务资源隔离；不触碰既有用户 profile。
+3. 同模型/数据/预算的分析 pilot 区分表示保真、端到端增益、隐私权限与安装
+   可用性；只使用合成或已明确许可输入。费用与真实 Provider 权限未明时，
+   先推进确定性 oracle，不用合成结果替代真实 Provider/安装验收。
+4. 达到相应门槛后聚焦提交、正常源码同步、准确候选 CI/review/适用安装验收，
+   再决定 merge/main。公开发布另行满足资格；当前没有完成结论。
 
-- 当前性能后继产品 SOURCE：`c8cec28cd4de61ae5c8fa23fa9d09d115fd58bc8`，
-  原分支/writer 接续 `ee91dcfed`；落地 low/cap 编码、连接池及发布诊断，
-  实测后修复输出预算逐 chunk 全历史扫描。Go 12 个定向包、生产装配三项、
-  typecheck、桌面 120 项通过；连接池 race 单独通过。
-  准确边界、before/after、A01—A09、native 协议和安装后继剩余项见
-  [性能后继记录](../qa/pr28-e15-performance-followup-2026-09-26.md)。
-  新源码 `SourceReady=pending`（准确远端 CI 尚待核验）；其余三个出口仍 false。
-  e15 证据继续仅属于下述历史准确制品，不因本轮源码修复而重新命名。
-
-### e15 凭据与安装验收检查点（保留）
-
-- 原分支产品 SOURCE `96294a3142ffe08f63ee9d367ce1e36c2b760473`；PR28
-  Draft/open，产品提交对应的 57/57 检查成功。直接读取的 `origin/main` 是
-  `ce96cf12581acfa0e19fae7c6aa9c709371012c8`，本地 `main` 是
-  `60839b721b273119ab30158c65109dde4db52441`。恢复时仍须重读
-  HEAD/tree/dirty、PR/CI/main，不用本行覆盖更新后继。
-- e15 私有 DMG 的安装副本通过合成 Provider 可见 Save、Go/Main 重启、
-  120-turn 与 post-120 GUI 续答、旧线程续答、e13→e15 负例升级保全及恢复、
-  双页 PDF 夹具。真实 Provider 仅在原获准持久开发 authority 的新源码 Core
-  进程中有有界回执，未复制到安装版 QA。准确制品哈希、C01–C18 分母、
-  原生 Windows 与未验边界见[当前 e15 验收记录](../qa/pr28-e15-credential-authority-2026-09-26.md)。
-- `SourceReady=true` 仅对上述产品 SOURCE；`PrivateCandidateReady=false`，
-  因安装版真实受保护 Provider 的保存/重启恢复仍无获准 QA 句柄；
-  `MergeReady=false`，PR 保持 Draft；`PublicMacReleaseReady=false`，制品为
-  `development_clean_non_publishable`。本轮三个合成 QA profile 与 loopback
-  Provider 在有界验收后清理，持久开发 authority 保留。下一依赖是在现有预算
-  和权限下取得可用的安装版受保护 QA 入口，再做一次正常可见保存/重启，
-  不复制开发密钥、不弱化安装版隔离。
-
-## 历史恢复点 — 2026-09-24 PDT
-
-- 最新产品源码与完整私有 app/DMG/ZIP 绑定
-  `14ab14cb9eb28611b1fd0c526865aee01bed5f95`；当前已推送 QA 后继
-  `4c1f98d97621733fffd226834a8bb217fac915a4`，原 `b9666a5af` 及全部
-  有效祖先保留。恢复时重新读取 HEAD/tree/dirty，不用本行覆盖更晚提交。
-  `4c1` 本机受影响测试 52/52、baseline 111/111，通过；准确后继 CI
-  本检查点仍在运行，旧提交的绿色检查不转移。PR28 仍 Draft；直接读取真正
-  `main` 为 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。
-- 附件 ZIP 全部 13 项通过 SHA256 校验，三个 QA 修复已在原 owner 集成：
-  前置失败停止后续写入、显式保留受保护诊断 profile、fork 恰好新增一个
-  child。后继加入只读分段观察及 fork 前后父历史一致检查；均已定向 commit
-  并普通 push。附件的片段测试与转换器测试不等于源码或安装验收。
-- 14ab 完整私有容器的 DMG 校验、安装副本严格签名、独立 Go Core 读包与
-  准确许可审计通过；1,172 个实际依赖实例无强制工程阻断，Canvas 未随 Core
-  分发，Lazy 替代已打包。该包仍为 `development_clean_non_publishable`。
-- 同一 14ab DMG 安装副本的连续合成 Provider 旅程在 `4c1` QA harness 下
-  19/19 实际检查通过：设置、重启、普通/工具/plan/附件、审批拒绝和允许、
-  用户输入、fork/resume、列表、usage、终态及清理；fork child 0→1，父历史
-  不变。另有同 SOURCE 的定向取消与新进程恢复回执。原 180 秒失败定位到
-  旧 CDP 总观察窗口触及用户输入阶段，旧 fork400/间歇性 503 精确内因仍未
-  证实。见[最新 QA 回执](../qa/pr28-closure-repair-continuation-2026-09-24.md)。
-- 当前四个出口：`SourceReady=pending`（准确后继 CI 尚未全部结束）；
-  `PrivateCandidateReady=false`、`MergeReady=false`、`PublicMacReleaseReady=false`。
-  14ab 仍缺正常受保护 Provider 恢复、120-turn 安装 GUI、Core 升级/数据
-  保全、安装 PDF 预览的有效回执。Mac Computer Use 对全新隔离 14ab 进程
-  返回 `timeoutReached`，未取得 GUI 树；旧/新 app 顺序启动也未形成可读回的
-  会话 fixture，不能据此放行。
-  Developer ID/公证/publication authority 只属于未来公开 macOS 分发；不索取
-  原开发 Key/普通开发 Keychain 密码，不增加累计 US$5 预算。
-
-## Historical handover entries
-
-- 普通源码开发现使用持久 development Registry/Secret Store；API Key 已一次
-  bootstrap，Core 及真实 GUI 的重启、新 profile 复用通过，不再索取同一 Key 或
-  普通开发 Keychain 密码。专项 QA 用 `--isolated-keychain`；包装版拒绝共享开发
-  authority。命令见 development-baseline，证据见本轮 admission 报告。
-- `ff2981536` 四项 CodeQL 与 gate 通过；CI35809621946 的 analysis_compute
-  输出文件测试出现 DuckDB 内部错误；后继已移除重复 count-page 查询，复用实际
-  结果行数回执，本机95项 CLI 通过。仍须取得准确后继 Linux CI，不能继承旧绿。
-- 长期执行顺序：[唯一执行方案](../delivery-execution-plan.md)。
-- 唯一当前状态与证据路由：[产品矩阵](../product-completion.md)。
-- 保留 SOURCE `0708620e21fc2bd706ba18a377a60824cdb78421`、
-  DELIVERY `9c21c0ec911571ddba1c733ac4a828737654e02b` 及其后有效工作。
-- 恢复先核对实际 HEAD/tree/dirty/祖先与适用 AGENTS；不能从远端旧 dde 重建。
-- 本轮 Core 资格源码：`69e74fdb6`、`0ce2e92a0`；法律清单 owner 后继至
-  `ac00f1602`。正式签名/安装/Provider/更新数据兼容验收仍未取得。
-- 保留恢复 SOURCE `dc059977ae0ae3b4986698eda82c25bfe9a54275` 及 DELIVERY
-  `e40693268b3bca6c8ae1d71253263dbe98efe1b1` 和全部有效后继。
-- 保留制品 SOURCE `55838f047fbdccd2f8e073b157815d896c084d5d` 与 DELIVERY
-  `d46d10b389285ce2b3e8a0a4d7ff68da7e75b60b` 及全部有效后继。
-- 新源码 `7f6137a4d` 已正常 push：生产/QA credential 路径已审计，普通用户默认
-  不需第二密码；新增初始化延后选中、Core 存储凭据可用性检查和 unavailable
-  恢复。针对性检查通过；追加 checked integer 修复后的 `8e5142250` 已 push，
-  其四种语言 CodeQL 与 gate 全通过。app-only 构建针对8e；旧 b2cf 不含凭据修复。
-- 历史容器制品 SOURCE `b2cf1179e7b6e23bf565f4de94e8f1e4715a2c94`，tree
-  `d6ca0b5dbd97a2f8eb8cd11aa1ea2beb336bd48c`；准确当前 HEAD/tree 在恢复时重读 Git。
-- 本轮证据：[新制品与发行准入接续](../qa/pr28-core-release-admission-2026-09-22.md)。
-  clean Core1.0.6 私有 app/DMG/ZIP 完成；全部8,639文件/链接与独立安装副本
-  一致，严格签名及 production-tag 独立 Go 读包通过。实际1,174包实例审计中，
-  原31+6行已有34通过、2阻断、1未分发；两个包级缺项是 Canvas 嵌入构建来源
-  与 lazy-val 原始许可全文，原生/WASM/字体完整义务仍另列。
-  新包仍为 development_clean_non_publishable，保留所有旧私有制品。
-- 保留证据：[Core 与多快照闭环](../qa/pr28-release-closure-2026-09-22.md)。
-  B1 完整原生链1776.55秒通过：A1/A2 public GET200及原始 final、历史/当前标识、
-  缺失/篡改503整批拒绝、原字节复原、普通任务连续性、原件不变及新OS进程恢复。
-  既有 accepted-final/compaction crash矩阵 production/race检查124.842秒通过。
-- 下一动作：继续剩余许可与嵌入组件来源通知；Canvas 签前/签后可信转换已经
-  通过真实夹具及新制品校验，不重复解决同一问题。Core profile、正式资格消费者
-  和已通过 A1/A2 恢复不重做。
-- 本机隔离 Mac 验收已获准，安装版已到正常 Provider onboarding。用户输入 Key
-  后 Save 报 Registry503；原任务 Keychain 元数据确认为 locked，
-  第二次正常解锁返回51、无信号、43ms，对应系统认证失败；用户已确认输入原密码，
-  不重复归咎输入，不推断历史创建原因。独立合成新 Keychain 通过同一 helper 的
-  创建/解锁，原配置与 Keychain 保留。新的 `core-credential-8e5142250` QA profile
-  已通过正常受保护输入创建/解锁，GUI 保存、真实模型响应、重启恢复和锁定后
-  保留配置/解锁重试均通过。后续模型交接与 Settings 错误提示修复通过107项
-  针对性检查和 web typecheck，尚未进入安装候选。单独授权的官方
-  DeepSeek `deepseek-flash` 探测 HTTP200、10tokens，证明 Key/模型有效，不能
-  替代安装版保存、Agent/工具、重启历史及升级恢复验收。测试总上限 US$5。
-- Developer ID/公证尚未配置；Apple 正常账户入口此前显示 Access Unavailable。
-  production publication authority 尚未建立；现有 Keychain 安全存储探测的
-  entitlement 缺项保留，不生成明文生产私钥，也不另建发布信任机制。
-- 当前范围源码外发已通过原接口重审，正常 push 已到8e5142250；旧 NOT_CLEARED
-  为历史状态。b2cf 的 Development CI 51任务全通过；8e 的该 CI 51任务全通过，CodeQL
-  分析与 gate 已通过。精确 HEAD review 与其余适用门禁未关闭，PR28 仍 Draft/BLOCKED，真实 main
-  仍 `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。满足条件才 merge、验证 main
-  并由合格来源发行；不换传输路径绕过拒绝。
-- 不启用 Goal、自动续跑或并行 writer。私有制品不是正式发行。
+长期方向与不变分母见[唯一执行方案](../delivery-execution-plan.md)，
+能力、候选、证据与缺口见[产品矩阵](../product-completion.md)。
+旧叙述已归入既有[日期 QA](../qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)，原锚点保留如下。
 
 ## Historical entry anchors
+
+<a id="当前恢复点--2026-09-27-pdt"></a>
+
+- [当前恢复点 — 2026-09-27 PDT](../qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-handover-8)
+
+<a id="c8-源码检查点保留"></a>
+
+- [c8 源码检查点（保留）](../qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-handover-35)
+
+<a id="e15-凭据与安装验收检查点保留"></a>
+
+- [e15 凭据与安装验收检查点（保留）](../qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-handover-46)
+
+<a id="历史恢复点--2026-09-24-pdt"></a>
+
+- [历史恢复点 — 2026-09-24 PDT](../qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-handover-66)
+
+<a id="historical-handover-entries"></a>
+
+- [Historical handover entries](../qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-handover-97)
 
 The following links preserve prior entry URLs; their targets are dated evidence, not current next actions.
 
