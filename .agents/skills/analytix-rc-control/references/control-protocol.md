@@ -49,9 +49,18 @@ handoff still closes every writer/lease it would transfer.
 | `REVISE` | Consolidated same-denominator findings and active lease | `WRITING` |
 | `COMPLETE_BRIEF` | Accepted candidate, matching completion acknowledgement, inactive processes, revoked lease | `ACCEPTED` (task remains reusable) |
 | `TERMINAL_FREEZE` | Exact final candidate, inactive processes, revoked lease | `ACCEPTED`, `BLOCKED`, `HANDOFF` |
-| `ACCEPTED` | Truthful level and fresh Controller verification | `BOOTSTRAP`, `HANDOFF` |
+| `ACCEPTED` | Truthful level and fresh Controller verification | `READY` (fresh next-brief baseline within the same healthy epoch), `BOOTSTRAP` (takeover, rotation, recovery or uncertain identity/authority/ownership), `HANDOFF` |
 | `BLOCKED` | Exact blocker, affected denominator, evidence, unblock condition, and no active writer | `BOOTSTRAP`, `HANDOFF` |
 | `HANDOFF` | No unrevoked writer lease/process and compact handoff delta | successor `BOOTSTRAP` |
+
+The `ACCEPTED` → `READY` exit requires a matching completion acknowledgement
+for the old brief, related writing processes and commands proven inactive,
+corresponding leases revoked through their normal lifecycle, and a task identity
+eligible for reuse. Bind the new brief to fresh `HEAD`/tree/diff
+and current authority/resource facts; never reuse the epoch's starting baseline.
+Existing task retirement, human restrictions and stale-message fences still apply.
+Takeover, rotation, recovery or uncertain identity/authority/ownership requires
+`BOOTSTRAP` before further writing.
 
 `REVIEW_SEALED` is recoverable; its `PAUSED` lease keeps its reservation and
 blocks every conflicting new writer (all repository writers for legacy leases). `TERMINAL_FREEZE` and `CANCEL` are
