@@ -34,6 +34,25 @@ func bindRuntimeOwnedResourceV1(
 	return &runtimeOwnedResourceHandlerV1{Handler: handler, resource: resource}, nil
 }
 
+// Binding borrows resources in shutdown order. The caller retains cleanup
+// ownership until its complete handler assembly succeeds, including on errors.
+func bindRuntimeOwnedResourcesV1(
+	handler http.Handler,
+	resources ...runtimeOwnedResourceCloserV1,
+) (http.Handler, error) {
+	if handler == nil {
+		return nil, errors.New("runtime owned resource is unavailable")
+	}
+	for _, resource := range resources {
+		var err error
+		handler, err = bindRuntimeOwnedResourceV1(handler, resource)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return handler, nil
+}
+
 func (handler *runtimeOwnedResourceHandlerV1) Shutdown(ctx context.Context) error {
 	handler.mu.Lock()
 	defer handler.mu.Unlock()

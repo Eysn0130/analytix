@@ -78,6 +78,39 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-09-30 有界资源与 quarantine 治理
+
+基于 `fb210a84426f8bcce55e515c681422702f54232c` 的 canonical worktree；
+四项继承 dirty 不属于本切片，哈希保持不变。此记录是局部源码验收，
+不是系统治理、安装验收、同模型分析增益或 main/发布就绪结论。
+
+- `runtimeapp/app.go` 的七处资源绑定失败出口收敛为一次有序绑定和一个出口；
+  owner 仍在 `owned_runtime_resource.go`，原可选条件、defer、错误链与最终
+  接管时点保留。反向顺序 fixture 得到行为 RED；多资源 drain/close 重试、
+  已关闭前缀、未关闭后缀、必需 nil 与并发 shutdown 的定向 race 检查通过，
+  真实 handler/maintenance 定向组装检查通过。
+- quarantine 的唯一行为 owner 为 `backend-manager.test.ts`：synthetic overrides、
+  冷导入、默认 GET/POST、并发 ensure、合法 renderer lease 与 stop 路径，
+  覆盖进程、目录、监听、网络和清理写入。五项临时语义回归均得到行为 RED，
+  原生产 blob 恢复哈希相同后才退役旧八项禁词及 packaging 的重复簇。
+  规范化 module identity 检查保留执行 authority 的架构边界。
+  与 native-runtime-paths/packaging 的聚合报告实际发现并通过 79/79，
+  其他授权、泄露、平台与聚合门禁不变。
+- 根 `AGENTS.md` 仅合并通用语义；适用链仍为 global + root + 当前 subtree，
+  不读全部 imports/指南，不将安全规则移入历史材料。root 字节为
+  15,830 → 15,467（-363）；global 未修改，scope 指南另计。
+- 固定三文件资源任务的实际返回读取为 4,602 → 7,987 字节，replay 各一
+  次工具调用；cache preflight 后首次行为验证为 20.356s / 8.943s。
+  warm/编译缓存状态未受控，新增测试使工作量不同，不能宣称提速或 token 收益。
+  初次 sandbox cache 失败和整包基线取消（130）另行保留；旧基线 null 未回填。
+  replay 计数不包含初始化、研究、实现、失败与轮询，不当作全部施工成本。
+- 本切片生产源码净 +1 字节，测试净 +7,086 字节；维护收益是失败处理
+  修改点 7 → 1，不能以总 LOC/字节下降代替覆盖或收益。没有新增治理工具。
+
+本机小 receipt 在 `/private/tmp/analytix-debt-resource-matched-{before,after}-20260930.json`
+及 `analytix-quarantine-{red,green}-20260930.json`；前者是明示范围的读取 proxy，
+后者保留五项 RED 与执行式发现结果，不复制大型 inventory。
+
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
 
 当前交接与矩阵的 2026-09-27 叙述已迁入既有

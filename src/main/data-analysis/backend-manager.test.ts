@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { Server, Socket } from 'node:net'
+import { preProcessFile } from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
@@ -54,12 +56,104 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+  for (const module of ['electron', 'node:child_process', 'node:fs', 'node:fs/promises', 'node:http', 'node:https']) {
+    vi.doUnmock(module)
+  }
   if (originalRendererUrl === undefined) Reflect.deleteProperty(process.env, 'ELECTRON_RENDERER_URL')
   else Reflect.set(process.env, 'ELECTRON_RENDERER_URL', originalRendererUrl)
 })
 
 describe('data analysis native authority quarantine', () => {
+  it('keeps legacy process and native execution authority outside its dependency boundary', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/data-analysis/backend-manager.ts'), 'utf8')
+    const ownerDirectory = join(process.cwd(), 'src/main/data-analysis')
+    const dependencyIdentity = (name: string) => name.startsWith('.')
+      ? resolve(ownerDirectory, name).replace(/\.[cm]?[jt]s$/u, '')
+      : name
+    const dependencies = preProcessFile(source, true, true).importedFiles.map((entry) => dependencyIdentity(entry.fileName))
+    for (const forbidden of [
+      'node:child_process', 'child_process',
+      './native-runtime-integrity', './python-runtime-integrity', './native-runtime-paths'
+    ]) expect(dependencies).not.toContain(dependencyIdentity(forbidden))
+  })
+
+  it.each([false, true])('has no I/O effects across the cold lifecycle with synthetic overrides (packaged=%s)', async (isPackaged) => {
+    const effects = new Map<string, ReturnType<typeof vi.fn>>()
+    const guard = (name: string) => {
+      const marker = vi.fn(() => { throw new Error(`synthetic forbidden effect: ${name}`) })
+      effects.set(name, marker)
+      return marker
+    }
+    const mockEffects = (module: string, methods: string[]) => {
+      vi.doMock(module, async () => {
+        const actual = await vi.importActual<Record<string, unknown>>(module)
+        const guarded = { ...actual }
+        for (const method of methods) guarded[method] = guard(`${module}.${method}`)
+        return { ...guarded, default: guarded }
+      })
+    }
+    mockEffects('node:child_process', ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'])
+    const fileEffects = ['mkdir', 'writeFile', 'appendFile', 'rm', 'rename', 'unlink', 'copyFile']
+    mockEffects('node:fs/promises', fileEffects)
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
+      const guarded: Record<string, unknown> = { ...actual }
+      for (const method of [...fileEffects, ...fileEffects.map((name) => `${name}Sync`), 'createWriteStream']) {
+        guarded[method] = guard(`node:fs.${method}`)
+      }
+      guarded.promises = Object.fromEntries(Object.entries(actual.promises).map(([name, value]) => [
+        name, fileEffects.includes(name) ? guard(`node:fs.promises.${name}`) : value
+      ]))
+      return { ...guarded, default: guarded }
+    })
+    mockEffects('node:http', ['request', 'get'])
+    mockEffects('node:https', ['request', 'get'])
+    vi.spyOn(Server.prototype, 'listen').mockImplementation(guard('server.listen'))
+    vi.spyOn(Socket.prototype, 'connect').mockImplementation(guard('socket.connect'))
+    vi.stubGlobal('fetch', guard('fetch'))
+    vi.stubGlobal('WebSocket', guard('WebSocket'))
+    vi.doMock('electron', () => ({
+      app: { isPackaged, getAppPath: () => '/synthetic/analytix-app' },
+      net: { fetch: guard('electron.net.fetch'), request: guard('electron.net.request') },
+      protocol: {}
+    }))
+    for (const name of [
+      'ANALYTIX_DATA_ANALYSIS_PYTHON', 'ANALYTIX_DATA_ANALYSIS_BACKEND_DIR', 'ANALYTIX_DATA_ANALYSIS_PORT',
+      'ANALYTIX_DATA_ENGINE_BIN', 'ANALYTIX_ANALYSIS_COMPUTE_BIN',
+      'ANALYTIX_IMPORT_ACCELERATOR_BIN', 'ANALYTIX_CLEANING_OPS_BIN'
+    ]) vi.stubEnv(name, name.endsWith('_PORT') ? '18731' : '/synthetic/untrusted-override')
+
+    // Observe import-time effects too; never clear guards after the cold import.
+    vi.resetModules()
+    const { DataAnalysisBackendManager: ColdManager } = await import('./backend-manager')
+    const manager = new ColdManager()
+    const states: unknown[] = []
+    const unsubscribe = manager.onState((state) => states.push(state))
+    const expected = manager.getState()
+    expect(expected).toMatchObject({ blocker: DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER, terminal: true, phase: 'failed' })
+    expect(await Promise.all([manager.ensureBackend(), manager.ensureBackend()])).toEqual([expected, expected])
+    await expect(manager.request('/health')).rejects.toThrow(DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER)
+    for (const path of ['/health', 'http://127.0.0.1:18731/health', 'https://synthetic.invalid/fallback']) {
+      await expect(manager.request(path, { method: 'POST', body: 'synthetic' })).rejects.toThrow(DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER)
+    }
+    const renderer = fakeRenderer(isPackaged ? 'analytix-app://renderer/index.html' : undefined)
+    expect(manager.registerRenderer(renderer as never)).toBe(true)
+    const generation = manager.getRendererAuthorityGeneration(renderer as never)!
+    const lease = manager.acquireRendererAuthorityLease(renderer.id, generation)
+    expect(lease?.isCurrent()).toBe(true)
+    await manager.stopAndWait()
+    expect(lease?.signal.aborted).toBe(true)
+    expect(lease?.isCurrent()).toBe(false)
+    expect(await manager.ensureBackend()).toEqual(expected)
+    expect(manager.getRuntimeInfo().backend).toMatchObject({ managed: false, terminal: true })
+    expect(states).toEqual([expected])
+    unsubscribe()
+    expect([...effects].filter(([, marker]) => marker.mock.calls.length).map(([name]) => name)).toEqual([])
+  })
+
   it('returns one deterministic terminal boundary with no endpoint, process, or local runtime disclosure', async () => {
     const manager = new DataAnalysisBackendManager()
     const first = await manager.ensureBackend()
@@ -83,28 +177,6 @@ describe('data analysis native authority quarantine', () => {
     expect(manager.getRuntimeInfo().backend).toMatchObject({ managed: false, terminal: true })
     expect(manager.getRuntimeInfo().backend).not.toHaveProperty('pythonExec')
     await expect(manager.stopAndWait()).resolves.toBeUndefined()
-  })
-
-  it('cannot execute env-selected Python, child processes, ports, filesystem setup, or network fallbacks', async () => {
-    const source = readFileSync(join(process.cwd(), 'src/main/data-analysis/backend-manager.ts'), 'utf8')
-    for (const forbidden of [
-      "node:child_process",
-      'ANALYTIX_DATA_ANALYSIS_PYTHON',
-      'ANALYTIX_DATA_ANALYSIS_BACKEND_DIR',
-      'ANALYTIX_DATA_ANALYSIS_PORT',
-      'spawn(',
-      'execFile(',
-      'mkdir(',
-      'fetch('
-    ]) {
-      expect(source).not.toContain(forbidden)
-    }
-
-    const fetchMarker = vi.fn()
-    vi.stubGlobal('fetch', fetchMarker)
-    const manager = new DataAnalysisBackendManager()
-    await expect(manager.request('/health')).rejects.toThrow(DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER)
-    expect(fetchMarker).not.toHaveBeenCalled()
   })
 
   it('notifies listeners once with the same terminal boundary', () => {

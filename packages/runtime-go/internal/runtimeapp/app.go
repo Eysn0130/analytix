@@ -1902,41 +1902,22 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, errors.Join(err, nativeAuthority.Close())
 		}
 	}
-	handler, err = bindRuntimeOwnedResourceV1(handler, providerClient)
-	if err != nil {
-		return nil, errors.Join(err, nativeAuthority.Close())
-	}
-	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
-	if err != nil {
-		return nil, errors.Join(err, nativeAuthority.Close())
-	}
+	ownedResources := []runtimeOwnedResourceCloserV1{providerClient, providerRegistryAuthority}
 	if !simulation && evidenceDomainAvailable {
 		if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
-			handler, err = bindRuntimeOwnedResourceV1(handler, sharedEvidenceDatasetSnapshotV2.registryOwner)
-			if err != nil {
-				return nil, errors.Join(err, nativeAuthority.Close())
-			}
+			ownedResources = append(ownedResources, sharedEvidenceDatasetSnapshotV2.registryOwner)
 		}
 		if hostLocalEvidenceOwnersV1 != nil {
-			handler, err = bindRuntimeOwnedResourceV1(handler, hostLocalEvidenceOwnersV1)
-			if err != nil {
-				return nil, errors.Join(err, nativeAuthority.Close())
-			}
+			ownedResources = append(ownedResources, hostLocalEvidenceOwnersV1)
 		}
-		handler, err = bindRuntimeOwnedResourceV1(handler, datasetSnapshotStoresV2)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
-		}
-		handler, err = bindRuntimeOwnedResourceV1(handler, evidenceAuthorityStoresV2)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
-		}
+		ownedResources = append(ownedResources, datasetSnapshotStoresV2, evidenceAuthorityStoresV2)
 	}
 	if !simulation && caseEntityCapability.store != nil {
-		handler, err = bindRuntimeOwnedResourceV1(handler, &caseEntityCapability)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
-		}
+		ownedResources = append(ownedResources, &caseEntityCapability)
+	}
+	handler, err = bindRuntimeOwnedResourcesV1(handler, ownedResources...)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
 	}
 	localDisplayHandler := httpapi.LocalDisplayMuxV1{
 		RuntimeToken: config.RuntimeToken,

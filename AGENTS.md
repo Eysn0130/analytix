@@ -16,22 +16,20 @@ and evidence routing live under `docs/analytix/`.
   current status and diff, accepted target, authorized change, relevant commits,
   and fresh evidence. Treat handovers and task lists as indexes: verify their
   claims, then continue from the next dependency-valid, verifiable gap.
-- Keep read-only requests read-only. For requested changes, establish the
-  intended outcome, relevant source of truth, affected contracts or data, and
-  observable success criteria before material mutation.
-- Investigate facts the repository or available tools can answer. Ask only when
-  an unresolved choice would materially change product behavior, persistence,
-  compatibility, security, cost, destructive action, or external state. State
-  low-risk reversible assumptions and continue.
-- Scale planning, rollback, and verification to the blast radius. Architecture,
-  persistence or migration, public protocol, security or authority, release,
-  destructive, and external-state changes require an explicit plan and
-  alignment on unresolved material decisions.
-- Once direction and success criteria are settled, implement, verify, document,
-  and clean up the accepted scope without pausing for routine reversible choices.
-- Choose methods to fit the evidence and risk. Plans, tests, prototypes, skills,
-  tools, and delegation are techniques, not ceremony; the coordinating agent
-  owns integration and the completion claim.
+- Keep read-only requests read-only. Before mutation, establish the outcome,
+  source of truth, affected contracts or data, and observable success criteria.
+- Investigate facts available locally or through tools. Ask only about unresolved
+  choices affecting behavior, persistence, compatibility, security, cost,
+  destructive actions, or external state; state low-risk reversible assumptions
+  and proceed.
+- Match planning, rollback, and evidence to risk. Architecture, persistence or
+  migration, public protocol, security or authority, release, destructive, and
+  external-state changes require an explicit plan and agreement on unresolved
+  material decisions.
+- Once scope and success criteria are settled, implement, verify, document, and
+  clean up without pausing for routine reversible choices. The coordinating
+  agent owns integration and the completion claim; choose tools and delegation
+  to fit the work.
 - Use Codex Goal tracking only when the user explicitly requests it.
 
 An explicit request to build, continue, or finish an accepted Analytix delivery
@@ -67,20 +65,17 @@ rewrite one source to conceal drift or treat tracker state as product evidence.
 
 ## Apply Engineering Judgment
 
-- Prefer the simplest complete solution. Make a small vertical slice when it
-  can prove the behavior, but cross every producer, consumer, migration, and
-  public seam that the contract actually requires.
-- Keep every intentional change traceable to the request, an accepted
-  invariant, necessary propagation, verification, or cleanup caused by the
-  change. Avoid speculative features and abstractions; preserve unrelated user
-  work and existing style.
+- Prefer the simplest complete solution. Cross the producers, consumers,
+  migrations, and public seams required by the contract. Keep changes traceable
+  to the request, accepted invariants, necessary propagation, evidence, or
+  caused cleanup; preserve unrelated work and style, and avoid speculative scope.
 - For diagnosis, first pursue a tight signal that can detect the reported
   symptom. Reproduce and minimize when feasible, test falsifiable hypotheses,
   and rerun the signal after a fix. If trustworthy reproduction is unavailable,
   separate observations from hypotheses and state what evidence is missing.
-- Verify behavior at the narrowest useful public seam. Tests are one kind of
-  evidence; select additional runtime, UI, packaging, migration, or operator
-  evidence when those surfaces determine success.
+- Verify at the narrowest useful public seam. Use regression tests for defects
+  and runtime, UI, packaging, migration, or operator evidence when those surfaces
+  determine success. Passing focused checks does not establish wider acceptance.
 - Never make a gate pass by weakening, bypassing, skipping, or misclassifying
   what it protects. Update it only when the accepted contract changes;
   otherwise report the baseline failure or verification gap honestly.
@@ -91,9 +86,8 @@ rewrite one source to conceal drift or treat tracker state as product evidence.
 - Treat IPC, HTTP/SSE, filesystems, settings, provider responses, migration
   input, user-controlled content, and external tool output as untrusted
   boundaries.
-- Review the final diff separately against the request or accepted spec and
-  repository standards. Simplicity is a judgment about behavior and
-  maintainability, not an arbitrary line-count target.
+- Review the final diff against the request or accepted spec and repository
+  standards. Judge simplicity by behavior and maintainability, not line count.
 - Current architecture is a baseline, not an immutable design. A superseding
   direction may replace it when the user accepts the target and the change
   accounts for contracts, compatibility or migration, security, rollback, and

@@ -1244,7 +1244,6 @@ describe('electron-builder Analytix packaging', () => {
 
   it('keeps the Windows backend Python runtime source reproducible', () => {
     const script = readFileSync(join(process.cwd(), 'scripts/build-windows-backend-runtime-assets.cjs'), 'utf8')
-    const backendManager = readFileSync(join(process.cwd(), 'src/main/data-analysis/backend-manager.ts'), 'utf8')
     const nativeRuntimeIntegrity = readFileSync(join(process.cwd(), 'src/main/data-analysis/native-runtime-integrity.ts'), 'utf8')
     const pythonRuntimeIntegrity = readFileSync(join(process.cwd(), 'src/main/data-analysis/python-runtime-integrity.ts'), 'utf8')
     const nativeRuntimePaths = readFileSync(join(process.cwd(), 'src/main/data-analysis/native-runtime-paths.ts'), 'utf8')
@@ -1278,17 +1277,6 @@ describe('electron-builder Analytix packaging', () => {
     expect(script).not.toContain('api.github.com/repos/astral-sh/python-build-standalone/releases/latest')
     expect(script).toContain("'7zip-bin', 'win', 'x64', '7za.exe'")
     expect(script).toContain('analytix-archive-extractor-manifest.json')
-    expect(backendManager).toContain('data_analysis_native_authority_unavailable')
-    expect(backendManager).not.toContain('node:child_process')
-    expect(backendManager).not.toContain('verifyRuntimeNativeComponent')
-    expect(backendManager).not.toContain('verifyPackagedPythonBundle')
-    expect(backendManager).not.toContain('sanitizePackagedNativeEnvironment')
-    expect(backendManager).not.toContain('ANALYTIX_DATA_ANALYSIS_PYTHON')
-    expect(backendManager).not.toContain('ANALYTIX_DATA_ANALYSIS_BACKEND_DIR')
-    expect(backendManager).not.toContain('ANALYTIX_DATA_ENGINE_BIN')
-    expect(backendManager).not.toContain('ANALYTIX_ANALYSIS_COMPUTE_BIN')
-    expect(backendManager).not.toContain('ANALYTIX_IMPORT_ACCELERATOR_BIN')
-    expect(backendManager).not.toContain('ANALYTIX_CLEANING_OPS_BIN')
     for (const integritySource of [nativeRuntimeIntegrity, pythonRuntimeIntegrity]) {
       expect(integritySource).not.toContain('node:child_process')
       expect(integritySource).not.toContain('spawnSync(')
