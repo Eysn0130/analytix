@@ -130,6 +130,17 @@ corpus 与实际完整指南返回 payload 分开计数，register 增量是 cor
 关闭/错误身份/重试/并发及冷导入、caught 副作用、两 packaged 态、lease
 覆盖保留；反向关闭及五类副作用在新测试上再次 RED，生产 blob 恢复一致。
 
+在 `aa76582cc3e66af5c5b3609d0bd9d9bee535ff1f` 上，packaged Milestone A
+测试的八处 Git 仓库种子声明收敛为一处本地 fixture，各场景仍独立建库和清理；
+完整 test owner 含新增 helper/import 从 567,614 降至 565,458 字节（-2,156），
+生产 owner 的读取需求未减少。前后实际发现的 179 个 ID 相同，选定 8/8 通过，
+18 处断言原文不变，171 项未执行；web/node typecheck 通过，独立只读复核无缺陷。
+同进程快照缺失、消费后失败/replay、目标隔离、dirty/prepackaged、symlink 和
+Git closure 边界保留。固定比较的 10 个完整文件基线为 823,568 字节；另读的
+CI、validation-command、packaging-config 测试共 210,352 字节为定位/复核输入，
+不能省略为全任务成本。小 receipt `analytix-milestone-source-fixture-{before,after}-20260930.json`
+分别绑定文件哈希、register 增量和验证结果，不推导全套测试、token、速度或发布结论。
+
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
 
 当前交接与矩阵的 2026-09-27 叙述已迁入既有
