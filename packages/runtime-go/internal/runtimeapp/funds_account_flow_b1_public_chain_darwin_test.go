@@ -957,6 +957,10 @@ type b1ReferenceFlow struct {
 }
 
 func b1ReferenceFlowFromCSV(t *testing.T, source []byte) b1ReferenceFlow {
+	return b1ReferenceFlowFromCSVInWindow(t, source, "2026-08-27 ")
+}
+
+func b1ReferenceFlowFromCSVInWindow(t *testing.T, source []byte, datePrefix string) b1ReferenceFlow {
 	t.Helper()
 	rows, err := csv.NewReader(bytes.NewReader(source)).ReadAll()
 	if err != nil || len(rows) < 2 {
@@ -980,7 +984,7 @@ func b1ReferenceFlowFromCSV(t *testing.T, source []byte) b1ReferenceFlow {
 	var inflow, outflow big.Int
 	count := 0
 	for _, row := range rows[1:] {
-		if row[account] != rev14PrivateAccount || !strings.HasPrefix(row[timestamp], "2026-08-27 ") {
+		if row[account] != rev14PrivateAccount || !strings.HasPrefix(row[timestamp], datePrefix) {
 			continue
 		}
 		if row[currency] != "CNY" {
@@ -1034,6 +1038,14 @@ func b1ReferenceMinorUnits(value string) (*big.Int, bool) {
 }
 
 func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) {
+	material := b1AssertPreparedFlowValues(t, record, reference)
+	binding := material.AcceptedSlotSourceBindings[0]
+	if binding.Field != domainevidence.AcceptedSlotSourceFieldAccountV1 || binding.SourceRowNumber != 1 || len(binding.FactIDs) != 3 || len(record.ReceiptDraft.SourceRecordIDs) != 1 || record.ReceiptDraft.SourceRecordIDs[0] != binding.SourceRecordID {
+		t.Fatal("B1 native account aggregate lost exact original row/field lineage")
+	}
+}
+
+func b1AssertPreparedFlowValues(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) domainevidence.CanonicalEvidenceMaterial {
 	t.Helper()
 	material, err := domainevidence.ParseCanonicalEvidenceMaterial(record.CanonicalEvidence)
 	if err != nil || len(material.Facts) != 3 || len(material.AcceptedSlotSourceBindings) != 1 {
@@ -1053,10 +1065,7 @@ func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSe
 	if values["in"] != reference.inflowMinor || values["out"] != reference.outflowMinor || values["count"] != fmt.Sprint(reference.transactionCount) {
 		t.Fatal("B1 native exact minor units or transaction count changed")
 	}
-	binding := material.AcceptedSlotSourceBindings[0]
-	if binding.Field != domainevidence.AcceptedSlotSourceFieldAccountV1 || binding.SourceRowNumber != 1 || len(binding.FactIDs) != 3 || len(record.ReceiptDraft.SourceRecordIDs) != 1 || record.ReceiptDraft.SourceRecordIDs[0] != binding.SourceRecordID {
-		t.Fatal("B1 native account aggregate lost exact original row/field lineage")
-	}
+	return material
 }
 
 func b1EvolvedCSV(t *testing.T) []byte {

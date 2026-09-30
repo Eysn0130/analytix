@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	caseentityapp "analytix.local/runtime-go/internal/app/caseentity"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
@@ -23,14 +24,21 @@ import (
 )
 
 // Real Go import/DSV2/Host/native/Provider/Final Gate/local display/reopen. The
-// native generation is the explicitly admitted historical one used by B1;
+// native generation is bound to the selected input's sealed source identity;
 // package admission and Provider are synthetic, so this is not installation QA.
 func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 	source := deliveryCNYCSV(t)
 	sourceHash := domainsecurity.SHA256Hex(source)
+	reference := b1ReferenceFlowFromCSVInWindow(t, source, "2026-09-")
 	t.Logf("separately derived Go CNY source sha256=%s", sourceHash)
 	var mu sync.Mutex
 	calls, semantics := 0, 0
+	correctSemantics := 0
+	firstContextBytes, secondContextBytes := 0, 0
+	firstRequestBytes, secondRequestBytes, firstInputBytes, secondInputBytes := 0, 0, 0, 0
+	var firstRoles, secondRoles map[string]int
+	secondHasCurrentClaim := false
+	var firstClaimDigests []string
 	model := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 		if err != nil || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-only" {
@@ -42,20 +50,89 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		mu.Lock()
 		calls++
 		call := calls
+		if call == 1 || call == 3 {
+			var request struct {
+				Messages []struct {
+					Content string `json:"content"`
+					Role    string `json:"role"`
+				} `json:"messages"`
+			}
+			if json.Unmarshal(body, &request) != nil {
+				t.Error("invalid two-thread Provider request")
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(body, &fields) != nil {
+				t.Error("invalid complete Provider request")
+			}
+			inputBytes, err := json.Marshal(map[string]json.RawMessage{"messages": fields["messages"], "tools": fields["tools"]})
+			if err != nil {
+				t.Error("invalid complete model input")
+			}
+			roles := make(map[string]int)
+			for _, message := range request.Messages {
+				roles[message.Role]++
+				if message.Role != "system" && message.Role != "developer" && message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
+					t.Error("unknown Provider message role")
+				}
+				if !strings.Contains(message.Content, "<analytix_host_verified_case_entity_semantics>") {
+					continue
+				}
+				if message.Role != "user" {
+					t.Error("case context attached to an unexpected role")
+				}
+				if call == 1 {
+					firstContextBytes += len(message.Content)
+				} else {
+					secondContextBytes += len(message.Content)
+					_, tail, _ := strings.Cut(message.Content, "<analytix_host_verified_case_entity_semantics>")
+					semanticBody, _, _ := strings.Cut(tail, "</analytix_host_verified_case_entity_semantics>")
+					var semantic struct {
+						Longitudinal caseentityapp.ProviderIngressLongitudinalStateV1 `json:"longitudinal"`
+					}
+					if json.Unmarshal([]byte(strings.TrimSpace(semanticBody)), &semantic) != nil {
+						t.Error("invalid case semantic JSON")
+					}
+					matched := 0
+					for _, digest := range firstClaimDigests {
+						for _, item := range semantic.Longitudinal.Items {
+							if item.Digest == digest && item.Kind == caseentityapp.ProviderIngressLongitudinalCurrentVerifiedFactV1 &&
+								item.Currentness == "current" && item.InvestigationState == "confirmed" && item.EvidenceReferenceCount == 1 {
+								matched++
+							}
+						}
+					}
+					secondHasCurrentClaim = len(firstClaimDigests) == 3 && matched == 3
+				}
+			}
+			if roles["user"] == 0 {
+				t.Error("Provider request has no user input")
+			}
+			if call == 1 {
+				firstRequestBytes, firstInputBytes, firstRoles = len(body), len(inputBytes), roles
+			} else {
+				secondRequestBytes, secondInputBytes, secondRoles = len(body), len(inputBytes), roles
+			}
+		}
 		mu.Unlock()
 		data := deliveryProviderSemantics(t, body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		if len(data) > 0 {
-			if len(data) != 1 || data[0].InflowMinor != "1301001" || data[0].OutflowMinor != "120060" || data[0].TransactionCount != 7 || !data[0].AggregateComplete || !data[0].EvidenceRowsComplete || data[0].EvidenceTransactionCount != 7 {
-				t.Error("final serialized Provider facts differ from the hand-authored vector")
+			correct := len(data) == 1 && data[0].InflowMinor == reference.inflowMinor && data[0].OutflowMinor == reference.outflowMinor &&
+				data[0].TransactionCount == uint64(reference.transactionCount) && data[0].AggregateComplete &&
+				data[0].EvidenceRowsComplete && data[0].EvidenceTransactionCount == uint64(reference.transactionCount)
+			if !correct {
+				t.Error("final serialized Provider facts differ from independent exact CSV arithmetic")
 			}
 			mu.Lock()
 			semantics++
+			if correct {
+				correctSemantics++
+			}
 			mu.Unlock()
 			runtimeOptionalLifecycleModelResponseV1(w, "", nil, "合成账户流水分析完成。")
 			return
 		}
-		if call > 2 {
+		if call > 4 {
 			t.Error("unexpected repeat without native semantics")
 			runtimeOptionalLifecycleModelResponseV1(w, "", nil, "停止合成验证。")
 			return
@@ -114,6 +191,75 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			t.Fatalf("actual Provider sequence calls=%d semantics=%d", beforeCalls, beforeSemantics)
 		}
 		display()
+		for _, body := range b1PrivateCASRecords(t, filepath.Join(config.DataDir, "private", "accepted-finals", "records")) {
+			record, err := domainevidence.ParsePrivateAcceptedFinalRecord(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.SecurityContext.ThreadID == threadID && record.SecurityContext.TurnID == turnID {
+				mu.Lock()
+				for _, claim := range record.Envelope.Claims {
+					firstClaimDigests = append(firstClaimDigests, claim.RecordDigest)
+				}
+				mu.Unlock()
+			}
+		}
+		// Independent B selects the same account in the same project. Its first
+		// request must receive A's typed currentness/evidence metadata, while its
+		// numerical answer still requires a fresh authorized native query.
+		secondThread := request(http.MethodPost, "/v1/threads", map[string]any{"title": "Synthetic longitudinal B", "workspace": workspace, "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
+		secondID := contracts.StringField(secondThread, "id")
+		secondStart := request(http.MethodPost, "/v1/threads/"+secondID+"/turns", map[string]any{"prompt": "继续核对银行账号 " + rev14PrivateAccount + " 在二〇二六年九月的收支。", "mode": "agent", "async": true, "approvalPolicy": "auto", "sandboxMode": "workspace-write"}, http.StatusAccepted)
+		secondTurnID := contracts.StringField(secondStart, "turnId")
+		driver.waitTurn(secondID, secondTurnID, "longitudinal-b")
+		secondTurn := b1WaitTerminal(t, client, driver.baseURL(), secondID, secondTurnID)
+		secondFinal, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(secondTurn["acceptedFinalView"])
+		if err != nil || secondTurn["status"] != "completed" || secondFinal.Variant != domainevidence.EvidenceBackedAnswer || secondFinal.ReceiptMetadata.Count != 1 {
+			t.Fatal("independent B did not finalize its current native evidence")
+		}
+		mu.Lock()
+		beforeCalls, beforeSemantics = calls, semantics
+		bHasCurrentClaim, aBytes, bBytes := secondHasCurrentClaim, firstContextBytes, secondContextBytes
+		aRequest, bRequest, aInput, bInput, correct := firstRequestBytes, secondRequestBytes, firstInputBytes, secondInputBytes, correctSemantics
+		aRoles, bRoles := firstRoles, secondRoles
+		mu.Unlock()
+		if beforeCalls != 4 || beforeSemantics != 2 {
+			t.Fatalf("two-thread Provider sequence calls=%d semantics=%d", beforeCalls, beforeSemantics)
+		}
+		if !bHasCurrentClaim {
+			t.Error("independent raw B request omitted A's current verified claim and evidence binding")
+		}
+		if aBytes == 0 || bBytes == 0 {
+			t.Error("two-thread serialized Provider context measurement is missing")
+		}
+		var nativePreparations []domainevidence.PreparedEvidenceSettlement
+		for _, body := range b1PrivateCASRecords(t, filepath.Join(config.DataDir, "private", "evidence-settlements", "prepared")) {
+			record, err := domainevidence.ParsePreparedEvidenceSettlement(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b1AssertPreparedFlowValues(t, record, reference)
+			nativePreparations = append(nativePreparations, record)
+			if record.SecurityContext.ThreadID == threadID {
+				b1AssertActualFinal(t, config.DataDir, record, final.AcceptedFinalDigest, true)
+			} else if record.SecurityContext.ThreadID == secondID {
+				b1AssertActualFinal(t, config.DataDir, record, secondFinal.AcceptedFinalDigest, true)
+			} else {
+				t.Fatal("native evidence came from another thread")
+			}
+		}
+		if len(nativePreparations) != 2 || nativePreparations[0].SecurityContext.ThreadID == nativePreparations[1].SecurityContext.ThreadID ||
+			nativePreparations[0].SecurityContext.DatasetSnapshotID != nativePreparations[1].SecurityContext.DatasetSnapshotID ||
+			nativePreparations[0].SecurityContext.CaseBindingHash != nativePreparations[1].SecurityContext.CaseBindingHash ||
+			nativePreparations[0].ReceiptID == nativePreparations[1].ReceiptID {
+			t.Fatal("A/B evidence scopes or receipts were rebound")
+		}
+		firstMaterial, _ := domainevidence.ParseCanonicalEvidenceMaterial(nativePreparations[0].CanonicalEvidence)
+		secondMaterial, _ := domainevidence.ParseCanonicalEvidenceMaterial(nativePreparations[1].CanonicalEvidence)
+		if firstMaterial.AcceptedSlotSourceBindings[0].EntityReference != secondMaterial.AcceptedSlotSourceBindings[0].EntityReference {
+			t.Fatal("A/B selected different source entities")
+		}
+		t.Logf("two-thread offline: request_json_bytes A=%d B=%d; model_messages_tools_json_bytes A=%d B=%d; roles A=%v B=%v; context_message_bytes A=%d B=%d; provider_requests_with_native_semantics=%d; signed_native_preparations=%d; exact_native_semantic_requests=%d/%d; current A metadata in B=%t; SQL count unmeasured", aRequest, bRequest, aInput, bInput, aRoles, bRoles, aBytes, bBytes, beforeSemantics, len(nativePreparations), correct, beforeSemantics, bHasCurrentClaim)
 		request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
 		t.Log("fresh thread-detail hydration passed before reopen")
 		driver.reopen()

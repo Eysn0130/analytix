@@ -216,6 +216,12 @@ func TestInitialCaseAccountIngressHTTPRetryPrivacyAndDatasetStalenessIsAdditive(
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, message := range ordinary.Messages {
+		if message.Role == "user" && (strings.Contains(message.Content, "<analytix_host_verified_case_entity_semantics>") ||
+			strings.Contains(message.Content, "<analytix_host_case_investigation_context_v1>")) {
+			t.Fatal("ordinary lane retained a protected host case payload after DSV2 revocation")
+		}
+	}
 	if strings.Contains(string(ordinaryMessages), rawAccount) ||
 		domaincaseentity.ContainsReferenceCandidateV1(string(ordinaryMessages)) ||
 		strings.Contains(string(ordinaryMessages), domaincaseentity.ReferencePrefixV1) {
@@ -565,7 +571,39 @@ func TestCaseLongitudinalContinuityUsesProductionHTTPCompositionAcrossRestartFor
 		}
 	}
 
-	// Reopen the real caseentity CAS before creating the independent thread.
+	// Reuse the live caseentity CAS for an independent raw-input thread first.
+	// Source-exact input must recover the same bounded owner state as an alias;
+	// compiling the new private ingress must not discard A's evidence metadata.
+	rawIndependent := createThread(t, serverA.URL, workspaceA)
+	before = len(providerA.Requests())
+	startTurn(t, handlerA, serverA.URL, rawIndependent, "继续分析银行账号 "+rawAccount+" 的资金流。")
+	assertLatestProviderAliases(t, providerA, before, "acct:1")
+	t.Logf("independent raw ingress provider prompt bytes=%d", len(lastProviderStepUserPrompt(providerA.Requests()[before].Messages)))
+	rawIndependentPrompt := assertLatestProviderLongitudinal(t, providerA,
+		originContinuationDigest, evidenceReceipt.ReceiptDigest, claim.RecordDigest)
+	_, semanticTail, _ := strings.Cut(rawIndependentPrompt, "<analytix_host_verified_case_entity_semantics>")
+	semanticBody, _, _ := strings.Cut(semanticTail, "</analytix_host_verified_case_entity_semantics>")
+	var semantic struct {
+		Longitudinal caseentityapp.ProviderIngressLongitudinalStateV1 `json:"longitudinal"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(semanticBody)), &semantic); err != nil {
+		t.Fatal(err)
+	}
+	matchedClaim := 0
+	for _, item := range semantic.Longitudinal.Items {
+		if item.Digest != claim.RecordDigest {
+			continue
+		}
+		matchedClaim++
+		if item.InvestigationState != domaincaseentity.InvestigationOpenV1 || item.Kind != caseentityapp.ProviderIngressLongitudinalEvidenceClaimReferenceV1 {
+			t.Fatal("raw independent ingress promoted the unresolved owner claim")
+		}
+	}
+	if matchedClaim != 1 {
+		t.Fatal("raw independent ingress lost the exact unresolved owner claim")
+	}
+
+	// Reopen the real caseentity CAS before the independent alias-free thread.
 	// The second turn does not contain an alias or complete identifier.
 	if closer, ok := activeStoreA.Store.(interface{ Close() error }); !ok || closer.Close() != nil {
 		t.Fatal("close caseentity store before restart")

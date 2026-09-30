@@ -2092,6 +2092,16 @@ func (service *Service) CompileAccountIngressV1(
 			if persistErr != nil {
 				return persistErr
 			}
+			// Recover only an existing case index under this current lease. Cold
+			// ingress still establishes its index through the normal loop owner.
+			var longitudinal ProviderIngressLongitudinalStateV1
+			index, indexErr := service.ensureCaseLongitudinalIndexCurrentExactV1(leaseContext, input.SecurityContext)
+			if indexErr == nil {
+				longitudinal, indexErr = providerIngressLongitudinalStateFromIndexV1(index)
+			}
+			if indexErr != nil && !errors.Is(indexErr, ErrPrivateStateNotFound) {
+				return indexErr
+			}
 			compiled = AccountIngressCompilationV1{
 				Status:               AccountIngressCompilationStatusPersistedV1,
 				PublicText:           publicText,
@@ -2103,8 +2113,9 @@ func (service *Service) CompileAccountIngressV1(
 					providerIngressDescriptorReferencesV1(providerDescriptors),
 					providerIngressDescriptorAliasesV1(providerDescriptors),
 				),
-				providerProjectionV1: newProviderIngressProjectionV1(
+				providerProjectionV1: newProviderIngressProjectionWithLongitudinalStateV1(
 					providerText,
+					longitudinal,
 					providerDescriptors...,
 				),
 			}

@@ -141,6 +141,14 @@ CI、validation-command、packaging-config 测试共 210,352 字节为定位/复
 不能省略为全任务成本。小 receipt `analytix-milestone-source-fixture-{before,after}-20260930.json`
 分别绑定文件哈希、register 增量和验证结果，不推导全套测试、token、速度或发布结论。
 
+`790b1b140` 基线上的 raw 账户 ingress 修复恢复既有案件纵向索引；冷启动不造索引，
+同一当前 lease、原生实体 descriptor 和受限 projection 保留。owner 回归先 RED、后
+8 项通过；实际 HTTP 连续性及撤权请求回归通过。新增两线程 CNY 数值 fixture
+复用原 Go/native/Final 链和独立整数 oracle，但原生执行仍 blocked：旧输入的 Host
+信任校验失败，`aac3ccef` 包的 Darwin fuse 摘要也不符合当前契约。元数据恢复不含
+金额/笔数复用；完整初始请求字节与请求级数值计数尚待原生执行，不宣称 SQL 次数、
+token、智能或安装验收收益。小 receipt 为 `/private/tmp/analytix-longitudinal-verification-20260930.json`。
+
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
 
 当前交接与矩阵的 2026-09-27 叙述已迁入既有
