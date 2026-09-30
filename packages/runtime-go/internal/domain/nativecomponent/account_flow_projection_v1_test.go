@@ -101,7 +101,7 @@ func TestAccountFlowProjectionSeparatesProviderSemanticsFromExactHostEvidence(t 
 			row.EvidenceRef != capture.rows[index].sourceRecordID ||
 			row.Counterparty.Status != AccountFlowCounterpartyResolvedV1 ||
 			ValidateAccountFlowProviderCounterpartyV1(row.Counterparty) != nil ||
-			row.Counterparty.Alias != domaincaseentity.ModelEntityAliasV1("acct:1") ||
+			row.Counterparty.Alias != domaincaseentity.ModelEntityAliasV1("acct:2") ||
 			row.Counterparty.EntityType != domaincontrolledaccount.ControlledAccountFinancialFieldBankAccountNumberV1 {
 			t.Fatalf("provider evidence reference %d drifted: row=%#v host=%#v", index, row, capture.rows[index])
 		}
@@ -1178,7 +1178,7 @@ func accountFlowProjectionTestCounterpartyResolverV1(caseSeed string) AccountFlo
 		}
 		display, err := domaincaseentity.NewDisplayLabelV1(domaincaseentity.DisplayLabelInputV1{
 			EntityType:    domaincontrolledaccount.ControlledAccountFinancialFieldBankAccountNumberV1,
-			StableOrdinal: 1,
+			StableOrdinal: 2,
 			SafeSuffix:    safeSuffix,
 			Institution:   bankInstitution,
 			AccountType:   AccountFlowCounterpartyAccountTypeV1,

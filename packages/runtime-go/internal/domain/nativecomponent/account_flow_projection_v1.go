@@ -678,6 +678,11 @@ func ProjectAnalyzeAccountFlowsResultV1(
 			if aliasErr != nil {
 				return ErrResultInvalid
 			}
+			// The subject and counterparty share the case-scoped alias vocabulary.
+			// Equal aliases must denote the same authority reference in both roles.
+			if (string(alias) == arguments.subjectAlias) != (string(reference) == arguments.subjectRef) {
+				return ErrResultInvalid
+			}
 			if previous, exists := resolvedReferenceByAccount[canonicalAccount]; exists && previous != reference {
 				return ErrResultInvalid
 			}

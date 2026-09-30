@@ -8,8 +8,9 @@ Resume with the [canonical handover](handovers/README.md) and fresh Git state.
 
 ## Current candidate and evidence
 
-Canonical HEAD is `c2cd3e29174e701569220e1c39076e0acff24a53`, tree
-`55893ead1fc3a6bce73ede22a251005a14810532`, on the existing PR28 branch.
+The inherited source checkpoint is `c2cd3e29174e701569220e1c39076e0acff24a53`, tree
+`55893ead1fc3a6bce73ede22a251005a14810532`, on the existing PR28 branch. Entry
+routing was committed locally as `39250cafa`; refresh current HEAD from Git.
 The inherited 34 tracked modifications and 26 untracked files include a
 **partial, uncommitted host-local B1 candidate**. HEAD alone does not identify
 that working-tree candidate; no frozen source or installation is claimed for it.

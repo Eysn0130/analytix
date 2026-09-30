@@ -10,7 +10,7 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 | 项目 | 当前观察与边界 |
 | --- | --- |
-| HEAD / tree | `c2cd3e29174e701569220e1c39076e0acff24a53` / `55893ead1fc3a6bce73ede22a251005a14810532`；延迟 bundled Funds activation，普通 Core 不因专业物化等待而阻塞。源码行为仍须相应验证。 |
+| 继承 HEAD / tree | `c2cd3e29174e701569220e1c39076e0acff24a53` / `55893ead1fc3a6bce73ede22a251005a14810532`；延迟 bundled Funds activation。入口整理已在 `39250cafa` 本机提交；实时 HEAD 以 Git 为准。 |
 | writer | 本轮唯一主施工线程 `01a0f08d-4ef4-7f82-a30b-8a94c014ac26`，保存的 local analytix 项目，实际 `gpt-6.1-sol / max`。协调桥只读。其他历史 worktree 不在本轮写入范围；不能把残留锁或进程等同于 active writer。 |
 | 继承 dirty | 开始时 34 tracked 修改、26 untracked 文件、0 staged；主要为 B1 host-local，另有用户 runbook 和 QA 草稿。保留原字节，按 hunk 来源审查，不 reset/clean/stash/跨分支迁移。该数量是开始快照，后续施工会增加任务自有修改。 |
 | 最新安装证据 | 精确 SOURCE `7dc07bb0973e2c5e6a5e5c9235bd585c9c3a1495`，两轮隔离合成 K10 正常退出、零残留；`032b8a147` 是 observer 修正，产品字节未改变。见[准确诊断](../qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md)。不转移到 c2cd/B1。 |
@@ -19,10 +19,12 @@ branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/E
 
 ## 下一依赖有效动作
 
-1. 本轮先修薄入口，并运行 `node scripts/validation-burden.mjs`。报告只做
+1. 本轮已在 `39250cafa` 修薄入口，并运行 `node scripts/validation-burden.mjs`。报告只做
    stdlib 只读盘点，基线与 matched read 范围见[小 manifest](../validation-burden-baseline.json)；
    它不选掉测试，不宣称 token、时间、正确率或分析收益已改善。
-2. 保留并核查 host-local 未提交合同与适用 OpenSpec；在隔离数据上补最小缺失
+2. [投影保真源码检查点](../qa/pr28-account-flow-projection-fidelity-2026-09-29.md)
+   已记录主体/对手方身份错配修复、独立金额真值与调用方验证；不等于分析收益。
+   保留并核查 host-local 未提交合同与适用 OpenSpec；在隔离数据上补最小缺失
    行为和独立语义 oracle。所有安全/撤权/恢复检查针对实际稳定候选；普通
    Agent 不依赖 Funds 初始化。命令先按 [runbook](../development-runbook.md)
    同 shell 加载缓存 helper，任务资源隔离；不触碰既有用户 profile。
