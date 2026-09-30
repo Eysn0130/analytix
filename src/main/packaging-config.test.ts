@@ -1789,7 +1789,8 @@ describe('electron-builder Analytix packaging', () => {
     ], {
       cwd: process.cwd(),
       env: process.env,
-      encoding: 'utf8'
+      encoding: 'utf8',
+      timeout: 15_000
     })
 
     expect(drifted.status).toBe(1)
@@ -1813,7 +1814,8 @@ describe('electron-builder Analytix packaging', () => {
     ], {
       cwd: process.cwd(),
       env: process.env,
-      encoding: 'utf8'
+      encoding: 'utf8',
+      timeout: 15_000
     })
     expect(valid.status).toBe(0)
     const result = JSON.parse(valid.stdout)
@@ -1829,7 +1831,7 @@ describe('electron-builder Analytix packaging', () => {
     })
     expect(result.archive).toMatchObject({ path: validArchive })
     expect(existsSync(validArchive)).toBe(true)
-    const archiveListing = spawnSync('tar', ['-tzf', validArchive], { encoding: 'utf8' })
+    const archiveListing = spawnSync('tar', ['-tzf', validArchive], { encoding: 'utf8', timeout: 5_000 })
     expect(archiveListing.status).toBe(0)
     const archiveRoot = `${canonical.packageId}/`
     const archiveEntries = archiveListing.stdout.split('\n').filter(Boolean)
@@ -1844,7 +1846,7 @@ describe('electron-builder Analytix packaging', () => {
         source: { source: 'local', path: `./plugins/${canonical.packageId}` }
       })
     ])
-  })
+  }, 60_000)
 
   it('requires canonical Funds public UI contributions to resolve to stable regular files', () => {
     const root = tempRoot()
@@ -2014,7 +2016,8 @@ describe('electron-builder Analytix packaging', () => {
     ], {
       cwd: goModuleRoot,
       env: { ...process.env, ANALYTIX_DECLARATION_V1_CORPUS: corpusPath },
-      encoding: 'utf8'
+      encoding: 'utf8',
+      timeout: 30_000
     })
     expect(
       goConformance.status,
@@ -2038,7 +2041,7 @@ describe('electron-builder Analytix packaging', () => {
         attack.name
       ).toThrow(/funds_plugin_declaration_v1_invalid|funds_plugin_json_invalid/)
     }
-  })
+  }, 60_000)
 
   it('requires the declared funds MCP entrypoint to be the fixed staged regular file', () => {
     const canonicalRoot = join(process.cwd(), 'plugins', 'analytix-fund-analysis')
@@ -3620,8 +3623,9 @@ describe('electron-builder Analytix packaging', () => {
       ...createMacPackContext(root),
       arch: 'arm64'
     }
-    const calls: Array<{ command: string; args: string[]; options: { cwd: string; env: NodeJS.ProcessEnv } }> = []
+    const calls: Array<{ command: string; args: string[]; options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number } }> = []
     const chmods: Array<{ path: string; mode: number }> = []
+    const logs: string[] = []
     const moduleCache = join(root, 'go-module-cache')
     mkdirSync(moduleCache, { recursive: true })
     const nativeTrust = {
@@ -3639,7 +3643,8 @@ describe('electron-builder Analytix packaging', () => {
         executable: '/trusted/go/bin/go',
         moduleCache
       },
-      execFileSync(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) {
+      log(message: string) { logs.push(message) },
+      execFileSync(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number }) {
         calls.push({ command, args, options })
         const outputIndex = args.indexOf('-o')
         if (outputIndex >= 0) writeFileSync(args[outputIndex + 1]!, 'runtime-server', { mode: 0o755 })
@@ -3684,7 +3689,52 @@ describe('electron-builder Analytix packaging', () => {
     expect(calls[1]?.options.env.GOARCH).toBe('arm64')
     expect(calls[1]?.options.env.CGO_ENABLED).toBe('0')
     expect(JSON.stringify(calls[1]?.options.env)).not.toContain('CSC_')
+    for (const call of calls) {
+      expect(call.options.timeout).toBeGreaterThan(0)
+      expect(call.options.timeout).toBeLessThanOrEqual(30 * 60 * 1000)
+    }
+    expect(logs).toHaveLength(4)
+    expect(logs[0]).toMatch(/Go module verification started/)
+    expect(logs[1]).toMatch(/Go module verification completed in \d+ ms/)
+    expect(logs[2]).toMatch(/Go runtime compilation started/)
+    expect(logs[3]).toMatch(/Go runtime compilation completed in \d+ ms/)
     expect(chmods).toEqual([{ path: output, mode: 0o755 }])
+  })
+
+  it('reports a failed Go build phase and removes scratch without publishing partial output', () => {
+    for (const failedCommand of ['mod', 'build']) {
+      const root = tempRoot()
+      const context = { ...createMacPackContext(root), arch: 'arm64' }
+      const output = afterPack._internals.bundledGoRuntimeServerPath(context)
+      const moduleCache = join(root, 'go-module-cache')
+      mkdirSync(moduleCache, { recursive: true })
+      mkdirSync(dirname(output), { recursive: true })
+      writeFileSync(output, 'prior-runtime', { mode: 0o755 })
+      const failure = Object.assign(new Error('owned Go command timed out'), { code: 'ETIMEDOUT' })
+      const logs: string[] = []
+      const commands: string[] = []
+
+      expect(() => afterPack._internals.buildBundledGoRuntimeServer(context, {
+        receiptSHA256: 'a'.repeat(64), manifestSHA256: 'b'.repeat(64), targetKey: 'darwin-arm64',
+        signingPolicySHA256: 'c'.repeat(64), signingMode: 'ad-hoc', appleTeamIdentifier: ''
+      }, {
+        toolchain: { key: 'darwin-arm64', executable: '/trusted/go/bin/go', moduleCache },
+        log(message: string) { logs.push(message) },
+        execFileSync(_command: string, args: string[]) {
+          commands.push(args[0]!)
+          const outputIndex = args.indexOf('-o')
+          if (outputIndex >= 0) writeFileSync(args[outputIndex + 1]!, 'partial-runtime', { mode: 0o755 })
+          if (args[0] === failedCommand) throw failure
+        }
+      })).toThrow(failure)
+
+      expect(commands).toEqual(failedCommand === 'mod' ? ['mod'] : ['mod', 'build'])
+      expect(readFileSync(output, 'utf8')).toBe('prior-runtime')
+      expect(readdirSync(dirname(output))).toEqual(['runtime-server'])
+      const phase = failedCommand === 'mod' ? 'module verification' : 'runtime compilation'
+      expect(logs.at(-1)).toMatch(new RegExp(`Go ${phase} failed after \\d+ ms`))
+      expect(logs.at(-1)).not.toContain('completed')
+    }
   })
 
   it('validates the bundled macOS Computer Use helper as Analytix Computer Use', () => {

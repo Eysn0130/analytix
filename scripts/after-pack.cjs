@@ -4275,12 +4275,24 @@ function buildBundledGoRuntimeServer(context, nativeTrust, options = {}) {
     `-X analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry.embeddedAppleTeamIdentifier=${runtimeNativeTrust.appleTeamIdentifier}`
   ].join(' ')
   const cwd = join(__dirname, '..', 'packages', 'runtime-go')
+  const log = options.log || console.log
+  const runGoStep = (phase, args, timeout) => {
+    const started = Date.now()
+    log(`[after-pack] Go ${phase} started (timeout ${timeout} ms).`)
+    try {
+      exec(toolchain.executable, args, { cwd, env: environment, stdio: 'inherit', timeout })
+    } catch (error) {
+      log(`[after-pack] Go ${phase} failed after ${Date.now() - started} ms.`)
+      throw error
+    }
+    log(`[after-pack] Go ${phase} completed in ${Date.now() - started} ms.`)
+  }
   try {
-    exec(toolchain.executable, ['mod', 'verify'], { cwd, env: environment, stdio: 'inherit' })
-    exec(toolchain.executable, [
+    runGoStep('module verification', ['mod', 'verify'], 5 * 60 * 1000)
+    runGoStep('runtime compilation', [
       'build', '-mod=readonly', '-buildvcs=false', '-trimpath', '-tags', 'analytix_prod',
       '-ldflags', ldflags, '-o', temporaryOutput, './cmd/runtime-server'
-    ], { cwd, env: environment, stdio: 'inherit' })
+    ], 30 * 60 * 1000)
     const outputStat = lstatSync(temporaryOutput)
     if (!outputStat.isFile() || outputStat.isSymbolicLink() || outputStat.size <= 0 || outputStat.mode & 0o022) {
       throw new Error('[after-pack] Hermetic Go build did not produce a trusted regular runtime-server')
