@@ -37,6 +37,13 @@ type FakeRenderer = EventEmitter & {
 }
 
 const originalRendererUrl = process.env.ELECTRON_RENDERER_URL
+const fileEffects = ['mkdir', 'writeFile', 'appendFile', 'rm', 'rename', 'unlink', 'copyFile']
+const moduleEffects: [string, string[]][] = [
+  ['node:child_process', ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']],
+  ['node:fs/promises', fileEffects],
+  ['node:fs', [...fileEffects, ...fileEffects.map((name) => `${name}Sync`), 'createWriteStream']],
+  ['node:http', ['request', 'get']], ['node:https', ['request', 'get']]
+]
 let nextRendererID = 100
 
 function fakeRenderer(url = 'http://127.0.0.1:5173/app'): FakeRenderer {
@@ -59,9 +66,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
-  for (const module of ['electron', 'node:child_process', 'node:fs', 'node:fs/promises', 'node:http', 'node:https']) {
-    vi.doUnmock(module)
-  }
+  for (const module of ['electron', ...moduleEffects.map(([name]) => name)]) vi.doUnmock(module)
   if (originalRendererUrl === undefined) Reflect.deleteProperty(process.env, 'ELECTRON_RENDERER_URL')
   else Reflect.set(process.env, 'ELECTRON_RENDERER_URL', originalRendererUrl)
 })
@@ -87,30 +92,19 @@ describe('data analysis native authority quarantine', () => {
       effects.set(name, marker)
       return marker
     }
-    const mockEffects = (module: string, methods: string[]) => {
+    const protect = (module: string, actual: Record<string, unknown>, methods: string[]) => ({
+      ...actual, ...Object.fromEntries(methods.map((name) => [name, guard(`${module}.${name}`)]))
+    })
+    for (const [module, methods] of moduleEffects) {
       vi.doMock(module, async () => {
         const actual = await vi.importActual<Record<string, unknown>>(module)
-        const guarded = { ...actual }
-        for (const method of methods) guarded[method] = guard(`${module}.${method}`)
+        const guarded = protect(module, actual, methods)
+        if (module === 'node:fs') {
+          guarded.promises = protect('node:fs.promises', actual.promises as Record<string, unknown>, fileEffects)
+        }
         return { ...guarded, default: guarded }
       })
     }
-    mockEffects('node:child_process', ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'])
-    const fileEffects = ['mkdir', 'writeFile', 'appendFile', 'rm', 'rename', 'unlink', 'copyFile']
-    mockEffects('node:fs/promises', fileEffects)
-    vi.doMock('node:fs', async () => {
-      const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
-      const guarded: Record<string, unknown> = { ...actual }
-      for (const method of [...fileEffects, ...fileEffects.map((name) => `${name}Sync`), 'createWriteStream']) {
-        guarded[method] = guard(`node:fs.${method}`)
-      }
-      guarded.promises = Object.fromEntries(Object.entries(actual.promises).map(([name, value]) => [
-        name, fileEffects.includes(name) ? guard(`node:fs.promises.${name}`) : value
-      ]))
-      return { ...guarded, default: guarded }
-    })
-    mockEffects('node:http', ['request', 'get'])
-    mockEffects('node:https', ['request', 'get'])
     vi.spyOn(Server.prototype, 'listen').mockImplementation(guard('server.listen'))
     vi.spyOn(Socket.prototype, 'connect').mockImplementation(guard('socket.connect'))
     vi.stubGlobal('fetch', guard('fetch'))

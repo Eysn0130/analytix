@@ -64,9 +64,8 @@ sequence recovery, SSE cursor behavior, cleanup, process restart, and renderer
 projection. A single array size, file size, port check, or passing unit test is
 not enough when the reported behavior crosses those seams.
 
-Build the tightest feasible signal for the user's exact symptom, minimize it,
-and rerun it after the change. Persistence work should prove both the live and
-restart paths when restart can change the result.
+Persistence work must prove live and restart paths when restart can change
+the result; use the root diagnosis and verification rules.
 
 ## Validation
 

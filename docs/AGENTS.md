@@ -6,25 +6,17 @@ document as current architecture or acceptance evidence.
 
 ## Separate Authority And Evidence
 
-- Root and nested `AGENTS.md` files govern how agents work; they do not prove
-  product behavior.
-- `docs/analytix/specs/README.md` classifies numbered product specs. Accepted
-  scoped requirements also live in `openspec/specs/<capability>/spec.md`.
-- An active `openspec/changes/<change>/` is a proposal and work plan. It becomes
-  an implementation instruction only when the current request authorizes that
-  change; an archived change is decision history.
-- Current code, tests, package scripts, and reproducible runtime or build
-  results define the as-built worktree.
-- Dated QA, benchmark, upstream, validation, handover, and release documents
-  are snapshots tied to their recorded commit, platform, environment, and
-  command.
+Inherit the root source-of-truth map and report `as-built`, `target` and `gap`
+separately. Guides do not prove behavior; accepted status does not prove
+implementation or fresh validation. Archived OpenSpec changes are decision
+history. Dated evidence also binds its platform and exact command.
+
+Historical/generated inputs include:
 - `docs/legacy/`, `release/legacy/`, `output/`, `dist*/`, package-resource
   copies, and `vendor/` are historical, generated, or vendored inputs unless a
   current source explicitly says otherwise.
 
-If accepted target and current implementation differ, document `as-built`,
-`target`, and `gap` separately. A document cannot remove drift by changing
-tense, and accepted status does not imply implementation or fresh validation.
+A document cannot remove drift by changing tense.
 
 ## Write Durable Documents
 

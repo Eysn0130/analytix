@@ -96,14 +96,17 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
   规范化 module identity 检查保留执行 authority 的架构边界。
   与 native-runtime-paths/packaging 的聚合报告实际发现并通过 79/79，
   其他授权、泄露、平台与聚合门禁不变。
-- 根 `AGENTS.md` 仅合并通用语义；适用链仍为 global + root + 当前 subtree，
-  不读全部 imports/指南，不将安全规则移入历史材料。root 字节为
-  15,830 → 15,467（-363）；global 未修改，scope 指南另计。
-- 固定三文件资源任务的实际返回读取为 4,602 → 7,987 字节，replay 各一
-  次工具调用；cache preflight 后首次行为验证为 20.356s / 8.943s。
-  warm/编译缓存状态未受控，新增测试使工作量不同，不能宣称提速或 token 收益。
-  初次 sandbox cache 失败和整包基线取消（130）另行保留；旧基线 null 未回填。
-  replay 计数不包含初始化、研究、实现、失败与轮询，不当作全部施工成本。
+- 根指南初次只减 363 字节；在 `62aa16969` 冻结基线继续收敛自动适用链，
+  root 15,467 → 13,945，src/go/docs 分别 -565/-73/-581。重复语义依赖
+  已自动读取的 root，不新增全 imports，独立仓库安全守卫保留。
+  global 9,094 不动，常驻 global+root 24,561 → 23,039；scope 按路径追加，
+  不能把本次跨三 scope 的指南总量当作日常常驻。
+- 旧三文件所选文本脚本计数 4,602 → 7,987：app -556、helper +557、test
+  +3,384。app 缺少完整初始化/defer/接管上下文，旧 receipt 未绑定完整
+  返回 payload；不能称为完整需求读取或 Agent 摄入。replay 各一调用，
+  排除初始化/定位/实现/失败/轮询；这些成本并未消失，全任务总量未知。
+  原 cache 失败、基线取消（130）及旧 null 保留。20.356s / 8.943s 的
+  warm/编译缓存未受控，新增测试工作量不同，不推导速度、token 或费用收益。
 - 本切片生产源码净 +1 字节，测试净 +7,086 字节；维护收益是失败处理
   修改点 7 → 1，不能以总 LOC/字节下降代替覆盖或收益。没有新增治理工具。
 
@@ -119,6 +122,13 @@ web/node typecheck 通过；独立只读 review 无具体缺陷。该切片生�
 本机小 receipt 在 `/private/tmp/analytix-debt-resource-matched-{before,after}-20260930.json`
 及 `analytix-quarantine-{red,green}-20260930.json`；前者是明示范围的读取 proxy，
 后者保留五项 RED 与执行式发现结果，不复制大型 inventory。
+
+整改固定 17 个完整必要文件（含新增 helper/测试、适用指南及既有 fixture），
+清单和哈希在 `analytix-debt-cost-frozen-{before,after}-20260930.json`；物理
+corpus 与实际完整指南返回 payload 分开计数，register 增量是 corpus 内的
+治理成本分解，小 receipt 和验证证据另计。测试数据表减少 529 字节，
+关闭/错误身份/重试/并发及冷导入、caught 副作用、两 packaged 态、lease
+覆盖保留；反向关闭及五类副作用在新测试上再次 RED，生产 blob 恢复一致。
 
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
 

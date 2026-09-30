@@ -75,21 +75,19 @@ func TestRuntimeOwnedResourcesCloseInBindingOrderAndRetryOnlyUnfinishedOwners(t 
 		t.Fatal(err)
 	}
 	lifecycle := bound.(interface{ Shutdown(context.Context) error })
-	if err := lifecycle.Shutdown(context.Background()); !errors.Is(err, drainErr) || len(order) != 1 {
-		t.Fatalf("drain failure closed resources: err=%v order=%v", err, order)
-	}
-	if err := lifecycle.Shutdown(context.Background()); !errors.Is(err, closeErr) ||
-		!reflect.DeepEqual(order, []string{"inner", "inner", "first", "middle"}) {
-		t.Fatalf("close failure lost owner/order: err=%v order=%v", err, order)
-	}
-	if err := lifecycle.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := lifecycle.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(order, []string{"inner", "inner", "first", "middle", "middle", "last"}) {
-		t.Fatalf("retry repeated completed owners or skipped pending owners: %v", order)
+	closed := []string{"inner", "inner", "first", "middle", "middle", "last"}
+	for step, want := range []struct {
+		err   error
+		order []string
+	}{
+		{drainErr, []string{"inner"}},
+		{closeErr, []string{"inner", "inner", "first", "middle"}},
+		{nil, closed},
+		{nil, closed},
+	} {
+		if err := lifecycle.Shutdown(context.Background()); !errors.Is(err, want.err) || !reflect.DeepEqual(order, want.order) {
+			t.Fatalf("shutdown step %d: err=%v want=%v order=%v want=%v", step, err, want.err, order, want.order)
+		}
 	}
 }
 
