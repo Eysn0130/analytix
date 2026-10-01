@@ -1410,12 +1410,13 @@ if (runPattern.includes('TestRuntimeServerSideEffectIntentBlocksSecondEquivalent
       writeExecutable(fakeNpm, `#!/usr/bin/env node
 const args = process.argv.slice(2)
 console.error('synthetic child output')
-if (args.includes('--reporter=json')) {
-  console.log(JSON.stringify({ testResults: args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
+if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs')) {
+  const testResults = args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
     name: process.cwd().split(require('node:path').sep).join('/') + '/' + file,
     status: 'passed',
     assertionResults: [{ fullName: 'synthetic selected assertion', status: 'passed' }]
-  })) }))
+  }))
+  console.log(JSON.stringify({ testResults, analytixRun: { reason: 'passed', files: testResults.map(({ name }) => ({ name, state: 'passed' })) } }))
 }
 `)
       writeExecutable(fakePython, '#!/usr/bin/env node\n')
@@ -1494,7 +1495,7 @@ if (args.includes('--reporter=json')) {
     }
   }, 20_000)
 
-  it.each(['passed', 'failed', 'missing', 'cancelled', 'duplicate', 'pending', 'other-file-failed'])
+  it.each(['passed', 'failed', 'missing', 'cancelled', 'cancelled-exit', 'abnormal-exit', 'duplicate', 'pending', 'other-file-failed', 'other-file-failed-missing', 'other-file-failed-pending', 'run-state-missing', 'interrupted-other-file-failed', 'other-file-hook-failed'])
     ('shares each overlapping Vitest file once with %s evidence without losing named gates', (scenario) => {
       const dir = mkdtempSync(join(tmpdir(), 'analytix-product-regression-shared-vitest-'))
       try {
@@ -1515,20 +1516,36 @@ if (args.includes('TestProductRegressionMatrixJSONSnapshot')) {
         writeExecutable(fakeNpm, `#!/usr/bin/env node
 const args = process.argv.slice(2)
 require('node:fs').appendFileSync(${JSON.stringify(marker)}, JSON.stringify(args) + '\\n')
-if (args.includes('--reporter=json')) {
+if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs')) {
   const scenario = ${JSON.stringify(scenario)}
   const sharedFiles = ['src/main/packaging-config.test.ts', 'src/renderer/src/components/settings-section-agents.test.ts']
+  const otherFileFailed = scenario.startsWith('other-file-failed') || scenario === 'interrupted-other-file-failed' || scenario === 'other-file-hook-failed'
   const testResults = scenario === 'missing' ? [] : args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
     name: process.cwd().split(require('node:path').sep).join('/') + '/' + file,
-    status: scenario === 'failed' || (scenario === 'other-file-failed' && !sharedFiles.includes(file)) ? 'failed' : 'passed',
+    status: scenario === 'failed' || (otherFileFailed && !sharedFiles.includes(file)) ? 'failed' : 'passed',
     assertionResults: [
-      { fullName: 'contract first assertion', status: scenario === 'failed' ? 'failed' : scenario === 'pending' ? 'pending' : 'passed' },
+      { fullName: 'contract first assertion', status: scenario === 'failed' || (otherFileFailed && !sharedFiles.includes(file)) ? 'failed' : scenario === 'pending' ? 'pending' : 'passed' },
       { fullName: scenario === 'duplicate' ? 'contract first assertion' : 'contract second assertion', status: 'passed' }
     ]
   }))
-  console.log(JSON.stringify({ testResults }))
+  if (scenario === 'other-file-failed-missing') testResults.pop()
+  if (scenario === 'other-file-failed-pending') testResults.at(-1).assertionResults[1].status = 'pending'
+  if (scenario === 'other-file-hook-failed') {
+    for (const entry of testResults.filter(({ name }) => !sharedFiles.some((file) => name.endsWith(file)))) {
+      entry.message = 'synthetic beforeAll failure'
+      entry.assertionResults.forEach((assertion) => { assertion.status = 'skipped' })
+    }
+  }
+  const reason = scenario === 'cancelled' || scenario === 'cancelled-exit' || scenario === 'interrupted-other-file-failed' ? 'interrupted' : scenario === 'failed' || otherFileFailed ? 'failed' : 'passed'
+  const analytixRun = scenario === 'run-state-missing' ? undefined : {
+    reason, files: testResults.map(({ name, status }, index) => ({
+      name, state: scenario === 'other-file-failed-pending' && index === testResults.length - 1 ? 'pending' : status
+    }))
+  }
+  console.log(JSON.stringify({ testResults, analytixRun }))
   if (scenario === 'cancelled') process.kill(process.pid, 'SIGTERM')
-  if (scenario === 'failed' || scenario === 'other-file-failed') process.exitCode = 1
+  if (scenario === 'failed' || otherFileFailed || scenario === 'cancelled-exit') process.exitCode = 1
+  if (scenario === 'abnormal-exit') process.exitCode = 130
 }
 `)
         writeExecutable(fakePython, '#!/usr/bin/env node\n')
@@ -1542,7 +1559,7 @@ if (args.includes('--reporter=json')) {
         const checks = report.checks as Array<Record<string, any>>
         const calls = readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[])
         const expectedStatus = scenario === 'passed' ? 'passed' : 'failed'
-        const expectedSharedStatus = scenario === 'passed' || scenario === 'other-file-failed' ? 'passed' : 'failed'
+        const expectedSharedStatus = scenario === 'passed' || scenario === 'other-file-failed' || scenario === 'other-file-hook-failed' ? 'passed' : 'failed'
         expect(result.status).toBe(scenario === 'passed' ? 0 : 1)
         expect(checks).toHaveLength(59)
         expect(new Set(checks.map((check) => check.id)).size).toBe(59)

@@ -927,7 +927,7 @@ const commands = [
       'src/main/packaging-config.test.ts',
       'src/main/data-analysis/native-runtime-paths.test.ts',
       '--run',
-      '--reporter=json'
+      '--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'
     ],
     sharedVitestFiles: ['src/main/packaging-config.test.ts'],
     cwd: repoRoot
@@ -954,7 +954,7 @@ const commands = [
       'src/renderer/src/components/settings-section-agents.test.ts',
       'src/renderer/src/agent/analytix-runtime.test.ts',
       '--run',
-      '--reporter=json'
+      '--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'
     ],
     sharedVitestFiles: ['src/renderer/src/components/settings-section-agents.test.ts'],
     cwd: repoRoot
@@ -1199,6 +1199,15 @@ function collectSharedVitestResults(item, result) {
       // npm prefixes and incomplete/cancelled reports cannot prove execution.
     }
   }
+  const expectedNames = item.args.filter((arg) => arg.endsWith('.test.ts'))
+    .map((file) => join(item.cwd, file).replaceAll('\\', '/'))
+  const run = report?.analytixRun
+  const completed = ['passed', 'failed'].includes(run?.reason) &&
+    Array.isArray(run?.files) && run.files.length === expectedNames.length &&
+    report.testResults.length === expectedNames.length && expectedNames.every((name) => (
+      run.files.filter((entry) => entry?.name === name && ['passed', 'failed'].includes(entry.state)).length === 1 &&
+      report.testResults.filter((entry) => entry?.name === name).length === 1
+    ))
   return item.sharedVitestFiles.map((file) => {
     // Vitest reports slash-normalized absolute paths on Windows as well.
     const expectedName = join(item.cwd, file).replaceAll('\\', '/')
@@ -1207,7 +1216,10 @@ function collectSharedVitestResults(item, result) {
       ? matches[0].assertionResults
       : []
     const testIds = assertions.map((entry) => JSON.stringify([file, entry?.fullName]))
-    const passed = !result.error && !result.signal && Number.isInteger(result.status) &&
+    const otherFileFailed = report?.testResults.some((entry) => entry?.name !== expectedName && entry?.status === 'failed')
+    const normalExit = (result.status === 0 && run?.reason === 'passed') ||
+      (result.status === 1 && run?.reason === 'failed' && otherFileFailed)
+    const passed = !result.error && !result.signal && completed && normalExit &&
       assertions.length > 0 && matches[0]?.status === 'passed' &&
       assertions.every((entry) => entry?.status === 'passed' && typeof entry.fullName === 'string' && entry.fullName.length > 0) &&
       new Set(testIds).size === testIds.length
