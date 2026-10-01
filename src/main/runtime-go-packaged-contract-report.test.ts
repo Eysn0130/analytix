@@ -1273,6 +1273,7 @@ process.exit(91)
     try {
       const fakeGo = join(dir, process.platform === 'win32' ? 'go.cmd' : 'go')
       const fakeNpm = join(dir, process.platform === 'win32' ? 'npm.cmd' : 'npm')
+      const fakePython = join(dir, process.platform === 'win32' ? 'python.cmd' : 'python')
       const marker = join(dir, 'commands.txt')
       writeExecutable(fakeGo, `#!/usr/bin/env node
 const fs = require('node:fs')
@@ -1292,11 +1293,13 @@ const args = process.argv.slice(2)
 fs.appendFileSync(${JSON.stringify(marker)}, 'npm ' + args.join(' ') + '\\n')
 process.exit(0)
 `)
+      writeExecutable(fakePython, '#!/usr/bin/env node\n')
 
       const result = spawnSync(process.execPath, ['scripts/runtime-go-product-regression.mjs', '--json'], {
         cwd: process.cwd(),
         env: reportEnv({
           GO: fakeGo,
+          PYTHON: fakePython,
           PATH: `${dir}${delimiter}${process.env.PATH || ''}`
         }),
         encoding: 'utf8',
@@ -1404,7 +1407,17 @@ if (runPattern.includes('TestRuntimeServerSideEffectIntentBlocksSecondEquivalent
   console.log(JSON.stringify({ Action: 'pass', Test: 'TestSyntheticFocusedSelection' }))
 }
 `)
-      writeExecutable(fakeNpm, "#!/usr/bin/env node\nconsole.log('synthetic child output')\n")
+      writeExecutable(fakeNpm, `#!/usr/bin/env node
+const args = process.argv.slice(2)
+console.error('synthetic child output')
+if (args.includes('--reporter=json')) {
+  console.log(JSON.stringify({ testResults: args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
+    name: process.cwd().split(require('node:path').sep).join('/') + '/' + file,
+    status: 'passed',
+    assertionResults: [{ fullName: 'synthetic selected assertion', status: 'passed' }]
+  })) }))
+}
+`)
       writeExecutable(fakePython, '#!/usr/bin/env node\n')
 
       const result = spawnSync(
@@ -1480,6 +1493,80 @@ if (runPattern.includes('TestRuntimeServerSideEffectIntentBlocksSecondEquivalent
       rmSync(dir, { recursive: true, force: true })
     }
   }, 20_000)
+
+  it.each(['passed', 'failed', 'missing', 'cancelled', 'duplicate', 'pending', 'other-file-failed'])
+    ('shares each overlapping Vitest file once with %s evidence without losing named gates', (scenario) => {
+      const dir = mkdtempSync(join(tmpdir(), 'analytix-product-regression-shared-vitest-'))
+      try {
+        const fakeGo = join(dir, process.platform === 'win32' ? 'go.cmd' : 'go')
+        const fakeNpm = join(dir, process.platform === 'win32' ? 'npm.cmd' : 'npm')
+        const fakePython = join(dir, process.platform === 'win32' ? 'python.cmd' : 'python')
+        const marker = join(dir, 'npm-calls.jsonl')
+        writeExecutable(fakeGo, `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args.includes('TestProductRegressionMatrixJSONSnapshot')) {
+  console.log('ANALYTIX_PRODUCT_REGRESSION_MATRIX_JSON=' + JSON.stringify([{ feature: 'Go-only runtime boundary' }]))
+} else if (args.includes('-json') && args.includes('-run')) {
+  for (const Test of ['TestRuntimeServerSideEffectIntentBlocksSecondEquivalentBashWrite', 'TestRuntimeServerAllowsRepeatedReadOnlyObservation']) {
+    console.log(JSON.stringify({ Action: 'pass', Test }))
+  }
+}
+`)
+        writeExecutable(fakeNpm, `#!/usr/bin/env node
+const args = process.argv.slice(2)
+require('node:fs').appendFileSync(${JSON.stringify(marker)}, JSON.stringify(args) + '\\n')
+if (args.includes('--reporter=json')) {
+  const scenario = ${JSON.stringify(scenario)}
+  const sharedFiles = ['src/main/packaging-config.test.ts', 'src/renderer/src/components/settings-section-agents.test.ts']
+  const testResults = scenario === 'missing' ? [] : args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
+    name: process.cwd().split(require('node:path').sep).join('/') + '/' + file,
+    status: scenario === 'failed' || (scenario === 'other-file-failed' && !sharedFiles.includes(file)) ? 'failed' : 'passed',
+    assertionResults: [
+      { fullName: 'contract first assertion', status: scenario === 'failed' ? 'failed' : scenario === 'pending' ? 'pending' : 'passed' },
+      { fullName: scenario === 'duplicate' ? 'contract first assertion' : 'contract second assertion', status: 'passed' }
+    ]
+  }))
+  console.log(JSON.stringify({ testResults }))
+  if (scenario === 'cancelled') process.kill(process.pid, 'SIGTERM')
+  if (scenario === 'failed' || scenario === 'other-file-failed') process.exitCode = 1
+}
+`)
+        writeExecutable(fakePython, '#!/usr/bin/env node\n')
+        const result = spawnSync(process.execPath, ['scripts/runtime-go-product-regression.mjs', '--json'], {
+          cwd: process.cwd(),
+          env: reportEnv({ GO: fakeGo, PATH: `${dir}${delimiter}${process.env.PATH || ''}`, PYTHON: fakePython }),
+          encoding: 'utf8',
+          stdio: 'pipe'
+        })
+        const report = JSON.parse(result.stdout) as Record<string, any>
+        const checks = report.checks as Array<Record<string, any>>
+        const calls = readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[])
+        const expectedStatus = scenario === 'passed' ? 'passed' : 'failed'
+        const expectedSharedStatus = scenario === 'passed' || scenario === 'other-file-failed' ? 'passed' : 'failed'
+        expect(result.status).toBe(scenario === 'passed' ? 0 : 1)
+        expect(checks).toHaveLength(59)
+        expect(new Set(checks.map((check) => check.id)).size).toBe(59)
+        for (const [owner, consumer, file] of [
+          ['p0-packaging-config-contract', 'packaged-go-boundary', 'src/main/packaging-config.test.ts'],
+          ['p0-provider-settings-probe-contract', 'p0-mcp-ui-contract', 'src/renderer/src/components/settings-section-agents.test.ts']
+        ]) {
+          expect(calls.filter((args) => args.includes(file))).toHaveLength(1)
+          const ownerCheck = checks.find((check) => check.id === owner)!
+          const consumerCheck = checks.find((check) => check.id === consumer)!
+          expect(ownerCheck.status).toBe(expectedStatus)
+          expect(consumerCheck.status).toBe(expectedSharedStatus)
+          expect(consumerCheck.reusedVitestResults).toEqual(ownerCheck.sharedVitestResults)
+          if (scenario === 'passed') {
+            expect(ownerCheck.sharedVitestResults[0].testIds).toEqual([
+              JSON.stringify([file, 'contract first assertion']),
+              JSON.stringify([file, 'contract second assertion'])
+            ])
+          }
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }, 15_000)
 
   it('forwards termination through the product regression process tree', async () => {
     if (process.platform === 'win32') return

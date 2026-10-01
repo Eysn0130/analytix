@@ -926,8 +926,10 @@ const commands = [
       '--',
       'src/main/packaging-config.test.ts',
       'src/main/data-analysis/native-runtime-paths.test.ts',
-      '--run'
+      '--run',
+      '--reporter=json'
     ],
+    sharedVitestFiles: ['src/main/packaging-config.test.ts'],
     cwd: repoRoot
   },
   {
@@ -951,8 +953,10 @@ const commands = [
       'src/main/claw-scheduled-task-detector.test.ts',
       'src/renderer/src/components/settings-section-agents.test.ts',
       'src/renderer/src/agent/analytix-runtime.test.ts',
-      '--run'
+      '--run',
+      '--reporter=json'
     ],
+    sharedVitestFiles: ['src/renderer/src/components/settings-section-agents.test.ts'],
     cwd: repoRoot
   },
   {
@@ -976,9 +980,12 @@ const commands = [
       '--',
       'src/renderer/src/components/plugin-marketplace-runtime.test.ts',
       'src/renderer/src/components/PluginMarketplaceView.test.ts',
-      'src/renderer/src/components/settings-section-agents.test.ts',
       '--run'
     ],
+    reuseVitestResults: [{
+      owner: 'p0-provider-settings-probe-contract',
+      file: 'src/renderer/src/components/settings-section-agents.test.ts'
+    }],
     cwd: repoRoot
   },
   {
@@ -1097,8 +1104,10 @@ const commands = [
   },
   {
     id: 'packaged-go-boundary',
-    command: npmCommand,
-    args: ['run', 'test', '--', 'src/main/packaging-config.test.ts', '--run'],
+    reuseVitestResults: [{
+      owner: 'p0-packaging-config-contract',
+      file: 'src/main/packaging-config.test.ts'
+    }],
     cwd: repoRoot
   },
   {
@@ -1166,7 +1175,52 @@ const commands = [
 ]
 
 function commandText(item) {
+  if (!item.command) {
+    return item.reuseVitestResults.map(({ owner, file }) => `reuse ${owner}: ${file}`).join('; ')
+  }
   return [item.command, ...item.args].join(' ')
+}
+
+// Only these two overlapping contracts share results within this invocation.
+// Keep per-file evidence: a different file's failure must not obscure which
+// named gate owns the failed assertions. No result survives a new invocation.
+const sharedVitestResults = new Map()
+
+function collectSharedVitestResults(item, result) {
+  let report
+  for (const match of String(result.stdout || '').matchAll(/(?:^|\n)\s*\{/g)) {
+    try {
+      const candidate = JSON.parse(result.stdout.slice(match.index).trim())
+      if (Array.isArray(candidate.testResults)) {
+        report = candidate
+        break
+      }
+    } catch {
+      // npm prefixes and incomplete/cancelled reports cannot prove execution.
+    }
+  }
+  return item.sharedVitestFiles.map((file) => {
+    // Vitest reports slash-normalized absolute paths on Windows as well.
+    const expectedName = join(item.cwd, file).replaceAll('\\', '/')
+    const matches = report?.testResults.filter((entry) => entry?.name === expectedName) || []
+    const assertions = matches.length === 1 && Array.isArray(matches[0].assertionResults)
+      ? matches[0].assertionResults
+      : []
+    const testIds = assertions.map((entry) => JSON.stringify([file, entry?.fullName]))
+    const passed = !result.error && !result.signal && Number.isInteger(result.status) &&
+      assertions.length > 0 && matches[0]?.status === 'passed' &&
+      assertions.every((entry) => entry?.status === 'passed' && typeof entry.fullName === 'string' && entry.fullName.length > 0) &&
+      new Set(testIds).size === testIds.length
+    const evidence = { owner: item.id, file, status: passed ? 'passed' : 'failed', testIds }
+    sharedVitestResults.set(`${item.cwd}:${item.id}:${file}`, evidence)
+    return evidence
+  })
+}
+
+function reusedVitestResults(item) {
+  return (item.reuseVitestResults || []).map(({ owner, file }) => (
+    sharedVitestResults.get(`${item.cwd}:${owner}:${file}`) || { owner, file, status: 'failed', testIds: [] }
+  ))
 }
 
 function skippedCheck(item) {
@@ -1332,12 +1386,22 @@ for (const [index, item] of commands.entries()) {
     results.push(skippedCheck(item))
     continue
   }
+  const reused = reusedVitestResults(item)
+  const sharedFailed = reused.some((evidence) => evidence.status !== 'passed')
+  if (!item.command) {
+    const status = sharedFailed || reused.length === 0 ? 'failed' : 'passed'
+    emitProgress({ event: 'check_started', checkId: item.id, ordinal: index + 4, total: totalChecks, elapsedMs: 0 })
+    results.push({ id: item.id, status, durationMs: 0, reusedVitestResults: reused })
+    emitProgress({ event: 'check_finished', checkId: item.id, ordinal: index + 4, total: totalChecks, elapsedMs: 0, status })
+    if (status === 'failed') failed = true
+    continue
+  }
   const focusedGoTest = isFocusedGoTestCommand(item)
   const commandItem = focusedGoTest ? withGoJSONOutput(item) : item
   const result = await runChildCommand(commandItem, {
     ordinal: index + 4,
     total: totalChecks,
-    captureStdout: focusedGoTest || Array.isArray(item.requiredPassedTests)
+    captureStdout: focusedGoTest || Array.isArray(item.requiredPassedTests) || Array.isArray(item.sharedVitestFiles)
   })
   const status = result.status ?? (result.signal ? 1 : 0)
   const passedTests = focusedGoTest && status === 0
@@ -1347,7 +1411,9 @@ for (const [index, item] of commands.entries()) {
   const missingRequiredTests = Array.isArray(item.requiredPassedTests) && status === 0
     ? requiredGoTestsMissing(passedTests, item.requiredPassedTests)
     : []
-  const itemFailed = status !== 0 || Boolean(result.error) || emptyFocusedSelection || missingRequiredTests.length > 0
+  const shared = item.sharedVitestFiles ? collectSharedVitestResults(item, result) : []
+  const itemFailed = status !== 0 || Boolean(result.error) || emptyFocusedSelection || missingRequiredTests.length > 0 ||
+    sharedFailed || shared.some((evidence) => evidence.status !== 'passed')
   if (result.stdout && (!jsonOutput || itemFailed)) {
     writeChildChunk('stdout', result.stdout)
   }
@@ -1359,7 +1425,9 @@ for (const [index, item] of commands.entries()) {
   results.push({
     id: item.id,
     status: itemFailed ? 'failed' : 'passed',
-    durationMs: result.durationMs ?? (Date.now() - started)
+    durationMs: result.durationMs ?? (Date.now() - started),
+    ...(shared.length ? { sharedVitestResults: shared } : {}),
+    ...(reused.length ? { reusedVitestResults: reused } : {})
   })
   if (result.error) {
     console.error(result.error.message)
