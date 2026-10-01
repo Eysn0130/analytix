@@ -3,7 +3,9 @@
 Status: Historical / candidate-local evidence；当前候选 CI 与 main 交付另查 GitHub。
 Scope: 两个 Vitest 文件的重复执行归属、34 raw 字段名称与引用配对。
 Source: `codex/shared-regression-source-row`，base `e73348f891c0fa73111d3efeac02ba61e5c314b5`，
-源码冻结 commit `3a7c7bba9938c0d17852cafb52a80d756f687eb4`。配置 Mac、Node 22.22.1；
+初次源码冻结及 A 观察 candidate 为 `3a7c7bba9938c0d17852cafb52a80d756f687eb4`；
+最终源码为 `ca7a73a4e5330bc3127a14538e9ff2900d30b024`，补齐复核发现的取消边界。
+配置 Mac、Node 22.22.1、Vitest 4.1.7；
 所有编译/测试均在同一 shell source `scripts/use-analytix-cache.sh`，隔离 fixture 使用 `umask 077`。
 
 ## 行为与验证
@@ -12,6 +14,8 @@ Source: `codex/shared-regression-source-row`，base `e73348f891c0fa73111d3efeac0
   调用内的逐文件结果；provider/settings owner 执行 settings 文件，MCP UI gate 引用该结果。
   同 cwd/env/tag 下两个文件各执行一次，59 个 named gates 不变。共享 evidence 要求
   唯一文件、非空唯一实际 assertion IDs、全部 passed；失败、缺失、pending、取消不通过。
+  两个 owner 专用 JsonReporter 子类追加公开回调的 run reason/module state；整个选择的
+  文件集合须完整且结束。正常其他文件失败可以复用，interrupted 与异常退出拒绝。
   其他文件失败仍使原 owner gate 失败，不把该失败伪装为共享文件失败。没有跨调用缓存。
 - `SourceValues::raw_fields` 直接配对 raw 名称与成员引用；移除名称表与取值数组的位置 zip。
   34 个原配对逐项相同，SQL key 顺序、`SOURCE_VALUES_JSON_SQL` 字节及其余生产逻辑保持。
@@ -20,9 +24,10 @@ Source: `codex/shared-regression-source-row`，base `e73348f891c0fa73111d3efeac0
 
 | 检查 | 实际结果 | 边界 |
 | --- | --- | --- |
-| 原三个 Vitest owner 范围 | 67/67、193/193、28/28；288 个唯一 ID 与 baseline 精确相同 | 原全部断言保留 |
-| product regression 窄行为组 | 12 passed、90 未选 | 子进程 fixture 验证一次执行、59 gates、失败继续、缺失/重复/pending/取消与 heartbeat |
-| 真实 Vitest stdout | 23 个 settings IDs 解析为 passed，与 baseline 相同 | 包含 npm 前缀；Windows slash 路径兼容另由 fixture 固定 |
+| 初次冻结的三个 Vitest owner 范围 | 67/67、193/193、28/28；288 个唯一 ID 与 baseline 精确相同 | 绑定 3a7；最终修正没有改变这些测试或选择 |
+| 最终 product regression 窄行为组 | 19 passed、90 未选 | 14 共享场景加原进程行为组，保留 59 gates；四个新增反例修复前 RED |
+| 最终真实 Vitest stdout | 23 个 settings IDs 解析为 passed，与 baseline 相同 | 专用 reporter 返回 passed reason/module state；npm 前缀、Windows slash fixture 保留 |
+| 极小真实 interrupted Vitest | 一断言 passed、JSON success=true、exit 1/signal null；reason=interrupted，collector 拒绝 | 使用隔离合成测试与公开 cancelCurrentRun 回调；不是产品通过证据 |
 | Rust source-row owner | 8/8 | 含真实 DuckDB、路径/权限边界、raw replay 限制、decimal/null 与独立 sentinel |
 | 临时生产引用交换 | RED，exit 101；候选源码精确恢复后 8/8 | 三类身份引用被交换；不靠摘要自洽证明语义 |
 | 原 CSV→DuckDB→source-row golden | 1/1，expected 未改 | 原固定摘要 `e092c1b936de8a85eb10747048f77c1343fe0ef8a8b9d22da2da298866c8b354`；原 Go 生成器 provenance 未定位 |
@@ -46,6 +51,9 @@ npm run typecheck
 timeout”归因未由错误正文证实；失败回执仍保留。单项复现与原两文件 owner 67/67
 通过没有抹去该失败，也不能豁免候选 CI。没有提高 timeout、删断言或降低 gate。
 原“早期失败仍继续”进程 fixture 意外调用真实 Python，已补齐其既有隔离策略。
+最终复核还发现原 JSON 丢失 interrupted 状态：非零退出仍可能有全 passed 文件。
+新增完成状态后，已覆盖无 signal 取消、异常退出、缺失/未完 module、缺失 run state、
+取消前已有其他失败，以及普通 assertion/hook 失败的逐文件归属；当前源码只读复核无新增缺陷。
 
 ## 维护观察与限制
 
@@ -66,7 +74,7 @@ timeout”归因未由错误正文证实；失败回执仍保留。单项复现�
 B 本次返回文本增加 27790 bytes。首次“识别”是建议行为检查的路由时刻，不是检查运行或通过。
 父任务批准仅修复 A 的一次新配对：两个全新会话、各自 clean pinned checkout，首调用机械
 验证 cwd/HEAD/目标脚本 SHA256；无已有答案或定位提示。两者首末状态均 clean，baseline
-为 base commit，candidate 为上述源码冻结 commit；目标脚本哈希各自匹配。
+为 base commit，candidate 为初次冻结 3a7；目标脚本哈希各自匹配。
 
 | 纠偏 A 会话 | 调用 | 返回文本 bytes | 定位结论 | UTC 开始 → 结束 | 首次识别行为检查 UTC |
 | --- | ---: | ---: | --- | --- | --- |
@@ -76,15 +84,18 @@ B 本次返回文本增加 27790 bytes。首次“识别”是建议行为检查
 这是各一次观测，返回文本差值为 -100729 bytes；含重复读取、错误与已返回的截断告知。
 两者未运行行为检查，没有真实失败 assertion，也没有预登记完整真实 assertion 清单；
 不能据此证明总体维护收益。candidate 开始时刻在首工具返回后采样，时间仅作审计。
+此配对没有覆盖后续 reporter/取消边界修正，不替最终源码建立维护收益结论。
 不增加第三轮、不依据正负结果选择性保留，不推导耗时、cache、token、费用或模型分析收益。
 
-三项 source/test corpus 为 348376 → 363927 bytes（+15551）；新增测试与结果文档是维护成本，
+初次三项 source/test corpus 为 348376 → 363927 bytes（+15551）；最终含新增 reporter 的
+四项为 367217 bytes，比 base 增加 18841。新增测试与结果文档是维护成本，
 不能把结构收敛表述为总 LOC/读取字节下降。实际结构结论是两个文件的重复执行归属退役，
 以及 raw semantic 名称/引用不再需要两个数组同步；全 Agent 维护成本和长期收益尚未证明。
 
-源码 SHA256：script `3ca48601932372f79eaa221f8a4183e8fa43ba2b6c074bd95ed8b3815d039ead`；
-report test `f8648a424c73557c662a3df3154e7a567932dfddd0ab70c685648384b41ce5ed`；
-mapper `cd29cffeccd5e1e41823f4ac3635ba025aadf9a343d8f3fbfe400284e5628a02`。
+最终源码 SHA256：script `494ddecc39954c21c59356bd5ecf8ac54301f1b0ade53be58a2302cfb16ff71c`；
+report test `a134fe2db9eae33eb75ec969cdd16b06c66bf36e6ee2a9e3f2262c4da8e726f4`；
+mapper `cd29cffeccd5e1e41823f4ac3635ba025aadf9a343d8f3fbfe400284e5628a02`；
+reporter `74cb69648c0f6248d3ca59a416cbd823b7185d7e56f38c3ab4b49dd948ad9afd`。
 小 host receipts 在 `/tmp/analytix-stage2-*`；原始观察对象只保存在会话 store，未完整导出。
 四项继承 dirty 保持原哈希。`validation-burden --plan` 对本范围为 unmapped，仍走 affected
 owner 与原 CI matrix。未重跑全 native 长测、9 行/7 笔完整产品向量、安装/恢复或正式包；
