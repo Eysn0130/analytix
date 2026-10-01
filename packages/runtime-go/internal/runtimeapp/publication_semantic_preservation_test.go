@@ -420,21 +420,46 @@ func TestRuntimePublicationOriginalRequiresExistingLocalKeyWithoutEnrollment(t *
 }
 
 func TestRuntimeUnavailablePublicationPreservesOriginalEmptyShard(t *testing.T) {
-	core, config, _, _, _, _, _ := runtimePublicationOriginalFixtureV1(t, true)
-	shard := filepath.Join(core.roots.DataDir, "private", "pii-authorization", "grants", "ff")
-	if err := os.Mkdir(shard, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := startupWholeTreeRecordMapForTest(t, filepath.Join(core.roots.DataDir, "private", "pii-authorization"))
-	handler, err := NewRuntimeServerHandlerE(config)
-	if err == nil {
-		shutdownOwnedRuntimeHandler(t, handler)
-	}
-	if !reflect.DeepEqual(original, startupWholeTreeRecordMapForTest(t, filepath.Join(core.roots.DataDir, "private", "pii-authorization"))) {
-		t.Fatal("ordinary startup deleted an unavailable original empty shard")
-	}
-	if err != nil {
-		t.Fatalf("preserved unavailable original prevented ordinary startup: %v", err)
+	for _, collide := range []bool{false, true} {
+		name := "preferred-free"
+		if collide {
+			name = "preferred-is-authenticated-grant"
+		}
+		t.Run(name, func(t *testing.T) {
+			core, config, grantPath, _, _, _, _ := runtimePublicationOriginalFixtureV1(t, true)
+			grantPrefix := filepath.Base(filepath.Dir(grantPath))
+			prefix := "ff"
+			if collide {
+				prefix = grantPrefix
+			}
+			// This fixture writes one authenticated grant. Choose a distinct
+			// shard without reusing or removing its original signed record.
+			if prefix == grantPrefix {
+				prefix = "00"
+				if prefix == grantPrefix {
+					prefix = "01"
+				}
+			}
+			shard := filepath.Join(core.roots.DataDir, "private", "pii-authorization", "grants", prefix)
+			if err := os.Mkdir(shard, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(shard)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("fixture did not create an independent empty shard")
+			}
+			original := startupWholeTreeRecordMapForTest(t, filepath.Join(core.roots.DataDir, "private", "pii-authorization"))
+			handler, err := NewRuntimeServerHandlerE(config)
+			if err == nil {
+				shutdownOwnedRuntimeHandler(t, handler)
+			}
+			if !reflect.DeepEqual(original, startupWholeTreeRecordMapForTest(t, filepath.Join(core.roots.DataDir, "private", "pii-authorization"))) {
+				t.Fatal("ordinary startup deleted an unavailable original empty shard")
+			}
+			if err != nil {
+				t.Fatalf("preserved unavailable original prevented ordinary startup: %v", err)
+			}
+		})
 	}
 }
 
