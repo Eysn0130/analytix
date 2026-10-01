@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "contract": "analytix.office-private-local-layout/v1",
+  "buildId": "efaf0670b4d055f838a2849becb10f08aa06a257",
+  "manifestSha256": "87f31a749b2cd71f60da5f96c8e2a6323bcb6a53d9fa8339bca383e66bcdf2c5",
+  "files": [
+    {
+      "path": "assets/fonts/NotoSansCJKsc-Regular.otf",
+      "source": "fonts/NotoSansCJKsc-Regular.otf",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 16437364,
+      "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+    },
+    {
+      "path": "assets/soffice.data",
+      "source": "soffice.data",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 99520604,
+      "sha256": "3dab0a5448e599dccc1b1e69f4f86ea9eb30777c3f1ed7b9c386a5f4163e361c"
+    },
+    {
+      "path": "assets/soffice.data.js.metadata",
+      "source": "soffice.data.js.metadata",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 215180,
+      "sha256": "5d9d909d0b9b38443c0f19704032d0fc12d654f6c9c24c2c3b237739c4848ae3"
+    },
+    {
+      "path": "assets/soffice.js",
+      "source": "soffice.js",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 858124,
+      "sha256": "5143e5354f470b87f86ba272bcfef857bd13e6f07b59666e48a7ccb89643cd77"
+    },
+    {
+      "path": "assets/soffice.wasm",
+      "source": "soffice.wasm",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 161667499,
+      "sha256": "9ebd9a487e849a24b9c69f843ebdb451709c27b7722c010e36846433474a5bd4"
+    },
+    {
+      "path": "assets/zetajs-57360bcb0e7726ffa0e66567c8041261b959f8dd/source/zeta.js",
+      "source": "zetajs-57360bcb0e7726ffa0e66567c8041261b959f8dd/source/zeta.js",
+      "owner": "asset",
+      "maximum": 201326592,
+      "byteLength": 42946,
+      "sha256": "b70ee7022908822c512535bbf43c4e44c297acc364e7542abba0d3071f5f9bfd"
+    },
+    {
+      "path": "manifest.json",
+      "source": "packages/runtime-go/internal/adapters/outbound/officeengineassets/manifest.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": 1543,
+      "sha256": "87f31a749b2cd71f60da5f96c8e2a6323bcb6a53d9fa8339bca383e66bcdf2c5"
+    },
+    {
+      "path": "notices/COPYING",
+      "source": "COPYING",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "path": "notices/COPYING.LGPL",
+      "source": "COPYING.LGPL",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 7639,
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+    },
+    {
+      "path": "notices/COPYING.MPL",
+      "source": "COPYING.MPL",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "notices/FONT-NOTICE.txt",
+      "source": "fonts/FONT-NOTICE.txt",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 348,
+      "sha256": "fd50fa43c3afea9046773ea987118c56ff100ea64163e9d4918e8f0b07b04669"
+    },
+    {
+      "path": "notices/LO-LICENSE.xml",
+      "source": "LO-LICENSE.efaf0670b4d055f838a2849becb10f08aa06a257.xml",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 588864,
+      "sha256": "0fc511d0cdf0b1098b2000f186840629f4a4740a0efe9a8cf60753d7de0f6af8"
+    },
+    {
+      "path": "notices/Noto-OFL.txt",
+      "source": "fonts/OFL.txt",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "path": "notices/office-local-install-admission.md",
+      "source": "docs/analytix/office-local-install-admission.md",
+      "owner": "repo",
+      "maximum": 262144,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "notices/zetajs-LICENSE",
+      "source": "zetajs-57360bcb0e7726ffa0e66567c8041261b959f8dd/LICENSE",
+      "owner": "asset",
+      "maximum": 1048576,
+      "byteLength": 1098,
+      "sha256": "a8c9b7d037ed112c3b9f85d5a1122aedd218947b21cf3f2c4200d13d7fe1a7d9"
+    },
+    {
+      "path": "notices/zetajs-adapter-NOTICE.txt",
+      "source": "src/main/office/surface/NOTICE.txt",
+      "owner": "repo",
+      "maximum": 65536,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-documents/.analytix-plugin/package.json",
+      "source": "plugins/analytix-documents/.analytix-plugin/package.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-documents/.codex-plugin/plugin.json",
+      "source": "plugins/analytix-documents/.codex-plugin/plugin.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-documents/assets/adapter.json",
+      "source": "plugins/analytix-documents/assets/adapter.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-documents/skills/documents/SKILL.md",
+      "source": "plugins/analytix-documents/skills/documents/SKILL.md",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-documents/ui/editor.json",
+      "source": "plugins/analytix-documents/ui/editor.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-presentations/.analytix-plugin/package.json",
+      "source": "plugins/analytix-presentations/.analytix-plugin/package.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-presentations/.codex-plugin/plugin.json",
+      "source": "plugins/analytix-presentations/.codex-plugin/plugin.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-presentations/assets/adapter.json",
+      "source": "plugins/analytix-presentations/assets/adapter.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-presentations/skills/presentations/SKILL.md",
+      "source": "plugins/analytix-presentations/skills/presentations/SKILL.md",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-presentations/ui/editor.json",
+      "source": "plugins/analytix-presentations/ui/editor.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-spreadsheets/.analytix-plugin/package.json",
+      "source": "plugins/analytix-spreadsheets/.analytix-plugin/package.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-spreadsheets/.codex-plugin/plugin.json",
+      "source": "plugins/analytix-spreadsheets/.codex-plugin/plugin.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-spreadsheets/assets/adapter.json",
+      "source": "plugins/analytix-spreadsheets/assets/adapter.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-spreadsheets/skills/spreadsheets/SKILL.md",
+      "source": "plugins/analytix-spreadsheets/skills/spreadsheets/SKILL.md",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "plugins/analytix-spreadsheets/ui/editor.json",
+      "source": "plugins/analytix-spreadsheets/ui/editor.json",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "preload/office.cjs",
+      "source": "out/preload/office.cjs",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "surface/office-surface.html",
+      "source": "src/main/office/surface/office-surface.html",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "surface/office-surface.js",
+      "source": "src/main/office/surface/office-surface.js",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    },
+    {
+      "path": "surface/office-worker.js",
+      "source": "src/main/office/surface/office-worker.js",
+      "owner": "repo",
+      "maximum": 1048576,
+      "byteLength": null,
+      "sha256": null
+    }
+  ]
+}

@@ -241,6 +241,7 @@ func typedOrdinaryCaseContinuationProjectionV1(
 	source threaddomain.TaskContinuationSnapshotV1,
 ) (threaddomain.TaskContinuationSnapshotV1, error) {
 	projected := source
+	projected.UserHistory = nil
 	projected.LatestUserConstraints = typedOrdinaryLatestUserConstraintsV1(priorTurns)
 	projected.PreviousContinuationDigest = source.StateDigest
 	projected.PreviousCompactionSourceDigest = typedOrdinaryHistoryStringFieldV1(marker, "sourceDigest")

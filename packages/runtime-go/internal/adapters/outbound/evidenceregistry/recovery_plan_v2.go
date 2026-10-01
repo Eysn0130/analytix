@@ -29,10 +29,12 @@ type PreparedRecoveryV2 struct {
 	incompleteV2       bool
 	unknownInventory   bool
 	legacyLockBlocked  bool
+	legacyLockPresent  bool
 	legacyV1Allowed    bool
 	witnessedV2Allowed bool
 	freshImportShape   bool
 	authorityEmpty     bool
+	indexMode          string
 	validated          bool
 }
 
@@ -121,6 +123,7 @@ func PrepareRecoveryV2(
 		root: absolute, topology: topology, indexes: indexes, capsules: capsules,
 		incompleteV2: indexes.Present() != capsules.Present(), unknownInventory: unknownInventory,
 		legacyLockBlocked: legacyLockBlocked, legacyV1Allowed: legacyV1Allowed,
+		legacyLockPresent: seen[domainprivatecas.EvidenceRegistryLegacyLockV1],
 		witnessedV2Allowed: witnessedV2Allowed,
 		freshImportShape:   witnessedV2Allowed && !seen[domainprivatecas.EvidenceRegistryLegacyLockV1],
 	}, nil
@@ -131,6 +134,7 @@ func (prepared *PreparedRecoveryV2) ValidateSemantics(ctx context.Context) error
 		return errors.New("evidence registry V2 recovery plan is invalid")
 	}
 	prepared.validated = false
+	prepared.indexMode = ""
 	err := finalauthorityadapter.ValidatePreparedPrivateCASDomainSemanticsV1(ctx,
 		map[string]*finalauthorityadapter.PreparedSecurePrivateCASRecoveryV1{
 			domainprivatecas.EvidenceRegistryIndexesLeafV2:  prepared.indexes,
@@ -142,7 +146,7 @@ func (prepared *PreparedRecoveryV2) ValidateSemantics(ctx context.Context) error
 			indexes := make(map[string]domainevidence.EvidenceRegistryAuthorityIndexV2)
 			capsules := make(map[string]domainevidence.EvidenceRegistryAuthorityCapsule)
 			if err := visit(domainprivatecas.EvidenceRegistryIndexesLeafV2, func(file finalauthorityadapter.SecurePrivateCASFile) error {
-				index, err := domainevidence.ParseEvidenceRegistryAuthorityIndexV2(file.Body)
+				index, err := domainevidence.ParseVersionedEvidenceRegistryAuthorityIndex(file.Body)
 				if err != nil || index.IndexDigest != file.Digest {
 					return errors.Join(errors.New("evidence registry V2 recovery contains a corrupt index"), err)
 				}
@@ -163,8 +167,20 @@ func (prepared *PreparedRecoveryV2) ValidateSemantics(ctx context.Context) error
 				return err
 			}
 			for _, index := range indexes {
+				mode := "witnessed"
+				if index.SchemaVersion == domainevidence.EvidenceRegistryAuthorityIndexHostLocalVersionV3 {
+					mode = "host_local"
+				}
+				if prepared.indexMode != "" && prepared.indexMode != mode {
+					return errors.New("evidence registry recovery mixes witnessed and host-local indexes")
+				}
+				prepared.indexMode = mode
 				capsule, found := capsules[index.Entry.CapsuleRecordDigest]
-				if !found || !domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleV2(index, capsule) {
+				matches := domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleV2(index, capsule)
+				if mode == "host_local" {
+					matches = domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleHostLocalV3(index, capsule)
+				}
+				if !found || !matches {
 					return errors.New("evidence registry V2 recovery index lost its exact capsule")
 				}
 				if index.Generation == 1 {
@@ -174,7 +190,11 @@ func (prepared *PreparedRecoveryV2) ValidateSemantics(ctx context.Context) error
 					continue
 				}
 				previous, found := indexes[index.PreviousIndexDigest]
-				if !found || domainevidence.ValidateEvidenceRegistryAuthorityIndexTransitionV2(previous, index) != nil {
+				validTransition := domainevidence.ValidateEvidenceRegistryAuthorityIndexTransitionV2(previous, index) == nil
+				if mode == "host_local" {
+					validTransition = domainevidence.ValidateEvidenceRegistryAuthorityIndexHostLocalTransitionV3(previous, index) == nil
+				}
+				if !found || !validTransition {
 					return errors.New("evidence registry V2 recovery index lost its exact predecessor")
 				}
 			}
@@ -231,7 +251,43 @@ func (prepared *PreparedRecoveryV2) HasStateV2() bool {
 // unavailable optional capability and are never initialized by observation.
 func (prepared *PreparedRecoveryV2) WitnessedV2ActivationAllowed() bool {
 	return prepared != nil && prepared.validated && prepared.witnessedV2Allowed &&
-		prepared.indexes.Present() && prepared.capsules.Present() && !prepared.authorityEmpty
+		prepared.indexMode == "witnessed" && prepared.indexes.Present() && prepared.capsules.Present() && !prepared.authorityEmpty
+}
+
+// HostLocalV3ActivationAllowed is only a mode-specific semantic inventory
+// result. The runtime must still validate the exact selected signed head.
+func (prepared *PreparedRecoveryV2) HostLocalV3ActivationAllowed() bool {
+	return prepared != nil && prepared.validated && prepared.witnessedV2Allowed &&
+		prepared.indexMode == "host_local" && prepared.indexes.Present() &&
+		prepared.capsules.Present() && !prepared.authorityEmpty
+}
+
+// HostLocalEmptyPartialInventoryAllowed recognizes only an empty one-sided
+// CAS directory left while opening the two leaves after a committed local
+// mode marker. The caller must separately prove the signed registry child is
+// still generation zero. Witnessed activation continues to reject this shape.
+func (prepared *PreparedRecoveryV2) HostLocalEmptyPartialInventoryAllowed(ctx context.Context) (bool, error) {
+	if prepared == nil || !prepared.incompleteV2 || prepared.unknownInventory ||
+		prepared.legacyLockBlocked || prepared.legacyLockPresent || prepared.legacyV1Allowed ||
+		prepared.topology == nil || prepared.indexes == nil || prepared.capsules == nil {
+		return false, nil
+	}
+	if err := prepared.RevalidatePhysicalV2(ctx); err != nil {
+		return false, err
+	}
+	found := false
+	for _, leaf := range []*finalauthorityadapter.PreparedSecurePrivateCASRecoveryV1{prepared.indexes, prepared.capsules} {
+		if err := leaf.VisitCommittedFiles(ctx, func(finalauthorityadapter.SecurePrivateCASFile) error {
+			found = true
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
+	if err := prepared.RevalidatePhysicalV2(ctx); err != nil {
+		return false, err
+	}
+	return !found, nil
 }
 
 // FreshImportInventoryV2 is only a physical/semantic prerequisite for an

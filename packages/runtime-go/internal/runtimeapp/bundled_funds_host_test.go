@@ -789,3 +789,29 @@ func TestBundledFundsNonpackageClassificationDoesNotMaskMixedFailure(t *testing.
 		}
 	}
 }
+
+func TestCoreProfileNeverReactivatesInstalledFunds(t *testing.T) {
+	fixture := newBundledFundsHostValidationFixtureV1(t)
+	inspect := fixture.dependencies.inspectPackage
+	fixture.dependencies.inspectPackage = func(ctx context.Context) (packagedauthorityfs.InspectionV2, error) {
+		value, err := inspect(ctx)
+		value.Authority.Core = &domainauthority.CoreDispositionV2{Kind: domainauthority.CoreDispositionKindV2, TargetKey: "darwin-arm64"}
+		return value, err
+	}
+	fixture.dependencies.inspectSource = func(context.Context, string) (pluginstore.SourceTreeIdentityV1, error) {
+		t.Fatal("core inspected excluded Funds source")
+		return pluginstore.SourceTreeIdentityV1{}, nil
+	}
+	spec, err := admitBundledFundsHostForStartupWithDependenciesV1(context.Background(), fixture.config, fixture.dependencies)
+	if err != nil || spec != nil {
+		t.Fatal("core admitted saved Funds installation")
+	}
+	manager := mcp.NewProductionManagerWithOptions(nil, mcp.ProductionManagerOptions{DatasetAuthority: unavailableBundledFundsDatasetAuthorityV2{}, HostFundsServer: spec})
+	manager.Connect()
+	defer manager.Disconnect()
+	for _, name := range manager.LiveTools() {
+		if strings.Contains(name, "analytix_funds") {
+			t.Fatal("core advertised excluded tool")
+		}
+	}
+}

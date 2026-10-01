@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { parseUsageResponse, withUsageRequestTimeout } from './usage-response'
+import { normalizeUsageCost, type UsageCostCoverage } from '../agent/usage-cost'
 
 export const DEFAULT_USAGE_HEATMAP_DAYS = 90
 
-export type DailyUsageBucket = {
+export type DailyUsageBucket = UsageCostCoverage & {
   date: string
   inputTokens: number
   outputTokens: number
@@ -12,9 +13,6 @@ export type DailyUsageBucket = {
   cachedTokens: number
   cacheMissTokens: number
   totalTokens: number
-  costUsd: number
-  costCny: number | null
-  priceConfigured: boolean
   tokenEconomySavingsTokens: number
   turns: number
   threadCount: number
@@ -54,6 +52,10 @@ type RawDailyUsageBucket = {
   cost_cny?: unknown
   price_configured?: unknown
   priceConfigured?: unknown
+  cost_estimate_status?: unknown
+  cost_known_currencies?: unknown
+  costEstimateStatus?: unknown
+  costKnownCurrencies?: unknown
   token_economy_savings_tokens?: unknown
   turns?: unknown
   thread_count?: unknown
@@ -79,16 +81,8 @@ function usageNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function usageOptionalNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
 function usageRate(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : null
-}
-
-function usageBoolean(value: unknown): boolean {
-  return value === true
 }
 
 function dateStringFromParts(date: Date, timezone: string): string {
@@ -152,9 +146,7 @@ function normalizeBucket(raw: RawDailyUsageBucket): DailyUsageBucket {
     cachedTokens: usageNumber(raw.cached_tokens),
     cacheMissTokens: usageNumber(raw.cache_miss_tokens),
     totalTokens,
-    costUsd: usageNumber(raw.cost_usd),
-    costCny: usageOptionalNumber(raw.cost_cny),
-    priceConfigured: usageBoolean(raw.price_configured) || usageBoolean(raw.priceConfigured),
+    ...normalizeUsageCost(raw as Record<string, unknown>, 'snake'),
     tokenEconomySavingsTokens: usageNumber(raw.token_economy_savings_tokens),
     turns: usageNumber(raw.turns),
     threadCount: usageNumber(raw.thread_count),
@@ -174,6 +166,8 @@ function normalizeTotals(raw: RawDailyUsageBucket & { days?: unknown; active_day
     costUsd: bucket.costUsd,
     costCny: bucket.costCny,
     priceConfigured: bucket.priceConfigured,
+    costEstimateStatus: bucket.costEstimateStatus,
+    costKnownCurrencies: bucket.costKnownCurrencies,
     tokenEconomySavingsTokens: bucket.tokenEconomySavingsTokens,
     turns: bucket.turns,
     threadCount: bucket.threadCount,

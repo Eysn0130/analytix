@@ -1357,6 +1357,33 @@ func (m *Manager) List(parentThreadID string) ([]Record, error) {
 	return m.RecordsByParentThread(parentThreadID), nil
 }
 
+// RuntimeIdleForMaintenance rejects an optional runtime restart while child
+// work, completion delivery, or an in-process steer start can still commit.
+func (m *Manager) RuntimeIdleForMaintenance() bool {
+	if m == nil {
+		return false
+	}
+	if !m.mu.TryLock() {
+		return false
+	}
+	defer m.mu.Unlock()
+	if len(m.pendingSteerStarts) != 0 {
+		return false
+	}
+	for _, record := range m.jobs {
+		if !domainjob.TerminalStatusV1(record.Status) ||
+			(record.AutoContinueParent && record.AutoContinueStatus == "") ||
+			record.AutoContinueStatus == "starting" ||
+			(record.CompletionDeliveryID != "" && record.CompletionDeliveryStatus == "") ||
+			record.CompletionDeliveryStatus == "pending" ||
+			record.CompletionDeliveryStatus == "retry" ||
+			record.RecoveryStatus == "recovering" {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) CleanupStaleRunning() (int, error) {
 	records, err := m.CleanupStaleRunningRecords()
 	if err != nil {

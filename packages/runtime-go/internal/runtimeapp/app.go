@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	fundscsvsourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundscsvsource"
 	fundsquerysourceadapter "analytix.local/runtime-go/internal/adapters/outbound/fundsquerysource"
+	"analytix.local/runtime-go/internal/adapters/outbound/managededitingfiles"
 	mediaexecutiontransport "analytix.local/runtime-go/internal/adapters/outbound/mediaexecutiontransport"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
@@ -45,6 +47,7 @@ import (
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
 	continuationapp "analytix.local/runtime-go/internal/app/continuation"
 	controlapp "analytix.local/runtime-go/internal/app/control"
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	executionpolicy "analytix.local/runtime-go/internal/app/executionpolicy"
 	fundscleaningapp "analytix.local/runtime-go/internal/app/fundscleaning"
@@ -61,9 +64,11 @@ import (
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
@@ -86,6 +91,63 @@ import (
 type Config = server.RuntimeServerConfig
 
 const DefaultRuntimeToken = server.DefaultRuntimeToken
+
+const fundsCSVAdmissionTracePrefixV2 = "ANALYTIX_FUNDS_CSV_ADMISSION_V2 "
+
+type fundsCSVAdmissionTraceCodeV1 string
+
+const (
+	fundsCSVNotEvaluatedV1               fundsCSVAdmissionTraceCodeV1 = "not_evaluated"
+	fundsCSVNativeOwnerUnavailableV1     fundsCSVAdmissionTraceCodeV1 = "native_owner_unavailable"
+	fundsCSVEnrollmentAbsentV1           fundsCSVAdmissionTraceCodeV1 = "shared_evidence_enrollment_absent"
+	fundsCSVCredentialUnavailableV1      fundsCSVAdmissionTraceCodeV1 = "shared_evidence_credential_unavailable"
+	fundsCSVDatasetSnapshotUnavailableV1 fundsCSVAdmissionTraceCodeV1 = "dataset_snapshot_unavailable"
+	fundsCSVReadyV1                      fundsCSVAdmissionTraceCodeV1 = "ready"
+	fundsCSVOtherUnavailableV1           fundsCSVAdmissionTraceCodeV1 = "other_unavailable"
+)
+
+// This key only lets package tests capture the real assembly's opt-in line.
+// Production always uses stderr, and no request or config can supply a writer.
+type fundsCSVAdmissionTraceWriterContextKeyV1 struct{}
+
+func traceFundsCSVAdmissionAssemblyV1(ctx context.Context, simulation bool, nativeOwner *nativecomponenthost.Owner,
+	configured bool, shared runtimeSharedEvidenceDatasetSnapshotV2, hostLocalEligible bool) {
+	if os.Getenv("ANALYTIX_STARTUP_TRACE") != "1" {
+		return
+	}
+	// Semantic simulation deliberately has no native owner. Its observation
+	// cannot describe the activated runtime's Funds capability.
+	phase := "activation"
+	if simulation {
+		phase = "semantic_preparation"
+	}
+	// Report the first known missing prerequisite at the existing Funds CSV
+	// assembly guard. "ready" describes these inputs, not a completed import.
+	code := fundsCSVOtherUnavailableV1
+	switch {
+	case simulation:
+		code = fundsCSVNotEvaluatedV1
+	case nativeOwner == nil:
+		code = fundsCSVNativeOwnerUnavailableV1
+	case hostLocalEligible:
+		code = fundsCSVReadyV1
+	case !configured && !shared.credentialsUnavailable && shared.evidence == nil && shared.snapshot == nil:
+		code = fundsCSVEnrollmentAbsentV1
+	case configured && shared.credentialsUnavailable && shared.evidence == nil && shared.snapshot == nil:
+		code = fundsCSVCredentialUnavailableV1
+	case configured && !shared.credentialsUnavailable && shared.snapshot == nil:
+		code = fundsCSVDatasetSnapshotUnavailableV1
+	case configured && !shared.credentialsUnavailable && shared.evidence != nil && shared.snapshot != nil:
+		code = fundsCSVReadyV1
+	}
+	output := io.Writer(os.Stderr)
+	if ctx != nil {
+		if captured, ok := ctx.Value(fundsCSVAdmissionTraceWriterContextKeyV1{}).(io.Writer); ok && captured != nil {
+			output = captured
+		}
+	}
+	_, _ = io.WriteString(output, fundsCSVAdmissionTracePrefixV2+phase+" "+string(code)+"\n")
+}
 
 type runtimeEvidenceRegistryAuthority interface {
 	evidenceregistryport.Registry
@@ -185,6 +247,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	originalCreates *runtimeOriginalCreateStartupV1,
 	inheritedChildFloors ...domainpendingwork.ChildIdentityFloorsV1,
 ) (_ http.Handler, resultErr error) {
+	if err := validateDevelopmentProviderAuthority(config); err != nil {
+		return nil, err
+	}
 	startupPhase := "configuration"
 	if simulation {
 		defer func() {
@@ -256,6 +321,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 	}
+	uncontainedMCPConfigured := len(mcpSpecs) > 0
 	mcpSpecs = mcp.BindHostScheduleMCPServerV1(mcpSpecs, config.HostScheduleMCPServer)
 	mcpSearch := loadRuntimeMCPSearchSettings(document, hasRuntimeConfig)
 	skillCatalog, err := loadRuntimeSkillCatalog(config, document, hasRuntimeConfig)
@@ -584,8 +650,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var authorityAdvanceIntents authorityadvanceport.IntentInventoryStore = authorityAdvanceStartup.inventory
 	var authorityAdvanceSettlements authorityadvanceport.SettlementInventoryStore = authorityAdvanceStartup.inventory
 	privateAuthorityAdvanceExists := authorityAdvanceStartup.inventory.HasRecords()
+	var authorityAdvanceStore *authorityadvancefs.Store
 	if !reportRestartPreservation.publication.recoveryDeferredV1() {
-		authorityAdvanceStore, err := authorityadvancefs.NewStore(filepath.Join(config.DataDir, "private", "authority-advance"), privateCASAccessAuthority)
+		authorityAdvanceStore, err = authorityadvancefs.NewStore(filepath.Join(config.DataDir, "private", "authority-advance"), privateCASAccessAuthority)
 		if err != nil {
 			return nil, err
 		}
@@ -742,6 +809,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	privateDatasetSnapshotExists := optionalDomains["dataset-snapshot-authority"].hasRecords
 	privateEvidenceAuthorityExists := optionalDomains["evidence-authority"].hasRecords
+	privateHostLocalEvidenceExists := optionalDomains["evidence-authority-host-local"].hasRecords
 	privateCaseEntityExists := caseEntityCapability.hasRecords
 	privateThreadRiskPolicyExists, err := threadRiskPolicyStore.HasRecords(ctx)
 	if err != nil {
@@ -765,6 +833,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		PendingWork: privatePendingWorkExists, ProviderCacheTelemetry: privateProviderCacheTelemetryExists,
 		TurnTerminal: privateTurnTerminalExists, AttachmentAuthority: privateAttachmentAuthorityExists,
 		AuthorityAdvance: privateAuthorityAdvanceExists, EvidenceAuthority: privateEvidenceAuthorityExists,
+		HostLocalEvidence:   privateHostLocalEvidenceExists,
 		DatasetSnapshot:     privateDatasetSnapshotExists,
 		ThreadRiskPolicy:    privateThreadRiskPolicyExists,
 		CheckpointAuthority: privateCheckpointAuthorityExists,
@@ -985,6 +1054,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	providerClientOwnedByHandler := false
+	defer func() {
+		if !providerClientOwnedByHandler {
+			resultErr = errors.Join(resultErr, providerClient.Close())
+		}
+	}()
 	if strings.TrimSpace(config.ProviderAuditSocketPath) != "" {
 		providerClient.ProviderBodyAuditor, err = providerclient.NewUnixProviderRequestBodyAuditorV1(
 			config.ProviderAuditSocketPath,
@@ -1003,13 +1078,21 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	var sharedEvidenceDatasetSnapshotV2 runtimeSharedEvidenceDatasetSnapshotV2
+	var hostLocalEvidenceOwnersV1 *runtimeHostLocalEvidenceOwnersV1
 	defer func() {
 		if !evidenceResourcesOwnedByHandler && sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 			resultErr = errors.Join(resultErr, sharedEvidenceDatasetSnapshotV2.registryOwner.Close())
 		}
+		if !evidenceResourcesOwnedByHandler && hostLocalEvidenceOwnersV1 != nil {
+			resultErr = errors.Join(resultErr, hostLocalEvidenceOwnersV1.Close())
+		}
 	}()
+	hostSelectorPresent, hostHeadPresent, err := runtimeHostLocalProfileRootsPresentV1(config.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	var sharedEvidenceConfiguredV2 bool
-	if evidenceDomainAvailable {
+	if evidenceDomainAvailable && !hostSelectorPresent && !hostHeadPresent {
 		sharedEvidenceDatasetSnapshotV2, sharedEvidenceConfiguredV2, err = newRuntimeSharedEvidenceDatasetSnapshotV2(
 			ctx, config, finalAuthority, datasetSnapshotStoresV2, evidenceAuthorityStoresV2,
 			privateCASAccessAuthority, filestore.CaseBindingReader{}, reportRestartPreservation.registry,
@@ -1017,11 +1100,77 @@ func newRuntimeServerHandlerWithRootsModeE(
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		// Domain unavailability cannot bypass the shared enrollment/key anchor.
-		_, sharedEvidenceConfiguredV2, err = loadRuntimeSharedEvidenceEnrollmentV2(ctx, config, finalAuthority)
+	} else if hostSelectorPresent || hostHeadPresent {
+		// A host-local marker and witnessed enrollment are mutually exclusive.
+		// Inspect the manifest without loading witness credentials or composing a
+		// second case authority against the same protected children.
+		_, _, sharedEvidenceConfiguredV2, err = loadRuntimeSharedEvidenceManifestV2(ctx, config)
 		if err != nil {
 			return nil, err
+		}
+	} else {
+		// Domain unavailability cannot bypass the signed enrollment/key anchor;
+		// only private credential failure disables the optional capability.
+		_, sharedEvidenceConfiguredV2, err = loadRuntimeSharedEvidenceEnrollmentV2(ctx, config, finalAuthority)
+		sharedEvidenceDatasetSnapshotV2.credentialsUnavailable = errors.Is(err, errRuntimeOptionalAuthorityCredentialsUnavailable)
+		if err != nil && !errors.Is(err, errRuntimeOptionalAuthorityCredentialsUnavailable) {
+			return nil, err
+		}
+		err = nil
+	}
+	if !simulation && evidenceDomainAvailable && publicationDomainAvailable &&
+		!sharedEvidenceConfiguredV2 && datasetSnapshotStoresV2 != nil &&
+		(reportRestartPreservation.registry == nil || !reportRestartPreservation.registry.unavailable) {
+		protectedLineage := privateAuthorityExists || privateSettlementExists || privateRegistryExists ||
+			privateContinuationExists || privatePendingWorkExists || privateTurnTerminalExists ||
+			privateAuthorityAdvanceExists || privateEvidenceAuthorityExists || privateDatasetSnapshotExists ||
+			privateThreadRiskPolicyExists || privateCheckpointAuthorityExists || privatePIIAuthorizationExists ||
+			privateReportPublicationExists || privateControlledAccessExists || privateControlledAccessV2Exists ||
+			caseThreadAuthorityExists || publicSteeringAuthorityExists || publicAuthorityExists || publicSettlementExists
+		decision := classifyRuntimeHostLocalProfileV1(false, protectedLineage,
+			hostSelectorPresent, hostHeadPresent, simulation)
+		if decision != runtimeHostLocalProfileUnavailableV1 {
+			freshCheck := func(checkCtx context.Context) error {
+				if rootAuthority.Validate() != nil || authorityAdvanceStore == nil ||
+					piiAuthorizationStore == nil || reportPublicationStores == nil ||
+					controlledAccessStore == nil || controlledAccessStoreV2 == nil {
+					return errRuntimeCaseEvidenceAuthorityUnavailableV1
+				}
+				checks := []func(context.Context) (bool, error){
+					privateFinalStore.HasRecords, settlementStore.HasRecords,
+					caseThreadStore.HasRecords, continuationStore.HasRecords, pendingWorkStore.HasRecords,
+					turnTerminalStore.HasRecords, threadRiskPolicyStore.HasRecords,
+					checkpointAuthorityStore.HasRecords, datasetSnapshotStoresV2.HasRecords,
+					evidenceAuthorityStoresV2.hasRecords, authorityAdvanceStore.HasRecords,
+					piiAuthorizationStore.HasRecords, reportPublicationStores.HasRecords,
+					controlledAccessStore.HasRecords, controlledAccessStoreV2.HasRecordsV2,
+					func(c context.Context) (bool, error) {
+						return evidenceregistry.HasState(c, evidenceRegistryRoot, privateCASAccessAuthority)
+					},
+					func(c context.Context) (bool, error) { return evidenceapp.HasPublicAcceptedFinalAuthority(store) },
+					func(c context.Context) (bool, error) { return evidenceapp.HasPublicEvidenceSettlementAuthority(store) },
+					func(c context.Context) (bool, error) { return steeringauthorityapp.HasPublicAuthorityStateV1(store) },
+				}
+				for _, check := range checks {
+					found, checkErr := check(checkCtx)
+					if checkErr != nil || found {
+						return errors.Join(errRuntimeCaseEvidenceAuthorityUnavailableV1, checkErr)
+					}
+				}
+				return nil
+			}
+			hostLocalEvidenceOwnersV1, err = newRuntimeHostLocalEvidenceOwnersV1(config,
+				rootAuthority, privateCASAccessAuthority, finalAuthority, datasetSnapshotStoresV2,
+				decision, freshCheck)
+			if err != nil {
+				return nil, err
+			}
+			if decision == runtimeHostLocalProfileResumeV1 {
+				// A committed profile is read before restart inventory consumes the
+				// Registry marker. Invalid local authority stays a case-only
+				// boundary; it cannot prevent the ordinary Agent from starting.
+				_ = hostLocalEvidenceOwnersV1.ensureRead(ctx)
+			}
 		}
 	}
 	// Composition is local-only. Protected operations reach this shared
@@ -1034,6 +1183,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 			snapshot: sharedEvidenceDatasetSnapshotV2.snapshot, registry: sharedEvidenceDatasetSnapshotV2.registryOwner,
 		}
 		datasetSnapshotCurrentAuthorityV2 = sharedEvidenceDatasetSnapshotV2.snapshot
+	} else if hostLocalEvidenceOwnersV1 != nil {
+		datasetSnapshotAuthorityV2 = hostLocalEvidenceOwnersV1
+		datasetSnapshotCurrentAuthorityV2 = hostLocalEvidenceOwnersV1
 	}
 	identityAuthority, err := newRuntimeHostIdentityAuthority(finalAuthority)
 	if err != nil {
@@ -1068,6 +1220,8 @@ func newRuntimeServerHandlerWithRootsModeE(
 			}
 			return nil, errors.New("evidence registry authority inventory changed during startup")
 		}
+	} else if hostLocalEvidenceOwnersV1 != nil {
+		evidenceStore = hostLocalEvidenceOwnersV1
 	} else {
 		legacyPlan, prepareErr := evidenceregistry.PrepareRecoveryV2(ctx, evidenceRegistryRoot, privateCASAccessAuthority)
 		if prepareErr != nil {
@@ -1269,9 +1423,35 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err := trustedFinals.SeedTerminalComplete(ctx, terminalProjectionAuthorities); err != nil {
 		return nil, err
 	}
+	startupPhase = "fact-final-witness-recovery"
+	restoreRuntimeFactTerminalsV1(ctx, trustedFinals, terminalRecovery.FactCandidates, evidenceStore,
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord) error {
+			return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+				OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+				Context: record.SecurityContext, Workspace: record.SecurityContext.WorkspaceRealPath,
+			})
+		},
+		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, authority appturn.FactFinalMutationAuthority) ([]map[string]any, error) {
+			return evidenceapp.LoadVerifiedAcceptedFinalEventsWithAuthority(ctx, finalEventIO, store, record, authority)
+		},
+	)
 	currentCaseAuthority := threadapp.NewCurrentCaseThreadAuthorityValidator(caseThreads, filestore.CaseBindingReader{}, nil)
 	publicProjector := threadapp.NewTrustedPublicProjectorWithPreservedHistoryV1(
 		trustedFinals, caseThreads, currentCaseAuthority, acceptedFinalCASReader, reportRestartPreservation.report,
+		func(record domainevidence.PrivateAcceptedFinalRecord, current domainsecurity.TurnSecurityContext) error {
+			issuer, ok := evidenceStore.(evidenceregistryport.RecoveredFactFinalWitnessIssuer)
+			if !ok {
+				return errors.New("retained fact witness issuer is unavailable")
+			}
+			return issuer.WithRecoveredFactFinalWitness(ctx, record, func(cap evidenceregistryport.FactFinalWitnessCapability) error {
+				return cap.UseExact(record, func() error {
+					return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+						OperationContext: ctx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+						Context: current, Workspace: current.WorkspaceRealPath,
+					})
+				})
+			})
+		},
 	)
 	store.SetActiveHistorySourceAdmissionV1(func(source map[string]any) error {
 		if _, err := publicProjector.ProjectThread(source); err != nil {
@@ -1349,6 +1529,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 			filestore.CaseBindingReader{},
 			datasetSnapshotStoresV2.Materials,
 			validateCurrentChildContext,
+			func(ctx context.Context, securityContext domainsecurity.TurnSecurityContext) error {
+				return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+					OperationContext: ctx, Identity: identityAuthority,
+					Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+					Context: securityContext, Workspace: securityContext.WorkspaceRealPath,
+				})
+			},
 		)
 		if fundsAccountFlow.available() {
 			bundledFundsHostSpec, err = admitBundledFundsHostForStartupV1(ctx, config)
@@ -1529,17 +1716,25 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
 		activateImportRegistry = sharedEvidenceDatasetSnapshotV2.registryOwner.ActivateAfterImport
 	}
-	if nativeOwner != nil && sharedEvidenceDatasetSnapshotV2.evidence != nil &&
-		sharedEvidenceDatasetSnapshotV2.snapshot != nil {
+	traceFundsCSVAdmissionAssemblyV1(ctx, simulation, nativeOwner, sharedEvidenceConfiguredV2,
+		sharedEvidenceDatasetSnapshotV2, hostLocalEvidenceOwnersV1 != nil)
+	if nativeOwner != nil && (sharedEvidenceDatasetSnapshotV2.evidence != nil &&
+		sharedEvidenceDatasetSnapshotV2.snapshot != nil || hostLocalEvidenceOwnersV1 != nil) {
 		immutableSource, sourceErr := fundsquerysourceadapter.NewHostExactSource(config.UserDataDir)
 		if sourceErr != nil {
 			return nil, errors.Join(sourceErr, nativeAuthority.Close())
 		}
+		snapshotForImport := fundscsvadmissionapp.SnapshotAuthorityV2(sharedEvidenceDatasetSnapshotV2.snapshot)
+		var ensureHostLocal func(context.Context) error
+		if hostLocalEvidenceOwnersV1 != nil {
+			snapshotForImport = hostLocalEvidenceOwnersV1
+			ensureHostLocal = hostLocalEvidenceOwnersV1.EnsureForFundsImport
+		}
 		fundsCSVAdmission, err = fundscsvadmissionapp.NewServiceV1(fundscsvadmissionapp.ConfigV1{
 			Diagnostics: os.Stderr,
 			Observer:    filestore.CaseBindingReader{}, Identity: identityAuthority,
-			Evidence:  sharedEvidenceDatasetSnapshotV2.evidence,
-			Snapshots: sharedEvidenceDatasetSnapshotV2.snapshot,
+			Evidence: sharedEvidenceDatasetSnapshotV2.evidence, EnsureEvidenceCurrent: ensureHostLocal,
+			Snapshots: snapshotForImport,
 			Materials: datasetSnapshotStoresV2,
 			Native:    nativeOwner, Source: immutableSource,
 			ReadImportSource:         fundscsvsourceadapter.ReadImportExactV1,
@@ -1587,7 +1782,9 @@ func newRuntimeServerHandlerWithRootsModeE(
 		evidenceapp.ToolEvidenceService{Issuer: evidenceIssuer, Reader: mcpManager},
 	)
 	var providerRegistryAuthority *providerRegistryAuthorityV1
-	if config.DarwinSecretStoreKeychainDBPath == "" &&
+	if config.DevelopmentProviderAuthorityDir != "" {
+		providerRegistryAuthority, err = openDevelopmentProviderAuthority(ctx, config, simulation)
+	} else if config.DarwinSecretStoreKeychainDBPath == "" &&
 		config.DarwinSecretStoreKeychainBindingDigest == "" &&
 		config.DarwinSecretStoreKeychainSecurityDigest == "" {
 		providerRegistryAuthority, err = openProviderRegistryAuthorityV1(ctx, config.DataDir)
@@ -1611,7 +1808,18 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
 	phaseObserver, _ := ctx.Value(asyncTurnPhaseObservationContextKeyV1{}).(func(string))
+	officeAdapters, officePackageHost, officePrivate, officeSkillDiscoveryErrors := newOfficeRuntime(ctx, config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	skillCatalog = toolcatalogapp.WithSkillDiscoveryErrors(skillCatalog, officeSkillDiscoveryErrors)
+	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
+	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
+	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		DocumentCodec:       newDocumentCodec(config),
+		ManagedEditingFiles: managededitingfiles.New(),
+		ObjectEditing:       objectEditingHandler.Service,
+		WorkspaceRead:       workspaceRead,
+		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
+		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
 		AsyncTurnPhaseObserverV1: phaseObserver,
 
@@ -1687,39 +1895,51 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
-	handler, err = bindRuntimeOwnedResourceV1(handler, providerRegistryAuthority)
-	if err != nil {
-		return nil, errors.Join(err, nativeAuthority.Close())
+	maintenanceOwner := handler
+	artifactResolver, ok := handler.(interface {
+		ResolveGeneratedArtifact(context.Context, string, string) (generationapp.Resolved, error)
+	})
+	if !ok {
+		return nil, errors.Join(errors.New("generated artifact resolver is unavailable"), nativeAuthority.Close())
 	}
+	var inlineCompletion httpapi.InlineCompletionService
+	if !objectEditingHandler.UnsupportedPlatform {
+		inlineCompletion, err = server.NewInlineCompletionService(handler, providerTelemetry)
+		if err != nil {
+			return nil, errors.Join(err, nativeAuthority.Close())
+		}
+	}
+	ownedResources := []runtimeOwnedResourceCloserV1{providerClient, providerRegistryAuthority}
 	if !simulation && evidenceDomainAvailable {
 		if sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
-			handler, err = bindRuntimeOwnedResourceV1(handler, sharedEvidenceDatasetSnapshotV2.registryOwner)
-			if err != nil {
-				return nil, errors.Join(err, nativeAuthority.Close())
-			}
+			ownedResources = append(ownedResources, sharedEvidenceDatasetSnapshotV2.registryOwner)
 		}
-		handler, err = bindRuntimeOwnedResourceV1(handler, datasetSnapshotStoresV2)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
+		if hostLocalEvidenceOwnersV1 != nil {
+			ownedResources = append(ownedResources, hostLocalEvidenceOwnersV1)
 		}
-		handler, err = bindRuntimeOwnedResourceV1(handler, evidenceAuthorityStoresV2)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
-		}
+		ownedResources = append(ownedResources, datasetSnapshotStoresV2, evidenceAuthorityStoresV2)
 	}
 	if !simulation && caseEntityCapability.store != nil {
-		handler, err = bindRuntimeOwnedResourceV1(handler, &caseEntityCapability)
-		if err != nil {
-			return nil, errors.Join(err, nativeAuthority.Close())
-		}
+		ownedResources = append(ownedResources, &caseEntityCapability)
+	}
+	handler, err = bindRuntimeOwnedResourcesV1(handler, ownedResources...)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
 	}
 	localDisplayHandler := httpapi.LocalDisplayMuxV1{
 		RuntimeToken: config.RuntimeToken,
 		Insecure:     config.Insecure,
 		Next:         handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
-			FundsCSVAdmission: fundsCSVAdmission,
-			FundsCleaning:     fundsCleaning,
+			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
+			ObjectEditing:          objectEditingHTTP,
+			BrowserSelection:       httpapi.BrowserSelectionHandler{Service: objectEditingHandler.Service},
+			WorkspaceRead:          httpapi.WorkspaceReadHandler{Service: workspaceRead},
+			InlineCompletion:       httpapi.InlineCompletionHandler{Service: inlineCompletion},
+			PackageHost:            httpapi.PluginPackageHostHandler{Service: officePackageHost},
+			OfficePrivateAdmission: httpapi.OfficePrivateAdmissionHandler{Assets: officePrivate},
+			FundsCSVAdmission:      fundsCSVAdmission,
+			FundsCleaning:          fundsCleaning,
 			Service: localdisplayapp.NewServiceWithTypedLocalDataSurface(
 				fundsAccountFlow.caseEntities,
 				privateFinalStore,
@@ -1760,7 +1980,11 @@ func newRuntimeServerHandlerWithRootsModeE(
 			},
 		},
 	}
-	boundHandler, err := bindFinalPublicationAuthorityIdentityV1(localDisplayHandler, finalAuthority)
+	maintenanceHandler, err := server.WrapRuntimeMaintenanceAdmissionV1(maintenanceOwner, localDisplayHandler)
+	if err != nil {
+		return nil, errors.Join(err, nativeAuthority.Close())
+	}
+	boundHandler, err := bindFinalPublicationAuthorityIdentityV1(maintenanceHandler, finalAuthority)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
@@ -1773,6 +1997,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	// Semantic-stage handlers are discarded after planning, so their Registry
 	// resources close through the defer above. Only a live handler owns them.
 	providerRegistryAuthorityTransferred = !simulation
+	providerClientOwnedByHandler = !simulation
 	return boundHandler, nil
 }
 

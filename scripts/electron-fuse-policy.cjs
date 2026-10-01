@@ -9,7 +9,10 @@ const ELECTRON_FUSE_POLICY_V1_DOMAIN = 'AnalytixElectronFusePolicyV1\0'
 // the executable after the packaged payload authority has been issued.
 const ELECTRON_FUSE_POLICY_V1 = Object.freeze({
   0: true, // RunAsNode: required by the packaged CLI launcher.
-  1: true, // EnableCookieEncryption.
+  // macOS cookie encryption uses Keychain. Existing encrypted Chromium state
+  // is retained in its old session directory and is not opened by the new
+  // versioned sessionData path.
+  1: false, // EnableCookieEncryption.
   2: false, // EnableNodeOptionsEnvironmentVariable.
   3: false, // EnableNodeCliInspectArguments.
   4: true, // EnableEmbeddedAsarIntegrityValidation.
@@ -24,22 +27,28 @@ const ELECTRON_FUSE_POLICY_V1 = Object.freeze({
   strictlyRequireAllFuses: true
 })
 
+const ELECTRON_FUSE_POLICY_V1_OTHER = Object.freeze({
+  ...ELECTRON_FUSE_POLICY_V1,
+  1: true // Windows and Linux retain the previous cookie policy.
+})
+
 function canonicalJSON(value) {
   return JSON.stringify(value)
 }
 
-function electronFusePolicyV1() {
-  return { ...ELECTRON_FUSE_POLICY_V1 }
+function electronFusePolicyV1(platform = 'darwin') {
+  return { ...(platform === 'darwin' ? ELECTRON_FUSE_POLICY_V1 : ELECTRON_FUSE_POLICY_V1_OTHER) }
 }
 
-function electronFusePolicyV1Digest() {
+function electronFusePolicyV1Digest(platform = 'darwin') {
   return createHash('sha256')
     .update(ELECTRON_FUSE_POLICY_V1_DOMAIN, 'utf8')
-    .update(canonicalJSON(ELECTRON_FUSE_POLICY_V1), 'utf8')
+    .update(canonicalJSON(electronFusePolicyV1(platform)), 'utf8')
     .digest('hex')
 }
 
 exports.ELECTRON_FUSE_POLICY_V1_CONTRACT = ELECTRON_FUSE_POLICY_V1_CONTRACT
 exports.ELECTRON_FUSE_POLICY_V1 = ELECTRON_FUSE_POLICY_V1
+exports.ELECTRON_FUSE_POLICY_V1_OTHER = ELECTRON_FUSE_POLICY_V1_OTHER
 exports.electronFusePolicyV1 = electronFusePolicyV1
 exports.electronFusePolicyV1Digest = electronFusePolicyV1Digest

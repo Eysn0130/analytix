@@ -15,20 +15,47 @@ import {
 } from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createK10DarwinExplicitTaskKeychain } from './k10-darwin-explicit-keychain.mjs'
+import {
+  classifyExactTargetList,
+  createFundsCSVAdmissionAttemptRecorderV2,
+  exactMainCommandMatches,
+  exactCoreRuntimeCommandMatches,
+  exactTargetDeadlineReason,
+  normalQuitDeadlineFailureCode,
+  exactTaskGroupMembers,
+  observedSingleInstanceLockFailure,
+  normalQuitFailureCode,
+  parseRuntimeStartupNumericDiagnostic,
+  parseRuntimeTransitionPhase,
+  parseGoStartupPhase,
+  parseGoOwnerPhase,
+  projectFundsCSVAdmissionDiagnosticV2,
+  residualMembersAlreadyPinned,
+  processProbeFailureKind
+} from './lib/k10-child-diagnostics.mjs'
+import { createPackagedStartupTraceRecorder } from './runtime-go-packaged-milestone-a.mjs'
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const lane = process.argv.includes('--packaged') ? 'packaged' : 'development'
 const appPathIndex = process.argv.indexOf('--app-path')
 const packagedAppPath = appPathIndex >= 0 ? process.argv[appPathIndex + 1] ?? '' : ''
+const latencyObservation = process.argv.includes('--latency-observation')
+const traceTransitions = process.argv.includes('--trace-transitions')
+const ordinaryFileProbe = process.argv.includes('--ordinary-file-probe')
+if (ordinaryFileProbe && (lane !== 'packaged' || !latencyObservation)) {
+  throw new Error('ordinary_file_probe_requires_packaged_latency_observation')
+}
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/u
 const MAX_PROVIDER_BODY_BYTES = 1 << 20
 const MAX_SCAN_FILE_BYTES = 16 << 20
 const MAX_CHILD_LINE_BYTES = 1 << 20
 const WAIT_TIMEOUT_MS = 120_000
+const STARTUP_TARGET_TIMEOUT_MS = latencyObservation ? 300_000 : WAIT_TIMEOUT_MS
+const PROCESS_PROBE_TIMEOUT_MS = 2_000
 const forbiddenPublicKeys = new Set([
   'apiKey', 'credential', 'credentialRef', 'keychainDBPath', 'ownerBinding',
   'password', 'path', 'secret', 'token'
@@ -51,6 +78,7 @@ let denyProxy = null
 let credential = ''
 let prompt = ''
 let reply = ''
+let ordinaryFileReadToolName = ''
 let settingsPath = ''
 let keychainDatabasePath = ''
 let providerBaseUrl = ''
@@ -59,8 +87,23 @@ let replyObservedInRenderer = false
 let lastChildFailureFacts = null
 let lastUiFacts = null
 let activeChildFailureSnapshot = null
+let firstSubmittedProviderRequestAtMs = 0
+let submittedProviderRequestArmed = false
+let latencyFailed = false
+let taskCleanupFailure = ''
+let lastTaskGroupIdentityFailure = ''
+let lastNormalQuitFacts = null
+let partialLatencyEvidence = null
+let lastTaskMainIdentity = null
+let ownedGoIdentity = null
+let ownedGroupMemberIdentities = new Map()
+let goProbeUnknownCount = 0
+let primaryFailureReasonCode = ''
+const processProbe = { count: 0, elapsedMs: 0, timeoutCount: 0 }
 const launchEvidence = []
+const fundsCSVAdmissionByLaunch = []
 const providerObservations = []
+const providerProbeObservations = []
 let denyProxyConnectionCount = 0
 
 function output(value) {
@@ -69,6 +112,26 @@ function output(value) {
 
 function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
+}
+
+function boundedProcessProbe(command, args) {
+  const startedAtMs = Date.now()
+  processProbe.count += 1
+  try {
+    return execFileSync(command, args, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: PROCESS_PROBE_TIMEOUT_MS
+    })
+  } catch (error) {
+    if (error?.code === 'ETIMEDOUT') processProbe.timeoutCount += 1
+    throw error
+  } finally {
+    processProbe.elapsedMs += Date.now() - startedAtMs
+  }
+}
+
+function processProbeTimedOut(error) {
+  return error?.code === 'ETIMEDOUT'
 }
 
 function exactOwnerOnlyDirectory(path) {
@@ -124,7 +187,7 @@ function closeServer(server) {
 }
 
 function terminateTaskProcessGroup(child) {
-  if (!child?.pid) return
+  if (!child?.pid || child.exitCode !== null || child.signalCode) return
   try {
     process.kill(-child.pid, 'SIGTERM')
   } catch {
@@ -132,8 +195,196 @@ function terminateTaskProcessGroup(child) {
   }
 }
 
+function processDefinitelyExited(pid) {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return error?.code === 'ESRCH'
+  }
+}
+
+async function pinExactPackagedMainBirth(child) {
+  if (!latencyObservation) return
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+    throw new Error('exact_main_birth_unavailable')
+  }
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode || processDefinitelyExited(child.pid)) {
+      throw new Error('exact_main_exited_before_birth_pin')
+    }
+    try {
+      const command = boundedProcessProbe('ps', ['-p', String(child.pid), '-o', 'ppid=,pgid=,command='])
+      const born = boundedProcessProbe('ps', ['-p', String(child.pid), '-o', 'lstart=']).trim()
+      if (born && exactMainCommandMatches(command, process.pid, child.pid,
+        packagedAppPath, child.analytixDebugPort) &&
+        boundedProcessProbe('ps', ['-p', String(child.pid), '-o', 'lstart=']).trim() === born) {
+        child.analytixMainBirth = born
+        lastTaskMainIdentity = { pid: child.pid, born }
+        return
+      }
+    } catch (error) {
+      if (processProbeFailureKind(error, 'ps') === 'timeout') {
+        throw new Error('process_probe_timeout')
+      }
+    }
+    await sleep(100)
+  }
+  throw new Error('exact_main_birth_unavailable')
+}
+
+function exactPackagedTaskGroupState(child) {
+  const untrusted = (reason) => {
+    lastTaskGroupIdentityFailure = reason
+    return 'untrusted'
+  }
+  if (!latencyObservation || !Number.isInteger(child?.pid) || child.pid <= 0 ||
+      !Number.isInteger(child.analytixDebugPort) || !child.analytixMainBirth) {
+    return untrusted('missing_task_identity')
+  }
+  if (child.exitCode !== null || child.signalCode || processDefinitelyExited(child.pid)) return 'gone'
+  let main = ''
+  let born = ''
+  try {
+    main = boundedProcessProbe('ps', ['-p', String(child.pid), '-o', 'ppid=,pgid=,command=']).trim()
+    born = boundedProcessProbe('ps', ['-p', String(child.pid), '-o', 'lstart=']).trim()
+  } catch (error) {
+    return processDefinitelyExited(child.pid) ? 'gone' :
+      untrusted(processProbeTimedOut(error) ? 'main_probe_timeout' : 'main_probe_unknown')
+  }
+  if (!born) return untrusted('main_birth_unavailable')
+  if (child.analytixMainBirth !== born) {
+    return untrusted('main_birth_changed')
+  }
+  if (!exactMainCommandMatches(main, process.pid, child.pid,
+    packagedAppPath, child.analytixDebugPort)) return untrusted('main_identity_changed')
+  const contentsRoot = resolve(packagedAppPath, '../..')
+  let processes = ''
+  try {
+    processes = boundedProcessProbe('ps', ['-axo', 'pid=,pgid=,command='])
+  } catch { return untrusted('group_probe_unavailable') }
+  const group = exactTaskGroupMembers(processes, child.pid, contentsRoot)
+  if (!group || group.length === 0 || !group.includes(child.pid)) {
+    return untrusted('group_member_untrusted')
+  }
+  lastTaskGroupIdentityFailure = ''
+  return 'matched'
+}
+
+async function stopExactPackagedTaskGroup(child) {
+  let state = exactPackagedTaskGroupState(child)
+  if (state === 'gone') return { signalSent: false, sigkillSent: false }
+  if (state !== 'matched') throw new Error('exact_packaged_task_group_untrusted')
+  pinExactTaskGroupMembers(child)
+  process.kill(-child.pid, 'SIGTERM')
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await sleep(250)
+    state = exactPackagedTaskGroupState(child)
+    if (state === 'gone') return { signalSent: true, sigkillSent: false }
+  }
+  if (state !== 'matched') throw new Error('exact_packaged_task_group_changed')
+  process.kill(-child.pid, 'SIGKILL')
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await sleep(250)
+    state = exactPackagedTaskGroupState(child)
+    if (state === 'gone') return { signalSent: true, sigkillSent: true }
+  }
+  throw new Error('exact_packaged_task_group_did_not_exit')
+}
+
+function exactGroupMemberIdentity(pid, groupPid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null
+  try {
+    const command = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'pgid=,command=']).trim()
+    const born = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'lstart=']).trim()
+    const match = command.match(/^(\d+)\s+(.+)$/u)
+    return match && Number(match[1]) === groupPid && born &&
+      match[2].startsWith(`${resolve(packagedAppPath, '../..')}/`)
+      ? { pid, groupPid, born, command: match[2] } : null
+  } catch { return null }
+}
+
+function sameExactGroupMember(identity) {
+  const current = exactGroupMemberIdentity(identity.pid, identity.groupPid)
+  return Boolean(current && current.born === identity.born &&
+    current.command === identity.command)
+}
+
+function pinExactTaskGroupMembers(child) {
+  if (exactPackagedTaskGroupState(child) !== 'matched') {
+    throw new Error('residual_main_identity_unavailable')
+  }
+  let processes = ''
+  try {
+    processes = boundedProcessProbe('ps', ['-axo', 'pid=,pgid=,command='])
+  } catch { throw new Error('residual_group_probe_unavailable') }
+  const members = exactTaskGroupMembers(processes, child.pid, resolve(packagedAppPath, '../..'))
+  if (!members || !members.includes(child.pid) || members.length > 24) {
+    throw new Error('residual_group_untrusted')
+  }
+  const identities = members.map((pid) => exactGroupMemberIdentity(pid, child.pid))
+  if (identities.some((value) => !value) || exactPackagedTaskGroupState(child) !== 'matched') {
+    throw new Error('residual_member_identity_unavailable')
+  }
+  ownedGroupMemberIdentities = new Map(identities.map((value) => [value.pid, value]))
+}
+
+async function stopExactTaskOwnedResiduals() {
+  if (!lastTaskMainIdentity) throw new Error('residual_main_identity_unavailable')
+  let processes = ''
+  try {
+    processes = boundedProcessProbe('ps', ['-axo', 'pid=,pgid=,command='])
+  } catch { throw new Error('residual_group_probe_unavailable') }
+  const members = exactTaskGroupMembers(processes, lastTaskMainIdentity.pid,
+    resolve(packagedAppPath, '../..'))
+  if (!residualMembersAlreadyPinned(members, ownedGroupMemberIdentities)) {
+    throw new Error('residual_group_untrusted')
+  }
+  const identities = members.map((pid) => ownedGroupMemberIdentities.get(pid))
+  for (const identity of identities) {
+    if (!sameExactGroupMember(identity)) continue
+    try { process.kill(identity.pid, 'SIGTERM') } catch { /* exited */ }
+  }
+  for (let attempt = 0; attempt < 20 && identities.some(sameExactGroupMember); attempt += 1) {
+    await sleep(100)
+  }
+  for (const identity of identities) {
+    if (!sameExactGroupMember(identity)) continue
+    try { process.kill(identity.pid, 'SIGKILL') } catch { /* exited */ }
+  }
+  for (let attempt = 0; attempt < 20 && identities.some(sameExactGroupMember); attempt += 1) {
+    await sleep(100)
+  }
+  if (ownedGoIdentity && sameExactGoIdentity(ownedGoIdentity)) {
+    try { process.kill(ownedGoIdentity.pid, 'SIGTERM') } catch { /* exited */ }
+    for (let attempt = 0; attempt < 20 && sameExactGoIdentity(ownedGoIdentity); attempt += 1) {
+      await sleep(100)
+    }
+    if (sameExactGoIdentity(ownedGoIdentity)) {
+      try { process.kill(ownedGoIdentity.pid, 'SIGKILL') } catch { /* exited */ }
+      for (let attempt = 0; attempt < 20 && sameExactGoIdentity(ownedGoIdentity); attempt += 1) {
+        await sleep(100)
+      }
+    }
+  }
+  if (taskOwnedResidualProcessCount() !== 0) throw new Error('residual_cleanup_unverified')
+}
+
 function createProviderServer() {
   return http.createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/models') {
+      const authorizationMatched = request.headers.authorization === `Bearer ${credential}`
+      providerProbeObservations.push({ authorizationMatched })
+      response.writeHead(authorizationMatched ? 200 : 401, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store'
+      })
+      response.end(authorizationMatched
+        ? '{"data":[{"id":"deepseek-v4-flash"}]}'
+        : '{"error":{"message":"unauthorized"}}')
+      return
+    }
     if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
       response.writeHead(404, { 'content-type': 'application/json' })
       response.end('{"error":{"message":"not found"}}')
@@ -155,6 +406,9 @@ function createProviderServer() {
     })
     request.on('end', () => {
       if (rejected) return
+      if (submittedProviderRequestArmed && !firstSubmittedProviderRequestAtMs) {
+        firstSubmittedProviderRequestAtMs = Date.now()
+      }
       const body = Buffer.concat(chunks)
       for (const item of chunks) item.fill(0)
       let parsed = null
@@ -164,6 +418,12 @@ function createProviderServer() {
         parsed = null
       }
       const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
+      const advertisedReadTool = Array.isArray(parsed?.tools) && parsed.tools.find((tool) =>
+        tool?.type === 'function' && ['read_file', 'read'].includes(tool.function?.name))
+      const readToolAdvertised = Boolean(advertisedReadTool)
+      const readResultSeen = messages.some((message) => message?.role === 'tool' &&
+        typeof message.content === 'string' && message.content.includes('2026-07-01') &&
+        message.content.includes('1234.56') && message.content.includes('REF-17'))
       providerObservations.push(Object.freeze({
         authorizationMatched: request.headers.authorization === `Bearer ${credential}`,
         pathMatched: request.url === '/v1/chat/completions',
@@ -172,14 +432,33 @@ function createProviderServer() {
         promptSeen: messages.some((message) =>
           message && message.role === 'user' && typeof message.content === 'string' &&
           message.content.includes(prompt)),
-        bodyBytes: body.length
+        bodyBytes: body.length,
+        readToolAdvertised,
+        readResultSeen
       }))
       body.fill(0)
       parsed = null
+      if (ordinaryFileProbe && ((providerObservations.length === 1 && !readToolAdvertised) ||
+        (providerObservations.length === 2 && !readResultSeen))) {
+        response.writeHead(409, { 'content-type': 'application/json' })
+        response.end('{"error":{"message":"synthetic read result missing"}}')
+        return
+      }
       response.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
         'cache-control': 'no-store'
       })
+      if (ordinaryFileProbe && providerObservations.length === 1) {
+        ordinaryFileReadToolName = advertisedReadTool.function.name
+        response.end([
+          `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{
+            index: 0, id: 'n04_read_once', type: 'function',
+            function: { name: ordinaryFileReadToolName, arguments: JSON.stringify({ path: '2026年资料/表单 42.txt' }) }
+          }] }, finish_reason: 'tool_calls' }] })}`,
+          'data: [DONE]'
+        ].join('\n\n'))
+        return
+      }
       response.end([
         `data: ${JSON.stringify({ choices: [{ delta: { content: reply }, finish_reason: 'stop' }] })}`,
         'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}',
@@ -198,13 +477,17 @@ function createDenyProxy() {
 
 function providerObservationFacts() {
   return {
+    probeRequestCount: providerProbeObservations.length,
+    probeAllAuthorizationMatched: providerProbeObservations.every((item) => item.authorizationMatched),
     requestCount: providerObservations.length,
     allAuthorizationMatched: providerObservations.every((item) => item.authorizationMatched),
     allLoopbackPathMatched: providerObservations.every((item) => item.pathMatched),
     allStreaming: providerObservations.every((item) => item.streamRequested),
     allModelConfigured: providerObservations.every((item) => item.modelConfigured),
     promptObserved: providerObservations.some((item) => item.promptSeen),
-    allBodiesNonEmpty: providerObservations.every((item) => item.bodyBytes > 0)
+    allBodiesNonEmpty: providerObservations.every((item) => item.bodyBytes > 0),
+    ordinaryFileReadToolAdvertised: providerObservations.some((item) => item.readToolAdvertised),
+    ordinaryFileReadResultObserved: providerObservations.some((item) => item.readResultSeen)
   }
 }
 
@@ -213,6 +496,8 @@ function seedKeyFreeSettings(userDataDir, runtimeDataDir) {
   const settings = {
     version: 1,
     locale: 'en',
+    // Make the isolated window-close choice explicit for the quit observation.
+    appBehavior: { closeAction: 'quit' },
     provider: {
       activeProviderId: '',
       baseUrl: providerBaseUrl,
@@ -254,6 +539,7 @@ function safeChildEnvironment(userDataDir, denyProxyPort) {
   env.ANALYTIX_USER_DATA_DIR = userDataDir
   env.ANALYTIX_HUB_ACTIVITY_OBSERVATION = '1'
   env.ANALYTIX_STARTUP_TRACE = '1'
+  if (latencyObservation) env.ANALYTIX_THREAD_TRACE = '1'
   env.HTTP_PROXY = `http://127.0.0.1:${denyProxyPort}`
   env.HTTPS_PROXY = env.HTTP_PROXY
   env.ALL_PROXY = env.HTTP_PROXY
@@ -307,6 +593,7 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     : [`--remote-debugging-port=${debugPort}`, ...chromiumArgs]
   const observations = []
   let line = ''
+  let lineOverflowed = false
   let stdoutBytes = 0
   let stderrBytes = 0
   let diagnosticTail = ''
@@ -321,12 +608,25 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     launcherRendererReady: 0,
     launcherElectronStarted: 0
   }
+  const startedAtMs = Date.now()
+  const checkpointReceivedAtMs = Object.create(null)
+  const startupNumericDiagnostics = {
+    maxEventLoopLagMs: null,
+    maxConcurrentWaitForHealthProbes: null
+  }
+  let goStartupAttemptCount = 0
+  const goStartupAttempts = []
+  const runtimeTransitions = []
+  const startupTrace = latencyObservation
+    ? createPackagedStartupTraceRecorder(({ checkpoint }) => {
+      checkpointReceivedAtMs[checkpoint] = Date.now()
+    })
+    : null
   const classifyDiagnostic = (chunk) => {
     diagnosticTail = `${diagnosticTail}${chunk.toString('utf8')}`.slice(-65_536)
     const patterns = [
       ['desktop_external_state_invalid', /desktop external-state isolation configuration is invalid/iu],
       ['darwin_keychain_binding_unavailable', /Darwin Secret Store task Keychain binding is unavailable/iu],
-      ['single_instance_unavailable', /another instance|single instance/iu],
       ['electron_vite_start_error', /error during start dev server and electron app/iu],
       ['address_in_use', /EADDRINUSE/iu],
       ['module_not_found', /ERR_MODULE_NOT_FOUND|Cannot find (?:package|module)/iu],
@@ -337,7 +637,7 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     for (const [kind, pattern] of patterns) {
       if (pattern.test(diagnosticTail)) diagnosticKinds.add(kind)
     }
-    if (/gotSingleInstanceLock["']?\s*[:=]\s*false/iu.test(diagnosticTail)) {
+    if (observedSingleInstanceLockFailure(diagnosticTail)) {
       diagnosticKinds.add('single_instance_lock_false')
     }
     for (const label of [
@@ -350,12 +650,18 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
       if (diagnosticTail.includes(label)) traceStages.add(label)
     }
   }
+  const childEnvironment = safeChildEnvironment(userDataDir, denyProxyPort)
+  const fundsCSVAdmission = createFundsCSVAdmissionAttemptRecorderV2(
+    childEnvironment.ANALYTIX_STARTUP_TRACE === '1'
+  )
   const child = spawn(command, args, {
     cwd: repoRoot,
-    env: safeChildEnvironment(userDataDir, denyProxyPort),
+    env: childEnvironment,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   })
+  fundsCSVAdmissionByLaunch.push(fundsCSVAdmission)
+  child.analytixDebugPort = debugPort
   activeChild = child
   activeChildFailureSnapshot = () => ({
     exitObserved: false,
@@ -365,17 +671,46 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
     traceStages: [...traceStages],
     eventCounts: { ...eventCounts },
     stdoutBytes,
-    stderrBytes
+    stderrBytes,
+    ...(startupTrace ? {
+      launchElapsedMs: Date.now() - startedAtMs,
+      startupTrace: startupTrace.evidence()
+    } : {})
   })
   child.stdout.on('data', (chunk) => {
+    startupTrace?.accept('stdout', chunk)
     stdoutBytes += chunk.length
     classifyDiagnostic(chunk)
     line += chunk.toString('utf8')
-    if (Buffer.byteLength(line) > MAX_CHILD_LINE_BYTES) line = line.slice(-MAX_CHILD_LINE_BYTES)
+    if (Buffer.byteLength(line) > MAX_CHILD_LINE_BYTES) {
+      line = line.slice(-MAX_CHILD_LINE_BYTES)
+      lineOverflowed = true
+    }
     for (;;) {
       const index = line.indexOf('\n')
       if (index < 0) break
       const completedLine = line.slice(0, index)
+      fundsCSVAdmission.acceptLine('stdout', completedLine, !lineOverflowed)
+      const phase = parseGoStartupPhase(completedLine)
+      const ownerPhase = parseGoOwnerPhase(completedLine)
+      const transition = parseRuntimeTransitionPhase(completedLine)
+      if (transition && runtimeTransitions.length < 32) runtimeTransitions.push(transition)
+      if (phase?.phase === 'preflightBegin') {
+        goStartupAttemptCount += 1
+        if (goStartupAttempts.length < 8) goStartupAttempts.push({ preflightBegin: phase.elapsedMs, ownerPhases: [] })
+      } else if (phase && goStartupAttempts.length > 0 && goStartupAttemptCount <= 8) {
+        goStartupAttempts.at(-1)[phase.phase] = phase.elapsedMs
+      }
+      if (ownerPhase && goStartupAttempts.length > 0 && goStartupAttemptCount <= 8 &&
+          goStartupAttempts.at(-1).ownerPhases.length < 16) {
+        goStartupAttempts.at(-1).ownerPhases.push(ownerPhase)
+      }
+      const numeric = parseRuntimeStartupNumericDiagnostic(completedLine)
+      if (numeric) {
+        startupNumericDiagnostics[numeric.key] = Math.max(
+          startupNumericDiagnostics[numeric.key] ?? 0, numeric.value
+        )
+      }
       parseHubObservationLine(completedLine, observations)
       if (completedLine.includes('event=main_info')) eventCounts.mainInfo += 1
       if (completedLine.includes('event=main_warn')) eventCounts.mainWarn += 1
@@ -385,14 +720,18 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
       if (completedLine.includes('dev server running for the electron renderer process')) eventCounts.launcherRendererReady += 1
       if (completedLine.includes('start electron app')) eventCounts.launcherElectronStarted += 1
       line = line.slice(index + 1)
+      lineOverflowed = false
     }
   })
   child.stderr.on('data', (chunk) => {
+    startupTrace?.accept('stderr', chunk)
     stderrBytes += chunk.length
     classifyDiagnostic(chunk)
   })
   const closed = new Promise((resolveClosed) => {
     child.once('close', (code, signal) => {
+      startupTrace?.finish('stdout')
+      startupTrace?.finish('stderr')
       parseHubObservationLine(line, observations)
       line = ''
       lastChildFailureFacts = {
@@ -403,7 +742,11 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
         traceStages: [...traceStages],
         eventCounts,
         stdoutBytes,
-        stderrBytes
+        stderrBytes,
+        ...(startupTrace ? {
+          launchElapsedMs: Date.now() - startedAtMs,
+          startupTrace: startupTrace.evidence()
+        } : {})
       }
       diagnosticTail = ''
       resolveClosed({ code, signal })
@@ -412,13 +755,28 @@ function startChild({ debugPort, userDataDir, denyProxyPort }) {
   return {
     child,
     closed,
-    observation: () => ({ observations: [...observations], stdoutBytes, stderrBytes })
+    observation: () => ({ observations: [...observations], stdoutBytes, stderrBytes,
+      ...((latencyObservation || traceTransitions) ? {
+        goStartupAttemptCount,
+        goStartupAttempts: goStartupAttempts.map((attempt) => ({ ...attempt })),
+        runtimeTransitions: runtimeTransitions.map((transition) => ({ ...transition }))
+      } : {}),
+      ...(startupTrace ? {
+        startupTrace: startupTrace.evidence(),
+        checkpointReceivedAtMs: { ...checkpointReceivedAtMs },
+        startupNumericDiagnostics: { ...startupNumericDiagnostics },
+        startedAtMs
+      } : {}) })
   }
 }
 
 async function waitForTarget(debugPort, timeoutMs = WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (latencyObservation && !ownedDebugPortReady(debugPort)) {
+      await sleep(250)
+      continue
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
         signal: AbortSignal.timeout(1000)
@@ -438,25 +796,93 @@ async function waitForTarget(debugPort, timeoutMs = WAIT_TIMEOUT_MS) {
   throw new Error('cdp_target_timeout')
 }
 
-async function waitForTargetClosed(debugPort, timeoutMs) {
+function ownedDebugPortReady(port) {
+  if (!Number.isInteger(activeChild?.pid) || activeChild.pid <= 0 ||
+      activeChild.exitCode !== null || activeChild.signalCode) {
+    throw new Error('exact_main_process_unavailable')
+  }
+  let owners = []
+  try {
+    owners = [...new Set(boundedProcessProbe('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'])
+      .split(/\r?\n/u).map((value) => Number(value.trim()))
+      .filter((value) => Number.isInteger(value) && value > 0))]
+  } catch (error) {
+    if (processProbeTimedOut(error)) throw new Error('process_probe_timeout')
+    return false
+  }
+  if (owners.length === 0) return false
+  if (owners.length !== 1 || owners[0] !== activeChild.pid) {
+    throw new Error('exact_main_debug_port_owner_mismatch')
+  }
+  return true
+}
+
+async function waitForTargetClosed(debugPort, capturedTargetId, timeoutMs) {
+  const startedAtMs = Date.now()
   const deadline = Date.now() + timeoutMs
+  const counts = { targetPresent: 0, targetAbsent: 0, httpError: 0,
+    fetchError: 0, malformed: 0, mainExited: 0, timeout: 0 }
+  let lastObservationCategory = null
+  let lastObservationAtMs = null
+  const count = (key, category = null) => {
+    counts[key] = Math.min(counts[key] + 1, 128)
+    if (category) {
+      lastObservationCategory = category
+      lastObservationAtMs = Math.max(0, Date.now() - startedAtMs)
+    }
+  }
+  const result = (closed, reason) => ({ closed, reason, counts,
+    lastObservationCategory, lastObservationAtMs })
+  let consecutiveAbsences = 0
   while (Date.now() < deadline) {
+    if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
+      processDefinitelyExited(activeChild.pid))) {
+      count('mainExited', 'main_exited')
+      return result(true, 'main_exited')
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
         signal: AbortSignal.timeout(1000)
       })
-      if (!response.ok) return true
-      const targets = await response.json()
-      if (!Array.isArray(targets) || !targets.some((target) => target?.type === 'page')) return true
+      if (!response.ok) {
+        count('httpError', 'http_error')
+        consecutiveAbsences = 0
+      } else {
+        let targets
+        try { targets = await response.json() } catch { targets = null }
+        const category = classifyExactTargetList(targets, capturedTargetId)
+        if (category === 'target_absent') {
+          count('targetAbsent', category)
+          consecutiveAbsences += 1
+          if (consecutiveAbsences >= 2) return result(true, 'target_absent')
+        } else {
+          count(category === 'target_present' ? 'targetPresent' : 'malformed', category)
+          consecutiveAbsences = 0
+        }
+      }
     } catch {
-      return true
+      count('fetchError', 'fetch_error')
+      consecutiveAbsences = 0
     }
     await sleep(250)
   }
-  return false
+  if (activeChild && (activeChild.exitCode !== null || activeChild.signalCode ||
+    processDefinitelyExited(activeChild.pid))) {
+    count('mainExited', 'main_exited')
+    return result(true, 'main_exited')
+  }
+  count('timeout')
+  return result(false, exactTargetDeadlineReason(lastObservationCategory))
 }
 
-async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000) {
+async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000, onCommandSent = () => {}) {
+  const endpoint = latencyObservation ? new URL(webSocketDebuggerUrl) : null
+  const port = Number(endpoint?.port)
+  if (latencyObservation && (
+    endpoint.protocol !== 'ws:' || endpoint.hostname !== '127.0.0.1' ||
+    !Number.isInteger(port) || port <= 0 ||
+    !endpoint.pathname.startsWith('/devtools/page/') ||
+    !ownedDebugPortReady(port))) throw new Error('exact_main_debug_target_untrusted')
   const socket = new WebSocket(webSocketDebuggerUrl)
   await new Promise((resolveOpen, reject) => {
     socket.addEventListener('open', resolveOpen, { once: true })
@@ -464,8 +890,14 @@ async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000) {
   })
   let nextId = 0
   try {
+    if (latencyObservation && !ownedDebugPortReady(port)) {
+      throw new Error('exact_main_debug_port_owner_unavailable')
+    }
     const results = []
     for (const command of commands) {
+      if (latencyObservation && !ownedDebugPortReady(port)) {
+        throw new Error('exact_main_debug_port_owner_unavailable')
+      }
       const id = ++nextId
       const result = await new Promise((resolveResult, reject) => {
         const timer = setTimeout(() => reject(new Error('cdp_command_timeout')), timeoutMs)
@@ -487,6 +919,7 @@ async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000) {
         }
         socket.addEventListener('message', listener)
         socket.send(JSON.stringify({ id, ...command }))
+        onCommandSent(command)
       })
       results.push(result)
     }
@@ -496,6 +929,38 @@ async function dispatchCdp(webSocketDebuggerUrl, commands, timeoutMs = 20_000) {
   }
 }
 
+function taskOwnedResidualProcessCount() {
+  if (!exactTaskRoot || (latencyObservation && !lastTaskMainIdentity)) return null
+  let candidates = ''
+  try {
+    candidates = boundedProcessProbe('pgrep', ['-f', exactTaskRoot])
+  } catch (error) {
+    if (processProbeFailureKind(error, 'pgrep') !== 'no_match') return null
+  }
+  const found = new Set()
+  for (const value of candidates.split(/\r?\n/u)) {
+    const pid = Number(value.trim())
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue
+    try {
+      const command = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'command='])
+      if (command.includes(exactTaskRoot)) found.add(pid)
+    } catch (error) {
+      if (!processDefinitelyExited(pid)) return null
+    }
+  }
+  if (latencyObservation) {
+    let processes = ''
+    try {
+      processes = boundedProcessProbe('ps', ['-axo', 'pid=,pgid=,command='])
+    } catch { return null }
+    const group = exactTaskGroupMembers(processes, lastTaskMainIdentity.pid,
+      resolve(packagedAppPath, '../..'))
+    if (!group) return null
+    for (const pid of group) found.add(pid)
+  }
+  return found.size
+}
+
 async function evaluate(debugPort, expression, timeoutMs = 20_000) {
   const target = await waitForTarget(debugPort, timeoutMs)
   const [result] = await dispatchCdp(target.webSocketDebuggerUrl, [{
@@ -503,6 +968,27 @@ async function evaluate(debugPort, expression, timeoutMs = 20_000) {
     params: { expression, awaitPromise: true, returnByValue: true, timeout: timeoutMs }
   }], timeoutMs)
   return result?.result?.value
+}
+
+async function enableRendererThreadTrace(debugPort) {
+  // Main inherits the opt-in environment variable; a packaged renderer may not.
+  // Write once in this task's isolated profile, then inspect state if CDP did
+  // not acknowledge the write. Never replay an ambiguous mutating expression.
+  try {
+    if (await evaluate(debugPort, `(() => {
+      try {
+        localStorage.setItem('ANALYTIX_THREAD_TRACE', '1');
+        return localStorage.getItem('ANALYTIX_THREAD_TRACE') === '1';
+      } catch { return false; }
+    })()`)) return
+  } catch {
+    // A lost CDP response does not tell us whether the write took effect.
+  }
+  const observed = await evaluate(debugPort, `(() => {
+    try { return localStorage.getItem('ANALYTIX_THREAD_TRACE') === '1'; }
+    catch { return false; }
+  })()`).catch(() => false)
+  if (observed !== true) throw new Error('renderer_thread_trace_enable_unverified')
 }
 
 function geometryExpression(kind) {
@@ -546,7 +1032,7 @@ function credentialSurfaceExpression() {
     const credentials = Array.from(document.querySelectorAll('input[type="password"]')).filter(visible);
     const credential = credentials[0];
     const buttons = Array.from(document.querySelectorAll('button')).filter(visible);
-    const normalized = (element) => (element.textContent || '').replace(/\s+/g, ' ').trim();
+    const normalized = (element) => (element.textContent || '').replace(/\\s+/g, ' ').trim();
     const onboardingSave = buttons.find((button) => ['Save and continue', '保存并继续'].includes(normalized(button)));
     const recoverySave = buttons.find((button) => ['Save changes', '保存更改'].includes(normalized(button)));
     const save = onboardingSave || recoverySave;
@@ -567,7 +1053,8 @@ function credentialSurfaceExpression() {
       } else if (result?.error?.code) {
         const allowed = new Set([
           'invalid_request', 'method_not_allowed', 'not_found', 'conflict', 'persistence_failure',
-          'verification_failure', 'request_too_large', 'unauthorized', 'runtime_unavailable', 'invalid_response'
+          'verification_failure', 'request_too_large', 'unauthorized', 'runtime_unavailable', 'invalid_response',
+          'credential_unavailable', 'credential_reentry_required'
         ]);
         registryFailureKind = allowed.has(result.error.code) ? result.error.code : 'other';
       }
@@ -575,6 +1062,7 @@ function credentialSurfaceExpression() {
     const facts = {
       uiSchemaVersion: 1,
       ready: Boolean(credential && save),
+      credentialValuePresent: Boolean(credential?.value),
       visiblePasswordCount: credentials.length,
       onboardingTitlePresent: Boolean(document.getElementById('initial-setup-title')),
       onboardingSavePresent: Boolean(onboardingSave),
@@ -597,6 +1085,43 @@ function credentialSurfaceExpression() {
       credential: { found: true, x: credentialRect.left + credentialRect.width / 2, y: credentialRect.top + credentialRect.height / 2 },
       save: { found: true, x: saveRect.left + saveRect.width / 2, y: saveRect.top + saveRect.height / 2 }
     };
+  })()`
+}
+
+function onboardingSaveOutcomeExpression() {
+  return `(async () => {
+    const dialog = document.getElementById('initial-setup-title')?.closest('[role="dialog"]');
+    const buttons = dialog ? Array.from(dialog.querySelectorAll('button')) : [];
+    const normalized = (element) => (element.textContent || '').replace(/\\s+/g, ' ').trim();
+    const saving = buttons.some((button) =>
+      ['Saving configuration…', '正在保存配置…'].includes(normalized(button)));
+    const errorVisible = Boolean(dialog && Array.from(dialog.querySelectorAll('div')).some((element) => {
+      const rect = element.getBoundingClientRect();
+      return typeof element.className === 'string' && element.className.includes('border-red-500') &&
+        rect.width > 0 && rect.height > 0;
+    }));
+    let providerCount = 0;
+    let selected = false;
+    let credentialConfigured = false;
+    let registryFailureKind = 'none';
+    try {
+      const result = await window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' });
+      if (result && !result.error && Array.isArray(result.providers)) {
+        providerCount = result.providers.length;
+        const chosen = result.providers.find((provider) => provider.id === result.selectedProviderId);
+        selected = Boolean(chosen && !chosen.tombstone);
+        credentialConfigured = chosen?.credentialConfigured === true;
+      } else if (result?.error?.code) {
+        const allowed = new Set([
+          'invalid_request', 'method_not_allowed', 'not_found', 'conflict', 'persistence_failure',
+          'verification_failure', 'request_too_large', 'unauthorized', 'runtime_unavailable', 'invalid_response',
+          'credential_unavailable', 'credential_reentry_required'
+        ]);
+        registryFailureKind = allowed.has(result.error.code) ? result.error.code : 'other';
+      }
+    } catch { registryFailureKind = 'invoke_rejected'; }
+    return { uiSchemaVersion: 1, phase: 'after_onboarding_save', modalPresent: Boolean(dialog),
+      saving, errorVisible, providerCount, selected, credentialConfigured, registryFailureKind };
   })()`
 }
 
@@ -713,24 +1238,195 @@ function readyUiExpression(replyText = '') {
   })()`
 }
 
+function bridgeHealthExpression() {
+  return `(async () => {
+    try {
+      const response = await window.analytix?.runtime?.runtimeRequest('/health', 'GET');
+      if (response?.status !== 200) return { ready: false };
+      return { ready: JSON.parse(response.body || '{}').service === 'analytix' };
+    } catch { return { ready: false }; }
+  })()`
+}
+
+function ownedGoPid(mainPid) {
+  if (!Number.isInteger(mainPid) || mainPid <= 0 || !runtimeDataDirPath ||
+      lastTaskMainIdentity?.pid !== mainPid) return null
+  let children = ''
+  try {
+    children = boundedProcessProbe('pgrep', ['-P', String(mainPid)])
+  } catch (error) {
+    return processProbeFailureKind(error, 'pgrep') === 'no_match' ? 0 : null
+  }
+  for (const value of children.split(/\r?\n/u)) {
+    const pid = Number(value.trim())
+    if (!Number.isInteger(pid) || pid <= 0) continue
+    try {
+      const row = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'ppid=,pgid=,command=']).trim()
+      const match = row.match(/^(\d+)\s+(\d+)\s+(.+)$/u)
+      const executable = `${resolve(packagedAppPath, '../..')}/Resources/runtime-go/bin/runtime-server`
+      if (match && Number(match[1]) === mainPid &&
+          exactCoreRuntimeCommandMatches(match[3], executable, runtimeDataDirPath)) {
+        const born = boundedProcessProbe('ps', ['-p', String(pid), '-o', 'lstart=']).trim()
+        if (born && boundedProcessProbe('ps', ['-p', String(pid), '-o', 'lstart=']).trim() === born) {
+          ownedGoIdentity = { pid, pgid: Number(match[2]), born, command: match[3] }
+          return pid
+        }
+      }
+    } catch {
+      if (!processDefinitelyExited(pid)) return null
+    }
+  }
+  return 0
+}
+
+function sameExactGoIdentity(identity) {
+  try {
+    const row = boundedProcessProbe('ps', ['-p', String(identity.pid), '-o', 'pgid=,command=']).trim()
+    const born = boundedProcessProbe('ps', ['-p', String(identity.pid), '-o', 'lstart=']).trim()
+    const match = row.match(/^(\d+)\s+(.+)$/u)
+    return Boolean(match && Number(match[1]) === identity.pgid &&
+      match[2] === identity.command && born === identity.born)
+  } catch { return false }
+}
+
 async function normalQuit(debugPort, launched) {
+  const quitStartedAtMs = Date.now()
+  const relativeMs = () => Date.now() - quitStartedAtMs
+  let quitRequestOk = false
+  let quitRequestAcknowledged = false
+  let quitTargetObserved = false
+  let fallbackUsed = false
+  let fallbackSigkillSent = false
+  let capturedTargetId = null
+  let quitRequestSentAtMs = null
+  let quitRequestAcknowledgedAtMs = null
+  let mainExitObservedAtMs = null
+  let fallbackStartedAtMs = null
+  let fallbackSignalSentAtMs = null
+  let targetObservationAfterFallback = null
+  if (latencyObservation) pinExactTaskGroupMembers(launched.child)
   try {
     const target = await waitForTarget(debugPort, 10_000)
+    if (typeof target.id !== 'string' || target.id.length === 0 || target.id.length > 128) {
+      throw new Error('exact_main_debug_target_untrusted')
+    }
+    capturedTargetId = target.id
+    launched.quitTargetId = capturedTargetId
+    quitTargetObserved = true
     await dispatchCdp(target.webSocketDebuggerUrl, [
-      { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'q', code: 'KeyQ', modifiers: 4 } },
-      { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'q', code: 'KeyQ', modifiers: 4 } }
-    ], 10_000)
+      { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'F4', code: 'F4', modifiers: 1 } },
+      { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'F4', code: 'F4', modifiers: 1 } }
+    ], 10_000, (command) => {
+      if (command.params.type === 'rawKeyDown') {
+        quitRequestOk = true
+        quitRequestSentAtMs = relativeMs()
+      }
+    })
+    quitRequestAcknowledged = true
+    quitRequestAcknowledgedAtMs = relativeMs()
   } catch {
-    // Exact-child termination below is the bounded fallback.
+    // The app can exit and close CDP before acknowledging the key event.
+    // Exact-child exit and residual checks below still determine success.
   }
-  let targetClosed = await waitForTargetClosed(debugPort, 15_000)
+  const targetObservationBeforeFallback = capturedTargetId
+    ? await waitForTargetClosed(debugPort, capturedTargetId, 15_000)
+    : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+        reason: launched.child.exitCode !== null || launched.child.signalCode
+          ? 'main_exited' : 'target_unavailable', counts: null,
+        lastObservationCategory: null, lastObservationAtMs: null }
+  let targetClosed = targetObservationBeforeFallback.closed
+  let mainExitedBeforeFallback = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+  if (mainExitedBeforeFallback) mainExitObservedAtMs = relativeMs()
+  lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk,
+    quitRequestAcknowledged, quitRequestSentAtMs, quitRequestAcknowledgedAtMs,
+    targetClosed, targetObservationBeforeFallback, targetObservationAfterFallback,
+    mainExitedBeforeFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
+    fallbackSignalSent: false, fallbackSigkillSent: false,
+    mainExitCode: launched.child.exitCode,
+    mainSignaled: Boolean(launched.child.signalCode), residualProcessCount: null }
   if (!targetClosed) {
-    terminateTaskProcessGroup(launched.child)
-    targetClosed = await waitForTargetClosed(debugPort, 10_000)
+    fallbackStartedAtMs = relativeMs()
+    try {
+      if (latencyObservation) {
+        const stopped = await stopExactPackagedTaskGroup(launched.child)
+        fallbackUsed = stopped.signalSent
+        fallbackSigkillSent = stopped.sigkillSent
+      } else {
+        terminateTaskProcessGroup(launched.child)
+        fallbackUsed = true
+      }
+      if (fallbackUsed) fallbackSignalSentAtMs = relativeMs()
+    } catch {
+      taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+      lastNormalQuitFacts = { ...lastNormalQuitFacts, fallbackStartedAtMs, fallbackSignalSentAtMs }
+      throw new Error(normalQuitDeadlineFailureCode(quitRequestOk, targetObservationBeforeFallback))
+    }
+    targetObservationAfterFallback = capturedTargetId
+      ? await waitForTargetClosed(debugPort, capturedTargetId, 10_000)
+      : { closed: launched.child.exitCode !== null || Boolean(launched.child.signalCode),
+          reason: 'target_unavailable', counts: null,
+          lastObservationCategory: null, lastObservationAtMs: null }
+    targetClosed = targetObservationAfterFallback.closed
+    if (targetClosed && mainExitObservedAtMs === null &&
+        (launched.child.exitCode !== null || launched.child.signalCode)) mainExitObservedAtMs = relativeMs()
+    lastNormalQuitFacts = { ...lastNormalQuitFacts, targetClosed,
+      targetObservationAfterFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
+      fallbackSignalSent: fallbackUsed, fallbackSigkillSent,
+      mainExitCode: launched.child.exitCode,
+      mainSignaled: Boolean(launched.child.signalCode) }
+    if (latencyObservation) {
+      throw new Error(normalQuitDeadlineFailureCode(quitRequestOk, targetObservationBeforeFallback))
+    }
   }
   if (!targetClosed) throw new Error('electron_task_process_group_did_not_close')
+  let mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+  for (let attempt = 0; attempt < 40 && !mainExited; attempt += 1) {
+    await sleep(250)
+    mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+  }
+  if (mainExited && mainExitObservedAtMs === null) mainExitObservedAtMs = relativeMs()
+  if (mainExited && fallbackStartedAtMs === null) mainExitedBeforeFallback = true
+  if (!mainExited) {
+    fallbackStartedAtMs ??= relativeMs()
+    try {
+      if (latencyObservation) {
+        const stopped = await stopExactPackagedTaskGroup(launched.child)
+        fallbackUsed ||= stopped.signalSent
+        fallbackSigkillSent ||= stopped.sigkillSent
+      } else {
+        terminateTaskProcessGroup(launched.child)
+        fallbackUsed = true
+      }
+      if (fallbackUsed && fallbackSignalSentAtMs === null) fallbackSignalSentAtMs = relativeMs()
+    } catch {
+      taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+      lastNormalQuitFacts = { ...lastNormalQuitFacts, fallbackStartedAtMs, fallbackSignalSentAtMs }
+      throw new Error('exact_main_process_did_not_exit')
+    }
+    for (let attempt = 0; attempt < 40 && !mainExited; attempt += 1) {
+      await sleep(250)
+      mainExited = launched.child.exitCode !== null || Boolean(launched.child.signalCode)
+    }
+    if (mainExited && mainExitObservedAtMs === null) mainExitObservedAtMs = relativeMs()
+  }
+  const residualProcessCount = latencyObservation ? taskOwnedResidualProcessCount() : 0
+  lastNormalQuitFacts = { quitTargetObserved, quitRequestSent: quitRequestOk, quitRequestAcknowledged,
+    quitRequestSentAtMs, quitRequestAcknowledgedAtMs, targetClosed,
+    targetObservationBeforeFallback, targetObservationAfterFallback,
+    mainExitedBeforeFallback, mainExitObservedAtMs, fallbackStartedAtMs, fallbackSignalSentAtMs,
+    fallbackSignalSent: fallbackUsed,
+    fallbackSigkillSent, mainExitCode: launched.child.exitCode,
+    mainSignaled: Boolean(launched.child.signalCode), residualProcessCount }
+  if (latencyObservation) {
+    const failure = normalQuitFailureCode({ quitRequestOk, targetClosed, mainExited,
+      mainExitCode: launched.child.exitCode, mainSignal: launched.child.signalCode,
+      fallbackUsed, residualProcessCount })
+    if (failure) throw new Error(failure)
+  } else if (!mainExited) {
+    throw new Error('exact_main_process_did_not_exit')
+  }
   if (activeChild === launched.child) activeChild = null
-  return launched.observation()
+  return { ...launched.observation(), residualProcessCount, normalQuit: lastNormalQuitFacts }
 }
 
 function hubZeroEvidence(observations) {
@@ -752,12 +1448,45 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
   const denyProxyPort = denyProxy.address().port
   stage = 'electron_launch'
   const launched = startChild({ debugPort, userDataDir, denyProxyPort })
+  ownedGoIdentity = null
+  ownedGroupMemberIdentities = new Map()
+  const timing = { goSpawnObservedAtMs: 0, bridgeHealth200AtMs: 0,
+    credentialSurfaceReadyAtMs: 0, credentialSaveClickedAtMs: 0,
+    credentialSaveOutcomeAtMs: 0, registryReadyAtMs: 0,
+    composerReadyAtMs: 0, submitAtMs: 0, domReplyObservedAtMs: 0,
+    rendererTraceEnabled: false, terminalDomTraceObservedBeforeQuit: false }
+  const goProbe = latencyObservation ? setInterval(() => {
+    const pid = ownedGoPid(launched.child.pid)
+    if (pid === null && lastTaskMainIdentity?.pid === launched.child.pid) {
+      goProbeUnknownCount += 1
+    }
+    if (!timing.goSpawnObservedAtMs && pid) {
+      timing.goSpawnObservedAtMs = Date.now()
+    }
+  }, 250) : null
+  goProbe?.unref?.()
+  let launchError = null
   try {
+    if (latencyObservation) {
+      stage = 'main_birth_pin'
+      await pinExactPackagedMainBirth(launched.child)
+    }
     const startup = await Promise.race([
-      waitForTarget(debugPort).then(() => 'target'),
+      waitForTarget(debugPort, STARTUP_TARGET_TIMEOUT_MS).then(() => 'target'),
       launched.closed.then(() => 'exit')
     ])
     if (startup !== 'target') throw new Error('electron_exited_before_cdp')
+    if (latencyObservation) {
+      stage = 'bridge_health_ready'
+      await waitFor(
+        debugPort, bridgeHealthExpression(), (value) => value?.ready === true,
+        STARTUP_TARGET_TIMEOUT_MS
+      )
+      timing.bridgeHealth200AtMs = Date.now()
+      stage = 'renderer_thread_trace_enable'
+      await enableRendererThreadTrace(debugPort)
+      timing.rendererTraceEnabled = true
+    }
     if (enterCredential) {
       stage = 'credential_surface_ready'
       const credentialSurface = await waitFor(
@@ -765,10 +1494,30 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
         credentialSurfaceExpression(),
         (value) => value?.ready === true && ['onboarding', 'recovery'].includes(value?.mode)
       )
+      if (latencyObservation) timing.credentialSurfaceReadyAtMs = Date.now()
       stage = 'credential_normal_ui_input'
       await normalUiInput(debugPort, credentialSurface.credential, credential)
+      const readyToSave = await waitFor(
+        debugPort,
+        credentialSurfaceExpression(),
+        (value) => value?.ready === true && value?.credentialValuePresent === true &&
+          value?.save?.found === true
+      )
       stage = 'credential_normal_ui_commit'
-      await clickGeometry(debugPort, credentialSurface.save)
+      await clickGeometry(debugPort, readyToSave.save)
+      if (latencyObservation) timing.credentialSaveClickedAtMs = Date.now()
+      if (credentialSurface.mode === 'onboarding') {
+        stage = 'credential_onboarding_save_outcome'
+        const outcome = await waitFor(
+          debugPort,
+          onboardingSaveOutcomeExpression(),
+          (value) => value?.providerCount > 0 || value?.errorVisible === true ||
+            value?.modalPresent === false,
+          30_000
+        )
+        if (outcome.errorVisible) throw new Error('credential_onboarding_save_error_visible')
+        if (latencyObservation) timing.credentialSaveOutcomeAtMs = Date.now()
+      }
       if (credentialSurface.mode === 'recovery') {
         stage = 'credential_registry_commit_ready'
         const committed = await waitFor(
@@ -800,8 +1549,10 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
     }
     stage = 'registry_ready'
     const registry = await waitFor(debugPort, registryObservationExpression(), (value) => value?.ready === true)
+    if (latencyObservation) timing.registryReadyAtMs = Date.now()
     stage = 'composer_ready'
     await waitFor(debugPort, readyUiExpression(), (value) => value?.modal === false && value?.composer === true)
+    if (latencyObservation) timing.composerReadyAtMs = Date.now()
     if (sendPrompt) {
       const composerGeometry = await waitFor(
         debugPort,
@@ -816,20 +1567,194 @@ async function runLaunch({ userDataDir, unlock, enterCredential, sendPrompt }) {
         (value) => value?.found === true
       )
       stage = 'ordinary_prompt_normal_ui_commit'
+      if (latencyObservation) {
+        timing.submitAtMs = Date.now()
+        submittedProviderRequestArmed = true
+      }
       await clickGeometry(debugPort, sendGeometry)
       stage = 'ordinary_provider_reply'
       await waitFor(debugPort, readyUiExpression(reply), (value) => value?.replySeen === true)
+      submittedProviderRequestArmed = false
+      if (latencyObservation) timing.domReplyObservedAtMs = Date.now()
       replyObservedInRenderer = true
+      if (latencyObservation) {
+        stage = 'terminal_dom_trace_observation'
+        timing.terminalDomTraceObservedBeforeQuit = await waitForTerminalDomTrace(userDataDir)
+      }
     }
     stage = 'normal_quit'
     const processObservation = await normalQuit(debugPort, launched)
-    return { registry, processObservation }
+    return { registry, processObservation, timing }
+  } catch (error) {
+    launchError = error
+    throw error
   } finally {
+    submittedProviderRequestArmed = false
+    if (goProbe) clearInterval(goProbe)
     if (activeChild === launched.child) {
-      terminateTaskProcessGroup(launched.child)
-      await waitForTargetClosed(debugPort, 10_000)
-      activeChild = null
+      try {
+        if (latencyObservation) await stopExactPackagedTaskGroup(launched.child)
+        else terminateTaskProcessGroup(launched.child)
+        if (launched.quitTargetId) await waitForTargetClosed(debugPort, launched.quitTargetId, 10_000)
+        if (latencyObservation) await stopExactTaskOwnedResiduals()
+      } catch (error) {
+        taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+        if (!launchError) throw error
+      } finally {
+        activeChild = null
+      }
     }
+    if (latencyObservation) {
+      try {
+        partialLatencyEvidence = packagedLatencyEvidence(userDataDir, {
+          processObservation: {
+            ...launched.observation(), residualProcessCount: taskOwnedResidualProcessCount()
+          },
+          timing
+        })
+      } catch {
+        partialLatencyEvidence = { classification: 'development_only_partial_observation',
+          latencyEvidenceError: 'partial_timing_unavailable' }
+      }
+    }
+  }
+}
+
+function boundedElapsed(start, end) {
+  return Number.isFinite(start) && Number.isFinite(end) && start > 0 && end >= start &&
+    end - start <= 30 * 60 * 1000 ? Math.round((end - start) * 1000) / 1000 : null
+}
+
+function stageElapsed(start, end, stages) {
+  if (!Object.hasOwn(stages, start) || !Object.hasOwn(stages, end)) return null
+  const first = stages[start]
+  const last = stages[end]
+  return Number.isSafeInteger(first) && Number.isSafeInteger(last) &&
+    first >= 0 && last >= first && last - first <= 30 * 60 * 1000
+    ? last - first : null
+}
+
+function taskTraceTiming(userDataDir) {
+  const dir = join(userDataDir, 'traces')
+  const timing = { coreCommittedAtMs: 0, mainReceivedAtMs: 0,
+    ipcSentAtMs: 0, rendererCommittedAtMs: 0, domCommittedAtMs: 0 }
+  if (!existsSync(dir)) return timing
+  for (const entry of readdirSync(dir)) {
+    if (!/^thread-ref-[a-f0-9]{64}\.jsonl$/u.test(entry)) continue
+    const path = join(dir, entry)
+    const info = lstatSync(path)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) continue
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!line || line.length > 8192) continue
+      let event
+      try { event = JSON.parse(line) } catch { continue }
+      const data = event?.data
+      if (!data || typeof data !== 'object' || Array.isArray(data)) continue
+      const absolute = (origin, elapsed) => Number.isFinite(origin) &&
+        Number.isFinite(elapsed) && origin > 0 && elapsed >= 0
+        ? origin + elapsed : 0
+      if (event.name === 'thread.terminal.core_committed' && !timing.coreCommittedAtMs) {
+        timing.coreCommittedAtMs = absolute(data.timeOrigin, data.publicationCommittedMs)
+        timing.mainReceivedAtMs = absolute(data.mainTimeOrigin, data.mainReceivedMonotonicMs)
+      } else if (event.name === 'thread.terminal.ipc_sent' && !timing.ipcSentAtMs) {
+        timing.ipcSentAtMs = absolute(data.timeOrigin, data.monotonicMs)
+      } else if (event.name === 'thread.terminal.renderer_committed' && !timing.rendererCommittedAtMs) {
+        timing.rendererCommittedAtMs = absolute(data.timeOrigin, data.monotonicMs)
+      } else if (event.name === 'thread.terminal.dom_committed' && !timing.domCommittedAtMs) {
+        timing.domCommittedAtMs = absolute(data.timeOrigin, data.monotonicMs)
+      }
+    }
+  }
+  return timing
+}
+
+async function waitForTerminalDomTrace(userDataDir) {
+  const deadline = Date.now() + 6_000
+  while (Date.now() < deadline) {
+    try {
+      if (taskTraceTiming(userDataDir).domCommittedAtMs > 0) return true
+    } catch {
+      // The diagnostic writer may rotate a trace file during this read.
+    }
+    await sleep(250)
+  }
+  try { return taskTraceTiming(userDataDir).domCommittedAtMs > 0 } catch { return false }
+}
+
+function packagedLatencyEvidence(userDataDir, launch) {
+  const trace = launch.processObservation.startupTrace
+  const received = launch.processObservation.checkpointReceivedAtMs || {}
+  const at = launch.timing
+  const spawnAt = launch.processObservation.startedAtMs
+  const stages = trace?.checkpointElapsedMs || {}
+  const terminal = taskTraceTiming(userDataDir)
+  return {
+    classification: 'development_only_single_run_observation',
+    normalQuit: launch.processObservation.normalQuit ?? null,
+    rendererTraceEnabled: at.rendererTraceEnabled,
+    terminalDomTraceObservedBeforeQuit: at.terminalDomTraceObservedBeforeQuit,
+    processProbe: { ...processProbe },
+    goProbeUnknownCount,
+    mainEventLoopLagMaxMs: launch.processObservation.startupNumericDiagnostics?.maxEventLoopLagMs ?? null,
+    maxConcurrentWaitForHealthProbes: launch.processObservation.startupNumericDiagnostics?.maxConcurrentWaitForHealthProbes ?? null,
+    goStartupAttemptCount: launch.processObservation.goStartupAttemptCount ?? 0,
+    runtimeTransitions: (launch.processObservation.runtimeTransitions ?? []).map((item) => ({ ...item })),
+    goStartupAttempts: (launch.processObservation.goStartupAttempts ?? []).map((attempt, index) => ({
+      ordinal: index + 1,
+      ...attempt,
+      preflightToCapabilityMaterializationDoneMs: boundedElapsed(
+        attempt.preflightBegin, attempt.capabilityMaterializationDone),
+      processSpawnedToReadyLineReceivedMs: boundedElapsed(
+        attempt.processSpawned, attempt.readyLineReceived)
+    })),
+    goPhaseAttribution: launch.processObservation.goStartupAttemptCount > 1
+      ? 'multiple_go_attempts_bounded_phase_series' : 'single_or_unobserved_attempt',
+    taskOwnedResidualProcessCount: launch.processObservation.residualProcessCount,
+    traceCheckpointCount: trace?.checkpointCount || 0,
+    launchToMainFirstLogReceivedMs: boundedElapsed(spawnAt, received.main_module_evaluated),
+    mainModuleToWindowStartupSurfaceMs: stageElapsed(
+      'main_module_evaluated', 'window_startup_surface_ready', stages),
+    launchToGoSpawnObservedMs: boundedElapsed(spawnAt, at.goSpawnObservedAtMs),
+    goSpawnObservedToMainBridgeHealth200Ms: boundedElapsed(
+      at.goSpawnObservedAtMs, at.bridgeHealth200AtMs),
+    launchToMainBridgeHealth200Ms: boundedElapsed(spawnAt, at.bridgeHealth200AtMs),
+    bridgeHealthToCredentialSurfaceReadyMs: boundedElapsed(
+      at.bridgeHealth200AtMs, at.credentialSurfaceReadyAtMs),
+    credentialSurfaceToSaveClickMs: boundedElapsed(
+      at.credentialSurfaceReadyAtMs, at.credentialSaveClickedAtMs),
+    saveClickToSaveOutcomeMs: boundedElapsed(
+      at.credentialSaveClickedAtMs, at.credentialSaveOutcomeAtMs),
+    saveOutcomeToRegistryReadyMs: boundedElapsed(
+      at.credentialSaveOutcomeAtMs, at.registryReadyAtMs),
+    registryReadyToComposerReadyMs: boundedElapsed(
+      at.registryReadyAtMs, at.composerReadyAtMs),
+    bridgeHealthToComposerReadyMs: boundedElapsed(
+      at.bridgeHealth200AtMs, at.composerReadyAtMs),
+    launchToComposerReadyMs: boundedElapsed(spawnAt, at.composerReadyAtMs),
+    submitToFirstLoopbackProviderBodyReceivedMs: boundedElapsed(
+      at.submitAtMs, firstSubmittedProviderRequestAtMs),
+    submitToCoreCommittedMs: boundedElapsed(at.submitAtMs, terminal.coreCommittedAtMs),
+    coreCommittedToMainReceivedMs: boundedElapsed(terminal.coreCommittedAtMs, terminal.mainReceivedAtMs),
+    mainReceivedToIpcSentMs: boundedElapsed(terminal.mainReceivedAtMs, terminal.ipcSentAtMs),
+    ipcSentToRendererCommittedMs: boundedElapsed(terminal.ipcSentAtMs, terminal.rendererCommittedAtMs),
+    rendererCommittedToDomCommittedMs: boundedElapsed(terminal.rendererCommittedAtMs, terminal.domCommittedAtMs),
+    ipcSentToDomCommittedMs: boundedElapsed(terminal.ipcSentAtMs, terminal.domCommittedAtMs),
+    submitToDomCommittedMs: boundedElapsed(at.submitAtMs, terminal.domCommittedAtMs),
+    submitToVisibleReplyObservedMs: boundedElapsed(at.submitAtMs, at.domReplyObservedAtMs),
+    terminalTrace: {
+      coreCommitted: terminal.coreCommittedAtMs > 0,
+      mainReceived: terminal.mainReceivedAtMs > 0,
+      ipcSent: terminal.ipcSentAtMs > 0,
+      rendererCommitted: terminal.rendererCommittedAtMs > 0,
+      domCommitted: terminal.domCommittedAtMs > 0
+    },
+    limits: [
+      'launch_to_main_includes_imports_and_top_level_initialization',
+      'go_spawn_is_polled_and_main_bridge_health_bounds_verified_runtime_ready',
+      'ui_phase_timings_include_cdp_and_process_probe_observer_overhead',
+      'window_startup_surface_is_not_agent_host_ready',
+      'dom_commit_is_not_compositor_presentation'
+    ]
   }
 }
 
@@ -961,7 +1886,9 @@ function runtimeFailureMaterializationFacts() {
 
 async function main() {
   if (process.platform !== 'darwin' || typeof process.getuid !== 'function') throw new Error('darwin_required')
-  if (lane === 'packaged' && (!packagedAppPath || !isAbsolute(packagedAppPath) || !existsSync(packagedAppPath))) {
+  if (latencyObservation && lane !== 'packaged') throw new Error('packaged_latency_observation_required')
+  if (lane === 'packaged' && (!packagedAppPath || !isAbsolute(packagedAppPath) ||
+      !existsSync(packagedAppPath) || !lstatSync(packagedAppPath).isFile())) {
     throw new Error('packaged_app_invalid')
   }
   const cacheRoot = process.env.ANALYTIX_DEV_CACHE_ROOT ?? ''
@@ -987,8 +1914,22 @@ async function main() {
   }
 
   credential = `sk-k10-${lane}-${randomBytes(24).toString('hex')}`
-  prompt = `k10-${lane}-ordinary-${randomBytes(16).toString('hex')}`
-  reply = `k10-${lane}-reply-${randomBytes(16).toString('hex')}`
+  prompt = ordinaryFileProbe
+    ? '请实际读取工作区相对路径「2026年资料/表单 42.txt」的内容，只列出文件中的日期、数量、金额和参考编号；不要猜测。标记 N04-QA-107d-ordinary。'
+    : 'Please say hello in one short sentence.'
+  reply = ordinaryFileProbe
+    ? '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。'
+    : 'Hello from the local test provider.'
+  if (ordinaryFileProbe) {
+    const workspace = join(exactTaskRoot, 'workspace')
+    const documentDirectory = join(workspace, '2026年资料')
+    mkdirSync(documentDirectory, { recursive: true, mode: 0o700 })
+    chmodSync(workspace, 0o700)
+    chmodSync(documentDirectory, 0o700)
+    writeFileSync(join(documentDirectory, '表单 42.txt'),
+      '日期：2026-07-01\n数量：42\n金额：1234.56 元\n参考编号：REF-17\n',
+      { mode: 0o600, flag: 'wx' })
+  }
   providerServer = createProviderServer()
   denyProxy = createDenyProxy()
   const providerPort = await listen(providerServer)
@@ -1011,8 +1952,16 @@ async function main() {
     registry: first.registry,
     hub: hubZeroEvidence(first.processObservation.observations),
     stdoutBytes: first.processObservation.stdoutBytes,
-    stderrBytes: first.processObservation.stderrBytes
+    stderrBytes: first.processObservation.stderrBytes,
+    ...((latencyObservation || traceTransitions) ? {
+      goStartupAttemptCount: first.processObservation.goStartupAttemptCount,
+      goStartupAttempts: first.processObservation.goStartupAttempts,
+      runtimeTransitions: first.processObservation.runtimeTransitions
+    } : {})
   })
+  const latency = latencyObservation
+    ? { ...packagedLatencyEvidence(userDataDir, first), normalQuitObserved: true }
+    : null
 
   if (lane === 'development') {
     stage = 'restart_launch'
@@ -1021,7 +1970,12 @@ async function main() {
       registry: second.registry,
       hub: hubZeroEvidence(second.processObservation.observations),
       stdoutBytes: second.processObservation.stdoutBytes,
-      stderrBytes: second.processObservation.stderrBytes
+      stderrBytes: second.processObservation.stderrBytes,
+      ...((latencyObservation || traceTransitions) ? {
+        goStartupAttemptCount: second.processObservation.goStartupAttemptCount,
+        goStartupAttempts: second.processObservation.goStartupAttempts,
+        runtimeTransitions: second.processObservation.runtimeTransitions
+      } : {})
     })
   }
 
@@ -1037,7 +1991,11 @@ async function main() {
   const providerGreen = providerObservations.length >= 1 && providerObservations.length <= 3 &&
     providerObservations.every((item) => item.authorizationMatched && item.pathMatched &&
       item.streamRequested && item.modelConfigured && item.bodyBytes > 0) &&
-    providerObservations.some((item) => item.promptSeen)
+    providerObservations.some((item) => item.promptSeen) &&
+    providerProbeObservations.length >= 1 &&
+    providerProbeObservations.every((item) => item.authorizationMatched) &&
+    (!ordinaryFileProbe || (providerObservations.length === 2 &&
+      providerObservations[0].readToolAdvertised && providerObservations[1].readResultSeen))
   const registryGreen = launchEvidence.every((item) =>
     item.registry.ready && item.registry.providerCount === 1 && item.registry.selectedDeepseek &&
     item.registry.credentialConfigured && item.registry.endpointLoopback && item.registry.forbiddenKeyCount === 0)
@@ -1049,12 +2007,20 @@ async function main() {
   const launchCountExpected = lane === 'development' ? 2 : 1
   const green = launchEvidence.length === launchCountExpected && registryGreen && hubGreen && providerGreen &&
     replyObservedInRenderer && privacyGreen && denyProxyConnectionCount === 0 && keychainEvidence.ready &&
+    (!latencyObservation || processProbe.timeoutCount === 0) &&
+    (!latencyObservation || first.processObservation.residualProcessCount === 0) &&
     (lane !== 'development' || keychainEvidence.reusedForTwoLaunches)
 
   stage = 'complete'
   output({
     schemaVersion: 1,
     lane,
+    ordinaryFileProbe,
+    ...(traceTransitions ? { runtimeTransitionDiagnostic: launchEvidence.map((item) => ({
+      goStartupAttemptCount: item.goStartupAttemptCount,
+      goStartupAttempts: item.goStartupAttempts,
+      runtimeTransitions: item.runtimeTransitions
+    })) } : {}),
     classification: green ? 'LOCAL_NONPUBLISHABLE_PRODUCT_SEAM_GREEN' : 'LOCAL_NONPUBLISHABLE_PRODUCT_SEAM_FAILED',
     green,
     launchCount: launchEvidence.length,
@@ -1104,32 +2070,87 @@ async function main() {
     network: {
       externalProviderUsed: false,
       denyProxyConnectionCount
-    }
+    },
+    ...projectFundsCSVAdmissionDiagnosticV2(fundsCSVAdmissionByLaunch),
+    ...(latency ? { latency } : {})
   })
-  if (!green) process.exitCode = 1
+  if (!green) {
+    latencyFailed = true
+    process.exitCode = 1
+  }
 }
 
 try {
   await main()
-} catch {
+} catch (error) {
+  latencyFailed = true
+  const allowedFailureCodes = new Set([
+    'normal_quit_target_stayed_open', 'normal_quit_target_state_unknown',
+    'normal_quit_request_failed',
+    'normal_quit_main_abnormal_exit', 'normal_quit_required_fallback',
+    'exact_main_process_did_not_exit',
+    'electron_task_process_group_did_not_close',
+    'exact_packaged_task_group_untrusted', 'exact_packaged_task_group_changed',
+    'exact_packaged_task_group_did_not_exit',
+    'exact_main_process_unavailable', 'exact_main_debug_port_owner_mismatch',
+    'exact_main_debug_target_untrusted', 'exact_main_debug_port_owner_unavailable',
+    'electron_exited_before_cdp', 'cdp_command_timeout', 'cdp_command_failed',
+    'process_probe_timeout', 'exact_main_birth_unavailable',
+    'exact_main_exited_before_birth_pin', 'task_owned_process_residual',
+    'task_owned_process_residual_unknown',
+    'credential_onboarding_save_error_visible', 'ui_wait_timeout',
+    'cdp_target_timeout'
+  ])
+  primaryFailureReasonCode = error instanceof Error && allowedFailureCodes.has(error.message)
+    ? error.message : 'other'
   output({
     schemaVersion: 1,
     lane,
+    ordinaryFileProbe,
     classification: 'LOCAL_NONPUBLISHABLE_PRODUCT_SEAM_FAILED',
     green: false,
     failedStage: stage,
+    failureReasonCode: primaryFailureReasonCode,
     child: lastChildFailureFacts ?? activeChildFailureSnapshot?.() ?? null,
+    ...(latencyObservation ? { processProbe: { ...processProbe } } : {}),
+    ...(latencyObservation && lastTaskGroupIdentityFailure
+      ? { taskGroupIdentityFailure: lastTaskGroupIdentityFailure } : {}),
     ui: lastUiFacts,
+    ...(lastNormalQuitFacts ? { normalQuit: lastNormalQuitFacts } : {}),
+    keychain: keychain ? {
+      ready: keychain.evidence().ready,
+      unlockCount: keychain.evidence().unlockCount
+    } : null,
     provider: providerObservationFacts(),
     network: { denyProxyConnectionCount },
     runtimeMaterialization: runtimeFailureMaterializationFacts(),
+    ...projectFundsCSVAdmissionDiagnosticV2(fundsCSVAdmissionByLaunch),
+    ...(partialLatencyEvidence
+      ? { latency: { ...partialLatencyEvidence, normalQuitObserved: false } }
+      : {}),
     rawErrorRetained: false
   })
   process.exitCode = 1
 } finally {
   if (activeChild) {
-    terminateTaskProcessGroup(activeChild)
+    try {
+      if (latencyObservation) {
+        await stopExactPackagedTaskGroup(activeChild)
+        await stopExactTaskOwnedResiduals()
+      } else terminateTaskProcessGroup(activeChild)
+    } catch {
+      taskCleanupFailure = 'exact_packaged_task_group_cleanup_failed'
+      latencyFailed = true
+    }
     activeChild = null
+  }
+  const finalTaskResidualProcessCount = latencyObservation && exactTaskRoot
+    ? taskOwnedResidualProcessCount() : null
+  if (latencyObservation && exactTaskRoot && finalTaskResidualProcessCount !== 0) {
+    taskCleanupFailure ||= finalTaskResidualProcessCount === null
+      ? 'final_task_residual_unknown' : 'final_task_process_residual'
+    latencyFailed = true
+    process.exitCode = 1
   }
   activeChildFailureSnapshot = null
   await closeServer(providerServer)
@@ -1138,18 +2159,28 @@ try {
   credential = ''
   prompt = ''
   reply = ''
+  ordinaryFileReadToolName = ''
   providerBaseUrl = ''
   runtimeDataDirPath = ''
   replyObservedInRenderer = false
   keychainDatabasePath = ''
   settingsPath = ''
   if (exactTaskRoot) {
-    try {
-      rmSync(exactTaskRoot, { recursive: true, force: false })
-      cleanedExactTaskRoot = !existsSync(exactTaskRoot)
-    } catch {
-      cleanedExactTaskRoot = false
+    if (!latencyObservation || !latencyFailed) {
+      try {
+        rmSync(exactTaskRoot, { recursive: true, force: false })
+        cleanedExactTaskRoot = !existsSync(exactTaskRoot)
+      } catch {
+        cleanedExactTaskRoot = false
+      }
     }
   }
-  output({ schemaVersion: 1, lane, cleanedExactTaskRoot })
+  output({ schemaVersion: 1, lane, cleanedExactTaskRoot,
+    ...(latencyObservation ? { finalTaskResidualProcessCount } : {}),
+    ...(primaryFailureReasonCode ? { primaryFailureReasonCode } : {}),
+    ...(taskCleanupFailure ? { taskCleanupFailure } : {}),
+    ...(lastTaskGroupIdentityFailure ? { taskGroupIdentityFailure: lastTaskGroupIdentityFailure } : {}),
+    ...(latencyObservation && !cleanedExactTaskRoot ? {
+      retainedDiagnosticProfile: exactTaskRoot
+    } : {}) })
 }

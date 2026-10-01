@@ -10,6 +10,9 @@ import (
 )
 
 type MaterializeInput struct {
+	DocumentGeneration         bool
+	DocumentGenerationKinds    []string
+	NativeSelections           bool
 	Prompt                     string
 	PromptRoute                string
 	ToolScope                  []string
@@ -82,8 +85,11 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 		return nil
 	}
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{
-		AllowBackgroundBash: input.AllowBackgroundBash,
-		WebFetch:            input.WebFetch,
+		NativeSelections:        input.NativeSelections && !input.Subagent,
+		DocumentGeneration:      input.DocumentGeneration && !input.Subagent,
+		DocumentGenerationKinds: input.DocumentGenerationKinds,
+		AllowBackgroundBash:     input.AllowBackgroundBash,
+		WebFetch:                input.WebFetch,
 	})
 	if input.Subagent && IsForegroundSubmitOnlyScope(input.ToolScope) {
 		tools = append(tools, ForegroundSubmitToolSchema())
@@ -149,7 +155,7 @@ func validMCPToolParameters(parameters json.RawMessage) bool {
 
 func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
-	case "read", "read_file", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list":
+	case "read", "read_file", "read_task_history", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list":
 		return true
 	default:
 		return MCPToolServerID(toolName) != "" && mcpAvailable && mcpToolReadOnly
@@ -158,8 +164,8 @@ func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) 
 
 func HostAuthorizesReadOnly(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
-	case "read", "read_file", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
-		"wait", "list_jobs", "bash_output":
+	case "read", "read_file", "read_task_history", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
+		"wait", "list_jobs", "bash_output", "native_selection_read":
 		return true
 	default:
 		return MCPToolServerID(toolName) != "" && mcpAvailable && mcpToolReadOnly

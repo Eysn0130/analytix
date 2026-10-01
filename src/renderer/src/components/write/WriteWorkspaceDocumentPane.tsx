@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { WriteInlineCompletionSettingsV1 } from '@shared/app-settings'
 import type { WriteRenderSafety } from '../../write/write-render-safety'
 import type { WriteRecentEdit } from '../../write/recent-edits'
+import type { WriteDiffReviewRecovery } from '../../write/write-workspace-store-types'
 import {
   WriteRichEditor,
   type WriteRichEditorHandle
@@ -59,6 +60,8 @@ type Props = {
   onImagePasteSaved: () => void
   onImagePasteError: (message: string) => void
   onMarkdownReviewStateChange?: (active: boolean) => void
+  reviewRecovery?: WriteDiffReviewRecovery | null
+  onMarkdownReviewSuspend?: (recovery: WriteDiffReviewRecovery) => void
 }
 
 export function WriteWorkspaceDocumentPane({
@@ -105,7 +108,9 @@ export function WriteWorkspaceDocumentPane({
   onSaveShortcut,
   onImagePasteSaved,
   onImagePasteError,
-  onMarkdownReviewStateChange
+  onMarkdownReviewStateChange,
+  reviewRecovery,
+  onMarkdownReviewSuspend
 }: Props): ReactElement {
   const { t } = useTranslation('common')
 
@@ -221,6 +226,8 @@ export function WriteWorkspaceDocumentPane({
                     onImagePasteSaved={onImagePasteSaved}
                     onImagePasteError={onImagePasteError}
                     onReviewStateChange={onMarkdownReviewStateChange}
+                    reviewRecovery={reviewRecovery}
+                    onReviewSuspend={onMarkdownReviewSuspend}
                     handleRef={markdownHandleRef}
                   />
                 }
@@ -248,6 +255,8 @@ export function WriteWorkspaceDocumentPane({
                 onImagePasteSaved={onImagePasteSaved}
                 onImagePasteError={onImagePasteError}
                 onReviewStateChange={onMarkdownReviewStateChange}
+                reviewRecovery={reviewRecovery}
+                onReviewSuspend={onMarkdownReviewSuspend}
                 handleRef={markdownHandleRef}
               />
             )}

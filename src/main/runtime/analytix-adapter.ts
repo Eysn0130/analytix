@@ -1,3 +1,5 @@
+import { packagedReleaseProfile } from '../release-profile'
+import { createRuntimePublicationTraceReceiver } from '../services/thread-trace-service'
 import { app } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -64,13 +66,16 @@ import { getAnalytixBaseUrl } from '../analytix-base-url'
 import type { RuntimeHostScheduleMcpBindingV1 } from '../claw-schedule-mcp-config'
 import type { DesktopExternalStateBoundary } from '../desktop-external-state-isolation'
 import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
-import { logWarn } from '../logger'
+import { logWarn, publicConsoleInfo, type StartupTraceStage } from '../logger'
 import {
+  BundledFundsMaterializationChildUnconfirmedError,
+  assertNoUnconfirmedMaterializationChildV1,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   materializeBundledFundsBeforeRuntimeV1,
   type BundledFundsMaterializationBindingV1
 } from './bundled-funds-materialization'
+import { createStartupOwnerPhaseStreamV1, type StartupOwnerPhaseV1 } from './startup-owner-trace-v1'
 import {
   authorityAnchorProjectionV1,
   takeMainOwnedRuntimeAuthorityEnvelopeV1,
@@ -86,9 +91,6 @@ import {
   selectRuntimeHostScheduleMcpBindingV1,
   writeRuntimeStartupPrivateFrameV1
 } from './runtime-startup-private-frame-v1'
-import {
-  resolveDarwinSecretStoreKeychainBindingV1
-} from './darwin-secret-store-keychain-binding-v1'
 import { isAnalytixHealthResponseBody } from '../analytix-health'
 import {
   TaskJobKillResponseV1Schema,
@@ -125,6 +127,7 @@ import {
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   DeleteThreadResponse,
   ListThreadsResponse,
+  ResumeThreadResponse,
   ThreadSchema,
   ThreadTodosResponse
 } from '../../../packages/runtime/src/contracts/threads.js'
@@ -143,7 +146,10 @@ import {
   SteerTurnResponse
 } from '../../../packages/runtime/src/contracts/turns.js'
 import { StartReviewResponse } from '../../../packages/runtime/src/contracts/review.js'
-import { ApprovalDecisionResponse } from '../../../packages/runtime/src/contracts/approvals.js'
+import {
+  ApprovalDecisionResponse,
+  UserInputResolutionResponse
+} from '../../../packages/runtime/src/contracts/approvals.js'
 import {
   DailyUsageResponseSchema,
   ModelUsageResponseSchema,
@@ -157,6 +163,7 @@ import {
   providerRegistryPortableManifestExportResponseSchemaV1,
   providerRegistryPortableManifestImportResponseSchemaV1,
   providerRegistryProbeResponseSchemaV1,
+  providerRegistryCredentialCheckResponseSchemaV1,
   providerRegistryProviderResponseSchemaV1,
   providerRegistryRecoveredResponseSchemaV1,
   providerRegistrySnapshotResponseSchemaV1
@@ -180,7 +187,20 @@ import {
 const ANALYTIX_RUNTIME_ID = 'analytix' as const
 const GO_CONFORMANCE_READY_PREFIX = 'ANALYTIX_SIDECAR_READY '
 const GO_RUNTIME_SERVER_READY_PREFIX = 'ANALYTIX_RUNTIME_SERVER_READY '
+let runtimeStartupTraceObserver: ((stage: StartupTraceStage) => void) | null = null
+
+export function configureRuntimeStartupTraceObserver(
+  observer: ((stage: StartupTraceStage) => void) | null
+): void {
+  runtimeStartupTraceObserver = observer
+}
+
+function traceRuntimeStartup(stage: StartupTraceStage): void {
+  if (process.env.ANALYTIX_STARTUP_TRACE !== '1') return
+  try { runtimeStartupTraceObserver?.(stage) } catch { /* diagnostics never gate startup */ }
+}
 const DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2 = 'ANALYTIX_DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2\n'
+const DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1 = 'ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1\n'
 const GO_CONFORMANCE_STARTUP_TIMEOUT_MS = 60_000
 const MAX_GO_READY_STDOUT_BYTES = 64 << 10
 const MAX_GO_MIGRATION_OUTPUT_BYTES = 4 << 10
@@ -312,6 +332,20 @@ let goSidecarRuntimeToken = ''
 let goSidecarDurableTempDir: string | null = null
 let goSidecarOwnsDurableRoot = false
 let goSidecarStderrTail = ''
+let bundledFundsActivationArmedV1 = false
+
+export function armBundledFundsActivationForNextGoStartV1(): () => void {
+  if (bundledFundsActivationArmedV1) {
+    throw new Error('Bundled Funds activation is already armed.')
+  }
+  bundledFundsActivationArmedV1 = true
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    bundledFundsActivationArmedV1 = false
+  }
+}
 export type ManagedFinalPublicationAuthorityPinV1 = FinalPublicationAuthorityPinV1 & Readonly<{
   runtimePid: number
   runtimeUrl: string
@@ -349,7 +383,12 @@ export async function settleOptionalRuntimeCapability<T>(
 ): Promise<T | null> {
   try {
     return await operation()
-  } catch {
+  } catch (error) {
+    // A still-running materialization writer cannot be treated as an absent
+    // optional capability while the base runtime opens the same data root.
+    if ((capability === 'bundled_funds' &&
+        error instanceof BundledFundsMaterializationChildUnconfirmedError) ||
+        error instanceof DesktopInstallationKeyPreflightChildUnconfirmedError) throw error
     try {
       reportUnavailable(capability)
     } catch {
@@ -1501,13 +1540,14 @@ function appendRuntimeGoSourceFingerprintEntries(root: string, relativeDir: stri
       appendRuntimeGoSourceFingerprintEntries(root, relativePath, entries)
       continue
     }
-    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum') {
+    const canonicalPath = relativePath.replaceAll('\\', '/')
+    const embeddedOfficeManifest = canonicalPath === 'internal/adapters/outbound/officeengineassets/manifest.json'
+    if (!entry.endsWith('.go') && entry !== 'go.mod' && entry !== 'go.sum' && !embeddedOfficeManifest) {
       continue
     }
     if (!stat.isFile()) {
       throw new Error(`Go runtime build input must be a regular file: ${relativePath}`)
     }
-    const canonicalPath = relativePath.replaceAll('\\', '/')
     entries.push(`${canonicalPath}:${stat.size}:${sha256File(fullPath)}`)
   }
 }
@@ -1517,7 +1557,7 @@ type DevGoRuntimeCacheManifestV1 = {
   sourceDigestSha256: string
   toolchainDigestSha256: string
   buildContractDigestSha256: string
-  buildMode: 'go-build-trimpath-analytix-prod-v1'
+  buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1'
   platform: NodeJS.Platform
   arch: string
   binaryName: string
@@ -1583,7 +1623,7 @@ function parseDevGoRuntimeCacheManifestV1(value: unknown): DevGoRuntimeCacheMani
     'toolchainDigestSha256'
   ]
   if (Object.keys(record).sort().join('\n') !== expectedKeys.join('\n')) return null
-  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-v1') return null
+  if (record.schemaVersion !== 1 || record.buildMode !== 'go-build-trimpath-analytix-prod-dev-credentials-v1') return null
   if (!isSha256(record.sourceDigestSha256) || !isSha256(record.toolchainDigestSha256) ||
       !isSha256(record.buildContractDigestSha256) || !isSha256(record.binarySha256)) return null
   if (typeof record.platform !== 'string' || typeof record.arch !== 'string' || !record.arch) return null
@@ -1651,7 +1691,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     schemaVersion: 1,
     sourceDigestSha256,
     toolchainDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1',
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1',
     cachePolicy: options.env.ANALYTIX_DEV_CACHE_ROOT ? 'repository-cache-v1' : 'ordinary-v1',
     platform,
     arch,
@@ -1662,7 +1702,7 @@ function ensureDevGoRuntimeServerBinary(options: {
     sourceDigestSha256,
     toolchainDigestSha256,
     buildContractDigestSha256,
-    buildMode: 'go-build-trimpath-analytix-prod-v1' as const,
+    buildMode: 'go-build-trimpath-analytix-prod-dev-credentials-v1' as const,
     platform,
     arch,
     binaryName
@@ -1685,7 +1725,7 @@ function ensureDevGoRuntimeServerBinary(options: {
       'build',
       '-trimpath',
       '-tags',
-      'analytix_prod',
+      'analytix_prod,analytix_dev_credentials',
       '-o',
       output,
       './cmd/runtime-server'
@@ -1816,6 +1856,23 @@ export function buildDesktopPrivateHistoryMigrationArgsV2(
   ]
 }
 
+// The Main startup owner may use this controlled seam after the persistent
+// enrollment transaction exists. Merely building these arguments never runs
+// another semantic Prepare during ordinary startup.
+export function buildDesktopInstallationKeyPreflightArgsV1(
+  dataDir: string,
+  durableRoot: string,
+  userDataDir: string
+): string[] {
+  return [
+    'migration',
+    'prepare-desktop-installation-key-v1',
+    '--data-dir', resolve(dataDir),
+    '--durable-root', resolve(durableRoot),
+    ...buildGoRuntimeStartupUserDataArgsV1(userDataDir)
+  ]
+}
+
 export function buildGoRuntimeStartupUserDataArgsV1(userDataDir: string): string[] {
   return ['--user-data-dir', resolve(userDataDir)]
 }
@@ -1853,6 +1910,18 @@ export function isExactDesktopPrivateHistoryMigrationReadyV2(stdout: Buffer): bo
     stdout.equals(Buffer.from(DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2, 'utf8'))
 }
 
+export function isExactDesktopInstallationKeyPreflightReadyV1(stdout: Buffer): boolean {
+  return Buffer.isBuffer(stdout) &&
+    stdout.equals(Buffer.from(DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1, 'utf8'))
+}
+
+export class DesktopInstallationKeyPreflightChildUnconfirmedError extends Error {
+  constructor() {
+    super('Desktop installation key preflight termination could not be confirmed.')
+    this.name = 'DesktopInstallationKeyPreflightChildUnconfirmedError'
+  }
+}
+
 export async function migrateDesktopPrivateHistoryBeforeStartV2(
   settings: AppSettingsV1,
   userDataDir: string
@@ -1862,10 +1931,6 @@ export async function migrateDesktopPrivateHistoryBeforeStartV2(
   const launchTarget = resolveGoRuntimeLaunchTarget({
     runtimeServer: true,
     runtimeGoDir: getGoRuntimeDir()
-  })
-  resolveDarwinSecretStoreKeychainBindingV1({
-    boundary: desktopExternalStateBoundaryForGoRuntime,
-    dataDir
   })
   const child = spawn(
     launchTarget.command,
@@ -1884,88 +1949,115 @@ export function waitForDesktopPrivateHistoryMigrationV2(
   timeoutMs = DESKTOP_PRIVATE_HISTORY_MIGRATION_TIMEOUT_MS_V2,
   terminationGraceMs = 5_000
 ): Promise<void> {
-	return new Promise((resolveReady, rejectReady) => {
-		let stdout = Buffer.alloc(0)
-		let stderrBytes = 0
-		let settled = false
-		let failureRequested = false
-		let timeout: NodeJS.Timeout | undefined
-		let terminationTimeout: NodeJS.Timeout | undefined
-		const cleanup = (): void => {
-			if (timeout) clearTimeout(timeout)
-			if (terminationTimeout) clearTimeout(terminationTimeout)
-			child.stdout?.off('data', onStdout)
-			child.stderr?.off('data', onStderr)
-			child.off('error', onError)
-			child.off('close', onClose)
-		}
-		const finishAfterClose = (error?: Error): void => {
-			if (settled) return
-			settled = true
-			cleanup()
-			stdout.fill(0)
-			stdout = Buffer.alloc(0)
-			if (error) rejectReady(error)
-			else resolveReady()
-		}
-		const requestFailure = (): void => {
-			if (failureRequested || settled) return
-			failureRequested = true
-			if (child.exitCode === null && child.signalCode === null) {
-				try {
-					child.kill('SIGKILL')
-				} catch {
-					// The bounded termination deadline below still keeps startup fail-closed.
-				}
-			}
-			terminationTimeout = setTimeout(() => {
-				if (settled) return
-				child.stdout?.destroy()
-				child.stderr?.destroy()
-				try {
-					child.unref()
-				} catch {
-					// Rejection remains authoritative even for incomplete ChildProcess test doubles.
-				}
-				finishAfterClose(new Error('Desktop private history migration termination could not be confirmed.'))
-			}, Math.max(1, terminationGraceMs))
-		}
-		const onStdout = (chunk: Buffer | string): void => {
-			const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
-			if (settled) {
-				incoming.fill(0)
-				return
-			}
-			if (failureRequested || stdout.length + incoming.length > MAX_GO_MIGRATION_OUTPUT_BYTES) {
-				incoming.fill(0)
-				requestFailure()
-				return
-			}
-			const combined = Buffer.concat([stdout, incoming])
-			stdout.fill(0)
-			incoming.fill(0)
-			stdout = combined
-		}
-		const onStderr = (chunk: Buffer | string): void => {
-			if (settled) return
-			stderrBytes = Math.min(
-				MAX_GO_MIGRATION_OUTPUT_BYTES + 1,
-				stderrBytes + Buffer.byteLength(chunk)
-			)
-			if (stderrBytes > MAX_GO_MIGRATION_OUTPUT_BYTES) requestFailure()
-		}
-		const onError = (): void => requestFailure()
-		const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
-			const valid = !failureRequested && code === 0 && signal === null && stderrBytes === 0 &&
-				isExactDesktopPrivateHistoryMigrationReadyV2(stdout)
-			finishAfterClose(valid ? undefined : new Error('Desktop private history migration did not complete.'))
-		}
-		child.stdout?.on('data', onStdout)
-		child.stderr?.on('data', onStderr)
-		child.once('error', onError)
-		child.once('close', onClose)
-		timeout = setTimeout(requestFailure, Math.max(1, timeoutMs))
-	})
+  return waitForFixedDesktopPreflightExitV1(
+    child, isExactDesktopPrivateHistoryMigrationReadyV2,
+    () => new Error('Desktop private history migration termination could not be confirmed.'),
+    'Desktop private history migration did not complete.', timeoutMs, terminationGraceMs
+  )
+}
+
+export function waitForDesktopInstallationKeyPreflightV1(
+  child: ChildProcess,
+  timeoutMs = DESKTOP_PRIVATE_HISTORY_MIGRATION_TIMEOUT_MS_V2,
+  terminationGraceMs = 5_000
+): Promise<void> {
+  return waitForFixedDesktopPreflightExitV1(
+    child, isExactDesktopInstallationKeyPreflightReadyV1,
+    () => new DesktopInstallationKeyPreflightChildUnconfirmedError(),
+    'Desktop installation key preflight did not complete.', timeoutMs, terminationGraceMs
+  )
+}
+
+function waitForFixedDesktopPreflightExitV1(
+  child: ChildProcess,
+  ready: (stdout: Buffer) => boolean,
+  unconfirmed: () => Error,
+  incompleteMessage: string,
+  timeoutMs: number,
+  terminationGraceMs: number
+): Promise<void> {
+  return new Promise((resolveReady, rejectReady) => {
+    let stdout = Buffer.alloc(0)
+    let stderrBytes = 0
+    let settled = false
+    let failureRequested = false
+    let timeout: NodeJS.Timeout | undefined
+    let terminationTimeout: NodeJS.Timeout | undefined
+    const cleanup = (): void => {
+      if (timeout) clearTimeout(timeout)
+      if (terminationTimeout) clearTimeout(terminationTimeout)
+      child.stdout?.off('data', onStdout)
+      child.stderr?.off('data', onStderr)
+      child.off('error', onError)
+      child.off('close', onClose)
+    }
+    const finishAfterClose = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      stdout.fill(0)
+      stdout = Buffer.alloc(0)
+      if (error) rejectReady(error)
+      else resolveReady()
+    }
+    const requestFailure = (): void => {
+      if (failureRequested || settled) return
+      failureRequested = true
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // The bounded termination deadline below still keeps startup fail-closed.
+        }
+      }
+      terminationTimeout = setTimeout(() => {
+        if (settled) return
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        try {
+          child.unref()
+        } catch {
+          // Rejection remains authoritative even for incomplete ChildProcess test doubles.
+        }
+        finishAfterClose(unconfirmed())
+      }, Math.max(1, terminationGraceMs))
+    }
+    const onStdout = (chunk: Buffer | string): void => {
+      const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
+      if (settled) {
+        incoming.fill(0)
+        return
+      }
+      if (failureRequested || stdout.length + incoming.length > MAX_GO_MIGRATION_OUTPUT_BYTES) {
+        incoming.fill(0)
+        requestFailure()
+        return
+      }
+      const combined = Buffer.concat([stdout, incoming])
+      stdout.fill(0)
+      incoming.fill(0)
+      stdout = combined
+    }
+    const onStderr = (chunk: Buffer | string): void => {
+      if (settled) return
+      stderrBytes = Math.min(
+        MAX_GO_MIGRATION_OUTPUT_BYTES + 1,
+        stderrBytes + Buffer.byteLength(chunk)
+      )
+      if (stderrBytes > MAX_GO_MIGRATION_OUTPUT_BYTES) requestFailure()
+    }
+    const onError = (): void => requestFailure()
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      const valid = !failureRequested && code === 0 && signal === null && stderrBytes === 0 &&
+        ready(stdout)
+      finishAfterClose(valid ? undefined : new Error(incompleteMessage))
+    }
+    child.stdout?.on('data', onStdout)
+    child.stderr?.on('data', onStderr)
+    child.once('error', onError)
+    child.once('close', onClose)
+    timeout = setTimeout(requestFailure, Math.max(1, timeoutMs))
+  })
 }
 
 function isGoSidecarRunning(): boolean {
@@ -1990,6 +2082,68 @@ export function isCurrentFinalPublicationAuthorityPin(
 
 function appendGoStderrTail(chunk: string): void {
   goSidecarStderrTail = `${goSidecarStderrTail}${chunk}`.slice(-16_384)
+}
+
+const CORE_FUNDS_CSV_ADMISSION_PREFIX_V2 = 'ANALYTIX_FUNDS_CSV_ADMISSION_V2 '
+const CORE_FUNDS_CSV_ADMISSION_ANOMALY_PREFIX_V1 = 'ANALYTIX_FUNDS_CSV_ADMISSION_ANOMALY_V1 '
+const CORE_FUNDS_CSV_ACTIVATION_CODES_V2: ReadonlySet<string> = new Set([
+  'native_owner_unavailable',
+  'shared_evidence_enrollment_absent',
+  'shared_evidence_credential_unavailable',
+  'dataset_snapshot_unavailable',
+  'ready',
+  'other_unavailable'
+])
+const MAX_CORE_FUNDS_CSV_ADMISSION_LINE_V1 = 128
+
+// This stream is attached only to the actual Core child, after Funds
+// materialization has finished. It retains one bounded partial line and
+// forwards at most one fixed observation and one duplicate signal per phase.
+// Semantic preparation never describes the activated native owner.
+export function createCoreFundsCSVAdmissionTraceStreamV2(
+  enabled: boolean,
+  onFixedLine: (line: string) => void
+): Readonly<{ accept(chunk: Buffer | string): void }> {
+  let pending = ''
+  let dropping = false
+  const observed = new Set<string>()
+  const duplicateSignaled = new Set<string>()
+  return {
+    accept(chunk) {
+      if (!enabled) return
+      const parts = String(chunk).split('\n')
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index]
+        if (!dropping && pending.length + part.length <= MAX_CORE_FUNDS_CSV_ADMISSION_LINE_V1) {
+          pending += part
+        } else {
+          pending = ''
+          dropping = true
+        }
+        if (index === parts.length - 1) break
+        if (!dropping && pending.startsWith(CORE_FUNDS_CSV_ADMISSION_PREFIX_V2)) {
+          const fixed = pending.slice(CORE_FUNDS_CSV_ADMISSION_PREFIX_V2.length)
+          const separator = fixed.indexOf(' ')
+          const phase = fixed.slice(0, separator)
+          const code = fixed.slice(separator + 1)
+          if (separator > 0 && ((phase === 'semantic_preparation' && code === 'not_evaluated') ||
+              (phase === 'activation' && CORE_FUNDS_CSV_ACTIVATION_CODES_V2.has(code)))) {
+            try {
+              if (!observed.has(phase)) {
+                observed.add(phase)
+                onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_PREFIX_V2}${phase} ${code}\n`)
+              } else if (!duplicateSignaled.has(phase)) {
+                duplicateSignaled.add(phase)
+                onFixedLine(`${CORE_FUNDS_CSV_ADMISSION_ANOMALY_PREFIX_V1}${phase}\n`)
+              }
+            } catch { /* optional diagnostics cannot gate startup */ }
+          }
+        }
+        pending = ''
+        dropping = false
+      }
+    }
+  }
 }
 
 export function resolveGoRuntimeConfiguredDurableRoot(options: {
@@ -2506,6 +2660,8 @@ async function startGoConformanceSidecarOnce(
   backend: AnalytixRuntimeGoBackendId,
   fallbackAlreadyUsed = false
 ): Promise<void> {
+  assertNoUnconfirmedMaterializationChildV1()
+  traceRuntimeStartup('go preflight:begin')
   const runtime = resolveAnalytixRuntimeSettings(settings)
   const dataDir = resolveAnalytixDataDir(runtime)
   const runtimeInsecure = isAnalytixRuntimeInsecure(runtime)
@@ -2518,12 +2674,8 @@ async function startGoConformanceSidecarOnce(
     runtimeServer: isRuntimeServer,
     runtimeGoDir
   })
-  const darwinSecretStoreKeychainBindingV1 = isRuntimeServer
-    ? resolveDarwinSecretStoreKeychainBindingV1({
-        boundary: desktopExternalStateBoundaryForGoRuntime,
-        dataDir
-      })
-    : null
+  const developmentProviderAuthorityDir = desktopExternalStateBoundaryForGoRuntime.developmentProviderAuthorityDir
+  if (developmentProviderAuthorityDir && app.isPackaged) throw new Error('Packaged Analytix rejects development credential authority.')
   if (launchTarget.mode === 'go-run-source' && !existsSync(join(runtimeGoDir, 'go.mod'))) {
     throw new Error(`Go runtime source is missing at ${runtimeGoDir}`)
   }
@@ -2531,6 +2683,7 @@ async function startGoConformanceSidecarOnce(
   const syncRuntimeConfig = async (
     bundledFundsMaterialization?: BundledFundsMaterializationBindingV1
   ): Promise<void> => {
+    assertNoUnconfirmedMaterializationChildV1()
     const synced = await syncGuiManagedAnalytixConfig(dataDir, runtime, {
       scheduleMcp: {
         settings,
@@ -2545,12 +2698,16 @@ async function startGoConformanceSidecarOnce(
     hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1
   }
   let bundledFundsConfigSynced = false
-  const bundledFundsMaterialization = isRuntimeServer
+  const bundledFundsMaterialization = isRuntimeServer && bundledFundsActivationArmedV1 &&
+    app.isPackaged && packagedReleaseProfile(app.getAppPath()) !== 'core'
     ? await settleOptionalRuntimeCapability('bundled_funds', async () => {
         const materialization = await materializeBundledFundsBeforeRuntimeV1({
           appIsPackaged: app.isPackaged,
           launchTarget,
-          dataDir
+          dataDir,
+          onStartupPhase: (phase: StartupOwnerPhaseV1) => {
+            publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
+          }
         })
         if (materialization) {
           await syncRuntimeConfig(materialization)
@@ -2559,9 +2716,11 @@ async function startGoConformanceSidecarOnce(
         return materialization
       })
     : null
+  traceRuntimeStartup('go capability materialization:done')
   const mainOwnedAuthority = isRuntimeServer && !fallbackAlreadyUsed
     ? await takeMainOwnedRuntimeAuthorityForLaunchV1()
     : null
+  traceRuntimeStartup('go authority:done')
   const expectedWitnessedAuthority = mainOwnedAuthority
     ? authorityAnchorProjectionV1(mainOwnedAuthority.authorityAnchorV1)
     : null
@@ -2606,11 +2765,10 @@ async function startGoConformanceSidecarOnce(
     if (!bundledFundsConfigSynced) await syncRuntimeConfig()
     hostScheduleMcpBindingV1 = selectRuntimeHostScheduleMcpBindingV1(
       mainOwnedAuthority,
-      hostScheduleMcpBindingV1,
-      darwinSecretStoreKeychainBindingV1
+      hostScheduleMcpBindingV1
     )
     hasPrivateStartupFrame = Boolean(
-      mainOwnedAuthority || hostScheduleMcpBindingV1 || darwinSecretStoreKeychainBindingV1
+      mainOwnedAuthority || hostScheduleMcpBindingV1 || developmentProviderAuthorityDir
     )
     if (isRuntimeDefault) {
       args.push('--durable-root', durableRoot)
@@ -2627,6 +2785,7 @@ async function startGoConformanceSidecarOnce(
   } else {
     args.push('--durable-temp-dir', durableRoot)
   }
+  assertNoUnconfirmedMaterializationChildV1()
   const child = spawn(
     launchTarget.command,
     args,
@@ -2647,6 +2806,7 @@ async function startGoConformanceSidecarOnce(
       detached: process.platform !== 'win32'
     }
   )
+  traceRuntimeStartup('go process:spawned')
   const ownedProcess = ownSpawnedProcess(child, {
     detached: process.platform !== 'win32'
   })
@@ -2655,20 +2815,35 @@ async function startGoConformanceSidecarOnce(
   goSidecarRuntimeToken = runtimeToken
   goSidecarFinalPublicationAuthorityPin = null
   const launchGeneration = ++goSidecarGeneration
-  child.stderr?.on('data', (chunk) => appendGoStderrTail(String(chunk)))
+  const publicationTrace = createRuntimePublicationTraceReceiver(app.getPath('userData'), child.pid ?? 0, launchGeneration)
+  const startupOwnerTrace = process.env.ANALYTIX_STARTUP_TRACE === '1'
+    ? createStartupOwnerPhaseStreamV1((phase) => {
+        publicConsoleInfo('startup', '', { stage: phase.stage, durationMs: phase.durationMs })
+      })
+    : null
+  const fundsCSVAdmissionTrace = createCoreFundsCSVAdmissionTraceStreamV2(
+    isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1',
+    (line) => { process.stdout.write(line) }
+  )
+  child.stderr?.on('data', (chunk) => {
+    appendGoStderrTail(String(chunk))
+    publicationTrace.write(chunk)
+    startupOwnerTrace?.accept(chunk)
+    fundsCSVAdmissionTrace.accept(chunk)
+  })
+  child.once('close', () => publicationTrace.close())
   const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })
   let readyPayloadReceived = false
 
   try {
     if (hasPrivateStartupFrame) {
       await writeRuntimeStartupPrivateFrameV1(child.stdin, {
+        ...(developmentProviderAuthorityDir ? { developmentProviderAuthorityDir } : {}),
         ...(mainOwnedAuthority ? { protectedAuthorityV1: mainOwnedAuthority } : {}),
-        ...(darwinSecretStoreKeychainBindingV1
-          ? { darwinSecretStoreKeychainBindingV1 }
-          : {}),
         ...(hostScheduleMcpBindingV1 ? { hostScheduleMcpBindingV1 } : {})
       })
     }
+    traceRuntimeStartup('go private frame:done')
     const runtimeLabel = isRuntimeServer ? 'Go runtime server' : 'Go conformance sidecar'
     const ready = await waitForGoConformanceReady(
       child,
@@ -2678,6 +2853,7 @@ async function startGoConformanceSidecarOnce(
       isRuntimeServer ? GO_RUNTIME_SERVER_STARTUP_TIMEOUT_MS_V1 : GO_CONFORMANCE_STARTUP_TIMEOUT_MS
     )
     readyPayloadReceived = true
+    traceRuntimeStartup('go ready line:received')
     if (!isRuntimeServer && ready.runtimeToken !== runtimeToken) {
       throw new Error(`${runtimeLabel} ready token does not match the requested runtime token.`)
     }
@@ -2715,6 +2891,7 @@ async function startGoConformanceSidecarOnce(
         generation: launchGeneration
       }
     }
+    traceRuntimeStartup('go ready identity:verified')
     exitObserver.markReady()
     if (isRuntimeDefault) {
       if (bundledFundsMaterialization) {
@@ -2724,6 +2901,7 @@ async function startGoConformanceSidecarOnce(
       }
       activeBackend = backend
       lastBackendFallbackReason = ''
+      traceRuntimeStartup('go adapter:done')
       return
     }
     const canary = await probeGoConformanceRuntimeCanary(settings, ready.url, backend)
@@ -2732,7 +2910,9 @@ async function startGoConformanceSidecarOnce(
     }
     activeBackend = backend
     lastBackendFallbackReason = ''
+    traceRuntimeStartup('go adapter:done')
   } catch (error) {
+    traceRuntimeStartup('go adapter:failed')
     const retryWithoutAuthority = shouldRetryWithoutOptionalCaseAuthorityV1({
       runtimeServer: isRuntimeServer,
       authorityAttempted: mainOwnedAuthority !== null,
@@ -3954,15 +4134,6 @@ function verifiedThreadAcceptedFinalDeliveriesV1(
   }
 }
 
-function runtimeResponseRequiresBody(path: string): boolean {
-  return path === '/v1/runtime/info' ||
-    path === '/v1/runtime/tools' ||
-    path === ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH ||
-    path === '/v1/skills' ||
-    path === '/v1/attachments/diagnostics' ||
-    path === '/v1/memory/diagnostics'
-}
-
 const PublicThreadHTTPResponseV1Schema = ThreadSchema.extend({
   historyAuthority: z.literal('case_boundary_only_v1').optional()
 }).strict()
@@ -3995,16 +4166,46 @@ const MemoryMutationResponseV1Schema = z.object({
 
 type RuntimeResponseSchemaV1 = z.ZodTypeAny
 
-function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponseSchemaV1[] | null {
-  if (path === '/health') return [RuntimeHealthResponseV1Schema]
-  if (path === '/v1/runtime/info') return [RuntimeInfoResponseSchema]
-  if (path === '/v1/runtime/tools') return [RuntimeToolsResponseSchema]
-  if (path === ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH && method === 'POST') {
-    return [SuccessfulToolExecutionObservationResponseV1Schema]
+// Body admission and schema selection share one registration. Observation still
+// requires a body for every verb, while only POST has an admitted response schema.
+const runtimeRequiredBodyContractsV1 = new Map<string, { schema: RuntimeResponseSchemaV1; method?: string }>([
+  ['/v1/runtime/info', { schema: RuntimeInfoResponseSchema }],
+  ['/v1/runtime/tools', { schema: RuntimeToolsResponseSchema }],
+  [ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_PATH, { schema: SuccessfulToolExecutionObservationResponseV1Schema, method: 'POST' }],
+  ['/v1/skills', { schema: RuntimeSkillsResponseSchema }],
+  ['/v1/attachments/diagnostics', { schema: AttachmentDiagnosticsResponseSchema }],
+  ['/v1/memory/diagnostics', { schema: MemoryDiagnosticsResponseSchema }]
+])
+
+type RuntimeResponseContractV1 = {
+  schemas: RuntimeResponseSchemaV1[] | null
+  requiresBody: boolean
+  requiresExactPublicProjection: boolean
+  isThreadSummaryRoute: boolean
+  summaryIdentity: ThreadSummaryRouteIdentityV1 | null
+}
+
+function runtimeResponseContractV1(path: string, method: string): RuntimeResponseContractV1 {
+  const requiredBody = runtimeRequiredBodyContractsV1.get(path)
+  const summaryMatch = /^\/v1\/threads\/([^/]+)\/summary(?:\/tasks\/([^/]+)\/(output|kill|restart))?$/.exec(path)
+  const isThreadSummaryRoute = /^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
+  const schemas = requiredBody
+    ? (!requiredBody.method || requiredBody.method === method ? [requiredBody.schema] : null)
+    : summaryMatch
+      ? [!summaryMatch[2] ? ThreadSummaryResponseSchema
+          : summaryMatch[3] === 'output' ? ThreadSummaryTaskOutputResponseV1Schema : ThreadSummaryTaskMutationResponseSchema]
+      : runtimeOtherResponseSchemasV1(path, method)
+  return {
+    schemas,
+    requiresBody: Boolean(requiredBody),
+    requiresExactPublicProjection: path.startsWith('/v1/runtime/task-jobs/') || isThreadSummaryRoute,
+    isThreadSummaryRoute,
+    summaryIdentity: summaryMatch ? threadSummaryRouteIdentityV1(summaryMatch) : null
   }
-  if (path === '/v1/skills') return [RuntimeSkillsResponseSchema]
-  if (path === '/v1/attachments/diagnostics') return [AttachmentDiagnosticsResponseSchema]
-  if (path === '/v1/memory/diagnostics') return [MemoryDiagnosticsResponseSchema]
+}
+
+function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeResponseSchemaV1[] | null {
+  if (path === '/health') return [RuntimeHealthResponseV1Schema]
   if (path === '/v1/memory') {
     if (method === 'GET') return [MemoryListResponseV1Schema]
     if (method === 'POST') return [MemoryMutationResponseV1Schema]
@@ -4021,18 +4222,11 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (path === '/v1/case-projects') return [CaseProjectListResponseV1Schema]
   if (/^\/v1\/case-projects\/[^/]+\/threads$/.test(path)) return [CaseProjectThreadsResponseV1Schema]
   if (/^\/v1\/case-projects\/[^/]+\/detail$/.test(path)) return [CaseProjectDetailResponseV1Schema]
-  if (/^\/v1\/threads\/[^/]+\/summary$/.test(path)) return [ThreadSummaryResponseSchema]
   if (/^\/v1\/threads\/[^/]+\/todos$/.test(path)) {
     if (method === 'DELETE') return [ClearThreadTodosResponse]
     return [ThreadTodosResponse]
   }
   if (/^\/v1\/threads\/[^/]+\/compact$/.test(path)) return [CompactResponse]
-  if (/^\/v1\/threads\/[^/]+\/summary\/tasks\/[^/]+\/(kill|restart)$/.test(path)) {
-    return [ThreadSummaryTaskMutationResponseSchema]
-  }
-  if (/^\/v1\/threads\/[^/]+\/summary\/tasks\/[^/]+\/output$/.test(path)) {
-    return [ThreadSummaryTaskOutputResponseV1Schema]
-  }
   if (path === '/v1/threads') {
     if (method === 'GET') return [ListThreadsResponse]
     if (method === 'POST') return [PublicThreadHTTPResponseV1Schema]
@@ -4044,12 +4238,18 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
     return [PublicThreadHTTPResponseV1Schema]
   }
   if (/^\/v1\/threads\/[^/]+\/fork$/.test(path)) return [PublicThreadHTTPResponseV1Schema]
+  if (/^\/v1\/sessions\/[^/]+\/resume-thread$/.test(path) && method === 'POST') {
+    return [ResumeThreadResponse]
+  }
   if (/^\/v1\/threads\/[^/]+\/turns$/.test(path)) return [StartTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/steer$/.test(path)) return [SteerTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/turns\/[^/]+\/interrupt$/.test(path)) return [InterruptTurnResponse]
   if (/^\/v1\/threads\/[^/]+\/rewind$/.test(path)) return [RewindThreadResponse]
   if (/^\/v1\/threads\/[^/]+\/review$/.test(path)) return [StartReviewResponse]
   if (/^\/v1\/approvals\/[^/]+$/.test(path)) return [ApprovalDecisionResponse]
+  if (/^\/v1\/user-inputs\/[^/]+$/.test(path) && method === 'POST') {
+    return [UserInputResolutionResponse]
+  }
   if (path === '/v1/usage') {
     return [DailyUsageResponseSchema, ThreadUsageResponseSchema, RuntimeUsageResponseSchema, ModelUsageResponseSchema]
   }
@@ -4066,7 +4266,7 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
   if (path === ANALYTIX_PROVIDER_REGISTRY_RECOVER_PATH && method === 'POST') {
     return [providerRegistryRecoveredResponseSchemaV1]
   }
-  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|probe|discover-models|account-observation))?$/.exec(path)
+  const providerRegistryProviderRoute = /^\/v1\/provider-registry\/providers\/[^/]+(?:\/(select|disconnect|credential|credential-check|probe|discover-models|account-observation))?$/.exec(path)
   if (providerRegistryProviderRoute) {
     switch (providerRegistryProviderRoute[1]) {
       case undefined:
@@ -4075,6 +4275,8 @@ function runtimeResponseSchemasV1(path: string, method: string): RuntimeResponse
         return null
       case 'probe':
         return method === 'POST' ? [providerRegistryProbeResponseSchemaV1] : null
+      case 'credential-check':
+        return method === 'POST' ? [providerRegistryCredentialCheckResponseSchemaV1] : null
       case 'account-observation':
         return method === 'POST' ? [providerRegistryAccountObservationResponseSchemaV1] : null
       case 'select':
@@ -4215,9 +4417,7 @@ function decodeClosedRuntimeRouteSegmentV1(value: string): string | null {
   }
 }
 
-function threadSummaryRouteIdentityV1(path: string): ThreadSummaryRouteIdentityV1 | null {
-  const match = /^\/v1\/threads\/([^/]+)\/summary(?:\/tasks\/([^/]+)\/(output|kill|restart))?$/.exec(path)
-  if (!match) return null
+function threadSummaryRouteIdentityV1(match: RegExpExecArray): ThreadSummaryRouteIdentityV1 | null {
   const threadId = decodeClosedRuntimeRouteSegmentV1(match[1])
   if (!threadId) return null
   if (!match[2]) return { threadId }
@@ -4226,9 +4426,12 @@ function threadSummaryRouteIdentityV1(path: string): ThreadSummaryRouteIdentityV
   return { threadId, taskId, action: match[3] as ThreadSummaryRouteIdentityV1['action'] }
 }
 
-function threadSummaryResponseIdentityMatchesV1(path: string, value: unknown): boolean {
-  const route = threadSummaryRouteIdentityV1(path)
-  if (!route) return !/^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
+function threadSummaryResponseIdentityMatchesV1(
+  route: ThreadSummaryRouteIdentityV1 | null,
+  isThreadSummaryRoute: boolean,
+  value: unknown
+): boolean {
+  if (!route) return !isThreadSummaryRoute
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   if (!route.taskId) return record.threadId === route.threadId
@@ -4249,8 +4452,16 @@ export function sanitizeRuntimeResponse(
 ): { ok: boolean; status: number; body: string } {
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
+  const contract = runtimeResponseContractV1(path, method)
+  const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    (/^\/v1\/threads\/[^/]+\/fork$/.test(path) || (path === '/v1/threads' && method === 'GET'))
+  if (packagedForkDiagnostic) {
+    console.error('[packaged-fork-schema] ' + JSON.stringify({
+      phase: 'response', status: response.status, ok: response.ok
+    }))
+  }
   if (!response.body.trim()) {
-    if (response.ok && !runtimeResponseRequiresBody(path)) return response
+    if (response.ok && !contract.requiresBody) return response
     return response.ok
       ? {
           ok: false,
@@ -4289,7 +4500,7 @@ export function sanitizeRuntimeResponse(
       canonicalValue = sanitizeLlmDebugResponse(parsed)
       schemaValidated = true
     } else {
-      const outputSchemas = runtimeResponseSchemasV1(path, method)
+      const outputSchemas = contract.schemas
       if (!outputSchemas) {
         return {
           ok: false,
@@ -4302,6 +4513,9 @@ export function sanitizeRuntimeResponse(
       }
       const authorityProjected = projectVerifiedAcceptedFinalHTTPValue(parsed, pin)
       if (canonicalRuntimeBoundaryValue(authorityProjected) !== canonicalRuntimeBoundaryValue(parsed)) {
+        if (packagedForkDiagnostic) {
+          console.error('[packaged-fork-schema] ' + JSON.stringify({ phase: 'authority_projection_changed' }))
+        }
         return {
           ok: false,
           status: 502,
@@ -4313,6 +4527,21 @@ export function sanitizeRuntimeResponse(
       }
       const validated = exactRuntimeResponseValueV1(outputSchemas, authorityProjected, pin)
       if (validated === null) {
+        if (packagedForkDiagnostic) {
+          const schemaResult = outputSchemas[0].safeParse(authorityProjected)
+          console.error('[packaged-fork-schema] ' + JSON.stringify({
+            phase: 'exact_validation',
+            schemaValid: schemaResult.success,
+            issuePaths: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .map((issue) => `${issue.path.join('.')}:${issue.code}`),
+            issueKeys: schemaResult.success ? [] : schemaResult.error.issues.slice(0, 20)
+              .filter((issue) => issue.code === 'unrecognized_keys')
+              .flatMap((issue) => issue.keys),
+            sanitizerChanged: schemaResult.success &&
+              canonicalRuntimeBoundaryValue(sanitizePublicRuntimeValue(schemaResult.data)) !==
+                canonicalRuntimeBoundaryValue(schemaResult.data)
+          }))
+        }
         return {
           ok: false,
           status: 502,
@@ -4322,13 +4551,23 @@ export function sanitizeRuntimeResponse(
           })
         }
       }
-      const requiresExactPublicProjection = path.startsWith('/v1/runtime/task-jobs/') ||
-        /^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
-      if (requiresExactPublicProjection) {
+      const resumedSession = /^\/v1\/sessions\/([^/]+)\/resume-thread$/.exec(path)
+      if (resumedSession && (validated as { session_id?: unknown }).session_id !==
+          decodeClosedRuntimeRouteSegmentV1(resumedSession[1])) {
+        return {
+          ok: false,
+          status: 502,
+          body: JSON.stringify({
+            code: 'runtime_response_schema_invalid',
+            message: 'Runtime response failed schema validation.'
+          })
+        }
+      }
+      if (contract.requiresExactPublicProjection) {
         const sanitized = sanitizePublicRuntimeValue(validated)
         const sanitizedMatches = sanitized !== undefined &&
           canonicalRuntimeBoundaryValue(sanitized) === canonicalRuntimeBoundaryValue(validated)
-        if (!sanitizedMatches || !threadSummaryResponseIdentityMatchesV1(path, validated)) {
+        if (!sanitizedMatches || !threadSummaryResponseIdentityMatchesV1(contract.summaryIdentity, contract.isThreadSummaryRoute, validated)) {
           return {
             ok: false,
             status: 502,
@@ -4377,11 +4616,21 @@ export function sanitizeRuntimeResponse(
   }
 }
 
+export function runtimeRequestTimeoutMs(pathAndQuery: string, method: string): number {
+  const path = pathAndQuery.split('?', 1)[0] || '/'
+  const verb = method.trim().toUpperCase()
+  // Credential mutations may wait on the protected task Keychain before Go replies.
+  const providerRegistryMutation = /^\/v1\/provider-registry(?:\/|$)/.test(path) &&
+    (verb === 'PATCH' || verb === 'PUT' || verb === 'DELETE')
+  return verb === 'POST' || providerRegistryMutation ? 60_000 : 15_000
+}
+
 export async function runtimeRequestViaHost(
   settings: AppSettingsV1,
   pathAndQuery: string,
   init: RuntimeRequestInit,
-  ensureRuntime: (settings: AppSettingsV1) => Promise<AppSettingsV1 | void>
+  ensureRuntime: (settings: AppSettingsV1) => Promise<AppSettingsV1 | void>,
+  dispatch?: <T>(send: () => Promise<T>) => Promise<T>
 ): Promise<{ ok: boolean; status: number; body: string }> {
   const ensuredSettings = await ensureRuntime(settings)
   const requestSettings = ensuredSettings ?? settings
@@ -4400,24 +4649,56 @@ export async function runtimeRequestViaHost(
   if (init.body && !hdrs.has('Content-Type')) {
     hdrs.set('Content-Type', 'application/json')
   }
-  try {
-    const res = await fetch(url, {
-      method: init.method ?? 'GET',
-      headers: hdrs,
-      body: init.body,
-      signal: AbortSignal.timeout(init.method === 'POST' ? 60_000 : 15_000)
-    })
-    return sanitizeRuntimeResponse({
-      ok: res.ok,
-      status: res.status,
-      body: await res.text()
-    }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
-  } catch {
-    throw new Error(JSON.stringify({
-      code: 'runtime_unavailable',
-      message: 'The Analytix runtime is unavailable.'
-    }))
+  const packagedThreadReadDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
+    (init.method ?? 'GET').toUpperCase() === 'GET' && /^\/v1\/threads\/[^/]+$/.test(pathNorm)
+  const send = async (): Promise<{ ok: boolean; status: number; body: string }> => {
+    let rawResponseSeen = false
+    try {
+      const res = await fetch(url, {
+        method: init.method ?? 'GET',
+        headers: hdrs,
+        body: init.body,
+        signal: AbortSignal.timeout(runtimeRequestTimeoutMs(pathNorm, init.method ?? 'GET'))
+      })
+      const body = await res.text()
+      rawResponseSeen = true
+      if (packagedThreadReadDiagnostic && !res.ok) {
+        let code = 'unclassified'
+        try {
+          const candidate = (JSON.parse(body) as { code?: unknown }).code
+          if (candidate === 'public_projection_pending' ||
+            candidate === 'accepted_final_hydration_unavailable' ||
+            candidate === 'internal_error') code = candidate
+        } catch { /* Response contents remain private. */ }
+        const rawHydrationClass = res.headers.get('X-Analytix-QA-Hydration-Class')
+        const hydrationClass = code === 'accepted_final_hydration_unavailable' && [
+          'frontier_torn', 'frontier_invalid', 'durable_replay', 'thread_readback',
+          'manifest_mismatch', 'projection_rejected', 'public_slot_mismatch',
+          'seal_rejected', 'batch_invalid', 'retained_authority',
+          'authority_mismatch', 'delivery_bound', 'other'
+        ].includes(rawHydrationClass || '') ? rawHydrationClass : null
+        console.error('[packaged-thread-read] ' + JSON.stringify({
+          status: res.status, code, ...(hydrationClass ? { hydrationClass } : {})
+        }))
+      }
+      return sanitizeRuntimeResponse({
+        ok: res.ok,
+        status: res.status,
+        body
+      }, pathNorm, isCurrentFinalPublicationAuthorityPin(requestAuthorityPin) ? requestAuthorityPin : null, init.method ?? 'GET')
+    } catch {
+      if (packagedThreadReadDiagnostic) {
+        console.error('[packaged-thread-read] ' + JSON.stringify({
+          status: 0, code: rawResponseSeen ? 'sanitizer_failed' : 'transport_unavailable'
+        }))
+      }
+      throw new Error(JSON.stringify({
+        code: 'runtime_unavailable',
+        message: 'The Analytix runtime is unavailable.'
+      }))
+    }
   }
+  return dispatch ? dispatch(send) : send()
 }
 
 export { buildAnalytixServeArgs, resolveAnalytixExecutable }
@@ -4473,6 +4754,8 @@ export function buildGoRuntimeSidecarEnv(
     'ANALYTIX_RUNTIME_TOKEN',
     'ANALYTIX_MCP_CONFIG_PATH',
     'ANALYTIX_APP_ROOT',
+    'ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT',
+    'ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT',
     'ANALYTIX_RESOURCES_PATH'
   ])
   // Windows folds environment names when spawning. Remove every alias before
@@ -4484,6 +4767,10 @@ export function buildGoRuntimeSidecarEnv(
     ...childEnvironment,
     ANALYTIX_RUNTIME_TOKEN: runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveGoRuntimeMCPConfigPath(dataDir),
+    ...(app.isPackaged ? {} : {
+      ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT: appRoot(),
+      ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT: env.ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT ?? ''
+    }),
     ANALYTIX_APP_ROOT: appRoot(),
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }

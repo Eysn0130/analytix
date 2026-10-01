@@ -15,6 +15,59 @@ const (
 	SourceSubagent = "subagent"
 )
 
+// Cost coverage is derived from the host-authored terminal usage record. The
+// amounts remain complete totals only; a partial group's known component is
+// retained privately while its public total is unavailable.
+type costCoverage struct {
+	status   string
+	usd, cny bool
+	usdTotal float64
+	cnyTotal float64
+}
+
+func unknownCostCoverage() costCoverage { return costCoverage{status: "unknown"} }
+
+func (coverage costCoverage) currencies() []string {
+	out := make([]string, 0, 2)
+	if coverage.usd {
+		out = append(out, "USD")
+	}
+	if coverage.cny {
+		out = append(out, "CNY")
+	}
+	return out
+}
+
+func (coverage costCoverage) add(other costCoverage) costCoverage {
+	if coverage.status == "none" {
+		return other
+	}
+	if other.status == "none" {
+		return coverage
+	}
+	combined := costCoverage{
+		usd: coverage.usd || other.usd, cny: coverage.cny || other.cny,
+		usdTotal: coverage.usdTotal + other.usdTotal,
+		cnyTotal: coverage.cnyTotal + other.cnyTotal,
+	}
+	switch {
+	case coverage.status == "complete" && other.status == "complete":
+		combined.status = "complete"
+	case coverage.status == "unknown" && other.status == "unknown":
+		combined.status = "unknown"
+	default:
+		combined.status = "partial"
+	}
+	return combined
+}
+
+func (coverage costCoverage) publicCosts() (float64, float64) {
+	if coverage.status != "complete" {
+		return 0, 0
+	}
+	return coverage.usdTotal, coverage.cnyTotal
+}
+
 type Snapshot struct {
 	PromptTokens              int      `json:"promptTokens"`
 	CompletionTokens          int      `json:"completionTokens"`
@@ -34,11 +87,69 @@ type Snapshot struct {
 	CostUSD                   float64  `json:"costUsd"`
 	CostCNY                   float64  `json:"costCny"`
 	PriceConfigured           bool     `json:"priceConfigured"`
+	CostEstimateStatus        string   `json:"costEstimateStatus,omitempty"`
+	CostKnownCurrencies       []string `json:"costKnownCurrencies,omitempty"`
 	CacheSavingsUSD           float64  `json:"cacheSavingsUsd"`
 	CacheSavingsCNY           float64  `json:"cacheSavingsCny"`
 	TokenEconomySavingsTokens int      `json:"tokenEconomySavingsTokens"`
 	TokenEconomySavingsUSD    float64  `json:"tokenEconomySavingsUsd"`
 	TokenEconomySavingsCNY    float64  `json:"tokenEconomySavingsCny"`
+}
+
+func (u Snapshot) coverage() costCoverage {
+	if u.CostEstimateStatus == "" {
+		if !u.HasUsage() {
+			return costCoverage{status: "none"}
+		}
+		return unknownCostCoverage()
+	}
+	status := u.CostEstimateStatus
+	if status != "none" && status != "complete" && status != "partial" && status != "unknown" {
+		return unknownCostCoverage()
+	}
+	coverage := costCoverage{status: status}
+	for index, currency := range u.CostKnownCurrencies {
+		switch {
+		case index == 0 && currency == "USD":
+			coverage.usd = true
+		case index == 0 && currency == "CNY":
+			coverage.cny = true
+		case index == 1 && currency == "CNY" && coverage.usd:
+			coverage.cny = true
+		default:
+			return unknownCostCoverage()
+		}
+	}
+	if (status == "none" && u.HasUsage()) ||
+		((status == "complete" || status == "partial") != (coverage.usd || coverage.cny)) ||
+		(status == "complete") != u.PriceConfigured ||
+		math.IsNaN(u.CostUSD) || math.IsInf(u.CostUSD, 0) || u.CostUSD < 0 ||
+		math.IsNaN(u.CostCNY) || math.IsInf(u.CostCNY, 0) || u.CostCNY < 0 ||
+		(!coverage.usd && u.CostUSD != 0) || (!coverage.cny && u.CostCNY != 0) ||
+		(status != "complete" && (u.CostUSD != 0 || u.CostCNY != 0)) {
+		return unknownCostCoverage()
+	}
+	coverage.usdTotal, coverage.cnyTotal = u.CostUSD, u.CostCNY
+	return coverage
+}
+
+func canonicalCostCurrenciesFromAny(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...), true
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, entry := range typed {
+			currency, ok := entry.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, currency)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 type Record struct {
@@ -79,6 +190,7 @@ type counters struct {
 	CostUSD                   float64
 	CostCNY                   float64
 	PriceConfigured           bool
+	CostCoverage              costCoverage
 	CacheSavingsUSD           float64
 	CacheSavingsCNY           float64
 	TokenEconomySavingsTokens int
@@ -472,6 +584,13 @@ func SnapshotFromMap(raw map[string]any) Snapshot {
 		TokenEconomySavingsUSD:    floatNumber(raw["tokenEconomySavingsUsd"]),
 		TokenEconomySavingsCNY:    floatNumber(raw["tokenEconomySavingsCny"]),
 	}
+	if status, ok := firstNonNilAny(raw["costEstimateStatus"], raw["cost_estimate_status"]).(string); ok {
+		currencies, currenciesOK := canonicalCostCurrenciesFromAny(firstNonNilAny(raw["costKnownCurrencies"], raw["cost_known_currencies"]))
+		if currenciesOK {
+			snapshot.CostEstimateStatus = status
+			snapshot.CostKnownCurrencies = currencies
+		}
+	}
 	if snapshot.TotalTokens == 0 {
 		snapshot.TotalTokens = snapshot.PromptTokens + snapshot.CompletionTokens
 	}
@@ -506,6 +625,8 @@ func SnapshotFromMap(raw map[string]any) Snapshot {
 }
 
 func (u Snapshot) Map() map[string]any {
+	coverage := u.coverage()
+	costUSD, costCNY := coverage.publicCosts()
 	return map[string]any{
 		"promptTokens":                   u.PromptTokens,
 		"completionTokens":               u.CompletionTokens,
@@ -520,9 +641,11 @@ func (u Snapshot) Map() map[string]any {
 		"cacheMissReasons":               stringListAny(u.CacheMissReasons),
 		"cacheSuggestions":               stringListAny(u.CacheSuggestions),
 		"turns":                          u.Turns,
-		"costUsd":                        u.CostUSD,
-		"costCny":                        u.CostCNY,
-		"priceConfigured":                u.PriceConfigured,
+		"costUsd":                        costUSD,
+		"costCny":                        costCNY,
+		"priceConfigured":                coverage.status == "complete",
+		"costEstimateStatus":             coverage.status,
+		"costKnownCurrencies":            coverage.currencies(),
 		"cacheSavingsUsd":                u.CacheSavingsUSD,
 		"cacheSavingsCny":                u.CacheSavingsCNY,
 		"tokenEconomySavingsTokens":      u.TokenEconomySavingsTokens,
@@ -540,9 +663,11 @@ func (u Snapshot) Map() map[string]any {
 		"output_tokens":                  u.CompletionTokens,
 		"reasoning_tokens":               u.ReasoningTokens,
 		"total_tokens":                   u.TotalTokens,
-		"cost_usd":                       u.CostUSD,
-		"cost_cny":                       u.CostCNY,
-		"price_configured":               u.PriceConfigured,
+		"cost_usd":                       costUSD,
+		"cost_cny":                       costCNY,
+		"price_configured":               coverage.status == "complete",
+		"cost_estimate_status":           coverage.status,
+		"cost_known_currencies":          coverage.currencies(),
 		"token_economy_savings_tokens":   u.TokenEconomySavingsTokens,
 	}
 }
@@ -580,26 +705,28 @@ func (u Snapshot) HasUsage() bool {
 
 func (u Snapshot) Diff(previous Snapshot) Snapshot {
 	delta := Snapshot{
-		PromptTokens:              nonNegativeInt(u.PromptTokens - previous.PromptTokens),
-		CompletionTokens:          nonNegativeInt(u.CompletionTokens - previous.CompletionTokens),
-		ReasoningTokens:           nonNegativeInt(u.ReasoningTokens - previous.ReasoningTokens),
-		TotalTokens:               nonNegativeInt(u.TotalTokens - previous.TotalTokens),
-		CachedTokens:              nonNegativeInt(u.CachedTokens - previous.CachedTokens),
-		CacheHitTokens:            nonNegativeInt(u.CacheHitTokens - previous.CacheHitTokens),
-		CacheMissTokens:           nonNegativeInt(u.CacheMissTokens - previous.CacheMissTokens),
-		HasCacheHitTokens:         u.HasCacheHitTokens || previous.HasCacheHitTokens,
-		HasCacheMissTokens:        u.HasCacheMissTokens || previous.HasCacheMissTokens,
-		CacheMissReasons:          append([]string(nil), u.CacheMissReasons...),
-		CacheSuggestions:          append([]string(nil), u.CacheSuggestions...),
-		Turns:                     nonNegativeInt(u.Turns - previous.Turns),
-		CostUSD:                   nonNegativeFloat(u.CostUSD - previous.CostUSD),
-		CostCNY:                   nonNegativeFloat(u.CostCNY - previous.CostCNY),
-		PriceConfigured:           u.PriceConfigured || previous.PriceConfigured,
+		PromptTokens:       nonNegativeInt(u.PromptTokens - previous.PromptTokens),
+		CompletionTokens:   nonNegativeInt(u.CompletionTokens - previous.CompletionTokens),
+		ReasoningTokens:    nonNegativeInt(u.ReasoningTokens - previous.ReasoningTokens),
+		TotalTokens:        nonNegativeInt(u.TotalTokens - previous.TotalTokens),
+		CachedTokens:       nonNegativeInt(u.CachedTokens - previous.CachedTokens),
+		CacheHitTokens:     nonNegativeInt(u.CacheHitTokens - previous.CacheHitTokens),
+		CacheMissTokens:    nonNegativeInt(u.CacheMissTokens - previous.CacheMissTokens),
+		HasCacheHitTokens:  u.HasCacheHitTokens || previous.HasCacheHitTokens,
+		HasCacheMissTokens: u.HasCacheMissTokens || previous.HasCacheMissTokens,
+		CacheMissReasons:   append([]string(nil), u.CacheMissReasons...),
+		CacheSuggestions:   append([]string(nil), u.CacheSuggestions...),
+		Turns:              nonNegativeInt(u.Turns - previous.Turns),
+		// Cumulative usage cannot attribute cost to the new physical attempts.
+		// Preserve the legacy index shape when neither raw snapshot had coverage.
 		CacheSavingsUSD:           nonNegativeFloat(u.CacheSavingsUSD - previous.CacheSavingsUSD),
 		CacheSavingsCNY:           nonNegativeFloat(u.CacheSavingsCNY - previous.CacheSavingsCNY),
 		TokenEconomySavingsTokens: nonNegativeInt(u.TokenEconomySavingsTokens - previous.TokenEconomySavingsTokens),
 		TokenEconomySavingsUSD:    nonNegativeFloat(u.TokenEconomySavingsUSD - previous.TokenEconomySavingsUSD),
 		TokenEconomySavingsCNY:    nonNegativeFloat(u.TokenEconomySavingsCNY - previous.TokenEconomySavingsCNY),
+	}
+	if u.CostEstimateStatus != "" || previous.CostEstimateStatus != "" {
+		delta.CostEstimateStatus = "unknown"
 	}
 	if delta.TotalTokens == 0 {
 		delta.TotalTokens = delta.PromptTokens + delta.CompletionTokens
@@ -619,6 +746,7 @@ func (u Snapshot) Diff(previous Snapshot) Snapshot {
 
 func SumRecords(records []Record) Snapshot {
 	var total Snapshot
+	coverage := costCoverage{status: "none"}
 	hasTelemetry := false
 	for _, record := range records {
 		total.PromptTokens += record.Usage.PromptTokens
@@ -628,9 +756,7 @@ func SumRecords(records []Record) Snapshot {
 		total.CachedTokens += record.Usage.CachedSnapshotTokens()
 		total.CacheHitTokens += record.Usage.CacheHitForCounters()
 		total.CacheMissTokens += record.Usage.CacheMissTokens
-		total.CostUSD += record.Usage.CostUSD
-		total.CostCNY += record.Usage.CostCNY
-		total.PriceConfigured = total.PriceConfigured || record.Usage.PriceConfigured
+		coverage = coverage.add(record.Usage.coverage())
 		total.CacheSavingsUSD += record.Usage.CacheSavingsUSD
 		total.CacheSavingsCNY += record.Usage.CacheSavingsCNY
 		total.TokenEconomySavingsTokens += record.Usage.TokenEconomySavingsTokens
@@ -643,6 +769,10 @@ func SumRecords(records []Record) Snapshot {
 	}
 	total.HasCacheHitTokens = hasTelemetry
 	total.HasCacheMissTokens = hasTelemetry
+	total.CostEstimateStatus = coverage.status
+	total.CostKnownCurrencies = coverage.currencies()
+	total.CostUSD, total.CostCNY = coverage.publicCosts()
+	total.PriceConfigured = coverage.status == "complete"
 	if hasTelemetry {
 		cacheTotal := total.CacheHitForCounters() + total.CacheMissTokens
 		if cacheTotal > 0 {
@@ -669,7 +799,7 @@ func normalizeWindow(window Window) Window {
 }
 
 func emptyCounters() *counters {
-	return &counters{ThreadIDs: map[string]bool{}}
+	return &counters{ThreadIDs: map[string]bool{}, CostCoverage: costCoverage{status: "none"}}
 }
 
 func (c *counters) Add(record Record) {
@@ -680,9 +810,9 @@ func (c *counters) Add(record Record) {
 	c.CachedTokens += usage.CacheHitForCounters()
 	c.CacheMissTokens += usage.CacheMissTokens
 	c.TotalTokens += usage.TotalTokens
-	c.CostUSD += usage.CostUSD
-	c.CostCNY += usage.CostCNY
-	c.PriceConfigured = c.PriceConfigured || usage.PriceConfigured
+	c.CostCoverage = c.CostCoverage.add(usage.coverage())
+	c.CostUSD, c.CostCNY = c.CostCoverage.publicCosts()
+	c.PriceConfigured = c.CostCoverage.status == "complete"
 	c.CacheSavingsUSD += usage.CacheSavingsUSD
 	c.CacheSavingsCNY += usage.CacheSavingsCNY
 	c.TokenEconomySavingsTokens += usage.TokenEconomySavingsTokens
@@ -709,9 +839,9 @@ func (c *counters) AddCounters(other *counters) {
 	c.CachedTokens += other.CachedTokens
 	c.CacheMissTokens += other.CacheMissTokens
 	c.TotalTokens += other.TotalTokens
-	c.CostUSD += other.CostUSD
-	c.CostCNY += other.CostCNY
-	c.PriceConfigured = c.PriceConfigured || other.PriceConfigured
+	c.CostCoverage = c.CostCoverage.add(other.CostCoverage)
+	c.CostUSD, c.CostCNY = c.CostCoverage.publicCosts()
+	c.PriceConfigured = c.CostCoverage.status == "complete"
 	c.CacheSavingsUSD += other.CacheSavingsUSD
 	c.CacheSavingsCNY += other.CacheSavingsCNY
 	c.TokenEconomySavingsTokens += other.TokenEconomySavingsTokens
@@ -751,6 +881,8 @@ func (c *counters) countersMap() map[string]any {
 		"cost_usd":                     c.CostUSD,
 		"cost_cny":                     c.CostCNY,
 		"price_configured":             c.PriceConfigured,
+		"cost_estimate_status":         c.CostCoverage.status,
+		"cost_known_currencies":        c.CostCoverage.currencies(),
 		"cache_savings_usd":            c.CacheSavingsUSD,
 		"cache_savings_cny":            c.CacheSavingsCNY,
 		"token_economy_savings_tokens": c.TokenEconomySavingsTokens,

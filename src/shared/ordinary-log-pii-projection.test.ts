@@ -4,6 +4,7 @@ import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
   containsProtectedCaseFactCandidate,
+  containsUnboundCaseRiskV1,
   projectOrdinaryLogPII,
   projectOrdinaryPublicText
 } from './ordinary-log-pii-projection'
@@ -26,6 +27,55 @@ function canonicalDigits(value: string): string {
 }
 
 describe('ordinary log PII projection', () => {
+  it('separates ordinary numeric file results from case assertions', () => {
+    for (const text of [
+      '请实际读取工作区相对路径「2026年资料/表单 42.txt」的内容，只列出文件中的日期、数量、金额和参考编号；不要猜测。标记 N04-QA-107d-ordinary。',
+      '请读取「表单 42.txt」，列出金额。',
+      '请读取「2026年资料/季度  报表 42.txt」，列出金额。标记 QA-17。',
+      '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+      '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：550e8400-e29b-41d4-a716-44665544a000。',
+      '金额：￥1234.56',
+      '取得版本2.0的说明文件',
+      '请取得2026年资料/表单 42.txt，核对金额：1234.56 元。',
+      '请取得2026年收入表/表单 42.txt，核对金额：1234.56 元。',
+      '解释 DOM 父子节点和兄弟节点的遍历',
+      '支付模块新增 3 个测试',
+      '支付2次测试，检查回调顺序',
+      '支付2元件用于测试',
+      '支付给测试模块 3 个元件',
+      '支付给测试模块 2 万个元件',
+      '为两位姐妹写旅行计划',
+      '解释 DOM 父子节点关系',
+      '请解释 DOM 元素的父子关系。',
+      '请解释 DOM 元素是否存在父子关系。',
+      'DOM 元素与子元素存在父子关系。'
+    ]) expect(containsUnboundCaseRiskV1(text)).toBe(false)
+    for (const text of [
+      '甲公司支付2645.72元，见doc/a.txt',
+      '甲公司支付\n2645.72 元',
+      '甲公司支付2645.72元，见doc/a.txt。标记 QA-17。',
+      '甲公司支付了 2645.72 元',
+      '甲公司支付￥2645.72',
+      '甲公司支付给乙公司2645.72元',
+      '甲公司支付乙公司2645.72元。',
+      '甲公司支付乙公司2万元。',
+      '甲公司支付乙公司2亿元。',
+      '甲公司支付乙公司2万人民币。',
+      '甲公司取得2万元。',
+      '甲公司取得2026年收益￥2万元。',
+      '甲公司取得2026年收益2万元。',
+      '甲公司取得￥2645.72，见doc/a.txt',
+      '请核实当前案件的金额字段',
+      '张某实际控制甲公司',
+      '张某与李某是父子',
+      '张某与李某存在父子关系。',
+      '张三与李四存在父子关系。',
+      '张某与李某为姐妹',
+      '请查询电话 13800138000'
+    ]) expect(containsUnboundCaseRiskV1(text)).toBe(true)
+    expect(containsProtectedCaseFactCandidate('金额：￥1234.56')).toBe(true)
+  })
+
   it('projects after long incomplete escaped mentions without backtracking', () => {
     const incomplete = '$[](' + String.raw`\!`.repeat(5000)
     expect(projectOrdinaryLogPII(`${incomplete}\n/Users/private-owner/source.csv`)).toBe(`${incomplete}\n[PRIVATE_PATH]`)
@@ -287,6 +337,20 @@ describe('ordinary log PII projection', () => {
     expect(containsOrdinaryPublicPII({ message: digest })).toBe(true)
     expect(containsOrdinaryPublicPII({
       output: { plan: { contentHash: '1'.repeat(64) } }
+    })).toBe(true)
+  })
+
+  it('only treats exact host user-input question IDs as structural outside prose', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }
+    const item = { kind: 'user_input', role: 'system', status: 'pending', inputId, questions: [question] }
+    expect(containsOrdinaryPublicPII(item)).toBe(false)
+    expect(containsOrdinaryPublicPII({ message: item })).toBe(true)
+    expect(containsOrdinaryPublicPII({ ...item,
+      questions: [{ ...question, id: `other_${'123456789012'}` }]
+    })).toBe(true)
+    expect(containsOrdinaryPublicPII({ ...item,
+      questions: [{ ...question, question: 'account=6222020202020202020' }]
     })).toBe(true)
   })
 

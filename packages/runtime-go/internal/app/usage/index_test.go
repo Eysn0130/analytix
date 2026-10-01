@@ -47,6 +47,28 @@ func TestBuildIndexRecordConvertsCumulativeUsageToDelta(t *testing.T) {
 	}
 }
 
+func TestBuildIndexRecordTreatsLegacyAndCumulativeCostAsUnknown(t *testing.T) {
+	legacy := BuildIndexRecord(IndexRecordInput{Event: map[string]any{
+		"threadId": "thread-a", "turnId": "turn-1", "usage": map[string]any{
+			"turns": 1, "costUsd": 0.25, "priceConfigured": true,
+		},
+	}})
+	if !legacy.OK || legacy.Record.Usage.coverage().status != "unknown" || legacy.Record.Usage.Map()["costUsd"] != float64(0) {
+		t.Fatalf("legacy signed usage invented complete cost: %#v", legacy)
+	}
+	cumulative := BuildIndexRecord(IndexRecordInput{Event: map[string]any{
+		"threadId": "thread-a", "turnId": "turn-2", "usage": map[string]any{
+			"turns": 2, "promptTokens": 20, "completionTokens": 2, "totalTokens": 22,
+			"costUsd": 0.5, "costCny": 0, "priceConfigured": true,
+			"costEstimateStatus": "complete", "costKnownCurrencies": []any{"USD"},
+		},
+	}, Previous: Snapshot{Turns: 1, PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11,
+		CostUSD: 0.25, PriceConfigured: true, CostEstimateStatus: "complete", CostKnownCurrencies: []string{"USD"}}, HasPrevious: true})
+	if !cumulative.OK || cumulative.Record.Usage.coverage().status != "unknown" || cumulative.Record.Usage.Map()["costUsd"] != float64(0) {
+		t.Fatalf("cumulative delta guessed new attempt cost: %#v", cumulative)
+	}
+}
+
 func TestBuildIndexRecordUsesTurnModelAndProviderDiagnostics(t *testing.T) {
 	result := BuildIndexRecord(IndexRecordInput{
 		Event: map[string]any{

@@ -122,6 +122,9 @@ func (h *runtimeServerHandler) executeRuntimeParallelSubagents(ctx context.Conte
 
 func (h *runtimeServerHandler) executeRuntimeRunSkill(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	name := subagentapp.SkillNameFromArgs(args)
+	if packageID := toolcatalogapp.OfficeSkillIdentity(name); packageID != "" {
+		return h.executeOfficeSkill(ctx, args, packageID)
+	}
 	skill, ok := h.runtimeSkillByName(name)
 	if !ok {
 		return map[string]any{"code": "unknown_skill", "error": "unknown skill: " + strings.TrimSpace(name), "available": h.runtimeSkillIDs()}, true
@@ -159,6 +162,9 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 	defer acquireSignal.SignalUnlessTransferred()
 	if !h.subagents.Enabled {
 		return runtimeSubagentFailedOutput(request, "subagents are disabled in Analytix runtime settings")
+	}
+	if h.beginOpaqueEditingExecution(ctx) != nil {
+		return runtimeSubagentFailedOutput(request, "Subagent execution is unavailable while a controlled editing session is active")
 	}
 	securityBinding, securityErr := domainjob.NewSecurityBinding(pending.SecurityContext, pending.ExecutionGrant, pending.Call.ID)
 	if securityErr != nil {
@@ -395,6 +401,9 @@ func (h *runtimeServerHandler) completeRuntimeSubagentTask(ctx context.Context, 
 }
 
 func (h *runtimeServerHandler) authorizeRuntimeJobStart(record jobs.Record) (jobs.Record, error) {
+	if err := h.beginOpaqueEditingExecution(context.Background()); err != nil {
+		return jobs.Record{}, err
+	}
 	authority := h.runtimeJobSecurityAuthorizer()
 	return subagentapp.AuthorizeJobStart(record, h != nil && h.jobs != nil && h.store != nil, h.jobs, authority.Blocker, authority.MarkDeadLetter)
 }

@@ -48,15 +48,35 @@ export function runtimeShardIndex(value) {
   return Number(value)
 }
 
-export function otherGoPackages(output) {
+// One filesystem owner list is consumed by both the actual-host lane and
+// ordinary package transfer. The tagged production matrix retains every package.
+export const filesystemContractPackages = [
+  'internal/testsupport/userconfigtest',
+  'internal/adapters/outbound/securegeneration',
+  'internal/adapters/outbound/finalauthority',
+  'internal/adapters/outbound/rawartifact',
+  'internal/adapters/outbound/persistencefs'
+].map(path => `${rootPackage}/${path}`)
+
+function validatedGoPackages(output) {
   const packages = output.trim().split(/\s+/)
   if (new Set(packages).size !== packages.length ||
     packages.some(name => !/^analytix\.local\/runtime-go(?:\/[a-zA-Z0-9_.-]+)*$/.test(name)) ||
-    !packages.includes(runtimePackage) || packages.length < 2) {
+    !packages.includes(rootPackage) || !packages.includes(runtimePackage) || filesystemContractPackages.some(name => !packages.includes(name))) {
     throw new Error('Go package inventory is incomplete or ambiguous.')
   }
-  // Runtime tests have their own required shards and explicit platform transfer.
-  return packages.filter(name => name !== runtimePackage)
+  return packages
+}
+
+export function otherGoPackages(output, tags = '') {
+  if (!['', 'analytix_prod'].includes(tags)) throw new Error('Unsupported Go CI build tags.')
+  return validatedGoPackages(output).filter(name => name !== runtimePackage &&
+    (tags === 'analytix_prod' || !filesystemContractPackages.includes(name)))
+}
+
+export function filesystemGoPackages(output) {
+  validatedGoPackages(output)
+  return [...filesystemContractPackages]
 }
 
 function goTestInventory(output, packageName, minimumCount = 1) {
@@ -148,8 +168,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (!['', 'analytix_prod'].includes(tags)) throw new Error('Unsupported Go CI build tags.')
     const args = ['test', '-count=1', '-p', '1', '-parallel', '2', '-timeout', '20m', '-tags', tags]
     if (mode === 'packages' && shardValue === undefined) {
-      const packages = otherGoPackages(inventory(['list', '-tags', tags, './...']))
+      const packages = otherGoPackages(inventory(['list', '-tags', tags, './...']), tags)
       console.log(`Go package partition: ${packages.length} packages; runtimeapp has ${runtimeShardCount} required shards, a required platform lane and explicit external diagnostics.`)
+      args.push(...packages)
+    } else if (mode === 'filesystem' && shardValue === undefined) {
+      if (tags !== '') throw new Error('Filesystem contracts require ordinary build tags.')
+      const packages = filesystemGoPackages(inventory(['list', './...']))
+      args[args.indexOf('20m')] = '5m'
       args.push(...packages)
     } else if (mode === 'platform-root' && shardValue === undefined) {
       if (process.platform !== 'darwin' || tags !== '') {
@@ -181,8 +206,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const pattern = `^(${names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`
       args.push('-json', '-run', pattern, runtimePackage)
       await runGoTestPartition(args, runtimePackage, names, requiredSubtests)
-    } else throw new Error(`Expected packages, platform, platform-root or runtime <0..${runtimeShardCount - 1}>.`)
-    if (mode === 'packages') process.exitCode = goExitStatus(spawnSync('go', args, { stdio: 'inherit' }))
+    } else throw new Error(`Expected packages, filesystem, platform, platform-root or runtime <0..${runtimeShardCount - 1}>.`)
+    if (['packages', 'filesystem'].includes(mode)) process.exitCode = goExitStatus(spawnSync('go', args, { stdio: 'inherit' }))
   } catch (error) {
     console.error(error.message)
     process.exitCode = 1

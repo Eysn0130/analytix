@@ -140,6 +140,7 @@ function contextNotes(context: InlineCompletionRequestContext): string[] {
 export function buildInlineCompletionPayload(
   context: InlineCompletionRequestContext,
   options: {
+    threadId?: string
     model?: string
     workspaceRoot?: string
     mode?: WriteInlineCompletionMode
@@ -211,6 +212,7 @@ export function buildInlineCompletionPayload(
   }
 
   return {
+    threadId: options.threadId,
     prefix: context.prefixWindow,
     suffix: context.suffixWindow,
     mode,

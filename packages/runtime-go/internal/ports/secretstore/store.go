@@ -14,15 +14,16 @@ const (
 )
 
 var (
-	ErrInvalidRequest       = errors.New("secret store: invalid request")
-	ErrUnauthorized         = errors.New("secret store: unauthorized")
-	ErrNotFound             = errors.New("secret store: not found")
-	ErrTombstoned           = errors.New("secret store: tombstoned")
-	ErrConflict             = errors.New("secret store: conflict")
-	ErrClosed               = errors.New("secret store: closed")
-	ErrPersistence          = errors.New("secret store: persistence failure")
-	ErrMasterKeyUnavailable = errors.New("secret store: master key unavailable")
-	ErrCryptographicFailure = errors.New("secret store: cryptographic failure")
+	ErrInvalidRequest        = errors.New("secret store: invalid request")
+	ErrUnauthorized          = errors.New("secret store: unauthorized")
+	ErrNotFound              = errors.New("secret store: not found")
+	ErrTombstoned            = errors.New("secret store: tombstoned")
+	ErrConflict              = errors.New("secret store: conflict")
+	ErrClosed                = errors.New("secret store: closed")
+	ErrPersistence           = errors.New("secret store: persistence failure")
+	ErrMasterKeyUnavailable  = errors.New("secret store: master key unavailable")
+	ErrLegacyReentryRequired = errors.New("secret store: legacy credential re-entry required")
+	ErrCryptographicFailure  = errors.New("secret store: cryptographic failure")
 )
 
 type Purpose string

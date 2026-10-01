@@ -257,6 +257,85 @@ func TestDesktopPrivateHistoryMigrationCommandRejectsInvalidArgumentsWithoutOutp
 	}
 }
 
+func TestDesktopInstallationKeyPreflightCommandUsesExactMarkerAndReusesKey(t *testing.T) {
+	base := t.TempDir()
+	dataDir := filepath.Join(base, "runtime-data")
+	durableDir := filepath.Join(base, "runtime-durable")
+	userDataDir := filepath.Join(base, "electron-user-data")
+	for _, root := range []string{dataDir, durableDir, userDataDir} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("ANALYTIX_RUNTIME_TOKEN", "synthetic-installation-preflight-token")
+	args := []string{
+		"prepare-desktop-installation-key-v1",
+		"--data-dir", dataDir, "--durable-root", durableDir,
+		"--user-data-dir", userDataDir,
+	}
+	var output bytes.Buffer
+	if err := runRuntimeMigrationCommand(args, &output); err != nil {
+		t.Fatalf("fresh key preflight command: %v", err)
+	}
+	if output.String() != desktopInstallationKeyPreflightReadyMarkerV1+"\n" {
+		t.Fatalf("key preflight stdout = %q", output.String())
+	}
+	keyPath := filepath.Join(dataDir, "private", "authority", "final-answer-ed25519-v1.json")
+	first, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := runRuntimeMigrationCommand(args, &output); err != nil ||
+		output.String() != desktopInstallationKeyPreflightReadyMarkerV1+"\n" {
+		t.Fatalf("repeat key preflight command: output=%q err=%v", output.String(), err)
+	}
+	second, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatalf("repeat command changed installation key: %v", err)
+	}
+	if err := runRuntimeMigrationCommand(args, failingRuntimeAuthorityWriter{}); err == nil {
+		t.Fatal("failed marker write was accepted")
+	}
+	third, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(first, third) {
+		t.Fatalf("failed marker write changed installation key: %v", err)
+	}
+}
+
+func TestDesktopInstallationKeyPreflightCommandRejectsInvalidArgsBeforeMutation(t *testing.T) {
+	base := t.TempDir()
+	dataDir := filepath.Join(base, "runtime-data")
+	durableDir := filepath.Join(base, "runtime-durable")
+	userDataDir := filepath.Join(base, "electron-user-data")
+	t.Setenv("ANALYTIX_RUNTIME_TOKEN", "synthetic-installation-preflight-token")
+	valid := []string{
+		"prepare-desktop-installation-key-v1",
+		"--data-dir", dataDir, "--durable-root", durableDir,
+		"--user-data-dir", userDataDir,
+	}
+	for _, args := range [][]string{
+		{"prepare-desktop-installation-key-v1"},
+		{"prepare-desktop-installation-key-v1", "--data-dir", "relative", "--durable-root", durableDir, "--user-data-dir", userDataDir},
+		append(append([]string(nil), valid...), "--data-dir", dataDir),
+		append(append([]string(nil), valid...), "--runtime-durable-root", durableDir),
+		append(append([]string(nil), valid...), "--insecure"),
+		append(append([]string(nil), valid...), "--private-startup-frame-v1"),
+		append(append([]string(nil), valid...), "unexpected"),
+	} {
+		var output bytes.Buffer
+		if err := runRuntimeMigrationCommand(args, &output); err == nil {
+			t.Fatalf("invalid key preflight command was accepted: %#v", args)
+		}
+		if output.Len() != 0 {
+			t.Fatalf("invalid key preflight command emitted output: %q", output.String())
+		}
+	}
+	if _, err := os.Lstat(dataDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid command created a Go data root: %v", err)
+	}
+}
+
 type failingRuntimeAuthorityWriter struct{}
 
 func (failingRuntimeAuthorityWriter) Write([]byte) (int, error) {

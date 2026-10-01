@@ -15,9 +15,10 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
+import type { ComposerFileReference } from '../../lib/composer-file-references'
+import { composerFileReferenceFromPath } from '../../lib/composer-file-references'
 import { confirmDialog } from '../../lib/confirm-dialog'
 import { formatWorkspacePickerError } from '../../lib/format-workspace-picker-error'
-import { useChatStore, type SettingsRouteSection } from '../../store/chat-store'
 import {
   useWriteWorkspaceStore,
   writeBasenameFromPath,
@@ -25,27 +26,14 @@ import {
   writeJoinPath,
   writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
-import { ConnectPhoneSidebarPanel } from '../chat/ConnectPhoneView'
-import { WorkspaceModeTabs } from '../chat/WorkspaceModeTabs'
 import {
   SidebarCollapseMotion,
   SidebarCommandRow,
-  SidebarFooterActions,
-  SidebarFrame,
   SidebarIconButton,
   SidebarSectionHeader,
   SidebarTreeRow
 } from '../sidebar/SidebarPrimitives'
 import { WriteFileTree } from './WriteFileTree'
-
-type Props = {
-  activeView: 'chat' | 'write' | 'claw' | 'schedule'
-  connectPhoneSidebarOpen: boolean
-  onCodeOpen: () => void
-  onWriteOpen: () => void
-  onOpenSettings: (section?: SettingsRouteSection) => void
-  onToggleConnectPhone: () => void
-}
 
 type EntryDialog =
   | { kind: 'create-file'; parentDirectory?: string; value: string }
@@ -55,20 +43,14 @@ type EntryDialog =
 
 type Translate = (key: string, opts?: Record<string, unknown>) => string
 
-export function WriteSidebar({
-  activeView,
-  connectPhoneSidebarOpen,
-  onCodeOpen,
-  onWriteOpen,
-  onOpenSettings,
-  onToggleConnectPhone
-}: Props): ReactElement {
+// The former Write navigation is now a file surface inside the right workspace.
+export function WriteSidebar({ initialWorkspaceRoot, selectedPath, onOpenFile, onAddReference }: {
+  initialWorkspaceRoot?: string
+  selectedPath?: string | null
+  onOpenFile?: (workspaceRoot: string, path: string) => void
+  onAddReference?: (reference: ComposerFileReference & { type: 'file' | 'directory' }) => void
+} = {}): ReactElement {
   const { t } = useTranslation('common')
-  const clawChannels = useChatStore((s) => s.clawChannels)
-  const addClawChannel = useChatStore((s) => s.addClawChannel)
-  const deleteClawChannel = useChatStore((s) => s.deleteClawChannel)
-  const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
-  const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null)
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
   // Field-level subscription: the sidebar must not re-render on fileContent or
@@ -124,10 +106,14 @@ export function WriteSidebar({
   )
 
   useEffect(() => {
-    void loadWriteSettings()
-  }, [loadWriteSettings])
+    void (async () => {
+      if (initialWorkspaceRoot) await useWriteWorkspaceStore.getState().initializeWorkspace(initialWorkspaceRoot)
+      await loadWriteSettings()
+    })()
+  }, [initialWorkspaceRoot, loadWriteSettings])
 
   const root = rootDirectory || workspaceRoot
+  const visibleWorkspaceRoots = [...new Set([workspaceRoot, ...workspaceRoots].filter(Boolean))]
   const entryDialogPortalTarget = typeof document === 'undefined' ? null : document.body
   const rootLoading = Boolean(
     loadingDirs.__root__
@@ -213,7 +199,10 @@ export function WriteSidebar({
     const created = entryDialog.kind === 'create-file'
       ? await createFile(workspaceRoot, writeJoinPath(parent, value))
       : await createDirectory(workspaceRoot, writeJoinPath(parent, value))
-    if (created) setEntryDialog(null)
+    if (created) {
+      setEntryDialog(null)
+      if (entryDialog.kind === 'create-file') onOpenFile?.(workspaceRoot, writeJoinPath(parent, value))
+    }
   }
 
   const pickWriteWorkspace = async (): Promise<void> => {
@@ -225,7 +214,6 @@ export function WriteSidebar({
       const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || defaultWorkspaceRoot || undefined)
       if (!picked.canceled && picked.path) {
         await addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
       }
     } catch (error) {
       setFileError(formatWorkspacePickerError(error))
@@ -234,7 +222,6 @@ export function WriteSidebar({
 
   const selectWorkspaceAndThread = async (workspacePath: string): Promise<void> => {
     await selectWriteWorkspace(workspacePath)
-    if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(workspacePath)
   }
 
   const toggleWorkspaceGroup = async (workspacePath: string): Promise<void> => {
@@ -257,24 +244,8 @@ export function WriteSidebar({
 
   return (
     <>
-    <SidebarFrame
-      title={t('appName')}
-      footer={
-        <SidebarFooterActions
-          settingsLabel={t('settings')}
-          connectPhoneLabel={t('claw')}
-          onOpenSettings={() => onOpenSettings('write')}
-          onToggleConnectPhone={onToggleConnectPhone}
-          connectPhoneActive={connectPhoneSidebarOpen}
-        />
-      }
-    >
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="ds-no-drag flex flex-col px-0.5">
-        <WorkspaceModeTabs
-          activeView={activeView}
-          onCodeOpen={onCodeOpen}
-          onWriteOpen={onWriteOpen}
-        />
         <SidebarCommandRow
           icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}
           label={t('writeCreateFile')}
@@ -290,17 +261,6 @@ export function WriteSidebar({
 
       <div className="ds-no-drag mx-1.5 my-3" />
 
-      {connectPhoneSidebarOpen ? (
-        <ConnectPhoneSidebarPanel
-          channels={clawChannels}
-          onAddProvider={async (provider, agentProfile, platformAccount, options) => {
-            await addClawChannel(provider, agentProfile, platformAccount, options)
-            onToggleConnectPhone()
-          }}
-          onDisconnect={(channelId) => deleteClawChannel(channelId)}
-          onOpenSettings={() => onOpenSettings('claw')}
-        />
-      ) : (
       <div className="ds-no-drag flex min-h-0 flex-1 flex-col">
         <SidebarSectionHeader
           label={t('writeSpaces')}
@@ -323,7 +283,7 @@ export function WriteSidebar({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          {workspaceRoots.length === 0 ? (
+          {visibleWorkspaceRoots.length === 0 ? (
             <button
               type="button"
               onClick={() => void pickWriteWorkspace()}
@@ -336,7 +296,7 @@ export function WriteSidebar({
             </button>
           ) : null}
 
-          {workspaceRoots.map((workspacePath) => {
+          {visibleWorkspaceRoots.map((workspacePath) => {
             const active = workspacePath === workspaceRoot
             const collapsed = active ? collapsedWorkspaces[workspacePath] === true : true
             const removable = workspaceRoots.length > 1 && workspacePath !== defaultWorkspaceRoot
@@ -425,11 +385,12 @@ export function WriteSidebar({
                       entriesByDir={entriesByDir}
                       expandedDirs={expandedDirs}
                       loadingDirs={loadingDirs}
-                      selectedFilePath={activeFilePath}
+                      selectedFilePath={selectedPath ?? activeFilePath}
                       error={treeError}
                       rootLoading={rootLoading}
                       onToggleDir={(path) => void toggleDirectory(workspaceRoot, path)}
-                      onSelectFile={(path) => void openFile(workspaceRoot, path)}
+                      onSelectFile={(path) => onOpenFile ? onOpenFile(workspaceRoot, path) : void openFile(workspaceRoot, path)}
+                      onAddReference={onAddReference ? (entry) => onAddReference({ ...composerFileReferenceFromPath(entry.path, workspaceRoot), type: entry.type }) : undefined}
                       onCreateFile={(directoryPath) => void openCreateFileDialog(directoryPath)}
                       onCreateDirectory={(directoryPath) => void openCreateDirectoryDialog(directoryPath)}
                       onRenameEntry={openRenameEntryDialog}
@@ -445,8 +406,7 @@ export function WriteSidebar({
           })}
         </div>
       </div>
-      )}
-    </SidebarFrame>
+    </div>
     {entryDialog && entryDialogPortalTarget ? createPortal(
       <WriteEntryDialog
         dialog={entryDialog}

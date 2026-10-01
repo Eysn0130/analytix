@@ -28,7 +28,7 @@ func TestApplyPricingHandlesCacheSavingsAndCurrencies(t *testing.T) {
 	if !priced.PriceConfigured || priced.Currency != "CNY" {
 		t.Fatalf("pricing metadata missing: %#v", priced)
 	}
-	if priced.CostCNY <= 0 || priced.CostUSD <= 0 || priced.CacheSavingsCNY <= 0 || priced.CacheSavingsUSD <= 0 {
+	if priced.CostCNY <= 0 || priced.CostUSD != 0 || priced.CacheSavingsCNY <= 0 || priced.CacheSavingsUSD != 0 {
 		t.Fatalf("expected CNY and USD cost/savings: %#v", priced)
 	}
 

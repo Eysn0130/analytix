@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -181,32 +182,40 @@ func TestRestartOpenNotRequiredSideEffectIntentIsOutcomeUnknownAndCannotResend(t
 }
 
 func TestRestartPreservesKnownDurableSideEffectIntentOutcome(t *testing.T) {
-	fixture := newServiceFixture(t)
-	grant := fixture.addGrant(t, "write_file", false, "not_required", fixture.now)
-	request := sideEffectIntentRequestForTest(fixture.pendingCall(grant), fixture.now.Add(time.Second))
-	lease, err := fixture.service.BeginSideEffectIntent(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.service.VerifySideEffectIntentAtSend(
-		context.Background(), lease, request, fixture.now.Add(2*time.Second),
-	); err != nil {
-		t.Fatal(err)
-	}
-	fixture.addResult(grant, false, "known durable outcome", fixture.now.Add(3*time.Second))
-	restarted := NewService(fixture.authority, fixture.store, fixture.threads)
-	dispositions, err := restarted.CloseAllOpenOnRestart(context.Background(), fixture.now.Add(4*time.Second))
-	if err != nil || len(dispositions) != 1 || dispositions[0].Status != domainpendingwork.StatusCompleted ||
-		dispositions[0].ReasonCode != "tool_outcome_durable" {
-		t.Fatalf("known side-effect outcome was downgraded at restart: dispositions=%#v err=%v", dispositions, err)
-	}
-	inventory, err := restarted.TrustedInventoryV1(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown, err := RestartOutcomeUnknownGrantsV1(inventory)
-	if err != nil || len(unknown) != 0 {
-		t.Fatalf("known side-effect outcome became outcome-unknown: unknown=%#v err=%v", unknown, err)
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint("failed=", failed), func(t *testing.T) {
+			fixture := newServiceFixture(t)
+			grant := fixture.addGrant(t, "write_file", false, "not_required", fixture.now)
+			request := sideEffectIntentRequestForTest(fixture.pendingCall(grant), fixture.now.Add(time.Second))
+			lease, err := fixture.service.BeginSideEffectIntent(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.service.VerifySideEffectIntentAtSend(
+				context.Background(), lease, request, fixture.now.Add(2*time.Second),
+			); err != nil {
+				t.Fatal(err)
+			}
+			fixture.addResult(grant, failed, "known durable outcome", fixture.now.Add(3*time.Second))
+			restarted := NewService(fixture.authority, fixture.store, fixture.threads)
+			dispositions, err := restarted.CloseAllOpenOnRestart(context.Background(), fixture.now.Add(4*time.Second))
+			if err != nil || len(dispositions) != 1 || dispositions[0].Status != domainpendingwork.StatusCompleted ||
+				dispositions[0].ReasonCode != "tool_outcome_durable" {
+				t.Fatalf("known side-effect outcome was downgraded at restart: dispositions=%#v err=%v", dispositions, err)
+			}
+			inventory, err := restarted.TrustedInventoryV1(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			unknown, err := RestartOutcomeUnknownGrantsV1(inventory)
+			if err != nil || len(unknown) != 0 {
+				t.Fatalf("known side-effect outcome became outcome-unknown: unknown=%#v err=%v", unknown, err)
+			}
+
+			if _, err := restarted.BeginSideEffectIntent(context.Background(), request); !errors.Is(err, ErrWorkClosed) && !errors.Is(err, ErrGrantAuthority) {
+				t.Fatalf("settled effect became resendable: %v", err)
+			}
+		})
 	}
 }
 

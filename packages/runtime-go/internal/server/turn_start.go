@@ -105,6 +105,11 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 			}
 		}
 	}()
+	releasePreparation, err := h.runtimeControl().PrepareForeground(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer releasePreparation()
 	thread, startBaselineDigest, err := turnstartapp.PrepareStartBaselineV1(turnstartapp.PrepareStartBaselineInputV1{
 		Context: ctx, Store: h.store, Compactor: h.runtimeThreadService(), ThreadID: threadID,
 		Prompt: request.Prompt, MainThread: request.InternalSubagentDepth == 0 && strings.TrimSpace(request.InternalChildRunID) == "",
@@ -165,7 +170,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 	securityAuthority.RiskIntent = request.RiskIntent
 	caseAdmissionText := apploop.CaseAdmissionTextV1(request.Prompt, request.DisplayText, request.FileReferences)
 	securityAuthority.LexicalCaseRisk = queuedLexicalCaseRisk || apploop.PromptRequiresCaseRiskAdmission(caseAdmissionText)
-	securityAuthority.ProtectedCaseData = queuedProtectedCaseData || domainsecurity.ContainsProtectedCaseFactCandidate(caseAdmissionText)
+	securityAuthority.ProtectedCaseData = queuedProtectedCaseData || domainsecurity.ContainsProtectedCaseData(caseAdmissionText)
 	securityAuthority.TrustedCaseThread = h.caseThreads != nil && h.caseThreads.IsCaseThread(threadID)
 	attachmentCarriesCaseBinding, err := h.runtimeAttachmentPipeline().Planner.PreflightCaseRisk(
 		turnContext,
@@ -522,7 +527,7 @@ func runtimeTaskJobQueuedSteerRiskSignals(authority *turnstartapp.ChildTransitio
 			continue
 		}
 		lexicalCaseRisk = lexicalCaseRisk || apploop.PromptRequiresCaseRiskAdmission(message.Text)
-		protectedCaseData = protectedCaseData || domainsecurity.ContainsProtectedCaseFactCandidate(message.Text)
+		protectedCaseData = protectedCaseData || domainsecurity.ContainsProtectedCaseData(message.Text)
 	}
 	return lexicalCaseRisk, protectedCaseData
 }
@@ -678,6 +683,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 	result := loopResult.LastResult
 	cacheDiagnostics := h.runtimeCacheDiagnostics(threadID, input.SecurityContext, result)
 	var completionRecord appturn.CompletionRecord
+	var publicationTiming appturn.PublicationTiming
 	var changed bool
 	status := ""
 	terminalReferenceKind := ""
@@ -723,6 +729,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 		); err != nil {
 			return nil, err
 		}
+		publicationTiming = accepted.Persistence.Timing
 		completionRecord = accepted.Persistence.CompletionRecord
 		changed, status = accepted.Persistence.Changed, accepted.Persistence.Status
 		terminalReferenceKind = appgoal.TerminalReferenceAcceptedFinal
@@ -744,6 +751,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 			if commitErr != nil {
 				return nil, apploop.WrapHostBoundaryFailure(apploop.HostCandidatePublicationFailure, commitErr)
 			}
+			publicationTiming = committed.Timing
 			completionRecord, changed, status = committed.CompletionRecord, committed.Changed, committed.Status
 			terminalReferenceDigest = committed.CASBinding.BindingDigest
 		} else {
@@ -772,6 +780,7 @@ func (h *runtimeServerHandler) completeStartedRuntimeTurn(ctx context.Context, i
 			return map[string]any{"status": status}, nil
 		}
 	}
+	recordRuntimePublicationTrace(threadID, turnID, loopResult, terminalEnteredAt, publicationTiming)
 	if releaseCandidateTerminal != nil {
 		releaseCandidateTerminal()
 	}

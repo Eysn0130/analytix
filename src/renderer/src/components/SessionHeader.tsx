@@ -310,7 +310,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   }
 
   const openSourcePreview = (): void => {
-    if (!workspaceRoot.trim() || runtimeConnection !== 'ready') return
+    if (!workspaceRoot.trim()) return
     closeActionsMenu()
     setSourcePreviewOpen(true)
   }
@@ -468,7 +468,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const activePinned = active ? pinnedThreadIds.has(active.id) : false
   const archived = active?.archived === true
   const threadActionsDisabled = !active || runtimeConnection !== 'ready'
-  const sourcePreviewDisabled = threadActionsDisabled || !workspaceRoot.trim()
+  const sourcePreviewDisabled = !workspaceRoot.trim()
 
   const renderThreadActionsMenu = (floating = false): ReactElement | null => {
     if (!active) return null
@@ -528,7 +528,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           icon={<TableProperties className="h-5 w-5" strokeWidth={1.9} />}
           label={t('sessionActionDataImport')}
           disabled={sourcePreviewDisabled}
-          title={sourcePreviewDisabled ? t('runtimeActionNeedsConnection') : undefined}
+          title={sourcePreviewDisabled ? t('sessionActionDataImportNeedsWorkspace') : undefined}
           onClick={openSourcePreview}
           onPointerEnter={() => setActionsSubmenu(null)}
         />
@@ -790,6 +790,18 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           ) : (
             <div className="min-w-0 flex-1" aria-hidden />
           )}
+          {!activeTitle && !editing && workspaceRoot.trim() ? (
+            <button
+              type="button"
+              className="ds-no-drag inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t('sessionActionDataImport')}
+              disabled={sourcePreviewDisabled}
+              onClick={openSourcePreview}
+            >
+              <TableProperties className="h-4 w-4" strokeWidth={1.8} />
+              {t('sessionActionDataImport')}
+            </button>
+          ) : null}
         </div>
         {actionsMenuPortal}
         {sourcePreviewPortal}
@@ -885,7 +897,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                     </span>
                     <span className="inline-flex items-center rounded-full border border-ds-border bg-ds-card/70 px-2.5 py-1 font-medium text-ds-muted">
                       {t('sessionUsageCost', {
-                        cost: formatCost(threadUsage.costUsd, i18n.language, threadUsage.costCny, threadUsage.priceConfigured)
+                        cost: formatCost(threadUsage.costUsd, i18n.language, threadUsage.costCny, threadUsage.costEstimateStatus, threadUsage.costKnownCurrencies)
                       })}
                     </span>
                     <span

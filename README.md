@@ -202,42 +202,25 @@ npm ci --registry=https://registry.npmmirror.com
 
 ## 文档地图
 
+入口只提供当前路由；按任务选择相关范围，不递归加载历史证据。
+
 | 文档 | 内容 |
 | --- | --- |
-| [docs/analytix/README.md](docs/analytix/README.md) | 文档分类、真相源与证据时效规则 |
-| [packages/runtime-go/README.md](packages/runtime-go/README.md) | 生产 Go runtime 架构、能力与验证 |
-| [packages/runtime/README.zh-CN.md](packages/runtime/README.zh-CN.md) | TypeScript launcher/contracts、CLI 与配置边界 |
-| [docs/ANALYTIX_CONFIG.md](docs/ANALYTIX_CONFIG.md) | 本地 Provider 凭据、桌面设置与 runtime config 分层 |
-| [docs/analytix/qa/windows-qa-operator-runbook.md](docs/analytix/qa/windows-qa-operator-runbook.md) | 无密 Windows QA SSH/RDP/RustDesk 操作入口 |
-| [plugins/README.md](plugins/README.md) | 自研 Agent 插件开发目录、发布镜像和 vendor 边界 |
-| [docs/analytix/specs/01-identity-runtime-schema-reset.md](docs/analytix/specs/01-identity-runtime-schema-reset.md) | 产品身份、runtime schema、数据目录 |
-| [docs/analytix/specs/02-release-packaging-channels.md](docs/analytix/specs/02-release-packaging-channels.md) | release、packaging、channel |
-| [docs/analytix/specs/03-brand-assets-visual-system.md](docs/analytix/specs/03-brand-assets-visual-system.md) | 品牌资产与视觉系统 |
-| [docs/analytix/specs/04-analytix-derived-thread-virtualizer.md](docs/analytix/specs/04-analytix-derived-thread-virtualizer.md) | ThreadVirtualizer 与聊天体感 |
-| [docs/analytix/specs/05-architecture-code-upgrade-inventory.md](docs/analytix/specs/05-architecture-code-upgrade-inventory.md) | 代码升级清单 |
-| [docs/analytix/specs/06-implementation-closure-and-acceptance.md](docs/analytix/specs/06-implementation-closure-and-acceptance.md) | 闭环验收标准 |
-| [docs/analytix/specs/07-desktop-qa-release-readiness.md](docs/analytix/specs/07-desktop-qa-release-readiness.md) | 桌面 QA 与发布就绪验收 |
-| [docs/analytix/specs/08-upstream-absorption-and-go-runtime.md](docs/analytix/specs/08-upstream-absorption-and-go-runtime.md) | 九个上游来源的长期吸收治理与 Go runtime 演进 |
-| [docs/analytix/specs/09-agent-quality-product-benchmark.md](docs/analytix/specs/09-agent-quality-product-benchmark.md) | Agent 质量、产品强度和上游对比 benchmark |
-| [docs/analytix/specs/10-subagent-todo-goal-control-plane.md](docs/analytix/specs/10-subagent-todo-goal-control-plane.md) | Subagent、Todo、Goal 与控制面安全边界 |
-| [docs/analytix/specs/11-agent-platform-brand-and-architecture.md](docs/analytix/specs/11-agent-platform-brand-and-architecture.md) | Agent Platform 品牌、Go Agent Harness、插件与 Privacy Layer 长期架构 |
-| [docs/analytix/upstreams/README.md](docs/analytix/upstreams/README.md) | 上游同步台账、冲突决策与 conformance 记录 |
-| [docs/analytix/upstreams/agent-platform-architecture-recheck-2026-08-25.md](docs/analytix/upstreams/agent-platform-architecture-recheck-2026-08-25.md) | Codex、Claude Code、DeepSeek Harness、OpenCode 架构复核证据 |
-| [docs/analytix/upstreams/upstream-capability-audit-2026-07-10.md](docs/analytix/upstreams/upstream-capability-audit-2026-07-10.md) | 九个上游项目的当前白盒能力、缺口、风险和施工优先级 |
-| [docs/analytix/upstreams/absorption-targets.md](docs/analytix/upstreams/absorption-targets.md) | 上游能力吸收目标，以及如何证明 Analytix 更强 |
-| [docs/analytix/upstreams/code-level-absorption-blueprint.md](docs/analytix/upstreams/code-level-absorption-blueprint.md) | 代码级复用、许可证、来源记录、落点和证明方式 |
-| [docs/analytix/upstreams/code-level-implementation-plan.md](docs/analytix/upstreams/code-level-implementation-plan.md) | 历史施工阶段与门槛记录；新施工以 2026-07-10 审计、吸收目标和 scoped OpenSpec 为准 |
-| [docs/analytix/benchmarks/README.md](docs/analytix/benchmarks/README.md) | benchmark 场景、质量门槛和上游 scorecard |
-| [docs/UI_PLUGINS.md](docs/UI_PLUGINS.md) | mascot / cameo UI 插件 |
-| [docs/legacy/kun/README.md](docs/legacy/kun/README.md) | 仅用于迁移背景的 historical legacy notes |
-| [docs/CONTRIBUTING.zh-CN.md](docs/CONTRIBUTING.zh-CN.md) | 本地维护说明 |
-| [SECURITY.zh-CN.md](SECURITY.zh-CN.md) | 安全漏洞披露方式 |
+| [文档地图](docs/analytix/README.md) | 当前责任、真相源、验证命令与历史查询规则 |
+| [spec registry](docs/analytix/specs/README.md) | accepted targets/contracts 与 historical 分类 |
+| [交接入口](docs/analytix/handovers/README.md) | fresh 恢复候选、writer 与证据 |
+| [Go runtime](packages/runtime-go/README.md) | 唯一生产 Agent core |
+| [TypeScript runtime](packages/runtime/README.zh-CN.md) | launcher/contracts/config |
+| [配置](docs/ANALYTIX_CONFIG.md) | 本地 Provider 与桌面设置 |
+| [插件](plugins/README.md) | 插件来源与 packaging 边界 |
+| [上游 admission](docs/analytix/upstreams/README.md) | 精确版本、许可证与来源 |
+| [安全披露](SECURITY.zh-CN.md) | 漏洞报告方式 |
 
 ## 本地维护
 
 欢迎在本地维护 bug 修复、UI/UX 优化、文档改进、本地化内容、构建发布流程和运行时集成相关改动。
 
-提交本地改动前建议运行 `npm run typecheck`、`npm run build` 和 `npm run test`。
+提交本地改动前，从当前任务、适用 `AGENTS.md` 和实际受影响的源码/消费者确定验证范围；可用 `node scripts/validation-burden.mjs --plan <task-owned-paths> --json` 查看已映射的维护路线。文档改动先检查 diff 与链接；源码、本地化或构建改动按其实际影响选择类型、测试、构建及其他适用门禁。未知范围须回到受影响 owner 与现有 CI 矩阵；此路线不替代 CI 或正式验收。
 
 ## 许可证
 

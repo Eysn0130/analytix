@@ -42,6 +42,7 @@ type PlanTurnOverrides = Pick<
   | 'model'
   | 'providerId'
   | 'reasoningEffort'
+  | 'submissionGuard'
 > & {
   workspaceRoot?: string
 }
@@ -237,7 +238,8 @@ export function useWorkbenchPlanController({
     // active plan was auto-detected as operation: 'refine', which caused new
     // composer requests to be treated as refinements of an old plan.
     const guiPlan = messageOverrides.guiPlan ?? buildDraftGuiPlanTurnOverrides({
-      request: text,
+      // Persist the user's request, not expanded transient scope instructions.
+      request: messageOverrides.displayText?.trim() || text,
       workspaceRoot: targetWorkspaceRoot,
       activeThreadId: currentChatState.activeThreadId,
       existingRelativePaths: await readExistingPlanRelativePaths(targetWorkspaceRoot)

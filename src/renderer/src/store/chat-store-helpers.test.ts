@@ -138,7 +138,7 @@ describe('chat-store Claw helpers', () => {
     expect(compacted).not.toContain(`/Users/zxy/project-${MAX_CODE_WORKSPACE_ROOTS}`)
   })
 
-  it('drops remembered write-only workspaces from the code workspace list', () => {
+  it('retains historical writing workspaces in unified project navigation', () => {
     expect(
       reconcileCodeWorkspaceRoots({
         currentRoots: [
@@ -156,6 +156,7 @@ describe('chat-store Claw helpers', () => {
     ).toEqual([
       '/Users/zxy/shared-project',
       '/Users/zxy/code-project',
+      '/Users/zxy/CodeLLMPaper',
       '/Users/zxy/active-code'
     ])
   })

@@ -42,6 +42,7 @@ import {
 type Props = {
   target: WorkspaceFileTarget | null
   openTargets?: WorkspaceFileTarget[]
+  tabbedWorkspace?: boolean
   workspaceRoot: string
   className?: string
   onSelectTarget?: (target: WorkspaceFileTarget) => void
@@ -173,6 +174,7 @@ function ResolvedPreviewImage({
 export function WorkspaceFilePreviewPanel({
   target,
   openTargets = target ? [target] : [],
+  tabbedWorkspace = false,
   workspaceRoot,
   className,
   onSelectTarget,
@@ -333,7 +335,7 @@ export function WorkspaceFilePreviewPanel({
       className={`ds-no-drag ds-code-sidebar flex min-h-0 flex-col border-l border-ds-border-muted ${className ?? ''}`}
     >
       <div className="ds-code-sidebar-topbar">
-        <div className="ds-code-sidebar-tabs" role="tablist" aria-label={t('filePreviewOpenFiles')}>
+        {!tabbedWorkspace ? <div className="ds-code-sidebar-tabs" role="tablist" aria-label={t('filePreviewOpenFiles')}>
           {(openTargets.length ? openTargets : target ? [target] : []).map((item) => {
             const active = targetKey(item) === activeTargetKey
             const itemPath = item.path
@@ -393,7 +395,7 @@ export function WorkspaceFilePreviewPanel({
               <span className="truncate">{currentFileName}</span>
             </div>
           ) : null}
-        </div>
+        </div> : null}
 
         <div className="ds-code-sidebar-actions">
           {isMarkdownFile ? (

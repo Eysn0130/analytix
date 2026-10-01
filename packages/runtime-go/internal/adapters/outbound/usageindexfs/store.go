@@ -220,36 +220,54 @@ func (s *Store) AppendEventOwnerLocked(event map[string]any) error {
 // contain the exact terminal usage record. Missing or divergent projections
 // are rebuilt and then verified before publication may continue.
 func (s *Store) SettleTerminalEventOwnerLocked(event map[string]any) error {
+	return s.SettleTerminalEventsOwnerLocked([]map[string]any{event})
+}
+
+// SettleTerminalEventsOwnerLocked verifies one thread's canonical terminal
+// usage against both derived projections with a single index and primary
+// read. History barriers use it after validating the complete event inventory.
+func (s *Store) SettleTerminalEventsOwnerLocked(events []map[string]any) error {
 	if s == nil {
 		return errors.New("usage index store is unavailable")
 	}
-	if err := s.checkRestartEffectV1(contracts.StringField(event, "threadId")); err != nil {
+	if len(events) == 0 {
+		return nil
+	}
+	threadID := strings.TrimSpace(contracts.StringField(events[0], "threadId"))
+	seenSeq := map[int]bool{}
+	for _, event := range events {
+		turnID := strings.TrimSpace(contracts.StringField(event, "turnId"))
+		seq, seqOK := contracts.NumericSeq(event["seq"])
+		rawUsage, _ := event["usage"].(map[string]any)
+		if threadID == "" || strings.TrimSpace(contracts.StringField(event, "threadId")) != threadID ||
+			turnID == "" || !seqOK || seq <= 0 || seenSeq[seq] || rawUsage == nil {
+			return errors.New("general terminal usage event is invalid")
+		}
+		seenSeq[seq] = true
+	}
+	if err := s.checkRestartEffectV1(threadID); err != nil {
 		return err
 	}
-	threadID := strings.TrimSpace(contracts.StringField(event, "threadId"))
-	turnID := strings.TrimSpace(contracts.StringField(event, "turnId"))
-	seq, seqOK := contracts.NumericSeq(event["seq"])
-	rawUsage, _ := event["usage"].(map[string]any)
-	if threadID == "" || turnID == "" || !seqOK || seq <= 0 || rawUsage == nil {
-		return errors.New("general terminal usage event is invalid")
-	}
 	if s.rebuildActive {
-		queued := false
-		for _, deferred := range s.deferredEvents {
-			deferredSeq, _ := contracts.NumericSeq(deferred["seq"])
-			if contracts.StringField(deferred, "threadId") == threadID && deferredSeq == seq {
-				queued = true
-				break
+		for _, event := range events {
+			seq, _ := contracts.NumericSeq(event["seq"])
+			queued := false
+			for _, deferred := range s.deferredEvents {
+				deferredSeq, _ := contracts.NumericSeq(deferred["seq"])
+				if contracts.StringField(deferred, "threadId") == threadID && deferredSeq == seq {
+					queued = true
+					break
+				}
 			}
-		}
-		if !queued {
-			s.deferredEvents = append(s.deferredEvents, contracts.CloneMap(event))
+			if !queued {
+				s.deferredEvents = append(s.deferredEvents, contracts.CloneMap(event))
+			}
 		}
 		// The reader may retain an older canonical prefix. Keep its deferred
 		// merge intact, but prove settlement now under Owner before publishing.
 		// Never wait for buildMu here: its reader needs Owner to finish.
 	}
-	if err := s.verifyTerminalEventOwnerLocked(event); err == nil {
+	if err := s.verifyTerminalEventsOwnerLocked(events); err == nil {
 		return nil
 	} else if !errors.Is(err, errRepairableProjection) {
 		return err
@@ -257,7 +275,7 @@ func (s *Store) SettleTerminalEventOwnerLocked(event map[string]any) error {
 	if err := s.rebuildOwnerLocked(); err != nil {
 		return err
 	}
-	if err := s.verifyTerminalEventOwnerLocked(event); err != nil {
+	if err := s.verifyTerminalEventsOwnerLocked(events); err != nil {
 		return errors.Join(err, errors.New("general terminal usage index did not converge after rebuild"))
 	}
 	return nil
@@ -630,9 +648,15 @@ func (s *Store) allThreadIDsReadOnly() ([]string, error) {
 }
 
 func (s *Store) verifyTerminalEventOwnerLocked(event map[string]any) error {
-	threadID := strings.TrimSpace(contracts.StringField(event, "threadId"))
-	seq, seqOK := contracts.NumericSeq(event["seq"])
-	if threadID == "" || !seqOK || seq <= 0 {
+	return s.verifyTerminalEventsOwnerLocked([]map[string]any{event})
+}
+
+func (s *Store) verifyTerminalEventsOwnerLocked(events []map[string]any) error {
+	if len(events) == 0 {
+		return nil
+	}
+	threadID := strings.TrimSpace(contracts.StringField(events[0], "threadId"))
+	if threadID == "" {
 		return errors.New("general terminal usage event identity is invalid")
 	}
 	global, globalErr := s.loadIndex("")
@@ -650,35 +674,42 @@ func (s *Store) verifyTerminalEventOwnerLocked(event map[string]any) error {
 		}
 		return errors.Join(errRepairableProjection, globalErr, threadErr)
 	}
-	expected, expectedErr := s.expectedTerminalRecordOwnerLocked(event, threadRecords)
-	if expectedErr != nil {
-		return expectedErr
+	thread, err := s.readThread(threadID)
+	if err != nil || thread == nil {
+		return errors.Join(err, errors.New("general terminal usage index cannot read its canonical thread"))
 	}
 	globalForThread := recordsForThread(global, threadID)
 	if !reflect.DeepEqual(globalForThread, threadRecords) {
 		return errors.Join(errRepairableProjection, errors.New("general terminal usage index projections diverged"))
 	}
-	globalMatches := recordsAt(global, threadID, seq)
-	threadMatches := recordsAt(threadRecords, threadID, seq)
-	if len(globalMatches) != 1 || len(threadMatches) != 1 ||
-		!reflect.DeepEqual(globalMatches[0], threadMatches[0]) || !recordEqual(globalMatches[0], expected) {
-		return errors.Join(errRepairableProjection, errors.New("general terminal usage index does not contain the exact record"))
+	for _, event := range events {
+		seq, seqOK := contracts.NumericSeq(event["seq"])
+		if !seqOK || seq <= 0 || strings.TrimSpace(contracts.StringField(event, "threadId")) != threadID {
+			return errors.New("general terminal usage event identity is invalid")
+		}
+		expected, expectedErr := expectedTerminalRecordWithThreadOwnerLocked(event, threadRecords, thread)
+		if expectedErr != nil {
+			return expectedErr
+		}
+		globalMatches := recordsAt(global, threadID, seq)
+		threadMatches := recordsAt(threadRecords, threadID, seq)
+		if len(globalMatches) != 1 || len(threadMatches) != 1 ||
+			!reflect.DeepEqual(globalMatches[0], threadMatches[0]) || !recordEqual(globalMatches[0], expected) {
+			return errors.Join(errRepairableProjection, errors.New("general terminal usage index does not contain the exact record"))
+		}
 	}
 	return nil
 }
 
-func (s *Store) expectedTerminalRecordOwnerLocked(
+func expectedTerminalRecordWithThreadOwnerLocked(
 	event map[string]any,
 	threadRecords []usageapp.IndexRecord,
+	thread map[string]any,
 ) (usageapp.IndexRecord, error) {
 	threadID := strings.TrimSpace(contracts.StringField(event, "threadId"))
 	seq, seqOK := contracts.NumericSeq(event["seq"])
 	if threadID == "" || !seqOK || seq <= 0 {
 		return usageapp.IndexRecord{}, errors.New("general terminal usage event identity is invalid")
-	}
-	thread, err := s.readThread(threadID)
-	if err != nil || thread == nil {
-		return usageapp.IndexRecord{}, errors.Join(err, errors.New("general terminal usage index cannot read its canonical thread"))
 	}
 	seenSeq := map[int]bool{}
 	previous := usageapp.Snapshot{}

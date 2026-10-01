@@ -44,6 +44,21 @@ func TestGuardGeneralOutputKeepsOrdinaryAgentAnswer(t *testing.T) {
 	}
 }
 
+func TestGuardGeneralOutputKeepsOrdinaryNumericFileAnswer(t *testing.T) {
+	securityContext, err := securitytest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "thread-general-numeric-file", TurnID: "turn-general-numeric-file", WorkspaceRealPath: t.TempDir(),
+		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID, ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。"
+	decision, err := GuardGeneralOutput(securityContext, answer)
+	if err != nil || decision.Blocked || decision.Text != answer {
+		t.Fatalf("ordinary numeric answer was withheld: %#v err=%v", decision, err)
+	}
+}
+
 func TestGuardGeneralOutputProjectsOrdinaryPIIBeforeTerminalCAS(t *testing.T) {
 	securityContext, err := securitytest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
 		ThreadID: "thread-general-private", TurnID: "turn-general-private", WorkspaceRealPath: t.TempDir(),
@@ -92,5 +107,49 @@ func TestCompileOrdinaryResultSlotBlocksRawPIIFactLaunderingInCaseThread(t *test
 				t.Fatalf("case ordinary hostile admission result = %#v withheld=%t", slot, withheld)
 			}
 		})
+	}
+}
+
+func TestIsolatedOrdinaryResultKeepsNumericFileAnswerInCaseThread(t *testing.T) {
+	securityContext, err := securitytest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "thread-case-ordinary-numeric", TurnID: "turn-case-ordinary-numeric", WorkspaceRealPath: t.TempDir(),
+		TenantID: domainsecurity.LocalTenantID, UserID: domainsecurity.LocalUserID, ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。"
+	strict, withheld, err := CompileOrdinaryResultSlot(securityContext, answer)
+	if err != nil || !withheld || strict.Text != GeneralCaseFactCandidateBlockedText {
+		t.Fatalf("unproven case-thread candidate escaped the strict guard: %#v withheld=%t err=%v", strict, withheld, err)
+	}
+	slot, withheld, err := CompileIsolatedOrdinaryResultSlot(securityContext, answer)
+	if err != nil || withheld || slot.Text != answer || slot.CandidateOrigin != "provider_ordinary_only" {
+		t.Fatalf("isolated ordinary file answer was withheld: %#v withheld=%t err=%v", slot, withheld, err)
+	}
+	for _, ordinary := range []string{
+		"解释 DOM 父子节点关系。",
+		"请解释 DOM 元素的父子关系。",
+		"为两位姐妹写旅行计划。",
+	} {
+		result, resultWithheld, resultErr := CompileIsolatedOrdinaryResultSlot(securityContext, ordinary)
+		if resultErr != nil || resultWithheld || result.Text != ordinary {
+			t.Fatalf("ordinary relation language was withheld: %#v withheld=%t err=%v", result, resultWithheld, resultErr)
+		}
+	}
+	for _, candidate := range []string{
+		"张某实际控制甲公司，涉案金额为￥2,645,472.00。",
+		"张某与李某是父子。",
+		"甲公司支付给乙公司2645.72元。",
+		"甲公司支付乙公司2645.72元。",
+		"甲公司支付乙公司2万元。",
+		"张某与李某存在父子关系。",
+		"甲公司取得2026年收益￥2万元。",
+		"6222021234567890123 与张某有关。",
+	} {
+		blocked, withheld, err := CompileIsolatedOrdinaryResultSlot(securityContext, candidate)
+		if err != nil || !withheld || blocked.Text != GeneralCaseFactCandidateBlockedText {
+			t.Fatalf("protected candidate crossed isolated ordinary lane: %#v withheld=%t err=%v", blocked, withheld, err)
+		}
 	}
 }

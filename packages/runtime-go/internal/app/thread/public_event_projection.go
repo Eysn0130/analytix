@@ -32,6 +32,10 @@ func ProjectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 }
 
 func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader) (map[string]any, bool, error) {
+	return projectPublicThreadEventWithRetainedFactsV1(routeThreadID, thread, event, trusted, caseThreads, currentAuthority, primaryCAS, nil)
+}
+
+func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, event map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, retained map[string]bool) (map[string]any, bool, error) {
 	routeThreadID = strings.TrimSpace(routeThreadID)
 	threadID := strings.TrimSpace(contracts.StringField(thread, "id"))
 	eventThreadID := strings.TrimSpace(contracts.StringField(event, "threadId"))
@@ -77,8 +81,8 @@ func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 		if providerErr != nil || !validProviderErrorPipelineStagePublicEventV1(providerError, true) {
 			return nil, false, nil
 		}
-		projectedThread, projectionErr := projectPublicThreadWithAuthority(
-			thread, trusted, caseThreads, currentAuthority, primaryCAS,
+		projectedThread, projectionErr := projectPublicThreadWithRetainedFactsV1(
+			thread, trusted, caseThreads, currentAuthority, primaryCAS, retained,
 		)
 		if projectionErr != nil {
 			return nil, false, projectionErr
@@ -100,8 +104,8 @@ func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 		if !generalAuthority.Terminal || !governed || !valid {
 			return nil, false, nil
 		}
-		if _, projectionErr := projectPublicThreadWithAuthority(
-			thread, trusted, caseThreads, currentAuthority, primaryCAS,
+		if _, projectionErr := projectPublicThreadWithRetainedFactsV1(
+			thread, trusted, caseThreads, currentAuthority, primaryCAS, retained,
 		); projectionErr != nil {
 			return nil, false, projectionErr
 		}
@@ -135,7 +139,7 @@ func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 		!trustedPublicationEvent(routeThreadID, projectedEvent, trusted) {
 		return nil, false, nil
 	}
-	projectedThread, err := projectPublicThreadWithAuthority(thread, trusted, caseThreads, currentAuthority, primaryCAS)
+	projectedThread, err := projectPublicThreadWithRetainedFactsV1(thread, trusted, caseThreads, currentAuthority, primaryCAS, retained)
 	if err != nil {
 		return nil, false, err
 	}

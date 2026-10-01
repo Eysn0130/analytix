@@ -42,7 +42,7 @@ func (h *runtimeServerHandler) steerRuntimeTurn(ctx context.Context, request con
 	admissionInput := controlapp.SteerSecurityAdmissionInput{
 		Context: securityContext, RiskIntent: request.RiskIntent,
 		LexicalCaseRisk:   apploop.PromptRequiresCaseRiskAdmission(request.Text + "\n" + request.DisplayText),
-		ProtectedCaseData: domainsecurity.ContainsProtectedCaseFactCandidate(request.Text + "\n" + request.DisplayText),
+		ProtectedCaseData: domainsecurity.ContainsProtectedCaseData(request.Text + "\n" + request.DisplayText),
 		AttachmentCount:   len(request.AttachmentIDs), FileRefCount: len(request.FileReferences),
 	}
 	effectBinding := steeringLogicalEffectBinding(request.Text+"\n"+request.DisplayText, admissionInput)

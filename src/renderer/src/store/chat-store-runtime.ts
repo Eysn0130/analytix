@@ -28,6 +28,7 @@ import {
 } from '../agent/accepted-final-projection-receipt'
 import { getProvider } from '../agent/registry'
 import { projectToolEventForRenderer } from '../agent/analytix-mapper'
+import { generatedArtifactMetadataSchema } from '../../../../packages/runtime/src/contracts/generated-artifact'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
@@ -85,6 +86,7 @@ import {
 import {
   createThreadTraceEvent,
   isThreadTraceEnabled,
+  registerTerminalDOMTrace,
   PersistedThreadTraceSink
 } from '../thread/tracing/thread-performance-trace'
 
@@ -221,20 +223,6 @@ function isInterruptSettledError(error: unknown, message: string): boolean {
     lowered.includes('aborted') ||
     lowered.includes('cancelled') ||
     lowered.includes('canceled')
-}
-
-export async function readActiveWriteWorkspace(fallbackWorkspaceRoot: string): Promise<string> {
-  try {
-    const settings = await rendererRuntimeClient.getSettings()
-    return normalizeWorkspaceRoot(
-      settings.write.activeWorkspaceRoot ||
-      settings.write.defaultWorkspaceRoot ||
-      settings.write.workspaces[0] ||
-      fallbackWorkspaceRoot
-    )
-  } catch {
-    return normalizeWorkspaceRoot(fallbackWorkspaceRoot)
-  }
 }
 
 export async function readWriteWorkspaceRoots(): Promise<string[]> {
@@ -435,6 +423,7 @@ export function shouldOpenSettingsForError(error: unknown): boolean {
 }
 
 export function looksLikeActiveTurnError(error: unknown): boolean {
+  if (getRuntimeErrorCode(error) === 'turn_execution_conflict') return true
   const raw = error instanceof Error ? error.message : String(error ?? '')
   return raw.toLowerCase().includes('active turn')
 }
@@ -442,7 +431,7 @@ export function looksLikeActiveTurnError(error: unknown): boolean {
 export function isCodeThread(
   thread: NormalizedThread,
   clawChannels: ClawImChannelV1[] = [],
-  writeRegistry?: WriteThreadRegistry
+  _writeRegistry?: WriteThreadRegistry
 ): boolean {
   const workspace = normalizeWorkspaceRoot(thread.workspace)
   return Boolean(workspace) &&
@@ -450,7 +439,6 @@ export function isCodeThread(
     !isInternalTemporaryWorkspace(thread.workspace) &&
     !isClawWorkspacePath(thread.workspace) &&
     !isClawThread(thread, clawChannels) &&
-    !isWriteThreadId(thread.id, writeRegistry) &&
     !isSddAssistantThread(thread)
 }
 
@@ -477,7 +465,7 @@ function notifyWriteWorkspaceFileRefresh(
   get: () => ChatState,
   event?: Pick<ToolEventPayload, 'filePath' | 'status' | 'toolKind'>
 ): void {
-  if (get().route !== 'write') return
+  if (get().route !== 'write' && get().route !== 'chat') return
   if (event && (event.toolKind !== 'file_change' || event.status !== 'success')) return
 
   const writeState = useWriteWorkspaceStore.getState()
@@ -518,6 +506,9 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
     return i18n.t('common:compactionSummaryFallbackStatus')
   }
   if (event.kind === 'pipeline_stage') {
+    if (event.stage === 'pre_send') return i18n.t('common:providerRequestPreparingStatus')
+    if (event.stage === 'post_send') return i18n.t('common:providerRequestStartedStatus')
+    if (event.stage === 'response_received') return i18n.t('common:providerResponseReceivedStatus')
     if (event.stage === 'provider_retrying') {
       return i18n.t('common:providerRetryingStatus', { defaultValue: '模型服务正在重试' })
     }
@@ -1301,6 +1292,20 @@ export function buildThreadEventSink(
   const loadThreadDetail = binding.getThreadDetail ?? ((threadId: string) => getProvider().getThreadDetail(threadId))
   const traceSink = new PersistedThreadTraceSink()
   const traceThreadId = (): string | undefined => boundThreadId || get().activeThreadId || undefined
+  const recordTerminalCommit = (threadId: string | null | undefined, lastSeq: number, acceptedFinal: boolean, turnId?: string | null): void => {
+    if (!threadId || !isThreadTraceEnabled()) return
+    traceSink.record(createThreadTraceEvent('thread.terminal.renderer_committed', {
+      threadId, turnId: turnId || undefined, data: { lastSeq, acceptedFinal, monotonicMs: performance.now(), timeOrigin: performance.timeOrigin }
+    }))
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        if (get().activeThreadId !== threadId) return
+        traceSink.record(createThreadTraceEvent('thread.terminal.next_frame', {
+          threadId, turnId: turnId || undefined, data: { lastSeq, acceptedFinal }
+        }))
+      })
+    }
+  }
   let appliedDeltaSeqFloor = binding.sinceSeq ?? 0
   const legacyLiveAssistant = createLiveTextBuffer(get().liveAssistant ?? '')
   let legacyLiveStoreLastPublishedAt = 0
@@ -1624,6 +1629,13 @@ export function buildThreadEventSink(
       const projectedEvent = projectToolEventForRenderer(ev)
       if (!projectedEvent) return
       ev = projectedEvent
+      const artifact = ev.status === 'success' && ev.meta?.toolName === 'generate_office_document'
+        ? generatedArtifactMetadataSchema.safeParse(ev.meta.generatedArtifact)
+        : null
+      const artifactScope = { threadId: get().activeThreadId ?? '', workspace: get().workspaceRoot }
+      const shouldOpenArtifact = artifact?.success && artifactScope.threadId && artifactScope.workspace &&
+        !get().blocks.some(block => block.kind === 'tool' && block.status === 'success' &&
+          generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact).data?.artifactId === artifact.data.artifactId)
       invalidateBoundThreadDetail()
       flushPendingStreamingDeltas()
       notifyWriteWorkspaceFileRefresh(get, ev)
@@ -1687,6 +1699,14 @@ export function buildThreadEventSink(
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       })
+      if (shouldOpenArtifact && artifact?.success) {
+        // History hydration already contains the receipt and does not reopen
+        // objects. A newly completed live result opens through the same Core
+        // resolver as its card, with the original conversation scope retained.
+        void import('../office/open-generated-artifact').then(({ openGeneratedArtifact }) => {
+          if (isCurrentStream()) void openGeneratedArtifact(artifact.data.artifactId, artifactScope)
+        })
+      }
     },
     onCompaction: (ev) => {
       if (!isCurrentStream()) return
@@ -2308,6 +2328,9 @@ export function buildThreadEventSink(
         delete watchTurnCompletion[batch.threadId]
         const unreadThreadIds = { ...state.unreadThreadIds }
         delete unreadThreadIds[batch.threadId]
+        if (batch.terminalItem?.kind === 'assistant') {
+          registerTerminalDOMTrace(batch.threadId, batch.terminalItem.id, batch.lastSeq, false, batch.turnId)
+        }
         committed = true
         return {
           ...timing,
@@ -2327,6 +2350,8 @@ export function buildThreadEventSink(
         }
       })
       if (!committed) return reject('general terminal delivery could not be committed atomically')
+
+      recordTerminalCommit(batch.threadId, batch.lastSeq, false, batch.turnId)
 
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
@@ -2482,6 +2507,7 @@ export function buildThreadEventSink(
         delete watchTurnCompletion[batch.threadId]
         const unreadThreadIds = { ...state.unreadThreadIds }
         delete unreadThreadIds[batch.threadId]
+        registerTerminalDOMTrace(batch.threadId, batch.assistant.id, batch.lastSeq, true, batch.turnId)
         committed = true
         return {
           ...timing,
@@ -2503,6 +2529,8 @@ export function buildThreadEventSink(
       if (!committed) {
         return reject('accepted-final delivery could not be committed atomically')
       }
+
+      recordTerminalCommit(batch.threadId, batch.lastSeq, true, batch.turnId)
 
       clearActiveStream(batch.threadId)
       clearWatchedCompletionNotification(batch.threadId)
@@ -2584,6 +2612,8 @@ export function buildThreadEventSink(
         get
       })
       if (!reconciled) return
+
+      recordTerminalCommit(completedThreadId, eventSeq ?? get().lastSeq, false, completedTurnId)
 
       const settledState = get()
       const pendingMirror = takePendingClawFeishuMirror(completedTurnId)

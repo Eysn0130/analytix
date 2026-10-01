@@ -52,7 +52,9 @@ type FaultInjectorV1 func(FaultPointV1) error
 type Store struct {
 	runtimeHome string
 	fault       FaultInjectorV1
-	mu          sync.Mutex
+	mu          *sync.Mutex
+	packageID   string
+	indexRoot   string
 }
 
 var _ pluginport.Store = (*Store)(nil)
@@ -62,7 +64,9 @@ func NewStore(runtimeHome string, fault FaultInjectorV1) (*Store, error) {
 	if err != nil {
 		return nil, errors.Join(pluginport.ErrInvalid, err)
 	}
-	store := &Store{runtimeHome: realHome, fault: fault}
+	store := packageStoreV1(realHome, domainplugin.PluginNameV1, fault)
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	for _, relative := range []string{
 		pluginCacheRelativeV1,
 		pluginParentRelativeV1(domainplugin.PluginNameV1),
@@ -85,7 +89,9 @@ func OpenExistingStoreV1(runtimeHome string) (*Store, error) {
 	if err != nil {
 		return nil, errors.Join(pluginport.ErrInvalid, err)
 	}
-	store := &Store{runtimeHome: realHome}
+	store := packageStoreV1(realHome, domainplugin.PluginNameV1, nil)
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	for _, relative := range []string{
 		pluginCacheRelativeV1,
 		pluginParentRelativeV1(domainplugin.PluginNameV1),
@@ -105,7 +111,7 @@ func OpenExistingStoreV1(runtimeHome string) (*Store, error) {
 }
 
 func (store *Store) Materialize(ctx context.Context, intent domainplugin.IntentV1, authority pluginport.InstallationAuthority, now time.Time) (pluginport.ResultV1, error) {
-	if store == nil || ctx == nil || ctx.Err() != nil || domainplugin.ValidateIntentV1(intent) != nil || now.IsZero() {
+	if store == nil || ctx == nil || ctx.Err() != nil || domainplugin.ValidateIntentV1(intent) != nil || intent.PluginName != store.packageID || now.IsZero() {
 		return pluginport.ResultV1{}, pluginport.ErrInvalid
 	}
 	keyID, publicKey, err := validateAuthority(authority)
@@ -115,7 +121,7 @@ func (store *Store) Materialize(ctx context.Context, intent domainplugin.IntentV
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	sourceBefore, err := InspectSourceTreeV1(ctx, intent.SourceRoot)
+	sourceBefore, err := inspectSourceForOriginV1(ctx, intent.SourceRoot, intent.Origin)
 	if err != nil || !identityMatchesIntent(sourceBefore, intent) {
 		return pluginport.ResultV1{}, errors.Join(pluginport.ErrInvalid, errors.New("formal package plugin source does not match its frozen authority"), err)
 	}
@@ -124,7 +130,10 @@ func (store *Store) Materialize(ctx context.Context, intent domainplugin.IntentV
 	}
 
 	if current, resolveErr := store.resolveActive(ctx, keyID, publicKey); resolveErr == nil {
-		if current.Receipt.IntentID != intent.IntentID || current.Receipt.PackageAuthoritySHA256 != intent.PackageAuthoritySHA256 ||
+		if current.Receipt.Origin != intent.Origin {
+			return pluginport.ResultV1{}, pluginport.ErrConflict
+		}
+		if current.Receipt.IntentID != intent.IntentID || current.Receipt.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 || current.Receipt.PackageAuthoritySHA256 != intent.PackageAuthoritySHA256 ||
 			current.Receipt.SourceTreeSHA256 != intent.SourceTreeSHA256 || current.Receipt.SourceTreeFileCount != intent.SourceTreeFileCount {
 			// A rebuilt package has a different independently verified package
 			// authority even when the bundled plugin version and bytes are
@@ -134,11 +143,12 @@ func (store *Store) Materialize(ctx context.Context, intent domainplugin.IntentV
 			// rotation on the same target. A target change, or content drift under
 			// the same package authority, remains a conflict.
 			if current.Receipt.Target != intent.Target ||
-				current.Receipt.PackageAuthoritySHA256 == intent.PackageAuthoritySHA256 {
+				(current.Receipt.PackageAuthoritySHA256 == intent.PackageAuthoritySHA256 &&
+					current.Receipt.SourceRegistrationSHA256 == intent.SourceRegistrationSHA256) {
 				return pluginport.ResultV1{}, pluginport.ErrConflict
 			}
 		} else {
-			if err := store.quarantineLegacyFundsSkillProjections(intent); err != nil {
+			if err := store.quarantinePackageLegacyProjectionsV1(intent); err != nil {
 				return pluginport.ResultV1{}, err
 			}
 			store.completeJournalBestEffort(intent, current.Receipt.GenerationID, now)
@@ -202,7 +212,7 @@ func (store *Store) Materialize(ctx context.Context, intent domainplugin.IntentV
 	}
 
 	if lastPhase < 4 {
-		if err := store.quarantineLegacyFundsSkillProjections(intent); err != nil {
+		if err := store.quarantinePackageLegacyProjectionsV1(intent); err != nil {
 			return pluginport.ResultV1{}, err
 		}
 		if err := store.quarantineDiscoverable(intent); err != nil {
@@ -290,7 +300,7 @@ func (store *Store) resolveActive(ctx context.Context, keyID string, publicKey [
 	}
 	index, err := domainplugin.ParseIndexV1(indexBody)
 	expectedActiveRelative := activeRelativeV1(index.PluginName, index.PluginVersion)
-	if err != nil || index.ActiveRelativePath != expectedActiveRelative {
+	if err != nil || index.PluginName != store.packageID || index.ActiveRelativePath != expectedActiveRelative {
 		return pluginport.ResultV1{}, errors.Join(pluginport.ErrCorrupt, err)
 	}
 	receiptPath := filepath.Join(store.absolute(controlRelativeV1+"/receipts"), index.GenerationID+".json")
@@ -304,14 +314,14 @@ func (store *Store) resolveActive(ctx context.Context, keyID string, publicKey [
 		return pluginport.ResultV1{}, errors.Join(pluginport.ErrCorrupt, err)
 	}
 	activeRoot := store.absolute(expectedActiveRelative)
-	identity, err := inspectInstalledTreeV1(ctx, activeRoot)
+	identity, err := inspectInstalledForOriginV1(ctx, activeRoot, receipt.Origin)
 	identityMatchesReceipt := identity.Declaration.PackageID == receipt.PluginName &&
 		identity.Declaration.PackageVersion == receipt.PluginVersion
 	if identity.LegacyV0 {
 		identityMatchesReceipt = identity.LegacyPackageID == receipt.PluginName &&
 			identity.LegacyVersion == receipt.PluginVersion
 	}
-	if err != nil || identity.TreeSHA256 != receipt.SourceTreeSHA256 || identity.FileCount != receipt.SourceTreeFileCount ||
+	if err != nil || identity.SourceRegistrationSHA256 != receipt.SourceRegistrationSHA256 || identity.TreeSHA256 != receipt.SourceTreeSHA256 || identity.FileCount != receipt.SourceTreeFileCount ||
 		!identityMatchesReceipt ||
 		identity.ManifestSHA256 != receipt.ManifestSHA256 || identity.EntrypointSHA256 != receipt.EntrypointSHA256 {
 		return pluginport.ResultV1{}, errors.Join(pluginport.ErrCorrupt, errors.New("active bundled plugin tree does not match its signed receipt"), err)
@@ -331,7 +341,7 @@ func (store *Store) resolveActive(ctx context.Context, keyID string, publicKey [
 func (store *Store) prepareStaging(ctx context.Context, intent domainplugin.IntentV1, sourceBefore SourceTreeIdentityV1, stagingPath string) error {
 	if info, err := os.Lstat(stagingPath); err == nil {
 		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			if identity, inspectErr := inspectInstalledTreeV1(ctx, stagingPath); inspectErr == nil && identityMatchesIntent(identity, intent) && store.validateMarkerAt(stagingPath, intent) == nil {
+			if identity, inspectErr := inspectInstalledForOriginV1(ctx, stagingPath, intent.Origin); inspectErr == nil && identityMatchesIntent(identity, intent) && store.validateMarkerAt(stagingPath, intent) == nil {
 				return nil
 			}
 		}
@@ -347,8 +357,8 @@ func (store *Store) prepareStaging(ctx context.Context, intent domainplugin.Inte
 	if err := store.writeInstallMarker(stagingPath, intent); err != nil {
 		return err
 	}
-	sourceAfter, sourceErr := InspectSourceTreeV1(ctx, intent.SourceRoot)
-	installed, installedErr := inspectInstalledTreeV1(ctx, stagingPath)
+	sourceAfter, sourceErr := inspectSourceForOriginV1(ctx, intent.SourceRoot, intent.Origin)
+	installed, installedErr := inspectInstalledForOriginV1(ctx, stagingPath, intent.Origin)
 	if sourceErr != nil || installedErr != nil || sourceBefore != sourceAfter || !identityMatchesIntent(sourceAfter, intent) || !identityMatchesIntent(installed, intent) {
 		return errors.Join(pluginport.ErrCorrupt, errors.New("bundled plugin full-tree revalidation failed"), sourceErr, installedErr)
 	}
@@ -401,7 +411,7 @@ func (store *Store) quarantineDiscoverable(intent domainplugin.IntentV1) error {
 		} else {
 			return errors.Join(pluginport.ErrUnavailable, targetErr)
 		}
-		if err := syncDirectory(store.absolute(controlRelativeV1)); err != nil {
+		if err := syncDirectory(filepath.Dir(store.activeIndexPath())); err != nil {
 			return errors.Join(pluginport.ErrUnavailable, err)
 		}
 		if err := syncDirectory(quarantineRoot); err != nil {
@@ -456,7 +466,7 @@ func (store *Store) commitGeneration(ctx context.Context, stagingPath, activePat
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return errors.Join(pluginport.ErrCorrupt, errors.New("active bundled plugin path is not a real directory"))
 		}
-		identity, inspectErr := inspectInstalledTreeV1(ctx, activePath)
+		identity, inspectErr := inspectInstalledForOriginV1(ctx, activePath, intent.Origin)
 		if inspectErr != nil || !identityMatchesIntent(identity, intent) || store.validateMarkerAt(activePath, intent) != nil {
 			return errors.Join(pluginport.ErrCorrupt, inspectErr)
 		}
@@ -467,7 +477,7 @@ func (store *Store) commitGeneration(ctx context.Context, stagingPath, activePat
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Join(pluginport.ErrUnavailable, err)
 	}
-	identity, err := inspectInstalledTreeV1(ctx, stagingPath)
+	identity, err := inspectInstalledForOriginV1(ctx, stagingPath, intent.Origin)
 	if err != nil || !identityMatchesIntent(identity, intent) || store.validateMarkerAt(stagingPath, intent) != nil {
 		return errors.Join(pluginport.ErrCorrupt, errors.New("staged bundled plugin is not authorized for commit"), err)
 	}
@@ -477,7 +487,7 @@ func (store *Store) commitGeneration(ctx context.Context, stagingPath, activePat
 	if err := syncDirectory(filepath.Dir(activePath)); err != nil {
 		return errors.Join(pluginport.ErrUnavailable, err)
 	}
-	committed, err := inspectInstalledTreeV1(ctx, activePath)
+	committed, err := inspectInstalledForOriginV1(ctx, activePath, intent.Origin)
 	if err != nil || !identityMatchesIntent(committed, intent) {
 		return errors.Join(pluginport.ErrCorrupt, errors.New("committed bundled plugin failed readback"), err)
 	}
@@ -533,7 +543,7 @@ func (store *Store) latestJournal(transactionRoot string, intent domainplugin.In
 			return 0, errors.Join(pluginport.ErrCorrupt, err)
 		}
 		record, err := domainplugin.ParseJournalV1(body)
-		if err != nil || record.Sequence != sequence || record.Phase != phase || record.IntentID != intent.IntentID ||
+		if err != nil || record.Sequence != sequence || record.Phase != phase || record.Origin != intent.Origin || record.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 || record.IntentID != intent.IntentID ||
 			record.GenerationID != generationID || record.StagingRelativePath != stagingRelative ||
 			record.ActiveRelativePath != activeRelativeV1(intent.PluginName, intent.PluginVersion) {
 			return 0, errors.Join(pluginport.ErrCorrupt, err)
@@ -547,7 +557,7 @@ func (store *Store) appendJournal(transactionRoot string, intent domainplugin.In
 	path := filepath.Join(transactionRoot, journalFileName(sequence, phase))
 	if body, err := stableReadFile(path, domainplugin.MaxContractBytesV1); err == nil {
 		record, parseErr := domainplugin.ParseJournalV1(body)
-		if parseErr != nil || record.Sequence != sequence || record.Phase != phase || record.IntentID != intent.IntentID || record.GenerationID != generationID {
+		if parseErr != nil || record.Sequence != sequence || record.Phase != phase || record.Origin != intent.Origin || record.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 || record.IntentID != intent.IntentID || record.GenerationID != generationID {
 			return errors.Join(pluginport.ErrCorrupt, parseErr)
 		}
 		return nil
@@ -642,17 +652,20 @@ func writeExclusiveSync(path string, body []byte) error {
 
 func (store *Store) writeInstallMarker(root string, intent domainplugin.IntentV1) error {
 	type markerV1 struct {
-		ManagedBy           string `json:"managedBy"`
-		MarketplaceName     string `json:"marketplaceName"`
-		PluginName          string `json:"pluginName"`
-		Version             string `json:"version"`
-		PackageSHA256       string `json:"packageSha256"`
-		SourcePath          string `json:"sourcePath"`
-		SourceTreeSHA256    string `json:"sourceTreeSha256"`
-		SourceTreeFileCount uint64 `json:"sourceTreeFileCount"`
-		InstallType         string `json:"installType"`
+		ManagedBy                string `json:"managedBy"`
+		MarketplaceName          string `json:"marketplaceName"`
+		PluginName               string `json:"pluginName"`
+		Version                  string `json:"version"`
+		PackageSHA256            string `json:"packageSha256,omitempty"`
+		SourcePath               string `json:"sourcePath"`
+		SourceTreeSHA256         string `json:"sourceTreeSha256"`
+		SourceTreeFileCount      uint64 `json:"sourceTreeFileCount"`
+		InstallType              string `json:"installType"`
+		Origin                   string `json:"origin,omitempty"`
+		SourceRegistrationSHA256 string `json:"sourceRegistrationSha256,omitempty"`
 	}
 	marker := markerV1{
+		Origin: intent.Origin, SourceRegistrationSHA256: intent.SourceRegistrationSHA256,
 		ManagedBy: "analytix-hub", MarketplaceName: "analytix-hub", PluginName: intent.PluginName,
 		Version: intent.PluginVersion, PackageSHA256: intent.PackageAuthoritySHA256, SourcePath: intent.SourceRoot,
 		SourceTreeSHA256: intent.SourceTreeSHA256, SourceTreeFileCount: intent.SourceTreeFileCount, InstallType: "user",
@@ -669,6 +682,7 @@ func (store *Store) validateInstallMarker(receipt domainplugin.ReceiptV1) error 
 	activeRoot := store.absolute(activeRelativeV1(receipt.PluginName, receipt.PluginVersion))
 	return store.validateMarkerAt(activeRoot, domainplugin.IntentV1{
 		SchemaVersion: domainplugin.SchemaVersionV1, Purpose: domainplugin.IntentPurposeV1, IntentID: receipt.IntentID,
+		Origin: receipt.Origin, SourceRegistrationSHA256: receipt.SourceRegistrationSHA256,
 		PackageAuthoritySHA256: receipt.PackageAuthoritySHA256, Target: receipt.Target,
 		PluginName: receipt.PluginName, PluginVersion: receipt.PluginVersion,
 		SourceRoot: markerSourcePath(activeRoot), SourceTreeSHA256: receipt.SourceTreeSHA256,
@@ -697,20 +711,23 @@ func (store *Store) validateMarkerAt(root string, intent domainplugin.IntentV1) 
 		return err
 	}
 	var marker struct {
-		ManagedBy           string `json:"managedBy"`
-		MarketplaceName     string `json:"marketplaceName"`
-		PluginName          string `json:"pluginName"`
-		Version             string `json:"version"`
-		PackageSHA256       string `json:"packageSha256"`
-		SourcePath          string `json:"sourcePath"`
-		SourceTreeSHA256    string `json:"sourceTreeSha256"`
-		SourceTreeFileCount uint64 `json:"sourceTreeFileCount"`
-		InstallType         string `json:"installType"`
+		ManagedBy                string `json:"managedBy"`
+		MarketplaceName          string `json:"marketplaceName"`
+		PluginName               string `json:"pluginName"`
+		Version                  string `json:"version"`
+		PackageSHA256            string `json:"packageSha256,omitempty"`
+		SourcePath               string `json:"sourcePath"`
+		SourceTreeSHA256         string `json:"sourceTreeSha256"`
+		SourceTreeFileCount      uint64 `json:"sourceTreeFileCount"`
+		InstallType              string `json:"installType"`
+		Origin                   string `json:"origin,omitempty"`
+		SourceRegistrationSHA256 string `json:"sourceRegistrationSha256,omitempty"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&marker) != nil || marker.ManagedBy != "analytix-hub" || marker.MarketplaceName != "analytix-hub" ||
 		marker.PluginName != intent.PluginName || marker.Version != intent.PluginVersion ||
+		marker.Origin != intent.Origin || marker.SourceRegistrationSHA256 != intent.SourceRegistrationSHA256 ||
 		marker.PackageSHA256 != intent.PackageAuthoritySHA256 || marker.SourcePath != intent.SourceRoot ||
 		marker.SourceTreeSHA256 != intent.SourceTreeSHA256 || marker.SourceTreeFileCount != intent.SourceTreeFileCount || marker.InstallType != "user" {
 		return errors.New("bundled plugin installation marker does not match the host receipt")
@@ -773,7 +790,7 @@ func (store *Store) absolute(relative string) string {
 }
 
 func (store *Store) activeIndexPath() string {
-	return filepath.Join(store.absolute(controlRelativeV1), activeIndexFileNameV1)
+	return filepath.Join(store.absolute(store.indexRoot), activeIndexFileNameV1)
 }
 
 func (store *Store) inject(point FaultPointV1) error {
@@ -804,7 +821,7 @@ func generationIDV1(intent domainplugin.IntentV1, keyID string) string {
 }
 
 func identityMatchesIntent(identity SourceTreeIdentityV1, intent domainplugin.IntentV1) bool {
-	return identity.TreeSHA256 == intent.SourceTreeSHA256 && identity.FileCount == intent.SourceTreeFileCount &&
+	return identity.SourceRegistrationSHA256 == intent.SourceRegistrationSHA256 && identity.TreeSHA256 == intent.SourceTreeSHA256 && identity.FileCount == intent.SourceTreeFileCount &&
 		identity.Declaration.PackageID == intent.PluginName && identity.Declaration.PackageVersion == intent.PluginVersion &&
 		identity.ManifestSHA256 == intent.ManifestSHA256 && identity.EntrypointSHA256 == intent.EntrypointSHA256
 }

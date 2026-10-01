@@ -158,6 +158,7 @@ func (session *PrivateProtocolSession) IssueAnthropicThinking(input AnthropicThi
 		promptRoute == "" || !domainsecurity.IsSHA256Hex(toolManifestHash) || input.Sequence == 0 ||
 		input.AssistantMessageIndex < 0 ||
 		(protocol == "anthropic-thinking" && signature == "") ||
+		(protocol == "deepseek-messages" && strings.TrimSpace(thinking) == "") ||
 		(protocol == "deepseek-chat-completions" &&
 			(strings.TrimSpace(thinking) == "" || signature != "")) {
 		return nil, errors.New("private provider protocol capsule binding is invalid")
@@ -217,7 +218,7 @@ func (session *PrivateProtocolSession) AnthropicThinkingRequestShapeChanged(
 	case "anthropic-thinking":
 		return capsule.payload.PromptRoute != promptRoute ||
 			capsule.payload.ToolManifestHash != toolManifestHash, nil
-	case "deepseek-chat-completions":
+	case "deepseek-chat-completions", "deepseek-messages":
 		return false, nil
 	default:
 		return false, errors.New("private provider protocol capsule binding is invalid")
@@ -308,7 +309,7 @@ func privateProtocolMessagesDigest(messages []Message) (string, error) {
 // ThinkingBlock returns the provider-private block only for the exact
 // assistant message position and shape bound by the consumed capsule.
 func (replay *AnthropicThinkingReplay) ThinkingBlock(index int, message Message) (string, string, bool) {
-	if replay == nil || replay.protocol != "anthropic-thinking" || index != replay.assistantMessageIndex {
+	if replay == nil || (replay.protocol != "anthropic-thinking" && replay.protocol != "deepseek-messages") || index != replay.assistantMessageIndex {
 		return "", "", false
 	}
 	digest, _, err := anthropicAssistantShape(message)
@@ -365,8 +366,8 @@ func privateThinkingProtocol(value string) string {
 		// The empty value keeps compatibility with direct callers of the
 		// historically Anthropic-named process-local capsule API.
 		return "anthropic-thinking"
-	case "deepseek-chat-completions":
-		return "deepseek-chat-completions"
+	case "deepseek-chat-completions", "deepseek-messages":
+		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
 	}

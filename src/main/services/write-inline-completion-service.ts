@@ -1,3 +1,5 @@
+import type { WriteRetrievalSource } from '../ipc/write-retrieval-ipc'
+import { inlineCompletionPath, inlineCompletionRequestSchema, inlineCompletionResponseSchema } from '../../../packages/runtime/src/contracts/inline-completion'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   resolveWriteInlineCompletionModel,
@@ -20,7 +22,6 @@ import {
 } from './write-retrieval-service'
 
 const INLINE_COMPLETION_TIMEOUT_MS = 30_000
-const INLINE_COMPLETION_POLL_MS = 100
 const MAX_INLINE_COMPLETION_DEBUG_ENTRIES = 120
 const INPUT_BOUNDARY_MARKERS = ['PREFIX', 'SUFFIX', 'EDIT_SCOPE'] as const
 const OUTPUT_ACTION_MARKERS = ['SHORT', 'LONG', 'EDIT'] as const
@@ -656,108 +657,51 @@ export function extractWriteInlineAction(
 
 export type WriteInlineRuntimeRequest = (
   path: string,
-  method?: string,
-  body?: string
+  body: string,
+  signal?: AbortSignal
 ) => Promise<{ ok: boolean; status: number; body: string }>
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function parseRuntimeObject(body: string): Record<string, unknown> | null {
-  try {
-    return objectValue(JSON.parse(body))
-  } catch {
-    return null
-  }
-}
-
-function runtimeTurnId(body: string): string {
-  const parsed = parseRuntimeObject(body)
-  const turn = objectValue(parsed?.turn)
-  return String(turn?.id ?? parsed?.turnId ?? '').trim()
-}
-
-function runtimeAssistantText(body: string, turnId: string): { text: string; status: string } {
-  const parsed = parseRuntimeObject(body)
-  const turns = Array.isArray(parsed?.turns) ? parsed.turns : []
-  const target = turns
-    .map(objectValue)
-    .find((turn) => String(turn?.id ?? '').trim() === turnId) ?? null
-  const status = String(target?.status ?? '').trim()
-  const topLevelItems = Array.isArray(parsed?.items) ? parsed.items : []
-  const turnItems = Array.isArray(target?.items) ? target.items : []
-  const items = [...topLevelItems, ...turnItems].map(objectValue)
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]
-    if (!item) continue
-    const kind = String(item.kind ?? '')
-    if (kind !== 'assistant_text' && kind !== 'agent_message') continue
-    const text = sanitizePublicAssistantText(String(item.text ?? item.detail ?? item.summary ?? ''))
-    if (text) return { text, status }
-  }
-  return { text: '', status }
-}
 
 async function requestRuntimeInlineCompletion(
   request: WriteInlineCompletionRequest,
   model: string,
   prompt: string,
-  runtimeRequest: WriteInlineRuntimeRequest
+  runtimeRequest: WriteInlineRuntimeRequest,
+  isCurrent: () => boolean,
+  authorityCurrent: () => Promise<boolean>,
+  signal: AbortSignal
 ): Promise<string> {
-  const create = await runtimeRequest('/v1/threads', 'POST', JSON.stringify({
-    workspace: request.workspaceRoot?.trim() || '',
-    model,
-    mode: 'agent',
-    approvalPolicy: 'never',
-    sandboxMode: 'read-only',
-    title: '[Write inline completion]'
-  }))
-  const thread = parseRuntimeObject(create.body)
-  const threadId = String(thread?.id ?? '').trim()
-  if (!create.ok || !threadId) throw new Error('runtime_thread_unavailable')
-
-  try {
-    const start = await runtimeRequest(
-      `/v1/threads/${encodeURIComponent(threadId)}/turns`,
-      'POST',
-      JSON.stringify({
-        prompt,
-        model,
-        mode: 'agent',
-        approvalPolicy: 'never',
-        sandboxMode: 'read-only',
-        disableUserInput: true,
-        maxModelSteps: 1
-      })
-    )
-    const turnId = runtimeTurnId(start.body)
-    if (!start.ok || !turnId) throw new Error('runtime_turn_unavailable')
-
-    const deadline = Date.now() + INLINE_COMPLETION_TIMEOUT_MS
-    while (Date.now() < deadline) {
-      const detail = await runtimeRequest(`/v1/threads/${encodeURIComponent(threadId)}`, 'GET')
-      if (!detail.ok) throw new Error('runtime_result_unavailable')
-      const outcome = runtimeAssistantText(detail.body, turnId)
-      if (outcome.status === 'completed') return outcome.text
-      if (outcome.status === 'failed' || outcome.status === 'aborted') {
-        throw new Error('runtime_turn_failed')
-      }
-      await new Promise((resolve) => setTimeout(resolve, INLINE_COMPLETION_POLL_MS))
+  const assertCurrent = async (): Promise<void> => {
+    if (signal.aborted || !isCurrent() || !await authorityCurrent() || signal.aborted || !isCurrent()) {
+      throw new Error('runtime_owner_stale')
     }
-    throw new Error('runtime_turn_timeout')
-  } finally {
-    await runtimeRequest(`/v1/threads/${encodeURIComponent(threadId)}`, 'DELETE').catch(() => undefined)
   }
+  await assertCurrent()
+  const body = inlineCompletionRequestSchema.parse({
+    threadId: request.threadId, requestId: request.requestId,
+    document: request.document, prompt, model
+  })
+  if (Buffer.byteLength(prompt) > 65536) throw new Error('runtime_input_too_large')
+  const response = await runtimeRequest(inlineCompletionPath, JSON.stringify(body), signal)
+  await assertCurrent()
+  if (!response.ok || response.status !== 200 || Buffer.byteLength(response.body) > 128 * 1024) throw new Error('runtime_result_unavailable')
+  const parsed = inlineCompletionResponseSchema.parse(JSON.parse(response.body))
+  if (!parsed.ok) throw new Error('runtime_result_unavailable')
+  const result = parsed.result
+  if (result.threadId !== body.threadId || result.requestId !== body.requestId ||
+      ('sessionId' in body.document && (result.objectId !== body.document.objectId || result.baseRevision !== body.document.baseRevision)) ||
+      Buffer.byteLength(result.text) > 16384) throw new Error('runtime_result_stale')
+  return result.text
 }
 
 export async function requestWriteInlineCompletion(
   settings: AppSettingsV1,
   request: WriteInlineCompletionRequest,
-  runtimeRequest?: WriteInlineRuntimeRequest
+  runtimeRequest?: WriteInlineRuntimeRequest,
+  options: { isCurrent?: () => boolean; source?: WriteRetrievalSource; signal?: AbortSignal } = {}
 ): Promise<WriteInlineCompletionResult> {
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(INLINE_COMPLETION_TIMEOUT_MS)]) : AbortSignal.timeout(INLINE_COMPLETION_TIMEOUT_MS)
+  const isCurrent = () => !signal.aborted && (options.isCurrent?.() ?? true)
+  if (!isCurrent()) return { ok: false, message: 'Inline completion owner is unavailable.' }
   const startedAt = Date.now()
   if (settings.write.inlineCompletion.enabled === false) {
     appendInlineCompletionPreflightFailure(startedAt, settings, request, 'Inline completion is disabled.')
@@ -775,8 +719,11 @@ export async function requestWriteInlineCompletion(
   const retrieval = settings.write.inlineCompletion.retrievalEnabled === false
     ? null
     : await retrieveWriteInlineCompletionContext(request, {
-        maxSnippets: mode === 'long' || mode === 'edit' || actionMayEdit ? 5 : 3
+        maxSnippets: mode === 'long' || mode === 'edit' || actionMayEdit ? 5 : 3,
+        isCurrent,
+        source: options.source
       }).catch(() => null)
+  if (!isCurrent()) return { ok: false, message: 'Inline completion owner is unavailable.' }
   const messages = buildWriteInlineCompletionChatMessages(request, retrieval)
   const prompt = debugPromptFromMessages(messages)
   const debugBase = {
@@ -793,7 +740,8 @@ export async function requestWriteInlineCompletion(
   }
 
   try {
-    const text = await requestRuntimeInlineCompletion(request, model, prompt, runtimeRequest)
+    const text = await requestRuntimeInlineCompletion(request, model, prompt, runtimeRequest, isCurrent, options.source?.current ?? (async () => true), signal)
+    if (!isCurrent()) throw new Error('runtime_owner_stale')
 
     const extractedAction = parseWriteInlineAction(text, {
       fallbackKind: mode,

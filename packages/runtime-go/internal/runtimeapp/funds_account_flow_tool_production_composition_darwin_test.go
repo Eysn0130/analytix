@@ -200,6 +200,13 @@ func TestFundsAccountFlowToolRetainedPackageProductionComposition(t *testing.T) 
 	fundsComposition := composeRuntimeFundsAccountFlowV1(
 		profileRoot, rev14KeyedDigester{key: []byte("ab-r3-rev14-case-entity-key")}, caseCapability.store,
 		datasetComposition.snapshot, reader, snapshotStores.Materials, validateFull,
+		func(operationContext context.Context, current domainsecurity.TurnSecurityContext) error {
+			return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+				OperationContext: operationContext, Identity: identityAuthority, Observer: reader,
+				RiskAuthority: turnFixture.authority.RiskAuthority,
+				Context:       current, Workspace: current.WorkspaceRealPath,
+			})
+		},
 	)
 	if !fundsComposition.available() || fundsComposition.caseEntities == nil {
 		rev14AccountFlowFail(t, "runtime_composition", counts)

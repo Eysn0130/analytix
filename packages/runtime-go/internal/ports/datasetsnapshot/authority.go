@@ -2,10 +2,13 @@ package datasetsnapshot
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainhost "analytix.local/runtime-go/internal/domain/hostcurrentness"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	evidenceauthorityport "analytix.local/runtime-go/internal/ports/evidenceauthority"
 )
@@ -99,6 +102,40 @@ type CurrentSelectionV2 struct {
 	SelectedIndex    domainsecurity.DatasetSnapshotIndexV1
 	Snapshot         ResolvedSnapshotV2
 	SelectionDigest  string
+	// Present only for the explicitly admitted host_local profile. The
+	// witnessed Head remains zero in that profile; its historical JSON bytes
+	// are unchanged when this field is absent.
+	HostLocalHead *domainhost.HeadV1 `json:"hostLocalHead,omitempty"`
+}
+
+// ValidateCurrentSelectionChildBindingV2 checks the closed currentness shape
+// and the selected immutable record. It does not issue currentness: callers
+// still need the live callback capability at the concrete protected effect.
+func ValidateCurrentSelectionChildBindingV2(selection CurrentSelectionV2) error {
+	if ValidateCurrentSelectionDigestV2(selection) != nil || len(selection.DatasetIndexPath) == 0 {
+		return ErrMismatch
+	}
+	if selection.HostLocalHead != nil {
+		head := *selection.HostLocalHead
+		publicKey, err := base64.RawURLEncoding.DecodeString(head.AuthorityPublicKey)
+		if !reflect.DeepEqual(selection.Head, evidenceauthorityport.FreshHead{}) ||
+			err != nil ||
+			domainhost.ValidateHeadV1(head) != nil || head.DatasetSnapshotCount != uint64(len(selection.DatasetIndexPath)) ||
+			head.DatasetSnapshotIndexDigest != selection.DatasetIndexPath[0].IndexDigest ||
+			domainsecurity.ValidateDatasetSnapshotIndexRecordForHostLocalV2(selection.SelectedIndex,
+				selection.Snapshot.Record, head.InstallationID, selection.SelectedIndex.ModeCommitmentDigest,
+				head.AuthorityKeyID, publicKey) != nil {
+			return ErrMismatch
+		}
+		return nil
+	}
+	if !selection.Head.HasBundle ||
+		selection.Head.Bundle.DatasetSnapshotCount != uint64(len(selection.DatasetIndexPath)) ||
+		selection.Head.Bundle.DatasetSnapshotIndexDigest != selection.DatasetIndexPath[0].IndexDigest ||
+		domainsecurity.ValidateDatasetSnapshotIndexRecordV2(selection.SelectedIndex, selection.Snapshot.Record) != nil {
+		return ErrMismatch
+	}
+	return nil
 }
 
 // CurrentSelectionCapabilityV2 is an opaque callback-scoped authority for one
@@ -318,4 +355,18 @@ type RecordStore interface {
 type IndexStore interface {
 	PutIfAbsent(context.Context, domainsecurity.DatasetSnapshotIndexV1) error
 	Resolve(context.Context, string) (domainsecurity.DatasetSnapshotIndexV1, error)
+}
+
+// HistoricalFactAuthorityV2 exposes exact original publication material only
+// while its immutable index remains on a newly challenged retained chain.
+// No query/commit capability escapes; current access permission is separate.
+type HistoricalFactAuthorityV2 interface {
+	WithHistoricalFactSelectionV2(context.Context, ResolveInputV2, domainsecurity.TurnSecurityContext, evidenceauthorityport.FreshHead, func(CurrentSelectionV2) error) error
+}
+
+// HostLocalHistoricalFactAuthorityV1 keeps the original frozen context and
+// material separate from current analytical selection. It issues no effect
+// capability and cannot represent a host-local head as a witness observation.
+type HostLocalHistoricalFactAuthorityV1 interface {
+	WithHostLocalHistoricalFactSelectionV1(context.Context, ResolveInputV2, domainsecurity.TurnSecurityContext, domainhost.HeadV1, func(CurrentSelectionV2) error) error
 }

@@ -1,13 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import type { ChildProcess } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  BundledFundsMaterializationChildUnconfirmedError,
+  assertNoUnconfirmedMaterializationChildV1,
   bindBundledFundsMaterializationToCurrentRuntimeV1,
   clearBundledFundsMaterializationCurrentRuntimeV1,
   currentBundledFundsMaterializationBindingV1,
   materializeBundledFundsBeforeRuntimeV1,
+  retainUnconfirmedMaterializationChildV1,
   verifyBundledFundsMaterializationOutputV1,
   type BundledFundsMaterializationCommandResultV1
 } from './bundled-funds-materialization'
@@ -146,6 +150,98 @@ describe('bundled funds materialization desktop binding', () => {
     })).rejects.toThrow(/command failed/)
     expect(stdout.every((value) => value === 0)).toBe(true)
     expect(stderr.every((value) => value === 0)).toBe(true)
+  })
+
+  it('accepts only fixed opt-in owner phases and still rejects other stderr', async () => {
+    const root = testRuntimeHome()
+    const previous = process.env.ANALYTIX_STARTUP_TRACE
+    process.env.ANALYTIX_STARTUP_TRACE = '1'
+    try {
+      const phases: unknown[] = []
+      const options = {
+        appIsPackaged: true,
+        launchTarget: { command: '/tmp/runtime-server', argsPrefix: [], mode: 'bundled-binary' as const },
+        dataDir: join(root, 'data'),
+        onStartupPhase: (phase: unknown) => phases.push(phase)
+      }
+      const ready = await materializeBundledFundsBeforeRuntimeV1({
+        ...options,
+        runner: async (_command, args) => ({
+          ...commandResult(readyFixture(args[5], root)),
+          stderr: Buffer.from('ANALYTIX_STARTUP_OWNER_PHASE_V1 funds_package_inspected 24\n')
+        })
+      })
+      expect(ready?.pluginVersion).toBe('0.16.16')
+      expect(phases).toEqual([{ stage: 'funds_package_inspected', durationMs: 24 }])
+      await expect(materializeBundledFundsBeforeRuntimeV1({
+        ...options,
+        runner: async (_command, args) => ({
+          ...commandResult(readyFixture(args[5], root)),
+          stderr: Buffer.from('ANALYTIX_STARTUP_OWNER_PHASE_V1 funds_package_inspected 24\nprivate detail\n')
+        })
+      })).rejects.toThrow(/command failed/)
+      expect(phases).toHaveLength(1)
+    } finally {
+      if (previous === undefined) delete process.env.ANALYTIX_STARTUP_TRACE
+      else process.env.ANALYTIX_STARTUP_TRACE = previous
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('settles an overflowing command even when a descendant holds its pipes open', async () => {
+    const code = [
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'],",
+      "  { stdio: ['ignore', 'inherit', 'inherit'] });",
+      "process.stderr.write('x'.repeat(600000));"
+    ].join('\n')
+    const started = Date.now()
+    await expect(materializeBundledFundsBeforeRuntimeV1({
+      appIsPackaged: true,
+      launchTarget: {
+        command: process.execPath,
+        argsPrefix: ['-e', code],
+        mode: 'bundled-binary'
+      },
+      dataDir: '/tmp/analytix-startup-owner-trace/data'
+    })).rejects.toThrow(/command failed/)
+    expect(Date.now() - started).toBeLessThan(3000)
+  })
+
+  it('reports unconfirmed direct-child termination as a fatal startup condition', async () => {
+    await expect(materializeBundledFundsBeforeRuntimeV1({
+      appIsPackaged: true,
+      launchTarget: { command: '/tmp/runtime-server', argsPrefix: [], mode: 'bundled-binary' },
+      dataDir: '/tmp/analytix-startup-owner-trace/data',
+      runner: async () => ({
+        exitCode: null, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0),
+        timedOut: true, overflow: false, terminationConfirmed: false, childPid: 54321
+      })
+    })).rejects.toMatchObject({
+      name: BundledFundsMaterializationChildUnconfirmedError.name,
+      childPid: 54321
+    })
+  })
+
+  it('holds every later Go startup until the exact materializer child exits', () => {
+    const child = { pid: 54321, exitCode: null as number | null, signalCode: null }
+    retainUnconfirmedMaterializationChildV1(child as ChildProcess)
+    expect(() => assertNoUnconfirmedMaterializationChildV1()).toThrow(
+      BundledFundsMaterializationChildUnconfirmedError
+    )
+    child.exitCode = 0
+    expect(() => assertNoUnconfirmedMaterializationChildV1()).not.toThrow()
+
+    const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('async function startGoConformanceSidecarOnce')
+    const body = source.slice(start, source.indexOf('async function stopGoConformanceSidecarOnce', start))
+    const firstBarrier = body.indexOf('assertNoUnconfirmedMaterializationChildV1()')
+    const configBarrier = body.indexOf('assertNoUnconfirmedMaterializationChildV1()', firstBarrier + 1)
+    const configSync = body.indexOf('await syncGuiManagedAnalytixConfig(')
+    const spawnBarrier = body.lastIndexOf('assertNoUnconfirmedMaterializationChildV1()')
+    const spawn = body.indexOf('const child = spawn(')
+    expect(firstBarrier).toBeGreaterThanOrEqual(0)
+    expect(configBarrier).toBeLessThan(configSync)
+    expect(spawnBarrier).toBeLessThan(spawn)
   })
 
   it('keeps materialization and config binding ahead of the runtime-server spawn', () => {

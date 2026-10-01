@@ -39,6 +39,32 @@ func TestProviderRegistryBoundedModelMetadataPreservesReasoningAndAlias(t *testi
 	}
 }
 
+func TestProviderRegistryNativeMessagesDoesNotDependOnUIModelMetadata(t *testing.T) {
+	selected := domainregistry.Provider{ID: "native", Kind: "deepseek-messages", Endpoint: "https://native.invalid/v1", Models: []string{"deepseek-flash"}, SelectedModel: "deepseek-flash"}
+	for _, effort := range []string{"auto", "off", "low", "medium", "high", "max"} {
+		resolver := newProviderRegistryExecutionResolverWithPricingV1(nil, "")
+		resolved, err := resolver.resolveTurnExecutionV1(provider.TurnExecutionInput{RequestEffort: effort}, selected, "synthetic-committed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved.Config.EndpointFormat != "messages" || resolved.Config.ReasoningProtocol != "deepseek-messages" || resolved.Effort != effort {
+			t.Fatal("committed native protocol did not reach the physical turn config")
+		}
+		if !providerRegistryUsesAnthropicCredentialV1(selected.Kind) {
+			t.Fatal("native Messages probe did not use the Messages authentication protocol")
+		}
+	}
+	resolver := newProviderRegistryExecutionResolverWithPricingV1(nil, "")
+	if _, err := resolver.resolveTurnExecutionV1(provider.TurnExecutionInput{RequestEffort: "xhigh"}, selected, "synthetic-committed"); err == nil {
+		t.Fatal("invalid effort was admitted")
+	}
+	selected.Kind = "anthropic-compatible"
+	resolved, err := resolver.resolveTurnExecutionV1(provider.TurnExecutionInput{}, selected, "synthetic-committed")
+	if err != nil || resolved.Config.ReasoningProtocol == "deepseek-messages" {
+		t.Fatal("generic Messages was silently promoted to the native protocol")
+	}
+}
+
 func TestProviderRegistryBoundedModelMetadataRejectsExpansionAndAmbiguity(t *testing.T) {
 	for _, mode := range []string{"unregistered", "foreign-route", "foreign-provider", "foreign-protocol", "alias-conflict", "canonical-conflict", "duplicate-route", "invalid-reasoning"} {
 		t.Run(mode, func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ var (
 	ErrAtomicTextBeforeDrift         = errors.New("atomic text mutation before state changed")
 	ErrAtomicTextUnsafePath          = errors.New("atomic text mutation path is unsafe")
 	ErrAtomicTextUnsupportedPlatform = errors.New("atomic text mutation is unsupported on this platform")
+	ErrAtomicTextTooLarge            = errors.New("atomic text exceeds byte limit")
 )
 
 type atomicTextState struct {
@@ -24,9 +26,17 @@ type atomicTextState struct {
 	Mode    os.FileMode
 }
 
+type atomicTextReadPolicy struct {
+	// Object reads must not expose bytes through aliases into protected roots.
+	RequireSingleLink bool
+}
+
 type atomicTextReplaceRequest struct {
-	Path              string
-	Content           []byte
+	Path    string
+	Content []byte
+	// MaxBytes bounds every target read and the replacement; zero preserves the unbounded contract.
+	MaxBytes          int64
+	ReadPolicy        atomicTextReadPolicy
 	ExpectedExists    bool
 	ExpectedHash      string
 	CreateParents     bool
@@ -44,11 +54,22 @@ type atomicTextTestHooks struct {
 }
 
 func inspectAtomicTextTarget(path string, missingParentsAreAbsent bool) (atomicTextState, error) {
+	return inspectAtomicTextTargetBounded(path, missingParentsAreAbsent, 0)
+}
+
+func inspectAtomicTextTargetBounded(path string, missingParentsAreAbsent bool, maxBytes int64) (atomicTextState, error) {
+	return inspectAtomicTextTargetWithPolicy(path, missingParentsAreAbsent, maxBytes, atomicTextReadPolicy{})
+}
+
+func inspectAtomicTextTargetWithPolicy(path string, missingParentsAreAbsent bool, maxBytes int64, policy atomicTextReadPolicy) (atomicTextState, error) {
+	if maxBytes < 0 || maxBytes == math.MaxInt64 {
+		return atomicTextState{}, errors.New("atomic text byte limit is invalid")
+	}
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" || path == "." || !filepath.IsAbs(path) {
 		return atomicTextState{}, fmt.Errorf("%w: target path must be absolute", ErrAtomicTextUnsafePath)
 	}
-	return inspectAtomicTextTargetPlatform(path, missingParentsAreAbsent)
+	return inspectAtomicTextTargetPlatform(path, missingParentsAreAbsent, maxBytes, policy)
 }
 
 func atomicReplaceText(request atomicTextReplaceRequest) error {
@@ -56,6 +77,12 @@ func atomicReplaceText(request atomicTextReplaceRequest) error {
 }
 
 func atomicReplaceTextWithHooks(request atomicTextReplaceRequest, hooks *atomicTextTestHooks) error {
+	if request.MaxBytes < 0 || request.MaxBytes == math.MaxInt64 {
+		return errors.New("atomic text byte limit is invalid")
+	}
+	if request.MaxBytes > 0 && int64(len(request.Content)) > request.MaxBytes {
+		return ErrAtomicTextTooLarge
+	}
 	request.Path = filepath.Clean(strings.TrimSpace(request.Path))
 	request.ExpectedHash = strings.ToLower(strings.TrimSpace(request.ExpectedHash))
 	if request.Path == "" || request.Path == "." || !filepath.IsAbs(request.Path) {
@@ -75,12 +102,31 @@ func atomicReplaceTextWithHooks(request atomicTextReplaceRequest, hooks *atomicT
 		return errors.New("atomic text delete cannot contain replacement bytes")
 	}
 	if request.Delete {
+		if request.MaxBytes != 0 {
+			return fmt.Errorf("%w: bounded conditional deletion is unavailable", ErrAtomicTextUnsupportedPlatform)
+		}
 		return conditionalDeleteExact(request.Path, request.ExpectedHash, request.MutationAuthority, hooks)
 	}
 	if request.DefaultMode.Perm() == 0 {
 		request.DefaultMode = 0o644
 	}
 	return atomicReplaceTextPlatform(request, hooks)
+}
+
+// The extra byte detects a file that grows after its handle was statted without
+// allowing that growth to cause an unbounded read. Oversized content is discarded.
+func readAtomicTextContent(reader io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes < 0 || maxBytes == math.MaxInt64 {
+		return nil, errors.New("atomic text byte limit is invalid")
+	}
+	if maxBytes == 0 {
+		return io.ReadAll(reader)
+	}
+	content, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if int64(len(content)) > maxBytes {
+		return nil, ErrAtomicTextTooLarge
+	}
+	return content, err
 }
 
 func validateAtomicTextBefore(request atomicTextReplaceRequest, state atomicTextState) error {

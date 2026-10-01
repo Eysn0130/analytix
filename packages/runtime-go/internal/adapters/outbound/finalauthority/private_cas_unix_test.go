@@ -20,6 +20,47 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestSecurePrivateCASRelativeReadRejectsNonLeafNames(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"schemaVersion":1}`)
+	outside := filepath.Join(root, "outside.json")
+	if err := os.WriteFile(outside, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root, filepath.Join(parent, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	fd, err := unix.Open(parent, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	device, err := privateCASUnixDirectoryDevice(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../outside.json", outside, "escape/outside.json", "./../outside.json"} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := privateCASUnixReadOnceAt(fd, name, 4096, device); err == nil {
+				t.Error("relative record read escaped its parent handle")
+			}
+			if _, err := privateCASUnixRecordIdentityAt(fd, name, 4096, device); err == nil {
+				t.Error("relative identity read escaped its parent handle")
+			}
+		})
+	}
+	if err := os.WriteFile(filepath.Join(parent, "record.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if read, _, err := privateCASUnixReadStableAt(fd, "record.json", 4096); err != nil || string(read) != string(body) {
+		t.Fatalf("safe leaf read failed: %v", err)
+	}
+}
+
 func TestSecurePrivateCASAdditionReceiptRejectsMetadataAndIdentityReplacement(t *testing.T) {
 	for _, test := range []struct {
 		name   string

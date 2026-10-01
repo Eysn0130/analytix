@@ -26,6 +26,7 @@ import type {
 } from '@shared/app-settings'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import type { ModelReasoningEffort } from '@shared/app-settings'
+import type { ComposerDraft } from './composer-drafts'
 
 export type QueuedUserMessage = {
   id: string
@@ -70,6 +71,12 @@ export type GuiPlanMessageContext = {
 }
 
 export type SendMessageOverrides = {
+  /** Renderer-local, one-submission fence. Core remains the authority. Never
+   * serialize this callback, forward it to a Provider, or retain it in a queue. */
+  submissionGuard?: {
+    isCurrent: () => boolean
+    validateBeforeSend: () => Promise<boolean>
+  }
   queued?: QueuedUserMessage
   model?: string
   providerId?: string
@@ -196,6 +203,8 @@ export type ChatState = {
   turnDurationByUserId: Record<string, number>
   inspectorSelectedId: string | null
   composerModel: string
+  composerDrafts: Record<string, ComposerDraft>
+  updateComposerDraft: (key: string, update: (draft: ComposerDraft) => ComposerDraft) => void
   composerProviderId: string
   composerPickList: string[]
   composerModelGroups: ModelProviderModelGroup[]
@@ -223,9 +232,6 @@ export type ChatState = {
   setRoute: (r: AppRoute) => void
   openWrite: () => Promise<void>
   openCode: () => Promise<void>
-  ensureWriteThreadForWorkspace: (workspaceRoot?: string) => Promise<string | null>
-  createWriteThread: (workspaceRoot?: string) => Promise<string | null>
-  selectWriteThread: (threadId: string, workspaceRoot?: string) => Promise<void>
   openSettings: (section?: SettingsRouteSection) => void
   openPlugins: (host?: PluginHostRoute) => void
   openClaw: () => void
@@ -258,10 +264,10 @@ export type ChatState = {
   selectWorkspaceRoot: (workspaceRoot: string) => Promise<string | null>
   clearWorkspace: () => Promise<void>
 	  deleteWorkspace: (workspacePath: string) => Promise<void>
-	  refreshCaseProjects: () => Promise<void>
-	  loadCaseProjectThreads: (caseProjectId: string, options?: { force?: boolean }) => Promise<void>
+	  refreshCaseProjects: (options?: { isCurrent?: () => boolean }) => Promise<void>
+	  loadCaseProjectThreads: (caseProjectId: string, options?: { force?: boolean; isCurrent?: () => boolean }) => Promise<void>
 	  setCaseProjectExpanded: (caseProjectId: string, expanded: boolean) => void
-	  refreshThreads: () => Promise<void>
+	  refreshThreads: (options?: { isCurrent?: () => boolean }) => Promise<void>
   setThreadSearch: (query: string) => void
   setShowArchivedThreads: (show: boolean) => void
   createThread: (options?: {

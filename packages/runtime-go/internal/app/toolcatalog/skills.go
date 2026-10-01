@@ -61,7 +61,7 @@ type SkillRecordInput struct {
 func SkillCapabilityState(catalog SkillCatalog) map[string]any {
 	available := catalog.Enabled && len(catalog.Skills) > 0
 	status := "disabled"
-	if catalog.Enabled && len(catalog.Roots) > 0 {
+	if catalog.Enabled {
 		status = "unavailable"
 	}
 	if available {
@@ -93,7 +93,7 @@ func SkillToolDiagnostics(catalog SkillCatalog) map[string]any {
 func SkillResponse(catalog SkillCatalog) map[string]any {
 	publicSkills := make([]any, 0, len(catalog.Skills))
 	seenSkillIDs := map[string]struct{}{}
-	if catalog.Enabled && len(catalog.Roots) > 0 {
+	if catalog.Enabled {
 		for _, skill := range catalog.Skills {
 			if summary, ok := PublicSkillSummaryV2(skill); ok {
 				id := contracts.StringField(summary, "id")

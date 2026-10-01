@@ -7,10 +7,10 @@ template.
 node atlasflow/renderers/dataflow/render-dataflow.mjs input.dataflow.json output.html
 ```
 
-Run `npm install` once in the skill folder first — the renderer validates the
-input against `atlasflow/schemas/dataflow.schema.json` via ajv. Without it, the
-renderer prints a warning and skips schema validation; its own layout checks
-still run.
+Run `npm ci` in the skill folder first to install the locked dependencies.
+The renderer validates input against `atlasflow/schemas/dataflow.schema.json`
+via ajv. If the required validator is unavailable, rendering fails without
+creating or replacing output. Layout checks supplement, not replace, schemas.
 
 If `output.html` is omitted, the renderer uses `meta.output` from the JSON file
 or falls back to `dataflow.html` in the current working directory.

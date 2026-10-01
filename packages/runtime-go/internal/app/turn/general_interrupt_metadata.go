@@ -3,6 +3,7 @@ package turn
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -72,7 +73,7 @@ func exactNonNegativeInterruptCountV1(value any) (int, bool) {
 	case int64:
 		count = typed
 	case float64:
-		if typed < 0 || typed != float64(int64(typed)) {
+		if math.IsNaN(typed) || typed < 0 || typed >= -float64(math.MinInt) || math.Trunc(typed) != typed {
 			return 0, false
 		}
 		count = int64(typed)
@@ -85,7 +86,7 @@ func exactNonNegativeInterruptCountV1(value any) (int, bool) {
 	default:
 		return 0, false
 	}
-	if count < 0 || int64(int(count)) != count {
+	if count < 0 || count > math.MaxInt {
 		return 0, false
 	}
 	return int(count), true

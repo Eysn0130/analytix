@@ -5,11 +5,12 @@ import {
 } from './InitialSetupDialog'
 
 describe('InitialSetupDialog completion flow', () => {
-  it('keeps required first-run setup modal-only until the runtime is ready, then opens Code', async () => {
+  it('checks the committed Provider without a second restart, then opens Code', async () => {
     const reloadUiSettings = vi.fn(async () => undefined)
     const probeRuntime = vi.fn(async () => undefined)
     const openCode = vi.fn(async () => undefined)
     const closeInitialSetup = vi.fn()
+    const selectSavedModel = vi.fn()
     const setDialogError = vi.fn()
 
     const completed = await completeInitialSetupAfterSave({
@@ -18,6 +19,7 @@ describe('InitialSetupDialog completion flow', () => {
       probeRuntime,
       openCode,
       closeInitialSetup,
+      selectSavedModel,
       getState: () => ({ runtimeConnection: 'ready', error: null }),
       setDialogError,
       fallbackRuntimeError: 'Could not reach Analytix.',
@@ -26,14 +28,18 @@ describe('InitialSetupDialog completion flow', () => {
 
     expect(completed).toBe(true)
     expect(reloadUiSettings).toHaveBeenCalledTimes(1)
-    expect(probeRuntime).toHaveBeenCalledWith('user', { restart: true })
+    expect(probeRuntime).toHaveBeenCalledWith('user')
     expect(openCode).toHaveBeenCalledTimes(1)
+    expect(selectSavedModel).toHaveBeenCalledTimes(1)
+    expect(selectSavedModel.mock.invocationCallOrder[0]).toBeGreaterThan(openCode.mock.invocationCallOrder[0])
+    expect(selectSavedModel.mock.invocationCallOrder[0]).toBeLessThan(closeInitialSetup.mock.invocationCallOrder[0])
     expect(closeInitialSetup).toHaveBeenCalledTimes(1)
     expect(setDialogError).not.toHaveBeenCalled()
   })
 
   it('does not close required first-run setup when the runtime cannot connect', async () => {
     const closeInitialSetup = vi.fn()
+    const selectSavedModel = vi.fn()
     const openCode = vi.fn(async () => undefined)
     const setDialogError = vi.fn()
     const probeRuntime = vi.fn(async () => undefined)
@@ -44,6 +50,7 @@ describe('InitialSetupDialog completion flow', () => {
       probeRuntime,
       openCode,
       closeInitialSetup,
+      selectSavedModel,
       getState: () => ({ runtimeConnection: 'offline', error: 'Port is busy.' }),
       setDialogError,
       fallbackRuntimeError: 'Could not reach Analytix.',
@@ -51,14 +58,45 @@ describe('InitialSetupDialog completion flow', () => {
     })
 
     expect(completed).toBe(false)
-    expect(probeRuntime).toHaveBeenCalledWith('user', { restart: true })
+    expect(probeRuntime).toHaveBeenCalledWith('user')
     expect(openCode).not.toHaveBeenCalled()
+    expect(selectSavedModel).not.toHaveBeenCalled()
     expect(closeInitialSetup).not.toHaveBeenCalled()
     expect(setDialogError).toHaveBeenCalledWith('Port is busy.')
   })
 
+  it('waits for the readiness probe before closing setup', async () => {
+    let finishProbe: (() => void) | undefined
+    const pendingProbe = new Promise<void>((resolve) => { finishProbe = resolve })
+    let runtimeConnection: 'idle' | 'ready' = 'idle'
+    const closeInitialSetup = vi.fn()
+    const probeRuntime = vi.fn(async () => {
+      await pendingProbe
+      runtimeConnection = 'ready'
+    })
+    const completion = completeInitialSetupAfterSave({
+      mode: 'required',
+      reloadUiSettings: vi.fn(async () => undefined),
+      probeRuntime,
+      openCode: vi.fn(async () => undefined),
+      selectSavedModel: vi.fn(),
+      closeInitialSetup,
+      getState: () => ({ runtimeConnection, error: null }),
+      setDialogError: vi.fn(),
+      fallbackRuntimeError: 'Could not reach Analytix.',
+      restartRuntimeError: 'Analytix could not start after saving the API key.'
+    })
+
+    await vi.waitFor(() => expect(probeRuntime).toHaveBeenCalledWith('user'))
+    expect(closeInitialSetup).not.toHaveBeenCalled()
+    finishProbe?.()
+    await expect(completion).resolves.toBe(true)
+    expect(closeInitialSetup).toHaveBeenCalledTimes(1)
+  })
+
   it('shows first-run restart guidance instead of the generic fetch failure after saving credentials', async () => {
     const closeInitialSetup = vi.fn()
+    const selectSavedModel = vi.fn()
     const openCode = vi.fn(async () => undefined)
     const setDialogError = vi.fn()
 
@@ -68,6 +106,7 @@ describe('InitialSetupDialog completion flow', () => {
       probeRuntime: vi.fn(async () => undefined),
       openCode,
       closeInitialSetup,
+      selectSavedModel,
       getState: () => ({ runtimeConnection: 'offline', error: 'Could not reach Analytix.' }),
       setDialogError,
       fallbackRuntimeError: 'Could not reach Analytix.',
@@ -76,6 +115,7 @@ describe('InitialSetupDialog completion flow', () => {
 
     expect(completed).toBe(false)
     expect(openCode).not.toHaveBeenCalled()
+    expect(selectSavedModel).not.toHaveBeenCalled()
     expect(closeInitialSetup).not.toHaveBeenCalled()
     expect(setDialogError).toHaveBeenCalledWith('Analytix could not start after saving the API key.')
   })
@@ -89,6 +129,7 @@ describe('InitialSetupDialog completion flow', () => {
       probeRuntime: vi.fn(async () => undefined),
       openCode: vi.fn(async () => undefined),
       closeInitialSetup: vi.fn(),
+      selectSavedModel: vi.fn(),
       getState: () => ({
         runtimeConnection: 'offline',
         error: 'fetch: The operation was aborted due to timeout',
@@ -109,6 +150,7 @@ describe('InitialSetupDialog completion flow', () => {
     const probeRuntime = vi.fn(async () => undefined)
     const openCode = vi.fn(async () => undefined)
     const closeInitialSetup = vi.fn()
+    const selectSavedModel = vi.fn()
 
     const completed = await completeInitialSetupAfterSave({
       mode: 'preview',
@@ -116,6 +158,7 @@ describe('InitialSetupDialog completion flow', () => {
       probeRuntime,
       openCode,
       closeInitialSetup,
+      selectSavedModel,
       getState: () => ({ runtimeConnection: 'offline', error: null }),
       setDialogError: vi.fn(),
       fallbackRuntimeError: 'Could not reach Analytix.',
@@ -125,6 +168,7 @@ describe('InitialSetupDialog completion flow', () => {
     expect(completed).toBe(true)
     expect(probeRuntime).toHaveBeenCalledWith('background')
     expect(openCode).not.toHaveBeenCalled()
+    expect(selectSavedModel).not.toHaveBeenCalled()
     expect(closeInitialSetup).toHaveBeenCalledTimes(1)
   })
 

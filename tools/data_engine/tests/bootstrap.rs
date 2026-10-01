@@ -523,25 +523,32 @@ fn partial_eof_request_is_rejected_without_execution() {
 #[test]
 fn invalid_bootstrap_rejects_before_reading_case_bytes() {
     let marker = "6222020202020202020";
-    let mut command = data_engine();
-    command
-        .env("ANALYTIX_NATIVE_LAUNCH_NONCE", "invalid")
-        .env("ANALYTIX_NATIVE_PROTOCOL_VERSION", PROTOCOL)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let (mut child, _owner_liveness) = spawn_data_engine(command);
-    child
-        .stdin
-        .take()
-        .expect("data engine stdin")
-        .write_all(marker.as_bytes())
-        .expect("write marker");
-    let output = child.wait_with_output().expect("wait data engine");
-    assert!(!output.status.success());
-    let combined = [output.stdout, output.stderr].concat();
-    assert!(!String::from_utf8_lossy(&combined).contains(marker));
-    assert!(!String::from_utf8_lossy(&combined).contains("analytix_native_ready"));
+    for (nonce, protocol) in [("invalid", PROTOCOL), (NONCE, "invalid")] {
+        // Queue input before spawning: a correct early exit must not race a
+        // parent write. Keep a reader to prove rejection consumed no case bytes.
+        let (mut unread_input, mut input_writer) = std::io::pipe().expect("create input pipe");
+        input_writer.write_all(marker.as_bytes()).expect("queue marker");
+        drop(input_writer);
+        let mut command = data_engine();
+        command
+            .env("ANALYTIX_NATIVE_LAUNCH_NONCE", nonce)
+            .env("ANALYTIX_NATIVE_PROTOCOL_VERSION", protocol)
+            .stdin(unread_input.try_clone().expect("clone input reader"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let (child, _owner_liveness) = spawn_data_engine(command);
+        let output = child.wait_with_output().expect("wait data engine");
+        assert_eq!(output.status.code(), Some(1), "must reject, not crash");
+        assert!(output.stdout.is_empty(), "invalid bootstrap emitted stdout");
+        let combined = [output.stdout, output.stderr].concat();
+        let text = String::from_utf8_lossy(&combined);
+        assert!(text.contains("data_engine_bootstrap_invalid"));
+        assert!(!text.contains(marker));
+        assert!(!text.contains("analytix_native_ready"));
+        let mut remaining = Vec::new();
+        unread_input.read_to_end(&mut remaining).expect("read unconsumed input");
+        assert_eq!(remaining, marker.as_bytes(), "bootstrap consumed case bytes");
+    }
 }
 
 #[test]

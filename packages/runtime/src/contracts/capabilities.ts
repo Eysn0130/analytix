@@ -31,6 +31,7 @@ export type SubagentReasoningEffort = z.infer<typeof SubagentReasoningEffort>
 export const ModelReasoningRequestProtocol = z.enum([
   'none',
   'deepseek-chat-completions',
+  'deepseek-messages',
   'glm-chat-completions',
   'mimo-chat-completions',
   'openai-responses',

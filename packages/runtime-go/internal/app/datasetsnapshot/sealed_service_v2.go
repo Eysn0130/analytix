@@ -334,20 +334,25 @@ func (service *SealedServiceV2) WithCurrentSelectionV2(
 	if err != nil {
 		return errors.Join(datasetsnapshotport.ErrMismatch, err)
 	}
+	return service.withFreshHeadChallengeV2(ctx, func(head evidenceauthorityport.FreshHead, challenge func(context.Context) error, _ bool) error {
+		return service.withCurrentSelectionV2(ctx, input, securityContext, callback, binding, head, challenge)
+	})
+}
+
+// One dispatch owner preserves entry-error mapping for both current capability
+// issuance and historical reads. Each consumer retains its own material checks.
+// scoped distinguishes a challenge source with a missing callback from a
+// coordinator that intentionally requires full observations instead.
+func (service *SealedServiceV2) withFreshHeadChallengeV2(
+	ctx context.Context,
+	use func(evidenceauthorityport.FreshHead, func(context.Context) error, bool) error,
+) error {
 	if source, ok := service.coordinator.(freshHeadChallengeSourceV2); ok {
 		callbackEntered := false
-		err := source.WithFreshHeadChallenge(
-			ctx,
-			func(
-				head evidenceauthorityport.FreshHead,
-				challenge func(context.Context) error,
-			) error {
-				callbackEntered = true
-				return service.withCurrentSelectionV2(
-					ctx, input, securityContext, callback, binding, head, challenge,
-				)
-			},
-		)
+		err := source.WithFreshHeadChallenge(ctx, func(head evidenceauthorityport.FreshHead, challenge func(context.Context) error) error {
+			callbackEntered = true
+			return use(head, challenge, true)
+		})
 		if err != nil && !callbackEntered {
 			return errors.Join(datasetsnapshotport.ErrUnavailable, err)
 		}
@@ -357,9 +362,7 @@ func (service *SealedServiceV2) WithCurrentSelectionV2(
 	if err != nil {
 		return err
 	}
-	return service.withCurrentSelectionV2(
-		ctx, input, securityContext, callback, binding, head, nil,
-	)
+	return use(head, nil, false)
 }
 
 func (service *SealedServiceV2) withCurrentSelectionV2(
@@ -446,7 +449,11 @@ func (service *SealedServiceV2) WithRetainedSelectionV2(
 			current datasetsnapshotport.CurrentSelectionV2,
 			capability datasetsnapshotport.CurrentSelectionCapabilityV2,
 		) error {
-			return capability.UseExact(
+			exact, ok := capability.(*currentSelectionCapabilityV2)
+			if !ok {
+				return datasetsnapshotport.ErrUnavailable
+			}
+			return exact.useExact(
 				current,
 				input.CurrentSecurityContext,
 				func(leaseContext context.Context) error {
@@ -484,6 +491,7 @@ func (service *SealedServiceV2) WithRetainedSelectionV2(
 					}
 					return nil
 				},
+				currentSelectionRetainedChallengeV2,
 			)
 		},
 	)
@@ -494,7 +502,7 @@ func (service *SealedServiceV2) verifyCurrentSelectionMaterialV2(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	input datasetsnapshotport.ResolveInputV2,
 ) error {
-	node, err := service.resolveVersionedNodeV2(ctx, selection.SelectedIndex)
+	node, err := service.resolveVersionedNodeV2(ctx, selection.SelectedIndex, false, "")
 	if err != nil {
 		return err
 	}
@@ -539,7 +547,7 @@ func (service *SealedServiceV2) resolveRetainedSelectionV2(
 		return datasetsnapshotport.RetainedSelectionV2{}, ctx.Err()
 	}
 	for _, index := range current.DatasetIndexPath {
-		node, err := service.resolveVersionedNodeV2(ctx, index)
+		node, err := service.resolveVersionedNodeV2(ctx, index, false, "")
 		if err != nil {
 			return datasetsnapshotport.RetainedSelectionV2{}, err
 		}
@@ -596,12 +604,23 @@ func retainedSelectionEqualV2(
 		reflect.DeepEqual(left.Snapshot, right.Snapshot)
 }
 
+type currentSelectionUseModeV2 uint8
+
+const (
+	currentSelectionFullObservationV2 currentSelectionUseModeV2 = iota
+	currentSelectionPostNativeChallengeV2
+	// Only WithRetainedSelectionV2 selects this private mode. The complete
+	// initial observations and current/retained material checks still run;
+	// its lease challenges the exact-bound witness without repersisting it.
+	currentSelectionRetainedChallengeV2
+)
+
 func (capability *currentSelectionCapabilityV2) UseExact(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
 ) error {
-	return capability.useExact(selection, securityContext, use, false)
+	return capability.useExact(selection, securityContext, use, currentSelectionFullObservationV2)
 }
 
 // UsePostNativeExact is intentionally reachable only through a structural
@@ -613,15 +632,16 @@ func (capability *currentSelectionCapabilityV2) UsePostNativeExact(
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
 ) error {
-	return capability.useExact(selection, securityContext, use, true)
+	return capability.useExact(selection, securityContext, use, currentSelectionPostNativeChallengeV2)
 }
 
 func (capability *currentSelectionCapabilityV2) useExact(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
-	postNative bool,
+	mode currentSelectionUseModeV2,
 ) error {
+	postNative := mode == currentSelectionPostNativeChallengeV2
 	began := capability != nil && use != nil && ((!postNative && capability.beginUse()) ||
 		(postNative && capability.beginPostNativeUse()))
 	if !began {
@@ -638,7 +658,7 @@ func (capability *currentSelectionCapabilityV2) useExact(
 	leaseContext, cancel := context.WithCancel(capability.ctx)
 	defer cancel()
 	confirmCurrent := func() error {
-		if postNative && capability.freshHead != nil {
+		if mode != currentSelectionFullObservationV2 && capability.freshHead != nil {
 			return capability.freshHead(leaseContext)
 		}
 		_, err := capability.service.confirmSharedEvidenceHeadV2(leaseContext, capability.selection.Head)
@@ -739,6 +759,7 @@ func (service *SealedServiceV2) validateCurrentSelectionV2(
 	securityContext domainsecurity.TurnSecurityContext,
 ) error {
 	if service == nil || validateCurrentResolveInputV2(input, securityContext) != nil ||
+		selection.HostLocalHead != nil ||
 		service.validateHead(selection.Head) != nil ||
 		len(selection.DatasetIndexPath) == 0 ||
 		len(selection.DatasetIndexPath) > maxDatasetSnapshotIndexDepth ||
@@ -832,6 +853,10 @@ func currentSelectionDigestV2(selection datasetsnapshotport.CurrentSelectionV2) 
 
 func cloneCurrentSelectionV2(selection datasetsnapshotport.CurrentSelectionV2) datasetsnapshotport.CurrentSelectionV2 {
 	selection.DatasetIndexPath = append([]domainsecurity.DatasetSnapshotIndexV1(nil), selection.DatasetIndexPath...)
+	if selection.HostLocalHead != nil {
+		head := *selection.HostLocalHead
+		selection.HostLocalHead = &head
+	}
 	return selection
 }
 
@@ -897,15 +922,27 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 	desired *domainsecurity.DatasetSnapshotBindingKeyV1,
 	input datasetsnapshotport.ResolveInputV2,
 ) (versionedChainStateV2, error) {
+	if err := service.validateHead(head); err != nil {
+		return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, err)
+	}
+	return service.loadVersionedChainFromRootV2(ctx, head.Bundle.DatasetSnapshotIndexDigest,
+		head.Bundle.DatasetSnapshotCount, false, "", desired, input)
+}
+
+func (service *SealedServiceV2) loadVersionedChainFromRootV2(
+	ctx context.Context,
+	root string,
+	count uint64,
+	hostLocal bool,
+	modeCommitmentDigest string,
+	desired *domainsecurity.DatasetSnapshotBindingKeyV1,
+	input datasetsnapshotport.ResolveInputV2,
+) (versionedChainStateV2, error) {
 	state := versionedChainStateV2{
 		indexDigests: map[string]bool{}, recordDigests: map[string]bool{}, snapshotIDs: map[string]bool{},
 		producerIDs: map[string]bool{}, mutationIDs: map[string]bool{}, latestByBinding: map[string]versionedSnapshotNodeV2{},
 	}
-	if err := service.validateHead(head); err != nil {
-		return state, errors.Join(datasetsnapshotport.ErrCorrupt, err)
-	}
-	count := head.Bundle.DatasetSnapshotCount
-	currentDigest := head.Bundle.DatasetSnapshotIndexDigest
+	currentDigest := root
 	if count == 0 {
 		if currentDigest != domainsecurity.DatasetSnapshotIndexGenesisDigestV1() {
 			return state, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("empty dataset snapshot v2 root is invalid"))
@@ -925,15 +962,35 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index cycle detected"))
 		}
 		index, err := service.indexes.Resolve(ctx, currentDigest)
-		if err != nil || domainsecurity.ValidateDatasetSnapshotIndexForInstallationV1(
-			index, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
-		) != nil || index.Generation != expectedGeneration || index.IndexDigest != currentDigest {
+		validIndex := false
+		if hostLocal {
+			validIndex = domainsecurity.ValidateDatasetSnapshotIndexForHostLocalV2(
+				index, service.installationID, modeCommitmentDigest, service.authorityKeyID, service.authorityKey,
+			) == nil
+		} else {
+			validIndex = domainsecurity.ValidateDatasetSnapshotIndexForInstallationV1(
+				index, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
+			) == nil
+		}
+		if err != nil || !validIndex || index.Generation != expectedGeneration || index.IndexDigest != currentDigest {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index ancestry is unavailable"), err)
 		}
-		if expectedGeneration == count && domainsecurity.ValidateDatasetSnapshotIndexWitnessRootV1(index, currentDigest, count) != nil {
+		rootValid := domainsecurity.ValidateDatasetSnapshotIndexWitnessRootV1(index, currentDigest, count) == nil
+		if hostLocal {
+			rootValid = domainsecurity.ValidateDatasetSnapshotIndexHostLocalRootV2(index, currentDigest, count) == nil
+		}
+		if expectedGeneration == count && !rootValid {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index does not match witness root"))
 		}
-		if newerIndex != nil && domainsecurity.ValidateDatasetSnapshotIndexTransitionV1(index, *newerIndex) != nil {
+		validTransition := true
+		if newerIndex != nil {
+			if hostLocal {
+				validTransition = domainsecurity.ValidateDatasetSnapshotIndexHostLocalTransitionV2(index, *newerIndex) == nil
+			} else {
+				validTransition = domainsecurity.ValidateDatasetSnapshotIndexTransitionV1(index, *newerIndex) == nil
+			}
+		}
+		if !validTransition {
 			return versionedChainStateV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 index lineage is invalid"))
 		}
 		if state.mutationIDs[index.MutationID] || state.recordDigests[index.SnapshotRecordDigest] {
@@ -943,7 +1000,7 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 		state.mutationIDs[index.MutationID] = true
 		state.recordDigests[index.SnapshotRecordDigest] = true
 		state.indexPath = append(state.indexPath, index)
-		node, err := service.resolveVersionedNodeV2(ctx, index)
+		node, err := service.resolveVersionedNodeV2(ctx, index, hostLocal, modeCommitmentDigest)
 		if err != nil {
 			return versionedChainStateV2{}, err
 		}
@@ -998,6 +1055,8 @@ func (service *SealedServiceV2) loadVersionedChainV2(
 func (service *SealedServiceV2) resolveVersionedNodeV2(
 	ctx context.Context,
 	index domainsecurity.DatasetSnapshotIndexV1,
+	hostLocal bool,
+	modeCommitmentDigest string,
 ) (versionedSnapshotNodeV2, error) {
 	bundle, bundleErr := service.bundles.Resolve(ctx, index.SnapshotRecordDigest)
 	legacy, legacyErr := service.records.Resolve(ctx, index.SnapshotRecordDigest)
@@ -1011,9 +1070,14 @@ func (service *SealedServiceV2) resolveVersionedNodeV2(
 		return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot record store failed closed"), bundleErr, legacyErr)
 	}
 	if bundleFound {
-		if domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV2(
+		validRecord := domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV2(
 			index, bundle.Record, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
-		) != nil || domainsecurity.ValidateDatasetSnapshotAuthorityRecordForManifestV2(bundle.Record, bundle.Manifest) != nil {
+		) == nil
+		if hostLocal {
+			validRecord = domainsecurity.ValidateDatasetSnapshotIndexRecordForHostLocalV2(index, bundle.Record,
+				service.installationID, modeCommitmentDigest, service.authorityKeyID, service.authorityKey) == nil
+		}
+		if !validRecord || domainsecurity.ValidateDatasetSnapshotAuthorityRecordForManifestV2(bundle.Record, bundle.Manifest) != nil {
 			return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("dataset snapshot v2 record is invalid"))
 		}
 		record := bundle.Record
@@ -1022,7 +1086,7 @@ func (service *SealedServiceV2) resolveVersionedNodeV2(
 		}
 		return versionedSnapshotNodeV2{index: index, record: versioned, bundle: &bundle, binding: bundle.Record.Binding}, nil
 	}
-	if domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV1(
+	if hostLocal || domainsecurity.ValidateDatasetSnapshotIndexRecordForInstallationV1(
 		index, legacy, service.installationID, service.enrollmentID, service.authorityKeyID, service.authorityKey,
 	) != nil {
 		return versionedSnapshotNodeV2{}, errors.Join(datasetsnapshotport.ErrCorrupt, errors.New("legacy dataset snapshot record is invalid"))

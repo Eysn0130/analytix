@@ -51,9 +51,15 @@ const rawArgs = process.argv.slice(2)
 const args = new Set(rawArgs)
 const jsonOutput = args.has('--json') || args.has('--dry-run')
 const dryRun = args.has('--dry-run')
-const noWrite = args.has('--no-write') || dryRun
+const noWriteRequested = args.has('--no-write')
 const reportOnly = args.has('--no-gate')
 const diagnosticUnpackaged = args.has('--diagnostic-unpackaged')
+const diagnosticPackagedSynthetic = args.has('--diagnostic-packaged-synthetic-case')
+const diagnosticSynthetic = diagnosticUnpackaged || diagnosticPackagedSynthetic
+const packagedDiagnosticDebugOwners = new Map()
+if (diagnosticUnpackaged && diagnosticPackagedSynthetic) {
+  throw new Error('milestone_b_diagnostic_modes_conflict')
+}
 const CACHE_MOUNT = '/Volumes/AnalytixCache'
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000
 const DEFAULT_OUTPUT =
@@ -543,7 +549,8 @@ function isSHA256(value) {
 
 function currentGitCommit() {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
-    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe'
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 5_000,
+    maxBuffer: 64 * 1024
   })
   return result.status === 0 ? String(result.stdout || '').trim().toLowerCase() : ''
 }
@@ -1793,14 +1800,7 @@ function expectedPackagedRendererURL() {
   if (diagnosticUnpackaged) {
     return pathToFileURL(resolve(process.cwd(), 'out/renderer/index.html')).href
   }
-  const target = packagedTarget()
-  const appPath = packagedAppPath(target)
-  return pathToFileURL(join(
-    appAsarPath(appPath, target),
-    'out',
-    'renderer',
-    'index.html'
-  )).href
+  return 'analytix-app://renderer/index.html'
 }
 
 function runtimeResourcePath(appPath, target) {
@@ -1919,7 +1919,8 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     currentSnapshot.snapshotDigest === worktreeSnapshotDigest
   const codeSign = spawnSync('/usr/bin/codesign', [
     '--verify', '--deep', '--strict', '--verbose=2', appPath
-  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 60_000,
+    maxBuffer: 256 * 1024 })
   const codeSignatureVerified = codeSign.status === 0
   const fundsPluginArtifactBound = Boolean(
     artifacts?.fundsPlugin && authority?.artifacts?.fundsPlugin &&
@@ -2020,7 +2021,7 @@ function configuredExternalCaseAcceptance(startedAt) {
       provenancePath,
       repositoryRoot: process.cwd(),
       startedAt,
-      diagnosticSynthetic: diagnosticUnpackaged
+      diagnosticSynthetic
     })
     return {
       ...base,
@@ -2392,7 +2393,10 @@ function safeChildEnvironment({ isolatedHome, userDataDir, providerAuditSocketPa
   return environment
 }
 
-async function launchProviderAuditScanner(authority, externalCase) {
+export async function launchProviderAuditScanner(
+  authority, externalCase, onPhase = null, onSpawn = null
+) {
+  onPhase?.('scanner_spawn_requested')
   const child = spawn(process.execPath, [
     PROVIDER_AUDIT_SCANNER_PATH,
     '--private-startup-frame-v1'
@@ -2401,10 +2405,14 @@ async function launchProviderAuditScanner(authority, externalCase) {
     env: safeScannerEnvironment(),
     stdio: ['pipe', 'pipe', 'ignore']
   })
+  onPhase?.('scanner_spawn_returned')
+  onSpawn?.(child)
   child.analytixExit = new Promise((resolvePromise) => {
     child.once('exit', (code, signal) => resolvePromise({ code, signal }))
   })
   child.analytixLaunchIdentity = null
+  child.analytixScannerSpawnIdentity = diagnosticPackagedSynthetic
+    ? processIdentity(child.pid) : null
   const document = {
     schemaVersion: 1,
     purpose: 'analytix.provider-request-audit-scanner-startup/v1',
@@ -2419,7 +2427,7 @@ async function launchProviderAuditScanner(authority, externalCase) {
     caseWorkspace: externalCase.workspace,
     caseContractPath: externalCase.contractPath,
     caseProvenancePath: externalCase.provenancePath,
-    diagnosticSynthetic: diagnosticUnpackaged
+    diagnosticSynthetic
   }
   let body = Buffer.from(JSON.stringify(document), 'utf8')
   const frame = Buffer.alloc(8 + body.length)
@@ -2429,27 +2437,79 @@ async function launchProviderAuditScanner(authority, externalCase) {
   body = null
   try {
     try {
-      await new Promise((resolveWrite, rejectWrite) => {
-        child.stdin.once('error', rejectWrite)
-        child.stdin.end(frame, resolveWrite)
-      })
+      if (diagnosticPackagedSynthetic) {
+        // The diagnostic listener is installed before the scanner can emit
+        // READY, so a prompt exit cannot hide the completed startup frame.
+        const ready = waitForProviderAuditScannerReady(child)
+        onPhase?.('scanner_ready_observer_attached')
+        child.stdin.on('error', () => {
+          // Scanner exit or the bounded READY timeout supplies the refusal.
+        })
+        try {
+          child.stdin.end(frame)
+          onPhase?.('scanner_frame_write_issued')
+        } catch (error) {
+          void ready.catch(() => undefined)
+          throw error
+        }
+        await ready
+      } else {
+        await new Promise((resolveWrite, rejectWrite) => {
+          child.stdin.once('error', rejectWrite)
+          child.stdin.end(frame, resolveWrite)
+        })
+        await waitForProviderAuditScannerReady(child)
+      }
+      onPhase?.('scanner_ready_received')
     } finally {
       frame.fill(0)
     }
-    await waitForProviderAuditScannerReady(child)
-    if (!child.analytixLaunchIdentity) await establishLaunchIdentity(child)
+    if (!child.analytixLaunchIdentity) {
+      onPhase?.('scanner_identity_probe_started')
+      await establishLaunchIdentity(child)
+      onPhase?.('scanner_identity_probe_finished')
+    }
     if (!child.analytixLaunchIdentity || !processIdentityMatches(child.analytixLaunchIdentity)) {
       throw new Error('provider_audit_scanner_process_identity_unavailable')
     }
+    onPhase?.('scanner_identity_verified')
     return child
   } catch (error) {
+    onPhase?.('scanner_failed')
     const identity = child.analytixLaunchIdentity || await establishLaunchIdentity(child, 500)
-    if (identity && processIdentityMatches(identity)) {
+    if (diagnosticPackagedSynthetic) {
+      child.analytixScannerCleanupVerified = await stopExactProviderAuditScanner(child)
+    } else if (identity && processIdentityMatches(identity)) {
       child.analytixLaunchIdentity = identity
       await stopExactTaskOwnedChild(child)
     }
     throw error
   }
+}
+
+function exactProviderAuditScannerIdentityMatches(child, pinned) {
+  if (!child || !pinned || child.pid !== pinned.pid) return false
+  const current = processIdentity(child.pid, 2_000)
+  if (!packagedDiagnosticStableProcessIdentity({
+    pinned, current, exactExecutablePath: realpathSync(process.execPath)
+  })) return false
+  const parent = spawnSync('/bin/ps', ['-p', String(child.pid), '-o', 'ppid='], {
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 2_000
+  })
+  return parent.status === 0 && String(parent.stdout || '').trim() === String(process.pid)
+}
+
+export async function stopExactProviderAuditScanner(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return true
+  const pinned = child.analytixLaunchIdentity || child.analytixScannerSpawnIdentity
+  if (!exactProviderAuditScannerIdentityMatches(child, pinned)) return false
+  for (const signal of ['SIGTERM', 'SIGKILL']) {
+    try { process.kill(child.pid, signal) } catch { /* It may have exited. */ }
+    await Promise.race([child.analytixExit, sleep(signal === 'SIGTERM' ? 750 : 250)])
+    if (child.exitCode !== null || child.signalCode || !processExists(child.pid)) return true
+    if (!exactProviderAuditScannerIdentityMatches(child, pinned)) return false
+  }
+  return child.exitCode !== null || Boolean(child.signalCode) || !processExists(child.pid)
 }
 
 function safeScannerEnvironment() {
@@ -2460,7 +2520,7 @@ function safeScannerEnvironment() {
   return environment
 }
 
-function waitForProviderAuditScannerReady(child, timeoutMs = 20_000) {
+export function waitForProviderAuditScannerReady(child, timeoutMs = 20_000) {
   return new Promise((resolveReady, rejectReady) => {
     let output = Buffer.alloc(0)
     let settled = false
@@ -2502,9 +2562,11 @@ function sleep(ms) {
 }
 
 async function debugTargets(port, timeoutMs) {
+  if (diagnosticPackagedSynthetic) assertPackagedDiagnosticDebugOwner(port)
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
     signal: AbortSignal.timeout(timeoutMs)
   })
+  if (diagnosticPackagedSynthetic) assertPackagedDiagnosticDebugOwner(port)
   if (!response.ok) throw new Error('packaged_renderer_debug_target_unavailable')
   const targets = await response.json()
   return Array.isArray(targets)
@@ -2520,7 +2582,12 @@ async function waitForDebugTarget(port, timeoutMs) {
       const targets = await debugTargets(port, Math.min(1000, Math.max(250, deadline - Date.now())))
       pageTargetCount = targets.length
       if (targets.length === 1) return { ...targets[0], pageTargetCount: targets.length }
-    } catch {
+    } catch (error) {
+      if (diagnosticPackagedSynthetic && [
+        'packaged_debug_port_owner_mismatch',
+        'packaged_debug_process_identity_lost',
+        'packaged_debug_port_owner_unavailable'
+      ].includes(error?.message)) throw error
       // The packaged renderer is still starting or reloading.
     }
     await sleep(250)
@@ -2772,7 +2839,8 @@ async function clickDirectSourcePreviewControl(debugPort, name, timeoutMs = 20_0
         await clickCdpGeometry(observed.target, control.geometry)
         return { ok: true, blocker: '' }
       }
-    } catch {
+    } catch (error) {
+      if (!packagedDiagnosticCdpMayRetry(error, diagnosticPackagedSynthetic)) throw error
       // The local projection can be refreshing between page or mode changes.
     }
     await sleep(150)
@@ -2782,12 +2850,14 @@ async function clickDirectSourcePreviewControl(debugPort, name, timeoutMs = 20_0
 
 async function evaluateReadonlyCdp(wsUrl, expression, timeoutMs) {
   if (typeof WebSocket === 'undefined') throw new Error('node_websocket_unavailable')
+  assertPackagedDiagnosticTargetOwner(wsUrl)
   const socket = new WebSocket(wsUrl)
-  await new Promise((resolvePromise, reject) => {
-    socket.addEventListener('open', resolvePromise, { once: true })
-    socket.addEventListener('error', reject, { once: true })
-  })
   try {
+    await new Promise((resolvePromise, reject) => {
+      socket.addEventListener('open', resolvePromise, { once: true })
+      socket.addEventListener('error', reject, { once: true })
+    })
+    assertPackagedDiagnosticTargetOwner(wsUrl)
     return await new Promise((resolvePromise, reject) => {
       const timer = setTimeout(() => reject(new Error('readonly_cdp_timeout')), timeoutMs)
       socket.addEventListener('message', (event) => {
@@ -2811,14 +2881,18 @@ async function evaluateReadonlyCdp(wsUrl, expression, timeoutMs) {
   }
 }
 
-async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
+export async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
   if (typeof WebSocket === 'undefined') throw new Error('node_websocket_unavailable')
+  assertPackagedDiagnosticTargetOwner(wsUrl)
   const socket = new WebSocket(wsUrl)
-  await new Promise((resolvePromise, reject) => {
-    socket.addEventListener('open', resolvePromise, { once: true })
-    socket.addEventListener('error', reject, { once: true })
-  })
+  let commandSent = false
   try {
+    await new Promise((resolvePromise, reject) => {
+      const timer = setTimeout(() => reject(new Error('cdp_handshake_timeout')), timeoutMs)
+      socket.addEventListener('open', () => { clearTimeout(timer); resolvePromise() }, { once: true })
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('cdp_connection_error')) }, { once: true })
+    })
+    assertPackagedDiagnosticTargetOwner(wsUrl)
     const results = []
     for (let index = 0; index < commands.length; index += 1) {
       const id = index + 1
@@ -2834,10 +2908,15 @@ async function dispatchCdpCommands(wsUrl, commands, timeoutMs) {
           else resolvePromise(message.result || {})
         }
         socket.addEventListener('message', onMessage)
+        commandSent = true
         socket.send(JSON.stringify({ id, method: command.method, params: command.params || {} }))
       }))
     }
     return results
+  } catch (error) {
+    error.cdpCommandSent = commandSent
+    error.cdpOutcome = commandSent ? 'unknown' : 'not_sent'
+    throw markPackagedDiagnosticCdpFailure(error, commandSent, diagnosticPackagedSynthetic)
   } finally {
     socket.close()
   }
@@ -2979,6 +3058,7 @@ async function cdpComposerSubmitToTarget(
           : 'composer_primary_button_not_ready'
     }
   } catch (error) {
+    if (!packagedDiagnosticCdpMayRetry(error, diagnosticPackagedSynthetic)) throw error
     return {
       ok: false,
       blocker: error instanceof Error ? error.message : 'composer_cdp_input_failed'
@@ -2986,15 +3066,17 @@ async function cdpComposerSubmitToTarget(
   }
 }
 
-async function cdpComposerSubmit(debugPort, text, acceptedButtonLabels = []) {
+export async function cdpComposerSubmit(debugPort, text, acceptedButtonLabels = [], resolveTarget = null) {
+  const currentTarget = resolveTarget || (() => waitForDebugTarget(debugPort, 5000))
   try {
     return await cdpComposerSubmitToTarget(
-      await waitForDebugTarget(debugPort, 20_000),
+      await (resolveTarget ? currentTarget() : waitForDebugTarget(debugPort, 20_000)),
       text,
       acceptedButtonLabels,
-      () => waitForDebugTarget(debugPort, 5000)
+      currentTarget
     )
   } catch (error) {
+    if (!packagedDiagnosticCdpMayRetry(error, diagnosticPackagedSynthetic)) throw error
     return {
       ok: false,
       blocker: error instanceof Error ? error.message : 'composer_cdp_input_failed'
@@ -3002,15 +3084,18 @@ async function cdpComposerSubmit(debugPort, text, acceptedButtonLabels = []) {
   }
 }
 
-function readonlyVisibleGeometryExpression(labels) {
+function readonlyVisibleGeometryExpression(labels, scopeSelector = '') {
   return `(() => {
     const labels = ${JSON.stringify(labels)};
-    const elements = Array.from(document.querySelectorAll('button,[role="button"],a'));
+    const scopeSelector = ${JSON.stringify(scopeSelector)};
+    const roots = scopeSelector ? Array.from(document.querySelectorAll(scopeSelector)) : [document];
+    const elements = roots.flatMap((root) => Array.from(root.querySelectorAll('button,[role="button"],a')));
     for (const element of elements) {
       const text = String(element.innerText || '').trim();
       const aria = String(element.getAttribute('aria-label') || '').trim();
       const title = String(element.getAttribute('title') || '').trim();
       if (!labels.includes(text) && !labels.includes(aria) && !labels.includes(title)) continue;
+      if (element.disabled === true || element.getAttribute('aria-disabled') === 'true') continue;
       const rect = element.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -3019,21 +3104,22 @@ function readonlyVisibleGeometryExpression(labels) {
   })()`
 }
 
-async function clickVisibleByLabels(debugPort, labels, timeoutMs = 20_000) {
+async function clickVisibleByLabels(debugPort, labels, timeoutMs = 20_000, scopeSelector = '') {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
       const target = await waitForDebugTarget(debugPort, Math.min(5000, deadline - Date.now()))
       const geometry = await evaluateReadonlyCdp(
         target.webSocketDebuggerUrl,
-        readonlyVisibleGeometryExpression(labels),
+        readonlyVisibleGeometryExpression(labels, scopeSelector),
         Math.min(5000, deadline - Date.now())
       )
       if (geometry) {
         await clickCdpGeometry(target, geometry)
         return { ok: true, blocker: '' }
       }
-    } catch {
+    } catch (error) {
+      if (!packagedDiagnosticCdpMayRetry(error, diagnosticPackagedSynthetic)) throw error
       // Renderer navigation may be settling.
     }
     await sleep(200)
@@ -3638,24 +3724,44 @@ export function ordinaryPublicSeam(observation, runtimePort) {
 export async function waitForLocalProviderWorkbench({
   debugPort, workspace, runtimePort, runtimeDataDir, timeoutMs, exactThreadId = '',
   expectedFunds = 'independent', providerRequired = expectedFunds === 'available',
-  onFreshRegistry = null, expectedProvider = null
+  onFreshRegistry = null, expectedProvider = null, ownedMainChild = null,
+  onFirstObserve = null
 }, internalDependencies = {}) {
   const observe = internalDependencies.observeRenderer || observeRenderer
   const pause = internalDependencies.sleep || sleep
+  const strictMainExit = internalDependencies.diagnosticPackagedSynthetic ??
+    diagnosticPackagedSynthetic
   const deadline = Date.now() + timeoutMs
   let latest = null
   let normalLocalProviderSetupObserved = false
   let initialRegistry = null
   let lastObservationBlocker = ''
+  let firstObserveStarted = false
   const observationSliceMs = diagnosticUnpackaged ? 30_000 : 10_000
   while (Date.now() < deadline) {
+    if (strictMainExit && ownedMainChild &&
+        (ownedMainChild.exitCode !== null || ownedMainChild.signalCode)) {
+      return { ok: false, blocked: false,
+        blocker: 'packaged_main_exited_before_readiness', observation: latest,
+        provider: milestoneBLocalProvider(latest),
+        publicSeam: ordinaryPublicSeam(latest, runtimePort),
+        normalLocalProviderSetupObserved, providerRequired }
+    }
     try {
+      if (!firstObserveStarted) {
+        firstObserveStarted = true
+        onFirstObserve?.('started')
+      }
       latest = await observe({
         debugPort,
         workspace,
         exactThreadId,
         timeoutMs: Math.min(observationSliceMs, Math.max(1000, deadline - Date.now()))
       })
+      if (firstObserveStarted && onFirstObserve) {
+        onFirstObserve('completed')
+        onFirstObserve = null
+      }
       const registry = latest?.providerRegistry
       if (!initialRegistry && freshLocalProviderRegistry(registry)) {
         initialRegistry = registry
@@ -3702,6 +3808,10 @@ export async function waitForLocalProviderWorkbench({
         }
       }
     } catch (error) {
+      if (firstObserveStarted && onFirstObserve) {
+        onFirstObserve('failed')
+        onFirstObserve = null
+      }
       // Visible Provider setup, renderer reload, and runtime restart are retried through read-only seams.
       lastObservationBlocker = error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
         ? error.message
@@ -3766,7 +3876,7 @@ const CASE_COMPACTION_SUMMARY_V1 =
   'Case-bound history compacted. No case facts, assistant prose, tool output, evidence authority, or prior compaction prose were carried into the new context epoch.'
 const TASK_CONTINUATION_EVIDENCE_STATE_V1 = 'unverified_for_case_facts'
 
-function goJSON(value) {
+export function goJSON(value) {
   return JSON.stringify(value)
     .replaceAll('&', '\\u0026')
     .replaceAll('<', '\\u003c')
@@ -4705,8 +4815,30 @@ async function waitForAnyBodyTextState(debugPort, expectedValues, present, timeo
   return false
 }
 
-function nativeSelectFile(path) {
-  const script = `
+function nativeSelectFile(path, debugPort) {
+  const diagnosticChild = diagnosticPackagedSynthetic
+    ? packagedDiagnosticDebugOwners.get(debugPort)
+    : null
+  if (diagnosticPackagedSynthetic) assertPackagedDiagnosticDebugOwner(debugPort)
+  const script = diagnosticPackagedSynthetic ? `
+set csvPath to ${JSON.stringify(path)}
+tell application "System Events"
+  set ownedProcess to first application process whose unix id is ${diagnosticChild.pid}
+  set frontmost of ownedProcess to true
+  delay 0.4
+  if not frontmost of ownedProcess then error "owned app lost focus"
+  keystroke "g" using {command down, shift down}
+  delay 0.4
+  if not frontmost of ownedProcess then error "owned app lost focus"
+  keystroke csvPath
+  delay 0.4
+  if not frontmost of ownedProcess then error "owned app lost focus"
+  key code 36
+  delay 0.7
+  if not frontmost of ownedProcess then error "owned app lost focus"
+  key code 36
+end tell
+` : `
 set csvPath to ${JSON.stringify(path)}
 tell application "System Events"
   delay 0.4
@@ -4733,34 +4865,46 @@ end tell
 }
 
 async function openDataImportDialog(debugPort) {
+  // Fresh profiles may choose the explicit local-data path before configuring
+  // a Provider. This leaves Agent and model actions behind their normal gate.
+  await clickVisibleByLabels(debugPort, [
+    'Open local data tools', '打开本地数据工具'
+  ], 2000)
   let importEntry = await clickVisibleByLabels(debugPort, [
-    'Open data import entry', '打开数据导入入口', 'Data import', '数据导入'
-  ], 5000)
+    'Data import', '数据导入'
+  ], 3000, '.session-header-compact')
   if (!importEntry.ok) {
     const actionsMenu = await clickVisibleByLabels(debugPort, [
       'Chat actions', '会话操作'
-    ], 10_000)
-    if (!actionsMenu.ok) return { ok: false, blocked: false, blocker: actionsMenu.blocker }
+    ], 10_000, '.session-header-compact')
+    if (!actionsMenu.ok) {
+      return { ok: false, blocked: false, blocker: 'session_actions_control_not_found' }
+    }
     await sleep(300)
     importEntry = await clickVisibleByLabels(debugPort, [
-      'Open data import entry', '打开数据导入入口', 'Data import', '数据导入'
-    ], 10_000)
+      'Data import', '数据导入'
+    ], 10_000, '.ds-session-actions-menu')
   }
-  return importEntry.ok
+  if (!importEntry.ok) {
+    return { ok: false, blocked: false, blocker: 'session_data_import_control_not_found' }
+  }
+  const dialog = await waitForAnyBodyTextState(debugPort,
+    ['Direct source preview', '来源直览'], true, 10_000)
+  return dialog
     ? { ok: true, blocked: false, blocker: '' }
-    : { ok: false, blocked: false, blocker: importEntry.blocker }
+    : { ok: false, blocked: false, blocker: 'direct_source_preview_dialog_not_observed' }
 }
 
 async function stageSnapshotThroughNativeUI({ debugPort, sourcePath, timeoutMs }) {
   const importEntry = await openDataImportDialog(debugPort)
   if (!importEntry.ok) return importEntry
   const stageButton = await clickVisibleByLabels(debugPort, [
-    'Select CSV and create snapshot', '选择 CSV 并建立快照'
+    'Select CSV or ZIP', '选择 CSV 或 ZIP'
   ], 20_000)
-  if (!stageButton.ok) return { ok: false, blocked: false, blocker: stageButton.blocker }
+  if (!stageButton.ok) return { ok: false, blocked: false, blocker: 'snapshot_stage_control_not_found' }
   const successMessages = [
-    'The Go host created, startup-validated, and selected the immutable data snapshot as the current case evidence source.',
-    '不可变数据快照已由 Go 主机建立、启动校验并切换为当前案件证据源。'
+    'The immutable data snapshot is ready and enabled as the current case evidence source for this runtime session.',
+    '不可变数据快照已建立，并已启用为本次运行的当前案件证据源。'
   ]
   const priorSuccessCleared = await waitForAnyBodyTextState(
     debugPort,
@@ -4771,8 +4915,10 @@ async function stageSnapshotThroughNativeUI({ debugPort, sourcePath, timeoutMs }
   if (!priorSuccessCleared) {
     return { ok: false, blocked: false, blocker: 'native_snapshot_staging_prior_success_not_cleared' }
   }
-  const selected = nativeSelectFile(sourcePath)
+  const selected = nativeSelectFile(sourcePath, debugPort)
   if (!selected.ok) return { ok: false, blocked: true, blocker: selected.blocker }
+  const confirm = await clickSnapshotConfirmOrCapabilityFailure(debugPort, timeoutMs)
+  if (!confirm.ok) return confirm
   const success = await waitForAnyBodyTextState(
     debugPort,
     successMessages,
@@ -4785,6 +4931,24 @@ async function stageSnapshotThroughNativeUI({ debugPort, sourcePath, timeoutMs }
     blocked: false,
     blocker: success ? '' : 'native_snapshot_staging_success_not_observed'
   }
+}
+
+async function clickSnapshotConfirmOrCapabilityFailure(debugPort, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const confirm = await clickVisibleByLabels(debugPort, [
+      'Confirm snapshot', '确认建立快照'
+    ], Math.min(2000, deadline - Date.now()))
+    if (confirm.ok) return { ok: true, blocked: false, blocker: '' }
+    const unavailable = await waitForAnyBodyTextState(debugPort, [
+      'Trusted data import is unavailable in this runtime environment.',
+      '当前运行环境未提供受信任的数据导入能力。'
+    ], true, Math.min(1000, Math.max(250, deadline - Date.now())))
+    if (unavailable) {
+      return { ok: false, blocked: false, blocker: 'funds_import_capability_unavailable' }
+    }
+  }
+  return { ok: false, blocked: false, blocker: 'snapshot_confirm_control_not_ready' }
 }
 
 async function reopenThreadInRenderer(debugPort, threadTitle, timeoutMs = 20_000) {
@@ -4839,9 +5003,11 @@ async function forkCurrentThreadInRenderer(debugPort, workspace, parentThreadId,
   return { ok: false, blocker: 'forked_thread_not_observed' }
 }
 
-async function cdpNormalQuit(debugPort) {
+export async function cdpNormalQuit(debugPort, resolveTarget = null) {
+  let quitDispatch = false
   try {
-    const target = await waitForDebugTarget(debugPort, 20_000)
+    const target = await (resolveTarget ? resolveTarget() : waitForDebugTarget(debugPort, 20_000))
+    quitDispatch = true
     await dispatchCdpCommands(target.webSocketDebuggerUrl, [
       { method: 'Input.dispatchKeyEvent', params: { type: 'rawKeyDown', key: 'q', code: 'KeyQ', modifiers: 4 } },
       { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'q', code: 'KeyQ', modifiers: 4 } }
@@ -4850,7 +5016,8 @@ async function cdpNormalQuit(debugPort) {
   } catch (error) {
     return {
       ok: false,
-      blocker: error instanceof Error ? error.message : 'normal_app_quit_input_failed'
+      blocker: error instanceof Error ? error.message : 'normal_app_quit_input_failed',
+      cdpOutcome: quitDispatch ? error?.cdpOutcome || 'not_sent' : 'not_sent'
     }
   }
 }
@@ -4869,19 +5036,38 @@ function launchPackagedApp({ appPath, target, debugPort, childEnv }) {
     child.once('exit', (code, signal) => resolvePromise({ code, signal }))
   })
   child.analytixLaunchIdentity = processIdentity(child.pid)
+  child.analytixDebugPort = debugPort
+  if (diagnosticPackagedSynthetic) child.analytixExactExecutablePath = realpathSync(command)
   return child
 }
 
-async function establishLaunchIdentity(child, timeoutMs = 5000) {
+export async function establishLaunchIdentity(
+  child, timeoutMs = 5000, diagnosticPackagedMode = diagnosticPackagedSynthetic
+) {
   const deadline = Date.now() + timeoutMs
+  const diagnosticPackagedMain = diagnosticPackagedMode &&
+    typeof child?.analytixExactExecutablePath === 'string'
   let previous = null
   while (Date.now() < deadline) {
-    const identity = processIdentity(child?.pid)
+    const identity = processIdentity(child?.pid, diagnosticPackagedMode ? 2_000 : undefined)
     if (identity && previous && identity.pid === previous.pid &&
         identity.startTime === previous.startTime &&
         identity.commandDigest === previous.commandDigest &&
-        identity.executableSetDigest === previous.executableSetDigest) {
+        (diagnosticPackagedMain
+          ? packagedDiagnosticStableProcessIdentity({
+              pinned: previous, current: identity,
+              exactExecutablePath: child.analytixExactExecutablePath
+            })
+          : identity.executableSetDigest === previous.executableSetDigest)) {
       child.analytixLaunchIdentity = identity
+      if (diagnosticPackagedMain) {
+        packagedDiagnosticDebugOwners.set(child.analytixDebugPort, child)
+        child.once('exit', () => {
+          if (packagedDiagnosticDebugOwners.get(child.analytixDebugPort) === child) {
+            packagedDiagnosticDebugOwners.delete(child.analytixDebugPort)
+          }
+        })
+      }
       return identity
     }
     if (!processExists(child?.pid)) return null
@@ -4917,7 +5103,8 @@ function processExists(pid) {
 function descendantPids(rootPid) {
   if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === 'win32') return []
   const result = spawnSync('/bin/ps', ['-axo', 'pid=,ppid='], {
-    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe'
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 2_000,
+    maxBuffer: 256 * 1024
   })
   if (result.status !== 0) return []
   const children = new Map()
@@ -4939,17 +5126,20 @@ function descendantPids(rootPid) {
   return found
 }
 
-function processIdentity(pid) {
+function processIdentity(pid, commandTimeoutMs = diagnosticPackagedSynthetic ? 2_000 : 5_000) {
   if (!Number.isInteger(pid) || pid <= 0 || !processExists(pid)) return null
   const started = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
-    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe'
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: commandTimeoutMs,
+    maxBuffer: 64 * 1024
   })
   const command = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'command='], {
-    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe'
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: commandTimeoutMs,
+    maxBuffer: 64 * 1024
   })
   const executable = spawnSync('/usr/sbin/lsof', [
     '-a', '-p', String(pid), '-d', 'txt', '-Fn'
-  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: commandTimeoutMs,
+    maxBuffer: 512 * 1024 })
   const startTime = String(started.stdout || '').trim()
   const commandText = String(command.stdout || '').trim()
   const executablePaths = String(executable.stdout || '').split(/\r?\n/u)
@@ -4962,6 +5152,7 @@ function processIdentity(pid) {
     pid,
     startTime,
     commandDigest: sha256(commandText),
+    executablePaths: Object.freeze(executablePaths),
     executableSetDigest: sha256(canonicalJSON(executablePaths))
   })
 }
@@ -4972,6 +5163,83 @@ function processIdentityMatches(identity) {
     current.startTime === identity.startTime &&
     current.commandDigest === identity.commandDigest &&
     current.executableSetDigest === identity.executableSetDigest)
+}
+
+export function packagedDiagnosticStableProcessIdentity({ pinned, current,
+  exactExecutablePath }) {
+  return Boolean(pinned && current && Number.isInteger(pinned.pid) && pinned.pid > 0 &&
+    current.pid === pinned.pid &&
+    typeof pinned.startTime === 'string' && pinned.startTime.length > 0 &&
+    current.startTime === pinned.startTime &&
+    typeof pinned.commandDigest === 'string' && pinned.commandDigest.length === 64 &&
+    current.commandDigest === pinned.commandDigest &&
+    typeof exactExecutablePath === 'string' && exactExecutablePath.startsWith('/') &&
+    Array.isArray(pinned.executablePaths) &&
+    pinned.executablePaths.includes(exactExecutablePath) &&
+    Array.isArray(current.executablePaths) &&
+    current.executablePaths.includes(exactExecutablePath))
+}
+
+export function packagedDiagnosticDebugOwnerBlocker({ expectedPid, identityCurrent, ownerPids }) {
+  if (!Number.isInteger(expectedPid) || expectedPid <= 0 || identityCurrent !== true) {
+    return 'packaged_debug_process_identity_lost'
+  }
+  if (!Array.isArray(ownerPids)) return 'packaged_debug_port_owner_unavailable'
+  if (ownerPids.length === 0) return 'packaged_debug_port_not_ready'
+  if (ownerPids.length !== 1 || ownerPids[0] !== expectedPid) {
+    return 'packaged_debug_port_owner_mismatch'
+  }
+  return ''
+}
+
+export function markPackagedDiagnosticCdpFailure(error, commandSent, diagnosticMode) {
+  if (!diagnosticMode || !commandSent) return error
+  const marked = error instanceof Error ? error : new Error('cdp_input_unknown_sent')
+  marked.cdpCommandSent = true
+  return marked
+}
+
+export function packagedDiagnosticCdpMayRetry(error, diagnosticMode) {
+  return !(diagnosticMode && error?.cdpCommandSent === true)
+}
+
+function assertPackagedDiagnosticDebugOwner(port) {
+  const child = packagedDiagnosticDebugOwners.get(port)
+  if (!child) throw new Error('packaged_debug_process_identity_lost')
+  const owners = spawnSync('/usr/sbin/lsof', [
+    '-ti', `tcp:${port}`, '-sTCP:LISTEN'
+  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 2_000,
+    maxBuffer: 256 * 1024 })
+  const pids = owners.error ? null : owners.status !== 0 ? []
+    : [...new Set(String(owners.stdout || '').split(/\r?\n/u)
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0))]
+  const blocker = packagedDiagnosticDebugOwnerBlocker({
+    expectedPid: child.pid,
+    identityCurrent: packagedDiagnosticStableProcessIdentity({
+      pinned: child.analytixLaunchIdentity,
+      current: processIdentity(child.pid),
+      exactExecutablePath: child.analytixExactExecutablePath
+    }),
+    ownerPids: pids
+  })
+  if (blocker) throw new Error(blocker)
+}
+
+function assertPackagedDiagnosticTargetOwner(wsUrl) {
+  if (!diagnosticPackagedSynthetic) return
+  let target
+  try {
+    target = new URL(wsUrl)
+  } catch {
+    throw new Error('packaged_debug_target_invalid')
+  }
+  if (target.protocol !== 'ws:' || target.hostname !== '127.0.0.1' ||
+      !target.port || target.username || target.password ||
+      !target.pathname.startsWith('/devtools/page/')) {
+    throw new Error('packaged_debug_target_invalid')
+  }
+  assertPackagedDiagnosticDebugOwner(Number(target.port))
 }
 
 function refreshTaskOwnedChildIdentity(child) {
@@ -5035,7 +5303,8 @@ async function stopExactTaskOwnedChild(child) {
 
 function listeningPids(port) {
   const result = spawnSync('/usr/sbin/lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'], {
-    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe'
+    cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 2_000,
+    maxBuffer: 256 * 1024
   })
   if (result.status !== 0) return []
   return String(result.stdout || '').split(/\r?\n/u)
@@ -5051,7 +5320,8 @@ function exactRuntimeProcessEvidence(appPid, runtimePort, expectedRuntimePath) {
   }
   const result = spawnSync('/usr/sbin/lsof', [
     '-a', '-p', String(listeners[0]), '-d', 'txt', '-Fn'
-  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })
+  ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe', timeout: 2_000,
+    maxBuffer: 256 * 1024 })
   let expected = ''
   try {
     expected = realpathSync(expectedRuntimePath)
@@ -5370,7 +5640,9 @@ function safeReportSkeleton({ target, appPath, sourceCommit, timeoutMs, typedLoc
     id: 'runtime-go-packaged-milestone-b',
     stage: diagnosticUnpackaged
       ? 'unpackaged-synthetic-electron-funds-diagnostic'
-      : 'packaged-real-duckdb-funds-analysis-milestone-b',
+      : diagnosticPackagedSynthetic
+        ? 'packaged-synthetic-electron-funds-diagnostic'
+        : 'packaged-real-duckdb-funds-analysis-milestone-b',
     generatedAt: new Date().toISOString(),
     sourceCommit,
     harnessCommit: currentGitCommit(),
@@ -5382,7 +5654,9 @@ function safeReportSkeleton({ target, appPath, sourceCommit, timeoutMs, typedLoc
     app: { targetKey: target.key, appPathHash: sha256(appPath) },
     acceptanceClass: diagnosticUnpackaged
       ? 'development-only-unpackaged-synthetic-case-diagnostic'
-      : 'formal-packaged-typed-local-display-external-owner-isolated-real-case',
+      : diagnosticPackagedSynthetic
+        ? 'development-only-packaged-synthetic-case-diagnostic'
+        : 'formal-packaged-typed-local-display-external-owner-isolated-real-case',
     mockUsed: false,
     fixtureUsed: false,
     syntheticProviderUsed: false,
@@ -5521,19 +5795,32 @@ function safeReportSkeleton({ target, appPath, sourceCommit, timeoutMs, typedLoc
     blockedCheckIds: [],
     unverifiedCheckIds: [...REQUIRED_CHECK_IDS]
   }
-  if (diagnosticUnpackaged) {
+  if (diagnosticSynthetic) {
     report.fixtureUsed = true
     report.diagnostic = {
-      mode: 'unpackaged-synthetic-current-source',
+      mode: diagnosticUnpackaged
+        ? 'unpackaged-synthetic-current-source'
+        : 'packaged-synthetic-exact-artifact',
       passed: false,
+      directPreviewPassed: false,
       formalArtifactAccepted: false,
+      packagedArtifactVerified: false,
       formalMilestoneBPassed: false,
       syntheticCase: true,
       realNetworkProvider: false,
-      sourceCommit
+      sourceCommit,
+      ...(diagnosticPackagedSynthetic ? { phaseEvents: [] } : {})
     }
   }
   return report
+}
+
+export function shouldRetainPackagedDiagnosticProfile(report, diagnosticMode) {
+  return diagnosticMode === true && (
+    report?.runtimeBlocker !== '' || report?.directSourcePreview?.status !== 'PASS' ||
+    report?.exit?.residualProcessCount !== 0 ||
+    report?.checks?.some((item) => item.status === 'FAIL') === true
+  )
 }
 
 function checkFromEvidence(report, id, evidence, successMessage) {
@@ -5959,16 +6246,26 @@ function finalizeReport(report) {
       : report.blockedCheckIds.length > 0
         ? 'BLOCKED'
         : 'UNVERIFIED'
-  if (diagnosticUnpackaged && report.diagnostic) {
-    const diagnosticCheckIds = REQUIRED_CHECK_IDS.filter((id) =>
-      id !== 'formal-packaged-artifact'
-    )
+  if (diagnosticSynthetic && report.diagnostic) {
+    const diagnosticCheckIds = diagnosticUnpackaged
+      ? REQUIRED_CHECK_IDS.filter((id) => id !== 'formal-packaged-artifact')
+      : REQUIRED_CHECK_IDS
     report.diagnostic.realNetworkProvider = report.provider?.configured === true
+    report.diagnostic.packagedArtifactVerified = diagnosticPackagedSynthetic &&
+      report.artifact?.ok === true && report.artifactFinal?.ok === true
+    report.diagnostic.directPreviewPassed = diagnosticPackagedSynthetic &&
+      report.diagnostic.packagedArtifactVerified &&
+      report.phaseLanes?.b1DirectSourcePreview?.status === 'PASS' &&
+      report.checks.some((item) => item.id === 'direct-source-preview' && item.status === 'PASS')
     report.diagnostic.passed = report.workflow?.completedRunnableFlow === true &&
       report.diagnostic.sourceStable === true && !report.runtimeBlocker &&
       diagnosticCheckIds.every((id) =>
         report.checks.some((item) => item.id === id && item.status === 'PASS')
       )
+  }
+  if (diagnosticPackagedSynthetic) {
+    report.passed = false
+    if (report.status === 'PASS') report.status = 'PARTIAL'
   }
   return report
 }
@@ -6000,6 +6297,18 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
     : DEFAULT_TIMEOUT_MS
   const typedLocalDisplay = configuredTypedLocalDisplayStatus()
   const report = safeReportSkeleton({ target, appPath, sourceCommit, timeoutMs, typedLocalDisplay })
+  const diagnosticStartedAtMs = Date.now()
+  const recordDiagnosticPhase = diagnosticPackagedSynthetic
+    ? (phase, status = 'observed') => {
+        if (report.diagnostic.phaseEvents.length < 32) {
+          report.diagnostic.phaseEvents.push({
+            phase,
+            elapsedMs: Date.now() - diagnosticStartedAtMs,
+            status
+          })
+        }
+      }
+    : null
   setCheck(
     report,
     'typed-local-display',
@@ -6067,7 +6376,7 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
     report,
     'external-owner-isolated-case',
     externalCase,
-    diagnosticUnpackaged
+    diagnosticSynthetic
       ? 'isolated synthetic diagnostic case with contract and snapshot provenance validated'
       : 'external pre-existing owner-isolated case with contract and snapshot provenance validated'
   )
@@ -6075,7 +6384,7 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
     report,
     'canonical-csv-contract-and-provenance',
     externalCase,
-    diagnosticUnpackaged
+    diagnosticSynthetic
       ? 'two canonical synthetic CSV snapshots and independent expected truth verified for development diagnostics only'
       : 'two canonical real CSV snapshots and independent expected truth verified'
   )
@@ -6138,6 +6447,7 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
   const observations = []
   const exactExitIdentities = []
   let providerAuditScanner = null
+  let providerAuditScannerCandidate = null
   let credentialSource = null
   let credentialProvider = null
   let finalCredentialProvider = null
@@ -6164,24 +6474,46 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
 
   try {
     ownActiveCheck('first_launch', 'packaged-first-launch')
+    recordDiagnosticPhase?.('case_workspace_prepare_started')
     mixedCodeWorkspace = prepareMixedCodeWorkspace(externalCase.authority.workspace)
+    recordDiagnosticPhase?.('case_workspace_prepare_finished')
     if (providerAudit.ok) {
       providerAuditScanner = await launchProviderAuditScanner(
         providerAudit.authority,
-        externalCase.authority
+        externalCase.authority,
+        recordDiagnosticPhase,
+        diagnosticPackagedSynthetic
+          ? (child) => { providerAuditScannerCandidate = child }
+          : null
       )
+      recordDiagnosticPhase?.('scanner_launch_finished')
     }
+    recordDiagnosticPhase?.('main_spawn_started')
     firstChild = launchPackagedApp({
       appPath,
       target,
       debugPort: firstDebugPort,
       childEnv
     })
+    recordDiagnosticPhase?.('main_spawn_returned')
+    if (recordDiagnosticPhase) {
+      firstChild.once('exit', (code, signal) => recordDiagnosticPhase(
+        'main_child_exit', signal ? 'signaled' : code === 0 ? 'zero' : 'nonzero'
+      ))
+      firstChild.once('error', () => recordDiagnosticPhase('main_spawn_error', 'error'))
+    }
+    recordDiagnosticPhase?.('main_identity_probe_started')
     if (!await establishLaunchIdentity(firstChild)) {
       throw new Error('packaged_process_identity_unavailable')
     }
+    recordDiagnosticPhase?.('main_identity_verified')
+    recordDiagnosticPhase?.('first_readiness_wait_started')
     const firstReady = await waitForLocalProviderWorkbench({
       debugPort: firstDebugPort,
+      ownedMainChild: firstChild,
+      onFirstObserve: recordDiagnosticPhase
+        ? (status) => recordDiagnosticPhase('first_readiness_observe', status)
+        : null,
       workspace: externalCase.authority.workspace,
       runtimePort,
       runtimeDataDir,
@@ -6199,6 +6531,7 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
           }
         : null
     })
+    recordDiagnosticPhase?.('first_readiness_wait_finished', firstReady.ok ? 'ready' : 'unready')
     if (firstReady.observation) observations.push(firstReady.observation)
     report.provider.normalLocalProviderSetupObserved = firstReady.normalLocalProviderSetupObserved
     report.provider.automatedTestBootstrapObserved = false
@@ -6259,7 +6592,9 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
       },
       diagnosticUnpackaged
         ? 'current-source unpackaged Electron renderer, health, Go runtime, and permanent ordinary catalog started'
-        : 'formal packaged Electron renderer, health, Go runtime, and permanent ordinary catalog started'
+        : diagnosticPackagedSynthetic
+          ? 'exact packaged synthetic diagnostic Electron renderer, health, Go runtime, and permanent ordinary catalog started'
+          : 'formal packaged Electron renderer, health, Go runtime, and permanent ordinary catalog started'
     )
     if (!firstReady.ok || !runtimeProcess.ok) {
       throw new Error(firstReady.blocker || 'packaged_first_launch_failed')
@@ -8118,7 +8453,10 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
     if (secondChild && processExists(secondChild.pid)) {
       exactExitIdentities.push(...await stopExactTaskOwnedChild(secondChild))
     }
-    if (providerAuditScanner && processExists(providerAuditScanner.pid)) {
+    if (diagnosticPackagedSynthetic && providerAuditScannerCandidate) {
+      providerAuditScannerCandidate.analytixScannerCleanupVerified =
+        await stopExactProviderAuditScanner(providerAuditScannerCandidate)
+    } else if (providerAuditScanner && processExists(providerAuditScanner.pid)) {
       exactExitIdentities.push(...await stopExactTaskOwnedChild(providerAuditScanner))
     }
     await stopExactProcessIdentities(
@@ -8239,11 +8577,27 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
   const residualIdentities = exactExitIdentities.filter((identity) =>
     processIdentityMatches(identity)
   )
-  report.exit.residualProcessCount = residualIdentities.length
+  const scannerCandidateLive = diagnosticPackagedSynthetic && providerAuditScannerCandidate &&
+    providerAuditScannerCandidate.exitCode === null &&
+    !providerAuditScannerCandidate.signalCode &&
+    processExists(providerAuditScannerCandidate.pid)
+  const scannerIdentityCurrent = scannerCandidateLive &&
+    exactProviderAuditScannerIdentityMatches(providerAuditScannerCandidate,
+      providerAuditScannerCandidate.analytixLaunchIdentity ||
+      providerAuditScannerCandidate.analytixScannerSpawnIdentity)
+  const scannerExitUnverified = scannerCandidateLive && !scannerIdentityCurrent
+  report.exit.residualProcessCount = scannerExitUnverified
+    ? null : residualIdentities.length + (scannerIdentityCurrent ? 1 : 0)
   checkFromEvidence(
     report,
     'zero-residual-processes',
-    { ok: residualIdentities.length === 0, blocker: 'task_owned_packaged_processes_remain' },
+    {
+      ok: report.exit.residualProcessCount === 0,
+      blocked: scannerExitUnverified,
+      blocker: scannerExitUnverified
+        ? 'provider_audit_scanner_exit_identity_unverified'
+        : 'task_owned_packaged_processes_remain'
+    },
     'all exact task-owned packaged Electron and Go descendant processes exited'
   )
 
@@ -8262,6 +8616,7 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
       finalArtifact.executableSha256 === artifact.executableSha256 &&
       finalArtifact.runtimeServerSha256 === artifact.runtimeServerSha256 &&
       finalArtifact.appAsarSha256 === artifact.appAsarSha256
+    if (report.diagnostic) report.diagnostic.sourceStable = artifactStable
     if (!artifactStable) {
       setCheck(report, 'formal-packaged-artifact', 'FAIL',
         finalArtifact.blocker || 'formal_package_changed_during_acceptance')
@@ -8285,27 +8640,40 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
     disposeLocalCredentialScanSource(credentialSource)
   }
 
-  const sandboxRemoved = removeExactHarnessOwnedRoot(
+  const retainDiagnosticProfile = shouldRetainPackagedDiagnosticProfile(
+    report, diagnosticPackagedSynthetic
+  )
+  const sandboxRemoved = !retainDiagnosticProfile && removeExactHarnessOwnedRoot(
     cache.path,
     sandboxRoot,
     'analytix-milestone-b-'
   )
-  const productRunRemoved = removeExactHarnessOwnedRoot(
+  const productRunRemoved = !retainDiagnosticProfile && removeExactHarnessOwnedRoot(
     managedProduct.authority.ownerRoot,
     productRunRoot,
     'analytix-milestone-b-run-'
   )
+  if (retainDiagnosticProfile && report.diagnostic) {
+    report.diagnostic.retainedProfile = {
+      status: report.exit.residualProcessCount === 0 ? 'quiesced' : 'processes_unresolved',
+      sandboxRoot,
+      productRunRoot
+    }
+  }
   report.isolation.sandboxRemoved = sandboxRemoved
   report.isolation.productRunRemoved = productRunRemoved
   checkFromEvidence(
     report,
     'sandbox-cleanup-and-case-preservation',
     {
-      ok: sandboxRemoved && productRunRemoved && casePreserved &&
+      ok: !retainDiagnosticProfile && sandboxRemoved && productRunRemoved && casePreserved &&
         report.isolation.ordinaryCodeWorkspaceCleaned &&
         report.isolation.caseBindingRestored &&
         report.isolation.protectedSourceAliasCleaned,
-      blocker: !casePreserved
+      blocked: retainDiagnosticProfile,
+      blocker: retainDiagnosticProfile
+        ? 'diagnostic_profile_retained_for_unknown_outcome'
+        : !casePreserved
         ? 'external_case_input_changed'
         : !report.isolation.caseBindingRestored
           ? 'case_binding_restoration_failed'
@@ -8325,13 +8693,36 @@ async function runMilestoneBWithCredentialSource({ credentialScanSource, entryAt
   return finalizeReport(report)
 }
 
-function reportOutputPath() {
-  return resolve(process.cwd(), optionValue(
-    '--output', process.env.ANALYTIX_RUNTIME_GO_MILESTONE_B_OUTPUT || DEFAULT_OUTPUT
-  ))
+export function milestoneBReportOutputDecision({
+  diagnosticSynthetic: isDiagnostic,
+  dryRun: isDryRun,
+  noWriteRequested: isNoWriteRequested,
+  explicitOutput,
+  configuredOutput,
+  cwd
+}) {
+  if (isDryRun || isNoWriteRequested || (isDiagnostic && !explicitOutput)) {
+    return { write: false, path: '', blocker: '' }
+  }
+  const path = resolve(cwd, isDiagnostic
+    ? explicitOutput
+    : explicitOutput || configuredOutput || DEFAULT_OUTPUT)
+  if (isDiagnostic && path === resolve(cwd, DEFAULT_OUTPUT)) {
+    return { write: false, path: '', blocker: 'diagnostic_formal_output_forbidden' }
+  }
+  return { write: true, path, blocker: '' }
 }
 
 async function main() {
+  const outputDecision = milestoneBReportOutputDecision({
+    diagnosticSynthetic,
+    dryRun,
+    noWriteRequested,
+    explicitOutput: optionValue('--output'),
+    configuredOutput: process.env.ANALYTIX_RUNTIME_GO_MILESTONE_B_OUTPUT || '',
+    cwd: process.cwd()
+  })
+  if (outputDecision.blocker) throw new Error(outputDecision.blocker)
   let report
   try {
     report = await runMilestoneB()
@@ -8355,10 +8746,9 @@ async function main() {
     setCheck(report, 'formal-packaged-artifact', 'FAIL', report.runtimeBlocker)
     finalizeReport(report)
   }
-  if (!noWrite) {
-    const output = reportOutputPath()
-    mkdirSync(dirname(output), { recursive: true })
-    writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  if (outputDecision.write) {
+    mkdirSync(dirname(outputDecision.path), { recursive: true })
+    writeFileSync(outputDecision.path, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   }
   if (jsonOutput) process.stdout.write(`${JSON.stringify(report)}\n`)
   else process.stdout.write(`Milestone B: ${report.status}\n`)

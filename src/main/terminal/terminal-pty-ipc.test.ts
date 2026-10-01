@@ -8,6 +8,11 @@ import {
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  createBundledFundsOnDemandActivationV1,
+  withCommittedBundledFundsStopV1
+} from '../runtime/bundled-funds-on-demand'
+import {
+  disposeTerminalPtysForRuntimeRestartV1,
   killTerminalPtyIfRunning,
   packagedDarwinNodePtyEntryPath,
   registerTerminalPtyIpc
@@ -210,6 +215,51 @@ function terminalHarness(options: { deferPtyLoad?: boolean } = {}) {
 }
 
 describe('terminal PTY IPC authority', () => {
+  it('preserves an active PTY during Funds-owned Go restart, then revokes it for ordinary restart', async () => {
+    if (process.platform !== 'darwin') return
+    const harness = terminalHarness()
+    const create = harness.handlers.get('terminal:create')!
+    const write = harness.handlers.get('terminal:write')!
+    const owner = eventFor(harness.sender)
+    await expect(create(owner, {
+      sessionId: 'independent', cwd: harness.ordinaryRoot, cols: 90, rows: 30
+    })).resolves.toEqual({ ok: true, sessionId: 'independent' })
+
+    let fundsReady = false
+    const activation = createBundledFundsOnDemandActivationV1({
+      isReady: () => fundsReady,
+      isManaged: () => true,
+      isShuttingDown: () => false,
+      prepare: async () => ({
+        expiresAtUnixMs: Date.now() + 30_000,
+        isCurrent: () => true,
+        commitStop: async () => true,
+        release: async () => undefined
+      }),
+      restartWithFunds: async (lease) => {
+        await withCommittedBundledFundsStopV1(lease, async () => {
+          disposeTerminalPtysForRuntimeRestartV1(harness.controller, true)
+          fundsReady = true
+        })
+      }
+    })
+    await expect(activation.activate()).resolves.toBe(true)
+    expect(harness.ptys[0]!.kill).not.toHaveBeenCalled()
+    await write(owner, { sessionId: 'independent', data: 'still alive\n' })
+    expect(harness.ptys[0]!.write).toHaveBeenCalledWith('still alive\n')
+
+    disposeTerminalPtysForRuntimeRestartV1(harness.controller, false)
+    expect(harness.ptys[0]!.kill).toHaveBeenCalledOnce()
+    const source = readFileSync(join(process.cwd(), 'src', 'main', 'index.ts'), 'utf8')
+    const restart = source.slice(
+      source.indexOf('async function restartRuntime('),
+      source.indexOf('async function restartRuntimeOnce(')
+    )
+    expect(restart).toContain(
+      'disposeTerminalPtysForRuntimeRestartV1(terminalPtyController, options.activationOwned === true)'
+    )
+  })
+
   it('revokes old PTYs before a runtime-root settings patch can persist', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'main', 'index.ts'), 'utf8')
     const applyStart = source.indexOf(

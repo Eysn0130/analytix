@@ -49,6 +49,7 @@ func runBundledPluginCommandV1(
 	output io.Writer,
 	dependencies bundledFundsMaterializationDependenciesV1,
 ) error {
+	started := time.Now()
 	if ctx == nil || ctx.Err() != nil || len(args) == 0 || args[0] != "materialize-funds-v1" || output == nil ||
 		dependencies.inspectPackage == nil || dependencies.inspectSource == nil || dependencies.openAuthority == nil ||
 		dependencies.newStore == nil || dependencies.now == nil {
@@ -66,13 +67,15 @@ func runBundledPluginCommandV1(
 	// Validate the independently anchored package, current runtime image, and
 	// complete packaged plugin tree before creating any installation state.
 	inspection, err := dependencies.inspectPackage(ctx)
-	if err != nil {
+	if err != nil || inspection.Authority.Core != nil {
 		return errors.New("bundled funds package authority is unavailable")
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupFundsPackageInspectedV1)
 	source, err := dependencies.inspectSource(ctx, inspection.PluginSourceRoot)
 	if err != nil || source != inspection.PluginSourceIdentity || source.LegacyV0 {
 		return errors.New("bundled funds package source is invalid")
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupFundsSourceInspectedV1)
 	platform, arch, ok := inspection.Authority.Target()
 	if !ok {
 		return errors.New("bundled funds package target is invalid")
@@ -97,6 +100,7 @@ func runBundledPluginCommandV1(
 	if err != nil {
 		return errors.New("bundled funds package static admission is denied")
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupFundsStaticAdmittedV1)
 
 	dataDir, err := prepareCanonicalDataDirV1(*dataDirFlag)
 	if err != nil {
@@ -162,6 +166,7 @@ func runBundledPluginCommandV1(
 		domainplugin.ValidateIndexForReceiptV1(result.Index, result.Receipt) != nil {
 		return errors.New("bundled funds materialization receipt is invalid")
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupFundsActiveResolvedV1)
 	activeRoot := filepath.Join(runtimeHome, filepath.FromSlash(result.Index.ActiveRelativePath))
 	activeRoot, err = canonicalExistingDirectoryV1(activeRoot)
 	if err != nil {
@@ -190,6 +195,7 @@ func runBundledPluginCommandV1(
 	if err != nil {
 		return errors.New("bundled funds current-run binding cannot be encoded")
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupFundsReadyBuiltV1)
 	if _, err := fmt.Fprintf(output, "%s%s\n", bundledFundsMaterializationReadyMarkerV1, body); err != nil {
 		return errors.New("bundled funds current-run binding cannot be written")
 	}

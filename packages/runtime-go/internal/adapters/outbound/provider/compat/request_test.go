@@ -27,6 +27,19 @@ func TestBuildHTTPRequestRejectsInvalidReasoningEffortForEveryEndpointShape(t *t
 	}
 }
 
+func TestBuildHTTPRequestRejectsNegativeOutputBudgetForEveryEndpointShape(t *testing.T) {
+	for _, shape := range []string{"chat_completions", "responses", "messages"} {
+		for _, format := range []string{shape, "custom_endpoint"} {
+			request := baseRequest(format, "https://provider.example/"+shape, nil)
+			request.MaxOutputTokens = -1
+			prepared, err := BuildHTTPRequest(request)
+			if err == nil || prepared.RequestURL != "" || prepared.Body != nil || prepared.Headers != nil {
+				t.Fatalf("negative output budget must stop before request construction: shape=%s format=%s", shape, format)
+			}
+		}
+	}
+}
+
 func TestBuildHTTPRequestPreservesEndpointFamilies(t *testing.T) {
 	cases := []struct {
 		name             string

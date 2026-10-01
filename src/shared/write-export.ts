@@ -1,3 +1,4 @@
+import type { ObjectExportBinding } from '../../packages/runtime/src/contracts/object-editing'
 import type { WriteTypographySettingsV1 } from './app-settings-types'
 
 export const WRITE_EXPORT_FORMATS = ['html', 'pdf', 'doc', 'docx'] as const
@@ -12,18 +13,22 @@ export type WriteExportTypographyPayload = {
   textAlign?: string
 }
 
-export type WriteExportPayload = {
-  path: string
+export type WriteExportPayload = ObjectExportBinding & {
   format: WriteExportFormat
-  content: string
   typography?: WriteExportTypographyPayload | Partial<WriteTypographySettingsV1>
 }
 
-export type WriteRichClipboardPayload = {
+export type WriteRichClipboardPayload = ObjectExportBinding
+
+/** Core-resolved bytes for the Main renderer service, never an IPC input. */
+export type WriteExportDocument = {
   path: string
-  workspaceRoot?: string
   content: string
+  format: WriteExportFormat
+  typography?: WriteExportPayload['typography']
 }
+export type WriteClipboardDocument = { path: string; content: string; workspaceRoot?: string }
+
 
 export type WriteExportResult =
   | {

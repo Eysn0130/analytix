@@ -174,6 +174,75 @@ version requires a reproducible public-seam failure, an accepted invariant that
 cannot otherwise be enforced, named owner/caller/consumer/failure paths, data
 compatibility and rollback, and packaged end-to-end proof.
 
+#### First-stage local currentness profile for an empty protected lineage
+
+The installed Funds import has no production enrollment writer for the
+independent SharedEvidence witness. In the current composition, absent
+enrollment leaves the existing DSV2 and Evidence Registry services uncomposed
+and the import capability unavailable. The first-stage remedy is an explicit
+`host_local` currentness profile within the existing installation, DSV2,
+Evidence Registry, receipt, and Final Gate authority chain. It is not an
+independent witness and does not claim resistance to restoring a complete old
+profile. The exact current-source installed result and its native-owner phase
+remain a separate acceptance check before claiming that the remedy closes B1.
+
+Before its first protected write, the host completes the existing global
+read-only startup inventory under the process-owner lease. It admits
+`host_local` only when the protected risk, DSV2, evidence, publication,
+authority-advance, case-thread, and accepted-final namespaces contain no
+legacy, witnessed, orphan, pending, or unknown state, and no witness enrollment
+or protected authority configuration is present. An absent manifest alone is
+never evidence of a new profile. A canonical installation-key-signed mode
+commitment, bound to the installation identity and existing protected roots,
+is installed once with no replacement and read back before DSV2 material or
+case authority can be written. A committed marker with no subsequent data is
+a valid empty `host_local` profile after a crash. Missing, invalid, divergent,
+or conflicting mode state blocks protected operations while ordinary Agent
+work remains available.
+
+`host_local` selects one current signed child-root head through one bounded
+host-private selector owned by the existing evidence authority. The selector
+binds the mode commitment, installation key, exact generation, predecessor,
+and DSV2/Evidence Registry/publication child digests. Its replacement is an
+atomic, cross-process exact expected-head CAS under the one process-owner lease;
+the immutable child records and head history are installed and verified first. The
+selector replacement is the only local currentness commit point. Every
+protected effect, receipt settlement, Final Gate, restart, and callback-scoped
+source read must re-read this exact selector and complete referenced immutable
+chain, compare the frozen generation/digests, and reject drift or ambiguity.
+Sequential writes under that lease refresh the selected expected head. A
+compare-failed CAS with an already installed losing signed record is a
+protected integrity event, not ordinary successful contention: that record
+could equally be evidence of selector rollback, so no inventory scan may
+ignore, delete, or promote it without an authenticated exact recovery plan.
+The existing witnessed `FreshHead`, witness observation, and signed historical
+record grammars retain their exact meanings and bytes; the new mode is a
+closed, separately typed currentness profile, never a fabricated witness
+observation or a maximum-generation inventory scan.
+
+An error proven before selector replacement leaves the old head current. A
+durable `Committed` result permits exact readback and mutation-id comparison.
+An `Indeterminate` result, including a visible rename before directory sync,
+is never settled by local readback alone; the protected process stays poisoned
+until a fresh startup fixed point or a separately proved authenticated
+recovery. A prepared head or
+unexpected signed descendant outside the selected chain is never promoted by
+inventory and blocks protected work pending a separately authorized recovery
+plan. Startup rejects a missing mode marker with any protected residue, and
+rejects a `host_local` marker alongside any enrolled/witnessed lineage. It
+does not rewrite or downgrade an existing witnessed profile. A complete
+profile rollback may restore a self-consistent old marker and selector; that
+scenario is `UNVERIFIED`, not a claim of rollback resistance. Where currentness
+cannot be proved, only the affected case effect is boundary-only.
+
+The first local selector implementation conservatively verifies its complete
+bounded signed head inventory on each currentness read. Source microbenchmarks
+are diagnostic only; the installed N03 latency and high-history limits remain
+separate acceptance evidence. A faster read path may be admitted only with an
+explicit proof that startup inventory, the process-owner lease, in-process
+high-water state, restart, and hostile-orphan handling preserve the same
+currentness result.
+
 Alternative considered: implement two product lanes, a startup
 `general-only` fallback, or make case authority readiness the global runtime
 health gate. Rejected because each creates a mode boundary around the Agent

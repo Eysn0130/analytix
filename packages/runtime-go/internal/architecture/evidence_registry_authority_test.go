@@ -280,7 +280,7 @@ func TestEvidenceRegistryChildAdvanceHasSingleProductionCaller(t *testing.T) {
 	}
 }
 
-func TestFactFinalWitnessCapabilityHasSingleProductionImplementation(t *testing.T) {
+func TestFactFinalWitnessCapabilitiesHaveSingleProductionOwner(t *testing.T) {
 	root := runtimeGoRoot(t)
 	methods := map[string]map[string]bool{}
 	for _, path := range goFiles(t, root) {
@@ -320,8 +320,20 @@ func TestFactFinalWitnessCapabilityHasSingleProductionImplementation(t *testing.
 			implementations = append(implementations, key)
 		}
 	}
-	if len(implementations) != 1 || implementations[0] != "internal/app/evidenceregistry/service.go#factFinalWitnessCapabilityV1" {
-		t.Fatalf("fact-final witness capability implementation is not unique: %v", implementations)
+	// Witnessed issuance/recovery and host-local Final are separate callback-
+	// scoped leases of the registry. No other owner may implement this authority.
+	expected := map[string]bool{
+		"internal/app/evidenceregistry/service.go#factFinalWitnessCapabilityV1":                true,
+		"internal/app/evidenceregistry/recovered_fact.go#recoveredFactCapability":              true,
+		"internal/app/evidenceregistry/host_local_fact_final_v1.go#hostLocalFinalCapabilityV1": true,
+	}
+	if len(implementations) != len(expected) {
+		t.Fatalf("fact-final witness capability inventory changed: %v", implementations)
+	}
+	for _, implementation := range implementations {
+		if !expected[implementation] {
+			t.Fatalf("fact-final witness capability outside its registry owner: %s", implementation)
+		}
 	}
 }
 

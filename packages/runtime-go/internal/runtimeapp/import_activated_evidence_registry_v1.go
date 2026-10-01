@@ -293,3 +293,12 @@ func (owner *runtimeImportActivatedRegistryV1) HasRecords(ctx context.Context) (
 	defer release()
 	return registry.HasRecords(ctx)
 }
+
+func (owner *runtimeImportActivatedRegistryV1) WithRecoveredFactFinalWitness(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, use func(registryport.FactFinalWitnessCapability) error) error {
+	registry, release, err := owner.current()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return registry.WithRecoveredFactFinalWitness(ctx, record, use)
+}

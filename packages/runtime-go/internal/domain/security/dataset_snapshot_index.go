@@ -57,7 +57,9 @@ type DatasetSnapshotIndexV1 struct {
 	SchemaVersion        int                         `json:"schemaVersion"`
 	Purpose              string                      `json:"purpose"`
 	InstallationID       string                      `json:"installationId"`
-	EnrollmentID         string                      `json:"enrollmentId"`
+	EnrollmentID         string                      `json:"enrollmentId,omitempty"`
+	Mode                 string                      `json:"mode,omitempty"`
+	ModeCommitmentDigest string                      `json:"modeCommitmentDigest,omitempty"`
 	Generation           uint64                      `json:"generation"`
 	PreviousIndexDigest  string                      `json:"previousIndexDigest"`
 	MutationID           string                      `json:"mutationId"`
@@ -460,6 +462,7 @@ func DatasetSnapshotIndexGenesisDigestV1() string {
 
 func validateDatasetSnapshotIndexUnsignedV1(index DatasetSnapshotIndexV1) error {
 	if index.SchemaVersion != DatasetSnapshotIndexSchemaVersion || index.Purpose != DatasetSnapshotIndexPurpose ||
+		index.Mode != "" || index.ModeCommitmentDigest != "" ||
 		!isCanonicalSHA256Hex(index.InstallationID) || !isCanonicalSHA256Hex(index.EnrollmentID) || index.Generation == 0 ||
 		!isCanonicalSHA256Hex(index.PreviousIndexDigest) || !isCanonicalSHA256Hex(index.MutationID) ||
 		ValidateDatasetSnapshotBindingKeyV1(index.Binding) != nil || !isCanonicalSHA256Hex(index.SnapshotRecordDigest) ||

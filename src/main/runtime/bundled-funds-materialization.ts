@@ -1,9 +1,13 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { parseStrictJsonObject } from '../controlled-artifact/strict-json'
+import {
+  parseBundledFundsStartupStderrV1,
+  type StartupOwnerPhaseV1
+} from './startup-owner-trace-v1'
 
 const READY_PREFIX = 'ANALYTIX_BUNDLED_FUNDS_MATERIALIZATION_READY_V1 '
 const READY_PURPOSE = 'analytix.bundled-funds-materialization-ready/v1'
@@ -16,6 +20,8 @@ const READY_BINDING_DOMAIN = Buffer.from('analytix.bundled-funds-materialization
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 const MAX_COMMAND_OUTPUT_BYTES = 512 * 1024
 const COMMAND_TIMEOUT_MS = 120_000
+const ABORT_EXIT_TIMEOUT_MS = 3_000
+const unconfirmedMaterializationChildren = new Set<ChildProcess>()
 
 const SHA256 = z.string().regex(/^[a-f0-9]{64}$/u)
 const ExactTime = z.string().refine((value) => value.endsWith('Z') && Number.isFinite(Date.parse(value)))
@@ -124,7 +130,35 @@ export type BundledFundsMaterializationCommandResultV1 = Readonly<{
   stderr: Buffer
   timedOut: boolean
   overflow: boolean
+  terminationConfirmed?: boolean
+  childPid?: number
 }>
+
+export class BundledFundsMaterializationChildUnconfirmedError extends Error {
+  readonly childPid: number | null
+
+  constructor(childPid?: number) {
+    super('Packaged funds materialization child termination was not confirmed.')
+    this.name = 'BundledFundsMaterializationChildUnconfirmedError'
+    this.childPid = Number.isSafeInteger(childPid) && Number(childPid) > 0 ? Number(childPid) : null
+  }
+}
+
+export function assertNoUnconfirmedMaterializationChildV1(): void {
+  for (const child of unconfirmedMaterializationChildren) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      unconfirmedMaterializationChildren.delete(child)
+      continue
+    }
+    throw new BundledFundsMaterializationChildUnconfirmedError(child.pid)
+  }
+}
+
+// Keep the direct child until its own exit is observed. A later ordinary Go
+// startup must not pass the previous materializer's unconfirmed writer.
+export function retainUnconfirmedMaterializationChildV1(child: ChildProcess): void {
+  unconfirmedMaterializationChildren.add(child)
+}
 
 export type BundledFundsMaterializationCommandRunnerV1 = (
   command: string,
@@ -142,11 +176,13 @@ export async function materializeBundledFundsBeforeRuntimeV1(options: Readonly<{
   }>
   dataDir: string
   runner?: BundledFundsMaterializationCommandRunnerV1
+  onStartupPhase?: (phase: StartupOwnerPhaseV1) => void
 }>): Promise<BundledFundsMaterializationBindingV1 | null> {
   if (!options.appIsPackaged) return null
   if (options.launchTarget.mode !== 'bundled-binary') {
     throw new Error('Packaged funds materialization requires the bundled runtime-server.')
   }
+  assertNoUnconfirmedMaterializationChildV1()
   const invocationId = randomBytes(32).toString('hex')
   const result = await (options.runner ?? runCommandV1)(
     options.launchTarget.command,
@@ -162,10 +198,20 @@ export async function materializeBundledFundsBeforeRuntimeV1(options: Readonly<{
     { cwd: options.launchTarget.cwd }
   )
   try {
-    if (result.exitCode !== 0 || result.signal !== null || result.timedOut || result.overflow || result.stderr.length !== 0) {
+    if (result.terminationConfirmed === false) {
+      throw new BundledFundsMaterializationChildUnconfirmedError(result.childPid)
+    }
+    const phases = process.env.ANALYTIX_STARTUP_TRACE === '1'
+      ? parseBundledFundsStartupStderrV1(result.stderr)
+      : result.stderr.length === 0 ? [] : null
+    if (result.exitCode !== 0 || result.signal !== null || result.timedOut || result.overflow || phases === null) {
       throw new Error('Packaged funds materialization command failed.')
     }
-    return verifyBundledFundsMaterializationOutputV1(result.stdout, invocationId, options.dataDir)
+    const ready = verifyBundledFundsMaterializationOutputV1(result.stdout, invocationId, options.dataDir)
+    for (const phase of phases) {
+      try { options.onStartupPhase?.(phase) } catch { /* diagnostics cannot gate startup */ }
+    }
+    return ready
   } finally {
     result.stdout.fill(0)
     result.stderr.fill(0)
@@ -384,12 +430,57 @@ async function runCommandV1(
     let stderr: Buffer = Buffer.alloc(0)
     let overflow = false
     let timedOut = false
+    let settled = false
+    let aborting = false
+    let exitObserved = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let abortTimer: ReturnType<typeof setTimeout> | null = null
+    const settle = (
+      exitCode: number | null,
+      signal: NodeJS.Signals | null,
+      discardStreams: boolean,
+      terminationConfirmed: boolean
+    ): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      if (abortTimer) clearTimeout(abortTimer)
+      child.stdout?.off('data', onStdout)
+      child.stderr?.off('data', onStderr)
+      if (discardStreams) {
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+      }
+      if (!terminationConfirmed) retainUnconfirmedMaterializationChildV1(child)
+      resolveResult({ exitCode, signal, stdout, stderr, timedOut, overflow,
+        terminationConfirmed, childPid: child.pid })
+    }
+    const abort = (): void => {
+      if (aborting || settled) return
+      aborting = true
+      if (exitObserved || !child.pid) {
+        settle(null, null, true, true)
+        return
+      }
+      try { child.kill('SIGKILL') } catch { /* the exit deadline still applies */ }
+      child.stdout?.off('data', onStdout)
+      child.stderr?.off('data', onStderr)
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      // A descendant can keep the pipes open after the direct child exits.
+      // Require that child's `exit`, but never wait indefinitely for `close`.
+      abortTimer = setTimeout(() => {
+        if (exitObserved) return
+        try { child.kill('SIGKILL') } catch { /* retain exact child for later exit */ }
+        settle(null, null, true, false)
+      }, ABORT_EXIT_TIMEOUT_MS)
+    }
     const append = (current: Buffer, chunk: Buffer | string): Buffer => {
       const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
       if (current.length + incoming.length > MAX_COMMAND_OUTPUT_BYTES) {
         overflow = true
-        child.kill('SIGKILL')
         incoming.fill(0)
+        abort()
         return current
       }
       const next = Buffer.concat([current, incoming])
@@ -397,19 +488,37 @@ async function runCommandV1(
       incoming.fill(0)
       return next
     }
-    child.stdout?.on('data', (chunk: Buffer | string) => { stdout = append(stdout, chunk) })
-    child.stderr?.on('data', (chunk: Buffer | string) => { stderr = append(stderr, chunk) })
-    const timer = setTimeout(() => {
+    const onStdout = (chunk: Buffer | string): void => { stdout = append(stdout, chunk) }
+    const onStderr = (chunk: Buffer | string): void => { stderr = append(stderr, chunk) }
+    child.stdout?.on('data', onStdout)
+    child.stderr?.on('data', onStderr)
+    timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGKILL')
+      abort()
     }, COMMAND_TIMEOUT_MS)
-    child.once('error', () => {
-      clearTimeout(timer)
-      resolveResult({ exitCode: null, signal: null, stdout, stderr, timedOut, overflow })
+    child.once('exit', () => {
+      exitObserved = true
+      unconfirmedMaterializationChildren.delete(child)
+      if (aborting) settle(null, null, true, true)
     })
-    child.once('exit', (exitCode, signal) => {
-      clearTimeout(timer)
-      resolveResult({ exitCode, signal, stdout, stderr, timedOut, overflow })
+    child.once('error', () => {
+      if (!child.pid || exitObserved) settle(null, null, true, true)
+      else abort()
+    })
+    // `close` follows stdout/stderr EOF; the strict ready and trace parsers
+    // must see every byte before classifying the command result.
+    child.once('close', (exitCode, signal) => {
+      if (exitCode !== null || signal !== null) {
+        exitObserved = true
+        unconfirmedMaterializationChildren.delete(child)
+      }
+      if (!aborting) {
+        settle(exitCode, signal, false,
+          exitObserved || exitCode !== null || signal !== null || !child.pid)
+      }
+      else if (exitObserved || exitCode !== null || signal !== null) {
+        settle(null, null, true, true)
+      }
     })
   })
 }
@@ -423,5 +532,6 @@ function commandEnvironmentV1(): NodeJS.ProcessEnv {
   env.PATH = process.platform === 'win32'
     ? process.env.PATH
     : '/usr/bin:/bin:/usr/sbin:/sbin'
+  if (process.env.ANALYTIX_STARTUP_TRACE === '1') env.ANALYTIX_STARTUP_TRACE = '1'
   return env
 }

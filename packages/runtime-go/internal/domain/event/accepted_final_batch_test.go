@@ -123,6 +123,7 @@ func TestAcceptedFinalDeliveryBatchV2RejectsPartialAndMutatedBundles(t *testing.
 		{name: "private turn identity", key: "turnId", value: "turn-private"},
 		{name: "private rendered text digest", key: "renderedTextSha256", value: digestAcceptedFinalBatchTest("private-text")},
 		{name: "private witness admission", key: "factFinalWitnessAdmission", value: map[string]any{"private": true}},
+		{name: "private host-local admission", key: "factFinalHostLocalAdmission", value: map[string]any{"private": true}},
 		{name: "private publication proof", key: "publicationSnapshotProof", value: map[string]any{"private": true}},
 		{name: "private registry head", key: "registryHead", value: map[string]any{"private": true}},
 		{name: "private publication intent", key: "publicationIntent", value: map[string]any{"private": true}},

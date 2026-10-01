@@ -13,8 +13,6 @@ import type {
 } from './types'
 import {
   getAnalytixRuntimeSettings,
-  getModelProviderSettings,
-  normalizeModelProviderId,
   resolveModelProviderRequestSelection,
   type AppSettingsV1
 } from '@shared/app-settings'
@@ -75,10 +73,9 @@ import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryListResponseJson,
   CoreMemoryRecordJson,
-  CoreResumeSessionResponseJson,
   CoreRuntimeInfoJson,
   CoreRuntimeEventJson,
-  CoreRuntimeSkillJson,
+  CoreRuntimeSkillsResponseJson,
   CoreRuntimeToolDiagnosticsJson,
   CoreStartReviewResponseJson,
   CoreClearThreadGoalResponseJson,
@@ -115,6 +112,7 @@ import {
 } from '../../../../packages/runtime/src/contracts/items.js'
 import { PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema } from '../../../../packages/runtime/src/contracts/events.js'
 import {
+  ResumeThreadResponse as ResumeThreadResponseSchema,
   ThreadSummaryResponse as ThreadSummaryResponseSchema,
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   ThreadSummaryTaskOutputResponse
@@ -379,12 +377,9 @@ function requestModelSelectionFromSettings(options: {
     return { model, providerId: explicitProviderId || undefined }
   }
   if (explicitProviderId) {
-    const normalizedExplicitProviderId = normalizeModelProviderId(explicitProviderId)
-    const providerKnown = getModelProviderSettings(options.settings).providers
-      .some((provider) => provider.id === normalizedExplicitProviderId)
-    if (!providerKnown) {
-      return { model, providerId: explicitProviderId }
-    }
+    // Explicit selections come from the Core Registry. Legacy Settings may
+    // contain an older model catalog; Core owns validation of this pair.
+    return { model, providerId: explicitProviderId }
   }
   const selection = resolveModelProviderRequestSelection(options.settings, {
     model,
@@ -581,6 +576,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     )
     if (thread.id !== threadId) throw new Error('Runtime thread response identity mismatch.')
     const turns = Array.isArray(thread.turns) ? thread.turns : []
+    const retainedFactTurns = new Set(turns.filter(turn => turn.factHistoryState === 'retained_snapshot').map(turn => turn.id))
     const caseBound = thread.historyAuthority === 'case_boundary_only_v1'
     const acceptedProjectionByTurn = acceptedFinalProjectionsForTurns(
       turns,
@@ -618,6 +614,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       if (projection?.assistant.id === item.id) {
         return [{
           ...projection.assistant,
+          meta: { ...projection.assistant.meta, ...(retainedFactTurns.has(item.turnId!) ? { factHistoryState: 'retained_snapshot' } : {}) },
           acceptedFinalProjectionReceipt: projection.receipt,
           acceptedFinalProjectionTerminal: projection.terminal
         }]
@@ -1273,7 +1270,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     )
   }
 
-  async listSkills(): Promise<CoreRuntimeSkillJson[]> {
+  async listSkills(): Promise<CoreRuntimeSkillsResponseJson> {
     const response = await rendererRuntimeClient.runtimeRequest(ANALYTIX_SKILLS_PATH, 'GET')
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'failed to list skills'))
@@ -1282,7 +1279,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid skills response',
       RuntimeSkillsResponseSchema
-    ).skills ?? []
+    )
   }
 
   async uploadAttachment(input: {
@@ -1468,18 +1465,12 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'resume session failed'))
     }
-    const body = readRuntimeJson<CoreResumeSessionResponseJson>(
+    const body = readRuntimeSchema(
       response.body,
-      'runtime returned an invalid resume session response'
+      'runtime returned an invalid resume session response',
+      ResumeThreadResponseSchema
     )
-    const threadId = body.thread_id ?? body.threadId
-    if (!threadId) {
-      throw runtimeErrorToError({
-        code: 'unknown',
-        message: 'resume session returned an invalid response'
-      })
-    }
-    return { threadId, sessionId: body.session_id ?? body.sessionId ?? sessionId }
+    return { threadId: body.thread_id, sessionId: body.session_id }
   }
 
   async subscribeThreadEvents(

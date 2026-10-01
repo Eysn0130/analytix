@@ -260,3 +260,15 @@ func containsName(names []string, needle string) bool {
 	}
 	return false
 }
+
+func TestNativeSelectionToolsRequireHostCaptureAndStayOutOfDelegatedScopes(t *testing.T) {
+	for _, test := range []struct{ active, child, want bool }{{false, false, false}, {true, false, true}, {true, true, false}} {
+		tools := MaterializeToolSchemas(MaterializeInput{Prompt: "update the selected text", PromptRoute: RouteToolAgent,
+			NativeSelections: test.active, Subagent: test.child, ToolScope: []string{"read", "native_selection_read", "native_selection_propose"}})
+		for _, name := range []string{"native_selection_read", "native_selection_propose"} {
+			if (schemaByNameOptional(tools, name) != nil) != test.want {
+				t.Fatalf("native tool availability mismatch: active=%v child=%v tool=%s", test.active, test.child, name)
+			}
+		}
+	}
+}

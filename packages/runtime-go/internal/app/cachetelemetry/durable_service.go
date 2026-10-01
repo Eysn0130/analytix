@@ -111,6 +111,7 @@ func (service *DurableService) BeginAttempt(ctx context.Context, input cachetele
 	}
 	shape := domaincachetelemetry.CacheVisibleShapeV1{
 		SchemaVersion:   domaincachetelemetry.CacheVisibleShapeV1SchemaVersion,
+		ModelInput:      digests.modelInput,
 		LogicalCallHMAC: digests.logicalCallHMAC, Attempt: input.PhysicalAttempt,
 		ProviderFamily: input.ProviderFamily, ModelHMAC: digests.modelHMAC,
 		Endpoint: input.EndpointFormat, EndpointHMAC: digests.endpointHMAC,
@@ -457,6 +458,7 @@ func (service *DurableService) ApplyRestartSettlements(ctx context.Context, plan
 }
 
 type providerAttemptDigestsV1 struct {
+	modelInput          domaincachetelemetry.ModelInputSegmentsV1
 	turnBindingHMAC     string
 	childRunHMAC        string
 	logicalCallHMAC     string
@@ -492,6 +494,7 @@ func (service *DurableService) deriveAttemptDigestsV1(ctx context.Context, input
 		key, "logical-call", []byte(turnBinding), []byte(input.UsageSource), []byte(childRun), []byte(input.Channel), sequence, outerAttempt, laneCallSequence,
 	)
 	return providerAttemptDigestsV1{
+		modelInput:      domaincachetelemetry.CaptureModelInputSegmentsV1(input.WireBody, func(label string, body []byte) string { return providerTelemetryHMACV1(key, label, body) }),
 		turnBindingHMAC: turnBinding, childRunHMAC: childRun, logicalCallHMAC: logicalCall,
 		modelHMAC:           providerTelemetryHMACV1(key, "model", input.Model),
 		endpointHMAC:        providerTelemetryHMACV1(key, "endpoint", input.Endpoint),

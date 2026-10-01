@@ -1,3 +1,4 @@
+import { captureWriteExport } from '../../write/write-export-snapshot'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
@@ -24,18 +25,11 @@ import {
   type WriteSaveStatus,
   writeBasenameFromPath,
   writeJoinPath,
-  writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
 import { getWriteRenderSafety } from '../../write/write-render-safety'
-import {
-  applyWriteInlineEditReplacement,
-  buildWriteInlineEditCompletionRequest,
-  buildWriteInlineEditDraft
-} from '../../write/inline-edit'
 import type { WriteBlockType } from '../../write/block-type'
 import { toggleWriteInlineFormat, type WriteInlineFormatKind } from '../../write/inline-format'
 import { resolveWriteQuickActions, type ResolvedWriteQuickAction } from '../../write/quick-actions'
-import { createWriteRecentEdit } from '../../write/recent-edits'
 import {
   beginPendingInfographic,
   buildPendingInfographicMarkdown,
@@ -48,12 +42,12 @@ import type { WriteRichEditorHandle } from '../../write/tiptap/WriteRichEditor'
 import { useWriteSplitScrollSync } from './use-write-split-scroll-sync'
 import { WriteWorkspaceEmptyState } from './WriteWorkspaceEmptyState'
 import { WriteWorkspaceToolbar } from './WriteWorkspaceToolbar'
+import { WriteConflictReview } from './WriteConflictReview'
 import { WriteInlineAgent } from './WriteInlineAgent'
 import { WriteWorkspaceDocumentPane } from './WriteWorkspaceDocumentPane'
 import { resolveWriteAgentPreset } from '../../write/agent-presets'
 import type { WriteMarkdownEditorHandle } from './WriteMarkdownEditor'
 import {
-  INLINE_EDIT_RECENT_CONTEXT_CHARS,
   WRITE_AUTOSAVE_MS,
   writePreviewDebounceMs,
   WRITE_RICH_CLIPBOARD_ACTION,
@@ -67,21 +61,25 @@ import {
 } from './write-workspace-view-utils'
 
 type Props = {
+  threadId?: string | null
   leftSidebarCollapsed: boolean
   input: string; setInput: (value: string) => void
-  onSubmitPrompt?: (value: string) => void
+  onSubmitPrompt: (value: string) => void
   onOpenAgentSettings?: () => void
+  onFocusConversation?: () => void
 }
 
 export function WriteWorkspaceView({
-  leftSidebarCollapsed,
+  threadId,
   input,
   setInput,
   onSubmitPrompt,
-  onOpenAgentSettings
+  onOpenAgentSettings,
+  onFocusConversation
 }: Props): ReactElement {
   const { t } = useTranslation('common')
-  const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
+  const shutdownFrozen = useWriteWorkspaceStore((s) => s.shutdownFrozen)
+  const exportPaused = useWriteWorkspaceStore((s) => s.exportInProgress)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   // Field-level subscription: this view must follow fileContent, but it should
@@ -107,6 +105,7 @@ export function WriteWorkspaceView({
     fileError,
     fileLoading,
     saveStatus,
+    legacyObjectEditing,
     previewMode,
     assistantOpen,
     selection,
@@ -131,6 +130,8 @@ export function WriteWorkspaceView({
     pendingAgentReview,
     clearPendingAgentReview,
     reviewActive,
+    reviewRecovery,
+    suspendReview,
     setReviewActive
   } = useWriteWorkspaceStore(
     useShallow((s) => ({
@@ -147,6 +148,8 @@ export function WriteWorkspaceView({
       pendingAgentReview: s.pendingAgentReview,
       clearPendingAgentReview: s.clearPendingAgentReview,
       reviewActive: s.reviewActive,
+      reviewRecovery: s.reviewRecovery,
+      suspendReview: s.suspendReview,
       setReviewActive: s.setReviewActive,
       imageGenReady: s.imageGenReady,
       fileContent: s.fileContent,
@@ -160,6 +163,7 @@ export function WriteWorkspaceView({
       fileError: s.fileError,
       fileLoading: s.fileLoading,
       saveStatus: s.saveStatus,
+      legacyObjectEditing: s.legacyObjectEditing,
       previewMode: s.previewMode,
       assistantOpen: s.assistantOpen,
       selection: s.selection,
@@ -191,7 +195,6 @@ export function WriteWorkspaceView({
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [pointerSelecting, setPointerSelecting] = useState(false)
   const resolvedAgentPresets = agentPresets.map((preset) => resolveWriteAgentPreset(preset))
-  const [inlineEditInFlight, setInlineEditInFlight] = useState(false)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportingFormat, setExportingFormat] = useState<WriteExportFormat | typeof WRITE_RICH_CLIPBOARD_ACTION | null>(null)
@@ -208,19 +211,17 @@ export function WriteWorkspaceView({
     fileSize,
     truncated: fileTruncated
   })
+  if (shutdownFrozen) renderSafety.readOnly = true
   const debouncedPreviewContent = useDebouncedValue(fileContent, writePreviewDebounceMs(fileContent.length))
   const saveLabel = activeFileIsImage
     ? t('writeImagePreview')
     : activeFileIsPdf ? t('writePdfPreview')
-    : renderSafety.readOnly ? t('writeReadOnly') : formatSaveLabel(saveStatus, t)
+    : renderSafety.readOnly ? t('writeReadOnly')
+    : legacyObjectEditing ? t('writeObjectLegacySave', { status: formatSaveLabel(saveStatus, t) }) : formatSaveLabel(saveStatus, t)
   // Only surface the toolbar once the selection gesture settles: while the
   // pointer is down (dragging to select) it stays hidden to avoid flicker.
   const selectionAction =
     selection.charCount > 0 && !pointerSelecting ? inlineAgentPosition(selection, { compact: activeFileIsPdf }) : null
-  const activeFileLabel = activeFilePath
-    ? writeRelativeToWorkspace(workspaceRoot, activeFilePath)
-    : t('writeNoFileOpen')
-  const activeFileName = activeFilePath ? writeBasenameFromPath(activeFilePath) : t('writeStudio')
   const documentStats = useMemo(
     () => (activeFileIsText ? computeWriteDocumentStats(fileContent, isMarkdown) : null),
     [activeFileIsText, fileContent, isMarkdown],
@@ -271,6 +272,7 @@ export function WriteWorkspaceView({
 
   const setAssistantPrompt = (prompt: string): void => {
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInput(input.trim() ? `${input.trim()}\n\n${prompt}` : prompt)
   }
 
@@ -281,23 +283,20 @@ export function WriteWorkspaceView({
     // context in sendWritePrompt) so it never shows as raw text in the bubble.
     quoteCurrentSelection(workspaceRoot)
     setAssistantOpen(true)
+    onFocusConversation?.()
     setInlineAgentValue('')
-    if (onSubmitPrompt) {
-      onSubmitPrompt(trimmed)
-      return
-    }
-    setInput(input.trim() ? `${input.trim()}\n\n${trimmed}` : trimmed)
+    onSubmitPrompt(trimmed)
   }
 
   const quoteSelectionToAssistant = (): void => {
     if (!workspaceReady || !activeFilePath) return
     quoteCurrentSelection(workspaceRoot)
+    onFocusConversation?.()
     setInlineAgentValue('')
   }
 
-  // Edit-mode quick actions rewrite the selection in place through the
-  // inline-edit pipeline; chat-mode actions (润色/解释) quote the selection and
-  // hand the prompt to the sidebar assistant (auto-expanding it).
+  // Both quick-action modes submit the selection to the current conversation.
+  // Edit requests first save and validate the selected document snapshot.
   const runQuickAction = (quickAction: ResolvedWriteQuickAction): void => {
     if (quickAction.mode === 'edit') {
       void submitInlineEdit(quickAction.prompt)
@@ -349,7 +348,7 @@ export function WriteWorkspaceView({
 
   const submitInlineEdit = async (prompt: string): Promise<void> => {
     const trimmed = prompt.trim()
-    if (!trimmed || !workspaceReady || !activeFilePath || inlineEditInFlight) return
+    if (!trimmed || !workspaceReady || !activeFilePath) return
     if (renderSafety.readOnly) {
       setFileError(t('writeReadOnlySaveDisabled'))
       return
@@ -362,132 +361,15 @@ export function WriteWorkspaceView({
       setFileError(t(selection.ranges.length > 1 ? 'writeInlineEditMultiSelection' : 'writeInlineEditNoSelection'))
       return
     }
-    if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') {
-      setFileError(t('writeInlineEditUnavailable'))
+    const snapshot = useWriteWorkspaceStore.getState()
+    if (!(await flushSave(workspaceRoot))) return
+    const current = useWriteWorkspaceStore.getState()
+    if (current.workspaceRoot !== snapshot.workspaceRoot || current.activeFilePath !== snapshot.activeFilePath ||
+        current.fileContent !== snapshot.fileContent || current.selection !== snapshot.selection) {
+      setFileError(t('workbenchReferenceChanged'))
       return
     }
-
-    // In rich mode the inline edit operates on the markdown projection: the
-    // selection ranges are projection offsets and the replacement is applied
-    // through the editor so undo history and node structure stay intact.
-    const richHandle = richModeActive ? richHandleRef.current : null
-    const richProjectionText = richHandle?.getProjectionText() ?? null
-    const editContent = richProjectionText ?? fileContent
-
-    const draft = buildWriteInlineEditDraft(editContent, selection.ranges[0], trimmed, {
-      workspaceRoot,
-      currentFilePath: activeFilePath,
-      model: inlineCompletion.model,
-      language: 'markdown',
-      recentEdits
-    })
-
-    setInlineEditInFlight(true)
-    try {
-      const result = await window.analytix.write.requestWriteInlineCompletion(
-        buildWriteInlineEditCompletionRequest(draft.request)
-      )
-      if (!result.ok) {
-        setFileError(t('writeInlineEditFailed', { message: result.message }))
-        return
-      }
-      const replacement = result.action?.kind === 'edit'
-        ? result.action.replacement
-        : result.completion
-      // An empty rewrite of non-empty text means the model failed to follow
-      // the instruction; applying it would silently delete the selection.
-      if (!replacement.trim() && draft.scope.text.trim()) {
-        setFileError(t('writeInlineEditEmpty'))
-        return
-      }
-
-      if (richHandle) {
-        const applied = richHandle.applyProjectedReplacement(
-          { from: draft.scope.from, to: draft.scope.to },
-          draft.scope.text,
-          replacement,
-          trimmed
-        )
-        if (!applied) {
-          setFileError(t('writeInlineEditChanged'))
-          return
-        }
-        setSelection({ text: '', ranges: [], charCount: 0 })
-        setInlineAgentValue('')
-        setFileError(null)
-        showExportNotice({ tone: 'success', message: t('writeInlineEditApplied') })
-        return
-      }
-
-      const latest = useWriteWorkspaceStore.getState()
-      if (latest.activeFilePath !== activeFilePath || latest.activeFileKind !== 'text') {
-        setFileError(t('writeInlineEditChanged'))
-        return
-      }
-      // The document can shift during the multi-second model call (live-preview
-      // normalization, autosave round-trips, …). Re-locate the scope in the
-      // latest content instead of hard-failing on a stale offset; only give up
-      // when the selected text is gone or no longer unique.
-      const baseline = latest.fileContent
-      let scopeFrom = draft.scope.from
-      let scopeTo = draft.scope.to
-      if (baseline.slice(scopeFrom, scopeTo) !== draft.scope.text) {
-        const firstMatch = draft.scope.text ? baseline.indexOf(draft.scope.text) : -1
-        const unique = firstMatch >= 0 && baseline.indexOf(draft.scope.text, firstMatch + 1) === -1
-        if (!unique) {
-          setFileError(t('writeInlineEditChanged'))
-          return
-        }
-        scopeFrom = firstMatch
-        scopeTo = firstMatch + draft.scope.text.length
-      }
-
-      const nextContent = applyWriteInlineEditReplacement(
-        baseline,
-        { ...draft.scope, from: scopeFrom, to: scopeTo },
-        replacement
-      )
-      const inlineEditRecord = createWriteRecentEdit({
-        source: 'inline-edit',
-        filePath: activeFilePath,
-        from: scopeFrom,
-        to: scopeTo,
-        deletedText: draft.scope.text,
-        insertedText: replacement,
-        beforeContext: baseline.slice(Math.max(0, scopeFrom - INLINE_EDIT_RECENT_CONTEXT_CHARS), scopeFrom),
-        afterContext: nextContent.slice(
-          scopeFrom + replacement.length,
-          Math.min(nextContent.length, scopeFrom + replacement.length + INLINE_EDIT_RECENT_CONTEXT_CHARS)
-        ),
-        instruction: trimmed,
-        scopeKind: draft.scope.kind
-      })
-
-      // Land the rewrite as an inline red/green diff review when the editor
-      // supports it (source/live CodeMirror); fall back to a direct apply
-      // (rich mode, or no handle) otherwise.
-      const startedReview = markdownHandleRef.current?.beginDiffReview({
-        original: baseline,
-        nextDoc: nextContent
-      }) ?? false
-      if (!startedReview) {
-        setFileContent(nextContent)
-        if (inlineEditRecord) recordRecentEdits([inlineEditRecord])
-      }
-      setSelection({ text: '', ranges: [], charCount: 0 })
-      setInlineAgentValue('')
-      setFileError(null)
-      showExportNotice({
-        tone: 'success',
-        message: startedReview ? t('writeInlineEditReview') : t('writeInlineEditApplied')
-      })
-    } catch (error) {
-      setFileError(t('writeInlineEditFailed', {
-        message: error instanceof Error ? error.message : String(error)
-      }))
-    } finally {
-      setInlineEditInFlight(false)
-    }
+    submitInlineAgent(trimmed)
   }
 
   // Inserts an animated placeholder right away and resolves it in the
@@ -649,7 +531,6 @@ export function WriteWorkspaceView({
       const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || undefined)
       if (!picked.canceled && picked.path) {
         await addWriteWorkspace(picked.path)
-        if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
       }
     } catch (error) {
       setFileError(formatWorkspacePickerError(error))
@@ -658,7 +539,7 @@ export function WriteWorkspaceView({
 
   const exportCurrentFile = async (format: WriteExportFormat): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.exportWriteDocument !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeExportUnavailable') })
       return
@@ -666,11 +547,13 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(format)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.exportWriteDocument({
-        path: activeFilePath,
+        ...prepared.binding,
         format,
-        content: fileContent,
         typography: currentTypography
       })
       if (!result.ok) {
@@ -698,13 +581,14 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
 
   const copyCurrentFileAsRichText = async (): Promise<void> => {
     if (!activeFilePath) return
-    if (!activeFileIsText) return
+    if (!activeFileIsText || !threadId || useWriteWorkspaceStore.getState().exportInProgress) return
     if (typeof window.analytix?.write?.copyWriteDocumentAsRichText !== 'function') {
       showExportNotice({ tone: 'error', message: t('writeCopyRichTextUnavailable') })
       return
@@ -712,11 +596,12 @@ export function WriteWorkspaceView({
 
     setExportMenuOpen(false)
     setExportingFormat(WRITE_RICH_CLIPBOARD_ACTION)
+    let release: (() => void) | undefined
     try {
+      const prepared = await captureWriteExport(threadId, () => useChatStore.getState().activeThreadId)
+      release = prepared.release
       const result = await window.analytix.write.copyWriteDocumentAsRichText({
-        path: activeFilePath,
-        workspaceRoot,
-        content: fileContent
+        ...prepared.binding
       })
       if (!result.ok) {
         showExportNotice({
@@ -739,6 +624,7 @@ export function WriteWorkspaceView({
         })
       })
     } finally {
+      release?.()
       setExportingFormat(null)
     }
   }
@@ -826,26 +712,27 @@ export function WriteWorkspaceView({
   // already on disk) instead of overwriting the document.
   useEffect(() => {
     if (!pendingAgentReview) return
+    if (previewMode !== 'source') {
+      setPreviewMode('source')
+      return
+    }
+    const editor = markdownHandleRef.current
+    if (!editor) return
     const nextContent = pendingAgentReview.nextContent
-    clearPendingAgentReview()
     const baseline = useWriteWorkspaceStore.getState().fileContent
-    const started = markdownHandleRef.current?.beginDiffReview({
+    const started = editor.beginDiffReview({
       original: baseline,
       nextDoc: nextContent
-    }) ?? false
-    if (!started) {
-      // Rich mode / no source editor / identical content: apply directly.
-      setFileContent(nextContent)
-      setReviewActive(false)
-    }
-  }, [pendingAgentReview, clearPendingAgentReview, setFileContent, setReviewActive])
+    })
+    if (started || baseline === nextContent) clearPendingAgentReview()
+  }, [pendingAgentReview, previewMode, setPreviewMode, clearPendingAgentReview, setFileContent, setReviewActive])
 
   useEffect(() => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
+    if (exportPaused || saveStatus !== 'dirty' || !workspaceReady || !activeFileIsText || renderSafety.readOnly || reviewActive) return
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null
       void flushSave(workspaceRoot)
@@ -856,7 +743,7 @@ export function WriteWorkspaceView({
         saveTimerRef.current = null
       }
     }
-  }, [flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
+  }, [exportPaused, flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, activeFileIsText, renderSafety.readOnly, reviewActive])
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
@@ -982,15 +869,12 @@ export function WriteWorkspaceView({
         activeFileIsImage={activeFileIsImage}
         activeFileIsPdf={activeFileIsPdf}
         activeFileIsText={activeFileIsText}
-        activeFileLabel={activeFileLabel}
-        activeFileName={activeFileName}
         activeFilePath={activeFilePath ?? ''}
         documentStatsLabel={documentStatsLabel}
         assistantOpen={assistantOpen}
         exportInFlight={exportInFlight}
         exportMenuOpen={exportMenuOpen}
         exportMenuRef={exportMenuRef}
-        leftSidebarCollapsed={leftSidebarCollapsed}
         liveModeActive={liveModeActive}
         modeMenuItems={modeMenuItems}
         modeMenuOpen={modeMenuOpen}
@@ -999,7 +883,7 @@ export function WriteWorkspaceView({
         saveLabel={saveLabel}
         saveStatus={saveStatus}
         reviewActive={reviewActive}
-        setAssistantOpen={setAssistantOpen}
+        setAssistantOpen={(open) => { setAssistantOpen(open); onFocusConversation?.() }}
         setExportMenuOpen={setExportMenuOpen}
         setModeMenuOpen={setModeMenuOpen}
         setPreviewMode={setPreviewMode}
@@ -1014,6 +898,7 @@ export function WriteWorkspaceView({
         onResetOfficialDocumentFormat={resetOfficialDocumentFormat}
         onTypographyChange={setCurrentTypography}
       />
+      <WriteConflictReview />
       <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden pb-3 pt-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-ds-border-muted bg-ds-card/92 shadow-[0_12px_32px_rgba(20,47,95,0.04)] backdrop-blur-xl">
           <WriteWorkspaceDocumentPane
@@ -1044,6 +929,8 @@ export function WriteWorkspaceView({
             richHandleRef={richHandleRef}
             markdownHandleRef={markdownHandleRef}
             onMarkdownReviewStateChange={setReviewActive}
+            reviewRecovery={reviewActive ? reviewRecovery : null}
+            onMarkdownReviewSuspend={suspendReview}
             debouncedPreviewContent={debouncedPreviewContent}
             isMarkdown={isMarkdown}
             inlineCompletion={inlineCompletion}
@@ -1076,7 +963,7 @@ export function WriteWorkspaceView({
         <WriteInlineAgent
           action={selectionAction}
           value={inlineAgentValue}
-          inFlight={inlineEditInFlight}
+          inFlight={false}
           textareaRef={inlineAgentTextareaRef}
           onValueChange={setInlineAgentValue}
           onSubmitPrompt={submitInlineAgent}

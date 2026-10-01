@@ -10,7 +10,7 @@ import pluginMarketplaceViewSource from './PluginMarketplaceView.tsx?raw'
 import settingsShortcutsSource from './settings-section-shortcuts.tsx?raw'
 import sidebarSource from './chat/Sidebar.tsx?raw'
 import sidebarProjectsSectionSource from './chat/SidebarProjectsSection.tsx?raw'
-import workspaceModeTabsSource from './chat/WorkspaceModeTabs.tsx?raw'
+import documentWorkspacePanelSource from './workbench/DocumentWorkspacePanel.tsx?raw'
 import scheduleTasksViewSource from './schedule/ScheduleTasksView.tsx?raw'
 import sidebarPrimitivesSource from './sidebar/SidebarPrimitives.tsx?raw'
 import shellNavigationControlsSource from './shell/ShellNavigationControls.tsx?raw'
@@ -26,7 +26,7 @@ const topLevelRouteSurfaceSource = [
   pluginMarketplaceViewSource,
   sidebarSource,
   sidebarProjectsSectionSource,
-  workspaceModeTabsSource,
+  documentWorkspacePanelSource,
   writeSidebarSource,
   shellNavigationControlsSource,
   chatStoreTypesSource,
@@ -321,4 +321,11 @@ describe('Workbench route surface', () => {
       /:root:not\(\[data-platform='darwin'\]\) \.ds-shell-controls-safe-inset \{\s+padding-left: var\(--ds-shell-collapsed-header-slot-width\);\s+\}/
     )
   })
+})
+
+// The unified composer is ProseMirror; referencing a document must focus its
+// actual editable surface, independently of the document editor implementation.
+it('targets the current composer after adding a document reference', () => {
+  expect(workbenchSource).toContain('.ds-chat-stage .composer-prompt-editor [contenteditable="true"]')
+  expect(workbenchSource).not.toContain('.composer-prompt-editor .cm-content')
 })

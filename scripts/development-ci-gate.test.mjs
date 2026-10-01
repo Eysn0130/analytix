@@ -3,12 +3,12 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { assertDevelopmentCISuccess, requiredDevelopmentJobs } from './development-ci-gate.mjs'
 import { goTestSelection } from './go-test-selection.mjs'
-import { runtimePackage, rootPackage, rootPlatformTests, rootPlatformSelection, runtimeShardCount, runtimeShardIndex, runtimeTestShards, runtimeTestPartition, runtimePlatformSelection, runtimePlatformTests, runtimePlatformSubtests, runtimeExternalDiagnostics, otherGoPackages, goExitStatus } from './go-ci-shards.mjs'
+import { runtimePackage, rootPackage, rootPlatformTests, rootPlatformSelection, runtimeShardCount, runtimeShardIndex, runtimeTestShards, runtimeTestPartition, runtimePlatformSelection, runtimePlatformTests, runtimePlatformSubtests, runtimeExternalDiagnostics, otherGoPackages, filesystemContractPackages, filesystemGoPackages, goExitStatus } from './go-ci-shards.mjs'
 import { goTestPartition } from './go-test-partition.mjs'
 
 test('Go partitions cover every discovered package and runtime test exactly once', () => {
-  const packages = ['analytix.local/runtime-go', runtimePackage, `${runtimePackage}/fixture`]
-  assert.deepEqual([...otherGoPackages(packages.join('\n')), runtimePackage].sort(), packages.sort())
+  const packages = ['analytix.local/runtime-go', runtimePackage, `${runtimePackage}/fixture`, ...filesystemContractPackages]
+  assert.deepEqual([...otherGoPackages(packages.join('\n')), ...filesystemGoPackages(packages.join('\n')), runtimePackage].sort(), packages.sort())
   const dedicated = 'TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP'
   const shared = [...Array.from({ length: runtimeShardCount * 2 + 1 }, (_, i) => `TestFixture${i}`), 'ExampleRead', 'FuzzDecode']
   const required = [...shared, dedicated]
@@ -254,3 +254,28 @@ test('missing, malformed or unaccounted CI results cannot produce a green gate',
     assert.throws(() => assertDevelopmentCISuccess({ ...success(), [name]: null }), /did not succeed/)
   }
 })
+
+
+test('filesystem transfer preserves the complete dynamic package inventory and tagged lane', () => {
+  const discovered = ['analytix.local/runtime-go', runtimePackage, ...filesystemContractPackages, 'analytix.local/runtime-go/internal/newowner'];
+  const listing = discovered.slice().reverse().join('\n');
+  const ordinary = otherGoPackages(listing);
+  const filesystem = filesystemGoPackages(listing);
+  const production = otherGoPackages(listing, 'analytix_prod');
+  assert.deepEqual([...ordinary, ...filesystem, runtimePackage].sort(), discovered.slice().sort());
+  assert.deepEqual(ordinary.filter(name => filesystem.includes(name)), []);
+  assert.deepEqual([...production, runtimePackage].sort(), discovered.slice().sort());
+  assert.deepEqual(production.filter(name => filesystem.includes(name)).sort(), filesystem.slice().sort());
+  assert.ok(ordinary.includes('analytix.local/runtime-go/internal/newowner'));
+  for (const missing of [rootPackage, runtimePackage, ...filesystemContractPackages]) {
+    const incomplete = discovered.filter(name => name !== missing).join('\n');
+    assert.throws(() => filesystemGoPackages(incomplete), /inventory/);
+    for (const tags of ['', 'analytix_prod']) assert.throws(() => otherGoPackages(incomplete, tags), /inventory/);
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const lane = workflow.slice(workflow.indexOf('  filesystem-contracts:'), workflow.indexOf('  restart-contracts:'));
+  assert.match(lane, /os: \[ubuntu-24\.04, macos-15\]/);
+  assert.match(lane, /actions\/setup-node@/);
+  assert.match(lane, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs filesystem/);
+  assert.doesNotMatch(lane, /\.\/internal\/adapters\/outbound/);
+});

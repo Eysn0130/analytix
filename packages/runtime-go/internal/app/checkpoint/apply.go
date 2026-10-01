@@ -114,6 +114,10 @@ func BuildRestoreFilePlan(input RestoreFilePlanInput) map[string]any {
 		file["reason"] = pathError
 		return file
 	}
+	if changed["generatedOfficeCreation"] == true {
+		file["reason"] = "generated Office file deletion requires manual review because binary checkpoint rescue is not available"
+		return file
+	}
 	switch changeKind {
 	case "created":
 		file["action"] = "delete_created_file"

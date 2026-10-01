@@ -18,18 +18,13 @@ pub(super) fn build_paginated_data_sql(
         );
     }
     format!(
-        "WITH agg AS ({agg_sql}), filtered AS (\
-           SELECT key_value, counterparty_account, counterparty_name, bank, location, \
-                  placeholder_kind, key_label, in_amount, out_amount, in_count, out_count, \
-                  first_time, last_time, doc, CAST(COUNT(1) OVER() AS BIGINT) AS total_count \
-             FROM agg \
-            WHERE {search_where}\
-         ) \
+        "WITH agg AS ({agg_sql}) \
          SELECT key_value, counterparty_account, counterparty_name, bank, location, \
                 placeholder_kind, key_label, in_amount, out_amount, in_count, out_count, \
                 CAST(first_time AS VARCHAR) AS first_time, CAST(last_time AS VARCHAR) AS last_time, \
-                doc, total_count \
-           FROM filtered \
+                doc, CAST(COUNT(1) OVER() AS BIGINT) AS total_count \
+           FROM agg \
+          WHERE {search_where} \
           ORDER BY {sort_expr} {sort_order}, CAST(key_value AS VARCHAR) ASC \
           LIMIT {limit} OFFSET {row_offset}"
     )

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_ANALYTIX_MODEL } from '@shared/app-settings'
 import {
   WRITE_ASSISTANT_MODEL_KEY,
+  filterWriteEntries,
   normalizeWriteAssistantModel,
   readStoredAssistantModel
 } from './write-workspace-store-helpers'
@@ -55,5 +56,18 @@ describe('write workspace assistant model helpers', () => {
 
     expect(readStoredAssistantModel()).toBe(DEFAULT_ANALYTIX_MODEL)
     expect(storage.getItem(WRITE_ASSISTANT_MODEL_KEY)).toBe(DEFAULT_ANALYTIX_MODEL)
+  })
+})
+
+
+describe('shared workspace file inventory', () => {
+  it('retains office, document, code and unsupported files for browsing while hiding internal trees', () => {
+    const files = ['report.docx', 'budget.xlsx', 'deck.pptx', 'notes.md', 'notes.txt', 'main.ts', 'archive.zip'].map(name => ({
+      name, path: `/workspace/${name}`, type: 'file' as const, ext: name.slice(name.lastIndexOf('.'))
+    }))
+    const directories = ['src', '.deepseek', '.git', '.hg', '.svn', 'node_modules'].map(name => ({
+      name, path: `/workspace/${name}`, type: 'directory' as const, ext: ''
+    }))
+    expect(filterWriteEntries([...files, ...directories]).map(entry => entry.name)).toEqual([...files.map(entry => entry.name), 'src'])
   })
 })

@@ -28,6 +28,9 @@ func TestCaseTerminalMutationHasSingleProductionCoordinator(t *testing.T) {
 		},
 		"CloseTurn": {
 			"internal/app/turnterminal/coordinator.go": {"CommitV1": true},
+			// General-only auxiliary calls settle provider budgets; they cannot
+			// persist or publish a case terminal through any of the other APIs.
+			"internal/app/loop/auxiliary.go": {"RunAuxiliaryProvider": true},
 		},
 		"FinishTurnIfActiveWithItemsAndFields": {
 			"internal/app/turn/finalize_after_loop.go": {"CommitCompletedTurn": true},
@@ -179,6 +182,9 @@ func TestTrustedFinalProjectionAcceptsOnlyTerminalCompleteAuthority(t *testing.T
 				"persistPrivateFinalV1": true, "ReconcileCommittedInterrupt": true,
 			},
 			"internal/app/gateprojection/trusted_final.go": {"RegisterTerminalComplete": true},
+			// Startup recovery stages original terminal-complete authorities in
+			// a private index inside fresh witness/currentness callbacks.
+			"internal/app/gateprojection/recovered_fact.go": {"RestoreFactTerminalBatch": true},
 		},
 	}
 	for _, file := range goFiles(t, root) {

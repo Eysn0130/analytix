@@ -106,4 +106,15 @@ describe('packaged desktop startup contract', () => {
     const createWindow = sourceSlice('function createWindow(', 'function openThreadInNewWindow(')
     expect(createWindow).toContain('devServerHintUrl(app.isPackaged)')
   })
+
+  it('shows the startup window without waiting for extension credential cleanup, while serializing later mutations', () => {
+    expect(source).toContain('const startupExtensionAccountReconciliation = reconcileInstalledExtensionAccounts().catch(')
+    const startup = sourceSlice('const startupExtensionAccountReconciliation =', 'const imChannelAccountLifecycle =')
+    expect(startup).not.toContain('await reconcileInstalledExtensionAccounts()')
+    expect(startup).toContain("traceStartup('extension account reconciliation:done')")
+    const settingsApply = sourceSlice('await startupExtensionAccountReconciliation', 'const fetchModels = async')
+    expect(settingsApply).toContain('await reconcileInstalledExtensionAccounts()')
+    const ipc = sourceSlice('installedExtensionAccountLifecycle: {', 'providerOAuthAccountManagement,')
+    expect(ipc).toContain('await startupExtensionAccountReconciliation')
+  })
 })

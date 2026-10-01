@@ -520,8 +520,7 @@ func (service *Service) AcceptedSlotDisplay(
 
 	record, err := service.privateFinals.Resolve(ctx, input.AcceptedFinalDigest)
 	if err != nil || domainevidence.ValidatePrivateAcceptedFinalRecord(record) != nil ||
-		record.SchemaVersion != domainevidence.PrivateAcceptedFinalRecordVersion ||
-		record.AcceptedFinal.SchemaVersion != domainevidence.AcceptedFinalRecordVersion ||
+		domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) != nil ||
 		record.AcceptedFinal.FinalGateVersion != domainevidence.FinalEvidenceGateVersion ||
 		record.AcceptedFinal.RecordDigest != input.AcceptedFinalDigest ||
 		record.SecurityContext.ThreadID != input.ThreadID || record.SecurityContext.TurnID != input.TurnID ||
@@ -606,8 +605,7 @@ func (service *Service) CaseAcceptedSlotDisplay(
 			}
 			record, resolveErr := service.privateFinals.Resolve(ctx, binding.AcceptedFinalDigest)
 			if resolveErr != nil || domainevidence.ValidatePrivateAcceptedFinalRecord(record) != nil ||
-				record.SchemaVersion != domainevidence.PrivateAcceptedFinalRecordVersion ||
-				record.AcceptedFinal.SchemaVersion != domainevidence.AcceptedFinalRecordVersion ||
+				domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) != nil ||
 				record.AcceptedFinal.FinalGateVersion != domainevidence.FinalEvidenceGateVersion ||
 				record.AcceptedFinal.FinalGateVersion != binding.FinalGateVersion ||
 				record.AcceptedFinal.RecordDigest != binding.AcceptedFinalDigest ||

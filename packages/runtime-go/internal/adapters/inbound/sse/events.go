@@ -85,6 +85,10 @@ type setupError struct {
 }
 
 func (h ThreadEventsHandler) replay(ctx context.Context, threadID string, sinceSeq int) ([]map[string]any, *setupError, string) {
+	return h.replayWithLimit(ctx, threadID, sinceSeq, 0)
+}
+
+func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID string, sinceSeq, snapshotLimit int) ([]map[string]any, *setupError, string) {
 	if code := h.preflightPublic(threadID); code != "" {
 		return nil, nil, code
 	}
@@ -130,6 +134,22 @@ func (h ThreadEventsHandler) replay(ctx context.Context, threadID string, sinceS
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
+	// A live subscriber will reconcile a large backlog from a trusted public
+	// thread snapshot. Decide this before projecting each event: projection can
+	// reread the entire thread for every replayed event. The atomic delivery
+	// preflight above still rejects malformed terminal groups, and a fresh
+	// public preflight preserves revocation before advancing the cursor.
+	if snapshotLimit > 0 && len(deliveryUnits) > snapshotLimit {
+		if code := h.preflightPublic(threadID); code != "" {
+			return nil, nil, code
+		}
+		highestReplaySeq := highestEventSeq(deliveryUnits, sinceSeq)
+		return []map[string]any{SnapshotRequiredEvent(SnapshotRequiredInput{
+			ThreadID: threadID, Seq: highestReplaySeq, SinceSeq: sinceSeq,
+			HighestSeq: highestReplaySeq, ReplayEventCount: len(deliveryUnits),
+			Timestamp: h.now().UTC().Format(time.RFC3339Nano),
+		})}, nil, ""
+	}
 	public, revocationCode := h.publicEvents(threadID, deliveryUnits)
 	if revocationCode != "" {
 		return nil, nil, revocationCode
@@ -149,7 +169,7 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 	}
 	events, unsubscribe := h.Store.SubscribeEvents(threadID)
 	defer unsubscribe()
-	replayEvents, setupErr, revocationCode := h.replay(r.Context(), threadID, sinceSeq)
+	replayEvents, setupErr, revocationCode := h.replayWithLimit(r.Context(), threadID, sinceSeq, maxLiveReplayEvents)
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -276,7 +296,7 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 			flusher.Flush()
 		case <-heartbeat.C:
 			catchUpSinceSeq := lastSeq
-			catchUp, setupErr, revocationCode := h.replay(r.Context(), threadID, catchUpSinceSeq)
+			catchUp, setupErr, revocationCode := h.replayWithLimit(r.Context(), threadID, catchUpSinceSeq, maxLiveReplayEvents)
 			if revocationCode != "" {
 				h.writeProjectionRevokedEvent(w, threadID, revocationCode)
 				flusher.Flush()
@@ -646,7 +666,7 @@ func (h ThreadEventsHandler) withSSETrace(event map[string]any) map[string]any {
 	case domainevent.AcceptedFinalDeliveryBatchKind, domainevent.GeneralTerminalDeliveryBatchKind:
 		return event
 	}
-	out := make(map[string]any, len(event)+1)
+	out := make(map[string]any, len(event))
 	for key, value := range event {
 		out[key] = value
 	}

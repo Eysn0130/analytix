@@ -6,7 +6,8 @@ import {
   generalTerminalProjectionBatchFromRuntime,
   mergeChatBlocks,
   RUNTIME_EVENT_KINDS_COVERED_BY_RENDERER,
-  threadFromCore
+  threadFromCore,
+  usageFromCore
 } from './analytix-mapper'
 import { RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
 import { CORE_RUNTIME_EVENT_KINDS } from './analytix-contract'
@@ -873,6 +874,29 @@ describe('review mapping', () => {
       status: 'success',
       reviewText: 'No review findings.'
     })
+  })
+})
+
+describe('generated Office artifact mapping', () => {
+  const artifact = { artifactId: 'a'.repeat(64), kind: 'docx' as const, contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
+  const item: CoreTurnItemJson = {
+    id: 'generated-1', turnId: 'turn-1', threadId: 'thread-1', role: 'tool', status: 'completed',
+    createdAt: artifact.savedAt, kind: 'tool_result', toolName: 'generate_office_document', callId: 'call-1', isError: false,
+    output: { ...hostToolProjection(), projectionKind: 'artifact_status', messageKey: 'artifact_created', code: 'artifact_created', artifact }
+  }
+  it('maps an opaque host receipt without inventing file paths', () => {
+    const block = chatBlockFromItem(item)
+    expect(block?.kind).toBe('tool')
+    if (block?.kind !== 'tool') throw new Error('expected generated object')
+    expect(block.meta?.generatedArtifact).toEqual(artifact)
+    expect(block.filePath).toBeUndefined()
+  })
+  it('does not promote arbitrary output or another tool into generated object authority', () => {
+    for (const value of [ { ...item, output: { artifact } }, { ...item, toolName: 'remote_generator' }, { ...item, isError: true } ]) {
+      const block = chatBlockFromItem(value)
+      if (block?.kind !== 'tool') throw new Error('expected tool status')
+      expect(block.meta?.generatedArtifact).toBeUndefined()
+    }
   })
 })
 
@@ -2397,6 +2421,20 @@ describe('streaming runtime status events', () => {
     expect(tools).toEqual([])
   })
 
+  it('coalesces fixed provider progress by turn and rejects unscoped progress', async () => {
+    const statuses: Array<{ itemId: string; label?: string }> = []
+    const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => { statuses.push(event) } }
+    for (const [index, stage] of (['pre_send', 'post_send', 'response_received'] as const).entries()) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: index + 1,
+        threadId: 'thr_progress', turnId: 'turn_progress', stage, label: 'UNTRUSTED_STAGE_TEXT' }, sink, async () => undefined)
+    }
+    expect(statuses.map(s => s.label)).toEqual(['Preparing model request', 'Model request started', 'Response received'])
+    expect(new Set(statuses.map(s => s.itemId))).toEqual(new Set(['runtime_status_turn_progress_provider_progress']))
+    await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 4,
+      threadId: 'thr_progress', stage: 'post_send', label: 'UNSCOPED' }, sink, async () => undefined)
+    expect(statuses).toHaveLength(3)
+  })
+
   it('surfaces subagent pipeline child linkage as a runtime status event', async () => {
     let captured: unknown = null
     const sink: ThreadEventSink = {
@@ -3531,6 +3569,8 @@ describe('usage event mapping', () => {
           costUsd: 0,
           costCny: 0,
           priceConfigured: true,
+          costEstimateStatus: 'complete',
+          costKnownCurrencies: ['USD'],
           cacheSavingsUsd: 0.0001,
           turns: 1
         }
@@ -3542,12 +3582,15 @@ describe('usage event mapping', () => {
     expect(captured[0]).toMatchObject({
       costUsd: null,
       costCny: null,
-      priceConfigured: false
+      priceConfigured: false,
+      costEstimateStatus: 'unknown'
     })
     expect(captured[1]).toMatchObject({
       costUsd: 0,
-      costCny: 0,
+      costCny: null,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['USD'],
       cacheSavingsUsd: 0.0001
     })
   })
@@ -3578,6 +3621,8 @@ describe('usage event mapping', () => {
           cost_usd: 0,
           cost_cny: 0,
           price_configured: true,
+          cost_estimate_status: 'complete',
+          cost_known_currencies: ['CNY'],
           cache_savings_usd: 0.0002,
           token_economy_savings_tokens: 5,
           cache_miss_reasons: ['tool schema changed'],
@@ -3599,9 +3644,11 @@ describe('usage event mapping', () => {
       cachedTokens: 6,
       cacheMissTokens: 4,
       cacheHitRate: 0.6,
-      costUsd: 0,
+      costUsd: null,
       costCny: 0,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['CNY'],
       cacheSavingsUsd: 0.0002,
       tokenEconomySavingsTokens: 5
     })
@@ -3889,6 +3936,30 @@ describe('tool presentation inference', () => {
   })
 
   it.each([
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。',
+    '日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：550e8400-e29b-41d4-a716-44665544a000。',
+    '请解释 DOM 元素的父子关系。'
+  ])('projects an ordinary answer without case fact authority: %s', async (answer) => {
+    const batch = typedGeneralTerminalBatch(answer)
+    expect(generalTerminalProjectionBatchFromRuntime(batch)).toMatchObject({
+      terminalItem: { kind: 'assistant', text: answer }
+    })
+  })
+
+  it.each([
+    '张某与李某是父子。',
+    '甲公司支付给乙公司2645.72元。',
+    '甲公司支付乙公司2645.72元。',
+    '甲公司支付乙公司2万元。',
+    '张某与李某存在父子关系。',
+    '甲公司取得2026年收益￥2万元。',
+    '甲公司取得2026年收益2万元。',
+    '甲公司支付\n2645.72 元'
+  ])('withholds a typed case assertion from renderer projection: %s', (text) => {
+    expect(generalTerminalProjectionBatchFromRuntime(typedGeneralTerminalBatch(text))).toBeNull()
+  })
+
+  it.each([
     ['fabricated amount', '该案涉案金额为 2,645,472 元。'],
     ['fabricated account', '资金已流入银行账号 6222020200001234567。']
   ])('rejects general terminal renderer projection containing %s', async (_label, text) => {
@@ -3937,4 +4008,21 @@ describe('tool presentation inference', () => {
       meta: { turnId: 'turn_1' }
     })
   })
+})
+
+
+it('keeps closed cache observation and cost coverage without treating legacy false as a check', () => {
+  const usage = usageFromCore({ promptTokens: 2, completionTokens: 1, totalTokens: 3 }, {
+    cacheDiagnostics: {
+      dynamicStateCheck: 'not_checked', toolSchemaEstimator: 'utf8_bytes_div4',
+      responseModelObservation: 'differs_resolved', modelInputComparable: true,
+      modelInputFirstDifference: 'tools', modelInputComparablePrefixBytes: 12,
+      providerAttemptCount: 3, providerCostKnownAttemptCount: 2,
+      providerKnownCostUsdNanos: 12, providerKnownCostCnyNanos: 30,
+      providerCostEstimateComplete: false
+    }
+  })
+  expect(usage.cacheDiagnostics).toMatchObject({dynamicStateCheck: 'not_checked', responseModelObservation: 'differs_resolved', modelInputFirstDifference: 'tools', providerCostEstimateComplete: false, providerAttemptCount: 3})
+  const legacy = usageFromCore({}, {cacheDiagnostics: {dynamicStateLeaked: false, dynamicStateCheck: 'checked', responseModelObservation: 'PRIVATE', modelInputFirstDifference: 'PRIVATE'} as never})
+  expect(legacy.cacheDiagnostics).toBeUndefined()
 })

@@ -17,12 +17,14 @@ export const PUBLIC_RUNTIME_HTTP_ERROR_CODES = [
   'case_history_restricted',
   'case_compaction_archive_required',
   'thread_running',
+  'turn_execution_conflict',
   'gate_continuation_unavailable',
   'gate_continuation_terminal_turn',
   'task_job_output_schema_invalid',
   'worktree_isolation_authority_required',
   'attachment_authority_unavailable',
   'attachment_upload_unavailable',
+  'public_projection_pending',
   'model_modality_unsupported',
   'internal_error'
 ] as const

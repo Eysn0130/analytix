@@ -13,6 +13,7 @@ import (
 	attachmentauthorityapp "analytix.local/runtime-go/internal/app/attachmentauthority"
 	attachmentpublicationapp "analytix.local/runtime-go/internal/app/attachmentpublication"
 	attachmentuseapp "analytix.local/runtime-go/internal/app/attachmentuse"
+	canvaseditingapp "analytix.local/runtime-go/internal/app/canvasediting"
 	caseentityapp "analytix.local/runtime-go/internal/app/caseentity"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
@@ -22,9 +23,13 @@ import (
 	executionpolicy "analytix.local/runtime-go/internal/app/executionpolicy"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	loopapp "analytix.local/runtime-go/internal/app/loop"
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	mediaexecutionapp "analytix.local/runtime-go/internal/app/mediaexecution"
 	nativecomponentapp "analytix.local/runtime-go/internal/app/nativecomponent"
+	objecteditingapp "analytix.local/runtime-go/internal/app/objectediting"
+	officeeditingapp "analytix.local/runtime-go/internal/app/officeediting"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
+	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	publicationauthorityapp "analytix.local/runtime-go/internal/app/publicationauthority"
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	sessionapp "analytix.local/runtime-go/internal/app/session"
@@ -35,11 +40,15 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	workspacemutationapp "analytix.local/runtime-go/internal/app/workspacemutation"
+	workspacereadapp "analytix.local/runtime-go/internal/app/workspaceread"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
+	managededitingport "analytix.local/runtime-go/internal/ports/managedediting"
+	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -59,7 +68,14 @@ type ProviderExecutionCurrentnessValidator interface {
 }
 
 type RuntimeServerComponents struct {
-	AsyncTurnObserverV1 func(AsyncTurnObservationV1)
+	DocumentCodec            codecport.Codec
+	ManagedEditingFiles      managededitingport.Files
+	OfficeAdapters           map[string]adapterport.Adapter
+	OfficePackageHost        *packagehostapp.Service
+	ObjectEditing            *objecteditingapp.Service
+	WorkspaceRead            *workspacereadapp.Service
+	UncontainedMCPConfigured bool
+	AsyncTurnObserverV1      func(AsyncTurnObservationV1)
 	// AsyncTurnPhaseObserverV1 is an optional in-process regression barrier.
 	// It receives fixed phase labels only, never public or persisted data.
 	AsyncTurnPhaseObserverV1 func(string)
@@ -252,6 +268,38 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	}
 	handler.control = controlapp.NewController(runtimeControlDriver{handler: handler})
 	handler.sessions = sessionapp.NewService(sessionapp.Dependencies{Repository: handler.store})
+	handler.managedEditing = managededitingapp.New(handler.workspaceMutations, components.ManagedEditingFiles)
+	handler.shellRunner = managedEditingShellRunner{next: handler.shellRunner, registry: handler.managedEditing}
+	handler.objectEditing = components.ObjectEditing
+	if components.WorkspaceRead != nil {
+		if err := components.WorkspaceRead.BindAuthority(runtimeWorkspaceReadAuthority{handler}); err != nil {
+			return nil, err
+		}
+	}
+	handler.officePackageHost = components.OfficePackageHost
+	handler.documentCodec = components.DocumentCodec
+	for _, adapter := range components.OfficeAdapters {
+		if office, ok := adapter.(*officeeditingapp.Adapter); ok {
+			if err := office.BindSelectionHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+				return nil, err
+			}
+		}
+		if canvas, ok := adapter.(*canvaseditingapp.Adapter); ok {
+			if err := canvas.BindHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if components.UncontainedMCPConfigured {
+		if err := handler.managedEditing.BeginOpaque(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	if handler.objectEditing != nil {
+		if err := handler.objectEditing.BindHost(runtimeObjectProjector{handler}, handler.managedEditing.WithCapture); err != nil {
+			return nil, err
+		}
+	}
 	handler.threads = threadapp.NewService(threadapp.Dependencies{
 		Repository:               handler.store,
 		DataDir:                  handler.dataDir,

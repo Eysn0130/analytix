@@ -22,6 +22,7 @@ const (
 	RouteUnknown               RuntimeRoute = ""
 	RouteHealth                RuntimeRoute = "health"
 	RouteRuntimeInfo           RuntimeRoute = "runtime_info"
+	RouteRuntimeQuiescence     RuntimeRoute = "runtime_quiescence"
 	RouteRuntimeTools          RuntimeRoute = "runtime_tools"
 	RouteToolExecutionObserve  RuntimeRoute = "tool_execution_observe"
 	RouteRuntimeTaskJobs       RuntimeRoute = "runtime_task_jobs"
@@ -61,6 +62,8 @@ func MatchRuntimeRoute(path string) RuntimeRouteMatch {
 		return RuntimeRouteMatch{Route: RouteHealth}
 	case path == "/v1/runtime/info":
 		return RuntimeRouteMatch{Route: RouteRuntimeInfo}
+	case path == "/v1/runtime/quiescence":
+		return RuntimeRouteMatch{Route: RouteRuntimeQuiescence}
 	case path == "/v1/runtime/tools":
 		return RuntimeRouteMatch{Route: RouteRuntimeTools}
 	case path == toolExecutionObservationPathV1:
@@ -93,7 +96,7 @@ func MatchRuntimeRoute(path string) RuntimeRouteMatch {
 		path == LocalDisplayDirectPreviewPathV1 || path == LocalDisplayAcceptedSlotsPathV1 ||
 		path == HostFundsImportStagePathV1 || path == HostFundsImportConfirmPathV1 ||
 		path == HostFundsImportCancelPathV1 || path == HostFundsImportStatusPathV1 ||
-		path == HostFundsDeterministicCleaningPathV1 || path == HostFundsCleaningRevokePathV1:
+		path == HostFundsDeterministicCleaningPathV1 || path == HostFundsCleaningRevokePathV1 || path == ObjectEditingPath || path == BrowserSelectionPath || path == WorkspaceReadPath || path == InlineCompletionPath || path == PluginPackageHostPath || path == GeneratedArtifactPath || path == OfficePrivateAdmissionPath:
 		return RuntimeRouteMatch{Route: RouteLocalDisplay}
 	case path == "/v1/case-projects" || strings.HasPrefix(path, "/v1/case-projects/"):
 		return RuntimeRouteMatch{Route: RouteCaseProjects}

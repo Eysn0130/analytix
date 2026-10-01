@@ -42,6 +42,7 @@ import {
   coordinateLocalCredentialEntry, readLocalCredentialScanSource, scanLocalCredentialIsolation,
   disposeLocalCredentialScanSource
 } from './lib/local-provider-credential-scan.mjs'
+import { prepareDevelopmentKeychain } from './development-keychain.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -434,7 +435,33 @@ const PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES = Object.freeze({
   'window:did-finish-load': 'window_did_finish_load',
   'window:did-fail-load': 'window_did_fail_load',
   'window:startup-surface-ready': 'window_startup_surface_ready',
-  'window:fallback-show-timeout': 'window_fallback_show_timeout'
+  'window:fallback-show-timeout': 'window_fallback_show_timeout',
+  'native host registration:done': 'native_host_registration_done',
+  'extension account reconciliation:scheduled':
+    'extension_account_reconciliation_scheduled',
+  'extension account reconciliation:done':
+    'extension_account_reconciliation_done',
+  'OAuth callback router:done': 'oauth_callback_router_done',
+  'OAuth authorization sweep:done': 'oauth_authorization_sweep_done',
+  'OAuth refresh scheduler:done': 'oauth_refresh_scheduler_done',
+  'runtime ensure:begin': 'runtime_ensure_begin',
+  'runtime initial health:done': 'runtime_initial_health_done',
+  'runtime launch settings:done': 'runtime_launch_settings_done',
+  'runtime adapter:begin': 'runtime_adapter_begin',
+  'runtime adapter:done': 'runtime_adapter_done',
+  'runtime adapter:failed': 'runtime_adapter_failed',
+  'runtime health:done': 'runtime_health_done',
+  'runtime thread probe:done': 'runtime_thread_probe_done',
+  'runtime ensure:done': 'runtime_ensure_done',
+  'go preflight:begin': 'go_preflight_begin',
+  'go capability materialization:done': 'go_capability_materialization_done',
+  'go authority:done': 'go_authority_done',
+  'go process:spawned': 'go_process_spawned',
+  'go private frame:done': 'go_private_frame_done',
+  'go ready line:received': 'go_ready_line_received',
+  'go ready identity:verified': 'go_ready_identity_verified',
+  'go adapter:done': 'go_adapter_done',
+  'go adapter:failed': 'go_adapter_failed'
 })
 const PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH = 4096
 const repositoryContextMarkers = new WeakMap()
@@ -991,6 +1018,16 @@ function packagedAuthorityContext(appPath, target) {
   }
 }
 
+function controlledCoreDispositionValid(appPath, target, authority) {
+  if (!packagedAuthorityContract.isPackagedBuildAuthorityV2(authority) ||
+      authority.nativeDisposition.kind !== 'core_controlled_release' || target.key !== 'darwin-arm64') return false
+  try {
+    require('./mac-notarize.cjs')._internals.verifyDataNativeAfterSign(
+      packagedAuthorityContext(appPath, target), { requireDeveloperID: true, requireSecureTimestamp: true })
+    return true
+  } catch { return false }
+}
+
 function controlledNativeDispositionValid(appPath, target, authority) {
   if (authority?.nativeDisposition?.kind !== 'controlled_release_receipt') return false
   const receiptPath = join(runtimeResourcePath(appPath, target), 'analytix-native-components-receipt.json')
@@ -1144,6 +1181,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind: '',
     developmentNativeDisposition: false,
     controlledReleaseNativeReceipt: false,
+    controlledCoreQualification: false,
     worktreeSnapshotBinding: packagedWorktreeSnapshotBindingEvidence(
       currentWorktreeSnapshot,
       null
@@ -1279,6 +1317,7 @@ function formalPackagedArtifactEvidence(appPath, target, expectedCommit) {
     nativeDispositionKind,
     developmentNativeDisposition,
     controlledReleaseNativeReceipt,
+    controlledCoreQualification: controlledCoreDispositionValid(appPath, target, authority),
     worktreeSnapshotBinding
   }
 }
@@ -4142,6 +4181,27 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   let unlockCount = 0
   let executableEvidence = null
   let defaultEvidence = { ok: false, observedPathHash: '' }
+  const retireCreatedKeychain = () => {
+    if (!ownerOnlyDirectory(keychainsPath, true) ||
+      !ownerOnlyRegularFile(databasePath) ||
+      realpathSync(databasePath) !== databasePath) {
+      throw new Error('isolated_login_keychain_cleanup_identity_invalid')
+    }
+    // `security create-keychain` also adds this task Keychain to the macOS
+    // search list. Removing only its directory leaves a stale global entry.
+    const result = spawnSync(DARWIN_SECURITY_PATH, ['delete-keychain', requestedPath], {
+      cwd: home,
+      env: isolatedKeychainEnvironment(home),
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 5000,
+      maxBuffer: 4096
+    })
+    if (result.error || result.signal || result.status !== 0 ||
+      existsSync(requestedPath) || existsSync(databasePath)) {
+      throw new Error('isolated_login_keychain_cleanup_failed')
+    }
+  }
   const snapshot = () => Object.freeze({
     ok: !disposed && ownerOnlyRegularFile(databasePath) && defaultEvidence.ok,
     created: ownerOnlyRegularFile(databasePath),
@@ -4182,6 +4242,7 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
   } catch (error) {
     password.fill(0)
     disposed = true
+    if (ownerOnlyRegularFile(databasePath)) retireCreatedKeychain()
     throw error
   }
   return Object.freeze({
@@ -4203,6 +4264,44 @@ export async function createIsolatedDarwinLoginKeychain(isolatedHome) {
       }
       unlockCount += 1
       return snapshot()
+    },
+    dispose() {
+      if (disposed) return
+      password.fill(0)
+      retireCreatedKeychain()
+      disposed = true
+    }
+  })
+}
+
+export async function createIsolatedDarwinTaskKeychain(taskRoot, homeRoot) {
+  if (process.platform !== 'darwin' || !isAbsolute(taskRoot) || !isAbsolute(homeRoot)) {
+    throw new Error('isolated_task_keychain_requires_darwin_absolute_root')
+  }
+  const trustedTemp = trustedCacheTempRoot()
+  if (!trustedTemp.ok || realpathSync(taskRoot) !== resolve(taskRoot) ||
+    realpathSync(homeRoot) !== resolve(homeRoot) ||
+    pathIsOutside(trustedTemp.path, taskRoot) || pathIsOutside(taskRoot, homeRoot) ||
+    !ownerOnlyDirectory(taskRoot, true) || !ownerOnlyDirectory(homeRoot, true)) {
+    throw new Error('isolated_task_keychain_root_invalid')
+  }
+  const password = createRandomHexPasswordBuffer()
+  // The shared QA provisioner creates a non-login database and publishes the
+  // exact task binding without changing the default Keychain or search list.
+  // Core validates the binding against its own runtime data on each launch.
+  const profile = { taskRoot, homeRoot }
+  let disposed = false
+  try {
+    await prepareDevelopmentKeychain(profile, password, { create: true })
+  } catch (error) {
+    password.fill(0)
+    disposed = true
+    throw error
+  }
+  return Object.freeze({
+    async unlockForLaunch() {
+      if (disposed) throw new Error('isolated_task_keychain_disposed')
+      await prepareDevelopmentKeychain(profile, password)
     },
     dispose() {
       if (disposed) return
@@ -13801,10 +13900,10 @@ function commercialReleaseEvidence(artifact, releaseAuthority) {
     ),
     check(
       'controlled-release-native-receipt',
-      artifact?.controlledReleaseNativeReceipt === true,
+      (artifact?.controlledReleaseNativeReceipt === true || artifact?.controlledCoreQualification === true),
       artifact?.developmentNativeDisposition === true
         ? 'development package is valid for Milestone A but requires a controlled native receipt before commercial publication'
-        : 'commercial publication requires the exact packaged controlled native receipt',
+        : 'commercial publication requires the exact controlled Full receipt or Core qualification',
       nativeReceiptStatus
     )
   ]
@@ -13838,8 +13937,9 @@ export function emptyPackagedStartupTraceEvidence(enabled = false) {
   })
 }
 
-export function createPackagedStartupTraceRecorder() {
+export function createPackagedStartupTraceRecorder(onCheckpoint) {
   const partial = { stdout: '', stderr: '' }
+  const discardingLongLine = { stdout: false, stderr: false }
   const observedCheckpointCodes = []
   const checkpointElapsedMs = Object.create(null)
   let checkpointCount = 0
@@ -13847,41 +13947,70 @@ export function createPackagedStartupTraceRecorder() {
   let lastElapsedMs = 0
 
   const acceptLine = (line) => {
-    if (typeof line !== 'string' || line.length === 0) return
-    const safePrefix = line.slice(0, 256)
-    const match = safePrefix.match(
-      /^\[analytix\] \[startup\] \[\+\s*([0-9]{1,9})ms\] (.+?)(?: — detail: |$)/u
+    if (typeof line !== 'string' || line.length === 0 ||
+        line.length > PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH) return
+    const match = line.match(
+      /^\[analytix\] \[main\] event=main_info detail=(\{.*\})$/u
     )
     if (!match) return
-    if (!Object.hasOwn(PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES, match[2])) return
-    const checkpoint = PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES[match[2]]
-    const elapsedMs = Number(match[1])
-    if (typeof checkpoint !== 'string' ||
-        !Number.isSafeInteger(elapsedMs) || elapsedMs < 0) return
-    checkpointCount = Math.min(checkpointCount + 1, Number.MAX_SAFE_INTEGER)
-    if (!Object.hasOwn(checkpointElapsedMs, checkpoint)) {
-      observedCheckpointCodes.push(checkpoint)
+    let detail
+    try {
+      detail = JSON.parse(match[1])
+    } catch {
+      return
     }
-    checkpointElapsedMs[checkpoint] = elapsedMs
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail) ||
+        Object.keys(detail).length !== 2 ||
+        !Object.hasOwn(detail, 'stage') ||
+        !Object.hasOwn(detail, 'elapsedMs') ||
+        typeof detail.stage !== 'string' ||
+        !Object.hasOwn(PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES, detail.stage) ||
+        !Number.isSafeInteger(detail.elapsedMs) || detail.elapsedMs < 0) return
+    const checkpoint = PACKAGED_STARTUP_TRACE_CHECKPOINT_CODES[detail.stage]
+    if (Object.hasOwn(checkpointElapsedMs, checkpoint)) return
+    checkpointCount += 1
+    observedCheckpointCodes.push(checkpoint)
+    checkpointElapsedMs[checkpoint] = detail.elapsedMs
     lastCheckpoint = checkpoint
-    lastElapsedMs = elapsedMs
+    lastElapsedMs = detail.elapsedMs
+    if (typeof onCheckpoint === 'function') {
+      try { onCheckpoint({ checkpoint, elapsedMs: detail.elapsedMs }) } catch {
+        // Optional observers cannot affect installed product diagnostics.
+      }
+    }
   }
 
   const accept = (source, chunk) => {
     if (source !== 'stdout' && source !== 'stderr') return
     const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '')
-    const lines = `${partial[source]}${text}`.split(/\r?\n/u)
-    const remainder = lines.pop() || ''
-    partial[source] = remainder.length <= PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH
-      ? remainder
-      : ''
-    for (const line of lines) acceptLine(line)
+    let offset = 0
+    while (offset < text.length) {
+      const newline = text.indexOf('\n', offset)
+      const fragment = text.slice(offset, newline < 0 ? undefined : newline)
+      if (!discardingLongLine[source]) {
+        if (partial[source].length + fragment.length >
+            PACKAGED_STARTUP_TRACE_MAX_PARTIAL_LENGTH) {
+          partial[source] = ''
+          discardingLongLine[source] = true
+        } else {
+          partial[source] += fragment
+        }
+      }
+      if (newline < 0) break
+      if (!discardingLongLine[source]) {
+        acceptLine(partial[source].replace(/\r$/u, ''))
+      }
+      partial[source] = ''
+      discardingLongLine[source] = false
+      offset = newline + 1
+    }
   }
 
   const finish = (source) => {
     if (source !== 'stdout' && source !== 'stderr') return
-    acceptLine(partial[source])
+    if (!discardingLongLine[source]) acceptLine(partial[source].replace(/\r$/u, ''))
     partial[source] = ''
+    discardingLongLine[source] = false
   }
 
   const evidence = () => Object.freeze({

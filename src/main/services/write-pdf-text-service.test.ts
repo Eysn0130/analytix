@@ -1,8 +1,14 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { clearWritePdfTextCache, readWritePdfText } from './write-pdf-text-service'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearWritePdfTextCache, readWritePdfText, readWritePdfBytes } from './write-pdf-text-service'
+
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
 
 function escapePdfText(text: string): string {
   return text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')
@@ -43,6 +49,16 @@ afterEach(() => {
 })
 
 describe('write PDF text service', () => {
+  it('parses authorized bytes without reopening a file and refuses a revoked owner', async () => {
+    vi.mocked(readFile).mockClear()
+    const bytes = createSimpleTextPdf('Authorized PDF context')
+    const result = await readWritePdfBytes(bytes, () => true)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.pages[0].text).toContain('Authorized PDF context')
+    expect(await readWritePdfBytes(bytes, () => false)).toMatchObject({ ok: false })
+    expect(readFile).not.toHaveBeenCalled()
+  })
+
   it('extracts page text from a text-layer PDF fixture', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'analytix-write-pdf-text-'))
     const pdfPath = join(workspaceRoot, 'papers', 'fixture.pdf')
@@ -63,5 +79,49 @@ describe('write PDF text service', () => {
       charStart: 0
     })
     expect(result.pages[0].text).toContain('PDF BM25 keyword retrieval context')
+  })
+
+  it('extracts real PDF text when the optional Node raster package cannot resolve', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'analytix-pdf-no-raster-'))
+    try {
+      const pdfPackage = join(root, 'node_modules', 'pdfjs-dist')
+      await mkdir(join(pdfPackage, 'legacy', 'build'), { recursive: true })
+      await copyFile(join(process.cwd(), 'node_modules/pdfjs-dist/package.json'),
+        join(pdfPackage, 'package.json'))
+      for (const name of ['pdf.mjs', 'pdf.worker.mjs']) {
+        await copyFile(join(process.cwd(), 'node_modules/pdfjs-dist/legacy/build', name),
+          join(pdfPackage, 'legacy/build', name))
+      }
+      await writeFile(join(root, 'fixture.pdf'), createSimpleTextPdf('PDF text without Node raster'))
+      const script = join(root, 'read.mjs')
+      await writeFile(script, `
+      import { createRequire } from 'node:module'
+      import { readFileSync } from 'node:fs'
+      const require = createRequire(import.meta.url)
+      let nativeResolvable = false
+      try { require.resolve('@napi-rs/canvas'); nativeResolvable = true } catch {}
+      globalThis.DOMMatrix = class DOMMatrix {}
+      globalThis.ImageData = class ImageData {}
+      globalThis.Path2D = class Path2D {}
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      const task = pdfjs.getDocument({ data: new Uint8Array(readFileSync(new URL('./fixture.pdf', import.meta.url))),
+        disableFontFace: true, disableWorker: true, isEvalSupported: false, useSystemFonts: false })
+      const document = await task.promise
+      const page = await document.getPage(1)
+      const text = (await page.getTextContent()).items.map(item => item.str || '').join(' ')
+      await document.destroy()
+      process.stdout.write(JSON.stringify({ nativeResolvable, text }))
+      `)
+      const child = spawnSync(process.execPath, [script], {
+        cwd: root, env: { PATH: process.env.PATH || '' }, encoding: 'utf8',
+        timeout: 20_000, maxBuffer: 4096
+      })
+      expect(child.status, child.stderr).toBe(0)
+      expect(JSON.parse(child.stdout)).toEqual({
+        nativeResolvable: false, text: 'PDF text without Node raster'
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

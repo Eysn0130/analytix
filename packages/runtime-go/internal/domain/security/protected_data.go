@@ -1,6 +1,7 @@
 package security
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -19,6 +20,31 @@ var monetaryCaseCues = []string{
 	"金额", "余额", "转账", "收款", "付款", "支付", "收入", "支出", "流水", "报价", "价款", "涉案",
 }
 
+var unboundCaseAssertionPhrases = []string{
+	"实际控制", "控制关系", "关联关系", "人员关系", "亲属", "配偶", "夫妻",
+	"是父子", "为父子", "系父子",
+	"是父女", "为父女", "系父女",
+	"是母子", "为母子", "系母子",
+	"是母女", "为母女", "系母女",
+	"是兄弟", "为兄弟", "系兄弟",
+	"是姐妹", "为姐妹", "系姐妹",
+	"串通投标", "围标",
+	"行贿", "利益输送", "具备立案条件", "当前案件", "案件账户", "案件账号", "涉案",
+}
+
+var unboundConcreteCaseAssertionPhrases = []string{
+	"实际控制", "是父子", "为父子", "系父子", "是父女", "为父女", "系父女",
+	"是母子", "为母子", "系母子", "是母女", "为母女", "系母女",
+	"是兄弟", "为兄弟", "系兄弟", "是姐妹", "为姐妹", "系姐妹",
+	"串通投标", "行贿", "利益输送", "具备立案条件",
+}
+
+var unboundMonetaryActionCues = []string{"支付", "转账", "收款", "付款", "汇入", "汇出", "取得"}
+var acquiredYearFinancialCues = []string{"收益", "收入", "利润", "利息", "补助", "货款", "价款"}
+
+var unboundRelationshipAssertion = regexp.MustCompile(`([\p{Han}]{1,4})[与和]([\p{Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系`)
+var acquiredYearPrefix = regexp.MustCompile(`^(?:了\s*)?[0-9]{4}\s*年`)
+
 // ContainsProtectedCaseData detects structured values whose publication must
 // never depend on a model or a lexical case-intent guess. It is deliberately a
 // data-shape guard: case identity and evidence authority still come only from
@@ -27,11 +53,10 @@ func ContainsProtectedCaseData(text string) bool {
 	return domainprivacy.ContainsRestrictedPII(text)
 }
 
-// ContainsProtectedCaseFactCandidate is a fail-closed admission and public
-// draft containment guard. It does not prove that text is a case fact and it
-// never grants evidence authority. It only identifies concrete fact-shaped
-// material that must use the case publication lane instead of arbitrary
-// provider prose.
+// ContainsProtectedCaseFactCandidate is the conservative draft guard for an
+// already case-sensitive turn. It does not prove a case fact or grant evidence
+// authority. Ordinary turns use ContainsUnboundCaseRiskV1 so a field label or
+// amount in ordinary work does not create a case binding.
 func ContainsProtectedCaseFactCandidate(text string) bool {
 	if domainprivacy.ContainsRestrictedPII(text) {
 		return true
@@ -48,6 +73,193 @@ func ContainsProtectedCaseFactCandidate(text string) bool {
 		return true
 	}
 	return containsAnyCaseFactPhrase(normalized, monetaryCaseCues)
+}
+
+// ContainsUnboundCaseRiskV1 is the lexical signal for an ordinary turn or
+// result without case authority. A field label or amount alone is not evidence
+// that the work belongs to a case. Structured restricted values and explicit
+// case assertions still raise risk; the Host binding remains authoritative.
+func ContainsUnboundCaseRiskV1(text string) bool {
+	if ContainsProtectedCaseData(text) {
+		return true
+	}
+	normalized := normalizeCaseFactText(text)
+	if containsAnyCaseFactPhrase(normalized, unboundCaseAssertionPhrases) ||
+		containsUnboundRelationshipAssertionV1(normalized) {
+		return true
+	}
+	return containsUnboundMonetaryFactV1(text)
+}
+
+// ContainsUnboundCaseFactAssertionV1 keeps an explicit case assertion from
+// being treated as software work merely because the same clause mentions code.
+// Bare case vocabulary remains a weaker admission signal.
+func ContainsUnboundCaseFactAssertionV1(text string) bool {
+	normalized := normalizeCaseFactText(text)
+	if containsAnyCaseFactPhrase(normalized, unboundConcreteCaseAssertionPhrases) ||
+		containsUnboundRelationshipAssertionV1(normalized) {
+		return true
+	}
+	return containsUnboundMonetaryFactV1(text)
+}
+
+func containsUnboundRelationshipAssertionV1(normalized string) bool {
+	for _, match := range unboundRelationshipAssertion.FindAllStringSubmatch(normalized, -1) {
+		if !technicalRelationshipSubjectV1(match[1]) && !technicalRelationshipSubjectV1(match[2]) {
+			return true
+		}
+	}
+	return false
+}
+
+func technicalRelationshipSubjectV1(subject string) bool {
+	for _, term := range []string{"元素", "节点", "组件", "模块", "对象"} {
+		if strings.Contains(subject, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsUnboundMonetaryFactV1(text string) bool {
+	if containsLineWrappedMonetaryActionV1(text) {
+		return true
+	}
+	for _, rawClause := range strings.FieldsFunc(text, func(character rune) bool {
+		return strings.ContainsRune("。！？!?；;\n", character)
+	}) {
+		clause := normalizeCaseFactText(rawClause)
+		if index := strings.Index(clause, "取得"); index >= 0 {
+			tail := clause[index+len("取得"):]
+			if containsCurrencyAmount(tail) || acquiredYearHasUnitAmountV1(tail) {
+				return true
+			}
+		}
+		for _, cue := range unboundMonetaryActionCues {
+			if actionHasAdjacentAmount(clause, cue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsLineWrappedMonetaryActionV1(text string) bool {
+	// Join only a monetary action at line end with its immediately following
+	// amount; independent lines must not become one broad case assertion.
+	lines := strings.Split(text, "\n")
+	for index := 0; index+1 < len(lines); index++ {
+		left := normalizeCaseFactText(strings.TrimSpace(lines[index]))
+		right := normalizeCaseFactText(strings.TrimSpace(lines[index+1]))
+		for _, cue := range unboundMonetaryActionCues {
+			if (strings.HasSuffix(left, cue) || strings.HasSuffix(left, cue+"了")) &&
+				actionHasAdjacentAmount(cue+right, cue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func acquiredYearHasUnitAmountV1(tail string) bool {
+	// A year after "取得" may be a filename. Require a nearby financial noun
+	// before the bounded unit amount, rather than scanning a whole file request.
+	tail = strings.TrimSpace(tail)
+	prefix := acquiredYearPrefix.FindStringIndex(tail)
+	if prefix == nil {
+		return false
+	}
+	afterYear := tail[prefix[1]:]
+	windowEnd := len(afterYear)
+	windowRunes := 0
+	for byteIndex := range afterYear {
+		if windowRunes >= 64 {
+			windowEnd = byteIndex
+			break
+		}
+		windowRunes++
+	}
+	window := afterYear[:windowEnd]
+	runeIndex := 0
+	for byteIndex, character := range window {
+		if runeIndex > 32 {
+			break
+		}
+		if character >= '0' && character <= '9' && amountHasCurrencyUnit(window[byteIndex:]) {
+			beforeAmount := []rune(window[:byteIndex])
+			if len(beforeAmount) > 8 {
+				beforeAmount = beforeAmount[len(beforeAmount)-8:]
+			}
+			if containsAnyCaseFactPhrase(string(beforeAmount), acquiredYearFinancialCues) {
+				return true
+			}
+		}
+		runeIndex++
+	}
+	return false
+}
+
+func actionHasAdjacentAmount(clause, cue string) bool {
+	for offset := 0; offset < len(clause); {
+		index := strings.Index(clause[offset:], cue)
+		if index < 0 {
+			return false
+		}
+		offset += index + len(cue)
+		tail := strings.TrimLeftFunc(clause[offset:], unicode.IsSpace)
+		tail = strings.TrimPrefix(tail, "了")
+		tail = strings.TrimLeftFunc(tail, unicode.IsSpace)
+		currencyPrefix := false
+		for _, prefix := range []string{"人民币", "￥", "¥", "$", "€", "£"} {
+			if strings.HasPrefix(tail, prefix) {
+				tail = strings.TrimPrefix(tail, prefix)
+				currencyPrefix = true
+				break
+			}
+		}
+		tail = strings.TrimLeftFunc(tail, unicode.IsSpace)
+		if len(tail) > 0 && tail[0] >= '0' && tail[0] <= '9' &&
+			(currencyPrefix || amountHasCurrencyUnit(tail)) {
+			return true
+		}
+		// A bounded payee may follow the action directly or after 给/向. The
+		// number still needs a currency marker or unit, so "支付2次测试" remains
+		// an ordinary action count.
+		payeeAndAmount := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(tail, "给"), "向"))
+		for byteIndex, character := range payeeAndAmount {
+			if character < '0' || character > '9' {
+				continue
+			}
+			if byteIndex == 0 || len([]rune(payeeAndAmount[:byteIndex])) > 16 {
+				break
+			}
+			beforeAmount := strings.TrimSpace(payeeAndAmount[:byteIndex])
+			if strings.HasSuffix(beforeAmount, "￥") || strings.HasSuffix(beforeAmount, "¥") ||
+				strings.HasSuffix(beforeAmount, "$") || strings.HasSuffix(beforeAmount, "€") ||
+				strings.HasSuffix(beforeAmount, "£") || amountHasCurrencyUnit(payeeAndAmount[byteIndex:]) {
+				return true
+			}
+			break
+		}
+	}
+	return false
+}
+
+func amountHasCurrencyUnit(text string) bool {
+	if len(text) == 0 || text[0] < '0' || text[0] > '9' {
+		return false
+	}
+	afterAmount := strings.TrimSpace(strings.TrimLeft(text, "0123456789,."))
+	afterAmount = strings.TrimLeft(afterAmount, "十百千万亿")
+	if strings.HasPrefix(afterAmount, "元件") {
+		return false
+	}
+	for _, unit := range []string{"元", "人民币", "美元", "欧元", "英镑"} {
+		if strings.HasPrefix(afterAmount, unit) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsCurrencyAmount(text string) bool {

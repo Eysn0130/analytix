@@ -1,0 +1,12 @@
+{
+  "kind": "SYNTHETIC_LOCAL_EVAL_MARKERS_NOT_REAL_PII",
+  "markers": [
+    "SYNTH_PII_A_NAME_7c21",
+    "SYNTH_PII_A_ACCOUNT_7c21",
+    "SYNTH_PII_CP_7c21",
+    "SYNTH_PII_B_NAME_8d32",
+    "SYNTH_PII_B_ACCOUNT_8d32",
+    "SYNTH_UNTRUSTED_MEMO_7c21"
+  ],
+  "notes": "Only compare with actual app outbound/history/log captures in local tests. Absence of these strings does not prove complete privacy. Never use this fixture oracle as the product projector or source authority."
+}

@@ -70,6 +70,18 @@
       "sensitiveCanonical": "001234567890"
     },
     {
+      "id": "chinese-identity-number",
+      "input": "身份证号 110101199001011234",
+      "expected": "mask",
+      "sensitiveCanonical": "110101199001011234"
+    },
+    {
+      "id": "chinese-phone-number",
+      "input": "电话 13800138000",
+      "expected": "mask",
+      "sensitiveCanonical": "13800138000"
+    },
+    {
       "id": "unbounded-long-identifier",
       "input": "12345678901234567890123456789012345678901234567890123456789012345",
       "expected": "mask",
@@ -93,6 +105,31 @@
     {
       "id": "calendar-date",
       "input": "日期 20260720",
+      "expected": "preserve"
+    },
+    {
+      "id": "chinese-year-and-count",
+      "input": "2026 年的中文 文件共有 2645472 条。",
+      "expected": "preserve"
+    },
+    {
+      "id": "precise-ordinary-amount",
+      "input": "金额 12345678.90 元，币种 CNY；数量 0。",
+      "expected": "preserve"
+    },
+    {
+      "id": "iso-local-date-time",
+      "input": "日期 2026-09-26 18:30:00",
+      "expected": "preserve"
+    },
+    {
+      "id": "opaque-machine-reference",
+      "input": "引用 550e8400-e29b-41d4-a716-44665544a000，摘要 abababababababababababababababababababababababababababababababab",
+      "expected": "preserve"
+    },
+    {
+      "id": "relative-numeric-chinese-path",
+      "input": "工作区 docs/2026/09/26/中文 文档.txt",
       "expected": "preserve"
     }
   ],

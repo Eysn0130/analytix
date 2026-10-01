@@ -177,6 +177,19 @@ function toolCallItem(argumentsValue: unknown, extra: Record<string, unknown> = 
 }
 
 describe('public runtime content', () => {
+  it('preserves host question IDs with numeric digest runs in thread detail', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const item = {
+      kind: 'user_input', role: 'system', status: 'pending', inputId, prompt: 'Choose a path',
+      questions: [{ id: `${inputId}_1`, header: 'Path', question: 'Choose a path', options: [] }]
+    }
+    const thread = { id: 'thread-gate', turns: [{ id: 'turn-gate', items: [item] }] }
+    expect(sanitizePublicRuntimeValue(thread)).toEqual(thread)
+    expect(sanitizePublicRuntimeValue({ ...thread, turns: [{ id: 'turn-gate', items: [{
+      ...item, questions: [{ ...item.questions[0], question: 'account=6222020202020202020' }]
+    }] }] })).toBeUndefined()
+  })
+
   it('withholds marker-free raw provider, tool, and job diagnostic fields', () => {
     const sentinel = 'SOL_RAW_JOB_ERROR_SENTINEL_7F3C'
     const value = {
@@ -679,6 +692,22 @@ describe('public runtime content', () => {
     expect(JSON.stringify(admitted)).toContain('案件分析已结束；仅发布通过宿主证据门的固定边界答复。')
     expect(JSON.stringify(admitted)).toContain(record.recordDigest)
 
+    const hostOnlyBatch = structuredClone(batch) as Record<string, any>
+    hostOnlyBatch.events[2].usage = {
+      ...hostOnlyBatch.events[2].usage,
+      costUsd: 0, costCny: 0, priceConfigured: false,
+      costEstimateStatus: 'unknown', costKnownCurrencies: []
+    }
+    hostOnlyBatch.events[2].cacheDiagnostics = {
+      terminalCacheDiagnosticsSchema: 'terminal-cache-diagnostics.v1',
+      terminalCacheDiagnosticsValid: false,
+      terminalCacheDiagnosticsDisposition: 'rejected'
+    }
+    expect(new PublicRuntimeEventFilter().push(hostOnlyBatch)).toBe(hostOnlyBatch)
+    const emptyStatusBatch = structuredClone(hostOnlyBatch) as Record<string, any>
+    emptyStatusBatch.events[2].usage.costEstimateStatus = ''
+    expect(new PublicRuntimeEventFilter().push(emptyStatusBatch)).toBeNull()
+
     for (const effort of ['', ' high ', 'HIGH', 'SOL_PRIVATE_REASONING_SENTINEL_7F3C']) {
       const invalidEffortBatch = structuredClone(batch) as Record<string, any>
       invalidEffortBatch.events[2].effort = effort
@@ -713,6 +742,7 @@ describe('public runtime content', () => {
     const strongMarkers = [
       'acceptedFinal',
       'factFinalWitnessAdmission',
+      'factFinalHostLocalAdmission',
       'publicationSnapshotProof',
       'publicationSnapshotProofDigest'
     ] as const
@@ -725,6 +755,17 @@ describe('public runtime content', () => {
       expect(sanitizePublicRuntimeValue(event)).toBeUndefined()
       expect(new PublicRuntimeEventFilter().push(event)).toBeNull()
       expect(isPublicSseIpcPayload({ streamId: `stream-${marker}`, events: [event] })).toBe(false)
+    }
+
+    for (const admission of [null, {}, 'truncated']) {
+      const event = {
+        kind: 'runtime_status',
+        seq: 1,
+        nested: [{ detached: { factFinalHostLocalAdmission: admission } }]
+      }
+      expect(sanitizePublicRuntimeValue(event)).toBeUndefined()
+      expect(new PublicRuntimeEventFilter().push(event)).toBeNull()
+      expect(isPublicSseIpcPayload({ streamId: 'stream-host-local-fragment', events: [event] })).toBe(false)
     }
 
     const generic = {

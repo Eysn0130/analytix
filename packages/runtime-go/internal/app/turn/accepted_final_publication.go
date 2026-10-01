@@ -55,7 +55,7 @@ func BuildAcceptedFinalPublicationPlan(record domainevidence.AcceptedFinalRecord
 // manifest bytes used by historical V2/V3/V4 records. It must never be used
 // for current writes, repair, projection admission, or resume.
 func BuildAcceptedFinalAuditPublicationPlan(record domainevidence.AcceptedFinalRecord, renderedText string, intent domainevidence.TerminalPublicationIntent) (AcceptedFinalPublicationPlan, error) {
-	if record.SchemaVersion == domainevidence.AcceptedFinalRecordVersion ||
+	if record.SchemaVersion == domainevidence.AcceptedFinalRecordVersion || record.SchemaVersion == domainevidence.HostLocalAcceptedFinalRecordVersionV6 ||
 		domainevidence.ValidateAcceptedFinalRecord(record) != nil ||
 		domainevidence.ValidateTerminalPublicationIntent(intent, record.TerminalReason) != nil ||
 		domainsecurity.SHA256Hex([]byte(renderedText)) != record.RenderedTextSHA256 {

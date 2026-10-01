@@ -55,14 +55,21 @@ display；广泛研判、资金穿透、报告、导出和发布仍处于 fail-c
 
 ## 开发启动
 
-开发阶段可用一条命令启动 Analytix，并清理早期本地开发植入残留。插件本体来自已发布的 Analytix Hub 市场，不再由该脚本注册、安装或启用本地 overlay：
+当前受支持的生产入口是 Go Host 准入的 `host-static-first-party` 包；必须同时
+核验包内容、物化/激活、当前身份和案件/快照 authority，源码目录存在不等于已安装。
+普通 `.mcp.json` 保持 disabled。桌面远端 archive 安装仍拒绝缺少 Go archive
+authority 的请求，不能将本段作为 Hub 已发布或可安装的证明。
+
+以下历史开发入口不注册、安装或启用本地 overlay；运行前遵循仓库开发 runbook
+的隔离 profile、存储和凭据准入，不用它绕过正常启动前提：
 
 ```bash
 cd <repo-root>
 node plugins/analytix-fund-analysis/scripts/dev-run-with-plugin.mjs
 ```
 
-进入 Analytix 插件页后，从 Analytix Hub 中添加 `Analytix 涉案资金研判`。开发启动器不会改写标准 Hub 插件列表，因此不会把 Browser、Chrome、Computer Use 等预装插件改成本地测试条目。
+第一方 Funds 的发现、启用、调用、禁用和重开须通过当前候选的实际封包/Host
+路径验收；任意 Hub archive、完整研判、报告及导出仍是后续完整产品范围。
 
 ## 后续产品命令入口（当前 provider catalog 不广告）
 

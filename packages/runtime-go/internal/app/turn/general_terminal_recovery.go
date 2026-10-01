@@ -130,14 +130,18 @@ func RecoverGeneralTerminalPublicationsAtStartupV1(ctx context.Context, store re
 					return err
 				}
 			}
+			usageEvents := make([]map[string]any, 0, len(entries))
 			for _, entry := range entries {
 				if entry.State != GeneralTerminalPublicationCompleteV1 {
 					return errors.New("general terminal recovery left an unsettled publication bundle")
 				}
 				if usage := GeneralTerminalUsageEventV1(entry.Events); usage != nil {
-					if err := tx.SettleTerminalUsage(usage); err != nil {
-						return err
-					}
+					usageEvents = append(usageEvents, usage)
+				}
+			}
+			if len(usageEvents) != 0 {
+				if err := tx.SettleTerminalUsageBatch(usageEvents); err != nil {
+					return err
 				}
 			}
 		}

@@ -45,6 +45,7 @@ type generalTerminalRecoveryTransactionStub struct {
 	recordHook  func(string, string) error
 	recordCalls int
 	settlements int
+	batchCalls  int
 }
 
 func (tx *generalTerminalRecoveryTransactionStub) requireExclusive() error {
@@ -103,6 +104,15 @@ func (tx *generalTerminalRecoveryTransactionStub) SettleTerminalUsage(map[string
 		return err
 	}
 	tx.settlements++
+	return nil
+}
+
+func (tx *generalTerminalRecoveryTransactionStub) SettleTerminalUsageBatch(events []map[string]any) error {
+	if err := tx.requireExclusive(); err != nil {
+		return err
+	}
+	tx.batchCalls++
+	tx.settlements += len(events)
 	return nil
 }
 
@@ -210,8 +220,8 @@ func TestStartupGeneralTerminalRecoverySettlesCompleteUsageWithoutReload(t *test
 	if err := RecoverGeneralTerminalPublicationsAtStartupV1(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
-	if tx.loadCalls != 1 || tx.recordCalls != 0 || tx.settlements != 1 {
-		t.Fatalf("complete startup inventory = loads:%d records:%d settlements:%d", tx.loadCalls, tx.recordCalls, tx.settlements)
+	if tx.loadCalls != 1 || tx.recordCalls != 0 || tx.settlements != 1 || tx.batchCalls != 1 {
+		t.Fatalf("complete startup inventory = loads:%d records:%d settlements:%d batches:%d", tx.loadCalls, tx.recordCalls, tx.settlements, tx.batchCalls)
 	}
 }
 
@@ -246,8 +256,8 @@ func TestStartupGeneralTerminalRecoveryReadsBackOnlyRepairedThread(t *testing.T)
 	if err := RecoverGeneralTerminalPublicationsAtStartupV1(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
-	if tx.loadCalls != 2 || tx.recordCalls != 1 || tx.settlements != 1 {
-		t.Fatalf("repaired startup inventory = loads:%d records:%d settlements:%d", tx.loadCalls, tx.recordCalls, tx.settlements)
+	if tx.loadCalls != 2 || tx.recordCalls != 1 || tx.settlements != 1 || tx.batchCalls != 1 {
+		t.Fatalf("repaired startup inventory = loads:%d records:%d settlements:%d batches:%d", tx.loadCalls, tx.recordCalls, tx.settlements, tx.batchCalls)
 	}
 }
 

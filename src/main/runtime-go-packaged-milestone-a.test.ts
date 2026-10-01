@@ -14,7 +14,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,7 @@ import { ThreadDetailResponseV1Schema } from '../../packages/runtime/src/contrac
 import type { AnalytixRuntimeApi } from '../shared/analytix-api'
 import { buildPlanRelativePath, planFeatureNameFromRequest } from '../shared/gui-plan'
 import { isStrictPublicRuntimeSseIpcPayload } from '../shared/public-runtime-sse'
+import { publicConsoleInfo } from './logger'
 import {
   findKeyboardShortcutCommand,
   keyboardEventToShortcut,
@@ -563,6 +564,9 @@ function fixtureMilestoneModule(exposeInternals: boolean): Promise<Record<string
     .replace("'./lib/local-provider-credential-scan.mjs'", JSON.stringify(pathToFileURL(join(
       process.cwd(), 'scripts/lib/local-provider-credential-scan.mjs'
     )).href))
+    .replace("'./development-keychain.mjs'", JSON.stringify(pathToFileURL(join(
+      process.cwd(), 'scripts/development-keychain.mjs'
+    )).href))
     .replace(
       "'./lib/packaged-release-publication-authority.mjs'",
       JSON.stringify(publicationAuthorityUrl)
@@ -622,6 +626,28 @@ function runGit(cwd: string, args: string[]): void {
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
   }
+}
+
+function packagedSourceRepositoryFixture(
+  name: string,
+  files: Record<string, string> = { 'base.txt': 'tracked\n' }
+): { root: string; workspace: string } {
+  const root = taskOwnedSandbox()
+  const workspace = join(root, name)
+  mkdirSync(workspace, { recursive: true })
+  runGit(workspace, ['init', '--quiet'])
+  for (const [relativePath, body] of Object.entries(files)) {
+    const path = join(workspace, relativePath)
+    if (dirname(path) !== workspace) mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, body, 'utf8')
+  }
+  runGit(workspace, ['add', ...Object.keys(files)])
+  runGit(workspace, [
+    '-c', 'user.name=Analytix Test',
+    '-c', 'user.email=test@analytix.invalid',
+    'commit', '--quiet', '-m', 'fixture'
+  ])
+  return { root, workspace }
 }
 
 function gitOutput(cwd: string, args: string[]): string {
@@ -1035,7 +1061,30 @@ afterEach(() => {
 describe('packaged general Agent Milestone A public-seam harness', () => {
   it('retains only allowlisted packaged startup checkpoints without raw process output', async () => {
     const { createPackagedStartupTraceRecorder } = await milestoneModule()
-    const recorder = createPackagedStartupTraceRecorder()
+    const checkpoints: Array<{ checkpoint: string; elapsedMs: number }> = []
+    const recorder = createPackagedStartupTraceRecorder((checkpoint: typeof checkpoints[number]) => {
+      checkpoints.push(checkpoint)
+    })
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    let firstLine: string
+    let extensionLine: string
+    try {
+      publicConsoleInfo('startup', 'untrusted /Users/private', {
+        stage: 'main module evaluated',
+        elapsedMs: 0,
+        path: '/Users/private'
+      })
+      publicConsoleInfo('startup', '', {
+        stage: 'extension account reconciliation:scheduled',
+        elapsedMs: 17
+      })
+      ;[firstLine, extensionLine] = info.mock.calls.map((call) => call.join(' '))
+    } finally {
+      info.mockRestore()
+    }
+    expect(firstLine!).toBe(
+      '[analytix] [main] event=main_info detail={"stage":"main module evaluated","elapsedMs":0}'
+    )
 
     recorder.accept(
       'stdout',
@@ -1043,27 +1092,27 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     )
     recorder.accept(
       'stderr',
-      Buffer.from('[analytix] [startup] [+    17ms] settings load:', 'utf8')
+      Buffer.from(firstLine!.slice(0, 34), 'utf8')
     )
     recorder.accept(
       'stderr',
-      Buffer.from('start — detail: {"path":"/Users/private"}\n', 'utf8')
+      Buffer.from(`${firstLine!.slice(34)}\n`, 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    29ms] not an allowlisted stage\n', 'utf8')
+      Buffer.from('[analytix] [main] event=main_info detail={"stage":"not an allowlisted stage","elapsedMs":29}\n', 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    30ms] toString\n', 'utf8')
+      Buffer.from('[analytix] [startup] [+    30ms] settings load:start\n', 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from(`private-fragment-${'x'.repeat(4096)}`, 'utf8')
+      Buffer.from(`private-fragment-${'x'.repeat(4096)}${extensionLine}\n`, 'utf8')
     )
     recorder.accept(
       'stdout',
-      Buffer.from('[analytix] [startup] [+    41ms] desktop private history migration:start\n', 'utf8')
+      Buffer.from(`${extensionLine}\n${firstLine}\n`, 'utf8')
     )
     recorder.finish('stdout')
     recorder.finish('stderr')
@@ -1073,20 +1122,74 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
       enabled: true,
       checkpointCount: 2,
       observedCheckpointCodes: [
-        'settings_load_start',
-        'desktop_private_history_migration_start'
+        'main_module_evaluated',
+        'extension_account_reconciliation_scheduled'
       ],
-      lastCheckpoint: 'desktop_private_history_migration_start',
-      lastElapsedMs: 41,
+      lastCheckpoint: 'extension_account_reconciliation_scheduled',
+      lastElapsedMs: 17,
       checkpointElapsedMs: {
-        settings_load_start: 17,
-        desktop_private_history_migration_start: 41
+        main_module_evaluated: 0,
+        extension_account_reconciliation_scheduled: 17
       }
     })
     expect(JSON.stringify(evidence)).not.toContain('/Users/private')
     expect(JSON.stringify(evidence)).not.toContain('do-not-retain')
     expect(JSON.stringify(evidence)).not.toContain('not an allowlisted stage')
     expect(JSON.stringify(evidence)).not.toContain('toString')
+    expect(checkpoints).toEqual([
+      { checkpoint: 'main_module_evaluated', elapsedMs: 0 },
+      { checkpoint: 'extension_account_reconciliation_scheduled', elapsedMs: 17 }
+    ])
+  })
+
+  it('rejects malformed, unsafe and oversized startup lines and recovers at the next line', async () => {
+    const { createPackagedStartupTraceRecorder } = await milestoneModule()
+    const recorder = createPackagedStartupTraceRecorder()
+    const prefix = '[analytix] [main] event=main_info detail='
+    const invalid = [
+      '{"stage":"settings load:start","elapsedMs":-1}',
+      '{"stage":"settings load:start","elapsedMs":1.5}',
+      '{"stage":"settings load:start","elapsedMs":9007199254740992}',
+      '{"stage":"settings load:start","elapsedMs":"12"}',
+      '{"stage":"settings load:start","elapsedMs":12,"path":"/Users/private"}',
+      '{"stage":"settings load:start"}',
+      '{"stage":"settings load:start","elapsedMs":12'
+    ]
+    recorder.accept('stdout', invalid.map((value) => `${prefix}${value}\n`).join(''))
+    recorder.accept('stdout', `${prefix}${'x'.repeat(4096)}`)
+    recorder.accept('stdout', `${prefix}{"stage":"settings load:start","elapsedMs":12}\n`)
+    expect(recorder.evidence().checkpointCount).toBe(0)
+
+    recorder.accept('stdout', `${prefix}{"stage":"settings load:start","elapsedMs":12}\r\n`)
+    recorder.finish('stdout')
+    expect(recorder.evidence()).toEqual({
+      enabled: true,
+      checkpointCount: 1,
+      observedCheckpointCodes: ['settings_load_start'],
+      lastCheckpoint: 'settings_load_start',
+      lastElapsedMs: 12,
+      checkpointElapsedMs: { settings_load_start: 12 }
+    })
+    expect(JSON.stringify(recorder.evidence())).not.toContain('/Users/private')
+  })
+
+  it('records the Go startup boundary without retaining private ready payloads', async () => {
+    const { createPackagedStartupTraceRecorder } = await milestoneModule()
+    const recorder = createPackagedStartupTraceRecorder()
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    let line = ''
+    try {
+      publicConsoleInfo('startup', '', {
+        stage: 'go ready identity:verified', elapsedMs: 421,
+        runtimeToken: 'do-not-retain'
+      })
+      line = info.mock.calls[0].join(' ')
+    } finally {
+      info.mockRestore()
+    }
+    recorder.accept('stdout', `${line}\n`)
+    expect(recorder.evidence().checkpointElapsedMs).toEqual({ go_ready_identity_verified: 421 })
+    expect(JSON.stringify(recorder.evidence())).not.toContain('do-not-retain')
   })
 
   it('wires bounded sanitized startup tracing into both packaged launches and stable defaults', () => {
@@ -3358,6 +3461,11 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     mkdirSync(isolatedHome, { mode: 0o700 })
     chmodSync(isolatedHome, 0o700)
     const { createIsolatedDarwinLoginKeychain } = await milestoneModule()
+    const taskKeychain = join(isolatedHome, 'Library', 'Keychains', 'login.keychain')
+    const userDefaultBefore = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(userDefaultBefore.status).toBe(0)
     const controller = await createIsolatedDarwinLoginKeychain(isolatedHome)
     try {
       const created = controller.evidence()
@@ -3399,6 +3507,44 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
     } finally {
       controller.dispose()
     }
+    expect(existsSync(`${taskKeychain}-db`)).toBe(false)
+    const searchListAfter = spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    const userDefaultAfter = spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+    expect(searchListAfter.status).toBe(0)
+    expect(searchListAfter.stdout).not.toContain(taskKeychain)
+    expect(userDefaultAfter.status).toBe(0)
+    expect(userDefaultAfter.stdout).toBe(userDefaultBefore.stdout)
+  })
+
+  it('provisions the non-login Core task keychain without changing user Keychain selection', async () => {
+    if (process.platform !== 'darwin') return
+    const taskRoot = taskOwnedSandbox()
+    const homeRoot = join(taskRoot, 'home')
+    mkdirSync(homeRoot, { mode: 0o700 })
+    const snapshot = () => ({
+      defaultKeychain: spawnSync('/usr/bin/security', ['default-keychain', '-d', 'user'], { encoding: 'utf8' }),
+      searchList: spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], { encoding: 'utf8' })
+    })
+    const before = snapshot()
+    expect(before.defaultKeychain.status).toBe(0)
+    expect(before.searchList.status).toBe(0)
+    const { createIsolatedDarwinTaskKeychain } = await milestoneModule()
+    const controller = await createIsolatedDarwinTaskKeychain(taskRoot, homeRoot)
+    try {
+      expect(existsSync(join(taskRoot, 'darwin-secret-store-keychain', 'analytix-task.keychain-db'))).toBe(true)
+      await controller.unlockForLaunch()
+    } finally {
+      controller.dispose()
+    }
+    const after = snapshot()
+    expect(after.defaultKeychain.status).toBe(0)
+    expect(after.searchList.status).toBe(0)
+    expect(after.defaultKeychain.stdout).toBe(before.defaultKeychain.stdout)
+    expect(after.searchList.stdout).toBe(before.searchList.stdout)
   })
 
   it('keeps the isolated keychain password out of argv, env, files, and reports', () => {
@@ -12248,17 +12394,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('fails closed when the matching same-process afterExtract snapshot is missing', async () => {
     const contract = await packagedAuthorityInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'missing-prebuild-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { root, workspace } = packagedSourceRepositoryFixture('missing-prebuild-repository')
     const context = packageLifecycleContext(root)
 
     expect(() => contract.consumePackagedAfterExtractSnapshot(context, workspace)).toThrow(
@@ -12269,17 +12405,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
   it('consumes the afterExtract snapshot before rejecting a source mismatch and replay', async () => {
     const contract = await packagedAuthorityInternals()
     const afterExtract = await afterExtractInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'mismatched-prebuild-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { root, workspace } = packagedSourceRepositoryFixture('mismatched-prebuild-repository')
     const context = packageLifecycleContext(root)
     afterExtract.captureAfterExtractSnapshot(context, { repoRoot: workspace })
     writeFileSync(join(workspace, 'untracked.svg'), '<svg/>\n', 'utf8')
@@ -12295,17 +12421,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
   it('keeps concurrent afterExtract snapshots isolated by exact target key', async () => {
     const contract = await packagedAuthorityInternals()
     const afterExtract = await afterExtractInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'concurrent-target-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { root, workspace } = packagedSourceRepositoryFixture('concurrent-target-repository')
     const arm64Context = packageLifecycleContext(root, 'arm64')
     const x64Context = packageLifecycleContext(root, 'x64')
     const arm64 = afterExtract.captureAfterExtractSnapshot(arm64Context, { repoRoot: workspace })
@@ -12321,17 +12437,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('rejects prepackaged input and dirty formal release source at afterExtract', async () => {
     const afterExtract = await afterExtractInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'after-extract-release-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { root, workspace } = packagedSourceRepositoryFixture('after-extract-release-repository')
 
     const prepackaged = packageLifecycleContext(root)
     prepackaged.packager.packagerOptions.prepackaged = join(root, 'prepackaged')
@@ -12348,17 +12454,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('binds every non-ignored untracked regular file regardless of extension', async () => {
     const contract = await packagedAuthorityInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'snapshot-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { workspace } = packagedSourceRepositoryFixture('snapshot-repository')
     const clean = contract.collectPackagedWorktreeSnapshotV1(workspace)
     writeFileSync(join(workspace, 'logo.svg'), '<svg/>\n', 'utf8')
     const svg = contract.collectPackagedWorktreeSnapshotV1(workspace)
@@ -12374,17 +12470,9 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('does not filter tracked changes by generated-looking directory names', async () => {
     const contract = await packagedAuthorityInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'tracked-generated-looking-repository')
-    mkdirSync(join(workspace, 'dist'), { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'dist', 'logo.svg'), '<svg>v1</svg>\n', 'utf8')
-    runGit(workspace, ['add', 'dist/logo.svg'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { workspace } = packagedSourceRepositoryFixture('tracked-generated-looking-repository', {
+      'dist/logo.svg': '<svg>v1</svg>\n'
+    })
     const before = contract.collectPackagedWorktreeSnapshotV1(workspace)
     writeFileSync(join(workspace, 'dist', 'logo.svg'), '<svg>v2</svg>\n', 'utf8')
     const after = contract.collectPackagedWorktreeSnapshotV1(workspace)
@@ -12395,17 +12483,7 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('fails closed on an untracked symlink instead of hashing its target', async () => {
     const contract = await packagedAuthorityInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'snapshot-symlink-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, 'base.txt'), 'tracked\n', 'utf8')
-    runGit(workspace, ['add', 'base.txt'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { workspace } = packagedSourceRepositoryFixture('snapshot-symlink-repository')
     symlinkSync('base.txt', join(workspace, 'untracked.svg'))
 
     expect(() => contract.collectPackagedWorktreeSnapshotV1(workspace)).toThrow(
@@ -12415,18 +12493,10 @@ describe('packaged general Agent Milestone A public-seam harness', () => {
 
   it('keeps ignored dependency and build output outside the Git source closure', async () => {
     const contract = await packagedAuthorityInternals()
-    const root = taskOwnedSandbox()
-    const workspace = join(root, 'snapshot-git-closure-repository')
-    mkdirSync(workspace, { recursive: true })
-    runGit(workspace, ['init', '--quiet'])
-    writeFileSync(join(workspace, '.gitignore'), 'out/\nnode_modules/\n', 'utf8')
-    writeFileSync(join(workspace, 'package.json'), '{"name":"closure-fixture"}\n', 'utf8')
-    runGit(workspace, ['add', '.gitignore', 'package.json'])
-    runGit(workspace, [
-      '-c', 'user.name=Analytix Test',
-      '-c', 'user.email=test@analytix.invalid',
-      'commit', '--quiet', '-m', 'fixture'
-    ])
+    const { workspace } = packagedSourceRepositoryFixture('snapshot-git-closure-repository', {
+      '.gitignore': 'out/\nnode_modules/\n',
+      'package.json': '{"name":"closure-fixture"}\n'
+    })
     const before = contract.collectPackagedWorktreeSnapshotV1(workspace)
     mkdirSync(join(workspace, 'out'), { recursive: true })
     mkdirSync(join(workspace, 'node_modules', 'native-addon'), { recursive: true })

@@ -35,6 +35,7 @@ type RuntimeState struct {
 	mu                            sync.Mutex
 	backgroundJobs                map[string]*backgroundJobControl
 	backgroundClosing             bool
+	maintenance                   bool
 	admissionClosed               chan struct{}
 	currentByThread               map[string]domainsecurity.TurnSecurityContext
 	currentByWorkspace            map[string]domainsecurity.TurnSecurityContext
@@ -160,7 +161,7 @@ func (s *RuntimeState) registerBackgroundJob(waitContext context.Context, id str
 		if s.admissionClosed == nil {
 			s.admissionClosed = make(chan struct{})
 		}
-		if s.backgroundClosing || s.backgroundJobs[id] != nil || binding != nil && !s.bindingAllowedLocked(binding) || waitContext != nil && waitContext.Err() != nil {
+		if s.backgroundClosing || s.maintenance || s.backgroundJobs[id] != nil || binding != nil && !s.bindingAllowedLocked(binding) || waitContext != nil && waitContext.Err() != nil {
 			s.mu.Unlock()
 			cancel()
 			return nil, false
@@ -483,6 +484,34 @@ func (s *RuntimeState) ActiveBackgroundJobIDs() []string {
 		}
 	}
 	return ids
+}
+
+// BeginMaintenanceIfIdle prevents new Go-owned background work while Main
+// replaces an idle runtime. Existing jobs or queued child work make it busy.
+func (s *RuntimeState) BeginMaintenanceIfIdle() bool {
+	if s == nil {
+		return false
+	}
+	if !s.mu.TryLock() {
+		return false
+	}
+	defer s.mu.Unlock()
+	if s.backgroundClosing || s.maintenance || len(s.backgroundJobs) != 0 ||
+		s.active != 0 || len(s.waiters) != 0 || len(s.transitionThreads) != 0 ||
+		len(s.transitionWorkspaces) != 0 || len(s.delegatedWorkspaceTransitions) != 0 {
+		return false
+	}
+	s.maintenance = true
+	return true
+}
+
+func (s *RuntimeState) EndMaintenance() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.maintenance = false
+	s.mu.Unlock()
 }
 
 type BackgroundJobPauseSnapshot struct {

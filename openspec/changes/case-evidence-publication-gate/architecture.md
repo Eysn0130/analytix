@@ -13,7 +13,7 @@ The host trusts only its own canonical context, grant registry, evidence registr
 desktop request
   -> runtimeapp turn-start boundary
   -> strict host binding observer classifies valid/missing/invalid/unreadable/unstable
-  -> signed thread-risk index is compared with the live monotonic witness
+  -> host risk policy is revalidated (an enrolled witnessed policy retains its live witness check)
   -> host snapshot authority selects one immutable dataset snapshot
   -> context app service freezes executable TurnSecurityContextV2 or boundary-only V2
   -> source readiness app service performs live native probes and verifies the exact frozen snapshot
@@ -144,6 +144,15 @@ An executable case-evidence V2 contains a concrete host-registry snapshot id. `u
 
 ### Monotonic Authority Witness V1
 
+This subsection describes the preserved enrolled/witnessed profile. The
+first-stage empty-lineage `host_local` profile in the design uses the same
+DSV2, Evidence Registry, receipt, and Final Gate consumers with an explicitly
+typed local currentness selector and mode commitment. It never emits a
+`FreshHead` or witness binding to represent a local selector. The local mode
+proves exact expected-head CAS and signed lineage within the current profile;
+complete-profile rollback remains `UNVERIFIED`. Mixed, missing, or ambiguous
+mode/lineage state is boundary-only.
+
 Thread-risk and Evidence Registry heads use separate versioned namespaces over one generic protocol. A stable signed checkpoint records installation/enrollment, namespace, generation, current and previous state digests, predecessor checkpoint, and a witness fencing token. A separately signed observation echoes a fresh client challenge, preventing replay of an older valid checkpoint. Advance uses an installation-signed exact expected-generation/checkpoint/state compare-and-swap plus a deterministic mutation id; retry returns the byte-identical receipt.
 
 Local policy/index/intent/receipt records are immutable CAS material. A mutable local head is only a projection and may be repaired solely from a fresh witness observation. Witness unavailability, signature/enrollment/nonce mismatch, same-generation equivocation, a witness head whose referenced local material is missing, an indeterminate advance, or a local projection ahead of the witness quarantines high-risk execution. Signatures, maximum generations, Keychain/DPAPI/libsecret, or self-consistent old snapshots are not freshness proofs. Witness payloads contain digests and installation metadata only, never thread/case/workspace/prompt/evidence/PII content.
@@ -180,7 +189,7 @@ Host-native capability probes reuse the same durable `tool_call` / `tool_result`
 
 `receiptId`, `contextDigest`, `toolCallId`, server identity/version, `connectionEpoch`, `toolName`, `argsHash`, `resultHash`, source type, `datasetSnapshotId`, `queryHash`, range, granularity, currency, timezone, pagination completeness, `sourceRecordIds`, raw SHA-256, transformation lineage, PII classification, `issuedAt`, and registry integrity proof.
 
-The registry's membership authority is an installation-key-signed global root index whose ordered entry binds one turn/context to the full SHA-256, byte length, record digest, sequence, state digest, last-entry digest, and canonical-ledger digest of a content-addressed authority capsule. Each capsule binds the complete frozen `TurnSecurityContext` and current registry. Index generations bind `previousIndexDigest`; a live update may add a sequence-one context or extend exactly one existing registry by one canonical entry, while every other entry remains unchanged. A capsule blob is durably installed before the root index is atomically replaced; that index replacement is the local membership commit point. The per-turn capsule and JSONL files are disposable projections: missing or complete-record exact prefixes may be repaired, while longer, mid-record, divergent, wrong-key, unindexed, or non-canonical state fails closed. Superseded capsule blobs are removed after commit, and any retained orphan must be an exact historical prefix; a newer or divergent installation-signed orphan is local rollback evidence. The current root index is additionally advanced through the Evidence Registry monotonic-witness namespace. Receipt settlement/revocation, accepted finals, compaction references, and PublicationReceipts bind that witness checkpoint, so restoring the complete older local registry cannot resurrect support authority.
+The registry's membership authority is an installation-key-signed global root index whose ordered entry binds one turn/context to the full SHA-256, byte length, record digest, sequence, state digest, last-entry digest, and canonical-ledger digest of a content-addressed authority capsule. Each capsule binds the complete frozen `TurnSecurityContext` and current registry. Index generations bind `previousIndexDigest`; a live update may add a sequence-one context or extend exactly one existing registry by one canonical entry, while every other entry remains unchanged. A capsule blob is durably installed before the root index is atomically replaced; that index replacement is the local membership commit point. The per-turn capsule and JSONL files are disposable projections: missing or complete-record exact prefixes may be repaired, while longer, mid-record, divergent, wrong-key, unindexed, or non-canonical state fails closed. Superseded capsule blobs are removed after commit, and any retained orphan must be an exact historical prefix; a newer or divergent installation-signed orphan is local rollback evidence. In the enrolled profile, the current root index is additionally advanced through the Evidence Registry monotonic-witness namespace. Receipt settlement/revocation, accepted finals, compaction references, and PublicationReceipts bind that witness checkpoint, so restoring the complete older local registry cannot resurrect support authority. In `host_local`, the same registry/Final consumers instead bind the exact locally selected generation and mode commitment; they make no equivalent complete-profile rollback claim.
 
 MCP fact authority uses Streamable HTTP/stdio revisions `2025-11-25` or `2025-06-18`. The negotiated revision is frozen into host-issued `mcpv2` server identity and therefore into `ExecutionGrant`, source probe, `ToolOutcome`, and `EvidenceReceipt`. The 2024 HTTP+SSE revision and legacy `mcpv1` identities remain audit-only and cannot authorize new facts.
 

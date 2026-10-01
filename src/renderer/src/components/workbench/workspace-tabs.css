@@ -1,0 +1,22 @@
+.workspace-tabs-header { display: flex; align-items: center; flex: 0 0 38px; min-width: 0; border-bottom: 1px solid var(--ds-border-muted); background: var(--ds-surface-card); }
+.workspace-tablist { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.workspace-tab { display: flex; align-items: center; flex: 0 0 auto; max-width: 210px; border-right: 1px solid var(--ds-border-muted); border-bottom: 2px solid transparent; }
+.workspace-tab[data-active=true] { border-bottom-color: currentColor; background: var(--ds-surface-hover); }
+.workspace-tab[data-dragging=true] { opacity: .6; }
+.workspace-tab > [role=tab] { display: flex; align-items: center; gap: 6px; min-width: 0; height: 34px; padding: 0 8px; font-size: 12px; text-align: left; touch-action: none; }
+.workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tab svg { flex-shrink: 0; }
+.workspace-tab-close { display: grid; place-items: center; width: 26px; height: 28px; margin-right: 2px; flex-shrink: 0; border-radius: 4px; }
+.workspace-tabs-actions { display: flex; align-items: center; gap: 1px; padding: 0 4px; margin-left: auto; }
+.workspace-tabs-actions button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 4px; }
+.workspace-tab button:hover, .workspace-tabs-actions button:hover, .workspace-tool-selector button:hover { background: var(--ds-surface-hover); }
+.workspace-tabs-header button:focus-visible, .workspace-tool-selector button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.workspace-tab-status { font-size: 13px; }
+.workspace-tab-status[data-error=true] { color: var(--ds-danger, #b64040); }
+.workspace-tool-selector { padding: 22px 14px; overflow: auto; }
+.workspace-tool-selector h2 { margin: 0 8px 14px; font-size: 12px; font-weight: 500; color: var(--ds-text-muted); }
+.workspace-tool-selector > div { display: grid; gap: 3px; }
+.workspace-tool-selector button { display: flex; align-items: center; gap: 12px; padding: 10px 9px; border-radius: 5px; text-align: left; font-size: 13px; transition: background-color 120ms ease; }
+.workspace-tool-selector button:disabled { opacity: .4; cursor: not-allowed; }
+.workspace-tool-selector button:active:not(:disabled) { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) { .workspace-tool-selector button { transition: none; transform: none; } }

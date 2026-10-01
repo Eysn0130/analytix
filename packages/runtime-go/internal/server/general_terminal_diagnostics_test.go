@@ -257,7 +257,7 @@ func TestGeneralTerminalSettlementDuringPublicUsageRead(t *testing.T) {
 	// current authority. A new GET after both operations drain must succeed.
 	var refusal map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil || response.Code != http.StatusServiceUnavailable ||
-		refusal["code"] != "accepted_final_hydration_unavailable" || len(refusal) != 2 {
+		refusal["code"] != "public_projection_pending" || len(refusal) != 2 {
 		t.Fatalf("old public snapshot did not fail closed: status=%d", response.Code)
 	}
 	freshRequest := httptest.NewRequest(http.MethodGet, "/v1/threads/"+threadID, nil)

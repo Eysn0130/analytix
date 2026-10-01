@@ -2456,19 +2456,14 @@ func datasetSelectionMatchesSourceContextV2(
 	securityContext domainsecurity.TurnSecurityContext,
 ) bool {
 	if domainsecurity.ValidateTurnSecurityContextForCaseFactPublication(securityContext) != nil ||
-		!selection.Head.HasBundle || !domainsecurity.IsSHA256Hex(selection.SelectionDigest) ||
-		!currentDatasetSelectionDigestValidV2(selection) ||
-		len(selection.DatasetIndexPath) == 0 ||
-		selection.Head.Bundle.DatasetSnapshotCount != uint64(len(selection.DatasetIndexPath)) ||
-		selection.Head.Bundle.DatasetSnapshotIndexDigest != selection.DatasetIndexPath[0].IndexDigest ||
+		datasetsnapshotport.ValidateCurrentSelectionChildBindingV2(selection) != nil ||
 		selection.Snapshot.Record.DatasetSnapshotID != securityContext.DatasetSnapshotID ||
 		selection.Snapshot.Record.SourceManifestHash != securityContext.SourceManifestHash ||
 		selection.Snapshot.Manifest.SourceManifestHash != securityContext.SourceManifestHash ||
 		domainsecurity.ValidateDatasetSnapshotAuthorityRecordForManifestV2(
 			selection.Snapshot.Record, selection.Snapshot.Manifest,
 		) != nil ||
-		datasetsnapshotport.ValidateResolvedSnapshotV2(selection.Snapshot) != nil ||
-		domainsecurity.ValidateDatasetSnapshotIndexRecordV2(selection.SelectedIndex, selection.Snapshot.Record) != nil {
+		datasetsnapshotport.ValidateResolvedSnapshotV2(selection.Snapshot) != nil {
 		return false
 	}
 	for _, index := range selection.DatasetIndexPath {
@@ -2481,6 +2476,10 @@ func datasetSelectionMatchesSourceContextV2(
 
 func cloneCurrentDatasetSelectionV2(selection datasetsnapshotport.CurrentSelectionV2) datasetsnapshotport.CurrentSelectionV2 {
 	selection.DatasetIndexPath = append([]domainsecurity.DatasetSnapshotIndexV1(nil), selection.DatasetIndexPath...)
+	if selection.HostLocalHead != nil {
+		head := *selection.HostLocalHead
+		selection.HostLocalHead = &head
+	}
 	return selection
 }
 
@@ -2546,23 +2545,24 @@ func sameDatasetSelectionBindingV2(
 	left datasetsnapshotport.CurrentSelectionV2,
 	right datasetsnapshotport.CurrentSelectionV2,
 ) bool {
-	return datasetSelectionChildBindingValidV2(left) &&
-		datasetSelectionChildBindingValidV2(right) &&
-		left.Head.Bundle.DatasetSnapshotIndexDigest == right.Head.Bundle.DatasetSnapshotIndexDigest &&
-		left.Head.Bundle.DatasetSnapshotCount == right.Head.Bundle.DatasetSnapshotCount &&
-		reflect.DeepEqual(left.DatasetIndexPath, right.DatasetIndexPath) &&
-		reflect.DeepEqual(left.SelectedIndex, right.SelectedIndex) &&
-		reflect.DeepEqual(left.Snapshot, right.Snapshot)
+	if !datasetSelectionChildBindingValidV2(left) || !datasetSelectionChildBindingValidV2(right) ||
+		!reflect.DeepEqual(left.DatasetIndexPath, right.DatasetIndexPath) ||
+		!reflect.DeepEqual(left.SelectedIndex, right.SelectedIndex) ||
+		!reflect.DeepEqual(left.Snapshot, right.Snapshot) {
+		return false
+	}
+	if left.HostLocalHead != nil || right.HostLocalHead != nil {
+		return left.HostLocalHead != nil && right.HostLocalHead != nil &&
+			reflect.DeepEqual(left.HostLocalHead, right.HostLocalHead)
+	}
+	return left.Head.Bundle.DatasetSnapshotIndexDigest == right.Head.Bundle.DatasetSnapshotIndexDigest &&
+		left.Head.Bundle.DatasetSnapshotCount == right.Head.Bundle.DatasetSnapshotCount
 }
 
 func datasetSelectionChildBindingValidV2(
 	selection datasetsnapshotport.CurrentSelectionV2,
 ) bool {
-	return selection.Head.HasBundle &&
-		currentDatasetSelectionDigestValidV2(selection) &&
-		len(selection.DatasetIndexPath) > 0 &&
-		selection.Head.Bundle.DatasetSnapshotCount == uint64(len(selection.DatasetIndexPath)) &&
-		selection.Head.Bundle.DatasetSnapshotIndexDigest == selection.DatasetIndexPath[0].IndexDigest
+	return datasetsnapshotport.ValidateCurrentSelectionChildBindingV2(selection) == nil
 }
 
 func currentDatasetSelectionDigestValidV2(selection datasetsnapshotport.CurrentSelectionV2) bool {

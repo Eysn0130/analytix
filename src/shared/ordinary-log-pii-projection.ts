@@ -116,6 +116,7 @@ const PUBLIC_SCHEMA_DIGEST_KEYS = new Set([
 ])
 const CANONICAL_OPAQUE_DIGEST = /^(?=[a-f0-9]{64}$)(?=.*[a-f])[a-f0-9]{64}$/
 const CANONICAL_SCHEMA_DIGEST = /^[a-f0-9]{64}$/
+const HOST_USER_INPUT_ID = /^input_[a-f0-9]{64}$/
 
 const CASE_ENTITY_REFERENCE_V1 = /cer1_[a-p]{64}/
 const PRIVATE_SOURCE_ROW_REFERENCE_V1 = /srow1_[0-9a-f]{64}/
@@ -127,6 +128,20 @@ const CASE_FACT_ASSERTION_PHRASES = [
   'mac地址', '设备标识', '设备指纹'
 ]
 const MONETARY_CASE_CUES = ['金额', '余额', '转账', '收款', '付款', '支付', '收入', '支出', '流水', '报价', '价款', '涉案']
+const UNBOUND_CASE_ASSERTION_PHRASES = [
+  '实际控制', '控制关系', '关联关系', '人员关系', '亲属', '配偶', '夫妻',
+  '是父子', '为父子', '系父子',
+  '是父女', '为父女', '系父女',
+  '是母子', '为母子', '系母子',
+  '是母女', '为母女', '系母女',
+  '是兄弟', '为兄弟', '系兄弟',
+  '是姐妹', '为姐妹', '系姐妹',
+  '串通投标', '围标',
+  '行贿', '利益输送', '具备立案条件', '当前案件', '案件账户', '案件账号', '涉案'
+]
+const UNBOUND_MONETARY_ACTION_CUES = ['支付', '转账', '收款', '付款', '汇入', '汇出', '取得']
+const ACQUIRED_YEAR_FINANCIAL_CUES = ['收益', '收入', '利润', '利息', '补助', '货款', '价款']
+const UNBOUND_RELATIONSHIP_ASSERTION = /([\p{Script=Han}]{1,4})[与和]([\p{Script=Han}]{1,4})存在(?:父子|父女|母子|母女|兄弟|姐妹)关系/gu
 
 type PublicPIITraversalState = {
   active: WeakSet<object>
@@ -172,6 +187,104 @@ export function containsProtectedCaseFactCandidate(text: string): boolean {
   if (!/[0-9]/.test(normalized)) return false
   if (containsCurrencyAmount(normalized) || /人民币|美元|欧元|英镑/.test(normalized)) return true
   return MONETARY_CASE_CUES.some((phrase) => normalized.includes(phrase))
+}
+
+/** Mirrors the Go unbound ordinary-turn/result risk signal. Case authority is host-owned. */
+export function containsUnboundCaseRiskV1(text: string): boolean {
+  if (containsOrdinaryPublicPII(text)) return true
+  const normalized = normalizeCaseFactText(text)
+  if (UNBOUND_CASE_ASSERTION_PHRASES.some((phrase) => normalized.includes(phrase))) return true
+  if (containsUnboundRelationshipAssertionV1(normalized)) return true
+  if (containsLineWrappedMonetaryActionV1(text)) return true
+  return text.split(/[。！？!?；;\n]/u).some((rawClause) => {
+    const clause = normalizeCaseFactText(rawClause)
+    const acquiredAt = clause.indexOf('取得')
+    if (acquiredAt >= 0) {
+      const tail = clause.slice(acquiredAt + '取得'.length)
+      if (containsCurrencyAmount(tail) || acquiredYearHasUnitAmountV1(tail)) return true
+    }
+    return UNBOUND_MONETARY_ACTION_CUES.some((cue) => actionHasAdjacentAmount(clause, cue))
+  })
+}
+
+function containsLineWrappedMonetaryActionV1(text: string): boolean {
+  // Join only an action at line end to its immediately following amount.
+  const lines = text.split('\n')
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    const left = normalizeCaseFactText(lines[index].trim())
+    const right = normalizeCaseFactText(lines[index + 1].trim())
+    for (const cue of UNBOUND_MONETARY_ACTION_CUES) {
+      if ((left.endsWith(cue) || left.endsWith(`${cue}了`)) &&
+          actionHasAdjacentAmount(`${cue}${right}`, cue)) return true
+    }
+  }
+  return false
+}
+
+function acquiredYearHasUnitAmountV1(tail: string): boolean {
+  // A year may be a filename; require a nearby financial noun and bound the scan.
+  const trimmed = tail.trim()
+  const year = trimmed.match(/^(?:了\s*)?[0-9]{4}\s*年/u)
+  if (!year) return false
+  const afterYear = trimmed.slice(year[0].length)
+  let window = ''
+  let windowRunes = 0
+  for (const character of afterYear) {
+    if (windowRunes >= 64) break
+    window += character
+    windowRunes += 1
+  }
+  let offset = 0
+  let runeIndex = 0
+  for (const character of window) {
+    if (runeIndex > 32) break
+    if (/^[0-9]$/u.test(character) &&
+        amountHasCurrencyUnit(window.slice(offset))) {
+      const nearAmount = Array.from(window.slice(0, offset)).slice(-8).join('')
+      if (ACQUIRED_YEAR_FINANCIAL_CUES.some((cue) => nearAmount.includes(cue))) return true
+    }
+    offset += character.length
+    runeIndex += 1
+  }
+  return false
+}
+
+function containsUnboundRelationshipAssertionV1(normalized: string): boolean {
+  for (const match of normalized.matchAll(UNBOUND_RELATIONSHIP_ASSERTION)) {
+    if (!technicalRelationshipSubjectV1(match[1]) && !technicalRelationshipSubjectV1(match[2])) return true
+  }
+  return false
+}
+
+function technicalRelationshipSubjectV1(subject: string): boolean {
+  return ['元素', '节点', '组件', '模块', '对象'].some((term) => subject.includes(term))
+}
+
+function actionHasAdjacentAmount(clause: string, cue: string): boolean {
+  let offset = 0
+  while (offset < clause.length) {
+    const index = clause.indexOf(cue, offset)
+    if (index < 0) return false
+    offset = index + cue.length
+    const rawTail = clause.slice(offset).trimStart().replace(/^了/u, '').trimStart()
+    const currencyPrefix = /^(?:人民币|￥|¥|\$|€|£)/u.test(rawTail)
+    const tail = rawTail.replace(/^(?:人民币|￥|¥|\$|€|£)/u, '').trimStart()
+    if (/^[0-9]/u.test(tail) && (currencyPrefix || amountHasCurrencyUnit(tail))) return true
+    // A bounded payee may follow directly or after 给/向; a bare count stays ordinary.
+    const payeeAndAmount = tail.replace(/^(?:给|向)/u, '').trim()
+    const digitIndex = payeeAndAmount.search(/[0-9]/u)
+    if (digitIndex > 0 && Array.from(payeeAndAmount.slice(0, digitIndex)).length <= 16) {
+      const beforeAmount = payeeAndAmount.slice(0, digitIndex).trim()
+      if (/[￥¥$€£]$/u.test(beforeAmount) || amountHasCurrencyUnit(payeeAndAmount.slice(digitIndex))) return true
+    }
+  }
+  return false
+}
+
+function amountHasCurrencyUnit(text: string): boolean {
+  if (!/^[0-9]/u.test(text)) return false
+  const afterAmount = text.replace(/^[0-9][0-9,.]*/u, '').trimStart().replace(/^[十百千万亿]+/u, '')
+  return /^(?:元(?!件)|人民币|美元|欧元|英镑)/u.test(afterAmount)
 }
 
 function decodeASCIIJSONUnicodeEscapes(text: string): string {
@@ -268,11 +381,30 @@ export function containsOrdinaryPublicPII(value: unknown): boolean {
   return containsPublicPII(value, false, newPublicPIITraversalState(), 0)
 }
 
+function hostUserInputQuestionsId(
+  record: Record<string, unknown>,
+  key: string,
+  entry: unknown,
+  inheritedText: boolean
+): string | undefined {
+  if (key !== 'questions' || inheritedText || !Array.isArray(entry) ||
+      typeof record.inputId !== 'string' || !HOST_USER_INPUT_ID.test(record.inputId)) return undefined
+  if (record.kind === 'user_input' && record.role === 'system' &&
+      (record.status === 'pending' || record.status === 'submitted' ||
+        record.status === 'cancelled')) return record.inputId
+  if (record.kind === 'user_input_requested' && record.status === 'pending') return record.inputId
+  if (record.kind === 'user_input_resolved' &&
+      (record.status === 'submitted' || record.status === 'cancelled')) return record.inputId
+  return undefined
+}
+
 function containsPublicPII(
   value: unknown,
   inheritedText: boolean,
   state: PublicPIITraversalState,
-  depth: number
+  depth: number,
+  hostInputId?: string,
+  expectedQuestionId?: string
 ): boolean {
   if (!consumePublicPIINode(state, depth)) return true
   if (typeof value === 'string') {
@@ -286,15 +418,22 @@ function containsPublicPII(
   state.active.add(value)
   try {
     if (Array.isArray(value)) {
-      for (const entry of value) {
-        if (containsPublicPII(entry, inheritedText, state, depth + 1)) return true
+      for (const [index, entry] of value.entries()) {
+        if (containsPublicPII(entry, inheritedText, state, depth + 1, undefined,
+          hostInputId === undefined ? undefined : `${hostInputId}_${index + 1}`)) return true
       }
       return false
     }
-    for (const key in value as Record<string, unknown>) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue
-      const entry = (value as Record<string, unknown>)[key]
+    const record = value as Record<string, unknown>
+    for (const key in record) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const entry = record[key]
       const normalized = normalizePublicKey(key)
+      // The Go host derives these correlation IDs from its gate digest. They
+      // are structural only in a closed user-input record outside prose; all
+      // question text and any mismatched ID still receive the ordinary check.
+      if (normalized === 'id' && expectedQuestionId !== undefined &&
+          entry === expectedQuestionId) continue
       if (PUBLIC_OPAQUE_DIGEST_KEYS.has(normalized) &&
           typeof entry === 'string' && CANONICAL_OPAQUE_DIGEST.test(entry)) {
         continue
@@ -310,7 +449,8 @@ function containsPublicPII(
         entry,
         inheritedText || PUBLIC_TEXT_KEYS.has(normalized) || TYPED_PII_KEYS.has(normalized),
         state,
-        depth + 1
+        depth + 1,
+        hostUserInputQuestionsId(record, key, entry, inheritedText)
       )) {
         return true
       }

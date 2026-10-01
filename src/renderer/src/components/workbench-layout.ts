@@ -1,5 +1,5 @@
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, SetStateAction, PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkspaceFileTarget } from '@shared/workspace-file'
 import type { AppRoute } from '../store/chat-store-types'
 import {
@@ -8,6 +8,8 @@ import {
 } from '../lib/browser-storage'
 import { WORKSPACE_FILE_PREVIEW_EVENT, type WorkspaceFilePreviewDetail } from '../lib/workspace-file-preview'
 import type { RightPanelMode } from './chat/WorkbenchTopBar'
+import { useWorkspaceTabsStore, workspaceObjectTabId } from '../store/workspace-tabs-store'
+import i18n from '../i18n'
 
 const LEFT_PANEL_WIDTH_KEY = 'analytix.layout.leftSidebarWidth'
 const LEFT_PANEL_COLLAPSED_KEY = 'analytix.layout.leftSidebarCollapsed'
@@ -181,12 +183,12 @@ function persistBoolean(key: string, value: boolean, scope: string): void {
 
 function readStoredRightPanelMode(scope: string): RightPanelMode {
   const raw = readScopedStorageItem(RIGHT_PANEL_MODE_KEY, scope)
-  return raw === 'todo' || raw === 'changes' || raw === 'browser' ? raw : null
+  return raw === 'documents' || raw === 'todo' || raw === 'changes' || raw === 'browser' ? raw : null
 }
 
 function persistRightPanelMode(mode: RightPanelMode, scope: string): void {
   const key = workbenchLayoutStorageKey(RIGHT_PANEL_MODE_KEY, scope)
-  if (mode === 'todo' || mode === 'changes' || mode === 'browser') {
+  if (mode === 'documents' || mode === 'todo' || mode === 'changes' || mode === 'browser') {
     writeBrowserStorageItem(key, mode)
   } else {
     writeBrowserStorageItem(key, 'none')
@@ -290,7 +292,7 @@ export function useWorkbenchLayout({
   latestDevPreviewUrl,
   route,
   workspaceRoot,
-  writeAssistantOpen
+  writeAssistantOpen: _writeAssistantOpen
 }: {
   activeThreadId: string | null
   latestAutoOpenDevPreviewUrl: string | null
@@ -305,8 +307,41 @@ export function useWorkbenchLayout({
   }
   const initialLayout = initialLayoutRef.current
   const [layoutStorageScope, setLayoutStorageScope] = useState(initialLayout.scope)
-  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>(initialLayout.rightPanelMode)
-  const [filePreviewTarget, setFilePreviewTarget] = useState<WorkspaceFileTarget | null>(null)
+  const tabs = useWorkspaceTabsStore((state) => state.tabs)
+  const activeTabId = useWorkspaceTabsStore((state) => state.activeTabId)
+  const dockOpen = useWorkspaceTabsStore((state) => state.open)
+  const selectorOpen = useWorkspaceTabsStore((state) => state.selectorOpen)
+  const activeTab = tabs.find((tab) => tab.id === activeTabId)
+  const rightPanelMode: RightPanelMode = dockOpen && !selectorOpen ? activeTab?.mode ?? null : null
+  const [filePreviewTarget, updateFilePreviewTarget] = useState<WorkspaceFileTarget | null>(null)
+  const filePreviewTargetRef = useRef<WorkspaceFileTarget | null>(null)
+  const setFilePreviewTarget = useCallback((target: WorkspaceFileTarget | null): void => {
+    filePreviewTargetRef.current = target
+    updateFilePreviewTarget(target)
+  }, [])
+  const setRightPanelMode = useCallback((value: SetStateAction<RightPanelMode>): void => {
+    const store = useWorkspaceTabsStore.getState()
+    const currentMode = store.open && !store.selectorOpen ? store.tabs.find((tab) => tab.id === store.activeTabId)?.mode ?? null : null
+    const mode = typeof value === 'function' ? value(currentMode) : value
+    if (!mode) { store.setOpen(false); return }
+    if (mode === 'documents') {
+      const current = store.tabs.find((tab) => tab.id === store.activeTabId && tab.mode === 'documents')
+      if (current) { store.activateTab(current.id); return }
+    }
+    const target = filePreviewTargetRef.current
+    if (mode === 'file' && target) {
+      store.openTab({ id: workspaceObjectTabId(target.workspaceRoot ?? '', target.path), kind: 'file', mode,
+        title: target.path.replaceAll('\\', '/').split('/').at(-1) || target.path,
+        path: target.path, workspaceRoot: target.workspaceRoot })
+      return
+    }
+    const labels: Record<Exclude<RightPanelMode, null>, string> = {
+      documents: 'workbenchDocuments', files: 'rightPanelFiles', todo: 'rightPanelTodo', changes: 'rightPanelChanges',
+      browser: 'rightPanelBrowser', file: 'rightPanelFiles', plan: 'rightPanelPlan', summary: 'rightPanelSummary',
+      'sdd-ai': 'sddAssistantTitle', 'child-agent': 'subagentInspectorTitle'
+    }
+    store.openTab({ id: `tool:${mode}`, kind: 'tool', mode, title: i18n.t(`common:${labels[mode]}`) })
+  }, [])
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(initialLayout.leftSidebarWidth)
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(
     initialLayout.leftSidebarCollapsed
@@ -324,16 +359,12 @@ export function useWorkbenchLayout({
   const rightPaneContentRef = useRef<HTMLDivElement | null>(null)
   const previewThreadId = useRef<string | null>(activeThreadId)
   const autoOpenedPreviewUrlRef = useRef<string | null>(null)
-  const rightPanelVisible = route === 'write'
-    ? writeAssistantOpen
-    : rightPanelMode !== null && rightPanelMode !== 'summary'
+  const rightPanelVisible = dockOpen
 
   useEffect(() => {
     const nextLayout = readWorkbenchLayoutStorage(workspaceRoot)
     if (nextLayout.scope === layoutStorageScope) return
     setLayoutStorageScope(nextLayout.scope)
-    setRightPanelMode(nextLayout.rightPanelMode)
-    setFilePreviewTarget(null)
     setLeftSidebarWidth(nextLayout.leftSidebarWidth)
     setLeftSidebarCollapsed(nextLayout.leftSidebarCollapsed)
     setRightSidebarWidth(nextLayout.rightSidebarWidth)
@@ -384,30 +415,22 @@ export function useWorkbenchLayout({
 
     window.addEventListener(WORKSPACE_FILE_PREVIEW_EVENT, onPreview)
     return () => window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, onPreview)
-  }, [workspaceRoot])
+  }, [setFilePreviewTarget, setRightPanelMode, workspaceRoot])
 
   useEffect(() => {
     if (previewThreadId.current === activeThreadId) return
     previewThreadId.current = activeThreadId
     autoOpenedPreviewUrlRef.current = null
-    if (rightPanelMode === 'browser') setRightPanelMode(null)
-    if (rightPanelMode === 'file') {
-      setRightPanelMode(null)
-      setFilePreviewTarget(null)
-    }
+    // Tabs represent workspace objects, so switching a conversation does not close them.
   }, [activeThreadId, rightPanelMode])
 
   useEffect(() => {
     if (!latestAutoOpenDevPreviewUrl || route !== 'chat') return
     if (autoOpenedPreviewUrlRef.current === latestAutoOpenDevPreviewUrl) return
     autoOpenedPreviewUrlRef.current = latestAutoOpenDevPreviewUrl
-    setRightPanelMode('browser')
+    // A background preview is offered by the launch card without stealing focus.
   }, [latestAutoOpenDevPreviewUrl, route])
 
-  useEffect(() => {
-    if (route !== 'write') return
-    if (rightPanelMode !== null) setRightPanelMode(null)
-  }, [route, rightPanelMode])
 
   useLayoutEffect(() => {
     const sync = (): void => {
@@ -430,7 +453,7 @@ export function useWorkbenchLayout({
   }, [leftSidebarCollapsed, leftSidebarWidth, rightPanelVisible, rightSidebarWidth])
 
   const toggleRightPanelMode = (nextMode: Exclude<RightPanelMode, null>): void => {
-    setRightPanelMode((current) => (current === nextMode ? null : nextMode))
+    setRightPanelMode(nextMode)
   }
 
   const toggleLeftSidebar = (): void => {

@@ -105,7 +105,7 @@ func RecordRepeatSuccess(call domainmodel.ToolCall, counts map[string]int) {
 
 func repeatSuccessSignature(call domainmodel.ToolCall) (string, bool) {
 	switch call.Name {
-	case "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol":
+	case "generate_office_document", "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol":
 		return call.Name + "\x00" + canonicalJSON(call.Arguments), true
 	case "bash":
 		args := map[string]any{}

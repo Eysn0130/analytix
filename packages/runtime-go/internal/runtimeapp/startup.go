@@ -12,25 +12,26 @@ import (
 const runtimeStartupSecurityConfigurationVersion = 1
 
 type runtimeStartupSecurityConfigurationV1 struct {
-	SchemaVersion               int    `json:"schemaVersion"`
-	PersistenceMode             string `json:"persistenceMode"`
-	ProviderID                  string `json:"providerId"`
-	ProviderBaseURLDigest       string `json:"providerBaseUrlDigest"`
-	Model                       string `json:"model"`
-	EndpointFormat              string `json:"endpointFormat"`
-	ModelProvidersDigest        string `json:"modelProvidersDigest"`
-	MCPConfigPathDigest         string `json:"mcpConfigPathDigest"`
-	MCPConfigDocumentDigest     string `json:"mcpConfigDocumentDigest"`
-	ApprovalPolicy              string `json:"approvalPolicy"`
-	SandboxMode                 string `json:"sandboxMode"`
-	AllowWriteRootsDigest       string `json:"allowWriteRootsDigest"`
-	ProtectedReadRootsDigest    string `json:"protectedReadRootsDigest"`
-	AuthorityAnchorDigest       string `json:"authorityAnchorDigest"`
-	AuthorityManifestDigest     string `json:"authorityManifestDigest"`
-	AuthorityProfileDigest      string `json:"authorityProfileDigest"`
-	AuthorityBundleDigest       string `json:"authorityBundleDigest"`
-	DarwinKeychainBindingDigest string `json:"darwinKeychainBindingDigest,omitempty"`
-	ConformanceRoutesDigest     string `json:"conformanceRoutesDigest"`
+	DevelopmentProviderAuthorityDigest string `json:"developmentProviderAuthorityDigest,omitempty"`
+	SchemaVersion                      int    `json:"schemaVersion"`
+	PersistenceMode                    string `json:"persistenceMode"`
+	ProviderID                         string `json:"providerId"`
+	ProviderBaseURLDigest              string `json:"providerBaseUrlDigest"`
+	Model                              string `json:"model"`
+	EndpointFormat                     string `json:"endpointFormat"`
+	ModelProvidersDigest               string `json:"modelProvidersDigest"`
+	MCPConfigPathDigest                string `json:"mcpConfigPathDigest"`
+	MCPConfigDocumentDigest            string `json:"mcpConfigDocumentDigest"`
+	ApprovalPolicy                     string `json:"approvalPolicy"`
+	SandboxMode                        string `json:"sandboxMode"`
+	AllowWriteRootsDigest              string `json:"allowWriteRootsDigest"`
+	ProtectedReadRootsDigest           string `json:"protectedReadRootsDigest"`
+	AuthorityAnchorDigest              string `json:"authorityAnchorDigest"`
+	AuthorityManifestDigest            string `json:"authorityManifestDigest"`
+	AuthorityProfileDigest             string `json:"authorityProfileDigest"`
+	AuthorityBundleDigest              string `json:"authorityBundleDigest"`
+	DarwinKeychainBindingDigest        string `json:"darwinKeychainBindingDigest,omitempty"`
+	ConformanceRoutesDigest            string `json:"conformanceRoutesDigest"`
 }
 
 // runtimeStartupSecurityConfiguration deliberately excludes process time,
@@ -39,25 +40,26 @@ type runtimeStartupSecurityConfigurationV1 struct {
 // make a durable migration journal impossible to resume after restart.
 func runtimeStartupSecurityConfiguration(config Config) runtimeStartupSecurityConfigurationV1 {
 	return runtimeStartupSecurityConfigurationV1{
-		SchemaVersion:               runtimeStartupSecurityConfigurationVersion,
-		PersistenceMode:             runtimeStartupPersistenceMode(config),
-		ProviderID:                  strings.TrimSpace(config.ProviderID),
-		ProviderBaseURLDigest:       startupValueDigest(strings.TrimSpace(config.BaseURL)),
-		Model:                       strings.TrimSpace(config.Model),
-		EndpointFormat:              strings.TrimSpace(config.EndpointFormat),
-		ModelProvidersDigest:        startupValueDigest(config.ModelProvidersJSON),
-		MCPConfigPathDigest:         startupValueDigest(strings.TrimSpace(config.MCPConfigPath)),
-		MCPConfigDocumentDigest:     startupValueDigest(config.MCPConfigJSON),
-		ApprovalPolicy:              strings.TrimSpace(config.ApprovalPolicy),
-		SandboxMode:                 strings.TrimSpace(config.SandboxMode),
-		AllowWriteRootsDigest:       startupValueDigest(config.AllowWriteRoots),
-		ProtectedReadRootsDigest:    startupValueDigest(config.ProtectedReadDirs),
-		AuthorityAnchorDigest:       startupValueDigest(config.AuthorityAnchorV1),
-		AuthorityManifestDigest:     startupValueDigest(strings.TrimSpace(config.AuthorityManifestRoot)),
-		AuthorityProfileDigest:      startupValueDigest(strings.TrimSpace(config.AuthorityCredentialProfileRoot)),
-		AuthorityBundleDigest:       startupValueDigest(strings.TrimSpace(config.AuthorityCredentialBundleRoot)),
-		DarwinKeychainBindingDigest: strings.TrimSpace(config.DarwinSecretStoreKeychainBindingDigest),
-		ConformanceRoutesDigest:     startupValueDigest(config.Routes),
+		SchemaVersion:                      runtimeStartupSecurityConfigurationVersion,
+		DevelopmentProviderAuthorityDigest: developmentProviderAuthorityDigest(config),
+		PersistenceMode:                    runtimeStartupPersistenceMode(config),
+		ProviderID:                         strings.TrimSpace(config.ProviderID),
+		ProviderBaseURLDigest:              startupValueDigest(strings.TrimSpace(config.BaseURL)),
+		Model:                              strings.TrimSpace(config.Model),
+		EndpointFormat:                     strings.TrimSpace(config.EndpointFormat),
+		ModelProvidersDigest:               startupValueDigest(config.ModelProvidersJSON),
+		MCPConfigPathDigest:                startupValueDigest(strings.TrimSpace(config.MCPConfigPath)),
+		MCPConfigDocumentDigest:            startupValueDigest(config.MCPConfigJSON),
+		ApprovalPolicy:                     strings.TrimSpace(config.ApprovalPolicy),
+		SandboxMode:                        strings.TrimSpace(config.SandboxMode),
+		AllowWriteRootsDigest:              startupValueDigest(config.AllowWriteRoots),
+		ProtectedReadRootsDigest:           startupValueDigest(config.ProtectedReadDirs),
+		AuthorityAnchorDigest:              startupValueDigest(config.AuthorityAnchorV1),
+		AuthorityManifestDigest:            startupValueDigest(strings.TrimSpace(config.AuthorityManifestRoot)),
+		AuthorityProfileDigest:             startupValueDigest(strings.TrimSpace(config.AuthorityCredentialProfileRoot)),
+		AuthorityBundleDigest:              startupValueDigest(strings.TrimSpace(config.AuthorityCredentialBundleRoot)),
+		DarwinKeychainBindingDigest:        strings.TrimSpace(config.DarwinSecretStoreKeychainBindingDigest),
+		ConformanceRoutesDigest:            startupValueDigest(config.Routes),
 	}
 }
 

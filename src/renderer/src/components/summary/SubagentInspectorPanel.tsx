@@ -358,6 +358,7 @@ export function SubagentInspectorPanel({
   onCloseSubagentTab,
   onCreateSideChat,
   createSideChatDisabled = false,
+  tabbedWorkspace = false,
   onCollapse,
   onRetryConnection,
   onOpenSettings,
@@ -378,6 +379,7 @@ export function SubagentInspectorPanel({
   onCloseSubagentTab?: (key: string) => void | Promise<void>
   onCreateSideChat?: () => void | Promise<void>
   createSideChatDisabled?: boolean
+  tabbedWorkspace?: boolean
   onCollapse: () => void
   onRetryConnection: () => void
   onOpenSettings: () => void
@@ -1316,7 +1318,7 @@ export function SubagentInspectorPanel({
             title={t('rightPanelCollapse')}
           />
         </div>
-        {subagents.length > 0 || onCreateSideChat ? (
+        {!tabbedWorkspace && (subagents.length > 0 || onCreateSideChat) ? (
           <div className="ds-subagent-inspector-tab-row flex min-w-0 gap-1 border-t border-ds-border-muted px-3 pb-1 pt-2">
             <div className="ds-subagent-inspector-tab-scroll-shell min-w-0 flex-1">
               <div

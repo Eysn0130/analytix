@@ -33,6 +33,7 @@ import {
   ANALYTIX_PROVIDER_REGISTRY_RECOVER_PATH,
   analytixProviderRegistryAccountObservationPath,
   analytixProviderRegistryCredentialPath,
+  analytixProviderRegistryCredentialCheckPath,
   analytixProviderRegistryDiscoverModelsPath,
   analytixProviderRegistryDisconnectPath,
   analytixProviderRegistryProbePath,
@@ -168,7 +169,7 @@ const runtimeRequestResultSchema = z.object({
 }).strict()
 
 const runtimeUnavailableEnvelopeSchema = z.object({
-  code: z.literal('fetch_failed'),
+  code: z.union([z.literal('fetch_failed'), z.literal('runtime_unavailable')]),
   message: z.literal('The Analytix runtime is unavailable.')
 }).strict()
 
@@ -179,6 +180,8 @@ const providerRegistryFailureStatuses: Record<Exclude<ProviderRegistryFailureCod
   not_found: 404,
   conflict: 409,
   persistence_failure: 503,
+  credential_unavailable: 503,
+  credential_reentry_required: 503,
   verification_failure: 500,
   request_too_large: 413,
   unauthorized: 401
@@ -215,6 +218,7 @@ function mapProviderRegistryRequest(request: ProviderRegistryRequestV1): Provide
         method: 'POST',
         body: requestBody({
           schemaVersion: request.schemaVersion,
+          ...(request.deferSelection !== undefined ? { deferSelection: request.deferSelection } : {}),
           expected: request.expected,
           provider: request.provider,
           credential: request.credential
@@ -262,6 +266,12 @@ function mapProviderRegistryRequest(request: ProviderRegistryRequestV1): Provide
     case 'probe':
       return {
         path: analytixProviderRegistryProbePath(request.providerId),
+        method: 'POST',
+        body: requestBody({ schemaVersion: request.schemaVersion, expected: request.expected })
+      }
+    case 'credential-check':
+      return {
+        path: analytixProviderRegistryCredentialCheckPath(request.providerId),
         method: 'POST',
         body: requestBody({ schemaVersion: request.schemaVersion, expected: request.expected })
       }
@@ -484,6 +494,14 @@ function successMatchesOperation(
     }
     case 'probe':
       return 'status' in success && success.providerId === request.providerId &&
+        success.registryRevision === request.expected.registryRevision &&
+        success.registryIncarnation === request.expected.registryIncarnation &&
+        success.providerRevision === request.expected.providerRevision &&
+        success.providerGeneration === request.expected.providerGeneration &&
+        success.providerIncarnation === request.expected.providerIncarnation
+    case 'credential-check':
+      return 'credentialAvailable' in success && success.credentialAvailable === true &&
+        success.providerId === request.providerId &&
         success.registryRevision === request.expected.registryRevision &&
         success.registryIncarnation === request.expected.registryIncarnation &&
         success.providerRevision === request.expected.providerRevision &&
@@ -862,6 +880,8 @@ function parseProtectedRecoveryResponse(
       case 'conflict':
         return protectedRecoveryFailure('conflict')
       case 'persistence_failure':
+      case 'credential_unavailable':
+      case 'credential_reentry_required':
         return protectedRecoveryFailure('runtime_unavailable')
       case 'verification_failure':
         return protectedRecoveryFailure('verification_failure')

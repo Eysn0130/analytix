@@ -41,7 +41,7 @@ import { WRITE_BLOCK_TYPES, type WriteBlockType } from '../../write/block-type'
 import type { WriteInlineFormatKind } from '../../write/inline-format'
 import type { ResolvedWriteQuickAction } from '../../write/quick-actions'
 import type { ResolvedWriteAgentPreset } from '../../write/agent-presets'
-import { clamp, INLINE_AGENT_GAP, type WriteInlineAgentPosition } from './write-workspace-view-utils'
+import { clamp, INLINE_AGENT_GAP, writeUiScale, type WriteInlineAgentPosition } from './write-workspace-view-utils'
 
 type Props = {
   action: WriteInlineAgentPosition
@@ -58,7 +58,7 @@ type Props = {
   onApplyFormat?: (kind: WriteInlineFormatKind) => void
   blockType?: WriteBlockType
   onSetBlockType?: (type: WriteBlockType) => void
-  /** Configurable AI quick actions (edit ones rewrite in place, chat ones go to the sidebar). */
+  /** Configurable AI quick actions; the caller routes edit and chat requests. */
   quickActions?: ResolvedWriteQuickAction[]
   onQuickAction?: (action: ResolvedWriteQuickAction) => void
   /** Writing-assistant persona presets for quick role switching; active '' = no agent. */
@@ -211,7 +211,7 @@ export function WriteInlineAgent({
     const el = menuRef.current
     if (!el) return
     const height = el.offsetHeight
-    const viewportHeight = window.innerHeight
+    const viewportHeight = window.innerHeight / writeUiScale()
     const below = action.anchorBottom + INLINE_AGENT_GAP
     const above = action.anchorTop - height - INLINE_AGENT_GAP
     const canPlaceAbove = above >= 16

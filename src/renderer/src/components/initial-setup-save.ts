@@ -32,6 +32,7 @@ export type InitialSetupDrafts = Record<string, InitialSetupDraft>
 export type InitialSetupSelection = {
   presetId: string
   mode: InitialSetupAccessMode
+  model?: string
 }
 
 export type CredentialDraftAction =
@@ -182,6 +183,11 @@ export function buildInitialSetupSettings(
   }
 
   const selectedId = initialSetupProfileId(selection)
+  const explicitModel = selection.model?.trim()
+  const selectedDraftProfile = profiles.get(selectedId)
+  if (explicitModel && selectedDraftProfile && !selectedDraftProfile.models.includes(explicitModel)) {
+    profiles.set(selectedId, { ...selectedDraftProfile, models: [explicitModel, ...selectedDraftProfile.models] })
+  }
   const next = normalizeAppSettings({
     ...settings,
     provider: {
@@ -202,6 +208,7 @@ export function buildInitialSetupSettings(
     providerId: selectedId,
     baseUrl: '',
     ...(switchingProvider && selectedProfile?.models[0] ? { model: selectedProfile.models[0] } : {}),
+    ...(explicitModel ? { model: explicitModel } : {}),
     ...(wire.speechProviderId
       ? { speechToText: { enabled: true, providerId: wire.speechProviderId } }
       : {}),
@@ -225,6 +232,9 @@ function registrySnapshot(result: ProviderRegistryResult): ProviderRegistrySnaps
 }
 
 function registryProviderKind(profile: ModelProviderProfileV1): string {
+  if (profile.endpointFormat === 'messages' && profile.registryKind === 'deepseek-messages') {
+    return 'deepseek-messages'
+  }
   switch (profile.endpointFormat) {
     case 'responses': return 'openai-responses'
     case 'messages': return 'anthropic-compatible'
@@ -240,6 +250,7 @@ function registryProviderEndpointFormat(kind: string): ModelProviderProfileV1['e
       return 'responses'
     case 'anthropic-compatible':
     case 'anthropic-messages':
+    case 'deepseek-messages':
     case 'messages':
       return 'messages'
     case 'custom-endpoint':
@@ -341,6 +352,7 @@ async function syncProviderCredential(input: {
   selectedRoutes?: readonly string[]
   proxy: string
   action: CredentialDraftAction
+  deferSelection?: boolean
   updateMetadata?: boolean
 }): Promise<ProviderRegistrySnapshot> {
   const existing = input.snapshot.providers.find((provider) => provider.id === input.profile.id)
@@ -351,9 +363,13 @@ async function syncProviderCredential(input: {
       oauthBinding: existing?.oauthBinding,
       accountObservation: existing?.accountObservation
     }),
-    ...(existing && registryProviderEndpointFormat(existing.kind) === input.profile.endpointFormat
+    ...(existing && existing.kind !== 'deepseek-messages' && input.profile.registryKind !== 'deepseek-messages' &&
+      registryProviderEndpointFormat(existing.kind) === input.profile.endpointFormat
       ? { kind: existing.kind }
       : {})
+  }
+  if (existing && provider.kind !== existing.kind) {
+    throw new Error('Provider protocol cannot change after creation.')
   }
   if (!existing && input.action.kind === 'preserve') return input.snapshot
   let result: ProviderRegistryResult
@@ -393,6 +409,7 @@ async function syncProviderCredential(input: {
     result = await input.request({
       schemaVersion: 1,
       operation: 'connect',
+      ...(input.deferSelection ? { deferSelection: true } : {}),
       expected: {
         registryRevision: input.snapshot.registryRevision,
         registryIncarnation: input.snapshot.registryIncarnation,
@@ -609,6 +626,9 @@ export async function persistInitialSetup(input: {
   const nextSettings = buildInitialSetupSettings(input.settings, input.drafts, input.selection)
   const providerSettings = getModelProviderSettings(nextSettings)
   const selectedId = initialSetupProfileId(input.selection)
+  const previousProfile = getModelProviderSettings(input.settings).providers.find((profile) => profile.id === selectedId)
+  const selectedDraft = input.drafts[selectedId]
+  const editedEndpoint = selectedDraft !== undefined && selectedDraft.baseUrl.trim() !== (previousProfile?.baseUrl ?? '').trim()
   const proxy = providerSettings.proxy.enabled ? providerSettings.proxy.url.trim() : ''
   let snapshot = await readRegistrySnapshot(input.requestProviderRegistry)
 
@@ -621,14 +641,31 @@ export async function persistInitialSetup(input: {
       profile,
       selectedModel: nextSettings.runtime.model,
       proxy,
-      action
+      action,
+      deferSelection: true,
+      updateMetadata: profile.id === selectedId && (input.selection.model !== undefined || editedEndpoint)
     })
   }
 
   const selected = snapshot.providers.find((provider) => provider.id === selectedId)
-  if (!selected || !selected.credentialConfigured) {
+  if (!selected || selected.tombstone || !selected.credentialConfigured || !selected.selectedModel) {
     throw new Error('A committed Provider credential is required.')
   }
+  // Probe through Core using the committed reference, never the renderer draft.
+  // Selection is the durable startup boundary; partial setup stays recoverable.
+  const probe = await input.requestProviderRegistry({
+    schemaVersion: 1, operation: 'probe', providerId: selectedId,
+    expected: registryExpected(snapshot, selected)
+  })
+  if ('error' in probe) throw new Error(probe.error.message)
+  if (!('status' in probe) || probe.status !== 'reachable' ||
+    probe.providerId !== selectedId || probe.registryRevision !== snapshot.registryRevision ||
+    probe.registryIncarnation !== snapshot.registryIncarnation ||
+    probe.providerRevision !== selected.revision || probe.providerGeneration !== selected.generation ||
+    probe.providerIncarnation !== selected.incarnation) {
+    throw new Error('The Provider connection could not be verified. Check the connection in Settings and retry.')
+  }
+  const saved = await input.saveSettings(nextSettings)
   if (snapshot.selectedProviderId !== selectedId) {
     const result = await input.requestProviderRegistry({
       schemaVersion: 1,
@@ -655,7 +692,7 @@ export async function persistInitialSetup(input: {
   ) {
     throw new Error('Provider selection could not be verified.')
   }
-  return input.saveSettings(nextSettings)
+  return saved
 }
 
 export async function deleteProviderRegistryEntry(input: {

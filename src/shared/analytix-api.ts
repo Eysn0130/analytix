@@ -1,3 +1,5 @@
+import type { WriteShutdownHandler } from './write-shutdown'
+import type { ProviderEndpointKind } from './provider-display'
 import type {
   AppSettingsPatch,
   AppSettingsV1,
@@ -451,7 +453,10 @@ export type UpstreamModelsResult =
 export type ModelProviderModelGroup = {
   providerId: string
   label: string
+  endpointKind?: ProviderEndpointKind
   modelIds: string[]
+  /** Display-only labels projected from the committed provider endpoint. */
+  modelLabels?: Record<string, string>
   modelProfiles?: Record<string, ModelProviderModelProfileV1>
 }
 export type ModelCapabilityProbeRequest = {
@@ -897,6 +902,7 @@ export type AnalytixFlatApi = {
   requestWriteInlineCompletion: (
     payload: WriteInlineCompletionRequest
   ) => Promise<WriteInlineCompletionResult>
+  cancelWriteInlineCompletion: (payload: { requestId: string }) => Promise<{ canceled: boolean }>
   retrieveWriteContext: (
     payload: WriteRetrievalRequest
   ) => Promise<WriteRetrievalResult>
@@ -1161,6 +1167,7 @@ export type AnalytixFilesApi = {
 export type AnalytixWriteApi = Pick<
   AnalytixFlatApi,
   | 'requestWriteInlineCompletion'
+  | 'cancelWriteInlineCompletion'
   | 'retrieveWriteContext'
   | 'generateWriteInfographic'
   | 'authorizeWritePrototype'
@@ -1169,7 +1176,7 @@ export type AnalytixWriteApi = Pick<
   | 'clearWriteInlineCompletionDebugEntries'
   | 'exportWriteDocument'
   | 'copyWriteDocumentAsRichText'
->
+> & { onShutdown: (handler: WriteShutdownHandler) => () => void }
 
 export type AnalytixSpeechApi = {
   transcribe: AnalytixFlatApi['transcribeSpeech']
@@ -1251,6 +1258,29 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  canvas: {
+    request: (request: import('../../packages/runtime/src/contracts/canvas-host').CanvasHostRequest) => Promise<import('../../packages/runtime/src/contracts/canvas-host').CanvasHostResponse>
+    pickFile: (request: { workspace: string }) => Promise<{ ok: true; path: string | null } | { ok: false }>
+  }
+  office: {
+    onAnnotationInputFreeze: (handler: (frozen: boolean) => void) => () => void
+    onMenuRequested: (handler: (target: import('./native-office').NativeOfficeMenuTarget) => void) => () => void
+    showActionMenu: (request: import('./native-office').NativeOfficeActionMenu) => Promise<{actionId:string | null}>
+    onWorkspaceCommand: (handler: (command: import('./native-office').NativeWorkspaceCommand) => void) => () => void
+    pickFile: (request: import('zod').infer<typeof import('./native-office').nativeOfficePickerRequestSchema>) => Promise<import('zod').infer<typeof import('./native-office').nativeOfficePickerResponseSchema>>
+    request: (request: import('./native-office').NativeOfficeRequest) => Promise<import('./native-office').NativeOfficeResponse>
+    onChange: (handler: (view: import('./native-office').NativeOfficeView | null) => void) => () => void
+  }
+  packageHost: {
+    request: (request: import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostRequest) => Promise<import('../../packages/runtime/src/contracts/plugin-package-host').PluginPackageHostResponse>
+  }
+  browserSelection: {
+    request: (request: import('../../packages/runtime/src/contracts/browser-selection').BrowserSelectionRequest) => Promise<import('../../packages/runtime/src/contracts/browser-selection').BrowserSelectionResponse>
+  }
+  objects: {
+    resolveArtifact: (request: import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactRequest) => Promise<import('../../packages/runtime/src/contracts/generated-artifact').GeneratedArtifactResponse>
+    request: (request: import('../../packages/runtime/src/contracts/object-editing').ObjectEditingRequest) => Promise<import('../../packages/runtime/src/contracts/object-editing').ObjectEditingResponse>
+  }
   settings: AnalytixSettingsApi
   account: AnalytixAccountApi
   providerRegistry: AnalytixProviderRegistryApi

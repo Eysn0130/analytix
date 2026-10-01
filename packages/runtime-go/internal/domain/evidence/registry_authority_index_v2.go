@@ -28,19 +28,21 @@ var (
 // the exact latest IndexDigest and Generation. Consumers traverse immutable
 // predecessor nodes to find the newest entry for one frozen turn context.
 type EvidenceRegistryAuthorityIndexV2 struct {
-	SchemaVersion       int                                 `json:"schemaVersion"`
-	Purpose             string                              `json:"purpose"`
-	InstallationID      string                              `json:"installationId"`
-	EnrollmentID        string                              `json:"enrollmentId"`
-	Generation          uint64                              `json:"generation"`
-	PreviousIndexDigest string                              `json:"previousIndexDigest"`
-	MutationID          string                              `json:"mutationId"`
-	Entry               EvidenceRegistryAuthorityIndexEntry `json:"entry"`
-	AuthorityAlgorithm  string                              `json:"authorityAlgorithm"`
-	AuthorityKeyID      string                              `json:"authorityKeyId"`
-	AuthorityPublicKey  string                              `json:"authorityPublicKey"`
-	AuthoritySignature  string                              `json:"authoritySignature"`
-	IndexDigest         string                              `json:"indexDigest"`
+	SchemaVersion        int                                 `json:"schemaVersion"`
+	Purpose              string                              `json:"purpose"`
+	InstallationID       string                              `json:"installationId"`
+	EnrollmentID         string                              `json:"enrollmentId,omitempty"`
+	Mode                 string                              `json:"mode,omitempty"`
+	ModeCommitmentDigest string                              `json:"modeCommitmentDigest,omitempty"`
+	Generation           uint64                              `json:"generation"`
+	PreviousIndexDigest  string                              `json:"previousIndexDigest"`
+	MutationID           string                              `json:"mutationId"`
+	Entry                EvidenceRegistryAuthorityIndexEntry `json:"entry"`
+	AuthorityAlgorithm   string                              `json:"authorityAlgorithm"`
+	AuthorityKeyID       string                              `json:"authorityKeyId"`
+	AuthorityPublicKey   string                              `json:"authorityPublicKey"`
+	AuthoritySignature   string                              `json:"authoritySignature"`
+	IndexDigest          string                              `json:"indexDigest"`
 }
 
 type EvidenceRegistryAuthorityIndexInputV2 struct {
@@ -195,6 +197,7 @@ func EvidenceRegistryAuthorityIndexGenesisDigestV2() string {
 
 func validateEvidenceRegistryAuthorityIndexUnsignedV2(index EvidenceRegistryAuthorityIndexV2) error {
 	if index.SchemaVersion != EvidenceRegistryAuthorityIndexVersionV2 || index.Purpose != EvidenceRegistryAuthorityIndexPurposeV2 ||
+		index.Mode != "" || index.ModeCommitmentDigest != "" ||
 		!domainsecurity.IsSHA256Hex(index.InstallationID) || !domainsecurity.IsSHA256Hex(index.EnrollmentID) || index.Generation == 0 ||
 		!domainsecurity.IsSHA256Hex(index.PreviousIndexDigest) || !domainsecurity.IsSHA256Hex(index.MutationID) ||
 		!validEvidenceRegistryAuthorityIndexEntry(index.Entry) || index.AuthorityAlgorithm != AcceptedFinalAuthorityAlgorithm ||

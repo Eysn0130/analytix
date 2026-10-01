@@ -4,6 +4,7 @@ import "net/http"
 
 type RuntimeDispatcher interface {
 	RuntimeInfo(http.ResponseWriter, *http.Request)
+	RuntimeQuiescence(http.ResponseWriter, *http.Request)
 	RuntimeTools(http.ResponseWriter, *http.Request)
 	ToolExecutionObservation(http.ResponseWriter, *http.Request)
 	RuntimeTaskJobs(http.ResponseWriter, *http.Request)
@@ -81,6 +82,8 @@ func (h RuntimeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch match.Route {
 	case RouteRuntimeInfo:
 		h.Dispatcher.RuntimeInfo(w, r)
+	case RouteRuntimeQuiescence:
+		h.Dispatcher.RuntimeQuiescence(w, r)
 	case RouteRuntimeTools:
 		h.Dispatcher.RuntimeTools(w, r)
 	case RouteRuntimeTaskJobs:

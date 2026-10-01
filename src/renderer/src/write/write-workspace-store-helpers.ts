@@ -20,7 +20,6 @@ import {
   type WriteSettingsV1
 } from '@shared/app-settings'
 import type { WorkspaceEntry } from '@shared/workspace-file'
-import { isWriteWorkspaceEntry } from '@shared/write-text-file'
 import i18n from '../i18n'
 import type { WriteEditorSelectionState } from '../components/write/WriteMarkdownEditor'
 import {
@@ -261,7 +260,7 @@ export function imageMimeTypeFromPath(path: string): string {
 }
 
 export function filterWriteEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
-  return entries.filter(isWriteWorkspaceEntry)
+  return entries.filter((entry) => entry.type !== 'directory' || !['.deepseek', '.git', '.hg', '.svn', 'node_modules'].includes(entry.name.toLowerCase()))
 }
 
 export function initialState(): Pick<
@@ -275,6 +274,9 @@ export function initialState(): Pick<
   | 'activeFilePath'
   | 'activeFileKind'
   | 'fileContent'
+  | 'objectSession'
+  | 'legacyObjectEditing'
+  | 'pendingSave'
   | 'imageDataUrl'
   | 'imageMimeType'
   | 'pdfDataBase64'
@@ -301,6 +303,9 @@ export function initialState(): Pick<
     activeFilePath: null,
     activeFileKind: null,
     fileContent: '',
+    objectSession: null,
+    legacyObjectEditing: false,
+    pendingSave: null,
     imageDataUrl: '',
     imageMimeType: '',
     pdfDataBase64: '',

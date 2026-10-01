@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import i18n from '../../i18n'
 import type { DailyUsageBucket, DailyUsageState, DailyUsageSummary } from '../../hooks/use-daily-usage'
 import type { ModelUsageState } from '../../hooks/use-model-usage'
+import { combineUsageCost, type UsageCostCoverage } from '../../agent/usage-cost'
 import {
   InitialSessionUsageHeatmapView,
   USAGE_HEATMAP_CONTRAST_COLORS,
@@ -19,9 +20,11 @@ function bucket(date: string, totalTokens: number, turns = 1): DailyUsageBucket 
     cachedTokens: 0,
     cacheMissTokens: totalTokens,
     totalTokens,
-    costUsd: totalTokens / 1_000_000,
-    costCny: (totalTokens / 1_000_000) * 7.2,
-    priceConfigured: true,
+    costUsd: turns > 0 ? totalTokens / 1_000_000 : null,
+    costCny: turns > 0 ? (totalTokens / 1_000_000) * 7.2 : null,
+    priceConfigured: turns > 0,
+    costEstimateStatus: turns > 0 ? 'complete' : 'none',
+    costKnownCurrencies: turns > 0 ? ['USD', 'CNY'] : [],
     tokenEconomySavingsTokens: 0,
     turns,
     threadCount: turns > 0 ? 1 : 0,
@@ -32,7 +35,10 @@ function bucket(date: string, totalTokens: number, turns = 1): DailyUsageBucket 
 function usage(buckets: DailyUsageBucket[] = [bucket('2026-05-01', 1200), bucket('2026-05-02', 10000)]): DailyUsageSummary {
   const totalTokens = buckets.reduce((sum, item) => sum + item.totalTokens, 0)
   const turns = buckets.reduce((sum, item) => sum + item.turns, 0)
-  const priceConfigured = buckets.some((item) => item.priceConfigured)
+  const cost = buckets.reduce<UsageCostCoverage>(combineUsageCost, {
+    costUsd: null, costCny: null, priceConfigured: false,
+    costEstimateStatus: 'none', costKnownCurrencies: []
+  })
   return {
     groupBy: 'day',
     from: buckets[0]?.date ?? '2026-05-01',
@@ -46,9 +52,7 @@ function usage(buckets: DailyUsageBucket[] = [bucket('2026-05-01', 1200), bucket
       cachedTokens: 0,
       cacheMissTokens: totalTokens,
       totalTokens,
-      costUsd: totalTokens / 1_000_000,
-      costCny: (totalTokens / 1_000_000) * 7.2,
-      priceConfigured,
+      ...cost,
       tokenEconomySavingsTokens: 0,
       turns,
       threadCount: buckets.filter((item) => item.turns > 0).length,
@@ -152,7 +156,7 @@ describe('InitialSessionUsageHeatmap', () => {
   })
 
   it('renders stacked model usage bars with a hover breakdown tooltip', () => {
-    const detailedDay = {
+    const detailedDay: DailyUsageBucket = {
       date: '2026-06-04',
       inputTokens: 2365343,
       outputTokens: 44702,
@@ -163,6 +167,8 @@ describe('InitialSessionUsageHeatmap', () => {
       costUsd: 2.41,
       costCny: 17.35,
       priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['USD', 'CNY'],
       tokenEconomySavingsTokens: 0,
       turns: 3,
       threadCount: 1,
@@ -231,15 +237,17 @@ describe('InitialSessionUsageHeatmap', () => {
       usage: usage([
         {
           ...bucket('2026-05-01', 1200),
-          costUsd: 0,
+          costUsd: null,
           costCny: null,
-          priceConfigured: false
+          priceConfigured: false,
+          costEstimateStatus: 'unknown',
+          costKnownCurrencies: []
         }
       ]),
       loaded: true
     }))
 
-    expect(html).toContain('Not configured')
+    expect(html).toContain('Cost unavailable')
     expect(html).not.toContain('$0.0000')
   })
 
@@ -250,14 +258,16 @@ describe('InitialSessionUsageHeatmap', () => {
           ...bucket('2026-05-01', 1200),
           costUsd: 0,
           costCny: null,
-          priceConfigured: true
+          priceConfigured: true,
+          costEstimateStatus: 'complete',
+          costKnownCurrencies: ['USD']
         }
       ]),
       loaded: true
     }))
 
     expect(html).toContain('$0.0000')
-    expect(html).not.toContain('Not configured')
+    expect(html).not.toContain('Cost unavailable')
   })
 
   it('renders loading, empty, and error states as calendar-only warmup states', () => {

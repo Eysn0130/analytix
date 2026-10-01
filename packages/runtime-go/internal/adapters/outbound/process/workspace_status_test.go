@@ -96,3 +96,27 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
 	}
 }
+
+func TestWorkspaceStatusProbeDoesNotRevealProtectedMetadata(t *testing.T) {
+	protected := t.TempDir()
+	file := filepath.Join(protected, "synthetic-private.txt")
+	if err := os.WriteFile(file, []byte("synthetic only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(protected, alias); err != nil {
+		t.Fatal(err)
+	}
+	probe := NewWorkspaceStatusProbe(protected)
+	for _, path := range []string{protected, file, filepath.Join(protected, "missing"), alias, filepath.Join(alias, "synthetic-private.txt")} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			status := probe.WorkspaceStatus(context.Background(), path)
+			if status.Exists || status.IsGitRepository || status.HeadSHA != nil || status.Branch != nil || status.IsDirty != nil || status.FileChangeCount != nil {
+				t.Fatal("protected existence or repository metadata escaped")
+			}
+		})
+	}
+	if status := probe.WorkspaceStatus(context.Background(), t.TempDir()); runtime.GOOS == "darwin" && !status.Exists {
+		t.Fatal("ordinary non-Git directory became unavailable")
+	}
+}

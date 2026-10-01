@@ -1,10 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import path from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const setName = vi.fn()
 const setAppUserModelId = vi.fn()
 const setPath = vi.fn()
 const getPath = vi.fn()
+let appDataRoot: string
 
 vi.mock('electron', () => ({
   app: {
@@ -17,12 +20,17 @@ vi.mock('electron', () => ({
 
 describe('app identity bootstrap', () => {
   beforeEach(() => {
+    appDataRoot = mkdtempSync(path.join(tmpdir(), 'analytix-app-identity-'))
     setName.mockReset()
     setAppUserModelId.mockReset()
     setPath.mockReset()
     getPath.mockReset()
-    getPath.mockReturnValue(path.resolve('/tmp/analytix-test-app-data'))
+    getPath.mockReturnValue(appDataRoot)
     vi.resetModules()
+  })
+
+  afterEach(() => {
+    rmSync(appDataRoot, { recursive: true, force: true })
   })
 
   it('uses the visible product name while pinning the lowercase userData directory', async () => {
@@ -41,8 +49,9 @@ describe('app identity bootstrap', () => {
     expect(getPath).toHaveBeenCalledWith('appData')
     expect(setPath).toHaveBeenCalledWith(
       'userData',
-      path.resolve('/tmp/analytix-test-app-data', 'analytix')
+      path.resolve(appDataRoot, 'analytix')
     )
+    expect(setPath).not.toHaveBeenCalledWith('sessionData', expect.anything())
   })
 
   it('does not call app.setAppUserModelId (caller responsibility on win32)', async () => {
@@ -55,8 +64,23 @@ describe('app identity bootstrap', () => {
 
   it('can isolate Electron userData through the internal override env', async () => {
     const { configureAppIdentity } = await import('./app-identity')
-    configureAppIdentity({ ANALYTIX_USER_DATA_DIR: '/tmp/analytix-isolated-user-data' } as NodeJS.ProcessEnv)
+    const isolated = path.join(appDataRoot, 'isolated-user-data')
+    configureAppIdentity({ ANALYTIX_USER_DATA_DIR: isolated } as NodeJS.ProcessEnv)
     expect(getPath).not.toHaveBeenCalled()
-    expect(setPath).toHaveBeenCalledWith('userData', path.resolve('/tmp/analytix-isolated-user-data'))
+    expect(setPath).toHaveBeenCalledWith('userData', path.resolve(isolated))
+  })
+
+  it('starts a versioned macOS Chromium session only after userData migration', async () => {
+    const { configureAppIdentity, configureMacChromiumSessionData } = await import('./app-identity')
+    const userData = path.resolve(appDataRoot, 'analytix')
+    getPath.mockImplementation((name: string) => name === 'userData' ? userData : appDataRoot)
+    configureAppIdentity()
+    expect(setPath).not.toHaveBeenCalledWith('sessionData', expect.anything())
+    configureMacChromiumSessionData()
+    if (process.platform === 'darwin') {
+      expect(setPath).toHaveBeenCalledWith('sessionData', path.join(userData, 'chromium-session-no-keychain-v1'))
+    } else {
+      expect(setPath).not.toHaveBeenCalledWith('sessionData', expect.anything())
+    }
   })
 })

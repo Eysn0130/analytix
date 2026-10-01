@@ -1,5 +1,43 @@
 import { z } from 'zod'
 
+export const CostEstimateStatusSchema = z.enum(['none', 'complete', 'partial', 'unknown'])
+export type CostEstimateStatus = z.infer<typeof CostEstimateStatusSchema>
+export const CostKnownCurrenciesSchema = z.array(z.enum(['USD', 'CNY'])).max(2)
+  .refine((currencies) => currencies.length < 2 ||
+    (currencies[0] === 'USD' && currencies[1] === 'CNY'))
+
+export function isConsistentCostCoverage(
+  value: object,
+  style: 'camel' | 'snake'
+): boolean {
+  const record = value as Record<string, unknown>
+  const statusKey = style === 'camel' ? 'costEstimateStatus' : 'cost_estimate_status'
+  const currenciesKey = style === 'camel' ? 'costKnownCurrencies' : 'cost_known_currencies'
+  const configuredKey = style === 'camel' ? 'priceConfigured' : 'price_configured'
+  const usdKey = style === 'camel' ? 'costUsd' : 'cost_usd'
+  const cnyKey = style === 'camel' ? 'costCny' : 'cost_cny'
+  const statusPresent = Object.prototype.hasOwnProperty.call(record, statusKey)
+  const currenciesPresent = Object.prototype.hasOwnProperty.call(record, currenciesKey)
+  if (!statusPresent && !currenciesPresent) return true // signed legacy shape
+  if (!statusPresent || !currenciesPresent) return false
+  const status = record[statusKey]
+  const currencies = record[currenciesKey]
+  if (!CostEstimateStatusSchema.safeParse(status).success || !CostKnownCurrenciesSchema.safeParse(currencies).success ||
+      record[configuredKey] !== (status === 'complete')) return false
+  const known = currencies as Array<'USD' | 'CNY'>
+  const usd = record[usdKey]
+  const cny = record[cnyKey]
+  if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0 ||
+      typeof cny !== 'number' || !Number.isFinite(cny) || cny < 0) return false
+  if ((status === 'complete' || status === 'partial') !== (known.length > 0)) return false
+  if (status === 'none' && [record.turns, record.totalTokens, record.total_tokens, record.cachedTokens,
+    record.cached_tokens, record.cacheMissTokens, record.cache_miss_tokens, record.thread_count]
+    .some((amount) => typeof amount === 'number' && amount > 0)) return false
+  if ((status !== 'complete' && (usd !== 0 || cny !== 0)) ||
+      (!known.includes('USD') && usd !== 0) || (!known.includes('CNY') && cny !== 0)) return false
+  return true
+}
+
 /**
  * Token, cache, and cost counters emitted with every model response.
  *
@@ -23,6 +61,8 @@ export const UsageSnapshotSchema = z.object({
   cacheSuggestions: z.array(z.string()).optional(),
   turns: z.number().int().nonnegative(),
   priceConfigured: z.boolean().optional(),
+  costEstimateStatus: CostEstimateStatusSchema.optional(),
+  costKnownCurrencies: CostKnownCurrenciesSchema.optional(),
   costUsd: z.number().nonnegative().optional(),
   costCny: z.number().nonnegative().optional(),
   /**
@@ -48,11 +88,14 @@ export const DailyUsageCountersSchema = z.object({
   output_tokens: z.number().int().nonnegative(),
   reasoning_tokens: z.number().int().nonnegative(),
   cached_tokens: z.number().int().nonnegative(),
+  cache_hit_tokens: z.number().int().nonnegative().optional(),
   cache_miss_tokens: z.number().int().nonnegative(),
   total_tokens: z.number().int().nonnegative(),
   cost_usd: z.number().nonnegative(),
   cost_cny: z.number().nonnegative(),
   price_configured: z.boolean().default(false),
+  cost_estimate_status: CostEstimateStatusSchema.optional(),
+  cost_known_currencies: CostKnownCurrenciesSchema.optional(),
   cache_savings_usd: z.number().nonnegative(),
   cache_savings_cny: z.number().nonnegative(),
   token_economy_savings_tokens: z.number().int().nonnegative(),
@@ -82,6 +125,15 @@ export const DailyUsageResponseSchema = z.object({
   timezone: z.string().min(1),
   buckets: z.array(DailyUsageBucketSchema),
   totals: DailyUsageTotalsSchema
+}).superRefine((response, ctx) => {
+  for (const [index, bucket] of response.buckets.entries()) {
+    if (!isConsistentCostCoverage(bucket, 'snake')) {
+      ctx.addIssue({ code: 'custom', path: ['buckets', index], message: 'cost coverage is inconsistent' })
+    }
+  }
+  if (!isConsistentCostCoverage(response.totals, 'snake')) {
+    ctx.addIssue({ code: 'custom', path: ['totals'], message: 'cost coverage is inconsistent' })
+  }
 })
 export type DailyUsageResponse = z.infer<typeof DailyUsageResponseSchema>
 
@@ -89,6 +141,7 @@ export const ThreadUsageBucketSchema = DailyUsageCountersSchema.omit({
   thread_count: true
 }).extend({
   thread_id: z.string().min(1),
+  provider: z.string().min(1).optional(),
   /**
    * Cache hit rate of the most recent turn (by completedAt), distinct from the
    * thread-cumulative `cache_hit_rate`. The cumulative rate is dragged down by
@@ -114,6 +167,15 @@ export const ThreadUsageResponseSchema = z.object({
   group_by: z.literal('thread'),
   buckets: z.array(ThreadUsageBucketSchema),
   totals: ThreadUsageTotalsSchema
+}).superRefine((response, ctx) => {
+  for (const [index, bucket] of response.buckets.entries()) {
+    if (!isConsistentCostCoverage(bucket, 'snake')) {
+      ctx.addIssue({ code: 'custom', path: ['buckets', index], message: 'cost coverage is inconsistent' })
+    }
+  }
+  if (!isConsistentCostCoverage(response.totals, 'snake')) {
+    ctx.addIssue({ code: 'custom', path: ['totals'], message: 'cost coverage is inconsistent' })
+  }
 })
 export type ThreadUsageResponse = z.infer<typeof ThreadUsageResponseSchema>
 
@@ -131,6 +193,20 @@ export const RuntimeUsageResponseSchema = z.object({
     usage: UsageSnapshotSchema
   })),
   bySource: z.array(UsageSourceBucketSchema).default([])
+}).superRefine((response, ctx) => {
+  if (!isConsistentCostCoverage(response.total, 'camel')) {
+    ctx.addIssue({ code: 'custom', path: ['total'], message: 'cost coverage is inconsistent' })
+  }
+  for (const [index, entry] of response.perThread.entries()) {
+    if (!isConsistentCostCoverage(entry.usage, 'camel')) {
+      ctx.addIssue({ code: 'custom', path: ['perThread', index, 'usage'], message: 'cost coverage is inconsistent' })
+    }
+  }
+  for (const [index, entry] of response.bySource.entries()) {
+    if (!isConsistentCostCoverage(entry.usage, 'camel')) {
+      ctx.addIssue({ code: 'custom', path: ['bySource', index, 'usage'], message: 'cost coverage is inconsistent' })
+    }
+  }
 })
 export type RuntimeUsageResponse = z.infer<typeof RuntimeUsageResponseSchema>
 
@@ -151,6 +227,20 @@ export const ModelUsageResponseSchema = z.object({
   buckets: z.array(ModelUsageBucketSchema),
   days: z.array(ModelUsageDayBucketSchema),
   totals: DailyUsageTotalsSchema
+}).superRefine((response, ctx) => {
+  for (const [index, bucket] of response.buckets.entries()) {
+    if (!isConsistentCostCoverage(bucket, 'snake')) {
+      ctx.addIssue({ code: 'custom', path: ['buckets', index], message: 'cost coverage is inconsistent' })
+    }
+  }
+  for (const [index, day] of response.days.entries()) {
+    if (!isConsistentCostCoverage(day, 'snake')) {
+      ctx.addIssue({ code: 'custom', path: ['days', index], message: 'cost coverage is inconsistent' })
+    }
+  }
+  if (!isConsistentCostCoverage(response.totals, 'snake')) {
+    ctx.addIssue({ code: 'custom', path: ['totals'], message: 'cost coverage is inconsistent' })
+  }
 })
 export type ModelUsageResponse = z.infer<typeof ModelUsageResponseSchema>
 
@@ -165,5 +255,7 @@ export const emptyUsageSnapshot = (): UsageSnapshot => ({
   cacheHitRate: null,
   turns: 0,
   priceConfigured: false,
+  costEstimateStatus: 'none',
+  costKnownCurrencies: [],
   tokenEconomySavingsTokens: 0
 })

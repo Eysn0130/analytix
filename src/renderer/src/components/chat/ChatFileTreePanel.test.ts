@@ -22,9 +22,12 @@ describe('ChatFileTreePanel helpers', () => {
     expect(isChatFileTreeIgnoredDirectory('src')).toBe(false)
   })
 
-  it('marks only text files as previewable', () => {
+  it('opens native office, document and code files through the shared browser', () => {
     expect(isChatFileTreePreviewableEntry(entry({ name: 'main.ts', type: 'file' }))).toBe(true)
-    expect(isChatFileTreePreviewableEntry(entry({ name: 'logo.png', type: 'file' }))).toBe(false)
+    for (const name of ['report.docx', 'budget.xlsx', 'deck.pptx', 'notes.md', 'notes.txt', 'logo.png']) {
+      expect(isChatFileTreePreviewableEntry(entry({ name, type: 'file' }))).toBe(true)
+    }
+    expect(isChatFileTreePreviewableEntry(entry({ name: 'archive.zip', type: 'file' }))).toBe(false)
     expect(isChatFileTreePreviewableEntry(entry({ name: 'src', type: 'directory' }))).toBe(false)
   })
 

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { identity } from './darwin-task-keychain-core.mjs'
 import { assertCommittedDevelopmentKeychainIdentity } from './development-keychain.mjs'
-import { assertDevelopmentProfileReady, parseDevelopmentArgs, prepareDevelopmentProfile } from './dev-launcher.mjs'
+import { assertDevelopmentProfileReady, launchDevelopment, parseDevelopmentArgs, prepareDevelopmentProfile } from './dev-launcher.mjs'
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'analytix-dev-launcher-test-')))
@@ -15,7 +15,7 @@ function fixture(t) {
   const cache = join(root, 'cache')
   mkdirSync(cache, { mode: 0o700 })
   mkdirSync(join(cache, 'tmp'), { mode: 0o700 })
-  return { root, stateRoot: join(root, 'state'), env: { ANALYTIX_DEV_CACHE_ROOT: cache, PATH: process.env.PATH } }
+  return { root, credentialMode: 'isolated-keychain', stateRoot: join(root, 'state'), env: { ANALYTIX_DEV_CACHE_ROOT: cache, PATH: process.env.PATH } }
 }
 
 test('isolated development rejects ambient credentials, live-state and code-injection overrides', t => {
@@ -95,9 +95,91 @@ test('unsafe roots, symlinks, traversal and broadened permissions fail closed', 
 })
 
 test('only explicit development modes are accepted', () => {
-  assert.deepEqual(parseDevelopmentArgs([]), { fast: false, fresh: false, profile: 'default', unlockKeychain: false })
-  assert.deepEqual(parseDevelopmentArgs(['--fast', '--profile', 'recovery']), { fast: true, fresh: false, profile: 'recovery', unlockKeychain: false })
+  assert.deepEqual(parseDevelopmentArgs([]), { fast: false, fresh: false, profile: 'default', unlockKeychain: false, credentialMode: 'development' })
+  assert.deepEqual(parseDevelopmentArgs(['--fast', '--profile', 'recovery']), { fast: true, fresh: false, profile: 'recovery', unlockKeychain: false, credentialMode: 'development' })
   for (const args of [['--env-file', 'private.env'], ['--profile'], ['--fresh', '--profile', 'recovery'], ['--built']]) assert.throws(() => parseDevelopmentArgs(args))
+})
+
+function launchFixture(needsKeychain) {
+  const profile = { needsKeychain }
+  const events = []
+  const password = Buffer.from('synthetic-task-password')
+  const child = {}
+  const dependencies = {
+    assertProfileReady: current => {
+      assert.equal(current, profile)
+      events.push('identity')
+    },
+    runPrerequisite: script => events.push(script),
+    promptPassword: () => { events.push('prompt'); return password },
+    prepareKeychain: async (current, supplied, options) => {
+      assert.equal(current, profile)
+      assert.equal(supplied, password)
+      assert.equal(supplied.toString(), 'synthetic-task-password')
+      assert.deepEqual(options, { create: needsKeychain })
+      events.push(needsKeychain ? 'create' : 'unlock')
+    },
+    startApplication: () => {
+      events.push('start')
+      return child
+    }
+  }
+  return { profile, events, password, child, dependencies }
+}
+
+test('development provisions or unlocks only after prerequisites and clears the password before launch', async () => {
+  for (const needsKeychain of [true, false]) {
+    const f = launchFixture(needsKeychain)
+    f.dependencies.startApplication = () => {
+      assert.ok(f.password.every(byte => byte === 0))
+      f.events.push('start')
+      return f.child
+    }
+    assert.equal(await launchDevelopment(f.profile, { unlockKeychain: true }, f.dependencies), f.child)
+    assert.deepEqual(f.events, [
+      ...(!needsKeychain ? ['identity'] : []),
+      'doctor', 'build:data-native:development', 'build:runtime',
+      'prompt', needsKeychain ? 'create' : 'unlock', 'identity', 'start'
+    ])
+  }
+})
+
+test('any failed prerequisite prevents a password prompt, Keychain operation and application launch', async () => {
+  const scripts = ['doctor', 'build:data-native:development', 'build:runtime']
+  for (const needsKeychain of [true, false]) {
+    for (const failed of scripts) {
+      const f = launchFixture(needsKeychain)
+      f.dependencies.runPrerequisite = async script => {
+        f.events.push(script)
+        if (script === failed) throw new Error('synthetic prerequisite failure')
+      }
+      await assert.rejects(launchDevelopment(f.profile, { unlockKeychain: true }, f.dependencies), /prerequisite failure/)
+      assert.deepEqual(f.events, [
+        ...(!needsKeychain ? ['identity'] : []), ...scripts.slice(0, scripts.indexOf(failed) + 1)
+      ])
+    }
+  }
+})
+
+test('fast retained-profile launch checks identity without prompting unless unlock was requested', async () => {
+  const f = launchFixture(false)
+  await launchDevelopment(f.profile, { fast: true, unlockKeychain: false }, f.dependencies)
+  assert.deepEqual(f.events, ['identity', 'doctor', 'identity', 'start'])
+})
+
+test('unsafe retained profile stops before prerequisites and password interaction', async () => {
+  const f = launchFixture(false)
+  f.dependencies.assertProfileReady = () => { f.events.push('identity'); throw new Error('synthetic unsafe identity') }
+  await assert.rejects(launchDevelopment(f.profile, { unlockKeychain: true }, f.dependencies), /unsafe identity/)
+  assert.deepEqual(f.events, ['identity'])
+})
+
+test('failed Keychain unlock clears the supplied password and never starts the application', async () => {
+  const f = launchFixture(false)
+  f.dependencies.prepareKeychain = async () => { f.events.push('unlock'); throw new Error('synthetic unlock failure') }
+  await assert.rejects(launchDevelopment(f.profile, { fast: true, unlockKeychain: true }, f.dependencies), /unlock failure/)
+  assert.ok(f.password.every(byte => byte === 0))
+  assert.deepEqual(f.events, ['identity', 'doctor', 'prompt', 'unlock'])
 })
 
 test('launcher reads Core committed identity without adopting replacement or repairing missing records', t => {
@@ -168,4 +250,26 @@ test('launcher reads Core committed identity without adopting replacement or rep
   rmSync(join(profile.homeRoot, '.analytix', 'data', 'private', 'provider-secrets'), { recursive: true })
   mkdirSync(join(profile.homeRoot, '.analytix', 'data', 'private', 'provider-registry'), { mode: 0o700 })
   assert.throws(() => assertCommittedDevelopmentKeychainIdentity(profile), /identity is missing/)
+})
+
+test('ordinary tasks and worktrees share only the development credential authority without Keychain UI', async t => {
+  const f = fixture(t)
+  const first = prepareDevelopmentProfile({ ...f, credentialMode: 'development' })
+  const worktree = join(f.root, 'worktree')
+  mkdirSync(worktree, { mode: 0o700 })
+  const next = prepareDevelopmentProfile({ ...f, root: worktree, profile: 'next', credentialMode: 'development' })
+  assert.notEqual(first.taskRoot, next.taskRoot)
+  assert.equal(first.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR, next.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR)
+  assert.equal(first.needsKeychain, false)
+  assert.equal(next.needsKeychain, false)
+  const forbidden = () => { throw new Error('ordinary development requested Keychain interaction') }
+  await launchDevelopment(next, { fast: true }, {
+    promptPassword: forbidden, prepareKeychain: forbidden,
+    runPrerequisite: () => {}, startApplication: () => ({})
+  })
+  const qa = prepareDevelopmentProfile({ ...f, profile: 'qa' })
+  assert.equal(qa.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR, undefined)
+  assert.equal(qa.needsKeychain, true)
+  assert.throws(() => parseDevelopmentArgs(['--unlock-keychain']))
+  assert.equal(parseDevelopmentArgs(['--isolated-keychain', '--unlock-keychain']).credentialMode, 'isolated-keychain')
 })

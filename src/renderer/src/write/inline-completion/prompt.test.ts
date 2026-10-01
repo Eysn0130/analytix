@@ -73,6 +73,10 @@ function edit(partial: Partial<WriteRecentEdit>): WriteRecentEdit {
 }
 
 describe('buildInlineCompletionPayload', () => {
+  it('keeps the captured thread identity in the request', () => {
+    expect(buildInlineCompletionPayload(context(), { threadId: 'thread-a' }).threadId).toBe('thread-a')
+    expect(buildInlineCompletionPayload(context()).threadId).toBeUndefined()
+  })
   it('does not arm edit mode for ordinary typing insertions', () => {
     const payload = buildInlineCompletionPayload(context(), {
       now,

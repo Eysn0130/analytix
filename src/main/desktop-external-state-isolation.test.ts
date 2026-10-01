@@ -1,8 +1,9 @@
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve, sep, win32 } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
+import { createRequire } from 'node:module'
 import {
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV,
   ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1,
@@ -91,6 +92,45 @@ const launch: ClawScheduleMcpLaunchConfig = {
 }
 
 describe('main-private desktop external-state isolation', () => {
+  it('accepts only canonical Windows profile paths with native private-directory admission', () => {
+    const stateRoot = 'C:\\AnalytixDevelopment'
+    const cacheRoot = win32.join(stateRoot, 'build-cache')
+    const taskRoot = win32.join(stateRoot, 'analytix-dev-checkout', 'development-profile-default')
+    const userDataRoot = win32.join(taskRoot, 'user-data')
+    const homeRoot = win32.join(taskRoot, 'home')
+    const developmentRoot = win32.join(stateRoot, 'provider-credentials')
+    const env = {
+      ANALYTIX_DEV_CACHE_ROOT: cacheRoot,
+      ANALYTIX_DEV_STATE_ROOT: stateRoot,
+      ANALYTIX_USER_DATA_DIR: userDataRoot,
+      ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR: developmentRoot,
+      HOME: homeRoot,
+      [ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]:
+        ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1
+    }
+    const privateDirectory = vi.fn((_path: string) => true)
+    const dependencies = {
+      lstat: vi.fn(() => { throw new Error('Windows must use native ACL validation') }),
+      realpath: (path: string) => path,
+      ownerUID: () => null,
+      windowsPrivateDirectory: privateDirectory
+    }
+
+    expect(resolveDesktopExternalStateBoundary(env, dependencies, false, 'win32')).toMatchObject({
+      isolated: true,
+      isolationRoot: taskRoot,
+      userDataRoot,
+      stateHomeRoot: homeRoot,
+      developmentProviderAuthorityDir: developmentRoot
+    })
+    expect(privateDirectory).toHaveBeenCalledWith(developmentRoot)
+    privateDirectory.mockImplementation((path: string) => path !== developmentRoot)
+    expect(() => resolveDesktopExternalStateBoundary(env, dependencies, false, 'win32')).toThrow()
+    privateDirectory.mockImplementation(() => true)
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, ANALYTIX_USER_DATA_DIR: `${userDataRoot}\\..\\user-data` }, dependencies, false, 'win32')).toThrow()
+    expect(() => resolveDesktopExternalStateBoundary({ ...env, ANALYTIX_DEV_STATE_ROOT: 'D:\\AnalytixDevelopment' }, dependencies, false, 'win32')).toThrow()
+  })
+
   it('separates retained state from build cache without accepting a different state owner', async () => {
     const fixture = await isolatedFixture()
     const stateRoot = join(fixture.cacheRoot, '..', 'protected-state')
@@ -293,7 +333,7 @@ describe('main-private desktop external-state isolation', () => {
       readFile(join(process.cwd(), 'electron-builder.config.cjs'), 'utf8'),
       readFile(join(process.cwd(), 'scripts/release-mac.sh'), 'utf8')
     ])
-    const boundaryIndex = mainSource.indexOf('consumeDesktopExternalStateBoundary(process.env)')
+    const boundaryIndex = mainSource.indexOf('consumeDesktopExternalStateBoundary(process.env, undefined, app.isPackaged)')
     const firstStartupEffectIndex = mainSource.indexOf('captureOpenComputerUseAgentBaselineV1()')
 
     expect(boundaryIndex).toBeGreaterThanOrEqual(0)
@@ -322,6 +362,7 @@ describe('main-private desktop external-state isolation', () => {
           if (name.includes('macos-signing-policy')) return { requireOfficialTeamIdentifier: () => { throw new Error('unapproved signing') } }
           if (name.includes('production-mcp-entry-closure-manifest')) return { loadProductionMcpEntryClosureContract: () => ({ files: [] }) }
           if (name.includes('packaged-lifecycle-guard')) return { _internals: { assertNoPrepackagedCommandLine: () => {} } }
+          if (name === './scripts/core-package-profile.cjs') return createRequire(import.meta.url)(join(process.cwd(), name))
           throw new Error('unexpected builder dependency')
         } }
       runInNewContext(builderConfig, context)
@@ -335,11 +376,28 @@ describe('main-private desktop external-state isolation', () => {
     expect(ordinary.env.ANALYTIX_APP_VERSION).toBe('1.2.3')
     expect(ordinary.env[ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV]).toBeUndefined()
     expect(JSON.stringify(ordinary.config)).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
-    for (const defaultLaunchSource of [packageJson, releaseScript]) {
+    const scripts = JSON.parse(packageJson).scripts as Record<string, string>
+    const defaultCommands = ['dist', 'dist:mac', 'dist:mac:signed', 'dist:mac:arm64:core:controlled', 'release:all', 'release:mac']
+    for (const name of defaultCommands) expect(scripts[name]).toBeTypeOf('string')
+    for (const defaultLaunchSource of [...defaultCommands.map(name => scripts[name]), releaseScript]) {
       expect(defaultLaunchSource).not.toContain(ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV)
       expect(defaultLaunchSource).not.toContain(
         ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1
       )
     }
+    expect(scripts['dist:mac:arm64:core']).toContain(`${ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ENV}=${ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE_ISOLATED_LOCAL_V1}`)
+    expect(scripts['dist:mac:arm64:core']).not.toContain('ANALYTIX_RELEASE_BUILD=1')
   })
 })
+
+ it('development authority is explicit, private and rejected by packaged consumers', async () => {
+  const fixture=await isolatedFixture()
+  const root=join(fixture.cacheRoot,'tmp','provider-credentials')
+  await mkdir(root,{mode:0o700})
+  const env={...isolatedEnvironment(fixture),ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR:root}
+  expect(resolveDesktopExternalStateBoundary(env).developmentProviderAuthorityDir).toBe(root)
+  expect(()=>resolveDesktopExternalStateBoundary(env,undefined,true)).toThrow()
+  expect(()=>resolveDesktopExternalStateBoundary({ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR:root})).toThrow()
+  await chmod(root,0o755)
+  expect(()=>resolveDesktopExternalStateBoundary(env)).toThrow()
+ })

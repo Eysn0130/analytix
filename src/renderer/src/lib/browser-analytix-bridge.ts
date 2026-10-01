@@ -1299,6 +1299,27 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       listEditors: async () => ({ editors: [], defaultEditorId: '' }),
       openEditorPath: async () => ({ ok: false, message: browserPreviewUnavailable('Open editor') })
     },
+    office: {
+      onAnnotationInputFreeze: () => () => undefined,
+      onMenuRequested: () => () => undefined,
+      showActionMenu: async () => ({actionId:null}),
+      onWorkspaceCommand: () => () => undefined,
+      pickFile: async () => ({ ok: false, error: 'unavailable' }),
+      request: async () => ({ ok: false, view: null, error: 'unavailable' }),
+      onChange: () => () => undefined
+    },
+    packageHost: {
+      request: async () => ({ ok: false, code: 'identity_invalid', message: 'Plugin control requires the desktop workspace.' })
+    },
+    canvas: {
+      request: async () => ({ ok: false, code: 'unavailable' }),
+      pickFile: async () => ({ ok: false })
+    },
+    browserSelection: { request: async () => ({ ok: false }) },
+    objects: {
+      resolveArtifact: async () => ({ok:false,code:'unavailable'}),
+      request: async () => ({ ok: false, code: 'forbidden', message: 'Protected object editing requires the desktop workspace.' })
+    },
     files: {
       listDirectory: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace file listing') }),
       resolve: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace file resolving') }),
@@ -1321,7 +1342,9 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       getPathForFile: () => ''
     },
     write: {
+      onShutdown: () => () => undefined,
       requestWriteInlineCompletion: async () => ({ ok: false, message: browserPreviewUnavailable('Write inline completion') }),
+      cancelWriteInlineCompletion: async () => ({ canceled: false }),
       retrieveWriteContext: async () => ({ ok: false, message: browserPreviewUnavailable('Write retrieval') }),
       generateWriteInfographic: async () => ({ ok: false, message: browserPreviewUnavailable('Write infographic generation') }),
       authorizeWritePrototype: async () => ({ ok: false, message: browserPreviewUnavailable('Write prototype authorization') }),

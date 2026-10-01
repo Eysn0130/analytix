@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -416,8 +418,11 @@ func exactIntField(record map[string]any, key string) int {
 	case int:
 		return value
 	case float64:
-		if value == float64(int(value)) {
-			return int(value)
+		if !math.IsNaN(value) && value >= float64(math.MinInt) && value < -float64(math.MinInt) && math.Trunc(value) == value {
+			parsed, err := strconv.Atoi(strconv.FormatFloat(value, 'f', 0, 64))
+			if err == nil {
+				return parsed
+			}
 		}
 	}
 	return 0
@@ -428,7 +433,7 @@ func isExactJSONInteger(raw any) bool {
 	case int:
 		return true
 	case float64:
-		return value == float64(int(value))
+		return !math.IsNaN(value) && value >= float64(math.MinInt) && value < -float64(math.MinInt) && math.Trunc(value) == value
 	default:
 		return false
 	}

@@ -160,6 +160,57 @@ fn query_stats_rows_cli_filters_source_date_and_search_text() -> Result<()> {
 }
 
 #[test]
+fn query_stats_rows_cli_search_pages_keep_total_and_stable_tie_order() -> Result<()> {
+    let db = TempDb::new("stats-rows-filtered-pages")?;
+    seed_stats_query_tables(db.path())?;
+
+    for (offset, id, name, amount) in [
+        (0, "cp_key:CP-001", "对手甲", 10000.0),
+        (1, "cp_key:CP-002", "对手乙", 3000.0),
+    ] {
+        let output = run_analysis_compute_command(&[
+            "query-stats-rows",
+            "--case-id",
+            CASE_ID,
+            "--db-path",
+            &db.path().to_string_lossy(),
+            "--mode",
+            "inAccount",
+            "--selected-key",
+            "CARD-001",
+            "--date-start",
+            "2026-04-01",
+            "--date-end",
+            "2026-04-01",
+            "--search-text",
+            "对手",
+            "--row-sort-col",
+            "total_count",
+            "--row-sort-dir",
+            "desc",
+            "--row-limit",
+            "1",
+            "--row-offset",
+            &offset.to_string(),
+        ])?;
+
+        assert_eq!(output["ok"], json!(true));
+        assert_eq!(output["total"], json!(2));
+        let rows = output["rows"].as_array().expect("rows must be an array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], json!(id));
+        assert_eq!(rows[0]["counterparty_name"], json!(name));
+        assert_eq!(rows[0]["total_count"], json!(1));
+        assert_eq!(rows[0]["total_amount"], json!(amount));
+        assert_eq!(
+            output["row_summary"],
+            json!({"total_amount": amount, "total_count": 1}),
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn query_stats_rows_cli_returns_doc_status_in_display_rows() -> Result<()> {
     let db = TempDb::new("stats-rows-doc-status")?;
     seed_stats_query_tables(db.path())?;

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "packageId": "analytix-canvas",
+  "packageVersion": "0.1.0",
+  "contributions": {
+    "skills": [
+      {
+        "id": "canvas",
+        "path": "skills/canvas/SKILL.md"
+      }
+    ],
+    "mcpServers": [],
+    "hooks": [],
+    "assets": [
+      {
+        "id": "editor-adapter",
+        "path": "assets/adapter.json"
+      }
+    ],
+    "publicUi": [
+      {
+        "id": "workspace-editor",
+        "path": "ui/editor.json"
+      }
+    ]
+  },
+  "requestedCapabilities": [
+    {
+      "id": "canvas.local-preview",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "user-selected-object",
+        "read-only"
+      ]
+    },
+    {
+      "id": "canvas.local-edit",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "user-selected-object",
+        "reviewed-commit"
+      ]
+    },
+    {
+      "id": "canvas.generation",
+      "protocolVersion": 1,
+      "scopeConstraints": [
+        "new-file",
+        "current-conversation"
+      ]
+    }
+  ],
+  "lifecycle": {
+    "protocolVersion": 1,
+    "entryPolicy": "host-static-first-party"
+  }
+}

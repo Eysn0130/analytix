@@ -325,7 +325,7 @@ func projectLegacyPrivateContentValueV1(value any) (any, legacyPrivateContentRem
 		if preserveDigestBoundGeneralTerminalRecordV1(typed) {
 			return contracts.CloneValue(typed), 0
 		}
-		out := make(map[string]any, len(typed)+2)
+		out := make(map[string]any, len(typed))
 		var removed legacyPrivateContentRemovalV1
 		originalKind := strings.ToLower(strings.TrimSpace(stringValue(typed["kind"])))
 		for key, child := range typed {

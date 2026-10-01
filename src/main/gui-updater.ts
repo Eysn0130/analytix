@@ -15,6 +15,7 @@ import type {
 } from '../shared/gui-update'
 import { nextGuiUpdateCheckDelay } from '../shared/gui-update-schedule'
 import { DEFAULT_GUI_UPDATE_CHANNEL, normalizeGuiUpdateChannel } from '../shared/gui-update'
+import { assertUpdateTarget, profileUpdateFeed, updateProfile } from './gui-update-target'
 import { publicConsoleError, publicConsoleInfo, publicConsoleWarn } from './logger'
 
 const DEFAULT_STABLE_UPDATE_FEED_URL = 'https://analytix.top/desktop/releases/standard-win/'
@@ -76,15 +77,22 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)))
 }
 
+function currentUpdateProfile(): 'core' | 'full' { return updateProfile(readPackageJson()?.releaseProfile) }
+
+function validateUpdateInfo(info: UpdateInfo): void {
+  assertUpdateTarget(info as unknown as Record<string, unknown>, currentUpdateProfile(), process.platform, process.arch, configuredChannel)
+}
+
 function updateFeedUrlCandidates(channel: GuiUpdateChannel): string[] {
   const direct = envUpdateUrl(channel)
   if (direct) return [direct]
 
   const releaseBaseUrl = process.env.ANALYTIX_RELEASE_BASE_URL?.trim() || ''
   if (releaseBaseUrl) {
-    return uniqueStrings([`${joinUrl(releaseBaseUrl, 'channels', channel, 'latest')}/`])
+    return uniqueStrings([profileUpdateFeed(releaseBaseUrl, currentUpdateProfile(), process.platform, process.arch, channel)])
   }
-  return [DEFAULT_STABLE_UPDATE_FEED_URL]
+  if (process.platform === 'win32' && currentUpdateProfile() === 'full' && channel === 'stable') return [DEFAULT_STABLE_UPDATE_FEED_URL]
+  return [profileUpdateFeed('https://analytix.top/desktop/releases', currentUpdateProfile(), process.platform, process.arch, channel)]
 }
 
 function updateFeedUrl(channel: GuiUpdateChannel): string {
@@ -285,7 +293,7 @@ function isVersionGreater(latest: string, current: string): boolean {
 }
 
 function platformManifestName(): string {
-  if (process.platform === 'darwin') return 'latest-mac.yml'
+  if (process.platform === 'darwin') return configuredChannel === 'beta' ? 'beta-mac.yml' : 'latest-mac.yml'
   if (process.platform === 'linux') return 'latest-linux.yml'
   return 'latest.yml'
 }
@@ -298,7 +306,7 @@ function parseYamlScalar(source: string, key: string): string {
 
 function macAutoUpdateAllowed(): boolean {
   if (process.platform !== 'darwin') return true
-  if (process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES === '1') return true
+  if (currentUpdateProfile() !== 'core' && process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES === '1') return true
 
   const pkg = readPackageJson()
   const hints = pkg?.buildHints
@@ -445,6 +453,7 @@ function configureUpdaterChannel(channel: GuiUpdateChannel, feedUrl = updateFeed
   configuredChannel = normalized
   configuredFeedUrl = feedUrl
   autoUpdater.allowPrerelease = normalized === 'beta'
+  autoUpdater.channel = normalized === 'beta' ? 'beta' : 'latest'
   autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
   if (!changed) return
   downloaded = false
@@ -466,6 +475,7 @@ async function checkManualUpdate(
   code: GuiUpdateFailureCode = 'unsupported'
 ): Promise<GuiUpdateInfo> {
   const currentVersion = app.getVersion()
+  if (currentUpdateProfile() === 'core') return { ok: false, currentVersion, code: 'not_configured', message: 'Core updates require a qualified signed installation.', channel }
   try {
     const feedUrl = configuredChannel === channel && configuredFeedUrl
       ? configuredFeedUrl
@@ -559,6 +569,7 @@ export function initializeGuiUpdater(
 
   autoUpdater.on('update-available', (updateInfo: UpdateInfo) => {
     downloaded = false
+    try { validateUpdateInfo(updateInfo) } catch { lastInfo = null; emitGuiUpdateState({ status: 'error', message: 'Update target is incompatible with this installation.', code: 'unknown' }); return }
     const info = toGuiInfo(updateInfo, true)
     lastInfo = info
     emitGuiUpdateState({ status: 'available', info })
@@ -576,6 +587,7 @@ export function initializeGuiUpdater(
   })
 
   autoUpdater.on('update-downloaded', (event: UpdateDownloadedEvent) => {
+    try { validateUpdateInfo(event) } catch { downloaded = false; lastInfo = null; emitGuiUpdateState({ status: 'error', message: 'Update target is incompatible with this installation.', code: 'unknown' }); return }
     downloaded = true
     const info = toGuiInfo(event, true)
     lastInfo = info
@@ -665,11 +677,14 @@ export async function checkGuiUpdate(channel?: GuiUpdateChannel): Promise<GuiUpd
     if (!result) {
       return checkManualUpdate(selectedChannel, 'not_configured')
     }
+    validateUpdateInfo(result.updateInfo)
     const info = toGuiInfo(result.updateInfo, result.isUpdateAvailable)
     lastInfo = info
     emitGuiUpdateState(info.hasUpdate ? { status: 'available', info } : { status: 'not_available', info })
     return info
   } catch (e) {
+    lastInfo = null
+    downloaded = false
     const message = sanitizeUpdaterError(e instanceof Error ? e.message : String(e), selectedChannel)
     const info: GuiUpdateInfo = {
       ok: false,
@@ -742,8 +757,10 @@ export async function installGuiUpdate(): Promise<GuiUpdateInstallResult> {
         message: 'The update has not finished downloading yet.'
       }
     }
+    const expectedInfo = lastInfo
     emitGuiUpdateState({ status: 'installing', info: lastInfo ?? undefined })
     await Promise.all([pendingVersionStateWrite, runBeforeInstallUpdate()])
+    if (!downloaded || lastInfo !== expectedInfo) throw new Error('update target changed before installation')
     autoUpdater.quitAndInstall(false, true)
     return { ok: true }
   } catch {

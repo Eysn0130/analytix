@@ -154,6 +154,14 @@ func openExistingFileAuthority(path string) (*FileAuthority, error) {
 	return authority, err
 }
 
+// OpenExistingFileAuthority reads a previously prepared installation key
+// without creating its parent directory or replacing a missing key. Callers
+// must hold the frozen startup root authority and establish their own trust
+// anchor before using the returned signer for an existing installation.
+func OpenExistingFileAuthority(path string) (*FileAuthority, error) {
+	return openExistingFileAuthority(path)
+}
+
 func OpenOrCreateFileAuthority(path string, authorityStateExists bool) (*FileAuthority, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

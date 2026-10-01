@@ -51,6 +51,7 @@ var pipelineDetailSchema = map[string]map[string]pipelineValueKind{
 	"response_received": {
 		"stopReason": pipelineStopReason, "toolCallCount": pipelineNumber, "streamCompleted": pipelineBoolean,
 		"durationMs": pipelineNumber, "firstTokenLatencyMs": pipelineNumber,
+		"firstReasoningLatencyMs": pipelineNumber, "firstRawTextLatencyMs": pipelineNumber,
 	},
 }
 
@@ -81,8 +82,13 @@ func pipelineProviderRequestSchema(postSend bool) map[string]pipelineValueKind {
 	}
 	if postSend {
 		schema["provider_request_sent_at"] = pipelineNumber
+		schema["provider_connection_reused"] = pipelineBoolean
+		schema["provider_connection_was_idle"] = pipelineBoolean
 		for key := range map[string]struct{}{
 			"status": {}, "provider_response_headers_at": {}, "provider_response_headers_wait_ms": {},
+			"provider_dns_done_ms": {}, "provider_connect_done_ms": {}, "provider_tls_done_ms": {},
+			"provider_connection_acquired_ms": {}, "provider_connection_idle_ms": {},
+			"provider_request_written_ms": {}, "provider_first_response_byte_ms": {},
 		} {
 			schema[key] = pipelineNumber
 		}

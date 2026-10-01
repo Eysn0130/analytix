@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"math"
 	"strings"
 
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
@@ -31,7 +32,15 @@ func ApplyPricing(usage domainmodel.Usage, pricing *domainmodel.Pricing) domainm
 	if pricing == nil {
 		return usage
 	}
-	usage.PriceConfigured = true
+	if pricing.Input < 0 || pricing.Output < 0 || pricing.CacheHit < 0 || math.IsNaN(pricing.Input+pricing.Output+pricing.CacheHit) || math.IsInf(pricing.Input+pricing.Output+pricing.CacheHit, 0) {
+		usage.PriceConfigured = false
+		usage.CostUSD = 0
+		usage.CostCNY = 0
+		return usage
+	}
+	usage.CostCNY, usage.CostUSD = 0, 0
+	usage.CacheSavingsCNY, usage.CacheSavingsUSD = 0, 0
+	usage.Currency = ""
 	hit := usage.CacheHitTokens
 	miss := usage.CacheMissTokens
 	if hit+miss == 0 && usage.PromptTokens > 0 {
@@ -48,19 +57,18 @@ func ApplyPricing(usage domainmodel.Usage, pricing *domainmodel.Pricing) domainm
 	}
 	switch strings.ToLower(strings.TrimSpace(pricing.Currency)) {
 	case "cny", "rmb", "¥", "￥":
+		usage.PriceConfigured = true
 		usage.CostCNY = cost
-		usage.CostUSD = cost / 7.2
 		usage.CacheSavingsCNY = savings
-		usage.CacheSavingsUSD = savings / 7.2
 		usage.Currency = "CNY"
 	case "usd", "$":
+		usage.PriceConfigured = true
 		usage.CostUSD = cost
 		usage.CacheSavingsUSD = savings
 		usage.Currency = "USD"
 	default:
-		usage.CostUSD = cost
-		usage.CacheSavingsUSD = savings
-		usage.Currency = strings.TrimSpace(pricing.Currency)
+		// No exchange-rate or currency authority: do not fabricate a USD bill.
+		usage.PriceConfigured = false
 	}
 	return usage
 }
@@ -92,7 +100,15 @@ func CacheDiagnosticsWithPrevious(previous domainmodel.PrefixShape, result domai
 	if toolSourcesHash == "" {
 		toolSourcesHash = shape.ToolsHash
 	}
+	modelObservation := "not_reported"
+	if result.ResponseObservedModel != "" {
+		modelObservation = "differs_resolved"
+		if result.ResponseObservedModel == shape.Model {
+			modelObservation = "matches_resolved"
+		}
+	}
 	diagnostics := map[string]any{
+		"responseModelObservation":     modelObservation,
 		"prefixHash":                   shape.PrefixHash,
 		"prefixChanged":                len(prefixChangeReasons) > 0,
 		"prefixChangeReasons":          prefixChangeReasons,
@@ -102,6 +118,8 @@ func CacheDiagnosticsWithPrevious(previous domainmodel.PrefixShape, result domai
 		"prefixItemsHash":              shape.PrefixItemsHash,
 		"toolsHash":                    shape.ToolsHash,
 		"toolSchemaTokens":             shape.ToolSchemaTokens,
+		"dynamicStateCheck":            "not_checked",
+		"toolSchemaEstimator":          "utf8_bytes_div4",
 		"toolCount":                    shape.ToolCount,
 		"toolSourcesHash":              toolSourcesHash,
 		"toolSourceIds":                toolSourceIDs,

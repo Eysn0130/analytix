@@ -584,6 +584,10 @@ func (service *Service) VerifyFactFinalWitnessCurrent(
 	ctx context.Context,
 	record domainevidence.PrivateAcceptedFinalRecord,
 ) error {
+	return service.withVerifiedFactFinalWitness(ctx, record, func() error { return nil })
+}
+
+func (service *Service) withVerifiedFactFinalWitness(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord, use func() error) error {
 	if service == nil || ctx == nil || service.witnessChain == nil ||
 		domainevidence.ValidatePrivateAcceptedFinalRecord(record) != nil ||
 		domainsecurity.ValidateTurnSecurityContextForCaseFactPublication(record.SecurityContext) != nil ||
@@ -638,21 +642,22 @@ func (service *Service) VerifyFactFinalWitnessCurrent(
 	}
 	if record.AcceptedFinal.FactFinalWitnessAdmission.SchemaVersion ==
 		domainevidence.FactFinalWitnessAdmissionSchemaVersionV2 {
-		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historical.Bundle, input)
+		return service.verifyFactFinalDatasetAuthorityCurrentV2(ctx, record, historicalHead, input, use)
 	}
 	if err := domainevidence.ValidateFactFinalWitnessAdmissionExactV1(
 		*record.AcceptedFinal.FactFinalWitnessAdmission, input,
 	); err != nil {
 		return errors.Join(errors.New("fact final witness admission does not match fresh-chain authority"), err)
 	}
-	return nil
+	return use()
 }
 
 func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 	ctx context.Context,
 	record domainevidence.PrivateAcceptedFinalRecord,
-	historicalBundle domainevidence.EvidenceAuthorityBundleV1,
+	historicalHead evidenceauthorityport.FreshHead,
 	input domainevidence.FactFinalWitnessAdmissionInputV1,
+	use func() error,
 ) error {
 	if service.datasetAuthority == nil || service.bindingObserver == nil {
 		return errors.New("fact final current dataset replay authority is unavailable")
@@ -672,6 +677,26 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 		Observation:               binding,
 		ExpectedDatasetSnapshotID: record.SecurityContext.DatasetSnapshotID,
 	}
+	// Production history uses retained, exact original material without making
+	// the currently selected analytical snapshot every historical fact's owner.
+	if history, ok := service.datasetAuthority.(datasetsnapshotport.HistoricalFactAuthorityV2); ok {
+		return history.WithHistoricalFactSelectionV2(ctx, resolveInput, record.SecurityContext, historicalHead, func(selection datasetsnapshotport.CurrentSelectionV2) error {
+			if len(selection.DatasetIndexPath) == 0 || datasetsnapshotport.ValidateCurrentSelectionDigestV2(selection) != nil {
+				return errors.New("fact final historical dataset selection is invalid")
+			}
+			input.DatasetRootIndex = selection.DatasetIndexPath[0]
+			input.SelectedDatasetIndex = selection.SelectedIndex
+			input.DatasetIndexPath = append([]domainsecurity.DatasetSnapshotIndexV1(nil), selection.DatasetIndexPath...)
+			input.DatasetRecord = selection.Snapshot.Record
+			input.DatasetManifest = selection.Snapshot.Manifest
+			input.FundsProducerContent = selection.Snapshot.FundsProducerContent
+			input.BindingObservation = binding
+			if err := domainevidence.ValidateFactFinalWitnessAdmissionExactV1(*record.AcceptedFinal.FactFinalWitnessAdmission, input); err != nil {
+				return err
+			}
+			return use()
+		})
+	}
 	return service.datasetAuthority.WithCurrentSelectionV2(
 		ctx,
 		resolveInput,
@@ -681,8 +706,8 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 			capability datasetsnapshotport.CurrentSelectionCapabilityV2,
 		) error {
 			if capability == nil ||
-				selection.Head.Bundle.DatasetSnapshotIndexDigest != historicalBundle.DatasetSnapshotIndexDigest ||
-				selection.Head.Bundle.DatasetSnapshotCount != historicalBundle.DatasetSnapshotCount ||
+				selection.Head.Bundle.DatasetSnapshotIndexDigest != historicalHead.Bundle.DatasetSnapshotIndexDigest ||
+				selection.Head.Bundle.DatasetSnapshotCount != historicalHead.Bundle.DatasetSnapshotCount ||
 				len(selection.DatasetIndexPath) == 0 ||
 				datasetsnapshotport.ValidateCurrentSelectionDigestV2(selection) != nil {
 				return errors.New("fact final current dataset selection changed after admission")
@@ -707,7 +732,7 @@ func (service *Service) verifyFactFinalDatasetAuthorityCurrentV2(
 							err,
 						)
 					}
-					return nil
+					return use()
 				},
 			)
 		},
@@ -874,12 +899,17 @@ func (service *Service) registrySelectionFromHeadLocked(ctx context.Context, hea
 	if err := service.validateHead(head); err != nil {
 		return registrySelectionV2{}, err
 	}
+	return service.registrySelectionFromRootLocked(ctx, head.Bundle.EvidenceRegistryIndexDigest,
+		head.Bundle.EvidenceRegistryCount, false, "", securityContext)
+}
+
+func (service *Service) registrySelectionFromRootLocked(ctx context.Context, root string, count uint64,
+	hostLocal bool, modeCommitmentDigest string,
+	securityContext domainsecurity.TurnSecurityContext) (registrySelectionV2, error) {
 	empty, err := domainevidence.NewEvidenceReceiptRegistry(securityContext)
 	if err != nil {
 		return registrySelectionV2{}, err
 	}
-	root := head.Bundle.EvidenceRegistryIndexDigest
-	count := head.Bundle.EvidenceRegistryCount
 	if count == 0 {
 		if root != domainevidence.EvidenceRegistryAuthorityIndexGenesisDigestV2() {
 			return registrySelectionV2{}, ErrAuthorityIntegrity
@@ -898,25 +928,43 @@ func (service *Service) registrySelectionFromHeadLocked(ctx context.Context, hea
 	var selectedPath []domainevidence.EvidenceRegistryAuthorityIndexV2
 	for generation := count; generation > 0; generation-- {
 		index, err := service.indexes.Resolve(ctx, currentDigest)
-		if err != nil || domainevidence.ValidateEvidenceRegistryAuthorityIndexForInstallationV2(
-			index, service.installationID, service.enrollmentID, service.keyID, service.publicKey,
-		) != nil || index.Generation != generation || index.IndexDigest != currentDigest {
+		validIndex := domainevidence.ValidateEvidenceRegistryAuthorityIndexForInstallationV2(
+			index, service.installationID, service.enrollmentID, service.keyID, service.publicKey) == nil
+		if hostLocal {
+			validIndex = domainevidence.ValidateEvidenceRegistryAuthorityIndexForHostLocalV3(
+				index, service.installationID, modeCommitmentDigest, service.keyID, service.publicKey) == nil
+		}
+		if err != nil || !validIndex || index.Generation != generation || index.IndexDigest != currentDigest {
 			return registrySelectionV2{}, ErrAuthorityIntegrity
 		}
 		path = append(path, index)
 		if generation == count {
 			rootIndex = index
 		}
-		if generation == count && domainevidence.ValidateEvidenceRegistryAuthorityIndexWitnessRootV2(index, root, count) != nil {
+		validRoot := domainevidence.ValidateEvidenceRegistryAuthorityIndexWitnessRootV2(index, root, count) == nil
+		if hostLocal {
+			validRoot = domainevidence.ValidateEvidenceRegistryAuthorityIndexHostLocalRootV3(index, root, count) == nil
+		}
+		if generation == count && !validRoot {
 			return registrySelectionV2{}, ErrAuthorityIntegrity
 		}
-		if newer != nil && domainevidence.ValidateEvidenceRegistryAuthorityIndexTransitionV2(index, *newer) != nil {
-			return registrySelectionV2{}, ErrAuthorityIntegrity
+		if newer != nil {
+			validTransition := domainevidence.ValidateEvidenceRegistryAuthorityIndexTransitionV2(index, *newer) == nil
+			if hostLocal {
+				validTransition = domainevidence.ValidateEvidenceRegistryAuthorityIndexHostLocalTransitionV3(index, *newer) == nil
+			}
+			if !validTransition {
+				return registrySelectionV2{}, ErrAuthorityIntegrity
+			}
 		}
 		if selected == nil && index.Entry.ThreadID == securityContext.ThreadID && index.Entry.TurnID == securityContext.TurnID &&
 			index.Entry.ContextDigest == securityContext.ContextDigest {
 			capsule, err := service.capsules.Resolve(ctx, index.Entry.CapsuleRecordDigest)
-			if err != nil || !domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleV2(index, capsule) ||
+			matches := domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleV2(index, capsule)
+			if hostLocal {
+				matches = domainevidence.EvidenceRegistryAuthorityIndexEntryMatchesCapsuleHostLocalV3(index, capsule)
+			}
+			if err != nil || !matches ||
 				!reflect.DeepEqual(capsule.SecurityContext, securityContext) {
 				return registrySelectionV2{}, ErrAuthorityIntegrity
 			}
@@ -1017,14 +1065,21 @@ func (service *Service) validateEntryAppendLocked(
 	index domainevidence.EvidenceRegistryAuthorityIndexV2,
 	capsule domainevidence.EvidenceRegistryAuthorityCapsule,
 ) error {
-	if head.Bundle.EvidenceRegistryCount == 0 {
+	return service.validateEntryAppendFromRootLocked(ctx, head.Bundle.EvidenceRegistryIndexDigest,
+		head.Bundle.EvidenceRegistryCount, index, capsule)
+}
+
+func (service *Service) validateEntryAppendFromRootLocked(ctx context.Context, root string, count uint64,
+	index domainevidence.EvidenceRegistryAuthorityIndexV2,
+	capsule domainevidence.EvidenceRegistryAuthorityCapsule) error {
+	if count == 0 {
 		if index.Entry.RegistrySequence != 1 {
 			return errors.New("first evidence registry authority entry must start at sequence one")
 		}
 		return nil
 	}
-	currentDigest := head.Bundle.EvidenceRegistryIndexDigest
-	for generation := head.Bundle.EvidenceRegistryCount; generation > 0; generation-- {
+	currentDigest := root
+	for generation := count; generation > 0; generation-- {
 		previous, err := service.indexes.Resolve(ctx, currentDigest)
 		if err != nil || previous.Generation != generation {
 			return ErrAuthorityIntegrity

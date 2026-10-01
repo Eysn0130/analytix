@@ -44,9 +44,8 @@ export const RuntimeSkillsResponseV2 = z
     if (!value.enabled && value.skillCount !== 0) {
       context.addIssue({ code: 'custom', message: 'disabled skill catalog cannot publish skills' })
     }
-    if (value.skillCount > 0 && value.configuredRootCount === 0) {
-      context.addIssue({ code: 'custom', message: 'published skills require a configured root' })
-    }
+    // Installed plugin contributions need no configured filesystem roots.
+    // configuredRootCount describes configuration, not skill authority.
     if (new Set(value.skills.map((skill) => skill.id)).size !== value.skills.length) {
       context.addIssue({ code: 'custom', message: 'public skill ids must be unique' })
     }

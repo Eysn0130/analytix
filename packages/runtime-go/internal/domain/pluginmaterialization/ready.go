@@ -73,6 +73,7 @@ func ValidateReadyV1(ready ReadyV1) error {
 		!validPluginIdentityV1(ready.PluginName, ready.PluginVersion) ||
 		!canonicalAbsolutePath(ready.ActivePluginRoot) || ValidateReceiptV1(ready.Receipt) != nil ||
 		ValidateIndexForReceiptV1(ready.Index, ready.Receipt) != nil ||
+		ready.Receipt.Origin != "" || ready.Receipt.SourceRegistrationSHA256 != "" ||
 		ready.Receipt.PackageAuthoritySHA256 != ready.PackageAuthority.FileSHA256 ||
 		ready.Receipt.PluginName != ready.PluginName || ready.Receipt.PluginVersion != ready.PluginVersion ||
 		ready.Publishable || ready.FactToolsEnabled || ready.Receipt.FactToolsEnabled || ready.Index.FactToolsEnabled ||

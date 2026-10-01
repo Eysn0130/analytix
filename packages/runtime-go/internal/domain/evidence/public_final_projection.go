@@ -413,8 +413,7 @@ func buildAcceptedFinalPublicViewCoreV2(envelope FinalAnswerEnvelope, record Acc
 
 func acceptedFinalPublicViewCoreV2Digest(core AcceptedFinalPublicViewCoreV2) string {
 	body, _ := json.Marshal(core)
-	payload := make([]byte, 0, len(acceptedFinalPublicViewV2DigestDomain)+len(body))
-	payload = append(payload, acceptedFinalPublicViewV2DigestDomain...)
+	payload := []byte(acceptedFinalPublicViewV2DigestDomain)
 	payload = append(payload, body...)
 	return domainsecurity.SHA256Hex(payload)
 }
@@ -424,7 +423,7 @@ func acceptedFinalPublicViewCoreV2Digest(core AcceptedFinalPublicViewCoreV2) str
 // envelope is a separate private-authority check; this validator ensures the
 // public record cannot smuggle a non-canonical or cross-runtime-ambiguous view.
 func ValidateAcceptedFinalPublicViewCoreV2(record AcceptedFinalRecord) error {
-	if record.SchemaVersion != AcceptedFinalRecordVersion || record.PublicView == nil ||
+	if (record.SchemaVersion != AcceptedFinalRecordVersion && record.SchemaVersion != HostLocalAcceptedFinalRecordVersionV6) || record.PublicView == nil ||
 		!validSHA256(record.PublicViewDigest) {
 		return errors.New("accepted final V5 public view is incomplete")
 	}

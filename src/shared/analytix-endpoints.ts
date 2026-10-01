@@ -118,6 +118,9 @@ export const ANALYTIX_PROVIDER_REGISTRY_PROBE_TEMPLATE =
 export function analytixProviderRegistryProbePath(providerId: string): string {
   return `${analytixProviderRegistryProviderPath(providerId)}/probe`
 }
+export function analytixProviderRegistryCredentialCheckPath(providerId: string): string {
+  return `${analytixProviderRegistryProviderPath(providerId)}/credential-check`
+}
 export const ANALYTIX_PROVIDER_REGISTRY_DISCOVER_MODELS_TEMPLATE =
   '/v1/provider-registry/providers/{id}/discover-models'
 export function analytixProviderRegistryDiscoverModelsPath(providerId: string): string {

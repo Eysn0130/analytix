@@ -262,6 +262,7 @@ type Transaction struct {
 	Version                     int            `json:"version"`
 	ID                          string         `json:"id"`
 	Operation                   Operation      `json:"operation"`
+	DeferSelection              bool           `json:"deferSelection,omitempty"`
 	Phase                       Phase          `json:"phase"`
 	ProviderID                  string         `json:"providerId"`
 	CandidateCredentialPurpose  string         `json:"candidateCredentialPurpose,omitempty"`
@@ -836,6 +837,9 @@ func (scope PrivateAccountScope) Validate() error {
 }
 
 func (transaction Transaction) Validate() error {
+	if transaction.DeferSelection && transaction.Operation != OperationConnect {
+		return ErrInvalidRegistry
+	}
 	if transaction.Version != TransactionVersion || !ValidTransactionID(transaction.ID) ||
 		!validOperation(transaction.Operation) || !validPhase(transaction.Phase) ||
 		!validIdentifier(transaction.ProviderID, 96) || transaction.Fence.Validate() != nil ||
@@ -1263,7 +1267,7 @@ func validateOperationShape(transaction Transaction) error {
 			return ErrInvalidRegistry
 		}
 		selected := transaction.Fence.SelectedProviderID
-		if selected == "" && next.PrivateAccount == nil {
+		if selected == "" && next.PrivateAccount == nil && !transaction.DeferSelection {
 			selected = transaction.ProviderID
 		}
 		if transaction.NextSelectedProviderID != selected {

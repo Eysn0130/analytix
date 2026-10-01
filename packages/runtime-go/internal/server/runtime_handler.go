@@ -18,9 +18,12 @@ import (
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	loopapp "analytix.local/runtime-go/internal/app/loop"
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	mediaexecutionapp "analytix.local/runtime-go/internal/app/mediaexecution"
 	nativecomponentapp "analytix.local/runtime-go/internal/app/nativecomponent"
+	objecteditingapp "analytix.local/runtime-go/internal/app/objectediting"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
+	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	sessionapp "analytix.local/runtime-go/internal/app/session"
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
@@ -36,6 +39,7 @@ import (
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -43,6 +47,8 @@ import (
 const DefaultRuntimeToken = httpapi.DefaultRuntimeToken
 
 type runtimeServerHandler struct {
+	documentCodec      codecport.Codec
+	officePackageHost  *packagehostapp.Service
 	runtimeToken       string
 	insecure           bool
 	startedAt          string
@@ -64,6 +70,8 @@ type runtimeServerHandler struct {
 	pendingWork        *pendingworkapp.Service
 	checkpoints        checkpointapp.SnapshotAuthority
 	workspaceMutations *workspacemutationapp.Coordinator
+	managedEditing     *managededitingapp.Registry
+	objectEditing      *objecteditingapp.Service
 	publicProjector    threadapp.PublicProjector
 	control            *controlapp.Controller
 	sessions           *sessionapp.Service
@@ -113,11 +121,24 @@ type runtimeServerHandler struct {
 
 	asyncTurnPhaseObserver func(string)
 
-	mu                 sync.Mutex
-	gateCancellationMu sync.Mutex
-	turnSeq            int
-	readRegistry       *filetoolsapp.ReadRegistry
-	cachePrefixShapes  map[string]appusage.PrefixBaseline
+	mu                           sync.Mutex
+	maintenanceMu                sync.Mutex
+	maintenanceClosed            bool
+	maintenanceLease             string
+	maintenanceLastReleasedLease string
+	maintenanceCommitted         bool
+	maintenanceTimer             *time.Timer
+	maintenanceExpiresAt         time.Time
+	maintenanceAttempt           uint64
+	maintenancePrepareDeadline   time.Time
+	mutatingRequests             int
+	maintenanceSSE               map[uint64]context.CancelFunc
+	maintenanceNextID            uint64
+	maintenanceDrained           chan struct{}
+	gateCancellationMu           sync.Mutex
+	turnSeq                      int
+	readRegistry                 *filetoolsapp.ReadRegistry
+	cachePrefixShapes            map[string]appusage.PrefixBaseline
 }
 
 func (h *runtimeServerHandler) resolveRuntimeTurnExecution(

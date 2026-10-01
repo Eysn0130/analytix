@@ -49,18 +49,19 @@ const (
 // retaining the endpoint URL or request body. EndpointHMAC binds the effective
 // endpoint, including custom full endpoints, without persisting its secrets.
 type CacheVisibleShapeV1 struct {
-	SchemaVersion       string           `json:"schemaVersion"`
-	LogicalCallHMAC     string           `json:"logicalCallHmac"`
-	Attempt             uint32           `json:"attempt"`
-	ProviderFamily      ProviderFamilyV1 `json:"providerFamily"`
-	ModelHMAC           string           `json:"modelHmac"`
-	Endpoint            EndpointFormatV1 `json:"endpointFormat"`
-	EndpointHMAC        string           `json:"endpointHmac"`
-	WireBodyHMAC        string           `json:"wireBodyHmac"`
-	CredentialScopeHMAC string           `json:"credentialScopeHmac"`
-	ProviderConfigHMAC  string           `json:"providerConfigHmac"`
-	DigestEpoch         uint64           `json:"digestEpoch"`
-	StartedAt           string           `json:"startedAt"`
+	ModelInput          ModelInputSegmentsV1 `json:"modelInput,omitzero"`
+	SchemaVersion       string               `json:"schemaVersion"`
+	LogicalCallHMAC     string               `json:"logicalCallHmac"`
+	Attempt             uint32               `json:"attempt"`
+	ProviderFamily      ProviderFamilyV1     `json:"providerFamily"`
+	ModelHMAC           string               `json:"modelHmac"`
+	Endpoint            EndpointFormatV1     `json:"endpointFormat"`
+	EndpointHMAC        string               `json:"endpointHmac"`
+	WireBodyHMAC        string               `json:"wireBodyHmac"`
+	CredentialScopeHMAC string               `json:"credentialScopeHmac"`
+	ProviderConfigHMAC  string               `json:"providerConfigHmac"`
+	DigestEpoch         uint64               `json:"digestEpoch"`
+	StartedAt           string               `json:"startedAt"`
 }
 
 // TokenCountV1 distinguishes an unavailable provider counter from a provider
@@ -70,12 +71,29 @@ type TokenCountV1 struct {
 	Value uint64 `json:"value"`
 }
 
+type MessagesInputV1 struct {
+	SchemaVersion string       `json:"schemaVersion"`
+	Uncached      TokenCountV1 `json:"uncached"`
+	Read          TokenCountV1 `json:"read"`
+	Created       TokenCountV1 `json:"created"`
+}
+
+// Estimated costs are Host price estimates in 1e-9 currency units, rounded up
+// per physical attempt. They are not a bill or an exchange-rate conversion.
+type EstimatedCostV1 struct {
+	Known     bool   `json:"known"`
+	Currency  string `json:"currency,omitempty"`
+	NanoUnits uint64 `json:"nanoUnits,omitempty"`
+}
+
 type ProviderUsageV1 struct {
-	InputTokens     TokenCountV1 `json:"inputTokens"`
-	OutputTokens    TokenCountV1 `json:"outputTokens"`
-	CacheHitTokens  TokenCountV1 `json:"cacheHitTokens"`
-	CacheMissTokens TokenCountV1 `json:"cacheMissTokens"`
-	ReasoningTokens TokenCountV1 `json:"reasoningTokens"`
+	EstimatedCost   EstimatedCostV1 `json:"estimatedCost,omitzero"`
+	MessagesInput   MessagesInputV1 `json:"messagesInput,omitzero"`
+	InputTokens     TokenCountV1    `json:"inputTokens"`
+	OutputTokens    TokenCountV1    `json:"outputTokens"`
+	CacheHitTokens  TokenCountV1    `json:"cacheHitTokens"`
+	CacheMissTokens TokenCountV1    `json:"cacheMissTokens"`
+	ReasoningTokens TokenCountV1    `json:"reasoningTokens"`
 }
 
 // ProviderCallObservationV1 is a terminal settlement for one registered
@@ -91,6 +109,9 @@ type ProviderCallObservationV1 struct {
 }
 
 func (shape CacheVisibleShapeV1) Validate() error {
+	if err := shape.ModelInput.Validate(); err != nil {
+		return err
+	}
 	if shape.SchemaVersion != CacheVisibleShapeV1SchemaVersion {
 		return errors.New("cache visible shape schema version is invalid")
 	}
@@ -138,6 +159,22 @@ func (count TokenCountV1) Validate() error {
 }
 
 func (usage ProviderUsageV1) Validate() error {
+	c := usage.EstimatedCost
+	if (!c.Known && (c.Currency != "" || c.NanoUnits != 0)) || (c.Known && (c.Currency != "USD" && c.Currency != "CNY" || c.NanoUnits > 9007199254740991)) {
+		return errors.New("estimated cost is invalid")
+	}
+
+	m := usage.MessagesInput
+	if m != (MessagesInputV1{}) {
+		if m.SchemaVersion != "messages-input.v1" || m.Uncached.Validate() != nil || m.Read.Validate() != nil || m.Created.Validate() != nil {
+			return errors.New("messages input buckets are invalid")
+		}
+		if m.Uncached.Known && m.Read.Known && m.Created.Known {
+			if !usage.InputTokens.Known || m.Uncached.Value > usage.InputTokens.Value || m.Read.Value > usage.InputTokens.Value-m.Uncached.Value || m.Created.Value != usage.InputTokens.Value-m.Uncached.Value-m.Read.Value {
+				return errors.New("messages input buckets do not cover input")
+			}
+		}
+	}
 	counts := []struct {
 		name  string
 		value TokenCountV1

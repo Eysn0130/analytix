@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrUnavailable = errors.New("bundled_plugin_materialization_unavailable")
+	ErrNotFound    = errors.New("bundled_plugin_materialization_not_found")
 	ErrInvalid     = errors.New("bundled_plugin_materialization_invalid")
 	ErrCorrupt     = errors.New("bundled_plugin_materialization_corrupt")
 	ErrConflict    = errors.New("bundled_plugin_materialization_conflict")

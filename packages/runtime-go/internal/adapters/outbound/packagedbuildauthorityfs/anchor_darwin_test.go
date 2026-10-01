@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +149,44 @@ func TestDarwinDeveloperIDRequirementPinsExactTeam(t *testing.T) {
 	requirement := developerIDRequirementV2("ABCDE12345")
 	if requirement != `identifier "com.analytix.desktop" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "ABCDE12345"` {
 		t.Fatalf("unexpected requirement: %q", requirement)
+	}
+}
+
+func TestControlledCoreAnchorRequiresActualDeveloperID(t *testing.T) {
+	authority := domainauthority.ParsedAuthorityV2{Core: &domainauthority.CoreDispositionV2{Kind: domainauthority.CoreControlledDispositionKindV2, AppleTeamIdentifier: "TESTTEAM01"}}
+	for _, mode := range []string{"valid", "adhoc", "wrong-team", "missing-timestamp", "missing-runtime", "wrong-id", "signature-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			runner := func(_ context.Context, args ...string) ([]byte, error) {
+				calls++
+				if calls == 1 {
+					if !strings.Contains(strings.Join(args, " "), developerIDRequirementV2("TESTTEAM01")) {
+						t.Fatal("Core omitted Developer ID requirement")
+					}
+					if mode == "signature-failure" {
+						return nil, errors.New("synthetic rejection")
+					}
+					return nil, nil
+				}
+				body := "Executable=/private/tmp/Analytix.app/Contents/MacOS/analytix\nIdentifier=com.analytix.desktop\nCodeDirectory flags=0x10000(runtime)\nAuthority=Developer ID Application: Test\nTeamIdentifier=TESTTEAM01\nTimestamp=fixture\n"
+				switch mode {
+				case "adhoc":
+					body = strings.ReplaceAll(body, "Authority=Developer ID Application: Test", "Signature=adhoc")
+				case "wrong-team":
+					body = strings.ReplaceAll(body, "TESTTEAM01", "OTHERTEAM1")
+				case "missing-timestamp":
+					body = strings.ReplaceAll(body, "Timestamp=fixture", "")
+				case "missing-runtime":
+					body = strings.ReplaceAll(body, "flags=0x10000(runtime)", "flags=0x0")
+				case "wrong-id":
+					body = strings.ReplaceAll(body, "com.analytix.desktop", "invalid")
+				}
+				return []byte(body), nil
+			}
+			anchor, err := verifyPackageAnchorWithRunnerV2(context.Background(), "/private/tmp/Analytix.app/Contents/Resources", authority, runner)
+			if (err == nil) != (mode == "valid") || (err == nil && anchor != "macos_developer_id_resource_seal") {
+				t.Fatal("Core OS anchor verdict differs")
+			}
+		})
 	}
 }

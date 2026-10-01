@@ -1,6 +1,7 @@
 const crypto = require('node:crypto')
 const { lstatSync, readFileSync, realpathSync } = require('node:fs')
 const { isAbsolute, join, relative, resolve, sep } = require('node:path')
+const { releaseProfile } = require('./core-package-profile.cjs')
 
 const repoRoot = join(__dirname, '..')
 const policyPath = join(__dirname, 'macos-signing-policy.json')
@@ -89,6 +90,12 @@ function strictNativeRelativePath(appPath, filePath, value = policy) {
 
 const validatedPolicy = validatePolicy(policy)
 
+function strictNativePathsForProfile(profile = 'full') {
+  return releaseProfile(profile) === 'core'
+    ? validatedPolicy.strictNativeRelativePaths.slice(0, 1)
+    : [...validatedPolicy.strictNativeRelativePaths]
+}
+
 module.exports = {
   policy: validatedPolicy,
   policyBytes,
@@ -96,5 +103,6 @@ module.exports = {
   policyPath,
   requireOfficialTeamIdentifier,
   strictNativeRelativePath,
+  strictNativePathsForProfile,
   validatePolicy
 }

@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	// V5 is the only current-write/live accepted-final contract. V3 boundary
-	// and V4 witnessed-fact records remain strict audit inputs only.
+	// V5 remains the boundary/witnessed current contract. Host-local facts use
+	// the separately typed V6 admission; historical bytes retain their meaning.
 	AcceptedFinalRecordVersion                = 5
 	PrivateAcceptedFinalRecordVersion         = 5
 	BoundaryAcceptedFinalRecordVersion        = 3
@@ -54,8 +54,9 @@ type EvidenceRegistryHead struct {
 	StateDigest       string `json:"stateDigest"`
 }
 
-// AcceptedFinalRecord is the public, PII-free proof that a deterministic host
-// rendering passed the final evidence gate. The self-contained public-key
+// AcceptedFinalRecord is the private authority proof that a deterministic host
+// rendering passed the final evidence gate. Public delivery uses its separate
+// projection. The self-contained public-key
 // check proves mathematical integrity; production trust additionally requires
 // the key to match the private installation authority during runtime preflight.
 type AcceptedFinalRecord struct {
@@ -82,6 +83,7 @@ type AcceptedFinalRecord struct {
 	PublicViewDigest               string                         `json:"publicViewDigest,omitempty"`
 	PublicationSnapshotProofDigest string                         `json:"publicationSnapshotProofDigest,omitempty"`
 	FactFinalWitnessAdmission      *FactFinalWitnessAdmissionV1   `json:"factFinalWitnessAdmission,omitempty"`
+	FactFinalHostLocalAdmission    *FactFinalHostLocalAdmissionV1 `json:"factFinalHostLocalAdmission,omitempty"`
 	PrivateRecordDigest            string                         `json:"privateRecordDigest"`
 	AcceptedAt                     string                         `json:"acceptedAt"`
 	AuthoritySignature             string                         `json:"authoritySignature"`
@@ -89,17 +91,19 @@ type AcceptedFinalRecord struct {
 }
 
 type AcceptedFinalRecordInput struct {
-	Context                   domainsecurity.TurnSecurityContext
-	Envelope                  FinalAnswerEnvelope
-	RenderedText              string
-	RegistryHead              EvidenceRegistryHead
-	PublicationSnapshotProof  *PublicationSnapshotProof
-	FactFinalWitnessAdmission *FactFinalWitnessAdmissionV1
-	FactFinalWitnessAuthority *FactFinalWitnessAdmissionInputV1
-	PrivateRecordDigest       string
-	AcceptedAt                time.Time
-	AuthorityKeyID            string
-	AuthorityPublicKey        []byte
+	Context                     domainsecurity.TurnSecurityContext
+	Envelope                    FinalAnswerEnvelope
+	RenderedText                string
+	RegistryHead                EvidenceRegistryHead
+	PublicationSnapshotProof    *PublicationSnapshotProof
+	FactFinalWitnessAdmission   *FactFinalWitnessAdmissionV1
+	FactFinalWitnessAuthority   *FactFinalWitnessAdmissionInputV1
+	FactFinalHostLocalAdmission *FactFinalHostLocalAdmissionV1
+	FactFinalHostLocalAuthority *FactFinalHostLocalAdmissionInputV1
+	PrivateRecordDigest         string
+	AcceptedAt                  time.Time
+	AuthorityKeyID              string
+	AuthorityPublicKey          []byte
 }
 
 // PrivateAcceptedFinalRecord keeps the complete host-authoritative final on
@@ -176,7 +180,18 @@ func privateAcceptedFinalDigestForVersion(version int, context domainsecurity.Tu
 	)
 }
 
-func privateAcceptedFinalDigestForVersionAndRenderer(version int, rendererVersion string, context domainsecurity.TurnSecurityContext, envelope FinalAnswerEnvelope, renderedText string, intent TerminalPublicationIntent, proof *PublicationSnapshotProof, admission *FactFinalWitnessAdmissionV1) (string, error) {
+func privateAcceptedFinalDigestForVersionAndRenderer(version int, rendererVersion string, context domainsecurity.TurnSecurityContext, envelope FinalAnswerEnvelope, renderedText string, intent TerminalPublicationIntent, proof *PublicationSnapshotProof, admission *FactFinalWitnessAdmissionV1, hostAdmissions ...*FactFinalHostLocalAdmissionV1) (string, error) {
+	var host *FactFinalHostLocalAdmissionV1
+	if len(hostAdmissions) > 1 {
+		return "", errors.New("private accepted final host-local input is ambiguous")
+	}
+	if len(hostAdmissions) == 1 {
+		host = hostAdmissions[0]
+	}
+	if (version != HostLocalAcceptedFinalRecordVersionV6 && host != nil) ||
+		(version == HostLocalAcceptedFinalRecordVersionV6 && (host == nil || admission != nil || !FinalAnswerRequiresPublicationSnapshotProof(envelope))) {
+		return "", errors.New("private accepted final authority mode is invalid")
+	}
 	if err := domainsecurity.ValidateTurnSecurityContext(context); err != nil || ValidateFinalAnswerEnvelope(envelope) != nil ||
 		ValidateTerminalPublicationIntent(intent, envelope.TerminalReason) != nil {
 		return "", errors.New("private accepted final input is invalid")
@@ -194,7 +209,14 @@ func privateAcceptedFinalDigestForVersionAndRenderer(version int, rendererVersio
 		if ValidatePublicationSnapshotProofValue(proof, context, envelope, nil) != nil {
 			return "", errors.New("private accepted final lacks publication snapshot proof")
 		}
-		if version == WitnessedFactPrivateFinalRecordVersion || version == PrivateAcceptedFinalRecordVersion {
+		if version == HostLocalAcceptedFinalRecordVersionV6 {
+			if ValidateFactFinalHostLocalAdmissionV1(*host) != nil || host.ContextDigest != context.ContextDigest || host.DatasetSnapshotID != context.DatasetSnapshotID ||
+				host.SourceManifestHash != context.SourceManifestHash || host.EnvelopeDigest != envelope.EnvelopeDigest || host.RenderedTextSHA256 != domainsecurity.SHA256Hex([]byte(renderedText)) ||
+				host.PublicationSnapshotProofDigest != proof.ProofDigest || host.EvidenceReceiptCount != uint64(len(envelope.EvidenceReceiptIDs)) ||
+				host.EvidenceReceiptIDsDigest != factFinalWitnessReceiptIDsDigestV1(envelope.EvidenceReceiptIDs) {
+				return "", errors.New("private accepted final lacks exact host-local evidence authority")
+			}
+		} else if version == WitnessedFactPrivateFinalRecordVersion || version == PrivateAcceptedFinalRecordVersion {
 			if admission == nil || ValidateFactFinalWitnessAdmissionV1(*admission) != nil ||
 				(version == WitnessedFactPrivateFinalRecordVersion &&
 					admission.SchemaVersion != FactFinalWitnessAdmissionSchemaVersionV1) ||
@@ -209,18 +231,19 @@ func privateAcceptedFinalDigestForVersionAndRenderer(version int, rendererVersio
 		} else if admission != nil {
 			return "", errors.New("historical fact final cannot carry witnessed evidence authority")
 		}
-	} else if proof != nil || admission != nil {
+	} else if proof != nil || admission != nil || host != nil {
 		return "", errors.New("boundary accepted final must not contain publication snapshot proof")
 	}
 	body := struct {
-		SchemaVersion             int                                `json:"schemaVersion"`
-		SecurityContext           domainsecurity.TurnSecurityContext `json:"securityContext"`
-		Envelope                  FinalAnswerEnvelope                `json:"envelope"`
-		RenderedText              string                             `json:"renderedText"`
-		Intent                    TerminalPublicationIntent          `json:"publicationIntent"`
-		PublicationSnapshotProof  *PublicationSnapshotProof          `json:"publicationSnapshotProof,omitempty"`
-		FactFinalWitnessAdmission *FactFinalWitnessAdmissionV1       `json:"factFinalWitnessAdmission,omitempty"`
-	}{version, context, envelope, renderedText, intent, clonePublicationSnapshotProof(proof), cloneFactFinalWitnessAdmissionV1(admission)}
+		SchemaVersion               int                                `json:"schemaVersion"`
+		SecurityContext             domainsecurity.TurnSecurityContext `json:"securityContext"`
+		Envelope                    FinalAnswerEnvelope                `json:"envelope"`
+		RenderedText                string                             `json:"renderedText"`
+		Intent                      TerminalPublicationIntent          `json:"publicationIntent"`
+		PublicationSnapshotProof    *PublicationSnapshotProof          `json:"publicationSnapshotProof,omitempty"`
+		FactFinalWitnessAdmission   *FactFinalWitnessAdmissionV1       `json:"factFinalWitnessAdmission,omitempty"`
+		FactFinalHostLocalAdmission *FactFinalHostLocalAdmissionV1     `json:"factFinalHostLocalAdmission,omitempty"`
+	}{version, context, envelope, renderedText, intent, clonePublicationSnapshotProof(proof), cloneFactFinalWitnessAdmissionV1(admission), cloneFactFinalHostLocalAdmissionV1(host)}
 	encoded, _ := json.Marshal(body)
 	return domainsecurity.SHA256Hex(encoded), nil
 }
@@ -232,7 +255,9 @@ func NewAcceptedFinalRecord(input AcceptedFinalRecordInput, sign AcceptedFinalSi
 		ValidateFinalAnswerEnvelope(input.Envelope) != nil || ValidateEvidenceRegistryHead(input.RegistryHead) != nil {
 		return AcceptedFinalRecord{}, errors.New("accepted final input is invalid")
 	}
-	if (factBearing && (input.FactFinalWitnessAdmission == nil || input.FactFinalWitnessAuthority == nil)) ||
+	hostLocal := input.FactFinalHostLocalAdmission != nil || input.FactFinalHostLocalAuthority != nil
+	if (hostLocal && (!factBearing || input.FactFinalHostLocalAdmission == nil || input.FactFinalHostLocalAuthority == nil || input.FactFinalWitnessAdmission != nil || input.FactFinalWitnessAuthority != nil)) ||
+		(!hostLocal && factBearing && (input.FactFinalWitnessAdmission == nil || input.FactFinalWitnessAuthority == nil)) ||
 		(!factBearing && (input.FactFinalWitnessAdmission != nil || input.FactFinalWitnessAuthority != nil)) {
 		return AcceptedFinalRecord{}, errors.New("accepted final witness admission is invalid")
 	}
@@ -256,6 +281,18 @@ func NewAcceptedFinalRecord(input AcceptedFinalRecordInput, sign AcceptedFinalSi
 		}
 	}
 	admission := cloneFactFinalWitnessAdmissionV1(input.FactFinalWitnessAdmission)
+	hostAdmission := cloneFactFinalHostLocalAdmissionV1(input.FactFinalHostLocalAdmission)
+	if hostAdmission != nil {
+		if ValidateFactFinalHostLocalAdmissionExactV1(*hostAdmission, *input.FactFinalHostLocalAuthority) != nil ||
+			input.FactFinalHostLocalAuthority.AuthorityKeyID != strings.TrimSpace(input.AuthorityKeyID) ||
+			!bytes.Equal(input.FactFinalHostLocalAuthority.AuthorityPublicKey, input.AuthorityPublicKey) {
+			return AcceptedFinalRecord{}, errors.New("accepted final host-local admission lacks exact authority")
+		}
+		admittedAt, err := time.Parse(time.RFC3339Nano, hostAdmission.AdmittedAt)
+		if err != nil || acceptedAt.Before(admittedAt) {
+			return AcceptedFinalRecord{}, errors.New("accepted final predates host-local admission")
+		}
+	}
 	if admission != nil {
 		if ValidateFactFinalWitnessAdmissionExactV1(*admission, *input.FactFinalWitnessAuthority) != nil ||
 			input.FactFinalWitnessAuthority.AuthorityKeyID != strings.TrimSpace(input.AuthorityKeyID) ||
@@ -286,6 +323,10 @@ func NewAcceptedFinalRecord(input AcceptedFinalRecordInput, sign AcceptedFinalSi
 		RendererVersion: FinalAnswerRendererVersion, FinalGateVersion: FinalEvidenceGateVersion,
 		VerifierVersion: ClaimVerifierPolicyVersion, PrivateRecordDigest: input.PrivateRecordDigest,
 		AcceptedAt: acceptedAt.Format(time.RFC3339Nano), FactFinalWitnessAdmission: admission,
+		FactFinalHostLocalAdmission: hostAdmission,
+	}
+	if hostLocal {
+		record.SchemaVersion = HostLocalAcceptedFinalRecordVersionV6
 	}
 	if proof != nil {
 		record.PublicationSnapshotProofDigest = proof.ProofDigest
@@ -293,7 +334,8 @@ func NewAcceptedFinalRecord(input AcceptedFinalRecordInput, sign AcceptedFinalSi
 	publicView := buildAcceptedFinalPublicViewCoreV2(input.Envelope, record)
 	record.PublicView = &publicView
 	record.PublicViewDigest = acceptedFinalPublicViewCoreV2Digest(publicView)
-	if factBearing && ValidateFactFinalWitnessAdmissionForRecordV1(admission, record) != nil {
+	if factBearing && ((!hostLocal && ValidateFactFinalWitnessAdmissionForRecordV1(admission, record) != nil) ||
+		(hostLocal && ValidateFactFinalHostLocalAdmissionForRecordV1(hostAdmission, record) != nil)) {
 		return AcceptedFinalRecord{}, errors.New("accepted final witness admission does not match final authority")
 	}
 	signature, err := sign(AcceptedFinalSigningBytes(record))
@@ -319,8 +361,11 @@ func NewPrivateAcceptedFinalRecord(context domainsecurity.TurnSecurityContext, e
 		proof = proofs[0]
 	}
 	expectedVersion := AcceptedFinalRecordVersion
+	if acceptedFinal.SchemaVersion == HostLocalAcceptedFinalRecordVersionV6 {
+		expectedVersion = HostLocalAcceptedFinalRecordVersionV6
+	}
 	privateDigest, err := privateAcceptedFinalDigestForVersionAndRenderer(
-		expectedVersion, acceptedFinal.RendererVersion, context, envelope, renderedText, intent, proof, acceptedFinal.FactFinalWitnessAdmission,
+		expectedVersion, acceptedFinal.RendererVersion, context, envelope, renderedText, intent, proof, acceptedFinal.FactFinalWitnessAdmission, acceptedFinal.FactFinalHostLocalAdmission,
 	)
 	if err != nil || ValidateAcceptedFinalRecord(acceptedFinal) != nil || ValidateEvidenceRegistryHead(head) != nil ||
 		acceptedFinal.SchemaVersion != expectedVersion || privateDigest != acceptedFinal.PrivateRecordDigest {
@@ -369,7 +414,8 @@ func ValidateAcceptedFinalRecord(record AcceptedFinalRecord) error {
 	boundaryV3 := record.SchemaVersion == BoundaryAcceptedFinalRecordVersion
 	witnessedFactV4 := record.SchemaVersion == WitnessedFactAcceptedFinalRecordVersion
 	liveV5 := record.SchemaVersion == AcceptedFinalRecordVersion
-	if (!previous && !boundaryV3 && !witnessedFactV4 && !liveV5) || record.AuthorityPurpose != AcceptedFinalAuthorityPurpose ||
+	hostV6 := record.SchemaVersion == HostLocalAcceptedFinalRecordVersionV6
+	if (!previous && !boundaryV3 && !witnessedFactV4 && !liveV5 && !hostV6) || (!hostV6 && record.FactFinalHostLocalAdmission != nil) || record.AuthorityPurpose != AcceptedFinalAuthorityPurpose ||
 		record.AuthorityAlgorithm != AcceptedFinalAuthorityAlgorithm || !validSHA256(record.AuthorityKeyID) ||
 		strings.TrimSpace(record.ThreadID) == "" || strings.TrimSpace(record.TurnID) == "" || !validSHA256(record.EnvelopeDigest) ||
 		!validSHA256(record.ContextDigest) || record.ContextEpoch == 0 || strings.TrimSpace(record.DatasetSnapshotID) == "" ||
@@ -380,6 +426,12 @@ func ValidateAcceptedFinalRecord(record AcceptedFinalRecord) error {
 	}
 	requiresProof := finalAnswerVariantRequiresPublicationSnapshotProof(record.Variant)
 	switch {
+	case hostV6:
+		if record.FinalGateVersion != FinalEvidenceGateVersion || !requiresProof || record.FactFinalWitnessAdmission != nil ||
+			!validSHA256(record.PublicationSnapshotProofDigest) || ValidateFactFinalHostLocalAdmissionForRecordV1(record.FactFinalHostLocalAdmission, record) != nil ||
+			ValidateAcceptedFinalPublicViewCoreV2(record) != nil {
+			return errors.New("accepted final V6 host-local authority is invalid")
+		}
 	case previous:
 		if record.FinalGateVersion != LegacyFinalEvidenceGateVersion || requiresProof || record.PublicationSnapshotProofDigest != "" ||
 			record.FactFinalWitnessAdmission != nil || record.PublicView != nil || record.PublicViewDigest != "" {
@@ -415,7 +467,7 @@ func ValidateAcceptedFinalRecord(record AcceptedFinalRecord) error {
 	if err != nil {
 		return errors.New("accepted final record acceptedAt is invalid")
 	}
-	if witnessedFactV4 || liveV5 {
+	if witnessedFactV4 || liveV5 || hostV6 {
 		if acceptedAt.Location() != time.UTC || acceptedAt.UTC().Format(time.RFC3339Nano) != record.AcceptedAt {
 			return errors.New("accepted final timestamp authority is invalid")
 		}
@@ -424,6 +476,12 @@ func ValidateAcceptedFinalRecord(record AcceptedFinalRecord) error {
 		admittedAt, admissionErr := time.Parse(time.RFC3339Nano, record.FactFinalWitnessAdmission.AdmittedAt)
 		if admissionErr != nil || acceptedAt.Before(admittedAt) {
 			return errors.New("accepted final witnessed timestamp authority is invalid")
+		}
+	}
+	if hostV6 {
+		admittedAt, admissionErr := time.Parse(time.RFC3339Nano, record.FactFinalHostLocalAdmission.AdmittedAt)
+		if admissionErr != nil || acceptedAt.Before(admittedAt) {
+			return errors.New("accepted final host-local timestamp authority is invalid")
 		}
 	}
 	publicKey, err := base64.RawURLEncoding.DecodeString(record.AuthorityPublicKey)
@@ -445,7 +503,8 @@ func ValidatePrivateAcceptedFinalRecord(record PrivateAcceptedFinalRecord) error
 	boundaryV3 := record.SchemaVersion == BoundaryAcceptedFinalRecordVersion
 	witnessedFactV4 := record.SchemaVersion == WitnessedFactPrivateFinalRecordVersion
 	liveV5 := record.SchemaVersion == PrivateAcceptedFinalRecordVersion
-	if (!previous && !boundaryV3 && !witnessedFactV4 && !liveV5) || !validSHA256(record.PrivateRecordDigest) ||
+	hostV6 := record.SchemaVersion == HostLocalAcceptedFinalRecordVersionV6
+	if (!previous && !boundaryV3 && !witnessedFactV4 && !liveV5 && !hostV6) || !validSHA256(record.PrivateRecordDigest) ||
 		!validSHA256(record.StoreDigest) || domainsecurity.ValidateTurnSecurityContext(record.SecurityContext) != nil ||
 		ValidateFinalAnswerEnvelope(record.Envelope) != nil || ValidateEvidenceRegistryHead(record.RegistryHead) != nil ||
 		ValidateTerminalPublicationIntent(record.PublicationIntent, record.Envelope.TerminalReason) != nil ||
@@ -463,7 +522,7 @@ func ValidatePrivateAcceptedFinalRecord(record PrivateAcceptedFinalRecord) error
 	}
 	privateDigest, err := privateAcceptedFinalDigestForVersionAndRenderer(
 		record.SchemaVersion, record.AcceptedFinal.RendererVersion, record.SecurityContext, record.Envelope, record.RenderedText, record.PublicationIntent,
-		record.PublicationSnapshotProof, record.AcceptedFinal.FactFinalWitnessAdmission,
+		record.PublicationSnapshotProof, record.AcceptedFinal.FactFinalWitnessAdmission, record.AcceptedFinal.FactFinalHostLocalAdmission,
 	)
 	acceptedAt, acceptedAtErr := time.Parse(time.RFC3339Nano, record.AcceptedFinal.AcceptedAt)
 	proofCheckedAt := acceptedAt
@@ -473,6 +532,9 @@ func ValidatePrivateAcceptedFinalRecord(record PrivateAcceptedFinalRecord) error
 	admissionAt := acceptedAt
 	if record.AcceptedFinal.FactFinalWitnessAdmission != nil {
 		admissionAt, _ = time.Parse(time.RFC3339Nano, record.AcceptedFinal.FactFinalWitnessAdmission.AdmittedAt)
+	}
+	if record.AcceptedFinal.FactFinalHostLocalAdmission != nil {
+		admissionAt, _ = time.Parse(time.RFC3339Nano, record.AcceptedFinal.FactFinalHostLocalAdmission.AdmittedAt)
 	}
 	if err != nil || privateDigest != record.PrivateRecordDigest || privateDigest != record.AcceptedFinal.PrivateRecordDigest ||
 		acceptedAtErr != nil || acceptedAt.Before(proofCheckedAt) ||
@@ -491,7 +553,7 @@ func ValidatePrivateAcceptedFinalRecord(record PrivateAcceptedFinalRecord) error
 		privateAcceptedFinalStoreDigest(record) != record.StoreDigest {
 		return errors.New("private accepted final record integrity is invalid")
 	}
-	if liveV5 {
+	if liveV5 || hostV6 {
 		expectedView := buildAcceptedFinalPublicViewCoreV2(record.Envelope, record.AcceptedFinal)
 		if record.AcceptedFinal.PublicView == nil || !reflect.DeepEqual(*record.AcceptedFinal.PublicView, expectedView) ||
 			record.AcceptedFinal.PublicViewDigest != acceptedFinalPublicViewCoreV2Digest(expectedView) {
@@ -552,8 +614,7 @@ func ValidatePrivateAcceptedFinalPublicationAuthorityWithWitnessV1(record Privat
 	if domainsecurity.ValidateTurnSecurityContextForCasePublication(record.SecurityContext) != nil {
 		return errors.New("private accepted final lacks current V2 case publication authority")
 	}
-	if record.SchemaVersion != PrivateAcceptedFinalRecordVersion ||
-		record.AcceptedFinal.SchemaVersion != AcceptedFinalRecordVersion {
+	if !currentAcceptedFinalPairV1(record) {
 		return errors.New("historical accepted final is audit-only")
 	}
 	if !FinalAnswerRequiresPublicationSnapshotProof(record.Envelope) {
@@ -575,11 +636,11 @@ func ValidateAcceptedFinalForCurrentWriteV1(record AcceptedFinalRecord) error {
 	if err := ValidateAcceptedFinalRecord(record); err != nil {
 		return err
 	}
-	if record.SchemaVersion != AcceptedFinalRecordVersion || record.PublicView == nil || !validSHA256(record.PublicViewDigest) {
+	if (record.SchemaVersion != AcceptedFinalRecordVersion && record.SchemaVersion != HostLocalAcceptedFinalRecordVersionV6) || record.PublicView == nil || !validSHA256(record.PublicViewDigest) {
 		return errors.New("accepted final current-write version is invalid")
 	}
 	if finalAnswerVariantRequiresPublicationSnapshotProof(record.Variant) {
-		if record.FactFinalWitnessAdmission == nil {
+		if record.FactFinalWitnessAdmission == nil && record.FactFinalHostLocalAdmission == nil {
 			return errors.New("fact-bearing accepted final lacks witnessed current-write authority")
 		}
 		return nil
@@ -588,6 +649,19 @@ func ValidateAcceptedFinalForCurrentWriteV1(record AcceptedFinalRecord) error {
 		return errors.New("boundary accepted final version is invalid")
 	}
 	return nil
+}
+
+func currentAcceptedFinalPairV1(record PrivateAcceptedFinalRecord) bool {
+	return record.SchemaVersion == record.AcceptedFinal.SchemaVersion &&
+		(record.SchemaVersion == PrivateAcceptedFinalRecordVersion || record.SchemaVersion == HostLocalAcceptedFinalRecordVersionV6)
+}
+
+func PrivateAcceptedFinalDigestWithHostLocalV1(context domainsecurity.TurnSecurityContext, envelope FinalAnswerEnvelope, renderedText string, intent TerminalPublicationIntent,
+	proof *PublicationSnapshotProof, admission *FactFinalHostLocalAdmissionV1) (string, error) {
+	if domainsecurity.ValidateTurnSecurityContextForCaseFactPublication(context) != nil {
+		return "", errors.New("host-local fact final lacks current case authority")
+	}
+	return privateAcceptedFinalDigestForVersionAndRenderer(HostLocalAcceptedFinalRecordVersionV6, FinalAnswerRendererVersion, context, envelope, renderedText, intent, proof, nil, admission)
 }
 
 func AcceptedFinalSigningBytes(record AcceptedFinalRecord) []byte {

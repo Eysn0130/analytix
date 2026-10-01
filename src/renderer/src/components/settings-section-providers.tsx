@@ -1,3 +1,4 @@
+import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from '@shared/provider-display'
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type {
   AppSettingsPatch,
@@ -140,6 +141,7 @@ function endpointFormatForRegistryKind(kind: string): ModelEndpointFormat {
       return 'responses'
     case 'anthropic-compatible':
     case 'anthropic-messages':
+    case 'deepseek-messages':
     case 'messages':
       return 'messages'
     case 'custom-endpoint':
@@ -194,6 +196,7 @@ export function providerProfileFromRegistry(provider: ProviderRegistryPublicProv
     name: catalog?.name ?? provider.id,
     baseUrl: provider.endpoint,
     endpointFormat: endpointFormatForRegistryKind(provider.kind),
+    ...(provider.kind === 'deepseek-messages' ? { registryKind: 'deepseek-messages' as const } : {}),
     models: [...provider.models],
     modelProfiles: Object.fromEntries(provider.models.flatMap((model) => {
       const profile = catalog?.modelProfiles[model]
@@ -729,6 +732,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   const provider = providerFromContext ?? defaultModelProviderSettings()
   const [registrySnapshot, setRegistrySnapshot] = useState<ProviderRegistrySnapshotResult | null>(null)
+  const [registryLoadState, setRegistryLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const registryLoadSequence = useRef(0)
   const [modelProviders, setModelProviders] = useState<ModelProviderProfileV1[]>([])
   const [routingDrafts, setRoutingDrafts] = useState<Record<string, ProviderRegistryRoutingDraft>>({})
   const [selectedProviderId, setSelectedProviderId] = useState<string>('')
@@ -822,6 +827,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const applyRegistrySnapshot = (snapshot: ProviderRegistrySnapshotResult): void => {
+    setRegistryLoadState('ready')
     setRegistrySnapshot(snapshot)
     setModelProviders(snapshot.providers.map(providerProfileFromRegistry))
     setRoutingDrafts(Object.fromEntries(
@@ -854,15 +860,26 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     return result
   }
 
+  const loadRegistry = async (): Promise<void> => {
+    const sequence = ++registryLoadSequence.current
+    setRegistryLoadState('loading')
+    try {
+      const result = await window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' })
+      if (!credentialInputMounted.current || sequence !== registryLoadSequence.current) return
+      if ('error' in result || !('providers' in result)) {
+        setRegistryLoadState('unavailable')
+        return
+      }
+      applyRegistrySnapshot(result)
+    } catch {
+      if (credentialInputMounted.current && sequence === registryLoadSequence.current) {
+        setRegistryLoadState('unavailable')
+      }
+    }
+  }
   useEffect(() => {
-    let cancelled = false
-    void window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' })
-      .then((result) => {
-        if (cancelled || 'error' in result || !('providers' in result)) return
-        applyRegistrySnapshot(result)
-      })
-      .catch(() => undefined)
-    return () => { cancelled = true }
+    void loadRegistry()
+    return () => { registryLoadSequence.current += 1 }
   }, [])
   useEffect(() => {
     const expiries = Object.values(accountObservationStates)
@@ -894,6 +911,50 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const activeRegistryProvider = registrySnapshot?.providers.find(
     (item) => item.id === activeProvider?.id
   )
+  const [credentialAvailability, setCredentialAvailability] = useState<{
+    providerId: string
+    revision: string
+    status: 'available' | 'reentry' | 'unavailable'
+  } | null>(null)
+  useEffect(() => {
+    const candidate = registrySnapshot?.providers.find((item) => item.id === selectedProviderId)
+    if (!candidate || candidate.tombstone || !candidate.credentialConfigured || !candidate.credentialPurpose) {
+      setCredentialAvailability(null)
+      return
+    }
+    let current = true
+    setCredentialAvailability(null)
+    const expected = {
+      registryRevision: registrySnapshot!.registryRevision,
+      registryIncarnation: registrySnapshot!.registryIncarnation,
+      providerRevision: candidate.revision,
+      providerGeneration: candidate.generation,
+      providerIncarnation: candidate.incarnation,
+      providerCredentialPurpose: candidate.credentialPurpose
+    }
+    void window.analytix.providerRegistry.request({
+      schemaVersion: 1, operation: 'credential-check', providerId: candidate.id, expected
+    }).then((result) => {
+      if (!current) return
+      const status = 'error' in result
+        ? result.error.code === 'credential_reentry_required' ? 'reentry' : 'unavailable'
+        : 'credentialAvailable' in result && result.credentialAvailable === true &&
+          result.providerId === candidate.id && result.registryRevision === expected.registryRevision &&
+          result.registryIncarnation === expected.registryIncarnation &&
+          result.providerRevision === expected.providerRevision &&
+          result.providerGeneration === expected.providerGeneration &&
+          result.providerIncarnation === expected.providerIncarnation
+          ? 'available' : 'unavailable'
+      setCredentialAvailability({ providerId: candidate.id, revision: candidate.revision, status })
+    }).catch(() => {
+      if (current) setCredentialAvailability({ providerId: candidate.id, revision: candidate.revision, status: 'unavailable' })
+    })
+    return () => { current = false }
+  }, [registrySnapshot, selectedProviderId])
+  const activeCredentialReentryRequired = credentialAvailability !== null &&
+    credentialAvailability.providerId === activeRegistryProvider?.id &&
+    credentialAvailability.revision === activeRegistryProvider?.revision &&
+    credentialAvailability.status === 'reentry'
   const canConfigureAccountObservation = Boolean(
     activeRegistryProvider && !activeRegistryProvider.tombstone &&
     !getModelProviderPreset(activeRegistryProvider.id) && !tokenPlanPresetForProfileId(activeRegistryProvider.id)
@@ -1752,11 +1813,13 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       >
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 truncate text-[13.5px] font-semibold text-ds-ink">
-            {item.name.trim() || item.id}
+            {providerDisplayName(item.id, item.name)}
           </span>
           {isDraft ? <ProviderBadge tone="warning">{t('modelProviderDraftBadge')}</ProviderBadge> : null}
           {inUse ? <ProviderBadge tone="accent">{t('modelProviderInUse')}</ProviderBadge> : null}
           {!isDraft && missingKey ? <ProviderBadge tone="warning">{t('modelProviderMissingKey')}</ProviderBadge> : null}
+          {!isDraft && selected && activeCredentialReentryRequired
+            ? <ProviderBadge tone="warning">{t('modelProviderApiKeyReentryBadge')}</ProviderBadge> : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-ds-faint">
           <span>{t('modelProviderModelCount', { total: providerModelCount(item) })}</span>
@@ -1832,49 +1895,16 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
 
   return (
     <SettingsCard title={t('providers')}>
-      <SettingRow
-        title="Portable manifest / protected credential recovery"
-        description="Complete ordinary portable manifest import first. Recovery files and confirmations stay in the Main process; only bounded status is shown here."
-        wideControl
-        control={
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ds-border bg-ds-card p-3 text-[13px] text-ds-muted">
-            <Lock size={15} aria-hidden="true" />
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('createDestinationRequest')}
-            >
-              Prepare destination request
+      {registryLoadState !== 'ready' && (
+        <div role={registryLoadState === 'unavailable' ? 'alert' : 'status'} className="mb-4 rounded-xl border border-ds-border bg-ds-card p-3 text-sm text-ds-muted">
+          <p>{t(registryLoadState === 'loading' ? 'modelProviderRegistryLoading' : 'modelProviderRegistryUnavailable')}</p>
+          {registryLoadState === 'unavailable' && (
+            <button type="button" className="mt-2 rounded-lg border border-ds-border px-3 py-1.5 text-ds-ink" onClick={() => { void loadRegistry() }}>
+              {t('modelProviderRegistryRetry')}
             </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('createSourceBundle')}
-            >
-              Create source bundle
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('applyDestinationBundle')}
-            >
-              Apply destination bundle
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
-              disabled={protectedRecoveryBusy !== null}
-              onClick={() => void runProtectedRecoveryAction('finalizeSourceReceipt')}
-            >
-              Finalize source receipt
-            </button>
-            {protectedRecoveryStatus ? <span role="status">{protectedRecoveryStatus}</span> : null}
-          </div>
-        }
-      />
+          )}
+        </div>
+      )}
       <SettingRow
         title={t('proxyUrl')}
         description={t('proxyUrlDesc')}
@@ -1902,7 +1932,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         description={t('providersDesc')}
         wideControl
         control={
-          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
             <div className="flex flex-col gap-3">
               {grouped ? (
                 <>
@@ -1921,6 +1951,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={addMenuOpen}
+                  disabled={registryLoadState !== 'ready'}
                   onClick={() => setAddMenuOpen((value) => !value)}
                   className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full border border-ds-border bg-ds-card px-3 text-[12.5px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink"
                 >
@@ -1963,9 +1994,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate text-[14px] font-semibold text-ds-ink">
-                      {activeProvider.name.trim() || activeProvider.id}
+                      {providerDisplayName(activeProvider.id, activeProvider.name)}
                     </span>
-                    <span className="font-mono text-[12px] text-ds-faint">{activeProvider.id}</span>
+                    <span className="text-[11px] font-normal text-ds-faint">
+                      {t(`providerConnection_${providerEndpointKind(activeProvider.baseUrl)}`)}
+                    </span>
                     {!canEditActiveProviderId ? (
                       <span title={t('modelProviderIdLocked')} className="text-ds-faint">
                         <Lock className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -1984,6 +2017,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     ) : null}
                     {activeRegistryProvider && !activeRegistryProvider.tombstone &&
                     activeRegistryProvider.credentialConfigured &&
+                    !activeCredentialReentryRequired &&
                     registrySnapshot?.selectedProviderId !== activeRegistryProvider.id ? (
                       <button
                         type="button"
@@ -2024,7 +2058,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       {t('modelProviderName')}
                       <input
                         className={textInputClass}
-                        value={activeProvider.name}
+                        value={isDraftActive ? activeProvider.name : providerDisplayName(activeProvider.id, activeProvider.name)}
                         readOnly={!isDraftActive}
                         onChange={(e) => updateModelProvider(activeProvider.id, { name: e.target.value })}
                       />
@@ -2068,12 +2102,23 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         }}
                         visible={showApiKey}
                         onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
-                        placeholder={t('modelProviderApiKeyPlaceholder')}
+                        placeholder={t(activeCredentialReentryRequired
+                          ? 'modelProviderApiKeyReentryPlaceholder'
+                          : activeRegistryProvider?.credentialConfigured === true
+                            ? 'modelProviderApiKeySavedPlaceholder'
+                            : 'modelProviderApiKeyPlaceholder')}
                         autoComplete="off"
                         showLabel={t('showSecret')}
                         hideLabel={t('hideSecret')}
                       />
                     </div>
+                    {activeCredentialReentryRequired ? (
+                      <span role="alert" className="text-[12px] font-normal text-amber-700 dark:text-amber-300">
+                        {t('modelProviderApiKeyReentryHint')}
+                      </span>
+                    ) : activeRegistryProvider?.credentialConfigured === true ? (
+                      <span className="text-[12px] font-normal text-ds-muted">{t('modelProviderApiKeySavedHint')}</span>
+                    ) : null}
                   </label>
                   <label className={fieldLabelClass}>
                     {t('modelProviderBaseUrl')}
@@ -2132,9 +2177,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     {t('modelProviderEndpointFormat')}
                     <select
                       className={selectControlClass}
-                      value={activeProvider.endpointFormat}
+                      disabled={Boolean(activeRegistryProvider)}
+                      value={activeProvider.registryKind ?? activeProvider.endpointFormat}
                       onChange={(e) => updateModelProvider(activeProvider.id, {
-                        endpointFormat: e.target.value as ModelEndpointFormat
+                        endpointFormat: e.target.value === 'deepseek-messages' ? 'messages' : e.target.value as ModelEndpointFormat,
+                        registryKind: e.target.value === 'deepseek-messages' ? 'deepseek-messages' : undefined
                       })}
                     >
                       {MODEL_ENDPOINT_FORMATS.map((format) => (
@@ -2142,8 +2189,16 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                           {t(MODEL_ENDPOINT_FORMAT_LABEL_KEYS[format])}
                         </option>
                       ))}
+                      <option value="deepseek-messages">
+                        {t('providerModelReasoningProtocolDeepseekMessages')}
+                      </option>
                     </select>
                   </label>
+                  {activeRegistryProvider ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('modelProviderEndpointFormatCommitted')}
+                    </p>
+                  ) : null}
                   {activeProvider.endpointFormat === 'custom_endpoint' ? (
                     <p className="text-[12px] leading-5 text-ds-muted">
                       {t('modelEndpointCustomEndpointDesc')}
@@ -2221,7 +2276,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeProvider.models.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2234,7 +2289,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       >
                         <option value="">{t('modelProviderSelectionDisabled')}</option>
                         {activeMediaModelIds.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
                         ))}
                       </select>
                     </label>
@@ -2268,7 +2323,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                             onChange={() => toggleActiveRouteProvider(providerId)}
                           />
                           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ds-ink">
-                            {profile?.name.trim() || providerId}
+                            {profile ? providerDisplayName(profile.id, profile.name) : providerId}
                           </span>
                           <span className="font-mono text-[11.5px] text-ds-faint">{providerId}</span>
                           {selected ? (
@@ -2671,6 +2726,54 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
           </div>
         }
       />
+      <details className="border-t border-ds-border-muted px-4 py-3">
+        <summary className="cursor-pointer text-[13px] font-medium text-ds-muted focus-visible:outline-accent">
+          {t('modelProviderRecoveryTools')}
+        </summary>
+        <SettingRow
+          title="Portable manifest / protected credential recovery"
+          description="Complete ordinary portable manifest import first. Recovery files and confirmations stay in the Main process; only bounded status is shown here."
+          wideControl
+          control={
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ds-border bg-ds-card p-3 text-[13px] text-ds-muted">
+              <Lock size={15} aria-hidden="true" />
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('createDestinationRequest')}
+              >
+                Prepare destination request
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('createSourceBundle')}
+              >
+                Create source bundle
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('applyDestinationBundle')}
+              >
+                Apply destination bundle
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-ds-border px-2.5 py-1.5 hover:bg-ds-hover disabled:opacity-50"
+                disabled={protectedRecoveryBusy !== null}
+                onClick={() => void runProtectedRecoveryAction('finalizeSourceReceipt')}
+              >
+                Finalize source receipt
+              </button>
+              {protectedRecoveryStatus ? <span role="status">{protectedRecoveryStatus}</span> : null}
+            </div>
+          }
+        />
+      </details>
     </SettingsCard>
   )
 }

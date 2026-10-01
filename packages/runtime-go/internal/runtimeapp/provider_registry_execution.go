@@ -149,9 +149,23 @@ func (resolver *providerRegistryExecutionResolverV1) resolveTurnExecutionV1(
 	providerMetadata.ModelProxyURL = resolvedProvider.Proxy
 	providerMetadata.EndpointFormat = endpointFormat
 	providerMetadata.Models = append([]string(nil), resolvedProvider.Models...)
-	providerMetadata.ModelProfiles, err = resolver.boundedModelProfilesV1(resolvedProvider)
-	if err != nil {
-		return provider.TurnExecutionResult{}, err
+	// Native Messages is an explicit committed route choice. It must survive
+	// a fresh UI profile and cannot depend on legacy UI model metadata.
+	if strings.EqualFold(strings.TrimSpace(resolvedProvider.Kind), "deepseek-messages") {
+		providerMetadata.ModelProfiles = make(map[string]domainmodel.ModelProviderProfile)
+		for _, model := range resolvedProvider.Models {
+			profile := providerMetadata.ModelProfiles[model]
+			profile.Reasoning = &domainmodel.ModelProviderReasoning{
+				RequestProtocol: "deepseek-messages", DefaultEffort: "auto",
+				SupportedEfforts: []string{"auto", "off", "low", "medium", "high", "max"},
+			}
+			providerMetadata.ModelProfiles[model] = profile
+		}
+	} else {
+		providerMetadata.ModelProfiles, err = resolver.boundedModelProfilesV1(resolvedProvider)
+		if err != nil {
+			return provider.TurnExecutionResult{}, err
+		}
 	}
 	configured := domainmodel.ModelProvidersConfig{
 		DefaultProviderID: resolvedProvider.ID,
@@ -190,7 +204,7 @@ func providerRegistryEndpointFormatV1(kind string) (string, error) {
 		return "chat_completions", nil
 	case "openai-responses", "responses":
 		return "responses", nil
-	case "anthropic-compatible", "anthropic-messages", "messages":
+	case "anthropic-compatible", "anthropic-messages", "deepseek-messages", "messages":
 		return "messages", nil
 	case "custom-endpoint", "custom_endpoint":
 		return "custom_endpoint", nil

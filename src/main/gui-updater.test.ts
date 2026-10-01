@@ -18,6 +18,7 @@ let updater: MockUpdater
 let nativeUpdater: EventEmitter
 let originalEnv: NodeJS.ProcessEnv
 let originalPlatform: PropertyDescriptor
+let originalArch: PropertyDescriptor
 let appVersion: string
 let mockedFiles: Map<string, string>
 let showMessageBox: ReturnType<typeof vi.fn>
@@ -40,6 +41,7 @@ function createUpdater(): MockUpdater {
 beforeEach(() => {
   originalEnv = { ...process.env }
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  originalArch = Object.getOwnPropertyDescriptor(process, 'arch')!
   vi.useFakeTimers()
   vi.resetModules()
   updater = createUpdater()
@@ -48,6 +50,11 @@ beforeEach(() => {
   mockedFiles = new Map()
   showMessageBox = vi.fn().mockResolvedValue({ response: 1 })
   openExternal = vi.fn().mockResolvedValue(undefined)
+  vi.doMock('node:fs', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('node:fs')>()
+    return { ...actual, existsSync: (path: string) => mockedFiles.has(String(path)) || actual.existsSync(path),
+      readFileSync: (path: string, encoding: any) => mockedFiles.get(String(path)) ?? actual.readFileSync(path, encoding) }
+  })
   vi.doMock('node:fs/promises', () => ({
     mkdir: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn(async (path: string) => {
@@ -81,12 +88,14 @@ beforeEach(() => {
 afterEach(() => {
   process.env = originalEnv
   Object.defineProperty(process, 'platform', originalPlatform)
+  Object.defineProperty(process, 'arch', originalArch)
   vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.doUnmock('electron')
   vi.doUnmock('electron-updater')
   vi.doUnmock('node:fs/promises')
+  vi.doUnmock('node:fs')
   vi.resetModules()
 })
 
@@ -167,6 +176,7 @@ describe('checkGuiUpdate feed URL', () => {
   })
 
   it('uses the official standard Windows update feed when none is configured', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
     process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES = '1'
     const fetchMock = vi.fn().mockResolvedValue({ ok: true })
     vi.stubGlobal('fetch', fetchMock)
@@ -444,5 +454,50 @@ describe('showPostUpdateReleaseNotes', () => {
     expect(JSON.parse(mockedFiles.get(versionStatePath) ?? '{}')).toEqual({
       lastSeenVersion: '0.2.0'
     })
+  })
+})
+
+
+describe('Core update target admission', () => {
+  function corePackage() {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true })
+    mockedFiles.set('/tmp/analytix-updater-test-app/package.json', JSON.stringify({releaseProfile:'core',buildHints:{macSigningEnabled:true,notarizationEnabled:true}}))
+  }
+  function metadata() {
+    return {version:'1.0.7',analytixProfile:'core',analytixTarget:'darwin-arm64',analytixChannel:'stable',analytixAppId:'com.analytix.desktop',analytixDataCompatibility:'core-v1',files:[{url:'analytix-core-1.0.7-mac-arm64.zip',size:12,sha512:'a'.repeat(86)+'=='}]}
+  }
+  it('routes signed Core to its own feed and admits only the compatible target', async () => {
+    corePackage()
+    updater.checkForUpdates.mockResolvedValue({updateInfo:metadata(),isUpdateAvailable:true})
+    updater.downloadUpdate.mockResolvedValue(['synthetic.zip'])
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(()=>null,()=>'stable')
+    expect(await module.downloadGuiUpdate('stable')).toMatchObject({ok:true})
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({provider:'generic',url:'https://analytix.top/desktop/releases/core/darwin-arm64/channels/stable/latest/'})
+    updater.emit('update-downloaded',metadata())
+    expect(await module.installGuiUpdate()).toMatchObject({ok:true})
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(1)
+  })
+  it.each([{analytixProfile:'full'},{analytixChannel:'beta'},{analytixTarget:'darwin-x64'},{analytixDataCompatibility:'unknown'},{files:[]}])('refuses incompatible target before download and install: %j', async patch => {
+    corePackage()
+    const invalid = {...metadata(),...patch}
+    updater.checkForUpdates.mockResolvedValue({updateInfo:invalid,isUpdateAvailable:true})
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(()=>null,()=>'stable')
+    expect(await module.downloadGuiUpdate('stable')).toMatchObject({ok:false})
+    updater.emit('update-downloaded',invalid)
+    expect(await module.installGuiUpdate()).toMatchObject({ok:false})
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+  })
+  it('does not permit the unsigned override for private Core', async () => {
+    corePackage()
+    mockedFiles.set('/tmp/analytix-updater-test-app/package.json',JSON.stringify({releaseProfile:'core'}))
+    process.env.ANALYTIX_ALLOW_UNSIGNED_UPDATES='1'
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(()=>null,()=>'stable')
+    expect(await module.downloadGuiUpdate('stable')).toMatchObject({ok:false})
+    expect(updater.checkForUpdates).not.toHaveBeenCalled()
   })
 })

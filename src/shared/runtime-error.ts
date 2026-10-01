@@ -55,12 +55,14 @@ const PUBLIC_HTTP_ERROR_MESSAGES: Readonly<Record<PublicRuntimeHTTPErrorCode, st
   case_history_restricted: 'Case history is restricted to host-verified projections.',
   case_compaction_archive_required: 'Case compaction requires a verified publication archive.',
   thread_running: 'The request conflicts with the current runtime state.',
+  turn_execution_conflict: 'Another terminal or security transition still owns this thread.',
   gate_continuation_unavailable: 'The pending gate continuation is unavailable.',
   gate_continuation_terminal_turn: 'The pending gate continuation is unavailable because the turn is terminal.',
   task_job_output_schema_invalid: 'The runtime request could not be completed safely.',
   worktree_isolation_authority_required: 'Worktree isolation controls require host-issued durable authority.',
   attachment_authority_unavailable: 'The runtime request could not be completed safely.',
   attachment_upload_unavailable: 'The runtime request could not be completed safely.',
+  public_projection_pending: 'The thread public projection is finalizing.',
   model_modality_unsupported: 'The selected model does not support the requested modality.',
   internal_error: 'The runtime request could not be completed safely.'
 }
@@ -226,6 +228,7 @@ function publicHTTPSpecialCodeMatchesStatus(code: string, status: number): boole
       return status === 403
     case 'case_compaction_archive_required':
     case 'thread_running':
+    case 'turn_execution_conflict':
     case 'gate_continuation_unavailable':
     case 'gate_continuation_terminal_turn':
     case 'worktree_isolation_authority_required':
@@ -234,6 +237,8 @@ function publicHTTPSpecialCodeMatchesStatus(code: string, status: number): boole
       return status >= 500
     case 'attachment_authority_unavailable':
     case 'attachment_upload_unavailable':
+      return status === 503
+    case 'public_projection_pending':
       return status === 503
     default:
       return false

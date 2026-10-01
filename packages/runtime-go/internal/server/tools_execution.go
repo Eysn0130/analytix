@@ -117,6 +117,8 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return map[string]any{"code": "invalid_arguments", "error": "tool arguments failed strict host decoding", "executed": false}, true
 	}
 	switch pending.Call.Name {
+	case "native_selection_read", "native_selection_propose":
+		return h.executeNativeSelectionTool(ctx, pending, args)
 	case "read":
 		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
 		h.recordRuntimeRead(pending, output, readContent, isError)
@@ -137,6 +139,23 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return executeGrepRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "web_fetch":
 		return h.executeWebFetchRuntimeTool(ctx, pending, args)
+	case "read_task_history":
+		thread, err := h.store.GetThread(pending.ThreadID)
+		if err != nil {
+			return map[string]any{"code": "task_history_unavailable", "executed": false}, true
+		}
+		offset, limit := 0, 4000
+		if value, ok := args["offset"].(float64); ok {
+			offset = int(value)
+		}
+		if value, ok := args["limit"].(float64); ok {
+			limit = int(value)
+		}
+		output, err := appturn.ReadTaskContinuationSourceV1(thread, pending.SecurityContext, stringField(args, "reference"), offset, limit)
+		if err != nil {
+			return map[string]any{"code": "task_history_unavailable", "executed": false}, true
+		}
+		return output, false
 	case "get_goal":
 		return h.executeRuntimeGetGoalTool(pending)
 	case "create_goal":
@@ -185,8 +204,13 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return h.executeRuntimeTaskJobRestart(pending, args)
 	case "write", "write_file":
 		return h.executeWriteRuntimeTool(ctx, pending, args)
+	case "generate_office_document":
+		return h.executeGenerateDocumentRuntimeTool(ctx, pending, args)
 	default:
 		if mcpapp.IsToolName(pending.Call.Name) {
+			if h.beginOpaqueEditingExecution(ctx) != nil {
+				return map[string]any{"code": "managed_editing_mutation_blocked", "error": "Uncontained MCP execution is unavailable while a controlled editing session is active.", "executed": false}, true
+			}
 			exactArgs, err := mcpapp.DecodeArguments(pending.Call.Arguments)
 			if err != nil {
 				return map[string]any{"code": "invalid_arguments", "error": err.Error(), "executed": false}, true
@@ -228,8 +252,32 @@ func (h *runtimeServerHandler) acquireRuntimePendingToolEffect(
 
 func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pending runtimePendingToolCall, issuedAt time.Time) (apploop.PreparedSideEffect, error) {
 	children := &runtimeChildProducerPlanV1{owner: h}
+	var hostBinding any
+	args, _ := domainsecurity.DecodeCanonicalJSONObject(pending.Call.Arguments)
+	var packageID string
+	switch pending.ExecutionGrant.ToolName {
+	case "generate_office_document":
+		packageID = toolcatalogapp.OfficeSkillForKind(stringField(args, "kind"))
+	case "run_skill":
+		packageID = toolcatalogapp.OfficeSkillIdentity(subagentapp.SkillNameFromArgs(args))
+	}
+	requiresHost := packageID != "" || pending.ExecutionGrant.ToolName == "generate_office_document"
+	loaded, hosted := h.currentOfficeSkill(ctx, packageID)
+	var sources []toolcatalogapp.HostedOfficeSkill
+	if hosted {
+		sources = append(sources, toolcatalogapp.HostedOfficeSkill{PackageID: packageID, Snapshot: loaded.Snapshot})
+	}
+	catalog := toolcatalogapp.WithOfficeSkills(h.skills, sources)
+	if requiresHost {
+		if !hosted {
+			return apploop.PreparedSideEffect{Rejection: &apploop.ToolDispatchOverride{Output: map[string]any{"code": "plugin_host_unavailable", "error": "The Office plugin is unavailable."}, IsError: true}}, nil
+		}
+		hostBinding = hostedSkillProjection(loaded)
+	}
 	prepared, err := toolsideeffect.Prepare(ctx, pending, issuedAt, toolsideeffect.Dependencies{
-		GoalService: h.runtimeGoalToolService(), ResolveSkill: h.runtimeSkillByName, ResolveSkillBody: h.runtimeSkillEntryBody,
+		GoalService: h.runtimeGoalToolService(), HostBinding: hostBinding,
+		ResolveSkill:     func(name string) (map[string]any, bool) { return toolcatalogapp.SkillByName(catalog, name) },
+		ResolveSkillBody: func(skill map[string]any) (string, error) { return toolcatalogapp.SkillEntryBody(catalog, skill) },
 		ResolveTask: func(request subagentapp.TaskRequest) (any, error) {
 			return children.reserveChildV1(ctx, pending, request)
 		},
@@ -239,6 +287,15 @@ func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pen
 	})
 	if err != nil {
 		return apploop.PreparedSideEffect{}, err
+	}
+	if requiresHost && prepared.Rejection == nil {
+		bind := prepared.Bind
+		prepared.Bind = func(bound context.Context) context.Context {
+			if bind != nil {
+				bound = bind(bound)
+			}
+			return context.WithValue(bound, preparedHostedSkillKey{}, loaded)
+		}
 	}
 	return children.bindPreparedSideEffectV1(pending, prepared)
 }

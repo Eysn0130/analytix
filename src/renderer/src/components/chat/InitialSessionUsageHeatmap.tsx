@@ -17,6 +17,7 @@ import {
   useModelUsageState
 } from '../../hooks/use-model-usage'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
+import { combineUsageCost } from '../../agent/usage-cost'
 import { AnalytixHeroStage } from './AnalytixHeroStage'
 
 type CalendarCell = DailyUsageBucket | null
@@ -115,8 +116,6 @@ function usageRangeBuckets(buckets: DailyUsageBucket[], rangeKey: UsageRangeKey)
 }
 
 function usageTotalsFromBuckets(buckets: DailyUsageBucket[]): UsageTotalsBucket {
-  let hasCny = false
-  let priceConfigured = false
   const totals = buckets.reduce<UsageTotalsBucket>(
     (acc, bucket) => {
       acc.inputTokens += bucket.inputTokens
@@ -125,14 +124,15 @@ function usageTotalsFromBuckets(buckets: DailyUsageBucket[]): UsageTotalsBucket 
       acc.cachedTokens += bucket.cachedTokens
       acc.cacheMissTokens += bucket.cacheMissTokens
       acc.totalTokens += bucket.totalTokens
-      acc.costUsd += bucket.costUsd
-      acc.costCny = (acc.costCny ?? 0) + (bucket.costCny ?? 0)
-      acc.priceConfigured = acc.priceConfigured || bucket.priceConfigured
+      const cost = combineUsageCost(acc, bucket)
+      acc.costUsd = cost.costUsd
+      acc.costCny = cost.costCny
+      acc.priceConfigured = cost.priceConfigured
+      acc.costEstimateStatus = cost.costEstimateStatus
+      acc.costKnownCurrencies = cost.costKnownCurrencies
       acc.tokenEconomySavingsTokens += bucket.tokenEconomySavingsTokens
       acc.turns += bucket.turns
       acc.threadCount += bucket.threadCount
-      if (bucket.costCny != null) hasCny = true
-      if (bucket.priceConfigured) priceConfigured = true
       if (usageHasBucketActivity(bucket)) acc.activeDays += 1
       return acc
     },
@@ -144,9 +144,11 @@ function usageTotalsFromBuckets(buckets: DailyUsageBucket[]): UsageTotalsBucket 
       cachedTokens: 0,
       cacheMissTokens: 0,
       totalTokens: 0,
-      costUsd: 0,
-      costCny: 0,
+      costUsd: null,
+      costCny: null,
       priceConfigured: false,
+      costEstimateStatus: 'none',
+      costKnownCurrencies: [],
       tokenEconomySavingsTokens: 0,
       turns: 0,
       threadCount: 0,
@@ -158,8 +160,6 @@ function usageTotalsFromBuckets(buckets: DailyUsageBucket[]): UsageTotalsBucket 
   const cacheTotal = totals.cachedTokens + totals.cacheMissTokens
   return {
     ...totals,
-    costCny: hasCny ? totals.costCny : null,
-    priceConfigured,
     cacheHitRate: cacheTotal > 0 ? totals.cachedTokens / cacheTotal : null
   }
 }
@@ -172,7 +172,7 @@ function dailySummary(
   return t('usageHeatmapDaySummary', {
     date: bucket.date,
     tokens: formatCompactNumber(bucket.totalTokens),
-    cost: formatCost(bucket.costUsd, locale, bucket.costCny, bucket.priceConfigured),
+    cost: formatCost(bucket.costUsd, locale, bucket.costCny, bucket.costEstimateStatus, bucket.costKnownCurrencies),
     saved: formatCompactNumber(bucket.cachedTokens),
     turns: bucket.turns,
     threads: bucket.threadCount,
@@ -797,7 +797,7 @@ export function InitialSessionUsageHeatmapView({
     { label: t('usageHeatmapActiveDays'), value: String(totals.activeDays) },
     { label: t('usageHeatmapCurrentStreak'), value: t('usageHeatmapStreakDays', { count: streaks.current }) },
     { label: t('usageHeatmapLongestStreak'), value: t('usageHeatmapStreakDays', { count: streaks.longest }) },
-    { label: t('usageHeatmapCost'), value: formatCost(totals.costUsd, i18n.language, totals.costCny, totals.priceConfigured) },
+    { label: t('usageHeatmapCost'), value: formatCost(totals.costUsd, i18n.language, totals.costCny, totals.costEstimateStatus, totals.costKnownCurrencies) },
     {
       label: t('usageHeatmapCacheSavings'),
       value: t('usageHeatmapSavedTokensValue', { tokens: formatCompactNumber(totals.cachedTokens) })

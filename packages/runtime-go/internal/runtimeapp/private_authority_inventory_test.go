@@ -12,6 +12,9 @@ func TestPrivateAuthorityInventoryV1RequiresExistingAuthorityForV2RecordsAlone(t
 	if !(privateAuthorityInventoryV1{EvidenceAuthority: true}).Required() {
 		t.Fatal("shared evidence authority records did not require the existing installation authority")
 	}
+	if !(privateAuthorityInventoryV1{HostLocalEvidence: true}).Required() {
+		t.Fatal("host-local evidence records did not require the existing installation authority")
+	}
 	if !(privateAuthorityInventoryV1{CaseEntity: true}).Required() {
 		t.Fatal("case entity records did not require the existing installation authority")
 	}

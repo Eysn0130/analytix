@@ -85,13 +85,28 @@ func openProviderRegistryAuthorityV1(
 		}
 		return finishProviderRegistryAuthorityV1(ctx, registry, secrets)
 	}
+	legacyProfile, err := secretstore.InspectLegacyKeychainProfile(secretPath)
+	if err != nil {
+		return nil, errors.New("provider registry legacy authority is unavailable")
+	}
 	registry, err := providerregistryfs.New(dataDir)
 	if err != nil {
 		return nil, errors.New("provider registry authority is unavailable")
 	}
-	secrets, err := secretstore.New(secretPath, providerRegistrySecretAuthorizerV1{})
+	if legacyProfile != nil {
+		secretPath = filepath.Join(dataDir, "private", "provider-secrets-v2", "credentials.v2.json")
+	}
+	var secrets *secretstore.Store
+	if legacyProfile != nil {
+		secrets, err = secretstore.NewWithOptions(secretPath, providerRegistrySecretAuthorizerV1{}, secretstore.Options{LegacyReentryFileAuthority: true})
+	} else {
+		secrets, err = secretstore.New(secretPath, providerRegistrySecretAuthorizerV1{})
+	}
 	if err != nil {
 		return nil, errors.Join(errors.New("provider registry authority is unavailable"), registry.Close())
+	}
+	if legacyProfile != nil {
+		return finishProviderRegistryAuthorityV1WithLegacy(ctx, registry, secrets, legacyProfile, true)
 	}
 	return finishProviderRegistryAuthorityV1(ctx, registry, secrets)
 }
@@ -100,16 +115,39 @@ func finishProviderRegistryAuthorityV1(
 	ctx context.Context,
 	registry *providerregistryfs.Store,
 	secrets *secretstore.Store,
+	recoverState ...bool,
 ) (*providerRegistryAuthorityV1, error) {
-	manager, err := providerregistryapp.NewManager(registry, secrets, providerregistryfs.LegacySourceReader{})
+	return finishProviderRegistryAuthorityV1WithLegacy(ctx, registry, secrets, nil, len(recoverState) == 0 || recoverState[0])
+}
+
+func finishProviderRegistryAuthorityV1WithLegacy(
+	ctx context.Context,
+	registry *providerregistryfs.Store,
+	secrets *secretstore.Store,
+	legacyProfile *secretstore.LegacyKeychainProfile,
+	recoverState bool,
+) (*providerRegistryAuthorityV1, error) {
+	var registrySecrets secretstoreport.RegistryStore = secrets
+	if legacyProfile != nil {
+		registrySecrets = legacyProfile.ReentryStore(secrets)
+	}
+	manager, err := providerregistryapp.NewManager(registry, registrySecrets, providerregistryfs.LegacySourceReader{})
 	if err != nil {
 		return nil, errors.Join(errors.New("provider registry authority is unavailable"), registry.Close(), secrets.Close())
+	}
+	if legacyProfile != nil {
+		if err := manager.PermitLegacyReentryRefs(legacyProfile.ActivePurposes()); err != nil {
+			return nil, errors.Join(errors.New("provider registry legacy authority is unavailable"), registry.Close(), secrets.Close())
+		}
 	}
 	authority := &providerRegistryAuthorityV1{
 		manager:  manager,
 		service:  newProviderRegistryOperationsV1(manager),
 		registry: registry,
 		secrets:  secrets,
+	}
+	if !recoverState {
+		return authority, nil
 	}
 	if err := manager.Recover(ctx); err != nil {
 		return nil, errors.Join(errors.New("provider registry recovery failed"), authority.Close())

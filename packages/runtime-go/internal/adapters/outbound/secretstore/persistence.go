@@ -58,7 +58,10 @@ func (filePersistence) Load(path string) (persistentDocument, error) {
 		return persistentDocument{}, portsecretstore.ErrPersistence
 	}
 	defer clearBytes(content)
+	return parsePersistentDocument(content)
+}
 
+func parsePersistentDocument(content []byte) (persistentDocument, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	var document persistentDocument

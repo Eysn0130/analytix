@@ -13,7 +13,7 @@ func openNoFollow(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(descriptor), path), nil
+	return os.NewFile(uintptr(descriptor), "plugin-materialization-file"), nil
 }
 
 func syncDirectory(path string) error {

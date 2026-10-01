@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	generationapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
 	goalapp "analytix.local/runtime-go/internal/app/goal"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
@@ -53,6 +54,9 @@ type Input struct {
 	ResolveDeleteSymbol OwnerProjectionResolver
 	ResolveMCP          MCPProjectionResolver
 	ResolveTask         TaskProjectionResolver
+	// HostBinding is supplied by trusted composition for installed plugin tools.
+	// It is never read from model arguments or a filesystem skill manifest.
+	HostBinding any
 }
 
 // ResolveV1 derives a versioned semantic identity from the owner parser used
@@ -93,7 +97,8 @@ func ResolveV1(input Input) (IdentityV1, error) {
 		SchemaVersion int    `json:"schemaVersion"`
 		ToolName      string `json:"toolName"`
 		Arguments     any    `json:"arguments"`
-	}{SchemaVersionV1, toolName, projection}
+		HostBinding   any    `json:"hostBinding,omitempty"`
+	}{SchemaVersionV1, toolName, projection, input.HostBinding}
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		return IdentityV1{}, err
@@ -107,7 +112,7 @@ func ResolveV1(input Input) (IdentityV1, error) {
 
 func SupportsHostToolV1(toolName string) bool {
 	switch canonicalToolName(toolName) {
-	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol",
+	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "generate_office_document",
 		"task", "parallel_tasks", "run_skill", "kill_shell", "restart_job", "create_goal", "complete_step", "update_goal",
 		"todo_write", "todo_ops", toolcatalogapp.ToolCreatePlanName:
 		return true
@@ -138,6 +143,29 @@ func hostProjection(toolName string, record map[string]any, input Input) (any, e
 			"command": request.Command, "timeoutSeconds": request.TimeoutSeconds,
 			"runInBackground": boolAny(record["run_in_background"], record["runInBackground"]),
 		}, nil
+	case "generate_office_document":
+		request, err := generationapp.ParseRequest(record)
+		if err != nil {
+			return nil, err
+		}
+		path, err := resolvePath(input, request.Path)
+		if err != nil {
+			return nil, err
+		}
+		images := make([]map[string]any, 0, len(request.Images))
+		for _, image := range request.Images {
+			images = append(images, map[string]any{"id": image.ID, "type": image.Type, "encodedContentHash": domainsecurity.SHA256Hex([]byte(image.DataBase64))})
+		}
+		projection := map[string]any{"path": path, "kind": request.Kind, "title": request.Title}
+		switch request.Kind {
+		case "docx":
+			projection["markdown"], projection["images"] = request.Markdown, images
+		case "xlsx":
+			projection["workbook"] = request.Workbook
+		case "pptx":
+			projection["presentation"], projection["images"] = request.Presentation, images
+		}
+		return projection, nil
 	case "write_file":
 		request, err := filetoolsapp.ParseWriteToolRequest(record)
 		if err != nil {

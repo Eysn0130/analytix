@@ -81,6 +81,7 @@ func (listener countingListenerV1) Accept() (net.Conn, error) {
 }
 
 type credentialFixtureOptions struct {
+	sharedOnly          bool
 	keySemanticOverride string
 	mismatchedKey       bool
 	keyEncoding         privateKeyEncodingV1
@@ -90,6 +91,32 @@ type credentialFixtureOptions struct {
 	clientLifetime      time.Duration
 	crossNamespaceRole  domaincredentials.FileRoleV1
 	crossNamespaceAll   bool
+}
+
+func TestLoaderBuildsSharedEvidenceOnlyWitnessFromExactEnrollment(t *testing.T) {
+	fixture := newCredentialLoaderFixture(t, credentialFixtureOptions{sharedOnly: true})
+	witnesses, err := fixture.loadCurrent(context.Background())
+	if err != nil || witnesses.ThreadRisk != nil || witnesses.SharedEvidence == nil ||
+		witnesses.ManifestDigest != fixture.anchor.CurrentManifestDigest ||
+		witnesses.ProfileDigest != fixture.profile.ProfileDigest || len(fixture.profile.Files) != 3 {
+		t.Fatalf("shared-only loader output = %#v err=%v", witnesses, err)
+	}
+	fixture.assertNoNetworkV1(t)
+	request := fixture.observeRequestV1(t, domainenrollment.SharedEvidenceNamespaceV1, "shared-only-observe")
+	observation, err := witnesses.SharedEvidence.Observe(context.Background(), request)
+	if err != nil || observation.Checkpoint != fixture.checkpoints[domainenrollment.SharedEvidenceNamespaceV1] {
+		t.Fatalf("shared-only witness observe = %#v err=%v", observation, err)
+	}
+	if fixture.serverCalls.Load() != 1 || fixture.servers[domainenrollment.SharedEvidenceNamespaceV1].calls.Load() != 1 {
+		t.Fatal("shared-only witness used an unexpected network endpoint")
+	}
+
+	other := newCredentialLoaderFixture(t, credentialFixtureOptions{sharedOnly: true})
+	writePrivateFileV1(t, filepath.Join(other.bundleRoot, "thread-risk-root-ca.der"), []byte("unenrolled"))
+	if _, err := other.loadCurrent(context.Background()); err == nil {
+		t.Fatal("shared-only loader accepted an extra ThreadRisk credential file")
+	}
+	other.assertNoNetworkV1(t)
 }
 
 type privateKeyEncodingV1 uint8
@@ -445,6 +472,9 @@ func newCredentialLoaderFixture(t *testing.T, options credentialFixtureOptions) 
 	installationPublic := installationPrivate.Public().(ed25519.PublicKey)
 	installationID := domainsecurity.SHA256Hex([]byte("credential-loader-installation"))
 	namespaces := []string{domainenrollment.ThreadRiskNamespaceV1, domainenrollment.SharedEvidenceNamespaceV1}
+	if options.sharedOnly {
+		namespaces = []string{domainenrollment.SharedEvidenceNamespaceV1}
+	}
 	witnessPrivate := make(map[string]ed25519.PrivateKey, 2)
 	checkpoints := make(map[string]domainsecurity.MonotonicHeadCheckpointV1, 2)
 	for index, namespace := range namespaces {
@@ -524,17 +554,28 @@ func newCredentialLoaderFixture(t *testing.T, options credentialFixtureOptions) 
 		t.Fatal(err)
 	}
 	fixture.profile = profile
-	manifest, err := domainenrollment.NewManifestV2(domainenrollment.ManifestInputV2{
-		InstallationID: installationID, InstallationAuthorityKeyID: domainsecurity.SHA256Hex(installationPublic),
-		InstallationAuthorityPublicKey: installationPublic, CredentialProfileGeneration: profile.ProfileGeneration,
-		CredentialProfileDigest: profile.ProfileDigest, IssuedAt: now,
-		ThreadRisk: credentialEnrollmentInputV1(checkpoints[domainenrollment.ThreadRiskNamespaceV1], witnessPrivate[domainenrollment.ThreadRiskNamespaceV1],
-			materials[domainenrollment.ThreadRiskNamespaceV1].endpoint, materials[domainenrollment.ThreadRiskNamespaceV1].serverName,
-			materials[domainenrollment.ThreadRiskNamespaceV1].rootDER, materials[domainenrollment.ThreadRiskNamespaceV1].clientLeafDER),
-		SharedEvidence: credentialEnrollmentInputV1(checkpoints[domainenrollment.SharedEvidenceNamespaceV1], witnessPrivate[domainenrollment.SharedEvidenceNamespaceV1],
-			materials[domainenrollment.SharedEvidenceNamespaceV1].endpoint, materials[domainenrollment.SharedEvidenceNamespaceV1].serverName,
-			materials[domainenrollment.SharedEvidenceNamespaceV1].rootDER, materials[domainenrollment.SharedEvidenceNamespaceV1].clientLeafDER),
-	}, func(message []byte) ([]byte, error) { return ed25519.Sign(installationPrivate, message), nil })
+	sharedInput := credentialEnrollmentInputV1(checkpoints[domainenrollment.SharedEvidenceNamespaceV1], witnessPrivate[domainenrollment.SharedEvidenceNamespaceV1],
+		materials[domainenrollment.SharedEvidenceNamespaceV1].endpoint, materials[domainenrollment.SharedEvidenceNamespaceV1].serverName,
+		materials[domainenrollment.SharedEvidenceNamespaceV1].rootDER, materials[domainenrollment.SharedEvidenceNamespaceV1].clientLeafDER)
+	sign := func(message []byte) ([]byte, error) { return ed25519.Sign(installationPrivate, message), nil }
+	var manifest domainenrollment.ManifestV2
+	if options.sharedOnly {
+		manifest, err = domainenrollment.NewSharedEvidenceOnlyManifestV2(domainenrollment.SharedEvidenceOnlyManifestInputV2{
+			InstallationID: installationID, InstallationAuthorityKeyID: domainsecurity.SHA256Hex(installationPublic),
+			InstallationAuthorityPublicKey: installationPublic, CredentialProfileGeneration: profile.ProfileGeneration,
+			CredentialProfileDigest: profile.ProfileDigest, IssuedAt: now, SharedEvidence: sharedInput,
+		}, sign)
+	} else {
+		manifest, err = domainenrollment.NewManifestV2(domainenrollment.ManifestInputV2{
+			InstallationID: installationID, InstallationAuthorityKeyID: domainsecurity.SHA256Hex(installationPublic),
+			InstallationAuthorityPublicKey: installationPublic, CredentialProfileGeneration: profile.ProfileGeneration,
+			CredentialProfileDigest: profile.ProfileDigest, IssuedAt: now,
+			ThreadRisk: credentialEnrollmentInputV1(checkpoints[domainenrollment.ThreadRiskNamespaceV1], witnessPrivate[domainenrollment.ThreadRiskNamespaceV1],
+				materials[domainenrollment.ThreadRiskNamespaceV1].endpoint, materials[domainenrollment.ThreadRiskNamespaceV1].serverName,
+				materials[domainenrollment.ThreadRiskNamespaceV1].rootDER, materials[domainenrollment.ThreadRiskNamespaceV1].clientLeafDER),
+			SharedEvidence: sharedInput,
+		}, sign)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

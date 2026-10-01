@@ -5,16 +5,19 @@ package runtimeapp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +25,7 @@ import (
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
+	nativecomponentregistry "analytix.local/runtime-go/internal/adapters/outbound/nativecomponentregistry"
 	packagedbuildauthorityfs "analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
@@ -29,17 +33,15 @@ import (
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authorityfixture "analytix.local/runtime-go/internal/formalauthority"
+	"analytix.local/runtime-go/internal/server"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
 // This test binds current Go composition to an explicitly selected historical
-// native generation. It does not execute the retained runtime-server or claim
-// that the package contains the current Go source.
+// native generation, or an exact clean current package selected explicitly.
+// It does not execute the packaged runtime-server or establish installation QA.
 func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
-	path := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
-	if path != rev9RetainedRuntimeServer {
-		t.Fatal("B1 fixed native input is unavailable")
-	}
+	path := b1SelectedNativeInput(t)
 	inspection, err := packagedbuildauthorityfs.InspectPackageV2(context.Background(), path, "darwin", "arm64")
 	if err != nil {
 		t.Fatalf("B1 fixed native package inspection: %v", err)
@@ -56,17 +58,114 @@ func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
 	if err := owner.Close(); err != nil {
 		t.Fatalf("B1 fixed native owner closure: %v", err)
 	}
-	t.Log("current Go package inspection and normal local-build Owner admission passed; historical native input only")
+	t.Log("current Go package inspection and normal local-build Owner admission passed; native input identity is recorded separately")
+}
+
+// A byte-identical installation copy can remove removable-volume I/O from the
+// diagnostic. This does not replace production signature or Owner admission.
+func b1SelectedNativeInput(t *testing.T) string {
+	t.Helper()
+	original := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
+	current := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_RUNTIME_SERVER")
+	expectedSource := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_SOURCE_COMMIT")
+	if current != "" || expectedSource != "" {
+		if len(expectedSource) != 40 || strings.Trim(expectedSource, "0123456789abcdef") != "" || os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER") != "" {
+			t.Fatal("B1 exact current input requires one source identity and no historical relocation")
+		}
+		inspection, err := packagedbuildauthorityfs.InspectPackageV2(context.Background(), current, "darwin", "arm64")
+		if err != nil {
+			t.Fatalf("B1 exact current package inspection: %v", err)
+		}
+		authority := inspection.Authority
+		if authority.Development == nil || authority.Core != nil || authority.Controlled != nil ||
+			authority.Authority.SourceCommit != expectedSource || authority.Authority.WorktreeSnapshot.Dirty ||
+			authority.Authority.Classification != "development_clean_non_publishable" ||
+			inspection.Publishable || inspection.FactToolsEnabled || inspection.PackageAnchor != "macos_nonpublishable_resource_seal" {
+			t.Fatal("B1 exact current input does not match its clean private package contract")
+		}
+		t.Logf("B1 exact clean native package source=%s; synthetic Host admission and loopback only, not installation QA", expectedSource)
+		return current
+	}
+	if original != rev9RetainedRuntimeServer {
+		t.Fatal("B1 fixed native input is unavailable")
+	}
+	selected := os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER")
+	if selected == "" {
+		return original
+	}
+	const suffix = "/Contents/Resources/runtime-go/bin/runtime-server"
+	if !filepath.IsAbs(selected) || filepath.Clean(selected) != selected || !strings.HasSuffix(selected, ".app"+suffix) {
+		t.Fatal("B1 relocated input must be an absolute canonical app runtime path")
+	}
+	resolved, err := filepath.EvalSymlinks(selected)
+	if err != nil || resolved != selected {
+		t.Fatal("B1 relocated input must not traverse symlinks")
+	}
+	originalRoot, selectedRoot := strings.TrimSuffix(original, suffix), strings.TrimSuffix(selected, suffix)
+	anchors := []string{
+		"Contents/MacOS/analytix", "Contents/Info.plist", "Contents/_CodeSignature/CodeResources",
+		"Contents/Resources/app.asar", "Contents/Resources/runtime-go/bin/runtime-server",
+		"Contents/Resources/runtime/analytix-packaged-build-authority.json",
+		"Contents/Resources/runtime/analytix-native-development-build.json",
+		"Contents/Resources/runtime/analytix-import-accelerator",
+		"Contents/Resources/runtime/analytix-cleaning-ops",
+		"Contents/Resources/runtime/analytix-analysis-compute",
+		"Contents/Resources/runtime/analytix-data-engine",
+	}
+	for _, anchor := range anchors {
+		if b1NativeInputDigest(t, filepath.Join(originalRoot, anchor)) != b1NativeInputDigest(t, filepath.Join(selectedRoot, anchor)) {
+			t.Fatalf("B1 relocated historical input changed: %s", anchor)
+		}
+	}
+	t.Log("B1 historical native input relocation: 11 anchors byte-identical; normal signature admission still required")
+	return selected
+}
+
+func b1NativeInputDigest(t *testing.T, path string) [32]byte {
+	t.Helper()
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		t.Fatal("B1 native input anchor is unavailable or not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.Stat()
+	current, currentErr := os.Lstat(path)
+	if err != nil || currentErr != nil || !os.SameFile(before, after) || !os.SameFile(before, current) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("B1 native input anchor changed during comparison")
+	}
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
 }
 
 // The model supplies only a tool request and ordinary text. All evidence,
 // claims, final authority and display bindings must be produced by the live
 // production handler from the real native result.
 func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
-	runtimePath := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
-	if runtimePath != rev9RetainedRuntimeServer {
-		t.Fatal("B1 fixed native input is unavailable")
+	model := &b1PublicChainModel{t: t, expectedCredential: "test-only"}
+	defer model.diagnostics()
+	runB1ProductionPublicChain(t, rev14AccountFlowCSV(), http.HandlerFunc(model.serve), func(config Config, root, workspace, sourcePath, authorityKeyID string, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
+		b1AssertPublicChain(t, config, root, workspace, sourcePath, authorityKeyID, model, sourceEvents, driver)
+	})
+}
+
+// Reuse the same production composition for additional immutable synthetic CSV
+// vectors; callers supply only source/model responses and public-seam assertions.
+func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler, verify func(Config, string, string, string, string, func() []domainplugincapability.FundsSourceReadDecisionEventV1, b1PublicChainDriver)) {
+	t.Helper()
+	trust := nativecomponentregistry.EmbeddedTrust()
+	if trust.SigningMode != "ad-hoc" || trust.SigningPolicySHA256 != "7625f1de94282690dc72ce92f7e42a293437c24fb9f4a725ff82bfec157ecaf3" || trust.ReceiptSHA256 != "" || trust.ManifestSHA256 != "" || trust.TargetKey != "" || trust.AppleTeamIdentifier != "" {
+		t.Fatal("B1 requires the existing compiled development signing policy; no package or receipt trust override")
 	}
+	runtimePath := b1SelectedNativeInput(t)
 	root := workspacetest.New(t)
 	authorityRoot := strings.TrimSpace(os.Getenv("ANALYTIX_TEST_PROFILE_ROOT"))
 	if authorityRoot == "" {
@@ -97,12 +196,10 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	workspace := filepath.Join(root, "synthetic-case")
 	runtimeSharedEvidenceWriteCaseBindingV2(t, workspace)
 	sourcePath := filepath.Join(workspace, "baseline.csv")
-	if err := os.WriteFile(sourcePath, rev14AccountFlowCSV(), 0o600); err != nil {
+	if err := os.WriteFile(sourcePath, source, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	model := &b1PublicChainModel{t: t, expectedCredential: "test-only"}
-	defer model.diagnostics()
-	provider := httptest.NewServer(http.HandlerFunc(model.serve))
+	provider := httptest.NewServer(model)
 	defer provider.Close()
 	config.BaseURL, config.ProviderID, config.Model = provider.URL+"/v1", "b1-synthetic", "b1-synthetic-model"
 	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "test-only")
@@ -111,17 +208,29 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	dependencies.resolveRuntimeRoots = func(string) (string, string, error) {
 		return bundledFundsRuntimeRootsV1(host.config.DataDir)
 	}
+	var activeNativeOwner *nativecomponenthost.Owner
 	dependencies.openNativeOwnerForTest = func(dataDir string) (*nativecomponenthost.Owner, error) {
-		return openRev9DarwinHostCandidateForExecutable(dataDir, runtimePath)
-	}
-	if spec, err := validateBundledFundsHostMaterializationWithDependenciesV1(context.Background(), config, dependencies); err != nil || spec == nil {
-		t.Fatalf("B1 synthetic Host installation admission failed: %v", err)
+		owner, err := openRev9DarwinHostCandidateForExecutable(dataDir, runtimePath)
+		if err != nil || owner == nil {
+			t.Fatalf("B1 selected native owner prerequisite: %v", err)
+		}
+		activeNativeOwner = owner
+		return owner, nil
 	}
 	var sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1
 	dependencies.observeHostSourceRead = func(read func() []domainplugincapability.FundsSourceReadDecisionEventV1) { sourceEvents = read }
 	async := newRuntimeAsyncTurnGuardV1("b1-public-chain")
+	appendDiagnostic := &fundsAppendDiagnosticV1{t: t}
+	defer appendDiagnostic.close()
 	ctx := context.WithValue(context.Background(), bundledFundsHostValidationContextKeyV1{}, dependencies)
-	ctx = context.WithValue(ctx, asyncTurnObservationContextKeyV1{}, async.observe)
+	ctx = context.WithValue(ctx, asyncTurnObservationContextKeyV1{}, func(observation server.AsyncTurnObservationV1) {
+		appendDiagnostic.finished(observation)
+		async.observe(observation)
+	})
+	ctx = context.WithValue(ctx, asyncTurnPhaseObservationContextKeyV1{}, appendDiagnostic.phase)
+	ctx = context.WithValue(ctx, factRecoveryObservationKeyV1{}, func(report factRecoveryObservationV1) {
+		t.Logf("fact recovery candidates=%d admitted=%d held=%d phase=%s", report.Candidates, report.Admitted, report.Held, report.LastRejectedPhase)
+	})
 	lease, err := AcquireRuntimePersistenceLease(config)
 	if err != nil {
 		t.Fatal(err)
@@ -133,13 +242,35 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 	}
 	owned := &ownedPersistenceLeaseHandler{Handler: handler, lease: lease}
 	runtime := httptest.NewServer(owned)
+	closed := false
 	defer func() {
+		if closed {
+			return
+		}
 		runtime.Close()
 		shutdownOwnedRuntimeHandler(t, owned)
 		async.assertDrained(t)
 	}()
-	b1AssertPublicChain(t, config, root, workspace, sourcePath, fixture.Authority.KeyID(), model, sourceEvents, b1PublicChainDriver{
+	verify(config, root, workspace, sourcePath, fixture.Authority.KeyID(), sourceEvents, b1PublicChainDriver{
+		assertNewProcess: func(account string, expected ...b1RecoveryExpectedFinal) {
+			runtime.Close()
+			shutdownOwnedRuntimeHandler(t, owned)
+			async.assertDrained(t)
+			closed = true
+			before := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
+			b1AssertFreshProcessRecovery(t, b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, Account: account, ExpectedFinals: expected})
+			after := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
+			if before != after {
+				t.Fatal("fresh process changed original evidence/final stores")
+			}
+		},
 		baseURL: func() string { return runtime.URL },
+		closeNativeSource: func() error {
+			if activeNativeOwner == nil {
+				t.Fatal("B1 active native owner was not opened")
+			}
+			return activeNativeOwner.Close()
+		},
 		waitTurn: func(threadID, turnID, phase string) {
 			async.expect(threadID, turnID, phase)
 			if phase != "ordinary-after-failure" {
@@ -168,13 +299,24 @@ func TestFundsAccountFlowB1ProductionPublicChain(t *testing.T) {
 // The assertions below are shared with the black-box process test. The driver
 // owns transport/lifecycle only; it cannot fabricate product evidence or finals.
 type b1PublicChainDriver struct {
-	baseURL  func() string
-	waitTurn func(threadID, turnID, phase string)
-	reopen   func()
+	assertNewProcess  func(account string, expected ...b1RecoveryExpectedFinal)
+	baseURL           func() string
+	waitTurn          func(threadID, turnID, phase string)
+	reopen            func()
+	closeNativeSource func() error
 }
 
 func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePath, authorityKeyID string, model *b1PublicChainModel, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
 	t.Helper()
+	baselineSource, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineReference := b1ReferenceFlowFromCSV(t, baselineSource)
+	if baselineReference.transactionCount != 1 {
+		t.Fatal("B1 baseline reference did not select one source transaction")
+	}
+	model.setReference(baselineReference, false)
 	client := &http.Client{Timeout: 45 * time.Second}
 	request := func(method, path string, body map[string]any, expected int) map[string]any {
 		t.Helper()
@@ -212,7 +354,7 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 		if err != nil || record.HostAuthority == nil || record.HostAuthority.SelectionContentDigest == "" || record.AuthorityKeyID != authorityKeyID {
 			t.Fatal("B1 actual prepared record lost signed content or installation authority")
 		}
-		b1AssertPreparedFlow(t, record, "1250", "0", "1")
+		b1AssertPreparedFlow(t, record, baselineReference)
 		preparedRecords = append(preparedRecords, record)
 	}
 	capsuleBodies := b1PrivateCASRecords(t, filepath.Join(config.DataDir, "private", "evidence-registry", "capsules"))
@@ -352,6 +494,16 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 	if err := os.WriteFile(evolvedSource, b1EvolvedCSV(t), 0600); err != nil {
 		t.Fatal(err)
 	}
+	evolvedSourceBytes, err := os.ReadFile(evolvedSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evolvedReference := b1ReferenceFlowFromCSV(t, evolvedSourceBytes)
+	if evolvedReference.transactionCount != 2 || evolvedReference.outflowMinor == baselineReference.outflowMinor ||
+		evolvedReference.netMinor == baselineReference.netMinor {
+		t.Fatal("B1 changed source did not change the independent reference result")
+	}
+	model.setReference(evolvedReference, true)
 	evolvedStage := request(http.MethodPost, "/v1/local-display/funds-import/stage", map[string]any{"workspaceRoot": workspace, "sourcePath": evolvedSource}, http.StatusOK)
 	evolvedItems, _ := evolvedStage["items"].([]any)
 	if len(evolvedItems) != 1 {
@@ -382,7 +534,7 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 			evolved = candidate
 		}
 	}
-	b1AssertPreparedFlow(t, evolved, "1250", "225", "2")
+	b1AssertPreparedFlow(t, evolved, evolvedReference)
 	b1AssertActualFinal(t, config.DataDir, evolved, evolvedFinal.AcceptedFinalDigest, false)
 	evolvedMaterial, _ := domainevidence.ParseCanonicalEvidenceMaterial(evolved.CanonicalEvidence)
 	evolvedBinding := evolvedMaterial.AcceptedSlotSourceBindings[0]
@@ -439,6 +591,27 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 	readOriginal()
 	previewCurrent()
 	driver.reopen()
+	// Public history is a separate consumer from the protected original-value sink.
+	t.Logf("B1 original/current publication policy equal=%t; immutable source contexts retained", baseline.SecurityContext.PublicationPolicy == evolved.SecurityContext.PublicationPolicy)
+	recoveredThread := request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
+	for position, expected := range []struct{ turnID, digest string }{{turnID, digest}, {evolvedTurnID, evolvedFinal.AcceptedFinalDigest}} {
+		recoveredTurn := packagedSourceUnavailableHydrationTurnV1(recoveredThread, expected.turnID)
+		recoveredFinal, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(recoveredTurn["acceptedFinalView"])
+		if err != nil || recoveredFinal.AcceptedFinalDigest != expected.digest {
+			t.Fatalf("B1 multi-snapshot public history lost original binding: position=%d view_present=%t parse_valid=%t", position, recoveredTurn["acceptedFinalView"] != nil, err == nil)
+		}
+		if position == 0 && recoveredTurn["factHistoryState"] != "retained_snapshot" {
+			t.Fatal("B1 A1 history was not marked as retained snapshot")
+		}
+		if position == 1 && recoveredTurn["factHistoryState"] != nil {
+			t.Fatal("B1 current A2 mislabeled as history")
+		}
+	}
+	recoveredPublic, _ := json.Marshal(recoveredThread)
+	b1AssertGenericPrivacy(t, recoveredPublic)
+	b1AssertActualFinal(t, config.DataDir, baseline, digest, true)
+	b1AssertActualFinal(t, config.DataDir, evolved, evolvedFinal.AcceptedFinalDigest, false)
+	t.Log("B1 A1/A2 public GET200 and both original final bindings preserved")
 	readOriginal()
 	previewCurrent()
 	t.Log("B1 real durable reopen preserved original slots and current exact preview")
@@ -466,6 +639,10 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 			failed := request(http.MethodPost, "/v1/local-display/accepted-slot-display", map[string]any{"kind": "accepted_slot_display", "threadId": threadID, "turnId": turnID, "acceptedFinalDigest": digest, "displayMode": "full"}, http.StatusConflict)
 			failedBytes, _ := json.Marshal(failed)
 			b1AssertGenericPrivacy(t, failedBytes)
+			publicFailure := request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusServiceUnavailable)
+			if publicFailure["turns"] != nil {
+				t.Fatal("B1 retained material fault exposed a partial public batch")
+			}
 			if failed["slots"] != nil {
 				t.Fatal("B1 unavailable retained material yielded a display slot")
 			}
@@ -485,6 +662,7 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 		}()
 		readOriginal()
 		previewCurrent()
+		request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
 		t.Logf("B1 retained %s failed closed and exact-byte restoration recovered both local display paths", fault)
 	}
 	after = startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
@@ -536,6 +714,10 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 		b1AssertGenericPrivacy(t, body)
 	}
 	t.Log("B1 actual durable reopen, current preview, retained missing/corrupt fail-closed, and ordinary Provider continuity passed")
+	driver.assertNewProcess(rev14PrivateAccount,
+		b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: turnID, FinalDigest: digest, HistoryState: "retained_snapshot"},
+		b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: evolvedTurnID, FinalDigest: evolvedFinal.AcceptedFinalDigest},
+	)
 }
 
 // This test uses an unformatted account admitted by canonical CSV. Exact retained
@@ -547,24 +729,48 @@ type b1PublicChainModel struct {
 	t                  *testing.T
 	mu                 sync.Mutex
 	requests           [][]byte
+	baselineReference  b1ReferenceFlow
+	evolvedReference   b1ReferenceFlow
+}
+
+func (model *b1PublicChainModel) setReference(reference b1ReferenceFlow, evolved bool) {
+	model.mu.Lock()
+	defer model.mu.Unlock()
+	if evolved {
+		model.evolvedReference = reference
+	} else {
+		model.baselineReference = reference
+	}
 }
 
 func b1WaitAsyncCompletion(t *testing.T, guard *runtimeAsyncTurnGuardV1, threadID, turnID string) {
 	t.Helper()
 	// Wait on the in-process completion observation before the public HTTP read.
 	// Hydrating historical finals on every poll would add concurrent witness work
-	// to the settlement being measured. Keep the original 90-second test budget.
-	deadline := time.Now().Add(90 * time.Second)
+	// to the settlement being measured. Exact-native shared-head/CAS validation
+	// has exceeded the old 90-second harness budget while completing normally.
+	// This is a bounded test wait, not a product latency acceptance threshold.
+	started := time.Now()
+	deadline := started.Add(180 * time.Second)
 	for time.Now().Before(deadline) {
 		guard.mu.Lock()
 		record := guard.records[threadID+"\x00"+turnID]
 		done := record != nil && record.ends == 1
 		guard.mu.Unlock()
 		if done {
+			if time.Since(started) > 90*time.Second {
+				t.Log("B1 terminal completed beyond the historical 90-second harness budget")
+			}
 			guard.assertDrained(t)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	// Report only bounded owner counts, never stacks, arguments or paths.
+	stacks := make([]byte, 2<<20)
+	stacks = stacks[:runtime.Stack(stacks, true)]
+	for _, owner := range []string{"WithHistoricalFactSelectionV2", "WithRecoveredFactFinalWitness", "ProjectThread", "ProjectEvent", "Sync", "RoundTrip"} {
+		t.Logf("B1 terminal timeout owner=%s active_frames=%d", owner, bytes.Count(stacks, []byte(owner+"(")))
 	}
 	t.Fatal("B1 asynchronous terminal finalization did not drain")
 }
@@ -589,7 +795,10 @@ func (model *b1PublicChainModel) serve(w http.ResponseWriter, r *http.Request) {
 		runtimeOptionalLifecycleModelResponseV1(w, "", nil, "B1_ORDINARY_COMPLETE: Clear writing makes one point at a time.")
 		return
 	}
-	if b1HasCurrentSemantic(model.t, body) {
+	model.mu.Lock()
+	baselineReference, evolvedReference := model.baselineReference, model.evolvedReference
+	model.mu.Unlock()
+	if b1HasCurrentSemantic(model.t, body, baselineReference, evolvedReference) {
 		runtimeOptionalLifecycleModelResponseV1(w, "", nil, "B1 synthetic analysis complete")
 		return
 	}
@@ -698,6 +907,12 @@ func b1PublicChainRequestFailure(method, path string, status, expected int, deco
 		phase = "IMPORT_CONFIRM"
 	}
 	code := "unavailable"
+	// Keep finite thread-detail failures distinguishable without echoing bodies,
+	// messages, arbitrary codes or thread identities into diagnostics.
+	switch candidate := contracts.StringField(decoded, "code"); candidate {
+	case "public_projection_pending", "accepted_final_hydration_unavailable":
+		code = candidate
+	}
 	if decoded["schemaVersion"] == float64(1) {
 		nested, _ := decoded["error"].(map[string]any)
 		switch candidate := contracts.StringField(nested, "code"); candidate {
@@ -747,16 +962,120 @@ func b1PrivateCASRecords(t *testing.T, root string) [][]byte {
 	return bodies
 }
 
-func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSettlement, inflow, outflow, count string) {
+// The reference reads only the CSV supplied to the normal import route. It does
+// not call the native query, its compiler, or the model-safe projection.
+type b1ReferenceFlow struct {
+	currency         string
+	inflowMinor      string
+	outflowMinor     string
+	netMinor         string
+	transactionCount int
+}
+
+func b1ReferenceFlowFromCSV(t *testing.T, source []byte) b1ReferenceFlow {
+	return b1ReferenceFlowFromCSVInWindow(t, source, "2026-08-27 ")
+}
+
+func b1ReferenceFlowFromCSVInWindow(t *testing.T, source []byte, datePrefix string) b1ReferenceFlow {
+	t.Helper()
+	rows, err := csv.NewReader(bytes.NewReader(source)).ReadAll()
+	if err != nil || len(rows) < 2 {
+		t.Fatal("B1 reference source is not a complete CSV")
+	}
+	columns := make(map[string]int, len(rows[0]))
+	for index, name := range rows[0] {
+		if _, duplicate := columns[name]; duplicate {
+			t.Fatal("B1 reference source has duplicate columns")
+		}
+		columns[name] = index
+	}
+	column := func(name string) int {
+		index, ok := columns[name]
+		if !ok {
+			t.Fatal("B1 reference source is missing a required column")
+		}
+		return index
+	}
+	account, timestamp, amount, direction, currency := column("交易账号"), column("交易时间"), column("交易金额"), column("收付标志"), column("交易币种")
+	var inflow, outflow big.Int
+	count := 0
+	for _, row := range rows[1:] {
+		if row[account] != rev14PrivateAccount || !strings.HasPrefix(row[timestamp], datePrefix) {
+			continue
+		}
+		if row[currency] != "CNY" {
+			t.Fatal("B1 reference transaction changed currency")
+		}
+		minor, ok := b1ReferenceMinorUnits(row[amount])
+		if !ok {
+			t.Fatal("B1 reference transaction has invalid exact amount")
+		}
+		switch row[direction] {
+		case "进":
+			inflow.Add(&inflow, minor)
+		case "出":
+			outflow.Add(&outflow, minor)
+		default:
+			t.Fatal("B1 reference transaction has unknown direction")
+		}
+		count++
+	}
+	if count == 0 {
+		t.Fatal("B1 reference selected no source transactions")
+	}
+	return b1ReferenceFlow{
+		currency: "CNY", inflowMinor: inflow.String(), outflowMinor: outflow.String(),
+		netMinor: new(big.Int).Sub(&inflow, &outflow).String(), transactionCount: count,
+	}
+}
+
+func b1ReferenceMinorUnits(value string) (*big.Int, bool) {
+	whole, fraction, decimal := strings.Cut(value, ".")
+	if whole == "" || strings.Trim(whole, "0123456789") != "" ||
+		(decimal && (fraction == "" || len(fraction) > 2 || strings.Trim(fraction, "0123456789") != "")) {
+		return nil, false
+	}
+	major, ok := new(big.Int).SetString(whole, 10)
+	if !ok {
+		return nil, false
+	}
+	minor := new(big.Int).Mul(major, big.NewInt(100))
+	if decimal {
+		if len(fraction) == 1 {
+			fraction += "0"
+		}
+		cents, ok := new(big.Int).SetString(fraction, 10)
+		if !ok {
+			return nil, false
+		}
+		minor.Add(minor, cents)
+	}
+	return minor, true
+}
+
+func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) {
+	material := b1AssertPreparedFlowValues(t, record, reference)
+	binding := material.AcceptedSlotSourceBindings[0]
+	if binding.Field != domainevidence.AcceptedSlotSourceFieldAccountV1 || binding.SourceRowNumber != 1 || len(binding.FactIDs) != 3 || len(record.ReceiptDraft.SourceRecordIDs) != 1 || record.ReceiptDraft.SourceRecordIDs[0] != binding.SourceRecordID {
+		t.Fatal("B1 native account aggregate lost exact original row/field lineage")
+	}
+}
+
+func b1AssertPreparedFlowValues(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) domainevidence.CanonicalEvidenceMaterial {
+	t.Helper()
+	return b1AssertPreparedFlowValuesWithBindings(t, record, reference, 1)
+}
+
+func b1AssertPreparedFlowValuesWithBindings(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow, expectedBindings int) domainevidence.CanonicalEvidenceMaterial {
 	t.Helper()
 	material, err := domainevidence.ParseCanonicalEvidenceMaterial(record.CanonicalEvidence)
-	if err != nil || len(material.Facts) != 3 || len(material.AcceptedSlotSourceBindings) != 1 {
-		t.Fatal("B1 actual native canonical fact/lineage cardinality is invalid")
+	if err != nil || len(material.Facts) != 3 || expectedBindings <= 0 || len(material.AcceptedSlotSourceBindings) != expectedBindings {
+		t.Fatalf("B1 actual native canonical fact/lineage cardinality is invalid: parse_failed=%t facts=%d want=3 bindings=%d want=%d", err != nil, len(material.Facts), len(material.AcceptedSlotSourceBindings), expectedBindings)
 	}
 	values := map[string]string{}
 	for _, fact := range material.Facts {
 		if fact.ClaimType == domainevidence.ClaimAmount {
-			if fact.NormalizedPayload.Currency != "CNY" {
+			if fact.NormalizedPayload.Currency != reference.currency {
 				t.Fatal("B1 native aggregate changed currency")
 			}
 			values[fact.NormalizedPayload.Direction] = fact.NormalizedPayload.AmountMinor
@@ -764,13 +1083,10 @@ func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSe
 			values["count"] = fact.NormalizedPayload.Count
 		}
 	}
-	if values["in"] != inflow || values["out"] != outflow || values["count"] != count {
+	if values["in"] != reference.inflowMinor || values["out"] != reference.outflowMinor || values["count"] != fmt.Sprint(reference.transactionCount) {
 		t.Fatal("B1 native exact minor units or transaction count changed")
 	}
-	binding := material.AcceptedSlotSourceBindings[0]
-	if binding.Field != domainevidence.AcceptedSlotSourceFieldAccountV1 || binding.SourceRowNumber != 1 || len(binding.FactIDs) != 3 || len(record.ReceiptDraft.SourceRecordIDs) != 1 || record.ReceiptDraft.SourceRecordIDs[0] != binding.SourceRecordID {
-		t.Fatal("B1 native account aggregate lost exact original row/field lineage")
-	}
+	return material
 }
 
 func b1EvolvedCSV(t *testing.T) []byte {
@@ -791,7 +1107,7 @@ func b1EvolvedCSV(t *testing.T) []byte {
 	return body.Bytes()
 }
 
-func b1HasCurrentSemantic(t *testing.T, body []byte) bool {
+func b1HasCurrentSemantic(t *testing.T, body []byte, baselineReference, evolvedReference b1ReferenceFlow) bool {
 	t.Helper()
 	var request struct {
 		Messages []struct {
@@ -856,13 +1172,14 @@ func b1HasCurrentSemantic(t *testing.T, body []byte) bool {
 		return true
 	}
 	data := found[0]
-	count := uint64(1)
-	outflow := "0"
+	reference := baselineReference
 	if evolved {
-		count = 2
-		outflow = "225"
+		reference = evolvedReference
 	}
-	if data.SubjectAlias != "acct:1" || data.InflowMinor != "1250" || data.OutflowMinor != outflow || data.TransactionCount != count ||
+	if reference.currency == "" || data.SubjectAlias != "acct:1" || data.Currency != reference.currency || data.MinorUnitScale != 2 ||
+		data.InflowMinor != reference.inflowMinor || data.OutflowMinor != reference.outflowMinor ||
+		data.NetMinor != reference.netMinor || data.TransactionCount != uint64(reference.transactionCount) ||
+		data.StartInclusive != "2026-08-27T00:00:00.000000Z" || data.EndInclusive != "2026-08-27T23:59:59.999999Z" ||
 		!data.AggregateComplete || data.EvidenceRowsComplete == evolved || data.EvidenceTransactionCount != 1 || data.EvidenceRowLimit != 1 || len(data.Transactions) != 1 {
 		t.Error("B1 actual native semantics lost stable alias, exact aggregate, or independent row coverage")
 	}

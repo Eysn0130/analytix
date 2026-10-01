@@ -58,6 +58,11 @@ func BuildTaskContinuationSnapshotV1(thread map[string]any) (threaddomain.TaskCo
 			})
 		}
 	}
+	var sourceErr error
+	snapshot.UserHistory, sourceErr = continuationUserHistoryV1(thread)
+	if sourceErr != nil {
+		return snapshot, sourceErr
+	}
 	snapshot.LatestUserConstraints = latestContinuationUserConstraintsV1(thread)
 	snapshot.PreviousContinuationDigest, snapshot.PreviousCompactionSourceDigest = previousContinuationDigestsV1(thread)
 	return threaddomain.SealTaskContinuationSnapshotV1(snapshot)

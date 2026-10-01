@@ -653,3 +653,80 @@ func TestManagerExecutionResolutionRecoversInterruptedReplacementBeforeRead(t *t
 		t.Fatal("execution resolution did not recover the committed replacement before read")
 	}
 }
+
+type lockedCredentialReadStore struct {
+	*memorySecretStore
+	locked   bool
+	lastRead []byte
+}
+
+func (store *lockedCredentialReadStore) GetForAuthorizedConsumer(ctx context.Context, request secretstoreport.AccessRequest) ([]byte, error) {
+	if store.locked {
+		return nil, secretstoreport.ErrMasterKeyUnavailable
+	}
+	value, err := store.memorySecretStore.GetForAuthorizedConsumer(ctx, request)
+	store.lastRead = value
+	return value, err
+}
+
+func TestManagerCredentialCheckKeepsConfiguredStateAcrossLockAndRestart(t *testing.T) {
+	ctx := context.Background()
+	registry := newMemoryRegistryStore()
+	secrets := &lockedCredentialReadStore{memorySecretStore: newMemorySecretStore()}
+	manager := mustManager(t, registry, secrets, nil)
+	command := connectCommand(registry.snapshot(), "provider-onboarding", "synthetic-onboarding-key")
+	command.DeferSelection = true
+	provider, err := manager.Connect(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := registry.snapshot()
+	if before.SelectedProviderID != "" {
+		t.Fatal("connect completed initialization before validation")
+	}
+	check := ProviderOperationCommand{Expected: expectedFor(before, provider.ID), ProviderID: provider.ID}
+	if err := manager.CheckCredential(ctx, check); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range secrets.lastRead {
+		if value != 0 {
+			t.Fatal("credential check retained plaintext")
+		}
+	}
+	secrets.locked = true
+	restarted := mustManager(t, registry, secrets, nil)
+	if err := restarted.CheckCredential(ctx, check); !errors.Is(err, registryport.ErrCredentialUnavailable) {
+		t.Fatalf("locked check = %v", err)
+	}
+	after := registry.snapshot()
+	if after.Revision != before.Revision || after.Providers[provider.ID].CredentialRef != provider.CredentialRef || after.SelectedProviderID != "" {
+		t.Fatal("locked check changed initialization or credentials")
+	}
+	secrets.locked = false
+	if err := restarted.CheckCredential(ctx, check); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Select(ctx, SelectCommand{Expected: check.Expected, ProviderID: provider.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.CheckCredential(ctx, check); !errors.Is(err, registryport.ErrConflict) {
+		t.Fatalf("stale check = %v", err)
+	}
+	current := registry.snapshot()
+	currentCheck := ProviderOperationCommand{Expected: expectedFor(current, provider.ID), ProviderID: provider.ID}
+	if err := restarted.CheckCredential(ctx, currentCheck); err != nil {
+		t.Fatal(err)
+	}
+	replacement, _ := secretstoreport.SetCredential([]byte("synthetic-explicit-replacement"))
+	if _, err := restarted.ReplaceCredential(ctx, CredentialReplaceCommand{
+		Expected: currentCheck.Expected, ProviderID: provider.ID, CredentialPurpose: "provider-api-key", Credential: replacement,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.CheckCredential(ctx, currentCheck); !errors.Is(err, registryport.ErrConflict) {
+		t.Fatalf("old credential generation = %v", err)
+	}
+	if err := restarted.CheckCredential(ctx, ProviderOperationCommand{Expected: expectedFor(registry.snapshot(), provider.ID), ProviderID: provider.ID}); err != nil {
+		t.Fatal(err)
+	}
+}

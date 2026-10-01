@@ -1,12 +1,49 @@
 package model_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 )
+
+func TestAutomaticCompactionKeepsEarlyUserRequirementsWithoutGoal(t *testing.T) {
+	thread := map[string]any{"id": "thread-early", "workspace": "/synthetic-workspace", "turns": []any{}}
+	turns := []any{}
+	for i := 0; i < 8; i++ {
+		text := fmt.Sprintf("ordinary follow-up %d", i)
+		if i == 0 {
+			text = "Only modify A.txt; never modify B.txt."
+		}
+		id := fmt.Sprintf("turn-%d", i)
+		turns = append(turns, map[string]any{"id": id, "threadId": "thread-early", "status": "completed", "items": []any{map[string]any{
+			"id": "user-" + id, "turnId": id, "threadId": "thread-early", "kind": "user_message", "role": "user", "text": text,
+		}}})
+	}
+	thread["turns"] = turns
+	plan := appturn.BuildThreadCompactionWithMode(thread, "thread-early", "automatic_context_threshold", 100, "2026-09-26T00:00:00Z", true)
+	if plan.Error != nil || !plan.Changed {
+		t.Fatal("automatic compaction failed", plan.Error)
+	}
+	thread["turns"] = plan.NextTurns
+	var body strings.Builder
+	for _, message := range appmodel.ProviderHistoryFromThread(thread) {
+		body.WriteString(message.Content)
+	}
+	if !strings.Contains(body.String(), "Only modify A.txt; never modify B.txt.") {
+		t.Fatal("early user requirement disappeared from real Provider history")
+	}
+	// The whole new snapshot is fenced, including its legacy summary and
+	// latest-four constraints, not only the new userHistory field.
+	thread["workspace"] = "/another-synthetic-workspace"
+	for _, message := range appmodel.ProviderHistoryFromThread(thread) {
+		if strings.Contains(message.Content, "[Compacted conversation summary]") || strings.Contains(message.Content, "[Analytix task continuation snapshot;") {
+			t.Fatal("a scoped compaction revived after workspace change")
+		}
+	}
+}
 
 func TestAutomaticCompactionRestoresContinuationAsDynamicUserData(t *testing.T) {
 	thread := map[string]any{

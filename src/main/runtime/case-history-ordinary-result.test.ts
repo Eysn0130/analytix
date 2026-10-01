@@ -113,6 +113,17 @@ describe('case-bound typed ordinary history', () => {
     expect(JSON.parse(response.body)).toEqual(detail)
   })
 
+  it('preserves ordinary numeric file output without granting case fact authority', () => {
+    const text = '示例文件日期 2026-09-27，数量 3，金额 100 元，参考编号 42。'
+    const slot = ordinaryResultSlot(text)
+    const detail = caseThreadDetail(assistantItem(text, slot))
+    expect(validOrdinaryResultSlotV1(slot)).toBe(true)
+    const response = sanitizeDetail(detail)
+    expect(response.ok).toBe(true)
+    expect(JSON.parse(response.body)).toEqual(detail)
+    expect(slot.factAnswerAllowed).toBe(false)
+  })
+
   it.each([
     {
       name: 'missing slot',
@@ -159,7 +170,14 @@ describe('case-bound typed ordinary history', () => {
     {
       name: 'protected case fact',
       build: () => {
-        const text = '交易金额 100 元。'
+        const text = '该案涉案金额为 100 元。'
+        return { item: assistantItem(text, ordinaryResultSlot(text)), sentinel: text }
+      }
+    },
+    {
+      name: 'company payment action without case cue',
+      build: () => {
+        const text = '甲公司支付了 2645.72 元'
         return { item: assistantItem(text, ordinaryResultSlot(text)), sentinel: text }
       }
     },

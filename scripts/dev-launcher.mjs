@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { assertCommittedDevelopmentKeychainIdentity, prepareDevelopmentKeychain, promptDevelopmentKeychainPassword } from './development-keychain.mjs'
@@ -15,10 +15,22 @@ const inheritedKeys = [
   'CARGO_HOME', 'CARGO_TARGET_DIR', 'RUSTUP_HOME', 'CCACHE_DIR', 'SCCACHE_DIR',
   'XWIN_CACHE_DIR', 'COREPACK_HOME', 'ELECTRON_CACHE', 'ELECTRON_BUILDER_CACHE',
   'PLAYWRIGHT_BROWSERS_PATH', 'NODE_COMPILE_CACHE', 'npm_config_cache',
-  'PIP_CACHE_DIR', 'UV_CACHE_DIR', 'PYTHONPYCACHEPREFIX', 'MYPY_CACHE_DIR', 'RUFF_CACHE_DIR'
+  'PIP_CACHE_DIR', 'UV_CACHE_DIR', 'PYTHONPYCACHEPREFIX', 'MYPY_CACHE_DIR', 'RUFF_CACHE_DIR',
+  'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT'
 ]
 
 function privateDirectory(directory, create = false) {
+  if (process.platform === 'win32') {
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-File',
+      join(repo, 'scripts/windows-development-profile.ps1'), '-Directory', directory,
+      ...(create ? ['-Create'] : [])
+    ], { cwd: repo, stdio: 'ignore', windowsHide: true, timeout: 10000 })
+    if (result.error || result.signal || result.status !== 0) {
+      throw new Error('Development profile requires canonical Windows directories with an owner-only native ACL.')
+    }
+    return
+  }
   if (create) {
     try { mkdirSync(directory, { mode: 0o700 }) } catch (error) {
       if (error.code !== 'EEXIST') throw error
@@ -32,6 +44,12 @@ function privateDirectory(directory, create = false) {
   }
 }
 
+function defaultDevelopmentStateRoot(env) {
+  return process.platform === 'win32'
+    ? join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'AnalytixDevelopment')
+    : join(homedir(), '.analytix-development')
+}
+
 function entryExists(path) {
   try { lstatSync(path); return true } catch (error) {
     if (error.code === 'ENOENT') return false
@@ -40,27 +58,39 @@ function entryExists(path) {
 }
 
 export function prepareDevelopmentProfile({ root = repo, env = process.env, profile = 'default', fresh = false,
-  stateRoot = join(homedir(), '.analytix-development') } = {}) {
+  stateRoot = defaultDevelopmentStateRoot(env), credentialMode = 'development' } = {}) {
   if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(profile)) throw new Error('Invalid development profile name.')
-  const cache = env.ANALYTIX_DEV_CACHE_ROOT
-  if (!cache || !/^\/[A-Za-z0-9._/-]+$/.test(cache) || resolve(cache) !== cache) {
+  if (!['development', 'isolated-keychain'].includes(credentialMode)) throw new Error('Invalid credential mode.')
+  if (process.platform === 'win32' && credentialMode === 'isolated-keychain') {
+    throw new Error('--isolated-keychain is a macOS-only compatibility QA mode.')
+  }
+  const cache = env.ANALYTIX_DEV_CACHE_ROOT || (process.platform === 'win32' ? join(stateRoot, 'build-cache') : '')
+  if (!cache || !isAbsolute(cache) || resolve(cache) !== cache ||
+    (process.platform !== 'win32' && !/^\/[A-Za-z0-9._/-]+$/.test(cache))) {
     throw new Error('A verified ANALYTIX_DEV_CACHE_ROOT is required; source the configured cache helper first.')
   }
   const temporary = join(cache, 'tmp')
-  privateDirectory(cache)
-  privateDirectory(temporary)
+  if (process.platform === 'win32') privateDirectory(stateRoot, true)
+  privateDirectory(cache, process.platform === 'win32')
+  privateDirectory(temporary, process.platform === 'win32')
   const checkout = createHash('sha256').update(realpathSync(root)).digest('hex').slice(0, 16)
   // Protected state must not inherit the storage qualification of a cache.
   // In particular the configured removable APFS cache is not admitted by the
   // Core's managed-local-filesystem validator. Keep retained state on the
   // local home volume; Core still performs its complete filesystem admission.
-  if (!/^\/[A-Za-z0-9._/-]+$/.test(stateRoot) || resolve(stateRoot) !== stateRoot) {
+  if (!isAbsolute(stateRoot) || resolve(stateRoot) !== stateRoot ||
+    (process.platform !== 'win32' && !/^\/[A-Za-z0-9._/-]+$/.test(stateRoot))) {
     throw new Error('Development state requires a canonical local state root.')
   }
   privateDirectory(stateRoot, true)
   const profiles = join(stateRoot, `analytix-dev-${checkout}`)
   privateDirectory(profiles, true)
-  const taskRoot = fresh ? mkdtempSync(join(profiles, 'fresh-')) : join(profiles, `profile-${profile}`)
+  const prefix = credentialMode === 'development' ? 'development-' : ''
+  const taskRoot = fresh
+    ? (process.platform === 'win32'
+        ? join(profiles, `${prefix}fresh-${randomBytes(12).toString('hex')}`)
+        : mkdtempSync(join(profiles, `${prefix}fresh-`)))
+    : join(profiles, `${prefix}profile-${profile}`)
   const created = fresh || !entryExists(taskRoot)
   privateDirectory(taskRoot, created)
   const userData = join(taskRoot, 'user-data')
@@ -73,6 +103,11 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
   privateDirectory(appCache, created)
   privateDirectory(join(homeRoot, '.analytix'), created)
   privateDirectory(join(homeRoot, '.analytix', 'data'), created)
+  if (process.platform === 'win32') {
+    privateDirectory(join(homeRoot, 'AppData'), created)
+    privateDirectory(join(homeRoot, 'AppData', 'Local'), created)
+    privateDirectory(join(homeRoot, 'AppData', 'Roaming'), created)
+  }
   const childEnv = Object.fromEntries(inheritedKeys.filter(key => env[key] !== undefined).map(key => [key, env[key]]))
   Object.assign(childEnv, {
     NODE_ENV: 'development',
@@ -85,19 +120,36 @@ export function prepareDevelopmentProfile({ root = repo, env = process.env, prof
     XDG_CONFIG_HOME: config,
     XDG_CACHE_HOME: appCache,
     TMPDIR: temporary,
+    ...(process.platform === 'win32' ? {
+      USERPROFILE: homeRoot,
+      APPDATA: join(homeRoot, 'AppData', 'Roaming'),
+      LOCALAPPDATA: join(homeRoot, 'AppData', 'Local'),
+      TEMP: temporary,
+      TMP: temporary,
+      ANALYTIX_DEV_CACHE_ROOT: cache
+    } : {}),
     ANALYTIX_DESKTOP_AUTH_TEST_BOOTSTRAP: '0',
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
     ANALYTIX_UPDATE_CHANNEL: 'beta',
     ANALYTIX_UPDATE_FEED_URL: 'https://example.invalid/analytix/development/'
   })
-  const needsKeychain = created
-  return { taskRoot, userData, homeRoot, created, needsKeychain, env: childEnv }
+  if (credentialMode === 'development') {
+    const credentialRoot = join(stateRoot, 'provider-credentials')
+    privateDirectory(credentialRoot, true)
+    childEnv.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR = credentialRoot
+  }
+  const needsKeychain = credentialMode === 'isolated-keychain' && created
+  return { taskRoot, userData, homeRoot, created, needsKeychain, credentialMode, env: childEnv }
 }
 
-// Directory isolation alone is not launch admission. The existing Darwin
-// runtime requires a separately provisioned explicit task Keychain. Never
-// create a placeholder, select the login Keychain, or silently skip binding.
+// Application-state isolation and credential isolation have distinct owners.
+// Explicit QA keeps its original task Keychain; ordinary source development
+// admits only its private shared authority directory.
 export function assertDevelopmentProfileReady(profile) {
+  if (profile.credentialMode === 'development') {
+    privateDirectory(profile.env.ANALYTIX_DEVELOPMENT_PROVIDER_AUTHORITY_DIR)
+    return
+  }
   try {
     const parent = join(profile.taskRoot, 'darwin-secret-store-keychain')
     privateDirectory(parent)
@@ -113,15 +165,17 @@ export function assertDevelopmentProfileReady(profile) {
 }
 
 export function parseDevelopmentArgs(args) {
-  const result = { fast: false, fresh: false, profile: 'default', unlockKeychain: false }
+  const result = { fast: false, fresh: false, profile: 'default', unlockKeychain: false, credentialMode: 'development' }
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--fast') result.fast = true
     else if (args[index] === '--fresh') result.fresh = true
+    else if (args[index] === '--isolated-keychain') result.credentialMode = 'isolated-keychain'
     else if (args[index] === '--unlock-keychain') result.unlockKeychain = true
     else if (args[index] === '--profile' && args[index + 1]) result.profile = args[++index]
-    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --unlock-keychain]')
+    else throw new Error('Usage: npm run dev:isolated [-- --fast | --fresh | --profile <name> | --isolated-keychain [--unlock-keychain]]')
   }
   if (result.fresh && result.profile !== 'default') throw new Error('Choose --fresh or --profile, not both.')
+  if (result.unlockKeychain && result.credentialMode !== 'isolated-keychain') throw new Error('--unlock-keychain requires --isolated-keychain.')
   return result
 }
 
@@ -132,6 +186,44 @@ export function developmentBuildEnvironment(profile, env = process.env) {
   return { ...profile.env, RUSTUP_HOME: env.RUSTUP_HOME || join(homedir(), '.rustup') }
 }
 
+export async function launchDevelopment(profile, options, {
+  assertProfileReady = assertDevelopmentProfileReady,
+  promptPassword = promptDevelopmentKeychainPassword,
+  prepareKeychain = prepareDevelopmentKeychain,
+  runPrerequisite = script => {
+    const args = script === 'doctor' && process.platform !== 'win32' ? ['run', script, '--', '--native'] : ['run', script]
+    const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+      cwd: repo, stdio: 'inherit', env: developmentBuildEnvironment(profile), shell: process.platform === 'win32'
+    })
+    if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
+  },
+  startApplication = () => {
+    console.log(`[dev] ${profile.credentialMode} credentials; isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
+    console.log('[dev] Profile is retained for restart/recovery; this is not packaged or live-Provider acceptance.')
+    // Invoke the local executable directly, without routing through dev:fast.
+    return spawn(join(repo, 'node_modules/.bin', process.platform === 'win32' ? 'electron-vite.cmd' : 'electron-vite'), ['dev'], {
+      cwd: repo, stdio: 'inherit', env: profile.env, shell: process.platform === 'win32'
+    })
+  }
+} = {}) {
+  if (process.platform === 'win32' && !options.fast) {
+    throw new Error('Windows native development build is not yet qualified; use --fast only with a previously prepared local runtime.')
+  }
+  if (!profile.needsKeychain) assertProfileReady(profile)
+  for (const script of ['doctor', ...(!options.fast ? ['build:data-native:development', 'build:runtime'] : [])]) {
+    await runPrerequisite(script)
+  }
+  // Build time must not consume the task Keychain's unlocked window. A failed
+  // prerequisite also leaves a new profile without a provisioned Keychain.
+  if (profile.needsKeychain || options.unlockKeychain) {
+    const password = promptPassword()
+    try { await prepareKeychain(profile, password, { create: profile.needsKeychain }) }
+    finally { password.fill(0) }
+  }
+  assertProfileReady(profile)
+  return startApplication()
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseDevelopmentArgs(process.argv.slice(2))
@@ -139,25 +231,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.umask(0o077)
     // The current native authority is macOS-only. Never silently open a
     // reduced-capability desktop on an unqualified host.
-    if (process.platform !== 'darwin') throw new Error('Native desktop development currently requires the qualified macOS build environment. Source checks remain available on other hosts.')
+    if (process.platform !== 'darwin' && process.platform !== 'win32') throw new Error('Native desktop development currently requires macOS or a prepared Windows --fast environment.')
     const profile = prepareDevelopmentProfile(options)
-    if (profile.needsKeychain || options.unlockKeychain) {
-      const password = promptDevelopmentKeychainPassword()
-      try { await prepareDevelopmentKeychain(profile, password, { create: profile.needsKeychain }) }
-      finally { password.fill(0) }
-    }
-    assertDevelopmentProfileReady(profile)
-    for (const script of ['doctor', ...(!options.fast ? ['build:data-native:development', 'build:runtime'] : [])]) {
-      const args = script === 'doctor' ? ['run', script, '--', '--native'] : ['run', script]
-      const result = spawnSync('npm', args, { cwd: repo, stdio: 'inherit', env: developmentBuildEnvironment(profile) })
-      if (result.error || result.signal || result.status !== 0) throw new Error(`Development prerequisite failed: ${script}`)
-    }
-    console.log(`[dev] Isolated ${options.fresh ? 'fresh' : options.profile} profile; Hub bootstrap disabled. Normal Provider onboarding is unchanged.`)
-    console.log('[dev] Profile is retained for restart/recovery; this is not packaged or live-Provider acceptance.')
-    // Invoke the local executable directly, without routing through dev:fast.
-    const child = spawn(join(repo, 'node_modules/.bin/electron-vite'), ['dev'], {
-      cwd: repo, stdio: 'inherit', env: profile.env
-    })
+    const child = await launchDevelopment(profile, options)
     const signals = ['SIGINT', 'SIGTERM']
     const forward = signal => child.kill(signal)
     const listeners = signals.map(signal => {

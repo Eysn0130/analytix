@@ -1,10 +1,12 @@
 import type { ReactElement, ReactNode } from 'react'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, Plug, RotateCcw, Sparkles, Terminal, Video, Wrench } from 'lucide-react'
 import type { HubAgentPluginListItem } from '@shared/analytix-api'
+import { generatedArtifactMetadataSchema } from '../../../../../packages/runtime/src/contracts/generated-artifact'
+import { GeneratedOfficeArtifact } from './GeneratedOfficeArtifact'
 import type { AttachmentReference, ChatBlock, GeneratedFileReference, RuntimeDisclosureMetadata, ToolBlock, UserInputAnswer, UserInputQuestion } from '../../agent/types'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'
 import {
@@ -20,6 +22,7 @@ import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
 import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
+import { observeTerminalDOMCommit } from '../../thread/tracing/thread-performance-trace'
 import { AcceptedSlotDisplay, acceptedFinalHasLocalDisplaySlots } from './AcceptedSlotDisplay'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
 import { ModelMetaTag, WritePromptMetaDisclosure } from './message-timeline-cards'
@@ -252,7 +255,7 @@ function UserMessageBubble({
   const [writeMetaOpen, setWriteMetaOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const parsedWritePrompt = useMemo(() => {
-    if (route !== 'write') return null
+    if (route !== 'write' && route !== 'chat') return null
     const parsed = parseWritePromptForDisplay(publicBlockText)
     return parsed?.userInput.trim() ? parsed : null
   }, [publicBlockText, route])
@@ -954,6 +957,15 @@ function MediaAttachmentGallery({
 
 export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactElement | null {
   const { t } = useTranslation('common')
+  const artifacts = useMemo(() => {
+    const seen = new Set<string>()
+    return blocks.flatMap(block => {
+      const parsed = generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact)
+      if (block.status !== 'success' || !parsed.success || seen.has(parsed.data.artifactId)) return []
+      seen.add(parsed.data.artifactId)
+      return [parsed.data]
+    })
+  }, [blocks])
   const media = useMemo(
     () =>
       blocks.flatMap((block) =>
@@ -965,11 +977,12 @@ export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactE
     [blocks]
   )
 
-  if (media.length === 0) return null
+  if (media.length === 0 && artifacts.length === 0) return null
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="text-[12px] font-semibold text-ds-faint">{t('generatedFilesTitle')}</div>
+      {artifacts.map(artifact => <GeneratedOfficeArtifact key={artifact.artifactId} artifact={artifact} />)}
       <MediaAttachmentGallery media={media} variant="conversation" />
     </div>
   )
@@ -1569,6 +1582,13 @@ function MessageBubbleImpl({
 }): ReactElement {
   const { t, i18n } = useTranslation('common')
   const resolveApproval = useChatStore((s) => s.resolveApproval)
+  const traceThreadId = useChatStore((s) => s.activeThreadId)
+  const answerRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    answerRef.current?.removeAttribute('data-terminal-trace-seq')
+    if (block.kind !== 'assistant' || block.id === 'live-assistant' || !answerRef.current) return
+    if (traceThreadId) observeTerminalDOMCommit(traceThreadId, block.id, answerRef.current)
+  }, [block, traceThreadId])
   if (block.kind === 'user') {
     return <UserMessageBubble block={block} />
   }
@@ -1579,7 +1599,10 @@ function MessageBubbleImpl({
       : null
     return (
       <div className="group/message flex min-w-0 max-w-full flex-col">
-        <div className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
+        {block.meta?.factHistoryState === 'retained_snapshot' && block.acceptedFinalProjectionReceipt ? (
+          <div className="mb-1 text-xs text-ds-muted">{t('retainedSnapshotHistory')}</div>
+        ) : null}
+        <div ref={answerRef} className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
           <AssistantMarkdown
             text={block.text}
             streaming={streaming}

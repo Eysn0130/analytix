@@ -180,16 +180,6 @@ export function writeWorkspaceForThreadId(
   return ''
 }
 
-export function writeThreadBelongsToWorkspace(
-  thread: Pick<NormalizedThread, 'id' | 'workspace'>,
-  workspaceRoot: string,
-  registry: WriteThreadRegistry = readWriteThreadRegistry()
-): boolean {
-  if (!isWriteThreadId(thread.id, registry)) return false
-  const registeredWorkspace = writeWorkspaceForThreadId(thread.id, registry)
-  return writeWorkspacePathsMatch(registeredWorkspace || thread.workspace, workspaceRoot)
-}
-
 export function hydrateWriteThreadRegistry(
   threads: WriteThreadCandidate[],
   writeWorkspaceRoots: string[],
@@ -243,27 +233,6 @@ export function hydrateWriteThreadRegistry(
   return normalizeWriteThreadRegistry({ version: 1, workspaces })
 }
 
-export function markWriteThread(
-  workspaceRoot: string,
-  threadId: string,
-  registry: WriteThreadRegistry = readWriteThreadRegistry()
-): WriteThreadRegistry {
-  const key = writeWorkspaceKey(workspaceRoot)
-  const id = threadId.trim()
-  if (!key || !id) return registry
-  const record = registry.workspaces[key] ?? { activeThreadId: '', threadIds: [] }
-  const threadIds = [id, ...record.threadIds.filter((item) => item !== id)]
-  const workspaces = { ...registry.workspaces }
-  delete workspaces[key]
-  return normalizeWriteThreadRegistry({
-    ...registry,
-    workspaces: {
-      ...workspaces,
-      [key]: { activeThreadId: id, threadIds }
-    }
-  })
-}
-
 export function forgetWriteThread(
   threadId: string,
   registry: WriteThreadRegistry = readWriteThreadRegistry()
@@ -297,23 +266,4 @@ export function pruneWriteThreadRegistry(
     workspaces[workspaceRoot] = { activeThreadId, threadIds }
   }
   return normalizeWriteThreadRegistry({ version: 1, workspaces })
-}
-
-export function activeWriteThreadForWorkspace(
-  workspaceRoot: string,
-  threads: NormalizedThread[],
-  registry: WriteThreadRegistry = readWriteThreadRegistry()
-): NormalizedThread | null {
-  const key = writeWorkspaceKey(workspaceRoot)
-  if (!key) return null
-  const record = registry.workspaces[key]
-  if (!record) return null
-  const candidates = record.threadIds
-    .map((id) => threads.find((thread) => thread.id === id) ?? null)
-    .filter((thread): thread is NormalizedThread => Boolean(thread))
-    .filter((thread) => thread.archived !== true)
-    .filter((thread) =>
-      writeWorkspacePathsMatch(writeWorkspaceForThreadId(thread.id, registry) || thread.workspace, key)
-    )
-  return candidates.find((thread) => thread.id === record.activeThreadId) ?? candidates[0] ?? null
 }

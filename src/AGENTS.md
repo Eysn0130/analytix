@@ -11,29 +11,16 @@ rules from the root `AGENTS.md`.
 - `src/preload`: the context-isolated renderer bridge.
 - `src/shared`: cross-layer settings, IPC, and desktop types.
 
-The renderer bridge is `window.analytix`. Runtime-owned settings use top-level
-`runtime`; provider profiles use top-level `provider`. Read legacy shapes only
-in explicit import, migration, fixture, or test paths, and write only the
-current shape.
+Use the bridge and settings identities from the root product anchors; write
+only the current settings shape.
 
 ## Complete Observable Changes
 
 For behavior or contract changes, trace the relevant live call graph before
-choosing files; a text or styling edit does not require unrelated runtime
-inspection. A runtime-facing desktop
-change may require the applicable parts of this slice:
-
-1. public schemas and TypeScript contracts in `packages/runtime/src/contracts`;
-2. the Go use case and HTTP/SSE adapter;
-3. Electron main transport, persistence, and IPC;
-4. preload exposure;
-5. renderer client, projection, state, and visible consumer;
-6. focused evidence at the changed public seams.
-
-Do not treat this list as a requirement to touch every layer. Follow the data
-and behavior through only the consumers the contract actually reaches. Keep
-Go-private routes and upstream-provider protocols behind main/preload-owned
-desktop contracts.
+choosing files; text or styling edits do not require unrelated runtime
+inspection. For runtime-facing changes, use the root's applicable API slice
+and only the consumers the contract reaches. Keep Go-private routes and
+upstream-provider protocols behind main/preload-owned desktop contracts.
 
 ## Providers And Model Requests
 

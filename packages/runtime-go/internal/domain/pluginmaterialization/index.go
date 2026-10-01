@@ -22,6 +22,8 @@ type IndexV1 struct {
 	DiscoverableGenerationCount int    `json:"discoverableGenerationCount"`
 	FactToolsEnabled            bool   `json:"factToolsEnabled"`
 	CommittedAt                 string `json:"committedAt"`
+	Origin                      string `json:"origin,omitempty"`
+	SourceRegistrationSHA256    string `json:"sourceRegistrationSha256,omitempty"`
 }
 
 func NewIndexV1(receipt ReceiptV1, committedAt time.Time) (IndexV1, error) {
@@ -30,6 +32,7 @@ func NewIndexV1(receipt ReceiptV1, committedAt time.Time) (IndexV1, error) {
 	}
 	index := IndexV1{
 		SchemaVersion: SchemaVersionV1, Purpose: IndexPurposeV1,
+		Origin: receipt.Origin, SourceRegistrationSHA256: receipt.SourceRegistrationSHA256,
 		PluginName: receipt.PluginName, PluginVersion: receipt.PluginVersion,
 		GenerationID: receipt.GenerationID, ActiveRelativePath: receipt.ActiveRelativePath,
 		ReceiptID: receipt.ReceiptID, ReceiptSHA256: ReceiptSHA256V1(receipt), IntentID: receipt.IntentID,
@@ -48,6 +51,8 @@ func ValidateIndexV1(index IndexV1) error {
 	if index.SchemaVersion != SchemaVersionV1 || index.Purpose != IndexPurposeV1 ||
 		!canonicalDigest(index.IndexDigest) || index.IndexDigest != deriveIndexDigest(index) ||
 		!validPluginIdentityV1(index.PluginName, index.PluginVersion) ||
+		!validOriginProjectionV1(index.Origin, index.SourceRegistrationSHA256) ||
+		(index.Origin == DevelopmentSourceOriginV1 && !validDevelopmentPackageIDV1(index.PluginName)) ||
 		!canonicalDigest(index.GenerationID) || !canonicalRelativePath(index.ActiveRelativePath) ||
 		!canonicalDigest(index.ReceiptID) || !canonicalDigest(index.ReceiptSHA256) || !canonicalDigest(index.IntentID) ||
 		!canonicalDigest(index.SourceTreeSHA256) || index.SourceTreeFileCount == 0 || index.SourceTreeFileCount > MaxSourceTreeFilesV1 ||
@@ -59,6 +64,7 @@ func ValidateIndexV1(index IndexV1) error {
 
 func ValidateIndexForReceiptV1(index IndexV1, receipt ReceiptV1) error {
 	if ValidateIndexV1(index) != nil || ValidateReceiptV1(receipt) != nil ||
+		index.Origin != receipt.Origin || index.SourceRegistrationSHA256 != receipt.SourceRegistrationSHA256 ||
 		index.PluginName != receipt.PluginName || index.PluginVersion != receipt.PluginVersion ||
 		index.GenerationID != receipt.GenerationID || index.ActiveRelativePath != receipt.ActiveRelativePath ||
 		index.ReceiptID != receipt.ReceiptID || index.ReceiptSHA256 != ReceiptSHA256V1(receipt) ||

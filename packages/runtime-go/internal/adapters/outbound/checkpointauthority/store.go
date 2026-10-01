@@ -56,7 +56,7 @@ func NewStoreContext(ctx context.Context, root string, access privatecasport.Acc
 		return nil, err
 	}
 	operationIntentCAS, err := finalauthority.OpenSecurePrivateCASWithAccessAuthorityContext(
-		ctx, filepath.Join(absolute, "operation-group-intents-v2"), maxCheckpointAuthorityCASBytes, access,
+		ctx, filepath.Join(absolute, "operation-group-intents-v2"), domaincheckpoint.MaxOperationGroupIntentRecordBytes, access,
 	)
 	if err != nil {
 		return nil, err
@@ -108,8 +108,12 @@ func OpenExistingStoreContext(
 	present := make([]bool, len(names))
 	presentCount := 0
 	for index, name := range names {
+		maxBytes := maxCheckpointAuthorityCASBytes
+		if name == "operation-group-intents-v2" {
+			maxBytes = domaincheckpoint.MaxOperationGroupIntentRecordBytes
+		}
 		stores[index], present[index], err = finalauthority.OpenExistingSecurePrivateCASWithAccessAuthorityContext(
-			ctx, filepath.Join(absolute, name), maxCheckpointAuthorityCASBytes, access,
+			ctx, filepath.Join(absolute, name), maxBytes, access,
 		)
 		if err != nil {
 			return nil, false, err

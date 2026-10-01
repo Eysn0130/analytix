@@ -466,3 +466,42 @@ func privateProtocolFlowConfig(endpointFormat, baseURL string) domainmodel.TurnC
 		Model: "claude-test", ReasoningEffort: "high", ReasoningProtocol: "anthropic-thinking",
 	}
 }
+
+func TestDeepSeekMessagesPrivateReplayIsScopeBoundAndVolatile(t *testing.T) {
+	fixture := newPrivateProtocolFlowFixture("messages", "", "https://synthetic.invalid/v1")
+	fixture.issue.ProviderConfig.ReasoningProtocol = "deepseek-messages"
+	fixture.issue.Signature = ""
+	issued, err := IssueAnthropicPrivateProtocol(fixture.issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := append([]domainmodel.Message(nil), fixture.issue.Messages...)
+	messages = append(messages, fixture.issue.AssistantMessage, domainmodel.Message{Role: "tool", ToolCallID: fixture.issue.AssistantMessage.ToolCalls[0].ID, Content: "tool failed: access_denied"})
+	input := AnthropicPrivateProtocolConsumeInput{Session: issued.Session, Capsule: issued.Capsule, ProviderConfig: fixture.issue.ProviderConfig, EndpointFormat: "messages", ContextDigest: fixture.issue.ContextDigest, PromptRoute: fixture.issue.PromptRoute, ToolManifestHash: fixture.issue.ToolManifestHash, Sequence: fixture.issue.Sequence, Messages: messages}
+	replay, err := ConsumeAnthropicPrivateProtocol(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thinking, signature, ok := replay.ThinkingBlock(fixture.issue.AssistantMessageIndex, fixture.issue.AssistantMessage)
+	if !ok || thinking != fixture.issue.Thinking || signature != "" {
+		t.Fatal("Messages requires exact thinking but no invented signature")
+	}
+	changed := input
+	changed.ContextDigest = domainsecurity.SHA256Hex([]byte("revoked"))
+	if _, err := ConsumeAnthropicPrivateProtocol(changed); err == nil {
+		t.Fatal("capsule crossed authority scope")
+	}
+	changed = input
+	changed.ProviderConfig.Model = "changed-model"
+	if _, err := ConsumeAnthropicPrivateProtocol(changed); err == nil {
+		t.Fatal("capsule crossed configured model")
+	}
+	changed = input
+	changed.Session, err = domainmodel.NewPrivateProtocolSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConsumeAnthropicPrivateProtocol(changed); err == nil {
+		t.Fatal("capsule survived session restart")
+	}
+}

@@ -54,7 +54,12 @@ const THREAD_TRACE_DATA_KEYS = {
     'estimatedLines',
     'codeBlockChars',
     'deferred'
-  ]
+  ],
+  'thread.terminal.verified': ['lastSeq', 'verificationMs', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.ipc_sent': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.renderer_committed': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin'],
+  'thread.terminal.dom_committed': ['lastSeq', 'acceptedFinal', 'monotonicMs', 'timeOrigin', 'storeToDomMs', 'documentVisible'],
+  'thread.terminal.next_frame': ['lastSeq', 'acceptedFinal']
 } as const satisfies Record<ThreadTraceEventName, readonly string[]>
 
 type PendingTraceFile = {
@@ -90,10 +95,12 @@ function projectThreadTraceEvent(event: ThreadTraceEventPayload): ThreadTraceEve
     }
   }
   const threadId = threadTraceRef(event.threadId)
+  const turnId = threadTraceRef(event.turnId)
   return {
     name: event.name,
     timestamp: event.timestamp,
     ...(threadId ? { threadId } : {}),
+    ...(turnId ? { turnId } : {}),
     ...(Object.keys(data).length > 0 ? { data } : {})
   }
 }
@@ -203,14 +210,23 @@ export async function appendThreadTraceEvent(
   }
 
   const projectedEvent = projectThreadTraceEvent(event)
+  return appendProjectedThreadTraceEvent(userDataDir, projectedEvent)
+}
+
+function appendProjectedThreadTraceEvent(
+  userDataDir: string,
+  projectedEvent: { name: string; timestamp: number; threadId?: string; turnId?: string; data?: object }
+): ThreadTraceWriteResult {
   const fileName = traceFileName(projectedEvent.threadId)
   const dir = traceDir(userDataDir)
   const tracePath = join(dir, fileName)
   let pending = pendingTraceFiles.get(tracePath)
   if (!pending) {
+    if (pendingTraceFiles.size >= 128) return { ok: false, message: 'thread trace queue full' }
     pending = { timer: null, chunks: [] }
     pendingTraceFiles.set(tracePath, pending)
   }
+  if (pending.chunks.length >= 256) return { ok: false, message: 'thread trace queue full' }
   pending.chunks.push(`${JSON.stringify(projectedEvent)}\n`)
   if (!pending.timer) {
     pending.timer = setTimeout(() => {
@@ -219,4 +235,72 @@ export async function appendThreadTraceEvent(
     pending.timer.unref?.()
   }
   return { ok: true, path: `traces/${fileName}` }
+}
+
+const CORE_PUBLICATION_TIMING_KEYS = new Set([
+  'pid', 'timeOrigin', 'providerStartedMs', 'firstProviderContentMs',
+  'lastProviderContentMs', 'firstProviderTextMs', 'lastProviderTextMs',
+  'providerFinishBoundaryMs', 'providerFinishedMs', 'lastDependencyMs',
+  'candidateProjectionStartedMs', 'candidateProjectionReadyMs',
+  'publicationValidationStartedMs', 'publicationProjectionReadyMs',
+  'publicationCommittedMs', 'sseDeliverableMs', 'publicationGapMs', 'physicalAttempt'
+])
+
+// Only the owned child stderr calls this receiver. Core trace names are not
+// admitted by renderer IPC. It shares the existing bounded writer/rotation;
+// arbitrary stderr remains private and is never forwarded to a trace file.
+export function createRuntimePublicationTraceReceiver(
+  userDataDir: string, pid: number, runtimeGeneration: number
+): { write: (chunk: Buffer | string) => void; close: () => void } {
+  let line = ''
+  let oversized = false
+  const prefix = '[analytix-thread-trace] '
+  const recordLine = (text: string): void => {
+    if (!text.startsWith(prefix)) return
+    try {
+      const value = JSON.parse(text.slice(prefix.length)) as Record<string, unknown>
+      if (!value || Array.isArray(value) ||
+          Object.keys(value).some((key) => !['name', 'threadId', 'turnId', 'data'].includes(key)) ||
+          value.name !== 'thread.terminal.core_committed' ||
+          typeof value.threadId !== 'string' || !/^ref-[a-f0-9]{64}$/.test(value.threadId) ||
+          typeof value.turnId !== 'string' || !/^ref-[a-f0-9]{64}$/.test(value.turnId) ||
+          !value.data || typeof value.data !== 'object' || Array.isArray(value.data)) return
+      const data = value.data as Record<string, unknown>
+      if (data.pid !== pid || !Number.isSafeInteger(pid) || pid <= 0 ||
+          !Number.isSafeInteger(runtimeGeneration) || runtimeGeneration < 1 ||
+          typeof data.timeOrigin !== 'number' || data.timeOrigin <= 0 ||
+          typeof data.publicationCommittedMs !== 'number') return
+      for (const [key, field] of Object.entries(data)) {
+        if (key === 'logicalCallHmac') {
+          if (typeof field !== 'string' || !/^[a-f0-9]{64}$/.test(field)) return
+        } else if (!CORE_PUBLICATION_TIMING_KEYS.has(key) ||
+            typeof field !== 'number' || !Number.isFinite(field) || field < 0) return
+      }
+      appendProjectedThreadTraceEvent(userDataDir, {
+        name: 'thread.terminal.core_committed', timestamp: Date.now(),
+        threadId: value.threadId, turnId: value.turnId,
+        data: { ...data, runtimeGeneration, mainReceivedMonotonicMs: performance.now(), mainTimeOrigin: performance.timeOrigin }
+      })
+    } catch {
+      // Optional malformed observations cannot affect child lifecycle or ACK.
+    }
+  }
+  return {
+    write: (chunk) => {
+      if (!traceEnabled()) { line = ''; oversized = false; return }
+      // Incremental and bounded even when a pipe splits a line or emits an
+      // arbitrarily long non-diagnostic line before a valid observation.
+      for (const part of String(chunk).split(/(?<=\n)/)) {
+        if (!oversized) {
+          if (line.length + part.length > 8192) { line = ''; oversized = true }
+          else line += part
+        }
+        if (part.endsWith('\n')) {
+          if (!oversized) recordLine(line.trimEnd())
+          line = ''; oversized = false
+        }
+      }
+    },
+    close: () => { line = ''; oversized = false }
+  }
 }

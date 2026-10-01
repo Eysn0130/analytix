@@ -423,7 +423,7 @@ describe('provider registry IPC', () => {
     expect(runtimeRequest).not.toHaveBeenCalled()
   })
 
-  it('routes typed Provider connect to the canonical Go API without echoing secret or credential reference', async () => {
+  it.each([undefined, true])('routes typed Provider connect with deferSelection %s without exposing secrets', async (deferSelection) => {
     const syntheticSecretMarker = 'synthetic-provider-registry-secret-marker'
     const valueBase64 = Buffer.from(syntheticSecretMarker).toString('base64')
     const credentialRef = `cred_${'c'.repeat(43)}`
@@ -456,6 +456,7 @@ describe('provider registry IPC', () => {
     const result = await handler({
       schemaVersion: 1,
       operation: 'connect',
+      ...(deferSelection === undefined ? {} : { deferSelection }),
       expected: {
         registryRevision: '0',
         registryIncarnation,
@@ -487,6 +488,7 @@ describe('provider registry IPC', () => {
       'POST',
       JSON.stringify({
         schemaVersion: 1,
+        ...(deferSelection === undefined ? {} : { deferSelection }),
         expected: {
           registryRevision: '0',
           registryIncarnation,
@@ -673,6 +675,14 @@ describe('provider registry IPC', () => {
           credential: { kind: 'set', purpose: 'provider-api-key', valueBase64: replacementBase64 }
         })],
         response: providerResponse({ provider: publicProvider({ generation: '4' }) })
+      },
+      {
+        request: { schemaVersion: 1, operation: 'credential-check', providerId: 'provider-alpha', expected: expectedExisting },
+        call: ['/v1/provider-registry/providers/provider-alpha/credential-check', 'POST', JSON.stringify({ schemaVersion: 1, expected: expectedExisting })],
+        response: { ok: true, status: 200, body: JSON.stringify({
+          schemaVersion: 1, registryRevision: '4', registryIncarnation, providerId: 'provider-alpha',
+          providerRevision: '7', providerGeneration: '3', providerIncarnation, credentialAvailable: true
+        }) }
       },
       {
         request: {
@@ -1116,24 +1126,25 @@ describe('provider registry IPC', () => {
 
   it('projects the production-shaped runtime transport failure as unavailable', async () => {
     const listRequest = { schemaVersion: 1, operation: 'list' }
-    const productionTransportFailure = createProviderRegistryIpcHandler(vi.fn(async () => ({
-      ok: false,
-      status: 0,
-      body: JSON.stringify({
-        code: 'fetch_failed',
-        message: 'The Analytix runtime is unavailable.'
+    for (const code of ['fetch_failed', 'runtime_unavailable']) {
+      const productionTransportFailure = createProviderRegistryIpcHandler(vi.fn(async () => ({
+        ok: false,
+        status: 0,
+        body: JSON.stringify({ code, message: 'The Analytix runtime is unavailable.' })
+      })))
+      await expect(productionTransportFailure(listRequest)).resolves.toEqual({
+        schemaVersion: 1,
+        error: {
+          code: 'runtime_unavailable',
+          message: 'The provider registry is unavailable.'
+        }
       })
-    })))
-    await expect(productionTransportFailure(listRequest)).resolves.toEqual({
-      schemaVersion: 1,
-      error: {
-        code: 'runtime_unavailable',
-        message: 'The provider registry is unavailable.'
-      }
-    })
+    }
 
     const malformedTransportFailures = [
       { code: 'fetch_failed', message: 'The Analytix runtime is unavailable.', detail: 'raw-provider-body' },
+      { code: 'runtime_unavailable', message: 'The Analytix runtime is unavailable.', detail: 'raw-provider-body' },
+      { code: 'runtime_unavailable', message: 'runtime failed at /private/provider-registry' },
       { code: 'fetch_failed', message: 'runtime failed at /private/provider-registry' },
       { code: 'other_failure', message: 'The Analytix runtime is unavailable.' },
       {
@@ -1152,6 +1163,12 @@ describe('provider registry IPC', () => {
         error: { code: 'invalid_response' }
       })
     }
+    const falseSuccess = createProviderRegistryIpcHandler(vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({ code: 'runtime_unavailable', message: 'The Analytix runtime is unavailable.' })
+    })))
+    await expect(falseSuccess(listRequest)).resolves.toMatchObject({ error: { code: 'invalid_response' } })
   })
 
   it('preserves canonical Go failures while redacting raw and transport failures', async () => {
@@ -1209,4 +1226,16 @@ describe('provider registry IPC', () => {
       error: { code: 'invalid_response' }
     })
   })
+})
+
+
+it('rejects stale or secret-bearing credential availability replies', async () => {
+  for (const patch of [{ providerGeneration: '2' }, { credential: 'synthetic-leaked-value' }]) {
+    const response = { schemaVersion: 1, registryRevision: '4', registryIncarnation, providerId: 'provider-alpha',
+      providerRevision: '7', providerGeneration: '3', providerIncarnation, credentialAvailable: true, ...patch }
+    const transport = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(response) }))
+    const handler = createProviderRegistryIpcHandler(transport)
+    await expect(handler({ schemaVersion: 1, operation: 'credential-check', providerId: 'provider-alpha', expected: expectedExisting }))
+      .resolves.toMatchObject({ error: { code: 'invalid_response' } })
+  }
 })

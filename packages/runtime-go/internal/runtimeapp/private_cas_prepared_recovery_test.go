@@ -95,6 +95,9 @@ func TestRuntimePrivateCASOwnerManifestBindsEveryExactProductionRoot(t *testing.
 			filepath.Join(privateRoot, "evidence-authority", "bundles"),
 			filepath.Join(privateRoot, "evidence-authority", "observations"),
 		},
+		"evidence-authority-host-local": {
+			filepath.Join(privateRoot, "evidence-authority-host-local", "heads"),
+		},
 		"evidence-registry": {
 			filepath.Join(privateRoot, "evidence-registry", "capsules"),
 			filepath.Join(privateRoot, "evidence-registry", "indexes"),

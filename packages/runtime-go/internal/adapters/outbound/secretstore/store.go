@@ -25,6 +25,13 @@ type Store struct {
 // Options carries main-private startup authority. It is never derived from a
 // public request or persisted settings.
 type Options struct {
+	// DevelopmentFileAuthority explicitly selects the existing protected-local
+	// fallback. The runtime admits it only in compiled source-development mode.
+	DevelopmentFileAuthority bool
+	// LegacyReentryFileAuthority is a main-private, Darwin-only v2 store used
+	// after the old Keychain ciphertext inventory has been verified without
+	// reading its master key.
+	LegacyReentryFileAuthority   bool
 	DarwinKeychainDBPath         string
 	DarwinKeychainBindingDigest  string
 	DarwinKeychainSecurityDigest string

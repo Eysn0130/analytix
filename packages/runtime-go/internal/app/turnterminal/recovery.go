@@ -27,7 +27,15 @@ type RestartRecoveryInputV1 struct {
 	Candidates                []domainevidence.PrivateAcceptedFinalRecord
 }
 
+// FactTerminalCandidateV1 is verified durable history, not current permission.
+// A fresh process-scoped witness is still required before public admission.
+type FactTerminalCandidateV1 struct {
+	PrivateFinal domainevidence.PrivateAcceptedFinalRecord
+	Terminal     CommitResultV1
+}
+
 type RestartRecoveryResultV1 struct {
+	FactCandidates         []FactTerminalCandidateV1
 	Complete               []CommitResultV1
 	LegacyQuarantined      []domainevidence.PrivateAcceptedFinalRecord
 	AuditOnly              []domainevidence.PrivateAcceptedFinalRecord
@@ -173,6 +181,7 @@ func (coordinator *Coordinator) RecoverV1(ctx context.Context, input RestartReco
 	sort.Slice(nonExecutableAudit, func(i, j int) bool {
 		return nonExecutableAudit[i].AcceptedFinal.RecordDigest < nonExecutableAudit[j].AcceptedFinal.RecordDigest
 	})
+	factCandidates := []FactTerminalCandidateV1{}
 	nonExecutableObservations := make(map[string]domainevidence.AcceptedFinalCASObservationV1, len(nonExecutableAudit))
 	for _, record := range nonExecutableAudit {
 		if err := ctx.Err(); err != nil {
@@ -252,6 +261,20 @@ func (coordinator *Coordinator) RecoverV1(ctx context.Context, input RestartReco
 				return RestartRecoveryResultV1{}, errors.New("turn terminal audit-only terminal disposition is detached")
 			}
 			consumedTerminal[record.SecurityContext.ContextDigest] = true
+			if !preservedScope.ownsThread(record.SecurityContext.ThreadID) &&
+				domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record.AcceptedFinal) == nil &&
+				(record.AcceptedFinal.FactFinalWitnessAdmission != nil || record.AcceptedFinal.FactFinalHostLocalAdmission != nil) &&
+				domainevidence.FinalAnswerRequiresPublicationSnapshotProof(record.Envelope) &&
+				acceptedDisposition.SchemaVersion == domainevidence.AcceptedFinalDispositionRecordV2 {
+				publication, err := buildRestartRecoveryPublicationPlanV1(record)
+				if err != nil {
+					return RestartRecoveryResultV1{}, err
+				}
+				factCandidates = append(factCandidates, FactTerminalCandidateV1{PrivateFinal: record, Terminal: CommitResultV1{
+					Persistence: appturn.PersistAcceptedFinalResult{CompletionRecord: publication.Completion, AcceptedFinal: record.AcceptedFinal, Publication: publication, Changed: false, Status: observation.Status},
+					Intent:      intent, ProviderClosure: closure, PublicObservation: observation, AcceptedFinalDisposition: acceptedDisposition, TerminalDisposition: terminalDisposition,
+				}})
+			}
 		}
 	}
 
@@ -404,7 +427,8 @@ func (coordinator *Coordinator) RecoverV1(ctx context.Context, input RestartReco
 	}
 
 	result := RestartRecoveryResultV1{
-		Complete: []CommitResultV1{}, LegacyQuarantined: []domainevidence.PrivateAcceptedFinalRecord{}, AuditOnly: auditOnly,
+		FactCandidates: factCandidates,
+		Complete:       []CommitResultV1{}, LegacyQuarantined: []domainevidence.PrivateAcceptedFinalRecord{}, AuditOnly: auditOnly,
 		NonExecutableAuditOnly: append([]domainevidence.PrivateAcceptedFinalRecord(nil), nonExecutableAudit...),
 		ProviderAuditOnly:      providerAuditOnly,
 		Preserved:              preservedRecords,
@@ -727,8 +751,7 @@ func terminalEventManifestDigestV1(privateFinal domainevidence.PrivateAcceptedFi
 // mutation; audit-only records use it solely to verify existing immutable
 // manifests and dispositions.
 func buildRestartRecoveryPublicationPlanV1(privateFinal domainevidence.PrivateAcceptedFinalRecord) (appturn.AcceptedFinalPublicationPlan, error) {
-	if privateFinal.SchemaVersion == domainevidence.PrivateAcceptedFinalRecordVersion &&
-		privateFinal.AcceptedFinal.SchemaVersion == domainevidence.AcceptedFinalRecordVersion {
+	if domainevidence.ValidateAcceptedFinalForCurrentWriteV1(privateFinal.AcceptedFinal) == nil {
 		return appturn.BuildAcceptedFinalPublicationPlan(
 			privateFinal.AcceptedFinal, privateFinal.RenderedText, privateFinal.PublicationIntent,
 		)

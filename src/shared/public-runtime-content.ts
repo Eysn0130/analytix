@@ -15,7 +15,7 @@ import { containsRestrictedEvidence } from './restricted-evidence-projection'
 import {
   containsInternalCaseEntityReference,
   containsOrdinaryPublicPII,
-  containsProtectedCaseFactCandidate
+  containsUnboundCaseRiskV1
 } from './ordinary-log-pii-projection'
 import { containsSecretMaterial } from './secret-redaction'
 
@@ -58,6 +58,7 @@ const PRIVATE_RUNTIME_DIAGNOSTIC_KEYS = new Set([
 const PRIVATE_ACCEPTED_FINAL_STRONG_KEYS = new Set([
   'acceptedfinal',
   'factfinalwitnessadmission',
+  'factfinalhostlocaladmission',
   'publicationsnapshotproof',
   'publicationsnapshotproofdigest'
 ])
@@ -99,6 +100,7 @@ function publicReasoningMetadataState(
     case 'reasoning':
       return PublicModelReasoningV2.safeParse(value).success ? 'valid' : 'invalid'
     case 'reasoningtokens':
+    case 'firstreasoninglatencyms':
       return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? 'valid' : 'invalid'
     case 'reasoningeffort':
       if (value === '') return 'legacy-empty'
@@ -566,7 +568,7 @@ export class PublicRuntimeEventFilter {
           containsInternalCaseEntityReference(payload)) return null
       const itemEvent = parsed.data.events.length === 3 ? parsed.data.events[0] : undefined
       if (itemEvent?.kind === 'item_completed' && itemEvent.item.kind === 'assistant_text' &&
-          'ordinaryResult' in itemEvent.item && containsProtectedCaseFactCandidate(itemEvent.item.text)) return null
+          'ordinaryResult' in itemEvent.item && containsUnboundCaseRiskV1(itemEvent.item.text)) return null
       return payload
     }
 

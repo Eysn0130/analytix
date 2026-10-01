@@ -57,6 +57,9 @@ func BuildCapturedCheckpointMetadata(input CapturedCheckpointInput) (map[string]
 		if afterHash := strings.TrimSpace(stringField(record, "afterHash")); afterHash != "" {
 			file["afterHash"] = afterHash
 		}
+		if record["generatedOfficeCreation"] == true {
+			file["generatedOfficeCreation"] = true
+		}
 		changedFiles = append(changedFiles, file)
 	}
 	if len(changedFiles) == 0 {

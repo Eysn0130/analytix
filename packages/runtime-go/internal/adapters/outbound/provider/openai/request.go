@@ -76,7 +76,9 @@ func applyDeepSeekChatReasoning(body map[string]any, effort string, nativeDeepSe
 	if effort == "auto" {
 		return
 	}
-	if effort == "max" {
+	if effort == "low" {
+		body["reasoning_effort"] = "low"
+	} else if effort == "max" {
 		body["reasoning_effort"] = "max"
 	} else {
 		body["reasoning_effort"] = "high"

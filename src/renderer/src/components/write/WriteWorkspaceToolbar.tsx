@@ -26,15 +26,12 @@ type Props = {
   activeFileIsImage: boolean
   activeFileIsPdf?: boolean
   activeFileIsText: boolean
-  activeFileLabel: string
-  activeFileName: string
   activeFilePath: string
   documentStatsLabel: string | null
   assistantOpen: boolean
   exportInFlight: boolean
   exportMenuOpen: boolean
   exportMenuRef: RefObject<HTMLDivElement | null>
-  leftSidebarCollapsed: boolean
   liveModeActive: boolean
   modeMenuItems: WriteModeMenuItem[]
   modeMenuOpen: boolean
@@ -60,15 +57,12 @@ export function WriteWorkspaceToolbar({
   activeFileIsImage,
   activeFileIsPdf = false,
   activeFileIsText,
-  activeFileLabel,
-  activeFileName,
   activeFilePath,
   documentStatsLabel,
   assistantOpen,
   exportInFlight,
   exportMenuOpen,
   exportMenuRef,
-  leftSidebarCollapsed,
   liveModeActive,
   modeMenuItems,
   modeMenuOpen,
@@ -96,9 +90,9 @@ export function WriteWorkspaceToolbar({
       ? 'text-accent'
       : readOnly
         ? ''
-        : saveStatus === 'error'
+        : (saveStatus === 'error' || saveStatus === 'conflict')
           ? 'text-red-500'
-          : saveStatus === 'dirty'
+          : (saveStatus === 'dirty' || saveStatus === 'unknown')
             ? 'text-amber-500'
             : saveStatus === 'saving'
               ? 'text-sky-500'
@@ -126,32 +120,9 @@ export function WriteWorkspaceToolbar({
   if (activeFileIsPdf) {
     return (
       <div className="-mx-3 shrink-0 sm:-mx-4 md:-mx-6 lg:-mx-8">
-        <header className="chat-topbar ds-chat-shell-header ds-topbar-surface write-pdf-topbar relative z-10 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible">
-          <div aria-hidden="true" className="chat-topbar-drag-region" />
-          <div className="chat-topbar-grid write-pdf-topbar-grid grid w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
-            <div
-              className={`chat-topbar-session ds-shell-controls-safe-motion flex min-w-0 items-center gap-2.5 ${
-                leftSidebarCollapsed ? 'ds-shell-controls-safe-inset' : ''
-              }`}
-            >
-              <div className="session-header-compact flex min-h-0 min-w-0 flex-1 items-center gap-2 text-left">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <div className="min-w-0 truncate text-[13px] font-semibold leading-[17px] tracking-[-0.01em] text-ds-ink opacity-95">
-                      {activeFileName}
-                    </div>
-                    <span className="ds-session-actions-anchor invisible pointer-events-none" aria-hidden="true">
-                      <span className="ds-session-actions-trigger" />
-                    </span>
-                  </div>
-                  <div className="session-header-compact-meta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] leading-[14px] text-ds-faint">
-                    <span className="session-meta-workspace max-w-[min(42vw,240px)] truncate">{activeFileLabel}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="chat-topbar-actions write-pdf-topbar-actions chat-workbench-topbar ds-no-drag flex min-w-0 flex-nowrap items-center justify-end gap-1.5 self-center">
+        <header className="write-pdf-topbar relative z-10 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible">
+          <div className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
+            <div className="write-pdf-topbar-actions ds-no-drag flex min-w-0 flex-nowrap items-center justify-end gap-1.5 self-center">
               <div className="write-pdf-topbar-status">
                 <BookOpen className="ds-toolbar-icon-svg" strokeWidth={1.85} />
                 <span>{t('writePdfPreview')}</span>
@@ -177,38 +148,10 @@ export function WriteWorkspaceToolbar({
 
   return (
     <div className="-mx-3 shrink-0 sm:-mx-4 md:-mx-6 lg:-mx-8">
-      <header className="chat-topbar ds-chat-shell-header ds-topbar-surface relative z-10 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible">
-        <div aria-hidden="true" className="chat-topbar-drag-region" />
-        <div className="chat-topbar-grid write-workspace-toolbar-grid grid w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
-          <div
-            className={`chat-topbar-session ds-shell-controls-safe-motion flex min-w-0 items-center gap-2.5 ${
-              leftSidebarCollapsed ? 'ds-shell-controls-safe-inset' : ''
-            }`}
-          >
-            <div className="session-header-compact flex min-h-0 min-w-0 flex-1 items-center gap-2 text-left">
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <div className="min-w-0 truncate text-[13px] font-semibold leading-[17px] tracking-[-0.01em] text-ds-ink opacity-95">
-                    {activeFileName}
-                  </div>
-                  <span className="ds-session-actions-anchor invisible pointer-events-none" aria-hidden="true">
-                    <span className="ds-session-actions-trigger" />
-                  </span>
-                </div>
-                <div className="session-header-compact-meta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] leading-[14px] text-ds-faint">
-                  <span className="session-meta-workspace max-w-[min(42vw,240px)] truncate">{activeFileLabel}</span>
-                  {documentStatsLabel ? (
-                    <>
-                      <span className="session-meta-workspace-separator shrink-0 opacity-70">·</span>
-                      <span className="session-meta-time shrink-0 tabular-nums">{documentStatsLabel}</span>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="chat-topbar-actions write-workspace-toolbar-actions chat-workbench-topbar ds-no-drag flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-3 self-center">
+      <header aria-label={t('writeTypographyControls')} className="relative z-10 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible">
+        <div className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
+          <div className="write-workspace-toolbar-actions ds-no-drag flex w-full min-w-0 flex-wrap items-center gap-2 self-center">
+            {documentStatsLabel ? <span className="mr-auto shrink-0 text-xs tabular-nums text-ds-muted">{documentStatsLabel}</span> : null}
             <div
               ref={modeMenuRef}
               className="write-workspace-toolbar-modes relative flex min-w-0 items-center justify-start"

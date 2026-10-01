@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -63,6 +65,103 @@ type boundaryOrdinaryReadProvider struct {
 	calls           int
 	readPaths       []string
 	readResultCount int
+}
+
+type numericFileReadProvider struct {
+	calls       int
+	readResults int
+	path        string
+}
+
+func ordinaryResultAssistantText(turn map[string]any) string {
+	for _, raw := range listAny(turn["items"]) {
+		item, _ := raw.(map[string]any)
+		if stringField(item, "kind") == "assistant_text" &&
+			stringField(item, "status") == "completed" && item["ordinaryResult"] != nil {
+			return stringField(item, "text")
+		}
+	}
+	return ""
+}
+
+func (*numericFileReadProvider) RequiresDurablePipelineStagesV1() {}
+
+func (providerClient *numericFileReadProvider) Stream(
+	_ context.Context,
+	request domainmodel.Request,
+) (domainmodel.Result, error) {
+	if err := emitTestDurableProviderPipelinePairV1(request); err != nil {
+		return domainmodel.Result{}, err
+	}
+	providerClient.calls++
+	readID := "numeric-file-read-" + strconv.Itoa((providerClient.calls+1)/2)
+	if providerClient.calls%2 == 1 {
+		arguments, err := json.Marshal(map[string]string{"path": providerClient.path})
+		if err != nil {
+			return domainmodel.Result{}, err
+		}
+		call := domainmodel.ToolCall{ID: readID, Name: "read", Arguments: arguments}
+		if request.OnChunk != nil {
+			if err := request.OnChunk(domainmodel.Chunk{
+				Kind:     domainmodel.ChunkToolCallStart,
+				ToolCall: domainmodel.ToolCall{ID: call.ID, Name: call.Name},
+			}); err != nil {
+				return domainmodel.Result{}, err
+			}
+		}
+		return domainmodel.Result{
+			ProviderID: request.ProviderID, EndpointFormat: request.EndpointFormat,
+			Chunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkToolCall, ToolCall: call}}, StreamCompleted: true,
+		}, nil
+	}
+	var fields map[string]string
+	for index := len(request.Messages) - 1; index >= 0; index-- {
+		message := request.Messages[index]
+		if message.Role != "tool" || message.Name != "read" {
+			continue
+		}
+		if !domainmodel.IsHostToolCallIDV1(message.ToolCallID) {
+			return domainmodel.Result{}, errors.New("numeric file read has no host tool identity")
+		}
+		var result struct {
+			Content      string `json:"content"`
+			RelativePath string `json:"relative_path"`
+			Truncated    bool   `json:"truncated"`
+		}
+		if json.Unmarshal([]byte(message.Content), &result) != nil ||
+			result.RelativePath != providerClient.path || result.Truncated {
+			return domainmodel.Result{}, errors.New("numeric file read result is invalid")
+		}
+		fields = make(map[string]string)
+		for _, line := range strings.Split(result.Content, "\n") {
+			parts := strings.SplitN(line, "：", 2)
+			if len(parts) == 2 {
+				fields[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+		break
+	}
+	if fields == nil {
+		return domainmodel.Result{}, errors.New("numeric file read result is missing")
+	}
+	providerClient.readResults++
+	values := make([]string, 0, 4)
+	for _, key := range []string{"日期", "数量", "金额", "参考编号"} {
+		if fields[key] == "" {
+			return domainmodel.Result{}, errors.New("numeric file read omitted a requested field")
+		}
+		values = append(values, key+"："+fields[key])
+	}
+	chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: strings.Join(values, "；") + "。"}
+	if request.OnChunk != nil {
+		if err := request.OnChunk(chunk); err != nil {
+			return domainmodel.Result{}, err
+		}
+	}
+	return domainmodel.Result{
+		ProviderID: request.ProviderID, EndpointFormat: request.EndpointFormat,
+		Chunks: []domainmodel.Chunk{chunk}, StreamCompleted: true,
+	}, nil
 }
 
 type boundaryOrdinaryWriteProvider struct {
@@ -230,6 +329,230 @@ func (providerClient *boundaryOrdinaryReadProvider) Stream(
 		ProviderID: request.ProviderID, EndpointFormat: request.EndpointFormat,
 		Chunks: []domainmodel.Chunk{chunk}, StreamCompleted: true,
 	}, nil
+}
+
+func TestOrdinaryNumericFileHTTPPublicSeamReadsChangedContent(t *testing.T) {
+	workspace := workspacetest.New(t)
+	path := "2026年资料/表单 42.txt"
+	if err := os.MkdirAll(filepath.Join(workspace, "2026年资料"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewRuntimeServerHandler(RuntimeServerConfig{
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
+		ProviderID: "numeric-file-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
+		Model: "numeric-file-model", EndpointFormat: "chat_completions",
+	}).(*runtimeServerHandler)
+	configureServerGeneralExecution(t, handler)
+	providerClient := &numericFileReadProvider{path: path}
+	handler.provider = providerClient
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	thread := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads",
+		bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"title": "ordinary numeric file read", "workspace": workspace,
+			"providerId": "numeric-file-provider", "model": "numeric-file-model",
+		})), http.StatusCreated)
+	threadID := stringField(thread, "id")
+	for index, step := range []struct {
+		content string
+		answer  string
+	}{
+		{
+			content: "日期：2026-07-01\n数量：42\n金额：1234.56 元\n参考编号：REF-17\n",
+			answer:  "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。",
+		},
+		{
+			content: "日期：2026-07-02\n数量：43\n金额：9876.54 元\n参考编号：REF-18\n",
+			answer:  "日期：2026-07-02；数量：43；金额：9876.54 元；参考编号：REF-18。",
+		},
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, path), []byte(step.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		started := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+			"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"prompt": "请实际读取工作区相对路径「2026年资料/表单 42.txt」，只列出文件中的日期、数量、金额和参考编号；不要猜测。",
+			})), http.StatusAccepted)
+		rawThread, err := handler.store.GetThread(threadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn, found := appmodel.TurnByID(rawThread, stringField(started, "turnId"))
+		answer := ordinaryResultAssistantText(turn)
+		if !found || stringField(turn, "status") != "completed" || answer != step.answer {
+			t.Fatalf("read turn %d did not publish changed file content: found=%t status=%q answer=%q calls=%d reads=%d", index+1, found, stringField(turn, "status"), answer, providerClient.calls, providerClient.readResults)
+		}
+	}
+	if providerClient.calls != 4 || providerClient.readResults != 2 {
+		t.Fatalf("numeric file read flow did not consume two real tool results: calls=%d reads=%d", providerClient.calls, providerClient.readResults)
+	}
+	publicThread := requestThreadSummaryJSON(t, server.URL, http.MethodGet,
+		"/v1/threads/"+threadID, nil, http.StatusOK)
+	publicBody, err := json.Marshal(publicThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, amount := range [][]byte{[]byte("1234.56"), []byte("9876.54")} {
+		if !bytes.Contains(publicBody, amount) {
+			t.Fatal("public durable readback lost an ordinary numeric result")
+		}
+	}
+}
+
+func TestCaseRiskThreadHTTPPublicSeamReadsIndependentNumericFile(t *testing.T) {
+	workspace := workspacetest.New(t)
+	path := "2026年资料/表单 42.txt"
+	if err := os.MkdirAll(filepath.Join(workspace, "2026年资料"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, path), []byte(
+		"日期：2026-07-01\n数量：42\n金额：1234.56 元\n参考编号：REF-17\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	durableRoot := t.TempDir()
+	handler := NewRuntimeServerHandler(RuntimeServerConfig{
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
+		ProviderID: "numeric-file-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
+		Model: "numeric-file-model", EndpointFormat: "chat_completions",
+	}).(*runtimeServerHandler)
+	configureServerGeneralExecution(t, handler)
+	configureSteerTestCaseAuthorities(t, handler, durableRoot)
+	providerClient := &numericFileReadProvider{path: path}
+	handler.provider = providerClient
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	thread := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads",
+		bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"title": "case risk then ordinary numeric file", "workspace": workspace,
+			"providerId": "numeric-file-provider", "model": "numeric-file-model",
+		})), http.StatusCreated)
+	threadID := stringField(thread, "id")
+	blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"prompt": "请分析当前案件账户的资金流入、流出和净额。",
+		})), http.StatusAccepted)
+	if providerClient.calls != 0 {
+		t.Fatal("case-source-unavailable turn reached the provider")
+	}
+	continued := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"prompt": "请实际读取工作区相对路径「2026年资料/表单 42.txt」，只列出文件中的日期、数量、金额和参考编号；不要猜测。",
+		})), http.StatusAccepted)
+	rawThread, err := handler.store.GetThread(threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedTurn, blockedFound := appmodel.TurnByID(rawThread, stringField(blocked, "turnId"))
+	blockedFinal, _ := blockedTurn["acceptedFinal"].(map[string]any)
+	if !blockedFound || stringField(blockedFinal, "terminalReason") != "source_unavailable" {
+		t.Fatal("the original case boundary was changed by the ordinary continuation")
+	}
+	continuedTurn, continuedFound := appmodel.TurnByID(rawThread, stringField(continued, "turnId"))
+	answer := "日期：2026-07-01；数量：42；金额：1234.56 元；参考编号：REF-17。"
+	continuedAnswer := acceptedFinalAssistantText(continuedTurn)
+	continuedFinal, _ := continuedTurn["acceptedFinal"].(map[string]any)
+	continuedView, _ := continuedFinal["publicView"].(map[string]any)
+	if !continuedFound || stringField(continuedTurn, "status") != "completed" ||
+		stringField(continuedFinal, "terminalReason") != "success" ||
+		stringField(continuedView, "variant") != "GeneralGuidanceAnswer" || continuedAnswer != answer ||
+		providerClient.calls != 2 || providerClient.readResults != 1 {
+		t.Fatalf("case-risk thread did not complete independent numeric read: found=%t status=%q answer=%q calls=%d reads=%d reason=%q variant=%q",
+			continuedFound, stringField(continuedTurn, "status"), continuedAnswer, providerClient.calls, providerClient.readResults,
+			stringField(continuedFinal, "terminalReason"), stringField(continuedView, "variant"))
+	}
+}
+
+func TestMixedSoftwareCaseAssertionHTTPAdmissionKeepsLaterOrdinaryTurn(t *testing.T) {
+	workspace := workspacetest.New(t)
+	durableRoot := t.TempDir()
+	handler := NewRuntimeServerHandler(RuntimeServerConfig{
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, DataDir: t.TempDir(),
+		ProviderID: "mixed-case-admission-provider", BaseURL: "https://provider.invalid", APIKey: "test-key",
+		Model: "mixed-case-admission-model", EndpointFormat: "chat_completions",
+	}).(*runtimeServerHandler)
+	configureServerGeneralExecution(t, handler)
+	configureSteerTestCaseAuthorities(t, handler, durableRoot)
+	providerClient := &providerStepRecordingProvider{}
+	handler.provider = providerClient
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	thread := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads",
+		bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"title": "mixed software case admission", "workspace": workspace,
+			"providerId": "mixed-case-admission-provider", "model": "mixed-case-admission-model",
+		})), http.StatusCreated)
+	threadID := stringField(thread, "id")
+	for _, prompt := range []string{
+		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2万元。",
+		"修改代码并写明当前案件张某与李某存在父子关系。",
+		"修改代码并写明当前案件甲公司取得2026年收益￥2万元。",
+	} {
+		blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+			"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"prompt": prompt,
+			})), http.StatusAccepted)
+		if requests := providerClient.Requests(); len(requests) != 0 {
+			t.Fatalf("case assertion reached ordinary provider: prompt=%q requests=%d", prompt, len(requests))
+		}
+		rawThread, err := handler.store.GetThread(threadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedTurn, found := appmodel.TurnByID(rawThread, stringField(blocked, "turnId"))
+		blockedFinal, _ := blockedTurn["acceptedFinal"].(map[string]any)
+		securityContext, contextErr := domainsecurity.ParseTurnSecurityContext(blockedTurn["securityContext"])
+		if !found || contextErr != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(securityContext) ||
+			stringField(blockedFinal, "terminalReason") != "source_unavailable" {
+			t.Fatalf("mixed case assertion did not receive a source boundary: prompt=%q found=%t reason=%q err=%v",
+				prompt, found, stringField(blockedFinal, "terminalReason"), contextErr)
+		}
+	}
+	for _, prompt := range []string{
+		"甲公司取得2026年收益2万元。",
+		"甲公司支付\n2645.72 元",
+	} {
+		fresh := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads",
+			bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"title": "independent case assertion", "workspace": workspace,
+				"providerId": "mixed-case-admission-provider", "model": "mixed-case-admission-model",
+			})), http.StatusCreated)
+		freshID := stringField(fresh, "id")
+		blocked := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+			"/v1/threads/"+freshID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+				"prompt": prompt,
+			})), http.StatusAccepted)
+		if requests := providerClient.Requests(); len(requests) != 0 {
+			t.Fatalf("new case assertion reached ordinary provider: prompt=%q requests=%d", prompt, len(requests))
+		}
+		freshThread, err := handler.store.GetThread(freshID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedTurn, found := appmodel.TurnByID(freshThread, stringField(blocked, "turnId"))
+		securityContext, contextErr := domainsecurity.ParseTurnSecurityContext(blockedTurn["securityContext"])
+		if !found || contextErr != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(securityContext) {
+			t.Fatalf("new case assertion did not get a boundary: prompt=%q found=%t err=%v", prompt, found, contextErr)
+		}
+	}
+	continued := requestThreadSummaryJSON(t, server.URL, http.MethodPost,
+		"/v1/threads/"+threadID+"/turns", bytes.NewReader(caseIngressJSONV1(t, map[string]any{
+			"prompt": "请解释 DOM 元素的父子关系。",
+		})), http.StatusAccepted)
+	requests := providerClient.Requests()
+	if len(requests) != 1 || requests[0].PrivateProviderTelemetry == nil ||
+		!requests[0].PrivateProviderTelemetry.OrdinaryEffect {
+		t.Fatalf("independent ordinary DOM turn lost provider access: requests=%d", len(requests))
+	}
+	rawThread, err := handler.store.GetThread(threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuedTurn, found := appmodel.TurnByID(rawThread, stringField(continued, "turnId"))
+	if !found || stringField(continuedTurn, "status") != "completed" ||
+		acceptedFinalAssistantText(continuedTurn) != "provider-step-candidate-1" {
+		t.Fatalf("independent ordinary turn did not publish: found=%t status=%q", found, stringField(continuedTurn, "status"))
+	}
 }
 
 func TestOrdinaryPlanningHTTPPublicSeamDoesNotAcquireCaseRisk(t *testing.T) {

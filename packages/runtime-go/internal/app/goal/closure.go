@@ -62,7 +62,7 @@ func EvidenceDetailsHostVerified(details []any) bool {
 
 func ToolWritesPath(toolName string) bool {
 	switch strings.TrimSpace(toolName) {
-	case "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol":
+	case "generate_office_document", "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol":
 		return true
 	default:
 		return false

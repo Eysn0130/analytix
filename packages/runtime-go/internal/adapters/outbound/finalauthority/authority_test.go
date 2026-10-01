@@ -476,7 +476,13 @@ func TestPrivateAcceptedFinalStoreRejectsNonCanonicalAuthorityPaths(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongShard := filepath.Join(store.records, "ff")
+	// The signed record digest depends on a newly generated authority key.
+	// A fixed "ff" shard can therefore be its valid shard, not a bad fixture.
+	wrongShardName := "ff"
+	if record.AcceptedFinal.RecordDigest[:2] == wrongShardName {
+		wrongShardName = "00"
+	}
+	wrongShard := filepath.Join(store.records, wrongShardName)
 	if err := os.Mkdir(wrongShard, 0o700); err != nil {
 		t.Fatal(err)
 	}

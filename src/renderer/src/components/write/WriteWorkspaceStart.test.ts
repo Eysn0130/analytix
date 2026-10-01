@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { WriteWorkspaceStart } from './WriteWorkspaceStart'
 
 describe('WriteWorkspaceStart', () => {
-  it('renders the top-level write home instead of a current-space folder page', () => {
+  it('offers real document actions in the current workspace', () => {
     const html = renderToStaticMarkup(
       createElement(WriteWorkspaceStart, {
         onAskAssistant: vi.fn(),
@@ -16,11 +16,9 @@ describe('WriteWorkspaceStart', () => {
       })
     )
 
-    expect(html).toContain('write-empty-report-window')
-    expect(html).toContain('ds-home-transition')
-    expect(html).toContain('ds-home-transition-stage')
-    expect(html).not.toContain('当前空间')
-    expect(html).not.toContain('空间路径')
-    expect(html).not.toContain('write_workspace</')
+    expect(html.match(/type="button"/g)).toHaveLength(4)
+    expect(html).toContain('write_workspace')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('/Users/sun/.analytix/write_workspace')
   })
 })

@@ -1169,42 +1169,17 @@ describe('app-ipc-schemas', () => {
     expect(payload.recentEdits?.[0].insertedText).toBe('Some')
   })
 
-  it('accepts write export payloads', () => {
-    const payload = writeExportPayloadSchema.parse({
-      path: '/tmp/workspace/draft.md',
-      format: 'docx',
-      content: '# Draft',
-      typography: {
-        fontPreset: 'custom',
-        customFontFamily: "'FangSong', serif",
-        fontSizePx: 21,
-        lineHeight: 2
-      }
-    })
-
-    expect(payload.path).toBe('/tmp/workspace/draft.md')
-    expect(payload.format).toBe('docx')
-    expect(payload.content).toBe('# Draft')
-    expect(payload.typography?.fontSizePx).toBe(21)
+  it('accepts identity-only export and clipboard bindings, never Renderer bytes or paths', () => {
+    const binding = { sessionId: 'a'.repeat(48), objectId: 'b'.repeat(64), threadId: 'main-thread',
+      baseRevision: 'c'.repeat(64), draftVersion: 'd'.repeat(48) }
+    const payload = writeExportPayloadSchema.parse({ ...binding, format: 'docx', typography: { fontSizePx: 21 } })
+    expect(payload).toMatchObject({ ...binding, format: 'docx', typography: { fontSizePx: 21 } })
+    expect(writeRichClipboardPayloadSchema.parse(binding)).toEqual(binding)
+    for (const field of ['workspaceRoot', 'path', 'content', 'principal', 'scopeId']) {
+      expect(writeExportPayloadSchema.safeParse({ ...binding, format: 'docx', [field]: 'forged' }).success).toBe(false)
+      expect(writeRichClipboardPayloadSchema.safeParse({ ...binding, [field]: 'forged' }).success).toBe(false)
+    }
+    expect(writeExportPayloadSchema.safeParse({ path: '/tmp/workspace/draft.md', format: 'docx', content: '# Draft' }).success).toBe(false)
   })
 
-  it('rejects renderer-supplied write export workspace authority', () => {
-    expect(() => writeExportPayloadSchema.parse({
-      path: '/tmp/workspace/draft.md',
-      workspaceRoot: '/tmp/renderer-forged-workspace',
-      format: 'docx',
-      content: '# Draft'
-    })).toThrow()
-  })
-
-  it('accepts write rich clipboard payloads', () => {
-    const payload = writeRichClipboardPayloadSchema.parse({
-      path: '/tmp/workspace/draft.md',
-      workspaceRoot: '/tmp/workspace',
-      content: '# Draft'
-    })
-
-    expect(payload.path).toBe('/tmp/workspace/draft.md')
-    expect(payload.content).toBe('# Draft')
-  })
 })

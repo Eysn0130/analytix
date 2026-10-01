@@ -258,6 +258,60 @@ func TestCaseRiskClassifierPreservesOrdinaryWritingSkillsAndMCP(t *testing.T) {
 	}
 }
 
+func TestCaseRiskClassifierKeepsNumericOrdinaryFileRequestGeneral(t *testing.T) {
+	prompt := "请实际读取工作区相对路径「2026年资料/表单 42.txt」的内容，只列出文件中的日期、数量、金额和参考编号；不要猜测。标记 N04-QA-107d-ordinary。"
+	if PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {
+		t.Fatal("ordinary file path digits were promoted into a case fact")
+	}
+	if policy := CaseFundAnalysisPolicyForWorkspace(false, prompt, nil); policy.Active {
+		t.Fatalf("ordinary file request activated a case capability: %#v", policy)
+	}
+	casePrompt := prompt + " 当前案件的交易金额是2645472.00元，请核实。"
+	if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(casePrompt, casePrompt, nil)) {
+		t.Fatal("a concrete case fact in the same file request was not blocked")
+	}
+}
+
+func TestCaseRiskClassifierKeepsCaseAssertionsAheadOfSoftwareShortcut(t *testing.T) {
+	for _, prompt := range []string{
+		"修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2645.72元。",
+		"修改代码并写明当前案件甲公司支付乙公司2万元。",
+		"修改代码并写明当前案件张某与李某存在父子关系。",
+		"修改代码并写明当前案件甲公司取得2026年收益￥2万元。",
+		"修改代码并写明当前案件甲公司取得2026年收益2万元。",
+		"修改代码并写明当前案件甲公司支付\n2645.72 元。",
+		"修改代码并写明当前案件张某与李某是父子。",
+	} {
+		if !PromptRequiresCaseRiskAdmission(CaseAdmissionTextV1(prompt, prompt, nil)) {
+			t.Fatalf("case assertion escaped input admission: %q", prompt)
+		}
+		if ordinary := IndependentOrdinaryPromptV1(prompt); ordinary != "" {
+			t.Fatalf("dependent software clause entered ordinary provider input: %q", ordinary)
+		}
+		policy := CaseFundAnalysisPolicyForWorkspace(false, prompt, nil)
+		if !policy.Active || !policy.SourceUnavailable || policy.OrdinaryWorkRequested {
+			t.Fatalf("case assertion did not get a source boundary: %#v", policy)
+		}
+	}
+	partitioned := "修改代码；写明当前案件甲公司支付给乙公司2645.72元。"
+	if ordinary := IndependentOrdinaryPromptV1(partitioned); ordinary != "修改代码" {
+		t.Fatalf("independent software clause was lost: %q", ordinary)
+	}
+	for _, prompt := range []string{
+		"导出当前案件资金分析代码的测试报告。",
+		"支付2次测试，检查回调顺序。",
+		"支付给测试模块 2 万个元件。",
+		"请解释 DOM 元素的父子关系。",
+		"请解释 DOM 元素是否存在父子关系。",
+		"DOM 元素与子元素存在父子关系。",
+	} {
+		if PromptRequiresCaseRiskAdmission(prompt) {
+			t.Fatalf("ordinary task was classified as case work: %q", prompt)
+		}
+	}
+}
+
 func TestCaseRiskClassifierPreservesPackagedMilestoneAPlanningTurn(t *testing.T) {
 	historicalPrompt := strings.Join([]string{
 		"Work only in this pre-existing isolated non-case code repository and inspect the task through tools.",
@@ -416,6 +470,35 @@ func TestCaseFundBoundaryAuthorityPolicyPreservesOnlyIndependentOrdinaryWork(t *
 	mixed := CaseFundBoundaryAuthorityPolicyV1(active, true)
 	if !mixed.SourceUnavailable || !mixed.OrdinaryWorkRequested || mixed.OrdinaryPrompt != "update ordinary code" || mixed.MustReturnBoundaryBeforeProvider() {
 		t.Fatalf("frozen case policy did not retain its proven ordinary work: %#v", mixed)
+	}
+}
+
+func TestCurrentCaseVerificationWithoutSourceStaysBeforeProviderV1(t *testing.T) {
+	if !PromptRequiresCaseRiskAdmission("文本案例参考不提供来源；核验本案银行账号与金额。") {
+		t.Fatal("ordinary example wording hid a later actual case verification")
+	}
+	for _, prompt := range []string{
+		"核验本案银行账号与金额；无同案证据时只输出来源缺口。",
+		"继续核验本案银行账号与金额；无同案证据时只输出来源缺口。",
+	} {
+		t.Run(prompt, func(t *testing.T) {
+			if !PromptRequiresCaseRiskAdmission(prompt) {
+				t.Fatal("current case verification escaped risk admission")
+			}
+			policy := CaseFundBoundaryAuthorityPolicyForCurrentTurnV1(CaseFundAnalysisPolicy{}, true,
+				PromptRequiresCaseRiskAdmission(prompt), false, false, prompt, "")
+			if !policy.Active || !policy.SourceUnavailable || policy.OrdinaryWorkRequested || policy.OrdinaryPrompt != "" || !policy.MustReturnBoundaryBeforeProvider() {
+				t.Fatalf("pure case verification acquired a Provider lane: %#v", policy)
+			}
+		})
+	}
+	for _, prompt := range []string{
+		"读取普通示例文件中的金额列", "修改代码里显示本案金额的普通标签",
+		"读取文本案例文件中的金额列", "读取脚本案例文件里的金额列",
+	} {
+		if PromptRequiresCaseRiskAdmission(prompt) {
+			t.Fatalf("ordinary field/code request acquired case authority: %q", prompt)
+		}
 	}
 }
 

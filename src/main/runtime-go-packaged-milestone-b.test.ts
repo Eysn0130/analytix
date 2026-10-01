@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash, generateKeyPairSync } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import {
   chmodSync,
   lstatSync,
@@ -13,7 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const repositoryRoot = process.cwd()
 const milestoneScriptPath = join(repositoryRoot, 'scripts/runtime-go-packaged-milestone-b.mjs')
@@ -2273,7 +2274,7 @@ describe('packaged Milestone B formal public-seam harness', () => {
     expect(module.verifyMilestoneBExternalCasePreserved(authority)).toBe(false)
   })
 
-  it('keeps synthetic unpackaged diagnostics outside formal real-case admission', async () => {
+  it('keeps synthetic diagnostics outside formal real-case admission', async () => {
     const input = externalCaseAcceptance(taskOwnedSandbox(), true, 36)
     const module = await milestoneModule()
     const startedAt = new Date(Date.now() + 10_000)
@@ -2296,14 +2297,21 @@ describe('packaged Milestone B formal public-seam harness', () => {
 
     const script = source('scripts/runtime-go-packaged-milestone-b.mjs')
     expect(script).toContain("args.has('--diagnostic-unpackaged')")
+    expect(script).toContain("args.has('--diagnostic-packaged-synthetic-case')")
     expect(script).toContain('development-only-unpackaged-synthetic-case-diagnostic')
+    expect(script).toContain('development-only-packaged-synthetic-case-diagnostic')
     expect(script).toContain('development diagnostic does not admit or substitute for a formal packaged artifact')
     expect(script).not.toContain("api.account")
     expect(script).toContain("environment.NODE_ENV = 'development'")
     expect(script).not.toContain("ANALYTIX_DESKTOP_AUTH_TEST_BOOTSTRAP")
     expect(script).toContain('environment.ELECTRON_RENDERER_URL = expectedPackagedRendererURL()')
+    expect(script).toMatch(/function expectedPackagedRendererURL\(\) \{[\s\S]*?return 'analytix-app:\/\/renderer\/index\.html'\n\}/)
     expect(script).toContain("resolve(process.cwd(), 'out/preload/index.cjs')")
-    expect(script).toContain('diagnosticSynthetic: diagnosticUnpackaged')
+    expect(script).toContain('diagnosticSynthetic')
+    expect(script).toContain('assertPackagedDiagnosticDebugOwner(port)')
+    expect(script).toContain('assertPackagedDiagnosticTargetOwner(wsUrl)')
+    expect(script).toContain("target.hostname !== '127.0.0.1'")
+    expect(script).toContain('shouldRetainPackagedDiagnosticProfile(')
     expect(script).toContain('child.analytixLaunchIdentity = null')
     expect(script).toContain('identity.executableSetDigest === previous.executableSetDigest')
     expect(script).toContain('if (!await establishLaunchIdentity(firstChild))')
@@ -2334,6 +2342,9 @@ describe('packaged Milestone B formal public-seam harness', () => {
     expect(runner).toContain('transactionCount: 3, evidenceTransactionCount: 3')
     expect(runner).toContain("report?.passed === true")
     expect(runner).toContain("report?.diagnostic?.passed !== true")
+    expect(runner).toContain("'--diagnostic-packaged-synthetic-case'")
+    expect(runner).toContain("'--app-path', packagedApp")
+    expect(runner).toContain('report?.diagnostic?.directPreviewPassed === true')
 
     const scanner = source('scripts/provider-request-audit-scanner.mjs')
     expect(scanner).toContain('diagnosticSynthetic: input.diagnosticSynthetic')
@@ -2576,6 +2587,235 @@ describe('packaged Milestone B formal public-seam harness', () => {
       id: 'trusted-cache-tmpdir', status: 'FAIL'
     }))
   })
+
+  it('labels a packaged synthetic dry run as a development diagnostic', () => {
+    const missingApp = join(taskOwnedSandbox(), 'missing.app')
+    const result = spawnSync(process.execPath, [
+      milestoneScriptPath, '--dry-run', '--json', '--no-write', '--no-gate',
+      '--diagnostic-packaged-synthetic-case', '--app-path', missingApp
+    ], {
+      cwd: repositoryRoot,
+      env: { PATH: process.env.PATH, TMPDIR: '' },
+      encoding: 'utf8',
+      stdio: 'pipe'
+    })
+    expect(result.status).toBe(0)
+    const report = JSON.parse(result.stdout)
+    expect(report).toMatchObject({
+      stage: 'packaged-synthetic-electron-funds-diagnostic',
+      acceptanceClass: 'development-only-packaged-synthetic-case-diagnostic',
+      passed: false,
+      fixtureUsed: true,
+      diagnostic: {
+        mode: 'packaged-synthetic-exact-artifact',
+        directPreviewPassed: false,
+        formalArtifactAccepted: false,
+        formalMilestoneBPassed: false,
+        syntheticCase: true
+      }
+    })
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      id: 'external-owner-isolated-case', status: 'BLOCKED'
+    }))
+  })
+
+  it('keeps synthetic diagnostics out of the formal report path by default', async () => {
+    const module = await milestoneModule()
+    const cwd = taskOwnedSandbox()
+    const policy = (overrides: Record<string, unknown>) =>
+      module.milestoneBReportOutputDecision({
+        diagnosticSynthetic: true,
+        dryRun: false,
+        noWriteRequested: false,
+        explicitOutput: '',
+        configuredOutput: 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-milestone-b.json',
+        cwd,
+        ...overrides
+      })
+    expect(policy({})).toEqual({ write: false, path: '', blocker: '' })
+    expect(policy({ explicitOutput: 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-milestone-b.json' }))
+      .toEqual({ write: false, path: '', blocker: 'diagnostic_formal_output_forbidden' })
+    expect(policy({ explicitOutput: 'diagnostics/synthetic-b.json' })).toEqual({
+      write: true, path: join(cwd, 'diagnostics/synthetic-b.json'), blocker: ''
+    })
+    expect(policy({ diagnosticSynthetic: false })).toEqual({
+      write: true,
+      path: join(cwd, 'docs/analytix/upstreams/runtime-go-live-evidence/packaged-milestone-b.json'),
+      blocker: ''
+    })
+    const script = source('scripts/runtime-go-packaged-milestone-b.mjs')
+    const debugOwner = script.slice(script.indexOf('function assertPackagedDiagnosticDebugOwner('),
+      script.indexOf('function assertPackagedDiagnosticTargetOwner('))
+    expect(debugOwner).toContain('timeout: 2_000')
+    expect(debugOwner).toContain('maxBuffer: 256 * 1024')
+  })
+
+  it('rejects a foreign CDP port owner and never retries an unknown sent action', async () => {
+    const module = await milestoneModule()
+    const exactExecutablePath = '/private/tmp/isolated/analytix.app/Contents/MacOS/analytix'
+    const pinned = {
+      pid: 1234, startTime: 'Sun Sep 27 05:00:00 2026',
+      commandDigest: 'a'.repeat(64),
+      executablePaths: [exactExecutablePath], executableSetDigest: 'b'.repeat(64)
+    }
+    const current = {
+      ...pinned,
+      executablePaths: [exactExecutablePath, '/System/Library/Frameworks/NewImage'],
+      executableSetDigest: 'c'.repeat(64)
+    }
+    const stableIdentity = (candidate: object) =>
+      module.packagedDiagnosticStableProcessIdentity({
+        pinned, current: candidate, exactExecutablePath
+      })
+    expect(stableIdentity(current)).toBe(true)
+    expect(stableIdentity({ ...current, startTime: 'Sun Sep 27 05:00:01 2026' })).toBe(false)
+    expect(stableIdentity({ ...current, commandDigest: 'd'.repeat(64) })).toBe(false)
+    expect(stableIdentity({ ...current, executablePaths: ['/different/analytix'] })).toBe(false)
+    const owner = (ownerPids: number[] | null, identityCurrent = true) =>
+      module.packagedDiagnosticDebugOwnerBlocker({
+        expectedPid: 1234, identityCurrent, ownerPids
+      })
+    expect(owner([1234])).toBe('')
+    expect(owner([])).toBe('packaged_debug_port_not_ready')
+    expect(owner([9999])).toBe('packaged_debug_port_owner_mismatch')
+    expect(owner([1234, 9999])).toBe('packaged_debug_port_owner_mismatch')
+    expect(owner(null)).toBe('packaged_debug_port_owner_unavailable')
+    expect(owner([1234], false)).toBe('packaged_debug_process_identity_lost')
+
+    const sent = module.markPackagedDiagnosticCdpFailure(
+      new Error('cdp_input_timeout'), true, true
+    )
+    expect(sent.cdpCommandSent).toBe(true)
+    expect(module.packagedDiagnosticCdpMayRetry(sent, true)).toBe(false)
+    expect(module.packagedDiagnosticCdpMayRetry(sent, false)).toBe(true)
+    const unsent = module.markPackagedDiagnosticCdpFailure(
+      new Error('cdp_connection_failed'), false, true
+    )
+    expect(module.packagedDiagnosticCdpMayRetry(unsent, true)).toBe(true)
+  })
+
+  it('retains a diagnostic profile after uncertain actions but preserves formal cleanup', async () => {
+    const module = await milestoneModule()
+    const clean = {
+      runtimeBlocker: '', directSourcePreview: { status: 'PASS' },
+      exit: { residualProcessCount: 0 }, checks: []
+    }
+    expect(module.shouldRetainPackagedDiagnosticProfile(clean, true)).toBe(false)
+    expect(module.shouldRetainPackagedDiagnosticProfile({
+      ...clean, runtimeBlocker: 'cdp_input_timeout'
+    }, true)).toBe(true)
+    expect(module.shouldRetainPackagedDiagnosticProfile({
+      ...clean, directSourcePreview: { status: 'FAIL' }
+    }, true)).toBe(true)
+    expect(module.shouldRetainPackagedDiagnosticProfile({
+      ...clean, exit: { residualProcessCount: 1 }
+    }, true)).toBe(true)
+    expect(module.shouldRetainPackagedDiagnosticProfile({
+      ...clean, checks: [{ status: 'FAIL' }]
+    }, true)).toBe(true)
+    expect(module.shouldRetainPackagedDiagnosticProfile({
+      ...clean, runtimeBlocker: 'cdp_input_timeout'
+    }, false)).toBe(false)
+  })
+
+  it('bounds scanner readiness and refuses a packaged Main exit before renderer polling', async () => {
+    const script = source('scripts/runtime-go-packaged-milestone-b.mjs')
+    const scanner = script.slice(script.indexOf('export async function launchProviderAuditScanner('),
+      script.indexOf('function safeScannerEnvironment('))
+    const diagnosticBranch = scanner.slice(scanner.indexOf('if (diagnosticPackagedSynthetic) {'),
+      scanner.indexOf('} else {', scanner.indexOf('if (diagnosticPackagedSynthetic) {')))
+    expect(diagnosticBranch.indexOf('const ready = waitForProviderAuditScannerReady(child)'))
+      .toBeLessThan(diagnosticBranch.indexOf('child.stdin.end(frame)'))
+    expect(diagnosticBranch).not.toContain('child.stdin.end(frame, resolveWrite)')
+    expect(scanner).toContain('child.stdin.end(frame, resolveWrite)')
+
+    const module = await milestoneModule()
+    const observeRenderer = vi.fn()
+    const result = await module.waitForLocalProviderWorkbench({
+      debugPort: 1234,
+      workspace: '/private/tmp/isolated/workspace',
+      runtimePort: 5678,
+      runtimeDataDir: '/private/tmp/isolated/runtime-data',
+      timeoutMs: 1000,
+      ownedMainChild: { exitCode: 1, signalCode: null }
+    }, { diagnosticPackagedSynthetic: true, observeRenderer })
+    expect(result).toMatchObject({
+      ok: false, blocked: false, blocker: 'packaged_main_exited_before_readiness'
+    })
+    expect(observeRenderer).not.toHaveBeenCalled()
+
+    const readyChild = Object.assign(new EventEmitter(), { stdout: new EventEmitter() })
+    const ready = module.waitForProviderAuditScannerReady(readyChild, 100)
+    readyChild.stdout.emit('data', Buffer.from('ANALYTIX_PROVIDER_AUDIT_SCANNER_READY_V1\n'))
+    await expect(ready).resolves.toBeUndefined()
+
+    const invalidChild = Object.assign(new EventEmitter(), { stdout: new EventEmitter() })
+    const invalid = module.waitForProviderAuditScannerReady(invalidChild, 100)
+    invalidChild.stdout.emit('data', Buffer.alloc(257))
+    await expect(invalid).rejects.toThrow('provider_audit_scanner_ready_invalid')
+
+    const exitedChild = Object.assign(new EventEmitter(), { stdout: new EventEmitter() })
+    const exited = module.waitForProviderAuditScannerReady(exitedChild, 100)
+    exitedChild.emit('exit')
+    await expect(exited).rejects.toThrow('provider_audit_scanner_exited_before_ready')
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'uses the real scanner process identity in packaged diagnostic mode and rejects a wrong Main executable',
+    async () => {
+      const module = await milestoneModule()
+      const scanner = spawn(process.execPath, [
+        join(repositoryRoot, 'scripts/provider-request-audit-scanner.mjs'),
+        '--private-startup-frame-v1'
+      ], {
+        cwd: repositoryRoot,
+        env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C' },
+        stdio: ['pipe', 'pipe', 'ignore']
+      }) as ReturnType<typeof spawn> & {
+        analytixLaunchIdentity?: { pid: number }
+        analytixExactExecutablePath?: string
+      }
+      const exited = new Promise<void>((resolveExit) => scanner.once('exit', () => resolveExit()))
+      try {
+        const identity = await module.establishLaunchIdentity(scanner, 5_000, true)
+        expect(identity).toMatchObject({ pid: scanner.pid })
+        expect(scanner.analytixLaunchIdentity).toMatchObject({ pid: scanner.pid })
+
+        scanner.analytixExactExecutablePath = '/private/tmp/not-the-scanner-executable'
+        expect(await module.establishLaunchIdentity(scanner, 500, true)).toBeNull()
+        delete scanner.analytixExactExecutablePath
+
+        const ready = module.waitForProviderAuditScannerReady(scanner, 2_000)
+        scanner.stdin!.end(Buffer.alloc(8))
+        await expect(ready).rejects.toThrow('provider_audit_scanner_exited_before_ready')
+
+        const cleanupScanner = spawn(process.execPath, [
+          join(repositoryRoot, 'scripts/provider-request-audit-scanner.mjs'),
+          '--private-startup-frame-v1'
+        ], {
+          cwd: repositoryRoot,
+          env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C' },
+          stdio: ['pipe', 'pipe', 'ignore']
+        }) as ReturnType<typeof spawn> & { analytixExit?: Promise<void> }
+        cleanupScanner.analytixExit = new Promise<void>((resolveExit) =>
+          cleanupScanner.once('exit', () => resolveExit()))
+        try {
+          expect(await module.establishLaunchIdentity(cleanupScanner, 5_000, true))
+            .toMatchObject({ pid: cleanupScanner.pid })
+          expect(await module.stopExactProviderAuditScanner(cleanupScanner)).toBe(true)
+          await cleanupScanner.analytixExit
+        } finally {
+          if (cleanupScanner.exitCode === null && cleanupScanner.signalCode === null) {
+            cleanupScanner.kill('SIGTERM')
+          }
+        }
+      } finally {
+        if (scanner.exitCode === null && scanner.signalCode === null) scanner.kill('SIGTERM')
+        await exited
+      }
+    },
+    15_000
+  )
 })
 
 it('R130 binds B1 producer harness entries to the formal consumer source closure', async () => {

@@ -83,7 +83,7 @@ func RunProviderReadinessMatrix(ctx context.Context, env map[string]string, http
 			"cacheHitTokens":      deepseek.Usage.CacheHitTokens,
 			"cacheMissTokens":     deepseek.Usage.CacheMissTokens,
 			"cacheHitRate":        deepseek.Usage.CacheHitRate,
-			"dynamicStateLeaked":  deepseek.PrefixShape.DynamicStateLeaked,
+			"dynamicStateCheck":   deepseek.PrefixShape.DynamicStateCheck,
 			"recordedAtFieldName": "recordedAt",
 		},
 		FixtureProbes:      fixtureProbes,

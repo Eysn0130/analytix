@@ -71,8 +71,8 @@ const sideAbortControllers = new Map<string, AbortController>()
 const sideLatestSeqByThread = new Map<string, number>()
 const SIDE_TERMINAL_SNAPSHOT_UNAVAILABLE_KEY = 'common:runtimeFinalSnapshotUnavailable'
 
-function createSideClientUserMessageId(now = Date.now()): string {
-  return globalThis.crypto?.randomUUID?.() ?? `side-user-${now}-${Math.random().toString(16).slice(2)}`
+function createSideClientUserMessageId(): string {
+  return globalThis.crypto.randomUUID()
 }
 
 function bindSideUserBlockTurn(blocks: ChatBlock[], userBlockId: string, turnId: string): ChatBlock[] {
@@ -626,6 +626,12 @@ function sideRuntimeStatusText(ev: RuntimeStatusEventPayload, t: SideContext['t'
   if (ev.kind === 'compaction_summary_fallback') return fixed('common:compactionSummaryFallbackStatus', 'Context compaction summary is unavailable')
   if (ev.kind !== 'pipeline_stage') return ''
   switch (ev.stage) {
+    case 'pre_send':
+      return fixed('common:providerRequestPreparingStatus', 'Preparing model request')
+    case 'post_send':
+      return fixed('common:providerRequestStartedStatus', 'Model request started')
+    case 'response_received':
+      return fixed('common:providerResponseReceivedStatus', 'Response received')
     case 'provider_retrying':
       return fixed('common:providerRetryingStatus', 'Provider request is retrying')
     case 'provider_error':

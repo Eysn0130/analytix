@@ -956,3 +956,51 @@ func mustProjectionJSON(t *testing.T, value any) []byte {
 	}
 	return body
 }
+
+func TestRetainedSnapshotPublicProjectionRequiresExactOperationAdmission(t *testing.T) {
+	authority := newProjectionTestAuthority(4)
+	old := newTrustedProjectionFixture(t, authority, newTrustedProjectionContext("thread-retained", "turn-old", "case-a", "snapshot-a", 3))
+	current := newTrustedProjectionContext("thread-retained", "turn-current", "case-a", "snapshot-b", 4)
+	if current.PublicationPolicy == old.securityContext.PublicationPolicy {
+		t.Fatal("fixture must preserve distinct original and current publication policies")
+	}
+	index := gateprojection.NewTrustedFinalProjectionIndex(authority)
+	if err := index.SeedTerminalComplete(context.Background(), []gateprojection.TerminalCompleteFinalAuthorityV1{old.terminalAuthority}); err != nil {
+		t.Fatal(err)
+	}
+	thread := old.thread()
+	thread["securityState"] = publicProjectionSecurityRecord(current)
+	thread["turns"] = append(thread["turns"].([]any), map[string]any{"id": current.TurnID, "threadId": current.ThreadID, "status": "running", "securityContext": publicProjectionSecurityRecord(current), "items": []any{}})
+	// An input marker is untrusted and must not admit an older snapshot.
+	thread["turns"].([]any)[0].(map[string]any)["factHistoryState"] = "retained_snapshot"
+	hidden, err := projectPublicThreadWithAuthority(thread, index, nil, nil, old.casReader(t, current))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := hidden["turns"].([]any)[0].(map[string]any)
+	if first["acceptedFinalView"] != nil || first["factHistoryState"] != nil {
+		t.Fatal("unadmitted old history was exposed")
+	}
+	shown, err := projectPublicThreadWithRetainedFactsV1(thread, index, nil, nil, old.casReader(t, current), map[string]bool{old.securityContext.TurnID: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first = shown["turns"].([]any)[0].(map[string]any)
+	view, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(first["acceptedFinalView"])
+	if err != nil || view.AcceptedFinalDigest != old.privateRecord.AcceptedFinal.RecordDigest || first["factHistoryState"] != "retained_snapshot" {
+		t.Fatal("authorized retained view lost its original identity or historical label")
+	}
+	for _, mutate := range []func(*domainsecurity.TurnSecurityContext){
+		func(c *domainsecurity.TurnSecurityContext) { c.CaseID = "case-b" },
+		func(c *domainsecurity.TurnSecurityContext) { c.UserID = "other-user" },
+		func(c *domainsecurity.TurnSecurityContext) { c.WorkspaceRealPath = "/different" },
+		func(c *domainsecurity.TurnSecurityContext) { c.ContextEpoch = 2 },
+		func(c *domainsecurity.TurnSecurityContext) { c.CaseBindingHash = strings.Repeat("b", 64) },
+	} {
+		changed := current
+		mutate(&changed)
+		if sameRetainedFactScopeV1(changed, old.securityContext) {
+			t.Fatal("retained display crossed current authority scope")
+		}
+	}
+}

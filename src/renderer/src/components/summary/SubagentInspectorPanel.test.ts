@@ -37,6 +37,21 @@ describe('SubagentInspectorPanel', () => {
     await i18n.changeLanguage('zh')
   })
 
+  it('uses the workspace instance selector without a second tab strip', () => {
+    const html = renderToStaticMarkup(createElement(SubagentInspectorPanel, {
+      tabbedWorkspace: true,
+      subagents: [subagent({ title: 'Verifier', key: 'run:verified' })],
+      selectedKey: 'run:verified', runtimeConnection: 'ready', composerModel: 'gpt-test',
+      composerPickList: ['gpt-test'], composerReasoningEffort: 'medium',
+      setComposerModel: () => {}, setComposerReasoningEffort: () => {}, onSelectSubagent: () => {},
+      onCollapse: () => {}, onRetryConnection: () => {}, onOpenSettings: () => {}
+    }))
+    expect(html).toContain('data-subagent-inspector-panel="true"')
+    expect(html).toContain('Verifier')
+    expect(html).not.toContain('role="tablist"')
+    expect(html).toContain('没有可打开的子线程')
+  })
+
   it('renders subagent tabs with the compact composer and without side-conversation affordances', () => {
     const html = renderToStaticMarkup(createElement(SubagentInspectorPanel, {
       subagents: [

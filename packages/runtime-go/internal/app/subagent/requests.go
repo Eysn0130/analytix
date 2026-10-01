@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -241,29 +240,36 @@ func TaskRequestFromArgs(toolName string, args map[string]any) (TaskRequest, err
 	explicitName := firstNonEmptyAnyString(args["name"], args["subagentName"])
 	explicitLabel := firstNonEmptyAnyString(args["label"], args["description"])
 	label := firstNonEmptyAnyString(explicitLabel, explicitName, PromptLabel(prompt))
-	maxSteps := 0
-	maxStepsSet := false
-	if value, ok := numericAny(args["max_steps"]); ok {
-		maxSteps = value
-		maxStepsSet = true
-	} else if value, ok := numericAny(args["maxSteps"]); ok {
-		maxSteps = value
-		maxStepsSet = true
+	maxSteps, maxStepsSet, err := budgetInteger(args["max_steps"], args["maxSteps"])
+	if err != nil {
+		return TaskRequest{}, err
 	}
-	tokenBudget := 0
-	tokenBudgetSet := false
-	if value, ok := numericAny(firstNonNilValue(args["token_budget"], args["tokenBudget"])); ok && value > 0 {
-		tokenBudget = value
-		tokenBudgetSet = true
+	tokenBudget, tokenBudgetSet, err := budgetInteger(args["token_budget"], args["tokenBudget"])
+	if err != nil {
+		return TaskRequest{}, err
 	}
-	timeBudgetMS := 0
-	timeBudgetMSSet := false
-	if value, ok := numericAny(firstNonNilValue(args["time_budget_ms"], args["timeBudgetMs"])); ok && value > 0 {
-		timeBudgetMS = value
-		timeBudgetMSSet = true
-	} else if value, ok := numericAny(firstNonNilValue(args["time_budget_seconds"], args["timeBudgetSeconds"])); ok && value > 0 {
-		timeBudgetMS = value * 1000
-		timeBudgetMSSet = true
+	tokenBudgetSet = tokenBudgetSet && tokenBudget > 0
+	if !tokenBudgetSet {
+		tokenBudget = 0
+	}
+	timeBudgetMS, timeBudgetMSSet, err := budgetInteger(args["time_budget_ms"], args["timeBudgetMs"])
+	if err != nil || !validTimeBudgetMS(timeBudgetMS) {
+		return TaskRequest{}, errInvalidBudget
+	}
+	timeBudgetMSSet = timeBudgetMSSet && timeBudgetMS > 0
+	if !timeBudgetMSSet {
+		seconds, secondsSet, err := budgetInteger(args["time_budget_seconds"], args["timeBudgetSeconds"])
+		if err != nil {
+			return TaskRequest{}, err
+		}
+		timeBudgetMS = 0
+		if secondsSet && seconds > 0 {
+			timeBudgetMS, err = budgetSecondsToMS(seconds)
+			if err != nil {
+				return TaskRequest{}, err
+			}
+			timeBudgetMSSet = true
+		}
 	}
 	profile := strings.TrimSpace(firstNonEmptyAnyString(args["profile"]))
 	toolPolicy := NormalizeToolPolicy(firstNonEmptyAnyString(args["toolPolicy"], args["tool_policy"]))
@@ -579,22 +585,6 @@ func firstNonEmptyAnyString(values ...any) string {
 func boolField(record map[string]any, key string) bool {
 	value, _ := record[key].(bool)
 	return value
-}
-
-func numericAny(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return int(parsed), err == nil
-	default:
-		return 0, false
-	}
 }
 
 func truncateText(value string, limit int) string {

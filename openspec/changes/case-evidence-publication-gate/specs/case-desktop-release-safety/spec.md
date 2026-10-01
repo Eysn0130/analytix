@@ -649,7 +649,7 @@ renderer mock, or historical package evidence SHALL NOT satisfy these rows.
   case/snapshot/epoch and typed source-field slots
 - **THEN** the execution evidence carrier has already been consumed or
   discarded exactly once, Go reads only the original source file/row/field
-  lineage through one callback against the retained witnessed DSV2, and the typed local
+  lineage through one callback against the retained current-authorized DSV2, and the typed local
   sink shows source-exact values while generic accepted-final/history/HTTP/
   SSE/events/stores remain PII-free; canonical binding/current database values
   are not accepted substitutes

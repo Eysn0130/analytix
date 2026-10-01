@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { atomicWriteFile } from '../adapters/file/atomic-write.js'
 import { SUBAGENT_READ_ONLY_TOOL_NAMES, SubagentToolPolicy } from '../contracts/capabilities.js'
 
 export const TaskJobStatus = z.enum(['queued', 'running', 'completed', 'failed', 'interrupted', 'killed'])
@@ -185,7 +186,7 @@ export class FileTaskJobStore {
 
   async upsert(record: TaskJobRecord): Promise<void> {
     await mkdir(this.rootDir, { recursive: true })
-    await writeFile(join(this.rootDir, `${record.id}.json`), JSON.stringify(record, null, 2), 'utf8')
+    await atomicWriteFile(join(this.rootDir, `${record.id}.json`), JSON.stringify(record, null, 2))
   }
 
   async load(id: string): Promise<TaskJobRecord | undefined> {

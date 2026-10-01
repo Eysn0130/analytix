@@ -49,6 +49,7 @@ func (s *DurableEventSessionStore) settleGeneralTerminalPublicationsBeforeHistor
 		return err
 	}
 	missing := make([]string, 0)
+	usageEvents := make([]map[string]any, 0, len(entries))
 	for _, entry := range entries {
 		if entry.State == turnapp.GeneralTerminalPublicationMissingV1 {
 			if entry.ArchivedOnly {
@@ -57,9 +58,15 @@ func (s *DurableEventSessionStore) settleGeneralTerminalPublicationsBeforeHistor
 			missing = append(missing, entry.TurnID)
 			continue
 		}
-		if err := s.settleGeneralTerminalDerivedStateNoLock(entry); err != nil {
-			return err
+		if usage := turnapp.GeneralTerminalUsageEventV1(entry.Events); usage != nil {
+			usageEvents = append(usageEvents, usage)
 		}
+	}
+	if err := s.usageIndex.SettleTerminalEventsOwnerLocked(usageEvents); err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 	for _, turnID := range missing {
 		if _, err := s.recordGeneralTerminalEventBundleNoLock(threadID, turnID); err != nil {
@@ -79,13 +86,14 @@ func (s *DurableEventSessionStore) settleGeneralTerminalPublicationsBeforeHistor
 	if err != nil {
 		return err
 	}
+	usageEvents = usageEvents[:0]
 	for _, entry := range entries {
 		if entry.State != turnapp.GeneralTerminalPublicationCompleteV1 {
 			return errors.New("general terminal history barrier left an unsettled publication bundle")
 		}
-		if err := s.settleGeneralTerminalDerivedStateNoLock(entry); err != nil {
-			return err
+		if usage := turnapp.GeneralTerminalUsageEventV1(entry.Events); usage != nil {
+			usageEvents = append(usageEvents, usage)
 		}
 	}
-	return nil
+	return s.usageIndex.SettleTerminalEventsOwnerLocked(usageEvents)
 }

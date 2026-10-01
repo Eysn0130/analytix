@@ -1,0 +1,115 @@
+{
+  "kind": "EVAL_ONLY_HAND_AUTHORED_EXPECTATIONS_NOT_PRODUCT_RECEIPTS",
+  "money_contract": "CNY/USD scale2; non-negative magnitude plus direction; no FX conversion",
+  "scope_contract": "case/snapshot/subject and UTC half-open [start,end); duplicate source identity counted once only if content is equal; malformed money retained as a quality gap",
+  "queries": [
+    {
+      "id": "case-A-v1",
+      "case_id": "SYNTH_CASE_A",
+      "snapshot_id": "SYNTH_SNAPSHOT_A1",
+      "subject_key": "SYNTH_SUBJECT_1",
+      "start": "2026-09-01T00:00:00Z",
+      "end": "2026-10-01T00:00:00Z",
+      "expected": {
+        "groups": [
+          {
+            "currency": "CNY",
+            "inflow": "13010.01",
+            "outflow": "1200.60",
+            "net": "11809.41",
+            "count": 7,
+            "missing_counterparty_count": 1
+          },
+          {
+            "currency": "USD",
+            "inflow": "100.25",
+            "outflow": "0.05",
+            "net": "100.20",
+            "count": 2,
+            "missing_counterparty_count": 0
+          }
+        ],
+        "quality": {
+          "rejected_count": 1,
+          "duplicate_observation_count": 1,
+          "coverage": "partial"
+        },
+        "accepted_source_ids": [
+          "A001",
+          "A002",
+          "A003",
+          "A004",
+          "A005",
+          "A006",
+          "A008",
+          "A009",
+          "A012"
+        ],
+        "rejected": [
+          {
+            "row_id": "A011",
+            "reason": "invalid_amount"
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-B",
+      "case_id": "SYNTH_CASE_B",
+      "snapshot_id": "SYNTH_SNAPSHOT_B1",
+      "subject_key": "SYNTH_SUBJECT_1",
+      "start": "2026-09-01T00:00:00Z",
+      "end": "2026-10-01T00:00:00Z",
+      "expected": {
+        "groups": [
+          {
+            "currency": "CNY",
+            "inflow": "777777.77",
+            "outflow": "0.00",
+            "net": "777777.77",
+            "count": 1,
+            "missing_counterparty_count": 0
+          }
+        ],
+        "quality": {
+          "rejected_count": 0,
+          "duplicate_observation_count": 0,
+          "coverage": "complete-for-fixture-query"
+        },
+        "accepted_source_ids": [
+          "B001"
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "case-A-v2",
+      "case_id": "SYNTH_CASE_A",
+      "snapshot_id": "SYNTH_SNAPSHOT_A2",
+      "subject_key": "SYNTH_SUBJECT_1",
+      "start": "2026-09-01T00:00:00Z",
+      "end": "2026-10-01T00:00:00Z",
+      "expected": {
+        "groups": [
+          {
+            "currency": "CNY",
+            "inflow": "9000.00",
+            "outflow": "0.00",
+            "net": "9000.00",
+            "count": 1,
+            "missing_counterparty_count": 0
+          }
+        ],
+        "quality": {
+          "rejected_count": 0,
+          "duplicate_observation_count": 0,
+          "coverage": "complete-for-fixture-query"
+        },
+        "accepted_source_ids": [
+          "A2_001"
+        ],
+        "rejected": []
+      }
+    }
+  ]
+}

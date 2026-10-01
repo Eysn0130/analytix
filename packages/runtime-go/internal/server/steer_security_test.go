@@ -306,6 +306,13 @@ func TestHighRiskSteerCannotEnterFrozenGeneralTurn(t *testing.T) {
 			wantBlocker: controlapp.SteerBlockerCaseRiskRaise,
 		},
 		{
+			name: "software-words-cannot-hide-case-assertion",
+			request: controlapp.SteerTurnRequest{
+				Text: "修改代码并写明当前案件甲公司支付给乙公司2645.72元。",
+			},
+			wantBlocker: controlapp.SteerBlockerCaseRiskRaise,
+		},
+		{
 			name: "display-text-case-risk",
 			request: controlapp.SteerTurnRequest{
 				Text:        "DISPLAY_CASE_STEER_MUST_NOT_PERSIST_193750",

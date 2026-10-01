@@ -2,6 +2,7 @@ package thread
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,35 @@ func TestAutomaticCompactionRunsOnceAndRecordsAutoContinuation(t *testing.T) {
 	}
 	if _, err := threaddomain.ParseTaskContinuationSnapshotV1(projectedItem["taskContinuation"]); err != nil {
 		t.Fatalf("projected automatic continuation is invalid: %#v err=%v", projectedItem, err)
+	}
+	// The desktop accepts only an exact public shape: schema defaults must
+	// already be present in the Core response, including after durable reload.
+	for _, reload := range []bool{false, true} {
+		candidate := map[string]any{"id": current.ThreadID, "turns": []any{compactionTurn}}
+		if reload {
+			body, err := json.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate = map[string]any{}
+			if err := json.Unmarshal(body, &candidate); err != nil {
+				t.Fatal(err)
+			}
+		}
+		projected, err := ProjectPublicThread(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compacted := projected["turns"].([]any)[0].(map[string]any)
+		for _, key := range []string{"steering", "attachmentIds", "activeSkillIds", "injectedMemoryIds"} {
+			values, ok := compacted[key].([]any)
+			if !ok || values == nil || len(values) != 0 {
+				t.Fatalf("public compaction missing canonical array %s after reload=%t", key, reload)
+			}
+		}
+		if _, mutated := compactionTurn["steering"]; mutated {
+			t.Fatal("public projection mutated durable history")
+		}
 	}
 	projectedEvent, visible, projectionErr := ProjectPublicThreadEvent(current.ThreadID, repo.thread, repo.events[1])
 	if projectionErr != nil || !visible || projectedEvent["auto"] != true {

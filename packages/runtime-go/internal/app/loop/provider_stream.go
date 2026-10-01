@@ -24,6 +24,7 @@ import (
 const DefaultProviderStreamMaxAttempts = 2
 
 var ErrProviderOutputTokenBudgetExceeded = errors.New("provider output token budget exceeded")
+var ErrProviderOutputByteBudgetExceeded = errors.New("provider output byte budget exceeded")
 
 type ProviderStreamCallbacks struct {
 	AcquireProviderAttempt func(context.Context, int) (context.Context, func(), error)
@@ -56,8 +57,10 @@ type ProviderStreamInput struct {
 	HostEntitySelection HostCaseEntitySelectionV1
 	// OrdinaryEffect is host-owned. Its zero value preserves the strict
 	// case-data projection used by existing case callers.
-	OrdinaryEffect        bool
-	MaxAttempts           int
+	OrdinaryEffect bool
+	MaxAttempts    int
+	// MaxOutputBytes bounds text, reasoning and tool material before buffering; zero preserves the existing unlimited byte policy.
+	MaxOutputBytes        int
 	Callbacks             ProviderStreamCallbacks
 	ContinuationAuthority ProviderContinuationAuthorityInput
 	toolCallIDRandom      io.Reader
@@ -172,6 +175,9 @@ func StreamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 	if err := domainmodel.ValidateReasoningEffortV1(input.Request.ReasoningEffort); err != nil {
 		return ProviderStreamOutput{}, err
 	}
+	if input.MaxOutputBytes < 0 {
+		return ProviderStreamOutput{}, ErrProviderOutputByteBudgetExceeded
+	}
 	if input.Request.MaxOutputTokens < 0 {
 		return ProviderStreamOutput{}, ErrProviderOutputTokenBudgetExceeded
 	}
@@ -240,7 +246,7 @@ func StreamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 type providerOutputTokenBudgetV1 struct {
 	maxTokens int
 	observed  bool
-	fragments strings.Builder
+	estimate  appmodel.TextTokenEstimatorV1
 }
 
 func newProviderOutputTokenBudgetV1(maxTokens int) *providerOutputTokenBudgetV1 {
@@ -254,16 +260,16 @@ func (budget *providerOutputTokenBudgetV1) Observe(chunk domainmodel.Chunk) erro
 	budget.observed = true
 	switch chunk.Kind {
 	case domainmodel.ChunkReasoning, domainmodel.ChunkText:
-		budget.fragments.WriteString(chunk.Text)
+		budget.estimate.WriteString(chunk.Text)
 	case domainmodel.ChunkToolCallStart, domainmodel.ChunkToolCall:
-		budget.fragments.WriteString(chunk.ToolCall.Name)
-		budget.fragments.Write(chunk.ToolCall.Arguments)
+		budget.estimate.WriteString(chunk.ToolCall.Name)
+		budget.estimate.WriteString(string(chunk.ToolCall.Arguments))
 	case domainmodel.ChunkUsage:
 		if providerReportedOutputTokensV1(chunk.Usage) > budget.maxTokens {
 			return ErrProviderOutputTokenBudgetExceeded
 		}
 	}
-	if appmodel.EstimateTextTokensV1(budget.fragments.String()) > budget.maxTokens {
+	if budget.estimate.Tokens() > budget.maxTokens {
 		return ErrProviderOutputTokenBudgetExceeded
 	}
 	return nil
@@ -328,6 +334,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			releaseAttempt = release
 		}
 		attemptOutput := ProviderStreamOutput{}
+		var reasoningBuffer strings.Builder
 		publicTextDecoder := domainreasoningmarkup.NewDecoder()
 		var reasoningMarkupErr error
 		request := input.Request
@@ -446,8 +453,13 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		}
 		toolCallIDs := newProviderToolCallIDIssuerV1(input.toolCallIDRandom)
 		outputBudget := newProviderOutputTokenBudgetV1(request.MaxOutputTokens)
+		outputBytes := 0
+		var outputBytesErr error
 		providerStartedAt := time.Now()
+		hostTiming := domainmodel.ProviderTiming{StartedAt: providerStartedAt}
 		firstTokenLatencyMs := int64(-1)
+		firstReasoningLatencyMs := int64(-1)
+		firstRawTextLatencyMs := int64(-1)
 		markFirstToken := func(observedAt time.Time) {
 			if firstTokenLatencyMs < 0 {
 				firstTokenLatencyMs = providerFirstTokenLatencyMillis(providerStartedAt, observedAt, time.Now())
@@ -456,6 +468,16 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		request.OnChunk = func(chunk domainmodel.Chunk) error {
 			if err := attemptCtx.Err(); err != nil {
 				return ProviderStreamCallbackError{Err: err}
+			}
+			if input.MaxOutputBytes > 0 {
+				size := providerChunkBytes(chunk)
+				if size > input.MaxOutputBytes-outputBytes {
+					outputBytesErr = ErrProviderOutputByteBudgetExceeded
+				}
+				if outputBytesErr != nil {
+					return ProviderStreamCallbackError{Err: outputBytesErr}
+				}
+				outputBytes += size
 			}
 			normalizedChunk, identityErr := toolCallIDs.normalizeCallbackChunk(chunk)
 			if identityErr != nil {
@@ -466,14 +488,47 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				return ProviderStreamCallbackError{Err: err}
 			}
 			if chunk.Trace.LoopChunkCallbackAt.IsZero() {
-				chunk.Trace.LoopChunkCallbackAt = time.Now().UTC()
+				chunk.Trace.LoopChunkCallbackAt = time.Now()
+			}
+			first, last := chunk.Trace.ProviderRawSSEChunkAt, chunk.Trace.ProviderLastRawSSEChunkAt
+			if first.IsZero() {
+				first = chunk.Trace.LoopChunkCallbackAt
+			}
+			if last.IsZero() {
+				last = first
+			}
+			if first.Before(providerStartedAt) || first.After(chunk.Trace.LoopChunkCallbackAt) {
+				first = chunk.Trace.LoopChunkCallbackAt
+			}
+			if last.Before(first) || last.After(chunk.Trace.LoopChunkCallbackAt) {
+				last = chunk.Trace.LoopChunkCallbackAt
+			}
+			if (chunk.Kind == domainmodel.ChunkText || chunk.Kind == domainmodel.ChunkReasoning) && chunk.Text != "" {
+				if hostTiming.FirstContentAt.IsZero() || first.Before(hostTiming.FirstContentAt) {
+					hostTiming.FirstContentAt = first
+				}
+				if last.After(hostTiming.LastContentAt) {
+					hostTiming.LastContentAt = last
+				}
+				if chunk.Kind == domainmodel.ChunkText {
+					if hostTiming.FirstTextAt.IsZero() {
+						hostTiming.FirstTextAt = first
+					}
+					hostTiming.LastTextAt = last
+				}
+			}
+			if chunk.Kind == domainmodel.ChunkDone {
+				hostTiming.FinishBoundaryAt = chunk.Trace.LoopChunkCallbackAt
 			}
 			switch chunk.Kind {
 			case domainmodel.ChunkReasoning:
 				if chunk.Text != "" {
 					markFirstToken(chunk.Trace.ProviderRawSSEChunkAt)
+					if firstReasoningLatencyMs < 0 {
+						firstReasoningLatencyMs = providerFirstTokenLatencyMillis(providerStartedAt, chunk.Trace.ProviderRawSSEChunkAt, time.Now())
+					}
 					attemptOutput.StreamedDeltas = true
-					attemptOutput.Reasoning += chunk.Text
+					reasoningBuffer.WriteString(chunk.Text)
 				}
 				if chunk.Signature != "" {
 					attemptOutput.ReasoningSignature = chunk.Signature
@@ -481,6 +536,9 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			case domainmodel.ChunkText:
 				if chunk.Text != "" {
 					markFirstToken(chunk.Trace.ProviderRawSSEChunkAt)
+					if firstRawTextLatencyMs < 0 {
+						firstRawTextLatencyMs = providerFirstTokenLatencyMillis(providerStartedAt, chunk.Trace.ProviderRawSSEChunkAt, time.Now())
+					}
 					attemptOutput.StreamedDeltas = true
 					attemptOutput.PartialTextStarted = true
 					if reasoningMarkupErr == nil {
@@ -510,7 +568,9 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				// callback boundary, so discard both its text candidate and its
 				// private reasoning before accepting replacement bytes.
 				attemptOutput.Text = ""
-				attemptOutput.Reasoning = ""
+				reasoningBuffer.Reset()
+				// Discarded bytes are not a dependency of the replacement candidate.
+				hostTiming = domainmodel.ProviderTiming{StartedAt: providerStartedAt}
 				attemptOutput.ReasoningSignature = ""
 				attemptOutput.StreamedDeltas = false
 				publicTextDecoder = domainreasoningmarkup.NewDecoder()
@@ -574,6 +634,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			}
 		}
 		result, streamErr := input.Provider.Stream(attemptCtx, request)
+		hostTiming.FinishedAt = time.Now()
 		if input.Callbacks.AfterProviderAttempt != nil {
 			if callbackErr := input.Callbacks.AfterProviderAttempt(attempt, streamErr); callbackErr != nil {
 				streamErr = errors.Join(streamErr, ProviderStreamCallbackError{Err: callbackErr})
@@ -595,6 +656,21 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			if providerOutputStarted(streamErr) {
 				attemptOutput.StreamedDeltas = true
 				attemptOutput.PartialTextStarted = true
+			}
+		}
+		if input.MaxOutputBytes > 0 {
+			resultBytes := 0
+			for _, chunk := range result.Chunks {
+				size := providerChunkBytes(chunk)
+				if size > input.MaxOutputBytes-resultBytes {
+					outputBytesErr = ErrProviderOutputByteBudgetExceeded
+					break
+				}
+				resultBytes += size
+			}
+			if outputBytesErr != nil {
+				result.Chunks = nil
+				streamErr = errors.Join(streamErr, outputBytesErr)
 			}
 		}
 		result = appmodel.NormalizeProviderResult(request, result)
@@ -684,6 +760,7 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			return ProviderStreamOutput{Result: cancelledResult}, errors.Join(streamErr, ProviderStreamCallbackError{Err: attemptErr})
 		}
 		releaseAttempt()
+		result.HostTiming = hostTiming
 		result.DurationMs = time.Since(providerStartedAt).Milliseconds()
 		result.HasDuration = true
 		if firstTokenLatencyMs >= 0 {
@@ -693,6 +770,15 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			result.FirstTokenLatencyMs = result.DurationMs
 			result.HasFirstTokenLatency = true
 		}
+		if firstReasoningLatencyMs >= 0 {
+			result.FirstReasoningLatencyMs = firstReasoningLatencyMs
+			result.HasFirstReasoningLatency = true
+		}
+		if firstRawTextLatencyMs >= 0 {
+			result.FirstRawTextLatencyMs = firstRawTextLatencyMs
+			result.HasFirstRawTextLatency = true
+		}
+		attemptOutput.Reasoning = reasoningBuffer.String()
 		attemptOutput.Result = result
 		output = attemptOutput
 		err = streamErr
@@ -933,4 +1019,8 @@ func providerFirstTokenLatencyMillis(startedAt time.Time, observedAt time.Time, 
 		observedAt = now
 	}
 	return observedAt.Sub(startedAt).Milliseconds()
+}
+
+func providerChunkBytes(chunk domainmodel.Chunk) int {
+	return len(chunk.Text) + len(chunk.Signature) + len(chunk.ToolCall.ID) + len(chunk.ToolCall.Name) + len(chunk.ToolCall.Arguments)
 }

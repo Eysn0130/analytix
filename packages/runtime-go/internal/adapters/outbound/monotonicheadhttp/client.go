@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	ObservePath         = "/v1/monotonic-head/observe"
-	AdvancePath         = "/v1/monotonic-head/advance"
-	MutationResolvePath = "/v1/monotonic-head/mutation/resolve"
+	ObservePath         = monotonichead.ObservePathV1
+	AdvancePath         = monotonichead.AdvancePathV1
+	MutationResolvePath = monotonichead.MutationResolvePathV1
 
 	protocolContentType  = "application/json"
 	errorPurpose         = "analytix.monotonic-head-error/v1"

@@ -4,7 +4,11 @@ package secretstore
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +16,49 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func windowsPrivateTestRoot(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes, err := privateWindowsSecurityAttributes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		var suffix [16]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(home, "analytix-credential-test-"+hex.EncodeToString(suffix[:]))
+		name, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.CreateDirectory(name, &attributes); errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			continue
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(path); err != nil {
+				t.Error(err)
+			}
+		})
+		handle, err := openPrivateWindowsDirectory(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.CloseHandle(handle); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	t.Fatal("private Windows test root name collision")
+	return ""
+}
 
 func TestDPAPIMasterKeyBlobIsStrictAndVersioned(t *testing.T) {
 	t.Parallel()
@@ -56,7 +103,7 @@ func TestDPAPIMasterKeyBlobIsStrictAndVersioned(t *testing.T) {
 func TestWindowsDefaultMasterKeyProviderUsesDPAPIFile(t *testing.T) {
 	t.Parallel()
 
-	storePath := filepath.Join(t.TempDir(), "credentials.enc.json")
+	storePath := filepath.Join(windowsPrivateTestRoot(t), "credentials.enc.json")
 	provider, err := defaultMasterKeyProvider(storePath, Options{})
 	if err != nil {
 		t.Fatalf("defaultMasterKeyProvider() error = %v", err)
@@ -77,6 +124,7 @@ func TestWindowsPrivateFileHandleValidationRejectsReparseAndNonRegularTargets(t 
 	valid := windows.ByHandleFileInformation{
 		FileAttributes: windows.FILE_ATTRIBUTE_NORMAL,
 		FileSizeLow:    32,
+		NumberOfLinks:  1,
 	}
 	if err := validateWindowsPrivateFileHandle(windows.FILE_TYPE_DISK, valid, 32); err != nil {
 		t.Fatalf("validateWindowsPrivateFileHandle(valid) error = %v", err)
@@ -124,5 +172,100 @@ func TestWindowsPrivateFileHandleValidationRejectsReparseAndNonRegularTargets(t 
 				t.Fatal("validateWindowsPrivateFileHandle() error = nil, want rejection")
 			}
 		})
+	}
+}
+
+func TestWindowsDPAPIMasterKeySurvivesRestartAndRejectsMissingKey(t *testing.T) {
+	storePath := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
+	provider, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := provider.LoadOrCreate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clearBytes(first)
+	secondProvider, err := defaultMasterKeyProvider(storePath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secondProvider.LoadOrCreate(context.Background())
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatalf("DPAPI restart readback failed: %v", err)
+	}
+	clearBytes(second)
+	if err := writePrivateFileAtomically(storePath, []byte("synthetic-ciphertext"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(provider.(*dpapiMasterKeyProvider).path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secondProvider.LoadOrCreate(context.Background()); !errors.Is(err, portsecretstore.ErrMasterKeyUnavailable) {
+		t.Fatalf("missing master key regenerated over ciphertext: %v", err)
+	}
+	content, err := readPrivateCommittedFile(storePath, 1024)
+	if err != nil || !bytes.Equal(content, []byte("synthetic-ciphertext")) {
+		t.Fatalf("ciphertext was not preserved after missing key: %v", err)
+	}
+	clearBytes(content)
+}
+
+func TestWindowsPrivateReplacementRetainsOwnerDACL(t *testing.T) {
+	path := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
+	for _, content := range [][]byte{[]byte("first"), []byte("second")} {
+		if err := writePrivateFileAtomically(path, content, nil); err != nil {
+			t.Fatal(err)
+		}
+		readback, err := readPrivateCommittedFile(path, 64)
+		if err != nil || !bytes.Equal(readback, content) {
+			t.Fatalf("private replacement readback failed: %v", err)
+		}
+		clearBytes(readback)
+	}
+}
+
+func TestWindowsPrivateFileRejectsForeignWriterACL(t *testing.T) {
+	path := filepath.Join(windowsPrivateTestRoot(t), "private", "provider-secrets", "credentials.v1.json")
+	if err := writePrivateFileAtomically(path, []byte("synthetic-ciphertext"), nil); err != nil {
+		t.Fatal(err)
+	}
+	token, err := windows.OpenCurrentProcessToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := token.GetTokenUser()
+	_ = token.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := windows.SecurityDescriptorFromString(
+		"O:" + user.User.Sid.String() + "D:P(A;;FA;;;" + user.User.Sid.String() + ")(A;;FA;;;WD)",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(name, windows.WRITE_DAC|windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readPrivateCommittedFile(path, 1024); err == nil {
+		t.Fatal("foreign Windows ACL writer grant was accepted")
 	}
 }

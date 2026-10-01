@@ -71,10 +71,14 @@ function textContentToPageText(content: { items?: unknown[] }): string {
 async function extractPdfText(
   targetPath: string,
   size: number,
-  mtimeMs: number
+  mtimeMs: number,
+  authorizedBytes?: Uint8Array,
+  isCurrent: () => boolean = () => true
 ): Promise<WritePdfTextResult> {
   const pdfjs = await loadPdfJs()
-  const bytes = await readFile(targetPath)
+  if (!isCurrent()) return { ok: false, message: 'PDF read is unavailable.' }
+  const bytes = authorizedBytes ?? await readFile(targetPath)
+  if (!isCurrent()) return { ok: false, message: 'PDF read is unavailable.' }
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(bytes),
     disableFontFace: true,
@@ -91,8 +95,10 @@ async function extractPdfText(
   try {
     const maxPages = Math.min(pageCount, MAX_PDF_TEXT_PAGES)
     for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+      if (!isCurrent()) return { ok: false, message: 'PDF read is unavailable.' }
       const page = await document.getPage(pageNumber)
       const content = await page.getTextContent()
+      if (!isCurrent()) return { ok: false, message: 'PDF read is unavailable.' }
       const text = textContentToPageText(content)
       if (text) {
         const remaining = MAX_PDF_TEXT_CHARS - charOffset
@@ -128,6 +134,13 @@ async function extractPdfText(
     hasText: pages.some((page) => page.text.trim().length > 0),
     truncated
   }
+}
+
+// Retrieval parses Core-authorized bytes; this path never reopens a filename.
+export async function readWritePdfBytes(bytes: Uint8Array, isCurrent: () => boolean): Promise<WritePdfTextResult> {
+  if (!isCurrent() || bytes.byteLength > 16 * 1024 * 1024) return { ok: false, message: 'PDF read is unavailable.' }
+  try { return await extractPdfText('', bytes.byteLength, 0, bytes, isCurrent) }
+  catch { return { ok: false, message: 'PDF read is unavailable.' } }
 }
 
 export async function readWritePdfText(payload: WorkspaceFileTarget): Promise<WritePdfTextResult> {

@@ -94,7 +94,7 @@ func ToolKind(name string) string {
 	if name == "task" || name == "delegate_task" || name == "parallel_tasks" {
 		return "subagent"
 	}
-	if name == ToolCreatePlanName || name == "write" || name == "write_file" || name == "edit" || name == "edit_file" || name == "multi_edit" || name == "move_file" || name == "notebook_edit" || name == "delete_range" || name == "delete_symbol" {
+	if name == "generate_office_document" || name == ToolCreatePlanName || name == "write" || name == "write_file" || name == "edit" || name == "edit_file" || name == "multi_edit" || name == "move_file" || name == "notebook_edit" || name == "delete_range" || name == "delete_symbol" {
 		return "file_change"
 	}
 	if name == "bash" || IsJobTool(name) {
@@ -163,7 +163,7 @@ func IsThreadStateTool(name string) bool {
 func IsMutatingTool(toolName string) bool {
 	return toolName == ReportDeliveryToolName ||
 		toolName == "write" ||
-		toolName == "write_file" ||
+		toolName == "write_file" || toolName == "generate_office_document" ||
 		toolName == "edit" ||
 		toolName == "edit_file" ||
 		toolName == "multi_edit" ||
@@ -554,7 +554,7 @@ func CancelledOutput(toolName string, callID string, cause error) map[string]any
 
 func IsFileMutationTool(toolName string) bool {
 	return toolName == "write" ||
-		toolName == "write_file" ||
+		toolName == "write_file" || toolName == "generate_office_document" ||
 		toolName == "edit" ||
 		toolName == "edit_file" ||
 		toolName == "multi_edit" ||

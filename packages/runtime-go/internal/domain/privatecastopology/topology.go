@@ -55,6 +55,7 @@ var runtimeRootSpecsV1 = []RootSpecV1{
 	rootSpec("authority-advance/v2/settlements", "authority-advance", LayoutDirectRootV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec("evidence-authority/bundles", "evidence-authority", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec("evidence-authority/observations", "evidence-authority", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
+	rootSpec("evidence-authority-host-local/heads", "evidence-authority-host-local", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec(EvidenceRegistryRecoveryGroupID+"/"+EvidenceRegistryCapsulesLeafV2, EvidenceRegistryRecoveryGroupID, LayoutOwnerLeafV1, SnapshotOpaqueBytesV1),
 	rootSpec(EvidenceRegistryRecoveryGroupID+"/"+EvidenceRegistryIndexesLeafV2, EvidenceRegistryRecoveryGroupID, LayoutOwnerLeafV1, SnapshotOpaqueBytesV1),
 	rootSpec("dataset-snapshot-authority/legacy-records", "dataset-snapshot-authority", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
@@ -169,7 +170,7 @@ func KnownTopLevelOwnerAliasV1(value string) bool {
 }
 
 func ValidateRuntimeRootSpecsV1() error {
-	if len(runtimeRootSpecsV1) != 56 {
+	if len(runtimeRootSpecsV1) != 57 {
 		return errors.New("runtime private CAS topology root count changed")
 	}
 	rootIDs := make(map[string]struct{}, len(runtimeRootSpecsV1))
@@ -217,7 +218,7 @@ func ValidateRuntimeRootSpecsV1() error {
 			}
 		}
 	}
-	if len(groups) != 19 || opaque != 4 {
+	if len(groups) != 20 || opaque != 4 {
 		return errors.New("runtime private CAS topology group or opaque policy count changed")
 	}
 	return nil

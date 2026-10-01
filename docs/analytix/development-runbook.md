@@ -2,7 +2,7 @@
 
 - Status: Operational
 - Applies to: local development, validation, packaging, and startup diagnosis
-- Current as of: 2026-09-12; verify the current worktree before use
+- Development routes updated: 2026-09-20; verify the current worktree before use
 - Source of truth: `package.json`, package scripts, build configuration, and
   `scripts/`
 
@@ -15,6 +15,35 @@ portable source checks, runtime-resource preparation and CI/package status,
 start with [Development baseline](development-baseline.md). The configured
 macOS storage procedures below are host-specific, not prerequisites for every
 public source checkout.
+
+## Development Routes
+
+The primary route is **Codex Desktop on the configured local Mac**, using the
+canonical `/Users/sun/Projects/analytix` workspace. The user's 2026-09-20
+authorization includes source edits, builds, tests, Electron GUI, synthetic
+Office/PDF/image tests, Chinese IME, local private installation and proportionate
+product acceptance on this Mac. Another Mac, VM, cloud host or independent
+execution entry is not a prerequisite. Use the configured cache and isolated
+synthetic profiles/data; this authorization does not open existing personal
+profiles, credentials or real case data to a test process.
+
+The auxiliary route is **ChatGPT + GitHub** for development and review through
+the capabilities actually available and authorized in that environment. Keep
+the same repository, real commit ancestry, PR and evidence ownership across
+both routes. On return to local work, refresh remote refs/receipts and protect
+any newer local or remote candidate before integration. A cloud source test is
+not installed Mac/native Office/IME acceptance; a local result does not prove
+that its candidate has reached GitHub or main.
+
+The earlier task restriction against using the user's Mac has been superseded
+by this explicit authorization. Dated handovers retain their historical facts
+and are not current host prohibitions. Neither route change nor general local
+execution/Git authority clears the earlier `create_tree` safety rejection,
+Chromium `ERR_BLOCKED_BY_ADMINISTRATOR`, or SecurityAgent refusal: each still
+requires its own applicable resolution evidence before a dependent retry.
+Do not switch interfaces, executors, profiles or credentials to bypass them.
+Private installation remains subject to its actual asset/platform/signing
+requirements; this strategy does not authorize tags, releases or publication.
 
 ## Preserve The Worktree
 
@@ -237,6 +266,23 @@ not yet a general development bootstrap and has not replaced the default entry.
 See [development baseline](development-baseline.md) for the full development
 loop, platform limits and remaining CI/package work.
 
+### Identify a GUI candidate before comparing it
+
+Keep development instance, profile, source commit and build fingerprints in
+private acceptance records. They do not belong in the product top bar or the
+composer's always-visible controls. Model display names describe the configured
+model selection; they do not attest the implementation behind a custom endpoint.
+Keep technical IDs and connection details available in Settings and tooltips.
+
+For GUI acceptance across tasks, retain the source commit plus task-owned dirty
+blob manifest, frozen Main/preload/Renderer build, profile ID and connection
+kind alongside screenshots. Use one integrator for canonical source changes.
+Do not keep acceptance attached to a shared HMR build while another task edits
+that source. A Mock screenshot and an official-Provider screenshot exercise
+different configurations; neither substitutes for the other. Investigate a
+suspected regression by comparing those identities before reverting code or
+reinitializing any protected profile.
+
 ## Validation Matrix
 
 Choose the smallest evidence that can fail on the changed behavior.
@@ -345,3 +391,68 @@ Verify scripts against the current `package.json` and build configuration
 before editing this page. Add commands only when they are maintained entry
 points. Move date-bound results to evidence documents rather than turning this
 runbook into a pass ledger.
+
+## Core package candidate profile
+
+`npm run dist:mac:arm64:core` selects the explicit `core` profile in the existing
+Electron builder and after-pack owners. The default remains `full`. The current
+private Core command remains a non-publishable Darwin arm64 candidate path.
+`npm run dist:mac:arm64:core:controlled` selects the existing Developer ID
+signing/notarization owner without the private command's external-state
+isolation. It requires the configured official team and normal authorized
+signing material. The explicit `core_controlled_release` disposition binds
+that team, signing policy, target and compiled Go qualification; it remains
+`controlled_release_clean_candidate_non_publishable` until separate publication
+authority and actual acceptance exist. Missing signing authority fails closed.
+No signing, notarization, installation or stage acceptance is implied by these
+commands existing.
+
+Both commands build DMG plus ZIP and run `scripts/core-update-metadata.cjs`
+after the pinned electron-builder completes. Builder 26.15.3 writes update YAML
+after `afterAllArtifactBuild`, so this operation must remain a postprocessor.
+Core feeds use `core/darwin-arm64/channels/<stable|beta>/latest/`; stable uses
+`latest-mac.yml`, beta uses `beta-mac.yml`. The updater and publisher require
+matching Core identity, channel, compatibility generation, version and artifact
+names/digests. The signed publication owner rejects mixed Core/Full packages;
+version archive writes use a create-only precondition. `core-v1` denotes the
+unchanged Core data-schema generation, not evidence of an end-to-end upgrade.
+Cross-profile automatic updates are unsupported. Full product formal evidence
+still requires A0 and B1. The same release gate has a separate read-only Core
+stage projection: on a clean source checkout, set `ANALYTIX_EXACT_ARTIFACT_PATH`
+to the exact controlled Core `.app`, then run
+`npm run runtime:go:core-stage -- --formal-evidence-dir <evidence-directory>`.
+It requires the current-source A0 report, the existing whole-artifact legal audit,
+authenticated Core absence, and fresh Developer ID/shared native signature checks.
+It reports B1 as `not_applicable_core`; it does not declare B1 passed or create
+Full product admission, publication authority, or a release receipt. Actual
+installation/Provider/upgrade and external release acceptance are separate evidence.
+
+The Core resource closure excludes the Funds plugin tree, Python data backend,
+all four data-analysis native binaries and their native authority generations,
+private Office engine and document-runtime. Both after-pack and the packaged
+Go reader reject unexpected professional payloads; the Go executable binds the
+profile at link time. Main skips Funds materialization, and the Go Host denies
+saved Funds activation before source inspection, catalog advertisement or effects.
+Existing case and installed-plugin state is retained. Case tasks remain subject
+to protected-root and authority checks; ordinary tools do not gain case access.
+
+The same Go Core, Electron/Main/preload/renderer, ordinary tool/terminal lanes,
+Provider Registry/Secret Store, approvals, history, Skills/MCP and ordinary child
+execution remain included. Existing Office codec WASM, document preview and
+renderer code remain packaged: their license and applicable shared checks are
+still required. Excluding the private Office engine does not claim those assets
+or advanced editing have passed qualification. The complete profile and its
+backlog remain intact.
+
+Use the cache helper in the same shell. Pin the source commit and inspect the
+actual resulting resource/seal/authority closure before installation. Do not
+launch a GUI across the unresolved Chromium/OS storage admission boundary or
+interpret an ad-hoc Core candidate as a public release.
+
+A clean build worktree does not contain ignored Computer Use native artifacts.
+The existing after-pack owner accepts `ANALYTIX_COMPUTER_USE_PACKAGE_ROOT` for
+that dependency. When reusing a local input, first verify its pinned provenance,
+listed file and adaptation hashes, and signature; supply the package root through
+that entry point and retain the ordinary after-pack validation. A private ad-hoc
+input is not release-qualified. A failed package must be rebuilt through the
+normal lifecycle, not resumed with `--prepackaged` or relabeled as complete.

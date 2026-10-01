@@ -25,7 +25,6 @@ import { ClawAddImDialog } from './SidebarClawDialog'
 import { SidebarMascot } from './AnimatedWorkLogo'
 import { ConnectPhoneSidebarPanel } from './ConnectPhoneView'
 import { SidebarProjectsSection } from './SidebarProjectsSection'
-import { WorkspaceModeTabs } from './WorkspaceModeTabs'
 import {
   SidebarCommandRow,
   SidebarFrame
@@ -106,8 +105,6 @@ export function Sidebar({
   focusModeEnabled,
   onFocusModeChange,
   onToggleConnectPhone,
-  onCodeOpen,
-  onWriteOpen,
   onScheduleOpen
 }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
@@ -163,12 +160,6 @@ export function Sidebar({
       }
     >
       <div className="ds-no-drag flex flex-col px-1">
-        <WorkspaceModeTabs
-          activeView={activeView}
-          onCodeOpen={onCodeOpen}
-          onWriteOpen={onWriteOpen}
-        />
-
         {activeView !== 'claw' && activeView !== 'schedule' ? (
           <>
             <SidebarCommandRow

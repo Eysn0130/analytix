@@ -46,8 +46,8 @@ func verifyPackageAnchorWithRunnerV2(
 	defer cancel()
 	arguments := []string{"--verify", "--deep", "--strict", "--verbose=2"}
 	anchor := "macos_nonpublishable_resource_seal"
-	if authority.Controlled != nil && authority.Controlled.SigningMode == "developer-id" {
-		team := authority.Controlled.AppleTeamIdentifier
+	if authority.DeveloperIDTeam() != "" {
+		team := authority.DeveloperIDTeam()
 		arguments = append(arguments, "-R="+developerIDRequirementV2(team))
 		anchor = "macos_developer_id_resource_seal"
 	}
@@ -66,8 +66,8 @@ func verifyPackageAnchorWithRunnerV2(
 	if metadataValueV2(metadata, "Executable") != expectedRunner {
 		return "", errors.New("macOS packaged application runner identity is invalid")
 	}
-	if authority.Controlled != nil && authority.Controlled.SigningMode == "developer-id" {
-		team := authority.Controlled.AppleTeamIdentifier
+	if authority.DeveloperIDTeam() != "" {
+		team := authority.DeveloperIDTeam()
 		if metadataValueV2(metadata, "TeamIdentifier") != team || metadataValueV2(metadata, "Timestamp") == "" ||
 			!hasMetadataPrefixV2(metadata, "Authority", "Developer ID Application:") || !hasHardenedRuntimeFlagV2(metadata) {
 			return "", errors.New("macOS packaged Developer ID identity is invalid")

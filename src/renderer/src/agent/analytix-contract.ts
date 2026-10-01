@@ -714,6 +714,7 @@ export type CoreAcceptedFinalPublicViewV2Json = AcceptedFinalPublicViewV2
 export type CoreAcceptedFinalPublicViewJson = AcceptedFinalPublicView
 
 export type CoreTurnJson = {
+  factHistoryState?: 'retained_snapshot'
   id: string
   threadId: string
   status: CoreTurnStatus
@@ -863,15 +864,6 @@ export type CoreMemoryListResponseJson = {
   memories: CoreMemoryRecordJson[]
 }
 
-export type CoreResumeSessionResponseJson = {
-  thread_id?: string
-  threadId?: string
-  session_id?: string
-  sessionId?: string
-  message_count?: number
-  summary?: string
-}
-
 /**
  * Optional plan context attached to a start-turn request. Carries the
  * reserved plan id, workspace root, and relative path the Analytix
@@ -924,6 +916,10 @@ export type CoreUsageSnapshotJson = {
   cost_cny?: number
   priceConfigured?: boolean
   price_configured?: boolean
+  costEstimateStatus?: 'none' | 'complete' | 'partial' | 'unknown'
+  cost_estimate_status?: 'none' | 'complete' | 'partial' | 'unknown'
+  costKnownCurrencies?: Array<'USD' | 'CNY'>
+  cost_known_currencies?: Array<'USD' | 'CNY'>
   cacheSavingsUsd?: number
   cache_savings_usd?: number
   cacheSavingsCny?: number
@@ -933,6 +929,19 @@ export type CoreUsageSnapshotJson = {
 }
 
 export type CoreCacheDiagnosticsJson = {
+  dynamicStateCheck?: 'not_checked'
+  toolSchemaEstimator?: 'utf8_bytes_div4'
+  responseModelObservation?: 'not_reported' | 'matches_resolved' | 'differs_resolved'
+  modelInputComparable?: boolean
+  modelInputFirstDifference?: 'unavailable' | 'none' | 'system' | 'tools' | 'history' | 'current' | 'ordering'
+  modelInputComparablePrefixBytes?: number
+  providerAttemptCount?: number
+  providerCostKnownAttemptCount?: number
+  providerKnownCostUsdAttemptCount?: number
+  providerKnownCostCnyAttemptCount?: number
+  providerKnownCostUsdNanos?: number
+  providerKnownCostCnyNanos?: number
+  providerCostEstimateComplete?: boolean
   prefixHash?: string
   prefixChanged?: boolean
   prefixChangeReasons?: string[]

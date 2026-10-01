@@ -1,6 +1,7 @@
 // 必须是第一个 import:把旧品牌前缀的 localStorage 键拷贝到新前缀,
 // 后面的 store 模块在 import 阶段就会读这些键。
 import './lib/legacy-local-storage-migration'
+import { createWriteShutdownHandler } from './write/write-shutdown'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import '@fontsource/noto-serif-sc/chinese-simplified-400.css'
@@ -26,6 +27,7 @@ async function installBrowserPreviewBridgeIfNeeded(): Promise<void> {
 
 async function startRenderer(): Promise<void> {
   await installBrowserPreviewBridgeIfNeeded()
+  window.analytix.write.onShutdown(createWriteShutdownHandler())
   desktopQueryCache.installBridge()
   document.documentElement.dataset.platform = window.analytix?.app?.platform ?? 'unknown'
   applyCursorSpotlight(true)

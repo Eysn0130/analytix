@@ -15,6 +15,7 @@ import (
 )
 
 type BeginOperationGroupAuthorityInput struct {
+	GenerationPrincipalDigest   string
 	SecurityContext             domainsecurity.TurnSecurityContext
 	ExecutionGrant              domainsecurity.ExecutionGrant
 	CheckpointID                string
@@ -45,7 +46,8 @@ func (authority SnapshotAuthority) BeginOperationGroup(
 		return domaincheckpoint.OperationGroupIntentV2{}, nil, false, errors.New("checkpoint operation group authority is unavailable")
 	}
 	return authority.Store.BeginOperationGroup(ctx, domaincheckpoint.OperationGroupIntentInputV2{
-		SecurityContext: input.SecurityContext, ExecutionGrant: input.ExecutionGrant,
+		GenerationPrincipalDigest: input.GenerationPrincipalDigest,
+		SecurityContext:           input.SecurityContext, ExecutionGrant: input.ExecutionGrant,
 		CheckpointID: input.CheckpointID, SourceWorkspaceCheckpointID: input.SourceWorkspaceCheckpointID,
 		ToolName: input.ToolName, ArgumentsJSON: input.ArgumentsJSON, Paths: input.Paths, CreatedAt: input.CreatedAt,
 	})

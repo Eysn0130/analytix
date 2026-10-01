@@ -152,8 +152,22 @@ security, operability and package surfaces when they are part of the accepted
 outcome. Do not add all these surfaces to every local edit. Do not shrink the
 outcome to whatever focused checks currently pass.
 
+Use that mapping when a long delivery changes phases or receives a new audit:
+which original obligation does the next bundle close, what is already delivered,
+and what would make its evidence invalid? Trace externally visible values through
+their real consumers; a correct producer/helper or diagnostic field does not
+prove the UI, aggregate, persistence or recovery path uses it correctly. Separate
+implementation, supported fallback, scoped verification and comparative product
+claims. A benchmark against a local baseline does not establish upstream parity.
+Keep the mapping in the existing record rather than copying the full history
+into every brief. Correct stale summaries; preserve the original evidence.
+
 After accepting a bundle, select the next gap or run the nearest product
 checkpoint if it can change that selection. Consolidate related corrections.
+If an audit finds a concrete omitted consumer or reproducible defect, dispatch
+the bounded repair to the healthy writer or implement it under an agreed scope;
+do not finish with another list of recommendations while authorized work is ready.
+When only one decision is blocked, release unrelated work from that dependency.
 When the complete authorized outcome is demonstrated, the Owner synthesizes
 what shipped locally, decisive evidence and any separately reserved external
 operation. A controller-local success or an OpenSpec checkmark does not itself
@@ -162,8 +176,8 @@ delivery acknowledgement for the final result.
 
 ## Rotate without losing control
 
-Prefer keeping the canonical Owner thin and rotating execution context at safe
-bundle boundaries. Rotate a Slice or Controller when repeated reconstruction,
+Keep the canonical Owner thin. When rotation is justified, transfer execution
+context at a safe bundle boundary. Rotate a Slice or Controller when repeated reconstruction,
 contradictory state, scope drift or unreliable review makes a fresh context more
 useful. Do not impose a fixed number of turns, tokens, hours or compactions; use
 context telemetry only if the current tool actually exposes it.

@@ -25,10 +25,10 @@ func TestPackagedBuildAuthorityV2AcceptsJavaScriptProducerGolden(t *testing.T) {
 	if parsed.Controlled == nil || parsed.Development != nil {
 		t.Fatalf("JavaScript producer disposition parsed incorrectly: %#v", parsed)
 	}
-	if parsed.Authority.AuthorityDigest != "1103e3fa03b4bd8e7231f82a2669d244bc2ff39727e7601d118c839680807597" {
+	if parsed.Authority.AuthorityDigest != "f310dbe02a258009085562dee8cd293daf2e1f4f69523ca4229af1daf573885b" {
 		t.Fatalf("JavaScript producer authority digest drifted: %q", parsed.Authority.AuthorityDigest)
 	}
-	if parsed.Authority.BuildContext.ContextDigest != "e9ed518d23f5af0dba2ff3f820b31e5ebf0275dc28d0b7c9d37875ab95c7a1c6" {
+	if parsed.Authority.BuildContext.ContextDigest != "a5f878cf3708c5dcd27c8ba8c70564ad7880a1cdf7e2b162a43d8874b21c5163" {
 		t.Fatalf("JavaScript producer build context digest drifted: %q", parsed.Authority.BuildContext.ContextDigest)
 	}
 }
@@ -331,4 +331,78 @@ func snapshotDigestFixtureV2(snapshot WorktreeSnapshotV1) string {
 
 func digestFixtureV2(label string) string {
 	return AuthorityFileSHA256V2([]byte(label))
+}
+
+func TestCoreProfileRequiresAbsentFundsAndExactTarget(t *testing.T) {
+	original := authorityFixtureV2(false, ControlledDispositionKindV2)
+	core := original
+	core.NativeDisposition = json.RawMessage(`{"kind":"core_no_professional_components","targetKey":"darwin-arm64"}`)
+	core.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	core.Classification = "development_clean_non_publishable"
+	check := func(t *testing.T, value AuthorityV2, want bool) {
+		t.Helper()
+		value.AuthorityDigest = authorityDigest(value)
+		body, _ := json.Marshal(value)
+		parsed, err := ParseV2(body)
+		if (err == nil) != want {
+			t.Fatalf("core authority acceptance=%v, want=%v", err == nil, want)
+		}
+		if want && (parsed.Core == nil || parsed.Development != nil || parsed.Controlled != nil) {
+			t.Fatal("core disposition promoted to native authority")
+		}
+	}
+	check(t, core, true)
+	mixed := core
+	mixed.Artifacts.FundsPlugin = original.Artifacts.FundsPlugin
+	check(t, mixed, false)
+	absentFull := original
+	absentFull.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	check(t, absentFull, false)
+	unknown := core
+	unknown.NativeDisposition = json.RawMessage(`{"kind":"core_no_professional_components","targetKey":"linux-x64"}`)
+	check(t, unknown, false)
+	published := core
+	published.Publishable = true
+	check(t, published, false)
+}
+
+func TestControlledCoreQualificationIsNotPublication(t *testing.T) {
+	base := authorityFixtureV2(false, ControlledDispositionKindV2)
+	base.Artifacts.FundsPlugin = FundsPluginArtifactBindingV2{}
+	disposition := CoreDispositionV2{Kind: CoreControlledDispositionKindV2, TargetKey: "darwin-arm64", SigningPolicySHA256: digestFixtureV2("policy"), SigningMode: "developer-id", AppleTeamIdentifier: "TESTTEAM01"}
+	check := func(t *testing.T, d CoreDispositionV2, value AuthorityV2, want bool) {
+		t.Helper()
+		value.NativeDisposition, _ = json.Marshal(d)
+		value.AuthorityDigest = authorityDigest(value)
+		body, _ := json.Marshal(value)
+		parsed, err := ParseV2(body)
+		if (err == nil) != want {
+			t.Fatalf("controlled Core accepted=%v want=%v", err == nil, want)
+		}
+		if want && (parsed.Core == nil || parsed.DeveloperIDTeam() != "TESTTEAM01" || parsed.Controlled != nil || parsed.Authority.Publishable) {
+			t.Fatal("Core qualification crossed authority boundary")
+		}
+	}
+	check(t, disposition, base, true)
+	for _, mutate := range []func(*CoreDispositionV2){
+		func(d *CoreDispositionV2) { d.Kind = "unknown" },
+		func(d *CoreDispositionV2) { d.SigningMode = "ad-hoc" },
+		func(d *CoreDispositionV2) { d.SigningPolicySHA256 = "" },
+		func(d *CoreDispositionV2) { d.AppleTeamIdentifier = "" },
+		func(d *CoreDispositionV2) { d.TargetKey = "darwin-x64" },
+		func(d *CoreDispositionV2) { d.Kind = CoreDispositionKindV2 },
+	} {
+		d := disposition
+		mutate(&d)
+		check(t, d, base, false)
+	}
+	published := base
+	published.Publishable = true
+	check(t, disposition, published, false)
+	development := base
+	development.Classification = "development_clean_non_publishable"
+	check(t, disposition, development, false)
+	mixed := base
+	mixed.Artifacts.FundsPlugin = authorityFixtureV2(false, ControlledDispositionKindV2).Artifacts.FundsPlugin
+	check(t, disposition, mixed, false)
 }

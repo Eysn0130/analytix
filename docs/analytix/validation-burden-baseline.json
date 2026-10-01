@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "source_head": "c2cd3e29174e701569220e1c39076e0acff24a53",
+  "captured_date": "2026-09-29",
+  "scope": "Tracked entry bytes before currentness repair; inherited dirty B1 is not a sealed candidate.",
+  "entries": [
+    {
+      "path": "AGENTS.md",
+      "bytes": 15830,
+      "sha256": "99b3ff9da0cf78a7e88da77cc2f9bf66ad162be5abd1da15f981c65a3bba2ceb"
+    },
+    {
+      "path": "docs/analytix/README.md",
+      "bytes": 21392,
+      "sha256": "77e87ec6ca55ce3394a5bc8fab809bd27a572adfb846bac9e2247dfb9bbc69d4"
+    },
+    {
+      "path": "docs/analytix/specs/README.md",
+      "bytes": 6399,
+      "sha256": "eeb3b89d5085bd93adba603376b745bc887f449fb791823a99de3fd08ad98a70"
+    },
+    {
+      "path": "docs/analytix/handovers/README.md",
+      "bytes": 22445,
+      "sha256": "ce46ecdca3ebd32cf19987a341c028d551cb2ac609aee2a894d15b52d403d614"
+    },
+    {
+      "path": "docs/analytix/product-completion.md",
+      "bytes": 32916,
+      "sha256": "ba3ef94098bf4347f0b01d03334ede08a08ee2d875d3773f4bcca2cdfb247e3a"
+    },
+    {
+      "path": "docs/analytix/delivery-execution-plan.md",
+      "bytes": 31469,
+      "sha256": "0d01e798221f807f0be4e582e8b0d9734870f097b9d9e2b2e5eabf57645749fd"
+    },
+    {
+      "path": "docs/analytix/document-consolidation-register.md",
+      "bytes": 9210,
+      "sha256": "f413b190f3c4b16e1b84592d7ac9a756c019b8a6479ed8d9f7b11efccf119af7"
+    },
+    {
+      "path": "openspec/changes/case-evidence-publication-gate/tasks.md",
+      "bytes": 212998,
+      "sha256": "bcb2d8d9f93a32fee1fa78a93cc1f9f1e095b88161cdfdb551b234e53d6606dd"
+    },
+    {
+      "path": "docs/analytix/qa/pr28-next-execution-2026-09-26.md",
+      "bytes": 84440,
+      "sha256": "f3047f776e6a0c895c941cb057497c267e68e36289cf91185a3564e6559bee20"
+    }
+  ],
+  "matched_reads": [
+    {
+      "id": "resume_candidate_and_evidence",
+      "paths": [
+        "docs/analytix/handovers/README.md",
+        "docs/analytix/product-completion.md"
+      ],
+      "domains": [
+        "routing",
+        "product-evidence"
+      ]
+    },
+    {
+      "id": "locate_next_validation",
+      "paths": [
+        "docs/analytix/handovers/README.md",
+        "docs/analytix/product-completion.md",
+        "docs/analytix/delivery-execution-plan.md"
+      ],
+      "domains": [
+        "routing",
+        "product-evidence",
+        "execution-policy"
+      ]
+    }
+  ],
+  "measurement_limits": "Full declared-file byte counts are a reading proxy. Task correctness, actual tokens, cost and first effective validation time have no matched baseline.",
+  "loaded_instruction_paths": [
+    "AGENTS.md",
+    "docs/AGENTS.md",
+    "packages/runtime-go/AGENTS.md"
+  ],
+  "scope_paths": [
+    "docs/analytix/development-baseline.md",
+    "docs/analytix/document-consolidation-register.md",
+    "docs/analytix/handovers/README.md",
+    "docs/analytix/product-completion.md",
+    "docs/analytix/qa/pr28-next-execution-2026-09-26.md",
+    "docs/analytix/qa/pr28-b1-host-local-currentness-source-2026-09-27.md",
+    "docs/analytix/validation-burden-baseline.json",
+    "scripts/validation-burden.mjs",
+    "package.json"
+  ]
+}

@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+const generatedPreview = vi.hoisted(() => ({ open: vi.fn(async () => true) }))
+vi.mock('../office/open-generated-artifact', () => ({ openGeneratedArtifact: generatedPreview.open }))
 import type { AcceptedFinalProjectionBatch, ChatBlock, GeneralTerminalProjectionBatch } from '../agent/types'
 import { dispatchAnalytixRuntimeEvent, dispatchAnalytixRuntimeEvents } from '../agent/analytix-mapper'
 import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
 import { rendererRuntimeClient } from '../agent/runtime-client'
+import type { ThreadTraceEventPayload } from '@shared/thread-trace'
 import i18n from '../i18n'
 import { formatRuntimeError } from '../lib/format-runtime-error'
 import {
@@ -94,6 +97,31 @@ function makeSinkHarness(overrides: Partial<ChatState> = {}): {
     setSnapshots: () => snapshots
   }
 }
+
+describe('live generated artifact preview', () => {
+  const artifact = { artifactId: 'a'.repeat(64), kind: 'docx', contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
+  const event = { itemId: 'artifact-tool', turnId: 'turn-current', summary: 'generate_office_document', status: 'success' as const, meta: { toolName: 'generate_office_document', generatedArtifact: artifact } }
+
+  it('opens a fresh live result once through its original main conversation', async () => {
+    generatedPreview.open.mockClear()
+    const { set, get } = makeSinkHarness({ workspaceRoot: '/workspace' })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    sink.onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).toHaveBeenCalledWith(artifact.artifactId, { threadId: 'thread-current', workspace: '/workspace' })
+    sink.onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).toHaveBeenCalledOnce()
+  })
+
+  it('does not reopen an artifact already restored from conversation history', async () => {
+    generatedPreview.open.mockClear()
+    const { set, get } = makeSinkHarness({ workspaceRoot: '/workspace', blocks: [{ kind: 'tool', id: 'artifact-tool', summary: event.summary, status: 'success', meta: event.meta }] })
+    buildThreadEventSink(set, get, { threadId: 'thread-current' }).onTool(event)
+    await vi.dynamicImportSettled()
+    expect(generatedPreview.open).not.toHaveBeenCalled()
+  })
+})
 
 function acceptedFinalProjectionBatch(
   overrides: Partial<AcceptedFinalProjectionBatch> = {}
@@ -239,6 +267,38 @@ describe('thread event sink binding', () => {
     expect('liveReasoning' in getState()).toBe(false)
     expect(getState().blocks).toEqual([])
     expect(getState().busy).toBe(true)
+  })
+
+  it.each([false, true])('records terminal commit before a separate next-frame sample (accepted final: %s)', async (acceptedFinal) => {
+    const frames: FrameRequestCallback[] = []
+    const traces: ThreadTraceEventPayload[] = []
+    const storage = memoryStorage()
+    storage.setItem('ANALYTIX_THREAD_TRACE', '1')
+    vi.stubGlobal('window', {
+      localStorage: storage,
+      requestAnimationFrame: (callback: FrameRequestCallback) => { frames.push(callback); return frames.length },
+      analytix: { diagnostics: { recordThreadTrace: async (event: ThreadTraceEventPayload) => { traces.push(event) } } }
+    })
+    try {
+      const { set, get } = makeSinkHarness({ lastSeq: 19 })
+      const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+      if (acceptedFinal) await sink.onAcceptedFinalBatch?.(acceptedFinalProjectionBatch())
+      else await sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch())
+      const terminalTraces = (): ThreadTraceEventPayload[] => traces.filter((event) => event.name.startsWith('thread.terminal.'))
+      expect(terminalTraces().map((event) => event.name)).toEqual(['thread.terminal.renderer_committed'])
+      for (const frame of frames) frame(123)
+      expect(terminalTraces().map((event) => event.name)).toEqual([
+        'thread.terminal.renderer_committed', 'thread.terminal.next_frame'
+      ])
+      expect(terminalTraces()[0]?.data).toEqual({
+        lastSeq: 22, acceptedFinal,
+        monotonicMs: expect.any(Number), timeOrigin: performance.timeOrigin
+      })
+      expect(terminalTraces()[0]?.data?.monotonicMs).toBeGreaterThanOrEqual(0)
+      expect(JSON.stringify(terminalTraces())).not.toContain('ordinary general guidance')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('applies accepted final, usage, terminal state, and cursor in one store commit', async () => {
@@ -1464,6 +1524,24 @@ describe('thread event sink binding', () => {
     } finally {
       request.mockRestore()
     }
+  })
+
+  it('projects trusted provider progress through one existing status row without exposing event prose', async () => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', blocks: [] })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    for (const [index, stage] of (['pre_send', 'post_send', 'response_received'] as const).entries()) {
+      await dispatchAnalytixRuntimeEvent({
+        kind: 'pipeline_stage', seq: index + 1, threadId: 'thread-current', turnId: 'turn_1',
+        stage, label: 'UNTRUSTED_PROVIDER_PROGRESS_PROSE', timestamp: '2026-09-26T00:00:00Z'
+      }, sink, async () => undefined)
+      expect(getState().blocks).toHaveLength(1)
+      expect(getState().blocks[0]).toMatchObject({ kind: 'system', id: 'runtime_status_turn_1_provider_progress' })
+      expect(JSON.stringify(getState().blocks)).not.toContain('UNTRUSTED_PROVIDER_PROGRESS_PROSE')
+    }
+    expect(getState().blocks[0]).toMatchObject({ text: i18n.t('common:providerResponseReceivedStatus') })
+    expect(getState().busy).toBe(true)
+    expect(getState().liveAssistant).toBe('')
+    expect(getState().blocks.some(block => block.kind === 'assistant')).toBe(false)
   })
 
   it('does not render blank runtime status rows for internal pipeline stages', () => {

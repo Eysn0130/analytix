@@ -80,6 +80,8 @@ func loadRuntimeSandboxSettings(config Config, document map[string]any, ok bool)
 	settings.AllowWriteRoots = filestore.NormalizeRealRoots(settings.AllowWriteRoots)
 	settings.ProtectedReadDirs = filestore.NormalizeRealRoots(settings.ProtectedReadDirs)
 	mandatoryRoots := []string{
+		config.DevelopmentProviderAuthorityDir,
+		filepath.Join(config.DataDir, "object-editing"),
 		filepath.Join(config.DataDir, "private"),
 		filepath.Join(config.DataDir, "child-runs"),
 		config.UserDataDir,

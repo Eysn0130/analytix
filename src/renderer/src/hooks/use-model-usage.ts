@@ -6,6 +6,7 @@ import {
   defaultDailyUsageRange
 } from './use-daily-usage'
 import { parseUsageResponse, withUsageRequestTimeout } from './usage-response'
+import { normalizeUsageCost } from '../agent/usage-cost'
 
 export type ModelUsageBucket = Omit<DailyUsageBucket, 'date'> & {
   model: string
@@ -43,6 +44,10 @@ type RawUsageCounters = {
   cost_cny?: unknown
   price_configured?: unknown
   priceConfigured?: unknown
+  cost_estimate_status?: unknown
+  cost_known_currencies?: unknown
+  costEstimateStatus?: unknown
+  costKnownCurrencies?: unknown
   token_economy_savings_tokens?: unknown
   turns?: unknown
   thread_count?: unknown
@@ -72,16 +77,8 @@ function usageNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function usageOptionalNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
 function usageRate(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : null
-}
-
-function usageBoolean(value: unknown): boolean {
-  return value === true
 }
 
 function normalizeCounters(raw: RawUsageCounters): Omit<DailyUsageBucket, 'date'> {
@@ -95,9 +92,7 @@ function normalizeCounters(raw: RawUsageCounters): Omit<DailyUsageBucket, 'date'
     cachedTokens: usageNumber(raw.cached_tokens),
     cacheMissTokens: usageNumber(raw.cache_miss_tokens),
     totalTokens,
-    costUsd: usageNumber(raw.cost_usd),
-    costCny: usageOptionalNumber(raw.cost_cny),
-    priceConfigured: usageBoolean(raw.price_configured) || usageBoolean(raw.priceConfigured),
+    ...normalizeUsageCost(raw as Record<string, unknown>, 'snake'),
     tokenEconomySavingsTokens: usageNumber(raw.token_economy_savings_tokens),
     turns: usageNumber(raw.turns),
     threadCount: usageNumber(raw.thread_count),

@@ -32,21 +32,25 @@ afterEach(() => {
 
 describe('thread usage formatting', () => {
   it('uses RMB for Chinese locales and USD for English locales', () => {
-    expect(formatCost(0.125, 'zh', 0.88)).toBe('￥0.8800')
-    expect(formatCost(0.125, 'zh-CN', 0.88)).toBe('￥0.8800')
-    expect(formatCost(0.125, 'en')).toBe('$0.1250')
-    expect(formatCost(null, 'en', 0.88)).toBe('￥0.8800')
-    expect(formatCost(0.00000001, 'en')).toBe('$<0.0001')
+    expect(formatCost(0.125, 'zh', 0.88, 'complete', ['USD', 'CNY'])).toBe('￥0.8800 + $0.1250')
+    expect(formatCost(0.125, 'zh-CN', 0.88, 'complete', ['USD', 'CNY'])).toBe('￥0.8800 + $0.1250')
+    expect(formatCost(0.125, 'en', null, 'complete', ['USD'])).toBe('$0.1250')
+    expect(formatCost(0.125, 'zh', null, 'complete', ['USD'])).toBe('$0.1250')
+    expect(formatCost(null, 'en', 0.88, 'complete', ['CNY'])).toBe('￥0.8800')
+    expect(formatCost(0.00000001, 'en', null, 'complete', ['USD'])).toBe('$<0.0001')
   })
 
   it('labels missing pricing as not configured instead of showing zero or a dash', () => {
-    expect(formatUnconfiguredCost('en')).toBe('Not configured')
-    expect(formatUnconfiguredCost('zh-CN')).toBe('价格未配置')
-    expect(formatCost(null, 'en', null)).toBe('Not configured')
-    expect(formatCost(0, 'en', 0)).toBe('Not configured')
-    expect(formatCost(undefined, 'zh-CN')).toBe('价格未配置')
-    expect(formatCost(0, 'en', 0, true)).toBe('$0.0000')
-    expect(formatCost(0, 'zh-CN', 0, true)).toBe('￥0.0000')
+    expect(formatUnconfiguredCost('en')).toBe('Cost unavailable')
+    expect(formatUnconfiguredCost('zh-CN')).toBe('费用未知')
+    expect(formatCost(null, 'en', null)).toBe('Cost unavailable')
+    expect(formatCost(0, 'en', 0)).toBe('Cost unavailable')
+    expect(formatCost(undefined, 'zh-CN')).toBe('费用未知')
+    expect(formatCost(0, 'zh-CN', null, 'complete', ['USD'])).toBe('$0.0000')
+    expect(formatCost(null, 'en', 0, 'complete', ['CNY'])).toBe('￥0.0000')
+    expect(formatCost(0, 'en', 0, 'partial', ['USD'])).toBe('Cost partially unknown')
+    expect(formatCost(0, 'zh-CN', 0, 'partial', ['USD'])).toBe('费用未完整估计')
+    expect(formatCost(0.25, 'en', 0)).toBe('Cost unavailable')
   })
 
   it('prefers latest-turn cache hit rate for compact cache chips', () => {
@@ -150,6 +154,9 @@ describe('thread usage formatting', () => {
                 total_tokens: 120,
                 cost_usd: 0,
                 cost_cny: 0.06909,
+                price_configured: true,
+                cost_estimate_status: 'complete',
+                cost_known_currencies: ['CNY'],
                 turns: 1
               }
             ]
@@ -201,7 +208,7 @@ describe('thread usage formatting', () => {
       costCny: null,
       priceConfigured: false
     })
-    expect(formatCost(usage?.costUsd, 'en', usage?.costCny)).toBe('Not configured')
+    expect(formatCost(usage?.costUsd, 'en', usage?.costCny)).toBe('Cost unavailable')
   })
 
   it('uses total_tokens when a Go aggregate bucket omits input and output tokens', async () => {
@@ -252,6 +259,8 @@ describe('thread usage formatting', () => {
                 cost_usd: 0,
                 cost_cny: 0,
                 price_configured: true,
+                cost_estimate_status: 'complete',
+                cost_known_currencies: ['USD'],
                 turns: 1
               }
             ]
@@ -266,11 +275,13 @@ describe('thread usage formatting', () => {
 
     expect(usage).toMatchObject({
       totalTokens: 120,
-      costUsd: null,
+      costUsd: 0,
       costCny: null,
-      priceConfigured: true
+      priceConfigured: true,
+      costEstimateStatus: 'complete',
+      costKnownCurrencies: ['USD']
     })
-    expect(formatCost(usage?.costUsd, 'en', usage?.costCny, usage?.priceConfigured)).toBe('$0.0000')
+    expect(formatCost(usage?.costUsd, 'zh-CN', usage?.costCny, usage?.costEstimateStatus, usage?.costKnownCurrencies)).toBe('$0.0000')
   })
 
   it('uses explicit aggregate thread cache telemetry when available', async () => {

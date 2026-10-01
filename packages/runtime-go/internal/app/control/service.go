@@ -36,6 +36,8 @@ type Controller struct {
 	driver Driver
 
 	mu                    sync.Mutex
+	auxiliary             map[string]*auxiliaryOperation
+	foregroundPreparing   map[string]int
 	turnCancels           map[turnKey]context.CancelFunc
 	interruptReservations map[turnKey]struct{}
 	cancelReservations    map[turnKey]struct{}
@@ -45,6 +47,7 @@ type Controller struct {
 	threadTransitions     map[string]struct{}
 	turnStateChanged      chan struct{}
 	shuttingDown          bool
+	maintenance           bool
 	activeTurnOperations  int
 	idle                  chan struct{}
 }
@@ -164,6 +167,8 @@ func NewController(driver Driver) *Controller {
 	close(idle)
 	return &Controller{
 		driver:                driver,
+		auxiliary:             map[string]*auxiliaryOperation{},
+		foregroundPreparing:   map[string]int{},
 		turnCancels:           map[turnKey]context.CancelFunc{},
 		interruptReservations: map[turnKey]struct{}{},
 		cancelReservations:    map[turnKey]struct{}{},
@@ -282,7 +287,7 @@ func (c *Controller) ReserveSteerAdmission(threadID, turnID string) (func(), err
 		return nil, ErrTerminalArbitration
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return nil, ErrRuntimeShuttingDown
 	}
@@ -339,12 +344,17 @@ func (c *Controller) RegisterTurnCancelAfterThreadTail(
 	if !ok || cancel == nil || c == nil || ctx == nil {
 		return ErrTurnExecutionConflict
 	}
+	releasePreparation, err := c.PrepareForeground(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	defer releasePreparation()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		c.mu.Lock()
-		if c.shuttingDown {
+		if c.shuttingDown || c.maintenance {
 			c.mu.Unlock()
 			return ErrRuntimeShuttingDown
 		}
@@ -388,9 +398,14 @@ func (c *Controller) RegisterTurnCancelWithError(threadID, turnID string, cancel
 		return ErrTurnExecutionConflict
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return ErrRuntimeShuttingDown
+	}
+	if auxiliary := c.auxiliary[key.threadID]; auxiliary != nil {
+		c.mu.Unlock()
+		auxiliary.cancel()
+		return ErrTurnExecutionConflict
 	}
 	if _, exists := c.turnCancels[key]; exists {
 		c.mu.Unlock()
@@ -434,7 +449,7 @@ func (c *Controller) BeginTurnOperation() (done func(), admitted bool) {
 		return func() {}, false
 	}
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
 		return func() {}, false
 	}
@@ -461,6 +476,37 @@ func (c *Controller) finishTurnOperation() {
 	}
 }
 
+// BeginMaintenanceIfIdle closes new turn admission without cancelling accepted
+// work. Its caller must hold the HTTP mutation fence until EndMaintenance.
+func (c *Controller) BeginMaintenanceIfIdle() bool {
+	if c == nil {
+		return false
+	}
+	if !c.mu.TryLock() {
+		return false
+	}
+	defer c.mu.Unlock()
+	if c.shuttingDown || c.maintenance || c.activeTurnOperations != 0 ||
+		len(c.turnCancels) != 0 || len(c.auxiliary) != 0 ||
+		len(c.foregroundPreparing) != 0 || len(c.interruptReservations) != 0 ||
+		len(c.cancelReservations) != 0 || len(c.candidateTerminals) != 0 ||
+		len(c.candidateTokens) != 0 || len(c.steerAdmissions) != 0 ||
+		len(c.threadTransitions) != 0 {
+		return false
+	}
+	c.maintenance = true
+	return true
+}
+
+func (c *Controller) EndMaintenance() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.maintenance = false
+	c.mu.Unlock()
+}
+
 // BeginShutdown atomically closes turn admission before cancelling all
 // registered executions. WaitForTurnOperations then observes the same closed
 // admission epoch, so a late operation cannot escape the shutdown barrier.
@@ -476,8 +522,15 @@ func (c *Controller) BeginShutdown() int {
 	if len(c.turnCancels) > 0 {
 		c.notifyTurnStateChangedLocked()
 	}
-	count := len(c.turnCancels)
+	count := len(c.turnCancels) + len(c.auxiliary)
+	cancels := make([]context.CancelFunc, 0, len(c.auxiliary))
+	for _, operation := range c.auxiliary {
+		cancels = append(cancels, operation.cancel)
+	}
 	c.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	return count
 }
 

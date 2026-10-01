@@ -1,0 +1,141 @@
+name: PR28 independent environment
+
+# Bounded transfer for the authorized integrator, not a test or release gate.
+# Existing Development CI, CodeQL, their filters and permissions are unchanged.
+on:
+  push:
+    branches: [codex/workbench-product-delivery-20260914]
+    paths: [.github/workflows/pr28-independent-environment.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr28-independent-environment-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: github.repository == 'Eysn0130/analytix' && github.ref == 'refs/heads/codex/workbench-product-delivery-20260914'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+      NPM_CONFIG_USERCONFIG: /dev/null
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: false
+          lfs: false
+          submodules: false
+      - name: Export only the exact authorized public ancestry and tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-list --max-parents=0 HEAD)" = eed7dfb1a1e6cdd50002f7ce8fcb2e2888b0547d
+          test "$(git rev-parse --is-shallow-repository)" = false
+          git diff --exit-code
+          git diff --cached --exit-code
+          out="$RUNNER_TEMP/pr28-source"
+          mkdir "$out"
+          git ls-tree -rz --full-tree HEAD > "$out/tree.ls-tree-z"
+          git rev-list --objects --no-object-names HEAD | git pack-objects --stdout > "$out/head-objects.pack"
+          test "$(stat -c %s "$out/head-objects.pack")" -le 268435456
+          printf 'repository=%s\nhead=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\nkind=public-head-ancestry-only\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$(git rev-parse 'HEAD^{tree}')" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$out/identity.txt"
+          (cd "$out" && sha256sum head-objects.pack tree.ls-tree-z identity.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr28-source-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr28-source/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: Prepare isolated Go tooling and locked module inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          out="$RUNNER_TEMP/pr28-go"
+          mkdir "$out"
+          export GOPATH="$RUNNER_TEMP/pr28-gopath"
+          export GOMODCACHE="$GOPATH/pkg/mod"
+          (cd packages/runtime-go && go mod download)
+          git diff --exit-code -- packages/runtime-go/go.mod packages/runtime-go/go.sum
+          go version > "$out/toolchain.txt"
+          sha256sum packages/runtime-go/go.mod packages/runtime-go/go.sum > "$out/inputs.sha256"
+          tar -C "$(go env GOROOT)" -czf "$out/go.tar.gz" .
+          tar -C "$GOMODCACHE" -czf "$out/modules.tar.gz" .
+          test "$(du -sb "$out" | cut -f1)" -le 536870912
+          (cd "$out" && sha256sum go.tar.gz modules.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr28-go-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr28-go/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Prepare isolated locked Node inputs without lifecycle scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          out="$RUNNER_TEMP/pr28-node"
+          mkdir "$out"
+          export npm_config_cache="$RUNNER_TEMP/pr28-npm-cache"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix packages/runtime --ignore-scripts --no-audit --no-fund
+          git diff --exit-code -- package-lock.json packages/runtime/package-lock.json
+          { node --version; npm --version; } > "$out/toolchain.txt"
+          sha256sum .node-version package.json package-lock.json packages/runtime/package.json packages/runtime/package-lock.json > "$out/inputs.sha256"
+          tar -C "$(dirname "$(dirname "$(command -v node)")")" -czf "$out/node.tar.gz" .
+          tar -czf "$out/dependencies.tar.gz" node_modules packages/runtime/node_modules
+          test "$(du -sb "$out" | cut -f1)" -le 1073741824
+          (cd "$out" && sha256sum node.tar.gz dependencies.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr28-node-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr28-node/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Prepare isolated locked Rust inputs without compiling project code
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          out="$RUNNER_TEMP/pr28-rust"
+          mkdir "$out"
+          channel="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          test "$channel" = 1.94.1
+          rustup toolchain install "$channel" --profile minimal --component rustfmt
+          export CARGO_HOME="$RUNNER_TEMP/pr28-cargo"
+          cargo +"$channel" fetch --locked --manifest-path tools/analysis_compute/Cargo.toml
+          git diff --exit-code -- tools/analysis_compute/Cargo.lock
+          { rustc +"$channel" --version; cargo +"$channel" --version; } > "$out/toolchain.txt"
+          sha256sum rust-toolchain.toml tools/analysis_compute/Cargo.toml tools/analysis_compute/Cargo.lock > "$out/inputs.sha256"
+          tar -C "$(rustc +"$channel" --print sysroot)" -czf "$out/rust.tar.gz" .
+          tar -C "$CARGO_HOME" -czf "$out/registry.tar.gz" registry
+          test "$(du -sb "$out" | cut -f1)" -le 1073741824
+          (cd "$out" && sha256sum rust.tar.gz registry.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr28-rust-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr28-rust/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

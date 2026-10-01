@@ -38,7 +38,7 @@ func (p WorkspaceStatusProbe) WorkspaceStatus(ctx context.Context, workspace str
 	if err != nil {
 		abs = workspace
 	}
-	if _, err := os.Stat(abs); err != nil {
+	if !p.exists(ctx, abs) {
 		return ports.WorkspaceStatusResult{
 			Path:            abs,
 			Exists:          false,
@@ -75,7 +75,23 @@ func (p WorkspaceStatusProbe) WorkspaceStatus(ctx context.Context, workspace str
 	return status
 }
 
+func (p WorkspaceStatusProbe) exists(ctx context.Context, path string) bool {
+	if len(p.protectedReadDirs) == 0 {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+	// Existence is filesystem metadata too. Resolve symlinks and perform the
+	// read inside the same OS containment as Git, rather than Stat in the host
+	// or a pathname precheck with a check/read race. No shell is involved.
+	_, ok := p.commandOutput(ctx, "test", "-e", path)
+	return ok
+}
+
 func (p WorkspaceStatusProbe) gitOutput(ctx context.Context, workspace string, args ...string) (string, bool) {
+	return p.commandOutput(ctx, "git", append([]string{"-C", workspace}, args...)...)
+}
+
+func (p WorkspaceStatusProbe) commandOutput(ctx context.Context, binary string, args ...string) (string, bool) {
 	probe := p.CommandProbe
 	if probe == nil {
 		probe = NewCommandProbe(p.protectedReadDirs...)
@@ -87,8 +103,8 @@ func (p WorkspaceStatusProbe) gitOutput(ctx context.Context, workspace string, a
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	result := probe.ProbeCommand(probeCtx, ports.CommandProbeRequest{
-		Binary: "git",
-		Args:   append([]string{"-C", workspace}, args...),
+		Binary: binary,
+		Args:   args,
 	})
 	if !result.Found || result.Error != "" || result.TimedOut {
 		return "", false

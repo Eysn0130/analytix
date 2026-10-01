@@ -3,6 +3,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync
@@ -10,13 +11,20 @@ import {
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { defaultAnalytixRuntimeSettings } from '../shared/app-settings'
 import { HUB_PLUGIN_MARKER_FILENAME } from './plugin-install-marker'
 import { verifyInstalledPluginBindingV1 } from './plugin-install-verifier'
 import { computePluginSourceTreeIdentity } from './plugin-source-integrity'
 import type { BundledFundsMaterializationBindingV1 } from './runtime/bundled-funds-materialization'
 
 let tempRoot: string | null = null
+
+vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => '/tmp/analytix-test-app' } }))
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, homedir: () => tempRoot ?? actual.homedir() }
+})
 
 function runtimeHome(): string {
   if (!tempRoot) tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'analytix-plugin-binding-')))
@@ -213,6 +221,84 @@ afterEach(() => {
 })
 
 describe('installed plugin semantic binding V1', () => {
+  it('preserves independent config and retained state across unbound and bound Funds sync', async () => {
+    const funds = hostMaterializedFundsFixture()
+    const other = installFixture('local-remount')
+    const otherManifest = JSON.stringify({ name: 'demo-plugin', version: '1.0.0', mcpServers: './.mcp.json' })
+    const otherMcp = JSON.stringify({ mcpServers: { demo_mcp: { command: 'demo-mcp', args: ['--stdio'] } } })
+    for (const root of [other.sourcePath, other.pluginDir]) {
+      writeFileSync(join(root, '.codex-plugin', 'plugin.json'), otherManifest)
+      writeFileSync(join(root, '.mcp.json'), otherMcp)
+    }
+    const dataDir = join(runtimeHome(), 'data')
+    const configPath = join(dataDir, 'config.json')
+    const manualSkillRoot = join(runtimeHome(), 'manual-skills')
+    const historyPath = join(dataDir, 'threads', 'synthetic-thread', 'thread.json')
+    const evidencePath = join(dataDir, 'private', 'case-evidence', 'synthetic.json')
+    mkdirSync(manualSkillRoot, { recursive: true })
+    mkdirSync(join(historyPath, '..'), { recursive: true })
+    mkdirSync(join(evidencePath, '..'), { recursive: true })
+    writeFileSync(historyPath, '{"id":"synthetic-thread","status":"idle"}')
+    writeFileSync(evidencePath, '{"case":"synthetic"}')
+    writeFileSync(configPath, JSON.stringify({ capabilities: {
+      mcp: { servers: { manual: { transport: 'stdio', command: 'manual-mcp', trustScope: 'user' } } },
+      skills: { roots: [manualSkillRoot] },
+      web: { fetchEnabled: false }
+    } }))
+    const historyBefore = readFileSync(historyPath)
+    const evidenceBefore = readFileSync(evidencePath)
+    const { syncGuiManagedAnalytixConfig } = await import('./analytix-process')
+    const sync = (bound: boolean) => syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
+      mcpConfigPath: join(runtimeHome(), 'missing-mcp.json'),
+      ...(bound ? { bundledFundsMaterialization: funds.hostMaterialization } : {})
+    })
+    const readConfig = (): any => JSON.parse(readFileSync(configPath, 'utf8'))
+
+    expect(verifyInstalledPluginBindingV1({
+      runtimeHome: runtimeHome(), pluginDir: funds.pluginDir,
+      installCacheRoots: [funds.installCacheRoot], expectedPluginName: 'analytix-fund-analysis',
+      hostMaterialization: funds.hostMaterialization
+    })).not.toBeNull()
+    await sync(true)
+    // This Funds package has fact tools disabled: its bound capability is the
+    // private Go stage route, so config sync must never expose its MCP server.
+    expect(readConfig().capabilities.mcp.servers.analytix_funds).toBeUndefined()
+    const stale = readConfig()
+    stale.capabilities.mcp.servers.analytix_funds = {
+      transport: 'stdio', command: 'stale-funds-mcp', trustScope: 'user'
+    }
+    writeFileSync(configPath, JSON.stringify(stale))
+    const configBytes = readFileSync(configPath)
+    const sidecarDir = join(dataDir, '.cache')
+    mkdirSync(sidecarDir, { recursive: true })
+    const sidecarPath = join(sidecarDir, 'gui-plugin-mcp-server-ids.json')
+    writeFileSync(sidecarPath, JSON.stringify({
+      schemaVersion: 1, contract: 'analytix-plugin-managed-mcp-server-ids',
+      configSha256: createHash('sha256').update(configBytes).digest('hex'),
+      serverIds: ['analytix_funds']
+    }))
+    chmodSync(sidecarPath, 0o600)
+    await sync(false)
+    const ordinary = readConfig()
+    expect(ordinary.capabilities.mcp.servers.analytix_funds).toBeUndefined()
+    expect(ordinary.capabilities.mcp.servers.demo_mcp).toBeDefined()
+    expect(ordinary.capabilities.mcp.servers.manual).toMatchObject({ command: 'manual-mcp' })
+    expect(ordinary.capabilities.skills.roots).toContain(manualSkillRoot)
+    expect(ordinary.capabilities.web.fetchEnabled).toBe(false)
+    expect(readFileSync(historyPath).equals(historyBefore)).toBe(true)
+    expect(readFileSync(evidencePath).equals(evidenceBefore)).toBe(true)
+
+    await sync(true)
+    const activated = readConfig()
+    expect(activated.capabilities.mcp.servers.analytix_funds).toBeUndefined()
+    expect(activated.capabilities.mcp.servers.demo_mcp).toEqual(ordinary.capabilities.mcp.servers.demo_mcp)
+    expect(activated.capabilities.mcp.servers.manual).toEqual(ordinary.capabilities.mcp.servers.manual)
+    expect(activated.capabilities.skills.roots).toContain(manualSkillRoot)
+    expect(activated.capabilities.web.fetchEnabled).toBe(false)
+    expect(readFileSync(historyPath).equals(historyBefore)).toBe(true)
+    expect(readFileSync(evidencePath).equals(evidenceBefore)).toBe(true)
+  })
+
   it('verifies a complete authorized local-remount binding', () => {
     const fixture = installFixture('local-remount')
     const verified = verifyInstalledPluginBindingV1({

@@ -1,4 +1,5 @@
 import type { ChatBlock, ToolBlock } from '../../agent/types'
+import { generatedArtifactMetadataSchema } from '../../../../../packages/runtime/src/contracts/generated-artifact'
 import {
   extractDiffFilePath,
   extractUnifiedDiffText,
@@ -69,7 +70,8 @@ function metaArrayLength(meta: Record<string, unknown> | undefined, key: string)
 function hasGeneratedFiles(block: ToolBlock): boolean {
   return (
     block.status === 'success' &&
-    (metaArrayLength(block.meta, 'attachments') > 0 || metaArrayLength(block.meta, 'generatedFiles') > 0)
+    (metaArrayLength(block.meta, 'attachments') > 0 || metaArrayLength(block.meta, 'generatedFiles') > 0 ||
+      generatedArtifactMetadataSchema.safeParse(block.meta?.generatedArtifact).success)
   )
 }
 

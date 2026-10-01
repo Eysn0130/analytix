@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const schemasDir = path.resolve(__dirname, '../../schemas');
 
-let validators = null;
+const validators = new Map();
 
 try {
   const { default: Ajv2020 } = await import('ajv/dist/2020.js');
@@ -14,16 +14,15 @@ try {
   if (fs.existsSync(commonPath)) {
     ajv.addSchema(JSON.parse(fs.readFileSync(commonPath, 'utf8')));
   }
-  validators = {};
   for (const type of ['workflow', 'sequence', 'dataflow', 'lifecycle', 'architecture']) {
     const schema = JSON.parse(fs.readFileSync(path.join(schemasDir, `${type}.schema.json`), 'utf8'));
-    validators[type] = ajv.compile(schema);
+    validators.set(type, ajv.compile(schema));
   }
 } catch (err) {
   if (err && err.code === 'ERR_MODULE_NOT_FOUND') {
-    console.warn(
-      'atlasflow: ajv is not installed — skipping JSON-schema validation. '
-      + 'Run "npm install" in the skill folder to enable it; renderer layout checks still run.'
+    throw new Error(
+      'atlasflow: schema validation is required; the validator dependency is unavailable. '
+      + 'Run "npm ci" in the skill folder before rendering or validating diagrams.'
     );
   } else {
     throw err;
@@ -58,8 +57,7 @@ function formatErrors(errors, data) {
 }
 
 export function validateSchema(diagramType, data) {
-  if (!validators) return; // ajv unavailable — renderer layout checks still apply
-  const validate = validators[diagramType];
+  const validate = validators.get(diagramType);
   if (!validate) {
     throw new Error(`validateSchema: unknown diagram type "${diagramType}"`);
   }

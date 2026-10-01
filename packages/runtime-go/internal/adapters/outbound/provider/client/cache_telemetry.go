@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -114,6 +115,7 @@ func (c *HTTPProviderClient) newProviderCallTelemetry(
 		authority: authority,
 		baseShape: domaincache.CacheVisibleShapeV1{
 			SchemaVersion:       domaincache.CacheVisibleShapeV1SchemaVersion,
+			ModelInput:          domaincache.CaptureModelInputSegmentsV1(wireBody, func(label string, body []byte) string { return authority.digest(label, body) }),
 			LogicalCallHMAC:     authority.digest("logical-call", sequenceBytes),
 			ProviderFamily:      providerFamily,
 			ModelHMAC:           authority.digest("model", []byte(request.Model)),
@@ -351,12 +353,27 @@ func cacheProviderUsage(result domainmodel.Result, family domaincache.ProviderFa
 		result.Usage.CacheHitTokens < 0 || result.Usage.CacheMissTokens < 0 || result.Usage.ReasoningTokens < 0 {
 		return domaincache.ProviderUsageV1{}, errors.New("provider cache telemetry counters are invalid")
 	}
+	inputKnown, outputKnown := usageObserved, usageObserved
+	if result.Usage.UsagePresenceKnown {
+		inputKnown, outputKnown = result.Usage.HasPromptTokens, result.Usage.HasCompletionTokens
+	}
 	usage := domaincache.ProviderUsageV1{
-		InputTokens:     cacheTokenCount(result.Usage.PromptTokens, usageObserved),
-		OutputTokens:    cacheTokenCount(result.Usage.CompletionTokens, usageObserved),
+		MessagesInput:   result.Usage.MessagesInput,
+		InputTokens:     cacheTokenCount(result.Usage.PromptTokens, inputKnown),
+		OutputTokens:    cacheTokenCount(result.Usage.CompletionTokens, outputKnown),
 		CacheHitTokens:  cacheTokenCount(result.Usage.CacheHitTokens, result.Usage.HasCacheHit),
 		CacheMissTokens: cacheTokenCount(result.Usage.CacheMissTokens, result.Usage.HasCacheMiss),
 		ReasoningTokens: cacheTokenCount(result.Usage.ReasoningTokens, result.Usage.ReasoningTokens > 0),
+	}
+	if result.Usage.PriceConfigured && inputKnown && outputKnown {
+		amount := result.Usage.CostUSD
+		if result.Usage.Currency == "CNY" {
+			amount = result.Usage.CostCNY
+		}
+		nanos := math.Ceil(amount * 1e9)
+		if (result.Usage.Currency == "USD" || result.Usage.Currency == "CNY") && !math.IsNaN(nanos) && !math.IsInf(nanos, 0) && nanos >= 0 && nanos <= 9007199254740991 {
+			usage.EstimatedCost = domaincache.EstimatedCostV1{Known: true, Currency: result.Usage.Currency, NanoUnits: uint64(nanos)}
+		}
 	}
 	if err := usage.ValidateForProviderFamily(family); err != nil {
 		return domaincache.ProviderUsageV1{}, err

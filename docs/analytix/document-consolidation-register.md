@@ -2,7 +2,7 @@
 
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
-Current as of: 2026-09-09
+Current as of: 2026-09-29
 Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
@@ -78,7 +78,87 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-09-30 有界资源与 quarantine 治理
+
+基于 `fb210a84426f8bcce55e515c681422702f54232c` 的 canonical worktree；
+四项继承 dirty 不属于本切片，哈希保持不变。此记录是局部源码验收，
+不是系统治理、安装验收、同模型分析增益或 main/发布就绪结论。
+
+- `runtimeapp/app.go` 的七处资源绑定失败出口收敛为一次有序绑定和一个出口；
+  owner 仍在 `owned_runtime_resource.go`，原可选条件、defer、错误链与最终
+  接管时点保留。反向顺序 fixture 得到行为 RED；多资源 drain/close 重试、
+  已关闭前缀、未关闭后缀、必需 nil 与并发 shutdown 的定向 race 检查通过，
+  真实 handler/maintenance 定向组装检查通过。
+- quarantine 的唯一行为 owner 为 `backend-manager.test.ts`：synthetic overrides、
+  冷导入、默认 GET/POST、并发 ensure、合法 renderer lease 与 stop 路径，
+  覆盖进程、目录、监听、网络和清理写入。五项临时语义回归均得到行为 RED，
+  原生产 blob 恢复哈希相同后才退役旧八项禁词及 packaging 的重复簇。
+  规范化 module identity 检查保留执行 authority 的架构边界。
+  与 native-runtime-paths/packaging 的聚合报告实际发现并通过 79/79，
+  其他授权、泄露、平台与聚合门禁不变。
+- 根指南初次只减 363 字节；在 `62aa16969` 冻结基线继续收敛自动适用链，
+  root 15,467 → 13,945，src/go/docs 分别 -565/-73/-581。重复语义依赖
+  已自动读取的 root，不新增全 imports，独立仓库安全守卫保留。
+  global 9,094 不动，常驻 global+root 24,561 → 23,039；scope 按路径追加，
+  不能把本次跨三 scope 的指南总量当作日常常驻。
+- 旧三文件所选文本脚本计数 4,602 → 7,987：app -556、helper +557、test
+  +3,384。app 缺少完整初始化/defer/接管上下文，旧 receipt 未绑定完整
+  返回 payload；不能称为完整需求读取或 Agent 摄入。replay 各一调用，
+  排除初始化/定位/实现/失败/轮询；这些成本并未消失，全任务总量未知。
+  原 cache 失败、基线取消（130）及旧 null 保留。20.356s / 8.943s 的
+  warm/编译缓存未受控，新增测试工作量不同，不推导速度、token 或费用收益。
+- 本切片生产源码净 +1 字节，测试净 +7,086 字节；维护收益是失败处理
+  修改点 7 → 1，不能以总 LOC/字节下降代替覆盖或收益。没有新增治理工具。
+
+已启动的第二生产 owner 切片将 adapter 六条路由的 body/schema 注册合为一处，
+summary 的 schema、identity 和精确投影选择由同一私有 resolver 负责；
+严格 canonical equality、AcceptedFinal/currentMain pin 与两边 sanitation 未迁移。
+同一 `runtimeRequestViaHost` 测试组 before/after 各 43 通过、73 未选，
+最终候选 44 通过（包含两项实际 HTTP 回归）；组内其余项目混合直接 sanitizer
+与 HTTP 测试，不称为全组真实 transport 证据。精确投影相关三文件 43/43、
+web/node typecheck 通过；独立只读 review 无具体缺陷。该切片生产 +601 字节、
+测试 +2,477 字节，不宣称整个 adapter 或系统技术债已收口。
+
+本机小 receipt 在 `/private/tmp/analytix-debt-resource-matched-{before,after}-20260930.json`
+及 `analytix-quarantine-{red,green}-20260930.json`；前者是明示范围的读取 proxy，
+后者保留五项 RED 与执行式发现结果，不复制大型 inventory。
+
+整改固定 17 个完整必要文件（含新增 helper/测试、适用指南及既有 fixture），
+清单和哈希在 `analytix-debt-cost-frozen-{before,after}-20260930.json`；物理
+corpus 与实际完整指南返回 payload 分开计数，register 增量是 corpus 内的
+治理成本分解，小 receipt 和验证证据另计。测试数据表减少 529 字节，
+关闭/错误身份/重试/并发及冷导入、caught 副作用、两 packaged 态、lease
+覆盖保留；反向关闭及五类副作用在新测试上再次 RED，生产 blob 恢复一致。
+
+在 `aa76582cc3e66af5c5b3609d0bd9d9bee535ff1f` 上，packaged Milestone A
+测试的八处 Git 仓库种子声明收敛为一处本地 fixture，各场景仍独立建库和清理；
+完整 test owner 含新增 helper/import 从 567,614 降至 565,458 字节（-2,156），
+生产 owner 的读取需求未减少。前后实际发现的 179 个 ID 相同，选定 8/8 通过，
+18 处断言原文不变，171 项未执行；web/node typecheck 通过，独立只读复核无缺陷。
+同进程快照缺失、消费后失败/replay、目标隔离、dirty/prepackaged、symlink 和
+Git closure 边界保留。固定比较的 10 个完整文件基线为 823,568 字节；另读的
+CI、validation-command、packaging-config 测试共 210,352 字节为定位/复核输入，
+不能省略为全任务成本。小 receipt `analytix-milestone-source-fixture-{before,after}-20260930.json`
+分别绑定文件哈希、register 增量和验证结果，不推导全套测试、token、速度或发布结论。
+
+`790b1b140` 基线上的 raw 账户 ingress 修复恢复既有案件纵向索引；冷启动不造索引，
+同一当前 lease、原生实体 descriptor 和受限 projection 保留。owner 回归先 RED、后
+8 项通过；实际 HTTP 连续性及撤权请求回归通过。新增两线程 CNY 数值 fixture
+复用原 Go/native/Final 链和独立整数 oracle，但原生执行仍 blocked：旧输入的 Host
+信任校验失败，`aac3ccef` 包的 Darwin fuse 摘要也不符合当前契约。元数据恢复不含
+金额/笔数复用；完整初始请求字节与请求级数值计数尚待原生执行，不宣称 SQL 次数、
+token、智能或安装验收收益。小 receipt 为 `/private/tmp/analytix-longitudinal-verification-20260930.json`。
+
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
+
+当前交接与矩阵的 2026-09-27 叙述已迁入既有
+[日期 QA 的 Historical appendix](qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)，
+保留旧 entry anchors。入口现在区分 c2cd HEAD、继承的未提交 host-local B1、
+7dc 准确安装证据与当前未知远端状态。只读
+`node scripts/validation-burden.mjs --json` 使用
+[小基线 manifest](validation-burden-baseline.json) 比较声明读取字节并盘点静态测试范围，
+接入既有 `verify:baseline`。静态入口重叠不等于 CI 重跑，未知依赖仍走原全量门禁；
+报告不是低价值测试删除列表，也没有实际 token、正确率或首次有效验证时间基线。
 
 | 优先级 | 动作 | 最小完成证据 |
 | --- | --- | --- |
@@ -116,3 +196,23 @@ Hub-first 冲突、插件身份归属与规范分类。文档地图中的 2026-0
 迁至 [Historical reference](upstreams/agent-guidance-review-2026-07-29.md)，
 原入口保留链接。历史报告、归档 change 和打包要求的 reference 镜像保留；
 不会因为文件长、旧或重复就删除仍被消费或用于证据追溯的内容。
+
+## 2026-09-21 PR28 current-entry consolidation
+
+Scope: the two actual current entry files and their existing dated evidence owner,
+not a whole-repository documentation approval. START d8640957c; product SOURCE2f25c22f7.
+
+| Original at d8640957c | Exact original SHA256 | Preserved owner / action |
+| --- | --- | --- |
+| `handovers/README.md` | `57d367da2f4971651f1627f9ccdd71c674c83700716d2cf566b93379ea4714c2` | Complete snapshot moved to `handovers/2026-09-16-pr28-continuation.md`, explicit historical heading IDs; README now current identity/gaps/recovery with compatibility links |
+| `product-completion.md` | `c2d7429c6fc7a389587535ef0a606e322bed94704ac7461b4339144491aa881e` | Complete snapshot in the same dated owner; product-relative links rebased, current file becomes P0–P5 as-built/gap/evidence/gate matrix |
+
+Original text remains recoverable at the exact Git commit; migration changes heading
+currentness labels and link locations, not recorded outcomes. Private migration
+receipts bind original/relocated hashes and each heading's old/new anchor. The current
+QA adds errata for the wrong LibreOffice anchor, browser-red executed-versus-discovered
+counts, and old65ab totals. It does not rewrite immutable command receipts.
+The document map and knowledge governance now preserve a newer unsynchronized local
+writer/checkpoint before consulting an older remote. No license, historical failure,
+compatibility reader or product feature was removed. Other documents are UNREVIEWED
+unless a specific reading/validation record says otherwise.

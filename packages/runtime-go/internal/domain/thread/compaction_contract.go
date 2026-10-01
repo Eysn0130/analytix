@@ -36,6 +36,7 @@ type TaskContinuationEvidenceReferenceV1 struct {
 }
 
 type TaskContinuationSnapshotV1 struct {
+	UserHistory                    *ContinuationUserHistoryV1            `json:"userHistory,omitempty"`
 	SchemaVersion                  int                                   `json:"schemaVersion"`
 	Goal                           *TaskContinuationGoalV1               `json:"goal,omitempty"`
 	Todos                          []TaskContinuationTodoV1              `json:"todos"`
@@ -107,6 +108,9 @@ func TaskContinuationSnapshotMapV1(snapshot TaskContinuationSnapshotV1) map[stri
 }
 
 func validateTaskContinuationSnapshotFieldsV1(snapshot TaskContinuationSnapshotV1) error {
+	if err := snapshot.UserHistory.Validate(); err != nil {
+		return err
+	}
 	if snapshot.SchemaVersion != TaskContinuationSchemaVersionV1 || snapshot.EvidenceAuthority != TaskContinuationEvidenceStateV1 ||
 		len(snapshot.Todos) > 200 || len(snapshot.LatestUserConstraints) > 4 || len(snapshot.EvidenceReferences) > 32 ||
 		!optionalContinuationDigestV1(snapshot.PreviousContinuationDigest) || !optionalContinuationDigestV1(snapshot.PreviousCompactionSourceDigest) {

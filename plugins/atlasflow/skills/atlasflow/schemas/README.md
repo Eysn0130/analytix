@@ -53,9 +53,10 @@ stays in `lifecycle.schema.json`.
 the `$ref`s resolve. Validation runs when a renderer loads its input, before
 the renderer's own layout checks.
 
-If ajv is not installed (no `npm install` in the skill folder), the validator
-prints a warning and skips schema validation; renderer layout checks still
-run, so structurally valid files keep rendering.
+Install the locked dependencies with `npm ci` in the skill folder. If ajv or
+its dependency closure is unavailable, validator initialization fails and the
+CLI cannot create or replace output, or report successful validation.
+Layout checks remain additional checks, never a schema-validation fallback.
 
 ## Error format
 

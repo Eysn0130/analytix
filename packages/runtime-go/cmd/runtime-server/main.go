@@ -30,6 +30,7 @@ const defaultRuntimeServerShutdownTimeout = 30 * time.Second
 
 const backendGenerationConsumedMarkerV1 = "ANALYTIX_BACKEND_GENERATION_CONSUMED "
 const desktopPrivateHistoryMigrationReadyMarkerV2 = "ANALYTIX_DESKTOP_PRIVATE_HISTORY_MIGRATION_READY_V2"
+const desktopInstallationKeyPreflightReadyMarkerV1 = "ANALYTIX_DESKTOP_INSTALLATION_KEY_PREFLIGHT_READY_V1"
 
 type runtimeServerStartup interface {
 	ActivateContext(context.Context, runtimeapp.Config) (http.Handler, error)
@@ -71,12 +72,16 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 			commandCtx, args[1:], os.Stdout, defaultBundledFundsMaterializationDependenciesV1(),
 		)
 	}
+	if len(args) > 0 && args[0] == "provider" {
+		return runDevelopmentProviderVerify(args[1:], dependencies.stdin, os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "authority" {
 		return runRuntimeAuthorityCommand(args[1:], os.Stdout, rand.Reader)
 	}
 	if len(args) > 0 && args[0] == "migration" {
 		return runRuntimeMigrationCommand(args[1:], os.Stdout)
 	}
+	started := time.Now()
 	cli, err := parseRuntimeServerCLI(args)
 	if err != nil {
 		return fmt.Errorf("parse flags: %w", err)
@@ -94,6 +99,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		if err != nil {
 			return err
 		}
+		cli.DevelopmentProviderAuthorityDir = frame.DevelopmentProviderAuthorityDir
 		if frame.ProtectedAuthorityV1 != nil {
 			authority, err := frame.ProtectedAuthorityV1.config()
 			if err != nil {
@@ -125,6 +131,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err != nil {
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoLeaseAcquiredV1)
 	defer func() {
 		runErr = errors.Join(runErr, lease.Close())
 	}()
@@ -135,6 +142,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		}
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoSemanticPreparedV1)
 	if err := runtimeCtx.Err(); err != nil {
 		return nil
 	}
@@ -145,6 +153,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoListenerBoundV1)
 	defer listener.Close()
 	tcpAddr, _ := listener.Addr().(*net.TCPAddr)
 	if tcpAddr != nil {
@@ -158,6 +167,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		}
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoActivatedV1)
 	authoritySource, ok := handler.(runtimeapp.FinalPublicationAuthorityIdentitySourceV1)
 	if !ok {
 		return errors.New("runtime final publication authority identity is unavailable")
@@ -174,6 +184,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 	if err := runtimeapp.ProbeControlledArtifactHostV2(runtimeCtx, config); err != nil {
 		return err
 	}
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoHostProbedV1)
 	controlledArtifactLaunch, err := runtimeapp.ControlledArtifactSidecarLaunchBindingProofV2(
 		config, runtimeURL, uint64(os.Getpid()), effectiveRuntimeToken != "", false,
 	)
@@ -215,6 +226,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		"datasetSnapshotAdmissionV2AckHmacSha256":         "",
 	}
 	readyJSON, _ := json.Marshal(ready)
+	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoReadyBuiltV1)
 	fmt.Printf("ANALYTIX_RUNTIME_SERVER_READY %s\n", readyJSON)
 
 	errCh := make(chan error, 1)
@@ -237,6 +249,9 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 }
 
 func runRuntimeMigrationCommand(args []string, output io.Writer) error {
+	if len(args) > 0 && args[0] == "prepare-desktop-installation-key-v1" {
+		return runRuntimeInstallationKeyPreflightCommand(args[1:], output)
+	}
 	if len(args) == 0 || args[0] != "migrate-desktop-private-history-v2" || output == nil {
 		return errors.New("runtime migration command is invalid")
 	}
@@ -263,6 +278,51 @@ func runRuntimeMigrationCommand(args []string, output io.Writer) error {
 		return errors.New("runtime migration marker write failed")
 	}
 	return nil
+}
+
+func runRuntimeInstallationKeyPreflightCommand(args []string, output io.Writer) error {
+	if output == nil || !exactlyOneCLIFlagV1(args, "--data-dir") ||
+		!exactlyOneCLIFlagV1(args, "--user-data-dir") ||
+		(exactlyOneCLIFlagV1(args, "--durable-root") == exactlyOneCLIFlagV1(args, "--runtime-durable-root")) ||
+		!exactlyZeroCLIFlagV1(args, "--durable-temp-dir") {
+		return errors.New("desktop installation key preflight command is invalid")
+	}
+	cli, err := parseRuntimeServerCLI(args)
+	if err != nil || cli.PrivateStartupFrameV1 || cli.UserDataDir == "" ||
+		!exactAbsoluteCLIPath(firstNonEmpty(cli.ProductionDurableRoot, cli.RuntimeDurableRoot)) ||
+		cli.RuntimeToken == "" || cli.Insecure {
+		return errors.New("desktop installation key preflight command is invalid")
+	}
+	preflightCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := runtimeapp.RunDesktopInstallationKeyPreflightV1(
+		preflightCtx, runtimeConfigFromCLI(cli, cli.RuntimeToken, 0),
+	); err != nil {
+		return errors.New("desktop installation key preflight failed")
+	}
+	if _, err := fmt.Fprintln(output, desktopInstallationKeyPreflightReadyMarkerV1); err != nil {
+		return errors.New("desktop installation key preflight marker write failed")
+	}
+	return nil
+}
+
+func exactlyOneCLIFlagV1(args []string, name string) bool {
+	count := 0
+	for _, argument := range args {
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			count++
+		}
+	}
+	return count == 1
+}
+
+func exactlyZeroCLIFlagV1(args []string, name string) bool {
+	for _, argument := range args {
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			return false
+		}
+	}
+	return true
 }
 
 func exactAbsoluteCLIPath(value string) bool {
@@ -433,6 +493,10 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 		darwinKeychain = *cli.DarwinSecretStoreKeychainV1
 	}
 	return runtimeapp.Config{
+		DevelopmentOfficeAssetRoot:              os.Getenv("ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT"),
+		DocumentCodecExecutable:                 os.Getenv("ANALYTIX_DOCUMENT_CODEC_EXECUTABLE"),
+		DocumentCodecEntry:                      os.Getenv("ANALYTIX_DOCUMENT_CODEC_ENTRY"),
+		DevelopmentPluginSourceRoot:             os.Getenv("ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT"),
 		RuntimeToken:                            runtimeToken,
 		Insecure:                                cli.Insecure,
 		DurableTempDir:                          firstNonEmpty(cli.RuntimeDurableRoot, cli.DurableTempDir),
@@ -461,6 +525,7 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 		AuthorityManifestRoot:                   authority.ManifestRoot,
 		AuthorityCredentialProfileRoot:          authority.CredentialProfileRoot,
 		AuthorityCredentialBundleRoot:           authority.CredentialBundleRoot,
+		DevelopmentProviderAuthorityDir:         cli.DevelopmentProviderAuthorityDir,
 		DarwinSecretStoreKeychainDBPath:         darwinKeychain.DBPath,
 		DarwinSecretStoreKeychainBindingDigest:  darwinKeychain.BindingDigest,
 		DarwinSecretStoreKeychainSecurityDigest: darwinKeychain.SecurityDigest,
@@ -516,32 +581,33 @@ func formalProviderAuditSocketPathV1() string {
 }
 
 type runtimeServerCLIConfig struct {
-	Addr                         string
-	Host                         string
-	DurableTempDir               string
-	RuntimeDurableRoot           string
-	ProductionDurableRoot        string
-	RuntimeToken                 string
-	Insecure                     bool
-	DataDir                      string
-	UserDataDir                  string
-	ProviderID                   string
-	BaseURL                      string
-	Model                        string
-	EndpointFormat               string
-	ModelProvidersJSON           string
-	MCPConfigPath                string
-	MCPConfigJSON                string
-	ModelProxyURL                string
-	MCPProxyURL                  string
-	ApprovalPolicy               string
-	SandboxMode                  string
-	TokenEconomyMode             string
-	HostScheduleMCPServer        *domainmcp.ServerSpec
-	PrivateStartupFrameV1        bool
-	MainOwnedAuthorityV1         *runtimeMainOwnedAuthorityConfigV1
-	MainOwnedAuthorityIdentityV1 *authorityAnchorEnvelopeV1
-	DarwinSecretStoreKeychainV1  *runtimeDarwinSecretStoreKeychainConfigV1
+	Addr                            string
+	Host                            string
+	DurableTempDir                  string
+	RuntimeDurableRoot              string
+	ProductionDurableRoot           string
+	RuntimeToken                    string
+	Insecure                        bool
+	DataDir                         string
+	UserDataDir                     string
+	ProviderID                      string
+	BaseURL                         string
+	Model                           string
+	EndpointFormat                  string
+	ModelProvidersJSON              string
+	MCPConfigPath                   string
+	MCPConfigJSON                   string
+	ModelProxyURL                   string
+	MCPProxyURL                     string
+	ApprovalPolicy                  string
+	SandboxMode                     string
+	TokenEconomyMode                string
+	HostScheduleMCPServer           *domainmcp.ServerSpec
+	PrivateStartupFrameV1           bool
+	MainOwnedAuthorityV1            *runtimeMainOwnedAuthorityConfigV1
+	MainOwnedAuthorityIdentityV1    *authorityAnchorEnvelopeV1
+	DevelopmentProviderAuthorityDir string
+	DarwinSecretStoreKeychainV1     *runtimeDarwinSecretStoreKeychainConfigV1
 }
 
 type runtimeServerLifecycleHandler interface {

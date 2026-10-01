@@ -5,6 +5,7 @@ import (
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	provider "analytix.local/runtime-go/internal/provider"
 )
 
@@ -18,6 +19,19 @@ func (h *runtimeServerHandler) runtimeToolCatalog() toolcatalogapp.RuntimeCatalo
 	if h == nil {
 		return catalog
 	}
+	// Advertise the native family while Core holds an editing baseline or a
+	// read-only image scope. Thread/version validation remains required at use.
+	catalog.NativeSelections = h.officePackageHost != nil && h.managedEditing != nil && h.managedEditing.HasCaptures() || h.objectEditing != nil && (h.objectEditing.HasImageScopes() || h.objectEditing.HasBrowserScopes())
+	catalog.Skills = h.currentSkillCatalog()
+	if h.turnSecurity.Identity != nil {
+		for _, kind := range []string{"docx", "xlsx", "pptx"} {
+			_, available := toolcatalogapp.SkillByName(catalog.Skills, toolcatalogapp.OfficeSkillForKind(kind))
+			if available && codecport.Supports(h.documentCodec, kind) {
+				catalog.DocumentGenerationKinds = append(catalog.DocumentGenerationKinds, kind)
+			}
+		}
+	}
+	catalog.DocumentGeneration = len(catalog.DocumentGenerationKinds) > 0
 	catalog.GoalTodos = h.store
 	catalog.MCP = h.mcp
 	catalog.MCPSearchResultLimit = runtimeinfoapp.MCPSearchResultLimit(h.mcpSearch)
@@ -27,7 +41,6 @@ func (h *runtimeServerHandler) runtimeToolCatalog() toolcatalogapp.RuntimeCatalo
 	catalog.WebFetch = runtimeinfoapp.WebFetchEnabled(h.web)
 	catalog.SubagentsEnabled = h.subagents.Enabled
 	catalog.SubagentProfileDescription = subagentapp.ProfileDescription(h.subagents)
-	catalog.Skills = h.skills
 	return catalog
 }
 

@@ -64,6 +64,19 @@ describe('runtime startup private frame v1', () => {
     }
   })
 
+  it('carries the explicit development directory and rejects malformed authority paths', () => {
+    const root = '/private/development/provider-credentials'
+    const frame = encodeRuntimeStartupPrivateFrameV1({ developmentProviderAuthorityDir: root })
+    expect(frame.subarray(8).toString('utf8')).toBe(JSON.stringify({
+      schemaVersion: 1,
+      purpose: 'analytix.runtime-startup-private-frame/v1',
+      developmentProviderAuthorityDir: root
+    }))
+    for (const invalid of ['relative/provider-credentials', '/private/../provider-credentials', '/private/wrong']) {
+      expect(() => encodeRuntimeStartupPrivateFrameV1({ developmentProviderAuthorityDir: invalid })).toThrow()
+    }
+  })
+
   it('writes exactly one frame and closes private stdin', async () => {
     const stdin = new PassThrough()
     const chunks: Buffer[] = []
@@ -175,9 +188,6 @@ describe('runtime startup private frame v1', () => {
     const deferredSync = body.indexOf(
       'if (!bundledFundsConfigSynced) await syncRuntimeConfig()'
     )
-    const keychainBinding = body.indexOf(
-      'resolveDarwinSecretStoreKeychainBindingV1({'
-    )
     const directBinding = Math.max(
       body.indexOf('hostScheduleMcpBindingV1 = synced.hostScheduleMcpBindingV1'),
       body.indexOf('hostScheduleMcpBindingV1 = syncedConfig.hostScheduleMcpBindingV1')
@@ -190,8 +200,7 @@ describe('runtime startup private frame v1', () => {
     const spawn = body.indexOf('spawn(', frameDecision)
 
     expect(start).toBeGreaterThanOrEqual(0)
-    expect(keychainBinding).toBeGreaterThanOrEqual(0)
-    expect(keychainBinding).toBeLessThan(deferredSync)
+    expect(source).not.toContain('resolveDarwinSecretStoreKeychainBindingV1(')
     expect(bindingReady).toBeGreaterThanOrEqual(0)
     expect(preflight).toBeGreaterThan(bindingReady)
     expect(frameDecision).toBeGreaterThan(preflight)

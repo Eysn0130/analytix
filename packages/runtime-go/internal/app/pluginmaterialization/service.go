@@ -60,6 +60,7 @@ func (service *Service) Materialize(ctx context.Context, intent domainplugin.Int
 		return pluginport.ResultV1{}, ErrUnavailable
 	}
 	if ctx == nil || ctx.Err() != nil || domainplugin.ValidateIntentV1(intent) != nil ||
+		intent.Origin != "" || intent.SourceRegistrationSHA256 != "" ||
 		intent.PackageAuthoritySHA256 != service.binding.AuthoritySHA256 || intent.Target != service.binding.Target ||
 		intent.PluginName != service.binding.PackageIdentity.PackageID ||
 		intent.PluginVersion != service.binding.PackageIdentity.PackageVersion ||
@@ -78,7 +79,8 @@ func (service *Service) ResolveActive(ctx context.Context) (pluginport.ResultV1,
 	if err != nil {
 		return pluginport.ResultV1{}, err
 	}
-	if result.Receipt.PackageAuthoritySHA256 != service.binding.AuthoritySHA256 || result.Receipt.Target != service.binding.Target {
+	if result.Receipt.Origin != "" || result.Receipt.SourceRegistrationSHA256 != "" ||
+		result.Receipt.PackageAuthoritySHA256 != service.binding.AuthoritySHA256 || result.Receipt.Target != service.binding.Target {
 		return pluginport.ResultV1{}, ErrPackageAuthority
 	}
 	if service.binding.PackageIdentity != (domainpluginpackage.PackageIdentityV1{}) &&

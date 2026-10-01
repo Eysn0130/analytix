@@ -12,6 +12,7 @@ import {
 } from './items.js'
 import { ThreadSchema, ThreadSummarySchema } from './threads.js'
 import { TurnReasoningEffortSchema, TurnStatus } from './turns.js'
+import { CostEstimateStatusSchema, CostKnownCurrenciesSchema, isConsistentCostCoverage } from './usage.js'
 
 const PublicThreadDetailUsageV1Schema = z.object({
   promptTokens: z.number().int().nonnegative(),
@@ -30,6 +31,8 @@ const PublicThreadDetailUsageV1Schema = z.object({
   costUsd: z.number().nonnegative(),
   costCny: z.number().nonnegative(),
   priceConfigured: z.boolean(),
+  costEstimateStatus: CostEstimateStatusSchema.optional(),
+  costKnownCurrencies: CostKnownCurrenciesSchema.optional(),
   cacheSavingsUsd: z.number().nonnegative(),
   cacheSavingsCny: z.number().nonnegative(),
   tokenEconomySavingsTokens: z.number().int().nonnegative(),
@@ -50,10 +53,19 @@ const PublicThreadDetailUsageV1Schema = z.object({
   cost_usd: z.number().nonnegative(),
   cost_cny: z.number().nonnegative(),
   price_configured: z.boolean(),
+  cost_estimate_status: CostEstimateStatusSchema.optional(),
+  cost_known_currencies: CostKnownCurrenciesSchema.optional(),
   token_economy_savings_tokens: z.number().int().nonnegative()
-}).strict()
+}).strict().superRefine((usage, ctx) => {
+  if (!isConsistentCostCoverage(usage, 'camel') || !isConsistentCostCoverage(usage, 'snake') ||
+      usage.costEstimateStatus !== usage.cost_estimate_status ||
+      JSON.stringify(usage.costKnownCurrencies) !== JSON.stringify(usage.cost_known_currencies)) {
+    ctx.addIssue({ code: 'custom', path: [], message: 'thread detail cost coverage is inconsistent' })
+  }
+})
 
 const CaseBoundaryTurnV1Schema = z.object({
+  factHistoryState: z.literal('retained_snapshot').optional(),
   id: z.string().min(1),
   threadId: z.string().min(1),
   status: TurnStatus,
@@ -75,6 +87,9 @@ const CaseBoundaryTurnV1Schema = z.object({
     (('acceptedFinal' in item && item.acceptedFinal !== undefined) ||
       ('acceptedFinalView' in item && item.acceptedFinalView !== undefined))
   )
+  if (turn.factHistoryState && !turn.acceptedFinalView) {
+    ctx.addIssue({ code: 'custom', path: ['factHistoryState'], message: 'retained history requires accepted-final authority' })
+  }
   if (!turn.acceptedFinal && !turn.acceptedFinalView) {
     if (acceptedItems.length !== 0) {
       ctx.addIssue({ code: 'custom', path: ['items'], message: 'case turn accepted-final authority is torn' })

@@ -9,6 +9,15 @@ It includes two Skills:
 
 The plugin ships as a standard `.codex-plugin` package with `skills/`, assets, and Hub catalog fixtures under `hub/`.
 
+## Renderer prerequisites
+
+Install the lockfile-defined dependencies in `skills/atlasflow` with `npm ci`
+before using the diagram CLI. JSON-schema validation is mandatory: if Ajv or
+its dependency closure cannot load, render, validate and inspect fail before
+writing output. Help remains available. Do not treat an unavailable validator
+as a valid degraded rendering mode. The pure Canvas adapter retains its
+separate, data-only input checks and does not import the CLI validator.
+
 ## Analytix Hub Release Payload
 
 Prepare the package and Hub catalog files:

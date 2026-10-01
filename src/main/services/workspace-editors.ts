@@ -156,6 +156,12 @@ const EDITOR_CANDIDATES: EditorCandidate[] = [
     platforms: ['darwin']
   },
   {
+    id: 'file-manager',
+    label: 'File manager',
+    kind: 'viewer',
+    alwaysAvailable: true
+  },
+  {
     id: 'finder',
     label: 'Finder',
     kind: 'viewer',
@@ -470,7 +476,7 @@ async function openWithResolvedEditor(
   line?: number,
   column?: number
 ): Promise<void> {
-  if (editor.id === 'finder') {
+  if (editor.id === 'finder' || editor.id === 'file-manager') {
     shell.showItemInFolder(targetPath)
     return
   }

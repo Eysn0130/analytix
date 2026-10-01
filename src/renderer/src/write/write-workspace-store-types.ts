@@ -1,3 +1,5 @@
+import type { ImageRegionActions } from './image-region-session'
+import type { WriteShutdownResult } from '@shared/write-shutdown'
 import type { WriteAgentPresetV1, WriteInlineCompletionSettingsV1, WriteSelectionAssistSettingsV1 } from '@shared/app-settings'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import type { WriteEditorSelectionState } from '../components/write/WriteMarkdownEditor'
@@ -5,10 +7,24 @@ import type { WriteQuotedSelection } from './quoted-selection'
 import type { WriteRecentEdit } from './recent-edits'
 
 export type WritePreviewMode = 'rich' | 'source' | 'live' | 'split' | 'preview'
-export type WriteSaveStatus = 'saved' | 'dirty' | 'saving' | 'error'
+export type WriteSaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict' | 'unknown'
+export type WriteObjectSession = { sessionId: string; objectId: string; revision: string }
+export type WritePendingSave = { operationId: string; baseRevision: string; content: string; objectId: string }
+export type WriteConflictComparison = WriteObjectSession & { workspaceRoot: string; path: string; diskContent: string; localContent: string }
 export type WriteActiveFileKind = 'text' | 'image' | 'pdf'
 
-export type WriteWorkspaceState = {
+export type WriteDiffReviewRecovery = {
+  workspaceRoot: string
+  filePath: string
+  /** The unchanged working copy while the editor owns the pending review. */
+  baseline: string
+  /** Accepted chunks have already advanced this original document. */
+  original: string
+  /** Rejected chunks have already reverted this proposed document. */
+  nextDoc: string
+}
+
+export type WriteWorkspaceState = ImageRegionActions & {
   defaultWorkspaceRoot: string
   workspaceRoots: string[]
   inlineCompletion: WriteInlineCompletionSettingsV1
@@ -32,6 +48,9 @@ export type WriteWorkspaceState = {
   activeFilePath: string | null
   activeFileKind: WriteActiveFileKind | null
   fileContent: string
+  objectSession: WriteObjectSession | null
+  legacyObjectEditing: boolean
+  pendingSave: WritePendingSave | null
   imageDataUrl: string
   imageMimeType: string
   pdfDataBase64: string
@@ -46,6 +65,8 @@ export type WriteWorkspaceState = {
   pendingAgentReview: { nextContent: string } | null
   /** True while an inline diff review (agent edit or AI rewrite) is in progress. */
   reviewActive: boolean
+  reviewRecovery: WriteDiffReviewRecovery | null
+  suspendReview: (recovery: WriteDiffReviewRecovery) => void
   previewMode: WritePreviewMode
   assistantOpen: boolean
   assistantModel: string
@@ -81,7 +102,12 @@ export type WriteWorkspaceState = {
     }
   ) => Promise<boolean>
   syncActiveImageFromDisk: (workspaceRoot: string, path?: string) => Promise<boolean>
+  shutdownFrozen: boolean
+  beginShutdown: () => { save: () => Promise<WriteShutdownResult>; release: () => void }
+  exportInProgress: boolean
+  beginExport: () => { settled: Promise<void>; release: () => void }
   flushSave: (workspaceRoot: string) => Promise<boolean>
+  resolveFileConflict: (comparison: WriteConflictComparison, choice: 'keep-draft' | 'use-disk') => Promise<boolean>
   createFile: (workspaceRoot: string, path: string, content?: string) => Promise<string | null>
   createDirectory: (workspaceRoot: string, path: string) => Promise<string | null>
   renameEntry: (workspaceRoot: string, path: string, newName: string) => Promise<string | null>

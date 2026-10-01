@@ -1,4 +1,7 @@
+import i18n from '../i18n'
+import { createImageRegionActions, imageRegionHasDraft } from './image-region-session'
 import { create } from 'zustand'
+import { objectEditingFailure, openTextObject } from './object-editing-client'
 import {
   DEFAULT_WRITE_INLINE_COMPLETION_DEBOUNCE_MS,
   DEFAULT_WRITE_INLINE_COMPLETION_MAX_TOKENS,
@@ -41,6 +44,11 @@ export { writeBasenameFromPath, writeDirnameFromPath, writeJoinPath, writeRelati
 
 const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
+let fileActionsInFlight = 0
+let shutdownGeneration = 0
+const navigation = { revision: 0 }
+let imageRefreshSequence = 0
+let saveInFlight: Promise<boolean> | null = null
 let lastSavedContent = ''
 let externalSyncTimer: number | null = null
 let externalSyncAnimationToken = 0
@@ -53,6 +61,19 @@ function cancelExternalSyncAnimation(): void {
   }
 }
 
+
+function shutdownAwareFileActions(actions: ReturnType<typeof createWriteFileActions>, get: () => WriteWorkspaceState): typeof actions {
+  return Object.fromEntries(Object.entries(actions).map(([name, action]) => [name, async (...args: unknown[]) => {
+    if (get().shutdownFrozen) {
+      if (name === 'openWorkspaceHome' || name === 'deleteEntry') return false
+      if (['loadDirectory', 'createFile', 'createDirectory', 'renameEntry'].includes(name)) return null
+      return undefined
+    }
+    fileActionsInFlight += 1
+    try { return await (action as (...args: unknown[]) => Promise<unknown>)(...args) }
+    finally { fileActionsInFlight -= 1 }
+  }])) as typeof actions
+}
 
 export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => ({
   defaultWorkspaceRoot: '',
@@ -81,6 +102,9 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   settingsLoading: false,
   settingsError: null,
   ...initialState(),
+  reviewRecovery: null,
+  exportInProgress: false,
+  shutdownFrozen: false,
   previewMode: readStoredPreviewMode(),
   assistantOpen: readStoredAssistantOpen(),
   assistantModel: readStoredAssistantModel(),
@@ -88,33 +112,47 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   assistantAgentPresetId: '',
 
   ...createWriteSettingsActions({ set, get }),
-  ...createWriteFileActions({
+  ...createImageRegionActions(set, get),
+  ...shutdownAwareFileActions(createWriteFileActions({
     set,
     get,
     cancelExternalSyncAnimation,
+    navigation,
     setLastSavedContent: (content) => {
       lastSavedContent = content
     }
-  }),
+  }), get),
 
   setFileContent: (content) => {
+    if (get().shutdownFrozen) return
     cancelExternalSyncAnimation()
     set((state) => ({
       fileContent: content,
-      saveStatus: state.activeFileKind === 'text' && state.activeFilePath && content !== lastSavedContent ? 'dirty' : 'saved'
+      saveStatus: state.saveStatus === 'conflict' ? 'conflict' : state.pendingSave ? 'unknown'
+        : state.activeFileKind === 'text' && state.activeFilePath && content !== lastSavedContent ? 'dirty' : 'saved'
     }))
   },
 
-  setReviewActive: (active) => set({ reviewActive: active === true }),
+  setReviewActive: (active) => set({
+    reviewActive: active === true,
+    ...(!active ? { reviewRecovery: null } : {})
+  }),
+
+  suspendReview: (recovery) => {
+    const state = get()
+    if (!state.reviewActive || state.workspaceRoot !== recovery.workspaceRoot ||
+        state.activeFilePath !== recovery.filePath || state.fileContent !== recovery.baseline) return
+    set({ reviewRecovery: recovery })
+  },
 
   clearPendingAgentReview: () => set({ pendingAgentReview: null }),
 
   syncActiveFileFromDisk: async (workspaceRoot, options = {}) => {
     const snapshot = get()
     const force = options.force === true
-    if (!snapshot.activeFilePath) return false
+    if (snapshot.shutdownFrozen || !snapshot.activeFilePath) return false
     if (snapshot.activeFileKind !== 'text') return false
-    if (!force && (snapshot.saveStatus === 'dirty' || snapshot.saveStatus === 'saving')) return false
+    if (snapshot.pendingSave || (!force && snapshot.fileContent !== lastSavedContent)) return false
     if (options.path && !pathsEqual(options.path, snapshot.activeFilePath)) return false
 
     if (options.message) {
@@ -122,46 +160,28 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       return false
     }
 
-    let content = options.content
-    let resolvedPath = options.path ?? snapshot.activeFilePath
-    let size = options.size
-    let truncated = options.truncated
-    if (typeof content !== 'string') {
-      let result: Awaited<ReturnType<typeof window.analytix.files.read>>
-      try {
-        result = await window.analytix.files.read({
-          path: snapshot.activeFilePath,
-          workspaceRoot
-        })
-      } catch (error) {
-        if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
-          set({
-            fileError: error instanceof Error ? error.message : String(error),
-            saveStatus: 'error'
-          })
-        }
-        return false
+    let document: Awaited<ReturnType<typeof openTextObject>>
+    try {
+      document = await openTextObject(workspaceRoot, snapshot.activeFilePath)
+    } catch (error) {
+      if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
+        set({ fileError: error instanceof Error ? error.message : String(error), saveStatus: 'error' })
       }
-      if (!result.ok) {
-        if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
-          set({ fileError: result.message, saveStatus: 'error' })
-        }
-        return false
-      }
-      content = result.content
-      resolvedPath = result.path
-      size = result.size
-      truncated = result.truncated
+      return false
     }
-
+    const content = document.content
+    const resolvedPath = document.path
+    const size = new TextEncoder().encode(content).length
+    const truncated = document.truncated
     const nextSize = typeof size === 'number' && Number.isFinite(size)
       ? Math.max(0, Math.floor(size))
       : content.length
     const nextTruncated = truncated === true
 
     const latest = get()
-    if (!latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
-    if (!force && (latest.saveStatus === 'dirty' || latest.saveStatus === 'saving')) return false
+    if (latest.shutdownFrozen || !latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
+    if (latest.pendingSave || (!force && latest.fileContent !== lastSavedContent)) return false
+    set({ objectSession: document.legacy ? null : { sessionId: document.sessionId, objectId: document.objectId, revision: document.revision }, legacyObjectEditing: document.legacy })
     if (
       latest.fileContent === content &&
       lastSavedContent === content &&
@@ -257,25 +277,36 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
   syncActiveImageFromDisk: async (workspaceRoot, path) => {
     const snapshot = get()
-    if (!snapshot.activeFilePath || snapshot.activeFileKind !== 'image') return false
+    if (snapshot.shutdownFrozen || !snapshot.activeFilePath || snapshot.activeFileKind !== 'image') return false
+    if (!pathsEqual(workspaceRoot, snapshot.workspaceRoot)) return false
     if (path && !pathsEqual(path, snapshot.activeFilePath)) return false
+    if (snapshot.imageRegionEditor) {
+      if (imageRegionHasDraft(snapshot.imageRegionEditor)) return false
+      snapshot.invalidateImageRegion()
+      return !!snapshot.imageRegionThreadId && get().openImageRegion(workspaceRoot, snapshot.activeFilePath, snapshot.imageRegionThreadId)
+    }
+    const activePath = snapshot.activeFilePath
+    const revision = navigation.revision
+    const sequence = ++imageRefreshSequence
+    const current = (): boolean => {
+      const latest = get()
+      return revision === navigation.revision && sequence === imageRefreshSequence &&
+        !latest.shutdownFrozen && latest.activeFileKind === 'image' &&
+        pathsEqual(latest.workspaceRoot, workspaceRoot) &&
+        pathsEqual(latest.activeFilePath ?? '', activePath)
+    }
 
     try {
       const result = await window.analytix.files.readImage({
         path: snapshot.activeFilePath,
         workspaceRoot
       })
+      if (!current()) return false
       if (!result.ok) {
-        if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
-          set({ fileError: result.message })
-        }
+        set({ fileError: result.message })
         return false
       }
-
-      const latest = get()
-      if (!latest.activeFilePath || latest.activeFileKind !== 'image' || !pathsEqual(latest.activeFilePath, result.path)) {
-        return false
-      }
+      if (!pathsEqual(snapshot.activeFilePath, result.path)) return false
 
       set({
         imageDataUrl: result.dataUrl,
@@ -288,49 +319,172 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       return true
     } catch (error) {
       if (isMissingImageIpc(error)) return false
-      if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
+      if (current()) {
         set({ fileError: formatWriteImageLoadError(error) })
       }
       return false
     }
   },
 
-  flushSave: async (workspaceRoot) => {
-    const state = get()
-    if (!state.activeFilePath) return true
-    if (state.activeFileKind !== 'text') return true
-    if (state.fileTruncated) return false
-    if (externalSyncTimer !== null) {
-      cancelExternalSyncAnimation()
-      set({ fileContent: lastSavedContent, saveStatus: 'saved', fileError: null })
-      return true
+  beginShutdown: () => {
+    if (get().shutdownFrozen) throw new Error('Document shutdown is already pending.')
+    const generation = ++shutdownGeneration
+    navigation.revision += 1
+    set({ shutdownFrozen: true, fileLoading: false })
+    let released = false
+    const current = () => !released && generation === shutdownGeneration && get().shutdownFrozen
+    return {
+      release: () => {
+        if (released) return
+        released = true
+        if (generation === shutdownGeneration) set({ shutdownFrozen: false })
+      },
+      save: async () => {
+        const snapshot = get()
+        if (snapshot.imageRegionEditor?.composing) return { result: 'blocked', reason: 'composing' }
+        if (snapshot.exportInProgress) return { result: 'blocked', reason: 'exporting' }
+        if (fileActionsInFlight || snapshot.fileLoading || externalSyncTimer !== null) return { result: 'blocked', reason: 'unavailable' }
+        if (snapshot.reviewActive || snapshot.pendingAgentReview || snapshot.saveStatus === 'conflict') return { result: 'blocked', reason: 'conflict' }
+        // An earlier receipt can be successful while returning false because
+        // the user typed a newer draft. Save that frozen draft after settlement.
+        await (saveInFlight ?? Promise.resolve(true)).catch(() => false)
+        if (!current()) return { result: 'blocked', reason: 'unavailable' }
+        const sameDocument = () => get().workspaceRoot === snapshot.workspaceRoot &&
+          get().activeFilePath === snapshot.activeFilePath && get().activeFileKind === snapshot.activeFileKind &&
+          get().fileContent === snapshot.fileContent && !get().fileLoading && !get().reviewActive &&
+          !get().pendingAgentReview && !get().exportInProgress && !fileActionsInFlight
+        if (!sameDocument()) return { result: 'blocked', reason: 'unavailable' }
+        const saved = await get().flushSave(snapshot.workspaceRoot).catch(() => false)
+        if (!current() || !sameDocument()) return { result: 'blocked', reason: 'unavailable' }
+        if (!saved || imageRegionHasDraft(get().imageRegionEditor) || get().pendingSave || (snapshot.activeFileKind === 'text' && get().saveStatus !== 'saved')) {
+          return { result: 'blocked', reason: get().saveStatus === 'conflict' || get().imageRegionEditor?.status === 'conflict' ? 'conflict' : 'save_unconfirmed' }
+        }
+        return { result: 'ready' }
+      }
     }
-    cancelExternalSyncAnimation()
-    if (state.fileContent === lastSavedContent) {
+  },
+
+  beginExport: () => {
+    if (get().shutdownFrozen) throw new Error('Document shutdown is pending.')
+    if (get().exportInProgress) throw new Error('A document export is already pending.')
+    set({ exportInProgress: true })
+    let released = false
+    return {
+      // Await only the write already underway; exporting never initiates a save.
+      settled: (saveInFlight ?? Promise.resolve(true)).then(() => undefined),
+      release: () => { if (!released) { released = true; set({ exportInProgress: false }) } }
+    }
+  },
+
+  flushSave: async (workspaceRoot) => {
+    if (get().exportInProgress) return false
+    if (get().imageRegionEditor) {
+      if (get().workspaceRoot !== workspaceRoot || !(await get().flushImageRegion())) return false
+    }
+    // One write at a time. A caller switching documents must also persist edits
+    // made while an earlier save was awaiting its receipt.
+    if (saveInFlight) {
+      if (!(await saveInFlight)) return false
+      return get().flushSave(workspaceRoot)
+    }
+    const state = get()
+    if (!state.activeFilePath || state.activeFileKind !== 'text') return true
+    if (state.fileTruncated || state.reviewActive) return false
+    if (state.workspaceRoot && state.workspaceRoot !== workspaceRoot) return false
+    if (externalSyncTimer !== null) return false
+    if (!state.pendingSave && state.fileContent === lastSavedContent) {
       set({ saveStatus: 'saved' })
       return true
     }
+    cancelExternalSyncAnimation()
     set({ saveStatus: 'saving' })
-    try {
-      const result = await window.analytix.files.write({
-        path: state.activeFilePath,
-        workspaceRoot,
-        content: state.fileContent
-      })
-      if (!result.ok) {
-        set({ saveStatus: 'error', fileError: result.message })
+    const stillActive = (): boolean => get().activeFilePath === state.activeFilePath &&
+      get().workspaceRoot === state.workspaceRoot
+    const operation = (async (): Promise<boolean> => {
+      try {
+        if (state.legacyObjectEditing && !state.pendingSave) {
+          const result = await window.analytix.files.write({ path: state.activeFilePath!, workspaceRoot, content: state.fileContent })
+          if (!stillActive()) return false
+          if (!result.ok) { set({ saveStatus: 'error', fileError: result.message }); return false }
+          lastSavedContent = state.fileContent
+          const unchanged = get().fileContent === state.fileContent
+          set({ saveStatus: unchanged ? 'saved' : 'dirty', fileError: null })
+          return unchanged
+        }
+        let session = state.objectSession
+        if (!session) {
+          set({ saveStatus: 'error', fileError: i18n.t('writeObjectSessionInvalid') })
+          return false
+        }
+        const pending = state.pendingSave ?? {
+          operationId: crypto.randomUUID(), baseRevision: session.revision,
+          content: state.fileContent, objectId: session.objectId
+        }
+        set({ pendingSave: pending })
+        let result = await window.analytix.objects.request(state.pendingSave
+          ? { action: 'status', sessionId: session.sessionId, operationId: pending.operationId }
+          : { action: 'commit', sessionId: session.sessionId, operationId: pending.operationId,
+              baseRevision: pending.baseRevision, content: pending.content })
+        if (!stillActive()) return false
+        if (!result.ok && result.code === 'session_invalid') {
+          // Runtime restart loses ephemeral sessions, never the frozen write
+          // intent. Rebind this same object and inspect its durable operation.
+          const reopened = await openTextObject(workspaceRoot, state.activeFilePath!)
+          if (!stillActive()) return false
+          if (reopened.objectId !== pending.objectId) {
+            set({ saveStatus: 'conflict', fileError: i18n.t('writeObjectConflict') })
+            return false
+          }
+          session = { sessionId: reopened.sessionId, objectId: reopened.objectId, revision: session.revision }
+          set({ objectSession: session })
+          result = await window.analytix.objects.request({ action: 'status', sessionId: session.sessionId, operationId: pending.operationId })
+        }
+        if (!result.ok && result.code === 'operation_not_found') {
+          // The exact operation ID and payload make even a racing retry safe.
+          result = await window.analytix.objects.request({ action: 'commit', sessionId: session.sessionId,
+            operationId: pending.operationId, baseRevision: pending.baseRevision, content: pending.content })
+        }
+        if (!stillActive()) return false
+        if (!result.ok) {
+          set({ saveStatus: result.code === 'conflict' ? 'conflict' : result.receipt ? 'unknown' : 'error', fileError: objectEditingFailure(result) })
+          return false
+        }
+        if (!('receipt' in result) || result.receipt.status !== 'committed') {
+          set({ saveStatus: 'receipt' in result && result.receipt.status === 'conflict' ? 'conflict' : 'unknown',
+            fileError: i18n.t('receipt' in result && result.receipt.status === 'conflict' ? 'writeObjectConflict' : 'writeObjectUnknown') })
+          return false
+        }
+        lastSavedContent = pending.content
+        const unchanged = get().fileContent === pending.content
+        set({ objectSession: { ...session, revision: result.receipt.revision }, pendingSave: null,
+          saveStatus: unchanged ? 'saved' : 'dirty', fileError: null })
+        return unchanged
+      } catch (error) {
+        if (stillActive()) set({ saveStatus: get().pendingSave ? 'unknown' : 'error', fileError: error instanceof Error ? error.message : String(error) })
         return false
       }
-      lastSavedContent = state.fileContent
-      set({ saveStatus: 'saved', fileError: null })
-      return true
-    } catch (error) {
-      set({
-        saveStatus: 'error',
-        fileError: error instanceof Error ? error.message : String(error)
-      })
+    })()
+    saveInFlight = operation
+    try { return await operation } finally { if (saveInFlight === operation) saveInFlight = null }
+  },
+
+  resolveFileConflict: async (comparison, choice) => {
+    const current = get()
+    if (saveInFlight || current.saveStatus !== 'conflict' || current.workspaceRoot !== comparison.workspaceRoot ||
+        current.activeFilePath !== comparison.path || current.fileContent !== comparison.localContent ||
+        current.objectSession?.objectId !== comparison.objectId) return false
+    const latest = await openTextObject(comparison.workspaceRoot, comparison.path).catch(() => null)
+    if (!latest || latest.objectId !== comparison.objectId || latest.revision !== comparison.revision ||
+        get().fileContent !== comparison.localContent || get().activeFilePath !== comparison.path ||
+        get().workspaceRoot !== comparison.workspaceRoot || get().saveStatus !== 'conflict') {
+      set({ fileError: i18n.t('writeObjectConflict') })
       return false
     }
+    lastSavedContent = latest.content
+    set({ objectSession: { sessionId: latest.sessionId, objectId: latest.objectId, revision: latest.revision },
+      pendingSave: null, fileContent: choice === 'use-disk' ? latest.content : comparison.localContent,
+      saveStatus: choice === 'use-disk' ? 'saved' : 'dirty', fileError: null })
+    return choice === 'use-disk' || get().flushSave(comparison.workspaceRoot)
   },
 
   setFileError: (message) => {
@@ -376,6 +530,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     if (!state.activeFilePath) return
     const quote = quotedSelectionFromEditor(state.selection, state.activeFilePath, workspaceRoot)
     if (!quote) return
+    quote.workspaceRoot = workspaceRoot
+    quote.snapshotContent = state.activeFileKind === 'pdf' ? String(state.pdfMtimeMs) : state.fileContent
     set((current) => ({
       assistantOpen: true,
       quotedSelections: [...current.quotedSelections, quote],
@@ -391,8 +547,12 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   clearQuotedSelections: () => set({ quotedSelections: [] }),
 
   resetWorkspace: () => {
+    if (get().shutdownFrozen || imageRegionHasDraft(get().imageRegionEditor)) return
+    get().invalidateImageRegion(true)
+    set({ imageRegionEditor: null })
+    navigation.revision += 1
     cancelExternalSyncAnimation()
     lastSavedContent = ''
-    set(initialState())
+    set({ ...initialState(), reviewRecovery: null })
   }
 }))

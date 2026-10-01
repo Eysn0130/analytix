@@ -195,7 +195,9 @@ export type InterruptTurnRequest = z.infer<typeof InterruptTurnRequest>
 export const InterruptTurnResponse = z.object({
   threadId: z.string().min(1),
   turnId: z.string().min(1),
-  status: TurnStatus
+  status: TurnStatus,
+  discard: z.boolean().optional(),
+  cancelled: z.boolean().optional()
 })
 export type InterruptTurnResponse = z.infer<typeof InterruptTurnResponse>
 

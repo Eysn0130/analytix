@@ -1,3 +1,4 @@
+import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -52,15 +53,12 @@ import {
 } from './chat-store-runtime-helpers'
 import {
   WRITE_ASSISTANT_THREAD_TITLE,
-  activeWriteThreadForWorkspace,
   forgetWriteThread,
   hydrateWriteThreadRegistry,
   isWriteThreadId,
-  markWriteThread,
   pruneWriteThreadRegistry,
   readWriteThreadRegistry,
   saveWriteThreadRegistry,
-  writeThreadBelongsToWorkspace,
   writeWorkspaceForThreadId
 } from '../write/write-thread-registry'
 import {
@@ -78,7 +76,6 @@ import {
   isCodeThread,
   latestThread,
   looksLikeActiveTurnError,
-  readActiveWriteWorkspace,
   readWriteWorkspaceRoots,
   quarantineTerminalTurnDraft,
   reconcileTerminalTurnFromThreadDetail,
@@ -215,7 +212,7 @@ function forkBlocksThroughTurn(blocks: ChatBlock[], turnId: string): ChatBlock[]
 export function createMaintenanceActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
-  const forkActiveThreadWithOptions = async (options: { turnId?: string } = {}): Promise<void> => {
+  const forkActiveThreadWithOptions = async (options: { turnId?: string } = {}): Promise<void> => withImageThreadNavigation(undefined, async navigationCurrent => {
     const { activeThreadId, busy, blocks } = get()
     if (!activeThreadId) return
     if (busy) {
@@ -255,8 +252,11 @@ export function createMaintenanceActions(
         )
       )
       await get().refreshThreads()
+      if (!navigationCurrent()) return
       await get().selectThread(forked.id)
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -264,7 +264,7 @@ export function createMaintenanceActions(
           : {})
       })
     }
-  }
+  })
 
   return {
   renameActiveThread: async (title) => {
@@ -301,7 +301,7 @@ export function createMaintenanceActions(
     }
   },
 
-  archiveThread: async (threadId, archived) => {
+  archiveThread: async (threadId, archived) => withImageThreadNavigation(undefined, async navigationCurrent => {
     const targetId = threadId.trim()
     if (!targetId) return
     if (get().runtimeConnection !== 'ready') {
@@ -319,7 +319,7 @@ export function createMaintenanceActions(
       } else {
         throw new Error(i18n.t('common:runtimeFeatureUnsupported'))
       }
-      if (archivingActive) {
+      if (archivingActive && navigationCurrent()) {
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
         clearBusyWatchdog()
@@ -338,12 +338,14 @@ export function createMaintenanceActions(
           ),
           watchTurnCompletion: w,
           unreadThreadIds: u,
-          ...(archivingActive ? clearedThreadSelection() : {}),
+          ...(archivingActive && navigationCurrent() ? clearedThreadSelection() : {}),
           error: null
         }
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -351,7 +353,7 @@ export function createMaintenanceActions(
           : {})
       })
     }
-  },
+  }),
 
   compactActiveThread: async (reason) => {
     const { activeThreadId, busy } = get()
@@ -614,7 +616,7 @@ export function createMaintenanceActions(
     }
   },
 
-  resumeSessionIntoThread: async (sessionId, options) => {
+  resumeSessionIntoThread: async (sessionId, options) => withImageThreadNavigation(null, async navigationCurrent => {
     const id = sessionId.trim()
     if (!id) return null
     if (get().runtimeConnection !== 'ready') {
@@ -629,9 +631,12 @@ export function createMaintenanceActions(
     try {
       const result = await p.resumeSession(id, options)
       await get().refreshThreads()
+      if (!navigationCurrent()) return null
       await get().selectThread(result.threadId)
+      if (!navigationCurrent()) return null
       return result.threadId
     } catch (e) {
+      if (!navigationCurrent()) return null
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -640,9 +645,9 @@ export function createMaintenanceActions(
       })
       return null
     }
-  },
+  }),
 
-  deleteThread: async (threadId) => {
+  deleteThread: async (threadId) => withImageThreadNavigation(undefined, async navigationCurrent => {
     const targetId = threadId.trim()
     if (!targetId) return
     if (get().runtimeConnection !== 'ready') {
@@ -659,7 +664,10 @@ export function createMaintenanceActions(
           projectPath: wtRecord.projectPath,
           poolIndex: wtRecord.poolIndex
         })
+        saveThreadWorktreeRegistry(forgetThreadWorktree(targetId))
+        if (!navigationCurrent()) return
       } catch {
+        if (!navigationCurrent()) return
         /* best-effort; the slot can be reclaimed later from Settings */
       }
     }
@@ -668,7 +676,7 @@ export function createMaintenanceActions(
       saveWriteThreadRegistry(forgetWriteThread(targetId))
       saveThreadForkRegistry(forgetThreadFork(targetId))
       if (wtRecord) saveThreadWorktreeRegistry(forgetThreadWorktree(targetId))
-      if (deletingActive) {
+      if (deletingActive && navigationCurrent()) {
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
         clearBusyWatchdog()
@@ -683,12 +691,14 @@ export function createMaintenanceActions(
           threads: s.threads.filter((thread) => thread.id !== targetId),
           watchTurnCompletion: w,
           unreadThreadIds: u,
-          ...(deletingActive ? clearedThreadSelection() : {}),
+          ...(deletingActive && navigationCurrent() ? clearedThreadSelection() : {}),
           error: null
         }
       })
       await get().refreshThreads()
+      if (!navigationCurrent()) return
     } catch (e) {
+      if (!navigationCurrent()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -696,7 +706,7 @@ export function createMaintenanceActions(
           : {})
       })
     }
-  },
+  }),
 
   rewindAndResend: async (userBlockId, newText) => {
     const trimmed = newText.trim()

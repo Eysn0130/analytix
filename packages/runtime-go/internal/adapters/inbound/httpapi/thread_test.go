@@ -63,6 +63,14 @@ func TestThreadHandlersRecordErrorMapping(t *testing.T) {
 		strings.Contains(string(recorder.Body.Bytes()), threadapp.ErrPublicProjectionPending.Error()) {
 		t.Fatalf("pending public projection was not mapped to a safe retryable response: code=%d body=%#v", recorder.Code, body)
 	}
+	stub.getErr = errors.Join(threadapp.ErrPublicProjectionPending, errors.New("PRIVATE_RETAINED_MATERIAL_FAILURE"))
+	recorder = httptest.NewRecorder()
+	handler.HandleRecord(recorder, request, "thr_1")
+	body = decodeThreadBody(t, recorder)
+	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "public_projection_pending" || body["turns"] != nil ||
+		strings.Contains(recorder.Body.String(), "PRIVATE_RETAINED_MATERIAL_FAILURE") {
+		t.Fatal("retained authority failure leaked details or a partial batch")
+	}
 	stub.getErr = nil
 
 	recorder = httptest.NewRecorder()
@@ -299,6 +307,72 @@ func TestThreadHandlersHydrateAcceptedFinalDeliveryOrFailClosed(t *testing.T) {
 	body = decodeThreadBody(t, recorder)
 	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "accepted_final_hydration_unavailable" {
 		t.Fatalf("missing accepted-final hydration callback did not fail closed: code=%d body=%#v", recorder.Code, body)
+	}
+}
+
+func TestThreadHandlersPrivateQAHydrationClassDoesNotExposeFailureText(t *testing.T) {
+	const privateCanary = "PRIVATE_HYDRATION_CANARY"
+	stub := &threadServiceStub{thread: map[string]any{
+		"id": "thr_hydration_qa", "latestSeq": float64(1),
+		"turns": []any{map[string]any{"acceptedFinalView": map[string]any{}}},
+	}}
+	handler := ThreadHandlers{
+		Service: stub,
+		HydrateAcceptedFinalDelivery: func(context.Context, string, map[string]any) (threadapp.AcceptedFinalHydrationProjectionV1, error) {
+			return threadapp.AcceptedFinalHydrationProjectionV1{}, errors.New(
+				"accepted final hydration snapshot and event frontier are torn: " + privateCanary,
+			)
+		},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/threads/thr_hydration_qa", nil)
+	for _, qa := range []bool{false, true} {
+		if qa {
+			t.Setenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK", "1")
+		} else {
+			t.Setenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK", "")
+		}
+		recorder := httptest.NewRecorder()
+		handler.HandleRecord(recorder, request, "thr_hydration_qa")
+		body := decodeThreadBody(t, recorder)
+		wantClass := ""
+		if qa {
+			wantClass = "frontier_torn"
+		}
+		if recorder.Code != http.StatusServiceUnavailable ||
+			body["code"] != "accepted_final_hydration_unavailable" ||
+			recorder.Header().Get("X-Analytix-QA-Hydration-Class") != wantClass ||
+			strings.Contains(recorder.Body.String(), privateCanary) {
+			t.Fatalf("unsafe hydration response: qa=%t code=%d class=%q", qa,
+				recorder.Code, recorder.Header().Get("X-Analytix-QA-Hydration-Class"))
+		}
+	}
+	if got := acceptedFinalHydrationQAClass(errors.New(privateCanary)); got != "other" {
+		t.Fatalf("private error was promoted to a diagnostic category: %q", got)
+	}
+}
+
+func TestThreadHandlersHydrationFrontierPendingDoesNotAdmitInvalidDelivery(t *testing.T) {
+	stub := &threadServiceStub{thread: map[string]any{
+		"id": "thr_hydration_pending", "latestSeq": float64(1),
+		"turns": []any{map[string]any{"acceptedFinalView": map[string]any{}}},
+	}}
+	handler := ThreadHandlers{
+		Service: stub,
+		HydrateAcceptedFinalDelivery: func(context.Context, string, map[string]any) (threadapp.AcceptedFinalHydrationProjectionV1, error) {
+			return threadapp.AcceptedFinalHydrationProjectionV1{}, errors.Join(
+				threadapp.ErrPublicProjectionPending,
+				errors.New("accepted final hydration snapshot and event frontier are torn"),
+			)
+		},
+	}
+	t.Setenv("ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK", "1")
+	recorder := httptest.NewRecorder()
+	handler.HandleRecord(recorder, httptest.NewRequest(http.MethodGet, "/v1/threads/thr_hydration_pending", nil), "thr_hydration_pending")
+	body := decodeThreadBody(t, recorder)
+	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "public_projection_pending" ||
+		recorder.Header().Get("X-Analytix-QA-Hydration-Class") != "" ||
+		body["acceptedFinalDelivery"] != nil || body["acceptedFinalDeliveries"] != nil {
+		t.Fatalf("torn frontier was admitted or misclassified: status=%d body=%#v", recorder.Code, body)
 	}
 }
 

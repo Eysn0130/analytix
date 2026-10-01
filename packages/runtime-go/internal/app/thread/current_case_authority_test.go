@@ -12,6 +12,7 @@ import (
 	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -270,6 +271,69 @@ func TestCurrentCaseThreadAuthorityRejectsSignedEpochRollback(t *testing.T) {
 	deleteLatest["turns"] = deleteLatest["turns"].([]any)[:1]
 	if current, err := validator.ValidateCurrent(oldContext.ThreadID, deleteLatest); err == nil || current.ContextDigest != "" {
 		t.Fatalf("removing the signed high-water turn enabled rollback: current=%#v err=%v", current, err)
+	}
+}
+
+func TestCurrentCaseAToBToAReturnRejectsOldHandleAndAllowsFreshContext(t *testing.T) {
+	contexts := []domainsecurity.TurnSecurityContext{
+		newTrustedProjectionContext("thread-case-return", "turn-a1", "case-a", "snapshot-a1", 3),
+		newTrustedProjectionContext("thread-case-return", "turn-b", "case-b", "snapshot-b", 4),
+		newTrustedProjectionContext("thread-case-return", "turn-a2", "case-a", "snapshot-a1", 5),
+	}
+	var handles []map[string]any
+	for position, current := range contexts {
+		authority := currentCaseInventoryStub{threadID: current.ThreadID, contexts: contexts[:position+1]}
+		binding := currentBindingReaderStub{workspace: current.WorkspaceRealPath, binding: domainsecurity.CaseBinding{
+			CaseID: current.CaseID, WorkspaceRealPath: current.WorkspaceRealPath, CaseBindingHash: current.CaseBindingHash,
+		}}
+		validator := NewCurrentCaseThreadAuthorityValidator(authority, binding, nil)
+		thread := currentAuthorityThread(t, current)
+		for _, old := range handles {
+			thread["turns"] = append(thread["turns"].([]any), old["turns"].([]any)[0])
+			if _, err := validator.ValidateCurrent(current.ThreadID, old); err == nil {
+				t.Fatal("case return reactivated an older context handle")
+			}
+		}
+		if got, err := validator.ValidateCurrent(current.ThreadID, thread); err != nil || got != current {
+			t.Fatal("fresh current case context was refused", err)
+		}
+		handles = append(handles, currentAuthorityThread(t, current))
+	}
+	if !sameRetainedFactScopeV1(contexts[2], contexts[0]) || sameRetainedFactScopeV1(contexts[1], contexts[0]) {
+		t.Fatal("historical eligibility did not follow the current case scope")
+	}
+}
+
+func TestRetainedFactPostWitnessRechecksEpochHighWater(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		old := newTrustedProjectionContext("thread-retained-epoch", "turn-original", "case-a", "snapshot-a", 3)
+		current := newTrustedProjectionContext(old.ThreadID, "turn-current", "case-a", "snapshot-b", 4)
+		authority := &currentCaseInventoryStub{threadID: old.ThreadID, contexts: []domainsecurity.TurnSecurityContext{old, current}}
+		binding := currentBindingReaderStub{workspace: current.WorkspaceRealPath, binding: domainsecurity.CaseBinding{
+			CaseID: current.CaseID, WorkspaceRealPath: current.WorkspaceRealPath, CaseBindingHash: current.CaseBindingHash,
+		}}
+		thread := currentAuthorityThread(t, current)
+		thread["turns"] = append(thread["turns"].([]any), currentAuthorityThread(t, old)["turns"].([]any)[0])
+		validator := NewCurrentCaseThreadAuthorityValidator(authority, binding, nil)
+		if _, err := validator.ValidateCurrent(current.ThreadID, thread); err != nil {
+			t.Fatal(err)
+		}
+		projector := NewTrustedPublicProjectorWithCurrentCaseAuthority(nil, authority, validator)
+		projector.retainedFactVerifier = func(domainevidence.PrivateAcceptedFinalRecord, domainsecurity.TurnSecurityContext) error {
+			if changed {
+				authority.contexts = append(authority.contexts,
+					newTrustedProjectionContext(old.ThreadID, "turn-case-b", "case-b", "snapshot-c", 5),
+					newTrustedProjectionContext(old.ThreadID, "turn-return-a", "case-a", "snapshot-b", 6))
+			}
+			return nil
+		}
+		err := projector.verifyRetainedFactsV1(thread, []retainedFactAdmissionV1{{current: current}})
+		if (err != nil) != changed {
+			t.Fatal("post-witness current epoch validation mismatch", err)
+		}
+		if changed && !errors.Is(err, ErrPublicProjectionPending) {
+			t.Fatal("changed retained authority lost its bounded public pending classification")
+		}
 	}
 }
 

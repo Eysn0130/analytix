@@ -1,8 +1,9 @@
-import type { CSSProperties, ReactElement, ReactNode } from 'react'
-import { ChevronDown, ChevronRight, FileText, FilePlus2, Folder, FolderPlus, Image, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight, FileText, FilePlus2, Folder, FolderPlus, Image, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
-import { isWriteImageFileExtension, isWriteWorkspaceEntry } from '@shared/write-text-file'
+import { isWriteImageFileExtension } from '@shared/write-text-file'
+import { relativeWorkspacePath } from '../../lib/composer-file-references'
 import {
   SidebarCollapseMotion,
   SidebarIconButton,
@@ -20,6 +21,7 @@ type Props = {
   rootLoading?: boolean
   onToggleDir: (path: string) => void
   onSelectFile: (path: string) => void
+  onAddReference?: (entry: WorkspaceEntry) => void
   onCreateFile: (directoryPath?: string) => void
   onCreateDirectory: (directoryPath?: string) => void
   onRenameEntry: (entry: WorkspaceEntry) => void
@@ -51,11 +53,11 @@ function relativeDisplayPath(root: string, target: string): string {
 }
 
 function isAssistantInternalDirectory(entry: WorkspaceEntry): boolean {
-  return entry.type === 'directory' && entry.name === '.deepseek'
+  return entry.type === 'directory' && ['.deepseek', '.git', '.hg', '.svn', 'node_modules'].includes(entry.name.toLowerCase())
 }
 
 function isWriteDocument(entry: WorkspaceEntry): boolean {
-  return !isAssistantInternalDirectory(entry) && isWriteWorkspaceEntry(entry)
+  return !isAssistantInternalDirectory(entry)
 }
 
 function isImageEntry(entry: WorkspaceEntry): boolean {
@@ -103,6 +105,7 @@ export function WriteFileTree({
   rootLoading = false,
   onToggleDir,
   onSelectFile,
+  onAddReference,
   onCreateFile,
   onCreateDirectory,
   onRenameEntry,
@@ -112,6 +115,24 @@ export function WriteFileTree({
   showRootLabel = true
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const [contextMenu, setContextMenu] = useState<{ entry: WorkspaceEntry; x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { setContextMenu(null) }, [rootDirectory])
+  useEffect(() => {
+    if (!contextMenu) return
+    const dismiss = (event: PointerEvent): void => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return
+      setContextMenu(null)
+    }
+    const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') setContextMenu(null) }
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', escape)
+    return () => { window.removeEventListener('pointerdown', dismiss); window.removeEventListener('keydown', escape) }
+  }, [contextMenu])
+  const withContextEntry = (action: (entry: WorkspaceEntry) => void): void => {
+    if (contextMenu) action(contextMenu.entry)
+    setContextMenu(null)
+  }
   const hasRootSnapshot = Object.prototype.hasOwnProperty.call(entriesByDir, rootDirectory)
   const rootEntries = (entriesByDir[rootDirectory] ?? []).filter(isWriteDocument)
 
@@ -131,6 +152,7 @@ export function WriteFileTree({
         >
           <SidebarTreeRow
             active={selected}
+            onContextMenu={(event) => { event.preventDefault(); setContextMenu({ entry, x: event.clientX, y: event.clientY }) }}
             onClick={() => (isDirectory ? onToggleDir(entry.path) : onSelectFile(entry.path))}
             className="min-h-[34px]"
             buttonStyle={{ paddingLeft: 10 + depth * 14 }}
@@ -154,6 +176,10 @@ export function WriteFileTree({
                     </TreeActionButton>
                   </>
                 ) : null}
+                {onAddReference ? <TreeActionButton
+                  title={t(isDirectory ? 'fileTreeAddFolderReference' : 'fileTreeAddFileReference')}
+                  onClick={() => onAddReference(entry)}
+                ><Plus className="h-3.5 w-3.5" strokeWidth={1.85} /></TreeActionButton> : null}
                 <TreeActionButton
                   title={t('writeRenameEntry')}
                   onClick={() => onRenameEntry(entry)}
@@ -290,6 +316,18 @@ export function WriteFileTree({
           <div>{renderEntries(rootDirectory, 0)}</div>
         )}
       </div>
+      {contextMenu ? <div ref={menuRef} role="menu"
+        className="fixed z-50 min-w-[190px] rounded-lg border border-ds-border bg-ds-card p-1 shadow-xl"
+        style={{ left: contextMenu.x, top: contextMenu.y }}>
+        {onAddReference ? <button type="button" role="menuitem" className="block w-full rounded-md px-2.5 py-2 text-left text-sm hover:bg-ds-hover"
+          onClick={() => withContextEntry(onAddReference)}>{t(contextMenu.entry.type === 'directory' ? 'fileTreeAddFolderReference' : 'fileTreeAddFileReference')}</button> : null}
+        <button type="button" role="menuitem" className="block w-full rounded-md px-2.5 py-2 text-left text-sm hover:bg-ds-hover"
+          onClick={() => withContextEntry((entry) => { void navigator.clipboard?.writeText(entry.path) })}>{t('fileTreeCopyAbsolutePath')}</button>
+        <button type="button" role="menuitem" className="block w-full rounded-md px-2.5 py-2 text-left text-sm hover:bg-ds-hover"
+          onClick={() => withContextEntry((entry) => { void navigator.clipboard?.writeText(relativeWorkspacePath(entry.path, rootDirectory)) })}>{t('fileTreeCopyRelativePath')}</button>
+        <button type="button" role="menuitem" className="block w-full rounded-md px-2.5 py-2 text-left text-sm hover:bg-ds-hover"
+          onClick={() => withContextEntry((entry) => { void window.analytix?.workspace?.openEditorPath({ path: entry.path, workspaceRoot: rootDirectory, editorId: 'file-manager' }) })}>{t(window.analytix?.app?.platform === 'darwin' ? 'fileTreeRevealInFinder' : 'fileTreeRevealInFileManager')}</button>
+      </div> : null}
     </div>
   )
 }

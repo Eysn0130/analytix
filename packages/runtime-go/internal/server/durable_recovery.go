@@ -276,6 +276,10 @@ func (tx generalTerminalRecoveryTransactionV1) SettleTerminalUsage(event map[str
 	return tx.store.usageIndex.SettleTerminalEventOwnerLocked(event)
 }
 
+func (tx generalTerminalRecoveryTransactionV1) SettleTerminalUsageBatch(events []map[string]any) error {
+	return tx.store.usageIndex.SettleTerminalEventsOwnerLocked(events)
+}
+
 func (s *DurableEventSessionStore) threadIDsFromFilesystemNoLock() ([]string, error) {
 	return s.threadIDsFromFilesystemReadOnlyNoLock()
 }

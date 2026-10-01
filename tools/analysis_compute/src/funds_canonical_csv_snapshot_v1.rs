@@ -1411,6 +1411,7 @@ fn valid_lower_hex(value: &str, length: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    include!("funds_delivery_vectors_test.rs");
     use super::*;
     use duckdb::Connection;
     use std::fs::{self, OpenOptions};

@@ -767,18 +767,19 @@ describe('ThreadSummaryPanelView', () => {
   })
 })
 
-describe('WorkbenchTopBar summary toggle', () => {
+describe('WorkbenchTopBar layout controls', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh')
   })
 
-  it('renders the top-right Toggle Summary action with the active pressed state', () => {
+  it('keeps two layout buttons and moves the summary action into the workspace', () => {
     const html = renderToStaticMarkup(createElement(WorkbenchTopBar, {
-      rightPanelMode: 'summary',
-      onToggleRightPanelMode: () => {}
+      workspaceOpen: true, onToggleWorkspace: () => {},
+      terminalOpen: false, onToggleTerminal: () => {}
     }))
 
-    expect(html).toContain('切换置顶摘要')
-    expect(html).toMatch(/aria-label="切换置顶摘要"[^>]*aria-pressed="true"/)
+    expect(html).not.toContain('切换置顶摘要')
+    expect(html.match(/<button /g)).toHaveLength(2)
+    expect(html).toMatch(/aria-pressed="true"[^>]*aria-controls="workbench-right-workspace"/)
   })
 })

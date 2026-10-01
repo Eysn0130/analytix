@@ -946,3 +946,100 @@ func effectGateChildContext(parent domainsecurity.TurnSecurityContext, threadID 
 	}
 	return securityContext
 }
+
+func TestMetadataNestedReadRetainsExactEffectBehindQueuedWriter(t *testing.T) {
+	gate := New()
+	security := effectGateContext("metadata-nested", "/workspace/metadata-nested", "case", 1)
+	scope := TransitionScope{security.ThreadID, security.WorkspaceRealPath, security.TenantID, security.UserID}
+	ctx, releaseEffect, err := gate.AcquireEffect(context.Background(), security)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseEffect()
+	writerCtx, stopWriter := context.WithTimeout(context.Background(), time.Second)
+	defer stopWriter()
+	done := make(chan error, 1)
+	go func() {
+		release, err := gate.AcquireTransitionScope(writerCtx, scope)
+		if err == nil {
+			release()
+		}
+		done <- err
+	}()
+	waitForEffectGateWriter(t, gate, security)
+	nestedCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	releaseMetadata, err := gate.AcquireTransitionScopeRead(nestedCtx, scope)
+	if err != nil {
+		t.Fatalf("nested metadata deadlocked behind its own writer: %v", err)
+	}
+	releaseEffect()
+	select {
+	case <-done:
+		t.Fatal("writer crossed retained metadata scope")
+	default:
+	}
+	cancel()
+	if _, err := gate.AcquireTransitionScopeRead(nestedCtx, scope); !errors.Is(err, context.Canceled) {
+		t.Fatal("canceled metadata read retained authority")
+	}
+	releaseMetadata()
+	releaseMetadata()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("metadata release stranded writer")
+	}
+}
+
+func TestMetadataNestedReadCannotReuseAnotherScope(t *testing.T) {
+	for _, change := range []string{"thread", "workspace", "principal", "gate"} {
+		t.Run(change, func(t *testing.T) {
+			gate := New()
+			security := effectGateContext("metadata-other", "/workspace/metadata-other", "case", 1)
+			ctx, release, err := gate.AcquireEffect(context.Background(), security)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			scope := TransitionScope{security.ThreadID, security.WorkspaceRealPath, security.TenantID, security.UserID}
+			target := gate
+			switch change {
+			case "thread":
+				scope.ThreadID += "-other"
+			case "workspace":
+				scope.WorkspaceRealPath += "-other"
+			case "principal":
+				scope.UserID += "-other"
+			case "gate":
+				target = New()
+			}
+			writerCtx, stop := context.WithCancel(context.Background())
+			defer stop()
+			done := make(chan error, 1)
+			go func() {
+				release, err := target.AcquireTransitionScope(writerCtx, scope)
+				if err == nil {
+					<-writerCtx.Done()
+					release()
+				}
+				done <- err
+			}()
+			keys, _ := gateTransitionScope(scope)
+			waitForEffectGateWriterOnKey(t, target, keys.workspaceKey)
+			readCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+			defer cancel()
+			if release, err := target.AcquireTransitionScopeRead(readCtx, scope); !errors.Is(err, context.DeadlineExceeded) {
+				if release != nil {
+					release()
+				}
+				t.Fatalf("metadata scope was reused: %v", err)
+			}
+			stop()
+			<-done
+		})
+	}
+}

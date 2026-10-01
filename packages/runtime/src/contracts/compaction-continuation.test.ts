@@ -72,6 +72,18 @@ function publicCaseCompaction(overrides: Record<string, unknown> = {}): Record<s
 }
 
 describe('automatic compaction continuation contract', () => {
+  it('reads legacy snapshots and the bounded optional chronological user sources', () => {
+    expect(TaskContinuationSnapshotV1Schema.safeParse(continuation()).success).toBe(true)
+    const source = { reference: digest('a'), text: 'Only modify A; do not modify B', digest: digest('b') }
+    const userHistory = { version: 'continuation-user-history.v1', scopeDigest: digest('c'), sources: [source] }
+    expect(TaskContinuationSnapshotV1Schema.safeParse(continuation({ userHistory })).success).toBe(true)
+    for (const invalid of [
+      { ...userHistory, sources: [source, source] },
+      { ...userHistory, version: 'untrusted-version' },
+      { ...userHistory, sources: [{ ...source, text: '字'.repeat(400_000) }] },
+      { ...userHistory, authority: 'execute' }
+    ]) expect(TaskContinuationSnapshotV1Schema.safeParse(continuation({ userHistory: invalid })).success).toBe(false)
+  })
   it('accepts the closed V4 snapshot without upgrading evidence authority', () => {
     const parsed = CompactionTurnItem.parse(compaction())
     expect(parsed.schemaVersion).toBe(4)

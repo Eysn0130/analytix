@@ -13,6 +13,7 @@ import (
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
 type acceptedFinalHydrationMultiReadbackV1 struct {
@@ -240,6 +241,49 @@ func TestBuildAcceptedFinalHydrationProjectionSealsEveryVisibleTurnIndependently
 			}
 		})
 	}
+	// This tests the operation boundary with the existing signed two-delivery
+	// fixture. The production collector separately requires an exact fact proof.
+	for _, mode := range []string{"valid", "revoked-before", "revoked-after", "cancel-after"} {
+		t.Run("retained-operation-"+mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			candidate := input
+			candidate.Context = ctx
+			calls := 0
+			local := *projector
+			local.retainedFactVerifier = func(original domainevidence.PrivateAcceptedFinalRecord, current domainsecurity.TurnSecurityContext) error {
+				calls++
+				if !reflect.DeepEqual(original, first.privateRecord) || !reflect.DeepEqual(current, second.securityContext) {
+					t.Fatal("retained operation changed original or current permission binding")
+				}
+				if mode == "revoked-before" || (mode == "revoked-after" && calls == 2) {
+					return errors.New("revoked")
+				}
+				if mode == "cancel-after" && calls == 2 {
+					cancel()
+				}
+				return nil
+			}
+			before := authority.signCalls.Load()
+			got, present, err := buildRetainedAcceptedFinalHydrationV1(candidate, &local, map[string]bool{}, []retainedFactAdmissionV1{{original: first.privateRecord, current: second.securityContext}})
+			if mode == "valid" {
+				if err != nil || !present || len(got.Deliveries) != 2 || calls != 2 {
+					t.Fatalf("bounded retained operation: present=%t deliveries=%d checks=%d err=%v", present, len(got.Deliveries), calls, err)
+				}
+			} else {
+				if err == nil || present || got.Latest != nil || len(got.Deliveries) != 0 {
+					t.Fatal("revoked retained operation exposed a partial batch")
+				}
+				if mode == "revoked-before" && (calls != 1 || authority.signCalls.Load() != before) {
+					t.Fatal("rejected operation reached signing")
+				}
+				if mode != "revoked-before" && calls != 2 {
+					t.Fatal("final operation revalidation was omitted")
+				}
+			}
+		})
+	}
+
 }
 
 func TestBuildAcceptedFinalHydrationProjectionCapsEveryVisibleTurnBeforeSigning(t *testing.T) {
@@ -479,14 +523,19 @@ func TestBuildLatestAcceptedFinalHydrationFailsClosedOnTornMissingDuplicateAndRe
 	}
 	torn := base
 	torn.SnapshotLatestSeq--
-	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(torn); err == nil || present || delivery != nil {
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(torn); !errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
 		t.Fatalf("torn frontier produced hydration: present=%t delivery=%#v err=%v", present, delivery, err)
+	}
+	ahead := base
+	ahead.SnapshotLatestSeq++
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(ahead); err == nil || errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
+		t.Fatalf("missing durable events were treated as pending: present=%t delivery=%#v err=%v", present, delivery, err)
 	}
 
 	missing := base
 	missing.SnapshotLatestSeq = 0
 	missing.DurableEvents = nil
-	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(missing); err == nil || present || delivery != nil {
+	if delivery, present, err := BuildLatestAcceptedFinalHydrationV1(missing); err == nil || errors.Is(err, ErrPublicProjectionPending) || present || delivery != nil {
 		t.Fatalf("missing manifest produced hydration: present=%t delivery=%#v err=%v", present, delivery, err)
 	}
 

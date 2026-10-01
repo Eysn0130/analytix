@@ -144,7 +144,7 @@ export function resolveDarwinSecretStoreKeychainBindingV1(input: Readonly<{
   ownerUID?: number
 }>): DarwinSecretStoreKeychainBindingV1 | null {
   const platform = input.platform ?? process.platform
-  if (!input.boundary.isolated || platform !== 'darwin') return null
+  if (!input.boundary.isolated || platform !== 'darwin' || input.boundary.developmentProviderAuthorityDir) return null
   const { isolationRoot, userDataRoot } = input.boundary
   const dataDir = input.dataDir
   const ownerUID = input.ownerUID ?? (typeof process.getuid === 'function' ? process.getuid() : -1)

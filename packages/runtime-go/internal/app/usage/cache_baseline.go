@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
@@ -12,6 +13,7 @@ import (
 const PrefixBaselineSchemaV1 = domainterminaltelemetry.PrefixBaselineSchemaV1
 
 type PrefixBaseline struct {
+	WireShape               domaincache.CacheVisibleShapeV1
 	SchemaVersion           string
 	ContinuityDigest        string
 	ProviderNamespaceDigest string
@@ -85,4 +87,14 @@ func PrefixBaselineDiagnostics(baseline PrefixBaseline) map[string]any {
 		"cacheContinuityDigest":        baseline.ContinuityDigest,
 		"cacheProviderNamespaceDigest": baseline.ProviderNamespaceDigest,
 	}
+}
+
+// ComparableModelInput uses the same privacy, epoch and provider namespace as
+// structural diagnostics. A per-thread map alone is not a privacy boundary.
+func ComparableModelInput(previous, current PrefixBaseline) map[string]any {
+	difference, prefix, comparable := "unavailable", 0, false
+	if ComparablePrefix(previous, current).PrefixHash != "" {
+		difference, prefix, comparable = domaincache.CompareModelInputSegmentsV1(previous.WireShape, current.WireShape)
+	}
+	return map[string]any{"modelInputFirstDifference": difference, "modelInputComparablePrefixBytes": prefix, "modelInputComparable": comparable}
 }

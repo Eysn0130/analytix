@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "adapter": "zeta-office",
+  "documentKind": "docx",
+  "openFormats": [
+    "docx"
+  ],
+  "readOnly": true,
+  "protocolVersion": 1
+}

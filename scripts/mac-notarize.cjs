@@ -9,8 +9,10 @@ const {
 } = require('./native-component-contract.cjs')
 const {
   policy: macSigningPolicy,
-  requireOfficialTeamIdentifier
+  requireOfficialTeamIdentifier,
+  strictNativePathsForProfile
 } = require('./macos-signing-policy.cjs')
+const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, assertCoreResourcesAbsent } = require('./core-package-profile.cjs')
 const {
   NATIVE_DISPOSITION_CONTROLLED_RELEASE,
   NATIVE_DISPOSITION_DEVELOPMENT,
@@ -32,13 +34,13 @@ function assertNativeDispositionSigningBoundary(authority, options = {}) {
     throw new Error('[mac-notarize] Packaged build authority is invalid')
   }
   const disposition = authority.nativeDisposition
-  if (disposition.kind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (disposition.kind === NATIVE_DISPOSITION_DEVELOPMENT || disposition.kind === CORE_DISPOSITION) {
     if (options.requireDeveloperID === true) {
       throw new Error('[mac-notarize] development_non_publishable cannot enter Developer ID or notarization')
     }
     return disposition.kind
   }
-  if (disposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE) {
+  if (disposition.kind !== NATIVE_DISPOSITION_CONTROLLED_RELEASE && disposition.kind !== CORE_CONTROLLED_DISPOSITION) {
     throw new Error('[mac-notarize] Native disposition is unsupported')
   }
   if (options.requireDeveloperID === true && disposition.signingMode !== 'developer-id') {
@@ -53,8 +55,16 @@ function verifyDataNativeAfterSign(context, options = {}) {
   const target = nativeTargetContract('darwin', normalizeBuilderArch(context.arch))
   const authority = packagedAuthorityContract.readPackagedBuildAuthorityV2(context)
   const dispositionKind = assertNativeDispositionSigningBoundary(authority, options)
+  if (dispositionKind === CORE_CONTROLLED_DISPOSITION &&
+      (authority.nativeDisposition.signingPolicySha256 !== require('./macos-signing-policy.cjs').policyDigest ||
+       authority.nativeDisposition.appleTeamIdentifier !== requireOfficialTeamIdentifier())) {
+    throw Error('core_profile_signing_authority_mismatch')
+  }
+  if (dispositionKind === CORE_CONTROLLED_DISPOSITION) options = { ...options, requireDeveloperID: true, requireSecureTimestamp: true }
   packagedAuthorityContract.verifyPackagedBuildAuthorityArtifacts(context, authority)
-  if (dispositionKind === NATIVE_DISPOSITION_DEVELOPMENT) {
+  if (isCoreDisposition(authority.nativeDisposition)) {
+    assertCoreResourcesAbsent(join(appBundle, 'Contents', 'Resources'))
+  } else if (dispositionKind === NATIVE_DISPOSITION_DEVELOPMENT) {
     packagedAuthorityContract.verifyPackagedDevelopmentNativeDisposition(
       context,
       authority.nativeDisposition,
@@ -78,7 +88,7 @@ function verifyDataNativeAfterSign(context, options = {}) {
     spawnSync: options.spawnSync
   }
   const appSignature = verifyDarwinCodeSignature(appBundle, signatureOptions)
-  for (const relativePath of macSigningPolicy.strictNativeRelativePaths) {
+  for (const relativePath of strictNativePathsForProfile(isCoreDisposition(authority.nativeDisposition) ? 'core' : 'full')) {
     const nativePath = join(appBundle, ...relativePath.split('/'))
     const nativeSignature = verifyDarwinCodeSignature(nativePath, {
       ...signatureOptions,
@@ -239,6 +249,13 @@ exports.default = async function afterSign(context) {
     requireDeveloperID: developerIdSigningEnabled,
     requireSecureTimestamp: developerIdSigningEnabled
   })
+  const legal = require('./lib/dependency-legal-evidence.cjs')
+  const { createArtifactReaderFromPath } = await import('./artifact-legal-obligations-audit.mjs')
+  const legalReader = createArtifactReaderFromPath(appBundle)
+  legal.verifyPackagedLegalMaterials(legalReader, legal.loadCatalog(join(__dirname, '..')), {
+    platform: context.electronPlatformName, arch: normalizeBuilderArch(context.arch)
+  })
+  legalReader.assertStable?.()
 
   if (!creds) {
     console.log('[mac-notarize] Verified signed native payloads; no Apple notary credentials found, skipping notarization.')

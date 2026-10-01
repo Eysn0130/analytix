@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 
 	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
@@ -269,12 +270,22 @@ func numericAny(value any) (int, bool) {
 	case int:
 		return typed, true
 	case int64:
+		if typed < math.MinInt || typed > math.MaxInt {
+			return 0, false
+		}
 		return int(typed), true
 	case float64:
+		// Check before conversion; MaxInt rounds up in float64 on 64-bit hosts.
+		if math.IsNaN(typed) || typed < float64(math.MinInt) || typed >= -float64(math.MinInt) || math.Trunc(typed) != typed {
+			return 0, false
+		}
 		return int(typed), true
 	case json.Number:
 		parsed, err := typed.Int64()
-		return int(parsed), err == nil
+		if err != nil || parsed < math.MinInt || parsed > math.MaxInt {
+			return 0, false
+		}
+		return int(parsed), true
 	default:
 		return 0, false
 	}

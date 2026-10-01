@@ -8,12 +8,14 @@ import (
 )
 
 var (
-	ErrInvalidRequest = errors.New("provider registry: invalid request")
-	ErrConflict       = errors.New("provider registry: conflict")
-	ErrNotFound       = errors.New("provider registry: not found")
-	ErrPersistence    = errors.New("provider registry: persistence failure")
-	ErrClosed         = errors.New("provider registry: closed")
-	ErrVerification   = errors.New("provider registry: verification failure")
+	ErrInvalidRequest            = errors.New("provider registry: invalid request")
+	ErrConflict                  = errors.New("provider registry: conflict")
+	ErrNotFound                  = errors.New("provider registry: not found")
+	ErrPersistence               = errors.New("provider registry: persistence failure")
+	ErrCredentialUnavailable     = errors.New("provider registry: credential storage unavailable")
+	ErrCredentialReentryRequired = errors.New("provider registry: credential re-entry required")
+	ErrClosed                    = errors.New("provider registry: closed")
+	ErrVerification              = errors.New("provider registry: verification failure")
 )
 
 type Store interface {

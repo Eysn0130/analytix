@@ -37,6 +37,7 @@ func NormalizeUsage(input Usage) Usage {
 		currency = ""
 	}
 	return Usage{
+		MessagesInput: input.MessagesInput, UsagePresenceKnown: input.UsagePresenceKnown, HasPromptTokens: input.HasPromptTokens, HasCompletionTokens: input.HasCompletionTokens,
 		PromptTokens: prompt, CompletionTokens: completion, ReasoningTokens: reasoning, TotalTokens: total,
 		CacheHitTokens: hit, CacheMissTokens: miss, CacheHitRate: rate, HasCacheHit: hasHit, HasCacheMiss: hasMiss,
 		FinishReason: NormalizeFinishReason(input.FinishReason), CostUSD: boundedNonNegativeFloat(input.CostUSD),

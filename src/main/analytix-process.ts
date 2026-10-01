@@ -333,6 +333,17 @@ function resolveNodeScriptCommand(command: string): string {
   })
 }
 
+export function resolveDocumentCodecLaunch(
+  launch = { appPath: app.getAppPath(), execPath: process.execPath, isPackaged: app.isPackaged },
+  platform: NodeJS.Platform = process.platform
+): { executable: string; entry: string } {
+  const root = launch.isPackaged ? launch.appPath.replace(/app\.asar$/, 'app.asar.unpacked') : launch.appPath
+  return {
+    executable: resolveClawScheduleMcpCommand(launch, platform),
+    entry: join(root, 'out', 'office-codec', 'office-generation-codec-entry.js')
+  }
+}
+
 export function resolveAnalytixDataDir(runtime: { dataDir: string }): string {
   const trimmed = runtime.dataDir?.trim()
   if (trimmed) return expandHomePath(trimmed)
@@ -405,11 +416,14 @@ async function startAnalytixChildOnce(
   })
   const runAsElectron = process.platform === 'darwin' && runtime.computerUse?.enabled === true
   const command = runAsElectron ? resolution.command : resolveNodeScriptCommand(resolution.command)
+  const documentCodec = resolveDocumentCodecLaunch()
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ANALYTIX_RUNTIME_TOKEN: runtime.runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveMainPrivateMcpConfigPath(),
     ANALYTIX_APP_ROOT: appRoot(),
+    ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: documentCodec.executable,
+    ANALYTIX_DOCUMENT_CODEC_ENTRY: documentCodec.entry,
     ANALYTIX_RESOURCES_PATH: appResourcesPath()
   }
   for (const name of [
@@ -1912,9 +1926,9 @@ export async function resolveAvailableAnalytixPort(
  * like our serve entry are touched; anything else keeps the port and we
  * fall back to allocating a different one.
  *
- * Safe by construction on every platform: any failure to positively
- * identify the holder as our own serve-entry leaves it untouched and the
- * caller allocates a different port instead.
+ * A matching command is not enough to establish staleness: another live
+ * Analytix app may own that child. Reclaim only an orphan. If parent ownership
+ * cannot be established, leave the listener alone and use a fallback port.
  */
 async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
   const pids = await listListeningPidsOnPort(port)
@@ -1926,7 +1940,7 @@ async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
     } catch {
       continue
     }
-    if (!commandLooksLikeStaleAnalytixRuntime(command)) continue
+    if (!commandLooksLikeStaleAnalytixRuntime(command) || !(await isOrphanedRuntime(pid))) continue
     void appendManagedChildLogRecord({
       code: 'ANALYTIX_STALE_CHILD_TERMINATION',
       port
@@ -1934,6 +1948,29 @@ async function killStaleAnalytixOnPort(port: number): Promise<boolean> {
     if (await terminateStalePid(pid)) reclaimed = true
   }
   return reclaimed
+}
+
+async function isOrphanedRuntime(pid: number): Promise<boolean> {
+  let parentPid: number
+  try {
+    const { stdout } = process.platform === 'win32'
+      ? await execFileAsync('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId`
+      ], { windowsHide: true, timeout: 5_000 })
+      : await execFileAsync('ps', ['-p', String(pid), '-o', 'ppid='])
+    parentPid = Number(stdout.trim())
+  } catch {
+    return false
+  }
+  if (!Number.isInteger(parentPid) || parentPid < 1) return false
+  if (process.platform !== 'win32' && parentPid === 1) return true
+  try {
+    process.kill(parentPid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
 }
 
 export function commandLooksLikeStaleAnalytixRuntime(command: string): boolean {

@@ -1,0 +1,11 @@
+Analytix supplemental provenance and change notice
+
+Applies only to @computer-use/{shared,provider-interfaces,libnut,default-clipboard-provider} 4.2.0 wrapper packages identified by the accompanying exact archive and instance pins. This is an Analytix-supplied record, not an upstream NOTICE or an assertion about the publisher's build environment.
+
+The original package declarations at nut-tree/nut.js commit aaca4af31e6ba6591804aeed981d57df7fc12eb5 identify these sources as Apache-2.0 and retain dry Software UG authorship. The accompanying LICENSE is the unchanged Apache-2.0 text from core/nut.js/LICENSE at that commit. No separate NOTICE or file-level license exception was found in the four exact source subtrees or their published wrapper files.
+
+Observed modifications: @nut-tree/ scope references become @computer-use/; workspace dependencies become 4.2.0; publish commands add --access public and remove prepublishOnly; libnut/clipboard peer dependencies move from ^3 to ^4. Shared README and libnut tsconfig have newline-only differences. Original attribution and metadata are retained in the distributed packages and accompanying source package declarations.
+
+With the original TypeScript 5.3.3 compiler and recorded options, the scope substitution reproduces all 52 runtime JavaScript files and all 52 source maps byte-for-byte. The separate libnut jest.config.js matches after that substitution. Of 45 declarations, 44 match exactly; shared image.class.d.ts differs only by one duplicate identical Node type-reference line in the local emission, explicitly accounted for without claiming an identical publisher build. No implementation difference remains in that declaration.
+
+This record covers the wrappers only. Their dependencies, native libnut platform binaries, helpers, fonts and other bundled assets have independent obligations. It does not grant approval for those components or for a complete Analytix release.

@@ -1,0 +1,15 @@
+{
+  "name": "@analytix/updater-lazy",
+  "version": "1.0.5+analytix.0",
+  "description": "Analytix-owned deferred promise holder for electron-updater",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "license": "Apache-2.0",
+  "author": "Guoqin He (GitHub: Eysn0130)",
+  "private": true,
+  "files": [
+    "index.cjs",
+    "index.d.ts",
+    "LICENSE"
+  ]
+}

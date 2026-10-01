@@ -19,6 +19,7 @@ type CompletionStore interface {
 }
 
 type FinalizeAfterLoopInput struct {
+	Timing          *PublicationTiming // Optional process-local observation; never authority.
 	Store           CompletionStore
 	SecurityContext domainsecurity.TurnSecurityContext
 	ThreadID        string
@@ -48,6 +49,7 @@ type CommitCompletionInput struct {
 }
 
 type CommitCompletionResult struct {
+	Timing           PublicationTiming `json:"-"`
 	CompletionRecord CompletionRecord
 	PublishedText    string
 	CASBinding       domainturnterminal.GeneralTerminalCASBindingV1
@@ -120,11 +122,16 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 	if err != nil {
 		return CommitCompletionResult{}, err
 	}
+	timing := PublicationTiming{ProjectionReadyAt: time.Now()}
 	changed, status, err := input.Store.FinishTurnIfActiveWithItemsAndFields(input.ThreadID, input.TurnID, "completed", items, map[string]any{
 		"generalTerminalCASBinding":  bindingRecord,
 		"generalTerminalPublication": domainturnterminal.GeneralTerminalPublicationCommitV1Map(publication),
 	})
+	if err == nil && changed {
+		timing.CommittedAt = time.Now()
+	}
 	result := CommitCompletionResult{
+		Timing:           timing,
 		CompletionRecord: record, PublishedText: publishedText, CASBinding: binding,
 		Publication: publication, Changed: changed, Status: status,
 	}
@@ -134,6 +141,7 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 	if _, err := input.Store.RecordGeneralTerminalEventBundle(input.ThreadID, input.TurnID); err != nil {
 		return result, WithGeneralTerminalDetailV1(err, GeneralTerminalDetailOutboxV1)
 	}
+	result.Timing.DeliverableAt = time.Now()
 	return result, nil
 }
 
@@ -166,7 +174,9 @@ func FinalizeAfterLoop(input FinalizeAfterLoopInput) error {
 	if err != nil {
 		return err
 	}
-	_ = result
+	if input.Timing != nil && result.Changed {
+		*input.Timing = result.Timing
+	}
 	return nil
 }
 

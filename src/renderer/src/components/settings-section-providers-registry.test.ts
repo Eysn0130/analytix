@@ -60,6 +60,10 @@ describe('Provider Settings Registry authority', () => {
       models: committed.models,
       image: { baseUrl: committed.endpoint, models: committed.mediaModels }
     })
+    expect(providerProfileFromRegistry({ ...committed, kind: 'deepseek-messages' })).toMatchObject({
+      endpointFormat: 'messages', registryKind: 'deepseek-messages', models: committed.models
+    })
+    expect(providerProfileFromRegistry(committed)).not.toHaveProperty('registryKind')
     expect(providerProfileFromRegistry({ ...committed, id: 'custom-registry', kind: 'custom-endpoint' }))
       .toMatchObject({
         id: 'custom-registry',
