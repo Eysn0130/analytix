@@ -1,10 +1,12 @@
-// Read-only source/entry inventory using Node's standard library.
-// Static counts never select, skip, or run tests.
-import { execFileSync } from 'node:child_process'
+// Current routing and bounded maintenance measurements. Inventory is explicit;
+// selected checks never replace CI, native, privacy or release acceptance.
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstatSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, readdirSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { performance } from 'node:perf_hooks'
+import { goTestPartition } from './go-test-partition.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const domains = {
@@ -16,12 +18,15 @@ const domains = {
 }
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
 const paths = output => output.split('\0').filter(Boolean).sort()
+let readReceipt = null
 function read(relative) {
   const path = resolve(root, relative)
   if (!realpathSync(path).startsWith(root + sep) || !lstatSync(path).isFile()) {
     throw new Error('Inventory input must be a repository-local regular file.')
   }
-  return readFileSync(path, 'utf8')
+  const value = readFileSync(path, 'utf8')
+  if (readReceipt) readReceipt.push({ ordinal: readReceipt.length + 1, path: relative, source_read_bytes: Buffer.byteLength(value), sha256: createHash('sha256').update(value).digest('hex') })
+  return value
 }
 function testFile(path) {
   if (path.endsWith('.go')) return path.endsWith('_test.go')
@@ -121,17 +126,163 @@ function report() {
   }
 }
 
-const args = process.argv.slice(2)
-if (args.length > 1 || args.some(arg => arg !== '--json')) throw new Error('Usage: node scripts/validation-burden.mjs [--json]')
-const value = report()
-if (args.includes('--json')) console.log(JSON.stringify(value, null, 2))
-else {
-  console.log(`Validation burden (read-only): HEAD ${value.head}`)
-  console.log(`Tracked paths ${value.tracked_paths}; untracked paths ${value.untracked_paths}`)
-  for (const [domain, counts] of Object.entries(value.domains)) {
-    console.log(`${domain}: ${counts.source_files} source paths / ${counts.test_files} test paths (${counts.test_detection})`)
+const registryTests = [
+  'TestExecutionGrantRegistryRequiresHostMembershipAndTracksApproval',
+  'TestExecutionGrantRegistryTransitionsDoNotMutateAuthoritySnapshots',
+  'TestExecutionGrantRegistryFailsClosedOnTamperAndReplay'
+]
+const scenarios = {
+  'docs-only': ['docs/analytix/README.md'],
+  'local-typescript': ['src/shared/gui-update-schedule.ts', 'src/shared/gui-update-schedule.test.ts'],
+  'go-authority': ['packages/runtime-go/internal/domain/security/grant_registry.go', 'packages/runtime-go/internal/domain/security/grant_registry_test.go']
+}
+
+export function validationPlan(changedPaths) {
+  const paths = [...new Set(changedPaths)].sort()
+  const known = new Set(Object.values(scenarios).flat())
+  const unknown = paths.filter(path => !known.has(path) && !/^(?:docs\/.+\.md|README(?:\.en)?\.md|AGENTS\.md)$/.test(path))
+  const commands = []
+  const docs = paths.filter(path => path.endsWith('.md'))
+  if (docs.length) commands.push({ argv: ['git', 'diff', '--check'], cwd: '.' },
+    { argv: ['node', 'scripts/validation-burden.mjs', '--check-links', ...docs], cwd: '.' })
+  if (paths.some(path => scenarios['local-typescript'].includes(path))) {
+    if (paths.includes('src/shared/gui-update-schedule.ts')) {
+      commands.push({ argv: ['npm', 'run', 'typecheck'], cwd: '.', source: 'package.json typecheck / producer and consumer contracts' })
+    }
+    commands.push({ argv: ['npm', 'test', '--', '--reporter=json', 'src/shared/gui-update-schedule.test.ts'], cwd: '.', source: 'package.json test / vitest.config.ts application lane', exact_typescript_fixture: true })
   }
-  console.log(`Vitest entry overlap: ${JSON.stringify(value.vitest_entry_overlap)}`)
-  for (const task of value.matched_reads) console.log(`${task.id}: declared read ${task.baseline_read_bytes} -> ${task.declared_read_bytes} bytes`)
-  console.log('Selection remains the existing full gates; dependency coverage is unknown.')
+  if (paths.some(path => scenarios['go-authority'].includes(path))) {
+    for (const tags of [[], ['-tags', 'analytix_prod']]) commands.push({
+      argv: ['go', 'test', '-json', '-count=1', ...tags, '-run', '^(' + registryTests.join('|') + ')$', './internal/domain/security'],
+      cwd: 'packages/runtime-go', source: '.github/workflows/ci.yml ordinary/analytix_prod matrix', exact_go_tests: registryTests
+    })
+  }
+  return { status: paths.length && !unknown.length ? 'focused_plan' : 'unmapped', changed_paths: paths, unknown_paths: unknown,
+    commands: unknown.length ? [] : commands, fallback: unknown.length ? ['Select affected owners and existing CI matrix; this tool cannot establish dependency coverage.'] : [],
+    acceptance: 'local maintenance only; existing privacy/authority/architecture/platform/tag/CI/package gates remain required where applicable' }
+}
+
+export function checkRelativeLinks(paths) {
+  for (const path of paths) {
+    const body = read(path)
+    for (const match of body.matchAll(/\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g)) {
+      const target = match[1].replace(/^<|>$/g, '').split('#')[0]
+      if (!target || /^[a-z][a-z\d+.-]*:/i.test(target)) continue
+      const absolute = resolve(root, dirname(path), decodeURIComponent(target))
+      if (!absolute.startsWith(root + sep) || !existsSync(absolute)) throw new Error(`Missing repository link in ${path}: ${target}`)
+    }
+  }
+}
+
+function currentRoutes() {
+  const previousReads = readReceipt
+  const inputs = []
+  readReceipt = inputs
+  const entries = ['AGENTS.md', 'README.md', 'docs/analytix/README.md', 'docs/analytix/specs/README.md', 'docs/analytix/handovers/README.md']
+  const entryFiles = entries.map(path => ({ path, bytes: Buffer.byteLength(read(path)) }))
+  // This is a derived view, not a second specification/status store. Artifact
+  // readiness and current implementation evidence are intentionally separate.
+  const activeChanges = readdirSync(resolve(root, 'openspec/changes'), { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && entry.name !== 'archive').map(entry => {
+      const path = `openspec/changes/${entry.name}/tasks.md`
+      return { change: entry.name, tasks_path: path, ...derivedTaskProgress(path) }
+    }).sort((a, b) => a.change.localeCompare(b.change))
+  readReceipt = previousReads
+  return { schema_version: 2, mode: 'current_routes', head: git('rev-parse', 'HEAD').trim(), entry_files: entryFiles,
+    source_reads: inputs, source_read_bytes: inputs.reduce((n, input) => n + input.source_read_bytes, 0),
+    active_changes: activeChanges, artifact_readiness_command: 'openspec status --change <selected-change> --json',
+    rule: 'Read only selected target/active-change scope and real dependencies; do not recursively open QA, handovers or archives.',
+    inventory_command: 'node scripts/validation-burden.mjs --inventory --json',
+    plan_command: 'node scripts/validation-burden.mjs --plan <task-owned-paths> --json',
+    evidence: 'Checkboxes describe task bookkeeping; neither planning artifacts nor task counts establish current implementation or acceptance.' }
+}
+
+export function derivedTaskProgress(path) {
+  let body
+  try { body = read(path) } catch (error) {
+    if (error.code === 'ENOENT') return { task_state: 'no_tasks', completed: 0, total: 0, remaining: 0 }
+    throw error
+  }
+  // Match the CLI checkbox grammar line by line, including * bullets. This is
+  // a derived bookkeeping view; it does not infer artifact or runtime readiness.
+  const tasks = body.split('\n').map(line => /^\s*[-*]\s*\[([\sxX])\]\s*(.*)/.exec(line)).filter(Boolean)
+  const completed = tasks.filter(task => task[1].toLowerCase() === 'x').length
+  return { task_state: 'present', completed, total: tasks.length, remaining: tasks.length - completed }
+}
+
+export function assertTypescriptFixtureExecution(stdout) {
+  const marker = /\{\s*"numTotalTestSuites"\s*:/.exec(stdout)
+  if (!marker) throw new Error('TypeScript fixture execution receipt is absent.')
+  const report = JSON.parse(stdout.slice(marker.index).trim())
+  const file = report.testResults?.[0]
+  if (report.success !== true || report.numTotalTests !== 3 || report.numPassedTests !== 3 ||
+    report.numFailedTests !== 0 || report.numPendingTests !== 0 || report.numTodoTests !== 0 ||
+    report.testResults.length !== 1 || file.name !== resolve(root, 'src/shared/gui-update-schedule.test.ts') ||
+    file.assertionResults?.length !== 3 || file.assertionResults.some(result => result.status !== 'passed')) {
+    throw new Error('Every selected TypeScript fixture assertion must execute and pass without skips or todos.')
+  }
+}
+
+function measureScenario(name) {
+  const startedAt = new Date().toISOString()
+  if (!scenarios[name]) throw new Error('Unknown fixed maintenance scenario.')
+  if (process.platform === 'darwin' && !process.env.ANALYTIX_DEV_CACHE_ROOT) {
+    throw new Error('Source ./scripts/use-analytix-cache.sh in the same shell before maintenance execution.')
+  }
+  const plan = validationPlan(scenarios[name])
+  const repetitions = []
+  for (let repetition = 1; repetition <= 3; repetition++) {
+    const started = performance.now()
+    readReceipt = []
+    const guides = name === 'go-authority' ? ['packages/runtime-go/AGENTS.md'] : name === 'local-typescript' ? ['src/AGENTS.md'] : ['docs/AGENTS.md']
+    const routes = ['AGENTS.md', ...guides, 'docs/analytix/README.md', 'package.json',
+      'scripts/validation-burden.mjs', 'scripts/go-test-partition.mjs',
+      ...(name === 'docs-only' ? [] : ['.github/workflows/ci.yml']),
+      ...(name === 'local-typescript' ? ['vitest.config.ts', 'tsconfig.web.json', 'tsconfig.node.json', 'src/main/gui-updater.ts'] : name === 'go-authority' ? ['packages/runtime-go/go.mod', 'packages/runtime-go/go.sum'] : []), ...scenarios[name]]
+    for (const path of routes) read(path)
+    const commands = []
+    let firstEffectiveValidationMs = null
+    for (const command of plan.commands) {
+      const began = performance.now()
+      const [executable, ...args] = command.argv
+      const result = spawnSync(executable, args, { cwd: resolve(root, command.cwd), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+      let passed = !result.error && result.status === 0 && !result.signal
+      if (passed && command.exact_go_tests) {
+        const partition = goTestPartition('analytix.local/runtime-go/internal/domain/security', command.exact_go_tests)
+        for (const line of result.stdout.trim().split('\n')) partition.observeLine(line)
+        try { partition.assert() } catch { passed = false }
+      }
+      if (passed && command.exact_typescript_fixture) {
+        try { assertTypescriptFixtureExecution(result.stdout) } catch { passed = false }
+      }
+      commands.push({ ...command, elapsed_ms: performance.now() - began, exit_code: result.status, signal: result.signal, passed,
+        stdout_sha256: createHash('sha256').update(result.stdout ?? '').digest('hex') })
+      if (passed && firstEffectiveValidationMs === null) firstEffectiveValidationMs = performance.now() - started
+      if (!passed) throw new Error(`Maintenance check failed: ${command.argv.join(' ')}\n${(result.stderr ?? '').slice(0, 2000)}`)
+    }
+    const reads = readReceipt
+    readReceipt = null
+    repetitions.push({ repetition, reads, source_read_bytes: reads.reduce((n, r) => n + r.source_read_bytes, 0),
+      repeated_reads: reads.length - new Set(reads.map(r => r.path)).size,
+      navigation_edges: routes.slice(1).map((to, i) => ({ from: routes[i], to })),
+      commands, first_effective_validation_ms: firstEffectiveValidationMs, total_elapsed_ms: performance.now() - started })
+  }
+  return { schema_version: 2, mode: 'measured_maintenance', scenario: name, started_at: startedAt, completed_at: new Date().toISOString(), head: git('rev-parse', 'HEAD').trim(), plan, repetitions,
+    input_fingerprint: createHash('sha256').update(JSON.stringify(repetitions[0].reads.map(({ path, sha256 }) => ({ path, sha256 })))).digest('hex'),
+    scope: 'Actual driver reads and current fixture validation, no product mutation. Rehearsal of maintenance routes; no before/after repair latency baseline.',
+    limits: ['Child validator reads are not instrumented; driver source bytes are reported separately.',
+      'Navigation edges are explicit driver routing, not observed human/model reading.',
+      'Elapsed time uses shared local development caches without controlled cold/warm state; it does not measure model tokens/cost, general productivity, Provider quality or native acceptance.'] }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2).filter(arg => arg !== '--json')
+  let value
+  if (!args.length) value = currentRoutes()
+  else if (args.length === 1 && args[0] === '--inventory') value = report()
+  else if (args[0] === '--plan') value = validationPlan(args.slice(1))
+  else if (args[0] === '--check-links' && args.length > 1) { checkRelativeLinks(args.slice(1)); value = { status: 'pass', checked_paths: args.slice(1) } }
+  else if (args[0] === '--measure' && args.length === 2) value = measureScenario(args[1])
+  else throw new Error('Usage: validation-burden.mjs [--inventory | --plan paths... | --measure scenario | --check-links paths...] [--json]')
+  console.log(JSON.stringify(value, null, 2))
 }

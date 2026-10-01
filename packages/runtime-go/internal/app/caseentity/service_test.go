@@ -3670,7 +3670,7 @@ type caseEntityTestContextInputV1 struct {
 }
 
 func caseEntityTestContextV1(
-	t *testing.T,
+	t testing.TB,
 	input caseEntityTestContextInputV1,
 ) domainsecurity.TurnSecurityContext {
 	t.Helper()

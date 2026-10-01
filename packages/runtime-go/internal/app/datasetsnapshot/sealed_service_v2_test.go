@@ -573,6 +573,166 @@ func TestRetainedDatasetSnapshotSelectionUsesWitnessedHistoricalPath(t *testing.
 	}
 }
 
+func TestRetainedDatasetSnapshotSelectionSkipsRepeatedAuthorityInventory(t *testing.T) {
+	fixture := newRealAuthoritySealedServiceFixtureV2(t)
+	fixture.base.service = fixture.service
+	historical, current := admitRetainedPairV2(t, fixture.base)
+	input := datasetsnapshotport.RetainedSelectionInputV2{
+		CurrentResolveInput:        fixture.base.resolveInput(current),
+		CurrentSecurityContext:     fixture.base.securityContext(t, current, "turn-retained-real-authority"),
+		RetainedDatasetSnapshotID:  historical.Record.DatasetSnapshotID,
+		RetainedSourceManifestHash: historical.Record.SourceManifestHash,
+	}
+	beforePut := fixture.authorityObservations.putCalls.Load()
+	beforeResolve := fixture.authorityObservations.resolveCalls.Load()
+	beforeProjection := fixture.authorityProjection.projectCalls.Load()
+	beforeWitness := fixture.authorityWitness.observeCalls.Load()
+	callbacks := 0
+	check := func(selection datasetsnapshotport.RetainedSelectionV2) error {
+		callbacks++
+		if selection.Snapshot != historical || selection.Current.Snapshot != current {
+			return errors.New("retained selection rebound its historical or current snapshot")
+		}
+		return nil
+	}
+	err := fixture.service.WithRetainedSelectionV2(
+		context.Background(), input,
+		func(ctx context.Context, selection datasetsnapshotport.RetainedSelectionV2) error {
+			if err := check(selection); err != nil {
+				return err
+			}
+			return fixture.service.WithRetainedSelectionV2(
+				ctx, input,
+				func(_ context.Context, nested datasetsnapshotport.RetainedSelectionV2) error {
+					return check(nested)
+				},
+			)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	puts := fixture.authorityObservations.putCalls.Load() - beforePut
+	resolves := fixture.authorityObservations.resolveCalls.Load() - beforeResolve
+	projections := fixture.authorityProjection.projectCalls.Load() - beforeProjection
+	witnesses := fixture.authorityWitness.observeCalls.Load() - beforeWitness
+	if callbacks != 2 || puts != 4 || resolves != 4 || projections != 4 || witnesses != 8 {
+		t.Fatalf("nested retained selection repeated inventory or lost fresh witnesses: callbacks=%d observation_puts=%d observation_resolves=%d projections=%d fresh_witnesses=%d",
+			callbacks, puts, resolves, projections, witnesses)
+	}
+}
+
+func TestRetainedDatasetSnapshotSelectionWithoutChallengeKeepsFullObservations(t *testing.T) {
+	fixture := newSealedServiceFixtureV2(t)
+	historical, current := admitRetainedPairV2(t, fixture)
+	coordinator := &sealedHeadRacingCoordinatorV2{delegate: fixture.coordinator}
+	service := fixture.newService(t, coordinator)
+	calls := 0
+	err := service.WithRetainedSelectionV2(
+		context.Background(),
+		datasetsnapshotport.RetainedSelectionInputV2{
+			CurrentResolveInput:        fixture.resolveInput(current),
+			CurrentSecurityContext:     fixture.securityContext(t, current, "turn-retained-no-challenge"),
+			RetainedDatasetSnapshotID:  historical.Record.DatasetSnapshotID,
+			RetainedSourceManifestHash: historical.Record.SourceManifestHash,
+		},
+		func(context.Context, datasetsnapshotport.RetainedSelectionV2) error {
+			calls++
+			return nil
+		},
+	)
+	if err != nil || calls != 1 || coordinator.observeCalls != 4 {
+		t.Fatalf("retained selection without a scoped challenge skipped full observations: callbacks=%d full_observations=%d err=%v",
+			calls, coordinator.observeCalls, err)
+	}
+}
+
+func TestDatasetSnapshotSelectionFreshHeadChallengeFailsClosed(t *testing.T) {
+	for _, kind := range []string{"retained", "historical"} {
+		for _, failAt := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/challenge-%d", kind, failAt), func(t *testing.T) {
+				fixture := newSealedServiceFixtureV2(t)
+				var head evidenceauthorityport.FreshHead
+				historical, current := admitRetainedPairV2(t, fixture, func(value evidenceauthorityport.FreshHead) { head = value })
+				coordinator := &sealedCountingFreshHeadCoordinatorV2{delegate: fixture.coordinator, failChallengeAt: failAt}
+				service := fixture.newService(t, coordinator)
+				calls := 0
+				var err error
+				if kind == "historical" {
+					err = service.WithHistoricalFactSelectionV2(context.Background(), fixture.resolveInput(historical), fixture.securityContext(t, historical, "historical-challenge-failure"), head, func(datasetsnapshotport.CurrentSelectionV2) error { calls++; return nil })
+				} else {
+					err = service.WithRetainedSelectionV2(context.Background(), datasetsnapshotport.RetainedSelectionInputV2{
+						CurrentResolveInput: fixture.resolveInput(current), CurrentSecurityContext: fixture.securityContext(t, current, "turn-retained-challenge-failure"),
+						RetainedDatasetSnapshotID: historical.Record.DatasetSnapshotID, RetainedSourceManifestHash: historical.Record.SourceManifestHash,
+					}, func(context.Context, datasetsnapshotport.RetainedSelectionV2) error { calls++; return nil })
+				}
+				if !errors.Is(err, monotonicheadport.ErrUnavailable) || calls != failAt-1 {
+					t.Fatalf("fresh witness failure crossed %s boundary: callbacks=%d err=%v", kind, calls, err)
+				}
+			})
+		}
+	}
+}
+
+func TestRetainedDatasetSnapshotSelectionFailsClosedDuringCallback(t *testing.T) {
+	for _, mode := range []string{"historical-material", "current-material", "fresh-head", "cancelled", "callback-error"} {
+		t.Run(mode, func(t *testing.T) {
+			fixture := newSealedServiceFixtureV2(t)
+			historical, current := admitRetainedPairV2(t, fixture)
+			coordinator := &sealedCountingFreshHeadCoordinatorV2{delegate: fixture.coordinator}
+			service := fixture.newService(t, coordinator)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			callbackFailure := errors.New("retained callback failed")
+			err := service.WithRetainedSelectionV2(
+				ctx,
+				datasetsnapshotport.RetainedSelectionInputV2{
+					CurrentResolveInput:        fixture.resolveInput(current),
+					CurrentSecurityContext:     fixture.securityContext(t, current, "turn-retained-callback-"+mode),
+					RetainedDatasetSnapshotID:  historical.Record.DatasetSnapshotID,
+					RetainedSourceManifestHash: historical.Record.SourceManifestHash,
+				},
+				func(context.Context, datasetsnapshotport.RetainedSelectionV2) error {
+					calls++
+					switch mode {
+					case "historical-material", "current-material":
+						selected := historical
+						if mode == "current-material" {
+							selected = current
+						}
+						body, err := domainsecurity.DatasetSnapshotManifestV2Bytes(selected.Manifest)
+						if err != nil {
+							return err
+						}
+						fixture.materials.mu.Lock()
+						fixture.materials.values[datasetsnapshotport.MaterialSnapshotManifestV2][domainsecurity.SHA256Hex(body)] = []byte("tampered")
+						fixture.materials.mu.Unlock()
+					case "fresh-head":
+						fixture.coordinator.mu.Lock()
+						fixture.coordinator.bundle.RecordDigest = domainsecurity.SHA256Hex([]byte("changed-retained-head"))
+						fixture.coordinator.mu.Unlock()
+					case "cancelled":
+						cancel()
+					case "callback-error":
+						return callbackFailure
+					}
+					return nil
+				},
+			)
+			if err == nil || calls != 1 {
+				t.Fatalf("retained callback drift was accepted: calls=%d err=%v", calls, err)
+			}
+			if mode == "cancelled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("retained cancellation was lost: %v", err)
+			}
+			if mode == "callback-error" && !errors.Is(err, callbackFailure) {
+				t.Fatalf("retained callback error was lost: %v", err)
+			}
+		})
+	}
+}
+
 func TestRetainedDatasetSnapshotSelectionFailsClosedBeforeCallback(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -970,10 +1130,11 @@ type sealedHeadRacingCoordinatorV2 struct {
 }
 
 type sealedCountingFreshHeadCoordinatorV2 struct {
-	mu           sync.Mutex
-	delegate     *datasetSnapshotTestCoordinator
-	observations int
-	challenges   int
+	mu              sync.Mutex
+	delegate        *datasetSnapshotTestCoordinator
+	observations    int
+	challenges      int
+	failChallengeAt int
 }
 
 func (coordinator *sealedCountingFreshHeadCoordinatorV2) ObserveFresh(
@@ -1008,7 +1169,11 @@ func (coordinator *sealedCountingFreshHeadCoordinatorV2) WithFreshHeadChallenge(
 		}
 		coordinator.mu.Lock()
 		coordinator.challenges++
+		fail := coordinator.challenges == coordinator.failChallengeAt
 		coordinator.mu.Unlock()
+		if fail {
+			return monotonicheadport.ErrUnavailable
+		}
 		current, err := coordinator.delegate.ObserveFresh(challengeContext)
 		if err != nil {
 			return err

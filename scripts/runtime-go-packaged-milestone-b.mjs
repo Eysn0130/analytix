@@ -3876,7 +3876,7 @@ const CASE_COMPACTION_SUMMARY_V1 =
   'Case-bound history compacted. No case facts, assistant prose, tool output, evidence authority, or prior compaction prose were carried into the new context epoch.'
 const TASK_CONTINUATION_EVIDENCE_STATE_V1 = 'unverified_for_case_facts'
 
-function goJSON(value) {
+export function goJSON(value) {
   return JSON.stringify(value)
     .replaceAll('&', '\\u0026')
     .replaceAll('<', '\\u003c')

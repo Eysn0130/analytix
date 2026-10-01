@@ -316,7 +316,7 @@ func TestProviderIngressLongitudinalSelectionExactBoundaryOrderReplayAndHostileS
 }
 
 func longitudinalPriorityIndexV1(
-	t *testing.T,
+	t testing.TB,
 	extraEvidence int,
 ) (domaincaseentity.ThreadCaseContextRecord, domainsecurity.TurnSecurityContext, domainsecurity.TurnSecurityContext) {
 	t.Helper()

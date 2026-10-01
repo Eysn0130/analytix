@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -30,26 +31,70 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 	source := deliveryCNYCSV(t)
 	sourceHash := domainsecurity.SHA256Hex(source)
 	reference := b1ReferenceFlowFromCSVInWindow(t, source, "2026-09-")
+	referenceRows := deliveryReferenceTransactions(t, source)
 	t.Logf("separately derived Go CNY source sha256=%s", sourceHash)
 	var mu sync.Mutex
 	calls, semantics := 0, 0
 	correctSemantics := 0
 	firstContextBytes, secondContextBytes := 0, 0
 	firstRequestBytes, secondRequestBytes, firstInputBytes, secondInputBytes := 0, 0, 0, 0
+	var requestBodies [][]byte
+	var requestInputBytes []int
+	var requestBodyComplete []bool
+	providerResults := make(map[int]domainnative.AccountFlowProviderSemanticResultV1)
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		requestSizes := make([]int, len(requestBodies))
+		inputMeasured := make([]bool, len(requestBodies))
+		allRequestBytes, allInputBytes := 0, 0
+		for index, body := range requestBodies {
+			requestSizes[index] = len(body)
+			allRequestBytes += len(body)
+			if requestInputBytes[index] >= 0 {
+				inputMeasured[index] = true
+				allInputBytes += requestInputBytes[index]
+			}
+		}
+		if len(requestSizes) != calls || len(requestInputBytes) != calls || len(requestBodyComplete) != calls {
+			t.Error("complete Provider dispatch capture is missing requests")
+		}
+		t.Logf("all received Provider dispatches=%d; body_complete=%v; request_json_bytes=%v total=%d; messages_tools_json_bytes=%v measured=%v measured_total=%d", calls, requestBodyComplete, requestSizes, allRequestBytes, requestInputBytes, inputMeasured, allInputBytes)
+	}()
 	var firstRoles, secondRoles map[string]int
 	secondHasCurrentClaim := false
 	var firstClaimDigests []string
 	model := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
-		if err != nil || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-only" {
+		body, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+		mu.Lock()
+		calls++
+		call := calls
+		requestBodies = append(requestBodies, bytes.Clone(body))
+		requestInputBytes = append(requestInputBytes, -1)
+		requestBodyComplete = append(requestBodyComplete, err == nil && len(body) <= 2<<20)
+		mu.Unlock()
+		t.Logf("received Provider dispatch=%d request_json_bytes=%d body_complete=%t", call, len(body), err == nil && len(body) <= 2<<20)
+		if err != nil || len(body) > 2<<20 || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-only" {
 			t.Error("unexpected loopback Provider request")
 			w.WriteHeader(400)
 			return
 		}
 		deliveryAssertPublic(t, body)
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(body, &fields) != nil {
+			t.Error("invalid complete Provider request")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		inputBytes, inputErr := json.Marshal(map[string]json.RawMessage{"messages": fields["messages"], "tools": fields["tools"]})
+		if inputErr != nil {
+			t.Error("invalid complete model input")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		mu.Lock()
-		calls++
-		call := calls
+		requestInputBytes[call-1] = len(inputBytes)
+		t.Logf("normalized Provider dispatch=%d messages_tools_json_bytes=%d measured=true", call, len(inputBytes))
 		if call == 1 || call == 3 {
 			var request struct {
 				Messages []struct {
@@ -60,38 +105,48 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			if json.Unmarshal(body, &request) != nil {
 				t.Error("invalid two-thread Provider request")
 			}
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(body, &fields) != nil {
-				t.Error("invalid complete Provider request")
-			}
-			inputBytes, err := json.Marshal(map[string]json.RawMessage{"messages": fields["messages"], "tools": fields["tools"]})
-			if err != nil {
-				t.Error("invalid complete model input")
-			}
 			roles := make(map[string]int)
+			contextBlocks := 0
 			for _, message := range request.Messages {
 				roles[message.Role]++
 				if message.Role != "system" && message.Role != "developer" && message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
 					t.Error("unknown Provider message role")
 				}
-				if !strings.Contains(message.Content, "<analytix_host_verified_case_entity_semantics>") {
+				semanticBody, found, blockErr := deliveryCaseSemanticBody(message.Content)
+				if !found {
+					continue
+				}
+				contextBlocks++
+				if blockErr != nil {
+					t.Error(blockErr)
 					continue
 				}
 				if message.Role != "user" {
 					t.Error("case context attached to an unexpected role")
 				}
+				var semantic struct {
+					Entities []struct {
+						Alias string `json:"alias"`
+					} `json:"entities"`
+					Longitudinal caseentityapp.ProviderIngressLongitudinalStateV1 `json:"longitudinal"`
+				}
+				if json.Unmarshal(semanticBody, &semantic) != nil || len(semantic.Entities) == 0 {
+					t.Error("invalid case semantic JSON")
+					continue
+				}
+				subjects := 0
+				for _, entity := range semantic.Entities {
+					if entity.Alias == "acct:1" {
+						subjects++
+					}
+				}
+				if subjects != 1 {
+					t.Error("case semantic context did not bind exactly one selected subject")
+				}
 				if call == 1 {
 					firstContextBytes += len(message.Content)
 				} else {
 					secondContextBytes += len(message.Content)
-					_, tail, _ := strings.Cut(message.Content, "<analytix_host_verified_case_entity_semantics>")
-					semanticBody, _, _ := strings.Cut(tail, "</analytix_host_verified_case_entity_semantics>")
-					var semantic struct {
-						Longitudinal caseentityapp.ProviderIngressLongitudinalStateV1 `json:"longitudinal"`
-					}
-					if json.Unmarshal([]byte(strings.TrimSpace(semanticBody)), &semantic) != nil {
-						t.Error("invalid case semantic JSON")
-					}
 					matched := 0
 					for _, digest := range firstClaimDigests {
 						for _, item := range semantic.Longitudinal.Items {
@@ -103,6 +158,9 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 					}
 					secondHasCurrentClaim = len(firstClaimDigests) == 3 && matched == 3
 				}
+			}
+			if contextBlocks != 1 {
+				t.Error("Provider request did not contain exactly one final case semantic block")
 			}
 			if roles["user"] == 0 {
 				t.Error("Provider request has no user input")
@@ -118,13 +176,20 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if len(data) > 0 {
 			correct := len(data) == 1 && data[0].InflowMinor == reference.inflowMinor && data[0].OutflowMinor == reference.outflowMinor &&
+				data[0].NetMinor == reference.netMinor && data[0].Currency == reference.currency && data[0].MinorUnitScale == 2 &&
+				data[0].SubjectAlias == "acct:1" && data[0].Timezone == "Z" &&
+				data[0].StartInclusive == "2026-09-01T00:00:00.000000Z" && data[0].EndInclusive == "2026-09-30T23:59:59.999999Z" &&
 				data[0].TransactionCount == uint64(reference.transactionCount) && data[0].AggregateComplete &&
-				data[0].EvidenceRowsComplete && data[0].EvidenceTransactionCount == uint64(reference.transactionCount)
+				data[0].EvidenceRowsComplete && data[0].EvidenceTransactionCount == uint64(reference.transactionCount) &&
+				len(data[0].Transactions) == reference.transactionCount && deliveryTransactionsMatch(referenceRows, data[0].Transactions)
 			if !correct {
 				t.Error("final serialized Provider facts differ from independent exact CSV arithmetic")
 			}
 			mu.Lock()
 			semantics++
+			if len(data) == 1 {
+				providerResults[call] = data[0]
+			}
 			if correct {
 				correctSemantics++
 			}
@@ -151,7 +216,8 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			t.Fatal("derived vector did not stage one actual source")
 		}
 		confirmed := request(http.MethodPost, "/v1/local-display/funds-import/confirm", map[string]any{"selector": items[0].(map[string]any)["selector"]}, http.StatusOK)
-		if confirmed["sourceRowCount"] != float64(9) {
+		importedRows, _ := confirmed["sourceRowCount"].(float64)
+		if importedRows != 9 {
 			t.Fatal("actual native importer lost source rows")
 		}
 		thread := request(http.MethodPost, "/v1/threads", map[string]any{"title": "Synthetic funds delivery", "workspace": workspace, "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
@@ -238,14 +304,47 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			b1AssertPreparedFlowValues(t, record, reference)
+			b1AssertPreparedFlowValuesWithBindings(t, record, reference, reference.transactionCount)
 			nativePreparations = append(nativePreparations, record)
+			providerCall := 0
 			if record.SecurityContext.ThreadID == threadID {
+				providerCall = 2
 				b1AssertActualFinal(t, config.DataDir, record, final.AcceptedFinalDigest, true)
 			} else if record.SecurityContext.ThreadID == secondID {
+				providerCall = 4
 				b1AssertActualFinal(t, config.DataDir, record, secondFinal.AcceptedFinalDigest, true)
 			} else {
 				t.Fatal("native evidence came from another thread")
+			}
+			mu.Lock()
+			semantic, observed := providerResults[providerCall]
+			mu.Unlock()
+			if !observed || semantic.QueryHash != record.QueryHash || len(record.ReceiptDraft.TransformationLineage) != 2 ||
+				semantic.ResultHash != record.ReceiptDraft.TransformationLineage[0].OutputHash {
+				t.Fatal("Provider semantics did not bind their own thread's signed native query and result")
+			}
+			material, err := domainevidence.ParseCanonicalEvidenceMaterial(record.CanonicalEvidence)
+			if err != nil || len(record.ReceiptDraft.SourceRecordIDs) != reference.transactionCount {
+				t.Fatal("native receipt did not bind the complete selected row set")
+			}
+			semanticRows := deliveryEvidenceRows(semantic.Transactions)
+			boundRows := make(map[string]bool)
+			entity := material.AcceptedSlotSourceBindings[0].EntityReference
+			fileID := material.AcceptedSlotSourceBindings[0].SourceFileID
+			for _, binding := range material.AcceptedSlotSourceBindings {
+				if _, exists := semanticRows[binding.SourceRecordID]; !exists || boundRows[binding.SourceRecordID] ||
+					binding.EntityReference != entity || binding.SourceFileID != fileID || binding.SourceRowNumber == 0 ||
+					binding.Field != domainevidence.AcceptedSlotSourceFieldAccountV1 || len(binding.FactIDs) != 3 {
+					t.Fatal("native row lineage did not match the selected subject and exact Provider evidence references")
+				}
+				boundRows[binding.SourceRecordID] = true
+			}
+			receiptRows := make(map[string]bool)
+			for _, ref := range record.ReceiptDraft.SourceRecordIDs {
+				if !boundRows[ref] || receiptRows[ref] {
+					t.Fatal("native receipt and canonical row lineage selected different source records")
+				}
+				receiptRows[ref] = true
 			}
 		}
 		if len(nativePreparations) != 2 || nativePreparations[0].SecurityContext.ThreadID == nativePreparations[1].SecurityContext.ThreadID ||
@@ -259,7 +358,31 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		if firstMaterial.AcceptedSlotSourceBindings[0].EntityReference != secondMaterial.AcceptedSlotSourceBindings[0].EntityReference {
 			t.Fatal("A/B selected different source entities")
 		}
+		secondBindings := make(map[string]domainevidence.AcceptedSlotSourceBindingV1)
+		for _, binding := range secondMaterial.AcceptedSlotSourceBindings {
+			secondBindings[binding.SourceRecordID] = binding
+		}
+		for _, binding := range firstMaterial.AcceptedSlotSourceBindings {
+			other, found := secondBindings[binding.SourceRecordID]
+			if !found || binding.EntityReference != other.EntityReference || binding.SourceFileID != other.SourceFileID ||
+				binding.SourceRowNumber != other.SourceRowNumber || binding.Field != other.Field {
+				t.Fatal("same immutable snapshot rebound a canonical source-row locator in B")
+			}
+		}
+		mu.Lock()
+		aRows := deliveryEvidenceRows(providerResults[2].Transactions)
+		bRows := deliveryEvidenceRows(providerResults[4].Transactions)
+		mu.Unlock()
+		if len(aRows) != reference.transactionCount || len(bRows) != len(aRows) {
+			t.Fatal("A/B evidence reference cardinality differs from the independently selected rows")
+		}
+		for ref, row := range aRows {
+			if bRows[ref] != row {
+				t.Fatal("same immutable snapshot rebound a transaction evidence reference or its values in B")
+			}
+		}
 		t.Logf("two-thread offline: request_json_bytes A=%d B=%d; model_messages_tools_json_bytes A=%d B=%d; roles A=%v B=%v; context_message_bytes A=%d B=%d; provider_requests_with_native_semantics=%d; signed_native_preparations=%d; exact_native_semantic_requests=%d/%d; current A metadata in B=%t; SQL count unmeasured", aRequest, bRequest, aInput, bInput, aRoles, bRoles, aBytes, bBytes, beforeSemantics, len(nativePreparations), correct, beforeSemantics, bHasCurrentClaim)
+		t.Logf("independent CNY reference inflow_minor=%s outflow_minor=%s net_minor=%s transactions=%d; observed native imported_rows=%.0f", reference.inflowMinor, reference.outflowMinor, reference.netMinor, reference.transactionCount, importedRows)
 		request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
 		t.Log("fresh thread-detail hydration passed before reopen")
 		driver.reopen()
@@ -285,8 +408,50 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		if sourceEvents == nil || len(sourceEvents()) == 0 {
 			t.Fatal("actual Host source lifecycle was not observed")
 		}
-		t.Log("derived vector: real import -> DuckDB -> Go authority -> final Provider semantic -> Final Gate -> protected local display -> reopen passed")
-		driver.assertNewProcess(threadID, turnID, final.AcceptedFinalDigest, rev14PrivateAccount)
+		// Close the actual admitted Owner, then try to reuse the prior case and
+		// facts. This is native-source unavailability, not persisted DSV2 revoke.
+		preparedRoot := filepath.Join(config.DataDir, "private", "evidence-settlements", "prepared")
+		preparedBeforeFailure := startupWholeTreeDigest(t, preparedRoot)
+		if driver.closeNativeSource == nil || driver.closeNativeSource() != nil {
+			t.Fatal("actual native-source failure prerequisite could not be established")
+		}
+		blockedStart := request(http.MethodPost, "/v1/threads/"+secondID+"/turns", map[string]any{"prompt": "继续核对银行账号 " + rev14PrivateAccount + " 在二〇二六年九月的收支。", "mode": "agent", "async": true, "approvalPolicy": "auto", "sandboxMode": "workspace-write"}, http.StatusAccepted)
+		blockedTurnID := contracts.StringField(blockedStart, "turnId")
+		driver.waitTurn(secondID, blockedTurnID, "native-source-unavailable")
+		publicHydrationStarted := time.Now()
+		t.Log("post-Owner-close public terminal hydration started")
+		b1WaitTerminal(t, client, driver.baseURL(), secondID, blockedTurnID)
+		t.Logf("post-Owner-close public terminal hydration_ms=%d", time.Since(publicHydrationStarted).Milliseconds())
+		blockedDetail := request(http.MethodGet, "/v1/threads/"+secondID, nil, http.StatusOK)
+		blockedTurn := packagedSourceUnavailableHydrationTurnV1(blockedDetail, blockedTurnID)
+		blockedBody, err := json.Marshal(blockedTurn)
+		if err != nil {
+			t.Fatal("native-source failure terminal could not be serialized")
+		}
+		deliveryAssertPublic(t, blockedBody)
+		if blockedTurn["status"] != "completed" || !bytes.Contains(blockedBody, []byte(domainevidence.CaseSourceUnavailableText)) {
+			t.Fatal("native-source failure did not complete with the expected Host-owned boundary")
+		}
+		if view := blockedTurn["acceptedFinalView"]; view != nil {
+			blockedFinal, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(view)
+			if err != nil || blockedFinal.Variant == domainevidence.EvidenceBackedAnswer || blockedFinal.Variant == domainevidence.PartialEvidenceAnswer {
+				t.Fatal("unavailable native source returned a malformed or authoritative numeric final")
+			}
+		}
+		mu.Lock()
+		unchanged = calls == beforeCalls
+		mu.Unlock()
+		if !unchanged || startupWholeTreeDigest(t, preparedRoot) != preparedBeforeFailure {
+			t.Fatal("unavailable native source issued Provider work or new evidence")
+		}
+		t.Log("actual native Owner closed: prior-fact retry produced zero Provider dispatches and zero new preparations; persisted DSV2 revocation remains unmeasured")
+		if !t.Failed() {
+			t.Log("derived vector: real import -> DuckDB -> Go authority -> final Provider semantic -> Final Gate -> protected local display -> reopen passed")
+		}
+		driver.assertNewProcess(rev14PrivateAccount,
+			b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: turnID, FinalDigest: final.AcceptedFinalDigest},
+			b1RecoveryExpectedFinal{ThreadID: secondID, TurnID: secondTurnID, FinalDigest: secondFinal.AcceptedFinalDigest},
+		)
 		mu.Lock()
 		unchanged = calls == beforeCalls
 		mu.Unlock()
@@ -294,6 +459,125 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			t.Fatal("fresh process recovery reissued Provider work")
 		}
 	})
+}
+
+// Static system instructions mention the tag inline. An actual Host block
+// occupies its own lines, is unique, and closes the message with valid JSON.
+// Recognition precedes the caller's user-role check.
+func deliveryCaseSemanticBody(content string) ([]byte, bool, error) {
+	const start = "<analytix_host_verified_case_entity_semantics>"
+	const end = "</analytix_host_verified_case_entity_semantics>"
+	if !strings.Contains("\n"+content, "\n"+start+"\n") {
+		return nil, false, nil
+	}
+	_, tail, _ := strings.Cut(content, start)
+	body, suffix, closed := strings.Cut(tail, end)
+	canonical := []byte(strings.TrimSpace(body))
+	if strings.Count(content, start) != 1 || strings.Count(content, end) != 1 || !closed ||
+		strings.TrimSpace(suffix) != "" || !json.Valid(canonical) {
+		return nil, true, errors.New("case semantic context is not one final JSON block")
+	}
+	return canonical, true, nil
+}
+
+func TestFundsDeliveryCaseSemanticBlockRecognition(t *testing.T) {
+	const start = "<analytix_host_verified_case_entity_semantics>"
+	const end = "</analytix_host_verified_case_entity_semantics>"
+	const body = `{"entities":[{"alias":"acct:1"}]}`
+	valid := "request\n\n" + start + "\n" + body + "\n" + end
+	for _, test := range []struct {
+		name, content  string
+		found, invalid bool
+	}{
+		{"system instruction", "A trusted semantic record is only the final " + start + " block appended to a provider user message.", false, false},
+		{"final block", valid, true, false},
+		{"duplicate block", valid + "\n" + start + "\n" + body + "\n" + end, true, true},
+		{"trailing text", valid + "\nuntrusted tail", true, true},
+		{"invalid JSON", start + "\nnot JSON\n" + end, true, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, found, err := deliveryCaseSemanticBody(test.content)
+			if found != test.found || (err != nil) != test.invalid || (found && err == nil && string(got) != body) {
+				t.Fatal("case semantic block classification changed")
+			}
+		})
+	}
+}
+
+type deliveryTransactionValue struct {
+	occurredAt, direction, amountMinor, currency string
+	minorUnitScale                               uint8
+}
+
+// Compare every selected row, including multiplicity, independently of DuckDB
+// and the model. This checks public transaction values and stable opaque refs;
+// it does not substitute for an authenticated DSV2 material-graph resolution.
+func deliveryReferenceTransactions(t *testing.T, source []byte) map[deliveryTransactionValue]int {
+	t.Helper()
+	rows, err := csv.NewReader(bytes.NewReader(source)).ReadAll()
+	if err != nil || len(rows) < 2 {
+		t.Fatal("invalid independent transaction CSV")
+	}
+	columns := make(map[string]int)
+	for index, name := range rows[0] {
+		columns[name] = index
+	}
+	for _, name := range []string{"交易账号", "交易时间", "交易金额", "收付标志", "交易币种"} {
+		if _, ok := columns[name]; !ok {
+			t.Fatal("independent transaction CSV is missing a column")
+		}
+	}
+	values := make(map[deliveryTransactionValue]int)
+	for _, row := range rows[1:] {
+		if row[columns["交易账号"]] != rev14PrivateAccount || !strings.HasPrefix(row[columns["交易时间"]], "2026-09-") {
+			continue
+		}
+		instant, err := time.Parse("2006-01-02 15:04:05.999999", row[columns["交易时间"]])
+		minor, valid := b1ReferenceMinorUnits(row[columns["交易金额"]])
+		if err != nil || !valid || row[columns["交易币种"]] != "CNY" {
+			t.Fatal("invalid independently selected transaction")
+		}
+		direction := domainnative.AccountFlowDirectionInflowV1
+		if row[columns["收付标志"]] == "出" {
+			direction = domainnative.AccountFlowDirectionOutflowV1
+		} else if row[columns["收付标志"]] != "进" {
+			t.Fatal("unknown independent transaction direction")
+		}
+		// Public flow rows carry direction plus exact magnitude; the imported
+		// source's signed decimal remains separate from that public contract.
+		values[deliveryTransactionValue{instant.Format(time.RFC3339Nano), direction, minor.Abs(minor).String(), "CNY", 2}]++
+	}
+	return values
+}
+
+func deliveryTransactionsMatch(expected map[deliveryTransactionValue]int, rows []domainnative.AccountFlowProviderSemanticTransactionV1) bool {
+	observed := make(map[deliveryTransactionValue]int)
+	refs := make(map[string]bool)
+	for _, row := range rows {
+		instant, err := time.Parse(time.RFC3339Nano, row.OccurredAt)
+		if err != nil || !strings.HasPrefix(row.EvidenceRef, "srow1_") || !domainsecurity.IsSHA256Hex(strings.TrimPrefix(row.EvidenceRef, "srow1_")) || refs[row.EvidenceRef] {
+			return false
+		}
+		refs[row.EvidenceRef] = true
+		observed[deliveryTransactionValue{instant.UTC().Format(time.RFC3339Nano), row.Direction, row.AmountMinor, row.Currency, row.MinorUnitScale}]++
+	}
+	if len(expected) != len(observed) {
+		return false
+	}
+	for value, count := range expected {
+		if observed[value] != count {
+			return false
+		}
+	}
+	return true
+}
+
+func deliveryEvidenceRows(rows []domainnative.AccountFlowProviderSemanticTransactionV1) map[string]deliveryTransactionValue {
+	values := make(map[string]deliveryTransactionValue, len(rows))
+	for _, row := range rows {
+		values[row.EvidenceRef] = deliveryTransactionValue{row.OccurredAt, row.Direction, row.AmountMinor, row.Currency, row.MinorUnitScale}
+	}
+	return values
 }
 
 func deliveryCNYCSV(t *testing.T) []byte {

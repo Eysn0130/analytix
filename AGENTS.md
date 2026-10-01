@@ -3,6 +3,11 @@
 Before changing files, read each applicable `AGENTS.md` from this root to the
 owning directory. A closer guide adds or overrides rules only in its subtree.
 Keep guidance durable; detailed procedures live under `docs/analytix/`.
+Default reading stops at current routes: read only the selected accepted scope,
+authorized change and real dependencies. Do not recursively open dated QA,
+old handovers or archived changes. `node scripts/validation-burden.mjs` derives
+active status; `--plan <task-owned-paths>` provides bounded maintenance routing,
+with unknown scopes requiring the existing affected-owner validation matrix.
 
 ## Work From The Outcome
 

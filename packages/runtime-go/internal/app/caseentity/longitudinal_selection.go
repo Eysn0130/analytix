@@ -59,13 +59,13 @@ func providerIngressLongitudinalStateFromIndexV1(
 		evidenceByIdentity[evidence.EvidenceReference+"\x00"+evidence.DatasetSnapshotID] = evidence
 	}
 
-	candidates := make([]providerIngressLongitudinalCandidateV1, 0,
-		len(index.Claims)+len(index.Evidence)+len(index.Continuations)+
-			len(index.OpenQuestionReferences)+len(index.DataGapReferences)+len(index.Snapshots)-1)
+	candidates := make([]providerIngressLongitudinalCandidateV1, 0, ProviderIngressLongitudinalSelectionBudgetV1)
+	counts := make([]uint32, len(providerIngressLongitudinalPriorityV1))
 	appendCandidate := func(item ProviderIngressLongitudinalItemV1) {
 		priority := providerIngressLongitudinalPriorityIndexV1(item.Kind)
+		counts[priority]++
 		body, _ := json.Marshal(item)
-		candidates = append(candidates, providerIngressLongitudinalCandidateV1{
+		candidates = retainProviderIngressTopCandidateV1(candidates, providerIngressLongitudinalCandidateV1{
 			priority: priority, key: string(body), item: item,
 		})
 	}
@@ -171,15 +171,9 @@ func providerIngressLongitudinalStateFromIndexV1(
 	}
 
 	sort.Slice(candidates, func(left, right int) bool {
-		if candidates[left].priority != candidates[right].priority {
-			return candidates[left].priority < candidates[right].priority
-		}
-		return candidates[left].key < candidates[right].key
+		return providerIngressCandidateLessV1(candidates[left], candidates[right])
 	})
 	selectedCount := len(candidates)
-	if selectedCount > ProviderIngressLongitudinalSelectionBudgetV1 {
-		selectedCount = ProviderIngressLongitudinalSelectionBudgetV1
-	}
 	state := ProviderIngressLongitudinalStateV1{
 		SchemaVersion:      ProviderIngressLongitudinalSchemaVersionV1,
 		ScopeBindingDigest: providerIngressLongitudinalScopeBindingDigestV1(index.CaseBindingHash),
@@ -194,19 +188,62 @@ func providerIngressLongitudinalStateFromIndexV1(
 		state.OmittedCoverage[index].Kind = kind
 	}
 	for index, candidate := range candidates {
-		if index < selectedCount {
-			state.Items[index] = candidate.item
-			continue
-		}
-		coverageIndex := providerIngressLongitudinalPriorityIndexV1(candidate.item.Kind)
-		state.OmittedCoverage[coverageIndex].Count++
-		state.OmittedTotal++
+		state.Items[index] = candidate.item
+		counts[candidate.priority]--
+	}
+	for index, count := range counts {
+		state.OmittedCoverage[index].Count = count
+		state.OmittedTotal += count
 	}
 	deriveProviderIngressLongitudinalDelegationStateV1(&state)
 	if validateProviderIngressLongitudinalStateV1(state) != nil {
 		return ProviderIngressLongitudinalStateV1{}, ErrPrivateStateIntegrity
 	}
 	return state, nil
+}
+
+// The max-heap retains exactly the best budget candidates. Every input still
+// passes full owner validation and contributes to coverage, including omitted
+// items; only candidate retention and final sorting are bounded.
+func providerIngressCandidateLessV1(left, right providerIngressLongitudinalCandidateV1) bool {
+	if left.priority != right.priority {
+		return left.priority < right.priority
+	}
+	return left.key < right.key
+}
+
+func retainProviderIngressTopCandidateV1(heap []providerIngressLongitudinalCandidateV1, candidate providerIngressLongitudinalCandidateV1) []providerIngressLongitudinalCandidateV1 {
+	if len(heap) < ProviderIngressLongitudinalSelectionBudgetV1 {
+		heap = append(heap, candidate)
+		for child := len(heap) - 1; child > 0; {
+			parent := (child - 1) / 2
+			if !providerIngressCandidateLessV1(heap[parent], heap[child]) {
+				break
+			}
+			heap[parent], heap[child] = heap[child], heap[parent]
+			child = parent
+		}
+		return heap
+	}
+	if !providerIngressCandidateLessV1(candidate, heap[0]) {
+		return heap
+	}
+	heap[0] = candidate
+	for parent := 0; ; {
+		child := parent*2 + 1
+		if child >= len(heap) {
+			break
+		}
+		if right := child + 1; right < len(heap) && providerIngressCandidateLessV1(heap[child], heap[right]) {
+			child = right
+		}
+		if !providerIngressCandidateLessV1(heap[parent], heap[child]) {
+			break
+		}
+		heap[parent], heap[child] = heap[child], heap[parent]
+		parent = child
+	}
+	return heap
 }
 
 // providerIngressLongitudinalScopeBindingDigestV1 derives a value-free scope

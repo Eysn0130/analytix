@@ -165,18 +165,20 @@ func composeRuntimeFundsAccountFlowV1(
 	bindingObserver casecontextport.Observer,
 	materials datasetsnapshotport.AdmissionMaterialReaderV2,
 	validateCurrent func(context.Context, domainsecurity.TurnSecurityContext) error,
+	validateInsideExact func(context.Context, domainsecurity.TurnSecurityContext) error,
 ) runtimeFundsAccountFlowCompositionV1 {
 	if strings.TrimSpace(userDataRoot) == "" || keyed == nil || store == nil ||
 		datasetAuthority == nil || bindingObserver == nil || materials == nil ||
-		validateCurrent == nil {
+		validateCurrent == nil || validateInsideExact == nil {
 		return runtimeFundsAccountFlowCompositionV1{}
 	}
-	caseEntities := caseentityapp.NewPersistentService(
+	caseEntities := caseentityapp.NewPersistentServiceWithExactAppendValidationV1(
 		keyed,
 		store,
 		datasetAuthority,
 		bindingObserver,
 		validateCurrent,
+		validateInsideExact,
 	)
 	hostSource, err := fundsquerysourceadapter.NewHostExactSource(userDataRoot)
 	if err != nil {

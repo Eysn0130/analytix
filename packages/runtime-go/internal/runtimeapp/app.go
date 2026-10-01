@@ -1529,6 +1529,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 			filestore.CaseBindingReader{},
 			datasetSnapshotStoresV2.Materials,
 			validateCurrentChildContext,
+			func(ctx context.Context, securityContext domainsecurity.TurnSecurityContext) error {
+				return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
+					OperationContext: ctx, Identity: identityAuthority,
+					Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+					Context: securityContext, Workspace: securityContext.WorkspaceRealPath,
+				})
+			},
 		)
 		if fundsAccountFlow.available() {
 			bundledFundsHostSpec, err = admitBundledFundsHostForStartupV1(ctx, config)

@@ -158,11 +158,12 @@ func NewResolveReferenceInputV1(
 }
 
 type Service struct {
-	keyed            KeyedPayloadDigester
-	store            caseentityport.Store
-	datasetAuthority datasetsnapshotport.CurrentAuthorityV2
-	bindingObserver  casecontextport.Observer
-	validateCurrent  func(context.Context, domainsecurity.TurnSecurityContext) error
+	keyed                     KeyedPayloadDigester
+	store                     caseentityport.Store
+	datasetAuthority          datasetsnapshotport.CurrentAuthorityV2
+	bindingObserver           casecontextport.Observer
+	validateCurrent           func(context.Context, domainsecurity.TurnSecurityContext) error
+	validateAppendInsideExact func(context.Context, domainsecurity.TurnSecurityContext) error
 }
 
 func NewService(keyed KeyedPayloadDigester) *Service {
@@ -181,6 +182,25 @@ func NewPersistentService(
 		datasetAuthority: datasetAuthority, bindingObserver: bindingObserver,
 		validateCurrent: validateCurrent,
 	}
+}
+
+// NewPersistentServiceWithExactAppendValidationV1 supplies the live
+// principal/risk/binding validator used only inside append's owned exact DSV2
+// lease. All other operations and append's outer checks keep validateCurrent.
+func NewPersistentServiceWithExactAppendValidationV1(
+	keyed KeyedPayloadDigester,
+	store caseentityport.Store,
+	datasetAuthority datasetsnapshotport.CurrentAuthorityV2,
+	bindingObserver casecontextport.Observer,
+	validateCurrent func(context.Context, domainsecurity.TurnSecurityContext) error,
+	validateInsideExact func(context.Context, domainsecurity.TurnSecurityContext) error,
+) *Service {
+	if validateInsideExact == nil {
+		return nil
+	}
+	service := NewPersistentService(keyed, store, datasetAuthority, bindingObserver, validateCurrent)
+	service.validateAppendInsideExact = validateInsideExact
+	return service
 }
 
 func (service *Service) withCurrentPrivateStateV1(
@@ -205,11 +225,23 @@ func (service *Service) withCurrentPrivateSelectionV1(
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context, datasetsnapshotport.CurrentSelectionV2) error,
 ) error {
+	return service.withCurrentPrivateSelectionValidatedV1(ctx, securityContext, use, nil)
+}
+
+func (service *Service) withCurrentPrivateSelectionValidatedV1(
+	ctx context.Context,
+	securityContext domainsecurity.TurnSecurityContext,
+	use func(context.Context, datasetsnapshotport.CurrentSelectionV2) error,
+	validateInsideExact func(context.Context, domainsecurity.TurnSecurityContext) error,
+) error {
 	if service == nil || ctx == nil || use == nil ||
 		dependencyIsNilV1(service.datasetAuthority) || dependencyIsNilV1(service.bindingObserver) ||
 		service.validateCurrent == nil ||
 		domainsecurity.ValidateTurnSecurityContextForCaseFactPublication(securityContext) != nil {
 		return ErrPrivateStateUnavailable
+	}
+	if validateInsideExact == nil {
+		validateInsideExact = service.validateCurrent
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -249,11 +281,11 @@ func (service *Service) withCurrentPrivateSelectionV1(
 					if err := leaseContext.Err(); err != nil {
 						return err
 					}
-					if err := service.validateCurrent(leaseContext, securityContext); err != nil {
+					if err := validateInsideExact(leaseContext, securityContext); err != nil {
 						return privateCurrentValidationErrorV1(err)
 					}
 					operationErr = use(leaseContext, selection)
-					currentErr := service.validateCurrent(leaseContext, securityContext)
+					currentErr := validateInsideExact(leaseContext, securityContext)
 					afterObservation, observationErr := service.bindingObserver.Observe(
 						securityContext.WorkspaceRealPath,
 					)
@@ -3810,7 +3842,10 @@ func (service *Service) AppendCaseLongitudinalOwnerStateV1(
 		len(input.finalizedSlots) == 0 {
 		return ErrPrivateStateIntegrity
 	}
-	return service.withCurrentPrivateStateV1(ctx, input.SecurityContext, func(leaseContext context.Context) error {
+	if service == nil {
+		return ErrPrivateStateUnavailable
+	}
+	return service.withCurrentPrivateSelectionValidatedV1(ctx, input.SecurityContext, func(leaseContext context.Context, _ datasetsnapshotport.CurrentSelectionV2) error {
 		index, err := service.ensureCaseLongitudinalIndexCurrentExactV1(leaseContext, input.SecurityContext)
 		if err != nil {
 			return err
@@ -4023,7 +4058,7 @@ func (service *Service) AppendCaseLongitudinalOwnerStateV1(
 			leaseContext, input.SecurityContext, currentThread.EntityReferences, next, CaseContinuityRestartV1,
 		)
 		return err
-	})
+	}, service.validateAppendInsideExact)
 }
 
 func (service *Service) persistCaseLongitudinalIndexExactV1(

@@ -31,6 +31,12 @@ later, more specific accepted requirement supersedes an older statement only
 for the same scope. Active OpenSpec changes remain proposals and work plans
 until the current request authorizes applying or continuing them.
 
+Read only the registered scope relevant to the current change and its real
+dependencies. Current active-change counts are derived by
+`node scripts/validation-burden.mjs`; inspect full change bodies only for the
+authorized target. Dated reviews and synchronized snapshots below are optional
+provenance, never recursive default inputs.
+
 When adding, replacing, accepting, or retiring a numbered spec, update this
 registry in the same change. Do not infer lifecycle from filename order,
 modification time, a `final` label, or Git tracking alone.

@@ -20,6 +20,7 @@ func TestFundsAccountFlowCompositionIsAdditiveAndFailClosed(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	); composition.available() || composition.caseEntities != nil {
 		t.Fatal("missing case dependencies advertised account-flow capability")
 	}
@@ -32,9 +33,18 @@ func TestFundsAccountFlowCompositionIsAdditiveAndFailClosed(t *testing.T) {
 		runtimeFundsCaseObserverStubV1{},
 		runtimeFundsMaterialReaderStubV1{},
 		func(context.Context, domainsecurity.TurnSecurityContext) error { return nil },
+		func(context.Context, domainsecurity.TurnSecurityContext) error { return nil },
 	)
 	if !composition.available() {
 		t.Fatal("complete host dependencies did not compose additive account-flow capability")
+	}
+	if missingInside := composeRuntimeFundsAccountFlowV1(
+		"/protected/user-data",
+		runtimeFundsKeyedDigesterStubV1{}, runtimeFundsCaseEntityStoreStubV1{},
+		runtimeFundsDatasetAuthorityStubV1{}, runtimeFundsCaseObserverStubV1{}, runtimeFundsMaterialReaderStubV1{},
+		func(context.Context, domainsecurity.TurnSecurityContext) error { return nil }, nil,
+	); missingInside.available() || missingInside.caseEntities != nil {
+		t.Fatal("missing exact-context validator advertised account-flow capability")
 	}
 	if composition.useCurrentSource == nil || composition.useCurrentIngressSource == nil ||
 		composition.useCurrentLocalDisplay == nil ||
@@ -69,6 +79,7 @@ func TestFundsAccountFlowCompositionRejectsInvalidProtectedRootWithoutBlocking(t
 		runtimeFundsDatasetAuthorityStubV1{},
 		runtimeFundsCaseObserverStubV1{},
 		runtimeFundsMaterialReaderStubV1{},
+		func(context.Context, domainsecurity.TurnSecurityContext) error { return nil },
 		func(context.Context, domainsecurity.TurnSecurityContext) error { return nil },
 	)
 	if composition.available() || composition.caseEntities != nil {

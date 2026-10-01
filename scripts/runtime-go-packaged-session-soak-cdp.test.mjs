@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import http from 'node:http'
 import vm from 'node:vm'
-import { cdpNormalQuit, dispatchCdpCommands } from './runtime-go-packaged-milestone-b.mjs'
-import { currentAccountFlow, exactAccountFlow, ownedPackagedRenderer, syntheticCleaningCSV, syntheticProvider } from './runtime-go-host-local-funds-installed.mjs'
+import { cdpNormalQuit, dispatchCdpCommands, goJSON } from './runtime-go-packaged-milestone-b.mjs'
+import { cdpValueExpression, currentAccountFlow, exactAccountFlow, ownedPackagedRenderer, syntheticCleaningCSV, syntheticProvider } from './runtime-go-host-local-funds-installed.mjs'
 
 // Exercise the existing owner's actual functions without importing the CLI
 // entry point (which would run Go/native/Mac acceptance as an import effect).
@@ -1175,4 +1175,51 @@ test('the installed Provider closes only after an in-flight refused request is a
   await closing
   assert.equal(provider.requests[0].safe, true)
   assert.equal(provider.requests[0].accepted, false)
+})
+
+
+test('CDP expressions preserve adversarial JSON values and own prototype keys without execution', () => {
+  const hostile = '\"\\</script><script>globalThis.executed = true</script>&\u2028\u2029\n\r\0'
+  const prototypeKeys = JSON.parse('{"__proto__":{"polluted":true},"nested":{"__proto__":{"polluted":true},"value":null}}')
+  const values = [null, hostile, prototypeKeys, { selector: { path: hostile }, provider: hostile, models: [hostile], modelProfiles: { [hostile]: { active: true } } }]
+  for (const value of values) {
+    assert.deepEqual(JSON.parse(goJSON(value)), value)
+    const expression = cdpValueExpression(value)
+    assert.doesNotMatch(expression, /[<>&\u2028\u2029]/)
+    const sandbox = vm.createContext({ executed: false })
+    const result = vm.runInContext(expression, sandbox)
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), value)
+    assert.equal(sandbox.executed, false)
+    if (value === prototypeKeys) {
+      const ordinaryPrototype = vm.runInContext('Object.prototype', sandbox)
+      assert.equal(Object.getPrototypeOf(result), ordinaryPrototype)
+      assert.equal(Object.getPrototypeOf(result.nested), ordinaryPrototype)
+      assert.ok(Object.hasOwn(result, '__proto__'))
+      assert.ok(Object.hasOwn(result.nested, '__proto__'))
+      assert.equal(result.__proto__.polluted, true)
+      assert.equal(result.nested.__proto__.polluted, true)
+      assert.equal(vm.runInContext('({}).polluted', sandbox), undefined)
+    }
+  }
+  assert.throws(() => cdpValueExpression(undefined), { name: 'TypeError', message: 'CDP value must not be undefined.' })
+  const installedSource = readFileSync(new URL('./runtime-go-host-local-funds-installed.mjs', import.meta.url), 'utf8')
+  const expressions = installedSource.slice(installedSource.indexOf('  const selectThread'), installedSource.indexOf("    check('actual-cleaning-diff"))
+  assert.doesNotMatch(expressions, /\$\{(?:JSON\.stringify|goJSON)\(/)
+  // Evaluate the owning script's actual property expression with adversarial
+  // model names, rather than a parallel hand-written object literal.
+  const profilesStart = expressions.indexOf('modelProfiles:')
+  const profilesEnd = expressions.indexOf('}]}});', profilesStart)
+  assert.ok(profilesStart >= 0 && profilesEnd > profilesStart)
+  const profilesSource = expressions.slice(profilesStart, profilesEnd)
+  assert.ok(profilesSource.includes('modelProfiles:{[${cdpValueExpression(model)}]:'))
+  for (const model of [hostile, '__proto__']) {
+    const property = profilesSource.replace('${cdpValueExpression(model)}', cdpValueExpression(model))
+    const sandbox = vm.createContext({ executed: false })
+    const result = vm.runInContext(`({${property}})`, sandbox).modelProfiles
+    assert.ok(Object.hasOwn(result, model))
+    assert.equal(result[model].contextWindowTokens, 1000000)
+    assert.equal(Object.getPrototypeOf(result), vm.runInContext('Object.prototype', sandbox))
+    assert.equal(vm.runInContext('({}).polluted', sandbox), undefined)
+    assert.equal(sandbox.executed, false)
+  }
 })

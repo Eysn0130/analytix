@@ -33,6 +33,7 @@ import (
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authorityfixture "analytix.local/runtime-go/internal/formalauthority"
+	"analytix.local/runtime-go/internal/server"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
@@ -65,9 +66,6 @@ func TestFundsAccountFlowB1FixedNativeInputAdmission(t *testing.T) {
 func b1SelectedNativeInput(t *testing.T) string {
 	t.Helper()
 	original := os.Getenv("ANALYTIX_AB_R3_PACKAGE_RUNTIME_SERVER")
-	if original != rev9RetainedRuntimeServer {
-		t.Fatal("B1 fixed native input is unavailable")
-	}
 	current := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_RUNTIME_SERVER")
 	expectedSource := os.Getenv("ANALYTIX_FUNDS_CURRENT_NATIVE_SOURCE_COMMIT")
 	if current != "" || expectedSource != "" {
@@ -87,6 +85,9 @@ func b1SelectedNativeInput(t *testing.T) string {
 		}
 		t.Logf("B1 exact clean native package source=%s; synthetic Host admission and loopback only, not installation QA", expectedSource)
 		return current
+	}
+	if original != rev9RetainedRuntimeServer {
+		t.Fatal("B1 fixed native input is unavailable")
 	}
 	selected := os.Getenv("ANALYTIX_FUNDS_RELOCATED_NATIVE_RUNTIME_SERVER")
 	if selected == "" {
@@ -207,21 +208,26 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 	dependencies.resolveRuntimeRoots = func(string) (string, string, error) {
 		return bundledFundsRuntimeRootsV1(host.config.DataDir)
 	}
+	var activeNativeOwner *nativecomponenthost.Owner
 	dependencies.openNativeOwnerForTest = func(dataDir string) (*nativecomponenthost.Owner, error) {
 		owner, err := openRev9DarwinHostCandidateForExecutable(dataDir, runtimePath)
 		if err != nil || owner == nil {
 			t.Fatalf("B1 selected native owner prerequisite: %v", err)
 		}
+		activeNativeOwner = owner
 		return owner, nil
-	}
-	if spec, err := validateBundledFundsHostMaterializationWithDependenciesV1(context.Background(), config, dependencies); err != nil || spec == nil {
-		t.Fatalf("B1 synthetic Host installation admission failed: %v", err)
 	}
 	var sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1
 	dependencies.observeHostSourceRead = func(read func() []domainplugincapability.FundsSourceReadDecisionEventV1) { sourceEvents = read }
 	async := newRuntimeAsyncTurnGuardV1("b1-public-chain")
+	appendDiagnostic := &fundsAppendDiagnosticV1{t: t}
+	defer appendDiagnostic.close()
 	ctx := context.WithValue(context.Background(), bundledFundsHostValidationContextKeyV1{}, dependencies)
-	ctx = context.WithValue(ctx, asyncTurnObservationContextKeyV1{}, async.observe)
+	ctx = context.WithValue(ctx, asyncTurnObservationContextKeyV1{}, func(observation server.AsyncTurnObservationV1) {
+		appendDiagnostic.finished(observation)
+		async.observe(observation)
+	})
+	ctx = context.WithValue(ctx, asyncTurnPhaseObservationContextKeyV1{}, appendDiagnostic.phase)
 	ctx = context.WithValue(ctx, factRecoveryObservationKeyV1{}, func(report factRecoveryObservationV1) {
 		t.Logf("fact recovery candidates=%d admitted=%d held=%d phase=%s", report.Candidates, report.Admitted, report.Held, report.LastRejectedPhase)
 	})
@@ -246,19 +252,25 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 		async.assertDrained(t)
 	}()
 	verify(config, root, workspace, sourcePath, fixture.Authority.KeyID(), sourceEvents, b1PublicChainDriver{
-		assertNewProcess: func(threadID, turnID, finalDigest, account string, additional ...b1RecoveryExpectedFinal) {
+		assertNewProcess: func(account string, expected ...b1RecoveryExpectedFinal) {
 			runtime.Close()
 			shutdownOwnedRuntimeHandler(t, owned)
 			async.assertDrained(t)
 			closed = true
 			before := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
-			b1AssertFreshProcessRecovery(t, b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, ThreadID: threadID, TurnID: turnID, FinalDigest: finalDigest, Account: account, AdditionalFinals: additional})
+			b1AssertFreshProcessRecovery(t, b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, Account: account, ExpectedFinals: expected})
 			after := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
 			if before != after {
 				t.Fatal("fresh process changed original evidence/final stores")
 			}
 		},
 		baseURL: func() string { return runtime.URL },
+		closeNativeSource: func() error {
+			if activeNativeOwner == nil {
+				t.Fatal("B1 active native owner was not opened")
+			}
+			return activeNativeOwner.Close()
+		},
 		waitTurn: func(threadID, turnID, phase string) {
 			async.expect(threadID, turnID, phase)
 			if phase != "ordinary-after-failure" {
@@ -287,10 +299,11 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 // The assertions below are shared with the black-box process test. The driver
 // owns transport/lifecycle only; it cannot fabricate product evidence or finals.
 type b1PublicChainDriver struct {
-	assertNewProcess func(threadID, turnID, finalDigest, account string, additional ...b1RecoveryExpectedFinal)
-	baseURL          func() string
-	waitTurn         func(threadID, turnID, phase string)
-	reopen           func()
+	assertNewProcess  func(account string, expected ...b1RecoveryExpectedFinal)
+	baseURL           func() string
+	waitTurn          func(threadID, turnID, phase string)
+	reopen            func()
+	closeNativeSource func() error
 }
 
 func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePath, authorityKeyID string, model *b1PublicChainModel, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
@@ -701,7 +714,10 @@ func b1AssertPublicChain(t *testing.T, config Config, root, workspace, sourcePat
 		b1AssertGenericPrivacy(t, body)
 	}
 	t.Log("B1 actual durable reopen, current preview, retained missing/corrupt fail-closed, and ordinary Provider continuity passed")
-	driver.assertNewProcess(threadID, turnID, digest, rev14PrivateAccount, b1RecoveryExpectedFinal{TurnID: evolvedTurnID, FinalDigest: evolvedFinal.AcceptedFinalDigest})
+	driver.assertNewProcess(rev14PrivateAccount,
+		b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: turnID, FinalDigest: digest, HistoryState: "retained_snapshot"},
+		b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: evolvedTurnID, FinalDigest: evolvedFinal.AcceptedFinalDigest},
+	)
 }
 
 // This test uses an unformatted account admitted by canonical CSV. Exact retained
@@ -1047,9 +1063,14 @@ func b1AssertPreparedFlow(t *testing.T, record domainevidence.PreparedEvidenceSe
 
 func b1AssertPreparedFlowValues(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow) domainevidence.CanonicalEvidenceMaterial {
 	t.Helper()
+	return b1AssertPreparedFlowValuesWithBindings(t, record, reference, 1)
+}
+
+func b1AssertPreparedFlowValuesWithBindings(t *testing.T, record domainevidence.PreparedEvidenceSettlement, reference b1ReferenceFlow, expectedBindings int) domainevidence.CanonicalEvidenceMaterial {
+	t.Helper()
 	material, err := domainevidence.ParseCanonicalEvidenceMaterial(record.CanonicalEvidence)
-	if err != nil || len(material.Facts) != 3 || len(material.AcceptedSlotSourceBindings) != 1 {
-		t.Fatal("B1 actual native canonical fact/lineage cardinality is invalid")
+	if err != nil || len(material.Facts) != 3 || expectedBindings <= 0 || len(material.AcceptedSlotSourceBindings) != expectedBindings {
+		t.Fatalf("B1 actual native canonical fact/lineage cardinality is invalid: parse_failed=%t facts=%d want=3 bindings=%d want=%d", err != nil, len(material.Facts), len(material.AcceptedSlotSourceBindings), expectedBindings)
 	}
 	values := map[string]string{}
 	for _, fact := range material.Facts {

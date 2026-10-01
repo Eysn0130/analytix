@@ -334,20 +334,25 @@ func (service *SealedServiceV2) WithCurrentSelectionV2(
 	if err != nil {
 		return errors.Join(datasetsnapshotport.ErrMismatch, err)
 	}
+	return service.withFreshHeadChallengeV2(ctx, func(head evidenceauthorityport.FreshHead, challenge func(context.Context) error, _ bool) error {
+		return service.withCurrentSelectionV2(ctx, input, securityContext, callback, binding, head, challenge)
+	})
+}
+
+// One dispatch owner preserves entry-error mapping for both current capability
+// issuance and historical reads. Each consumer retains its own material checks.
+// scoped distinguishes a challenge source with a missing callback from a
+// coordinator that intentionally requires full observations instead.
+func (service *SealedServiceV2) withFreshHeadChallengeV2(
+	ctx context.Context,
+	use func(evidenceauthorityport.FreshHead, func(context.Context) error, bool) error,
+) error {
 	if source, ok := service.coordinator.(freshHeadChallengeSourceV2); ok {
 		callbackEntered := false
-		err := source.WithFreshHeadChallenge(
-			ctx,
-			func(
-				head evidenceauthorityport.FreshHead,
-				challenge func(context.Context) error,
-			) error {
-				callbackEntered = true
-				return service.withCurrentSelectionV2(
-					ctx, input, securityContext, callback, binding, head, challenge,
-				)
-			},
-		)
+		err := source.WithFreshHeadChallenge(ctx, func(head evidenceauthorityport.FreshHead, challenge func(context.Context) error) error {
+			callbackEntered = true
+			return use(head, challenge, true)
+		})
 		if err != nil && !callbackEntered {
 			return errors.Join(datasetsnapshotport.ErrUnavailable, err)
 		}
@@ -357,9 +362,7 @@ func (service *SealedServiceV2) WithCurrentSelectionV2(
 	if err != nil {
 		return err
 	}
-	return service.withCurrentSelectionV2(
-		ctx, input, securityContext, callback, binding, head, nil,
-	)
+	return use(head, nil, false)
 }
 
 func (service *SealedServiceV2) withCurrentSelectionV2(
@@ -446,7 +449,11 @@ func (service *SealedServiceV2) WithRetainedSelectionV2(
 			current datasetsnapshotport.CurrentSelectionV2,
 			capability datasetsnapshotport.CurrentSelectionCapabilityV2,
 		) error {
-			return capability.UseExact(
+			exact, ok := capability.(*currentSelectionCapabilityV2)
+			if !ok {
+				return datasetsnapshotport.ErrUnavailable
+			}
+			return exact.useExact(
 				current,
 				input.CurrentSecurityContext,
 				func(leaseContext context.Context) error {
@@ -484,6 +491,7 @@ func (service *SealedServiceV2) WithRetainedSelectionV2(
 					}
 					return nil
 				},
+				currentSelectionRetainedChallengeV2,
 			)
 		},
 	)
@@ -596,12 +604,23 @@ func retainedSelectionEqualV2(
 		reflect.DeepEqual(left.Snapshot, right.Snapshot)
 }
 
+type currentSelectionUseModeV2 uint8
+
+const (
+	currentSelectionFullObservationV2 currentSelectionUseModeV2 = iota
+	currentSelectionPostNativeChallengeV2
+	// Only WithRetainedSelectionV2 selects this private mode. The complete
+	// initial observations and current/retained material checks still run;
+	// its lease challenges the exact-bound witness without repersisting it.
+	currentSelectionRetainedChallengeV2
+)
+
 func (capability *currentSelectionCapabilityV2) UseExact(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
 ) error {
-	return capability.useExact(selection, securityContext, use, false)
+	return capability.useExact(selection, securityContext, use, currentSelectionFullObservationV2)
 }
 
 // UsePostNativeExact is intentionally reachable only through a structural
@@ -613,15 +632,16 @@ func (capability *currentSelectionCapabilityV2) UsePostNativeExact(
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
 ) error {
-	return capability.useExact(selection, securityContext, use, true)
+	return capability.useExact(selection, securityContext, use, currentSelectionPostNativeChallengeV2)
 }
 
 func (capability *currentSelectionCapabilityV2) useExact(
 	selection datasetsnapshotport.CurrentSelectionV2,
 	securityContext domainsecurity.TurnSecurityContext,
 	use func(context.Context) error,
-	postNative bool,
+	mode currentSelectionUseModeV2,
 ) error {
+	postNative := mode == currentSelectionPostNativeChallengeV2
 	began := capability != nil && use != nil && ((!postNative && capability.beginUse()) ||
 		(postNative && capability.beginPostNativeUse()))
 	if !began {
@@ -638,7 +658,7 @@ func (capability *currentSelectionCapabilityV2) useExact(
 	leaseContext, cancel := context.WithCancel(capability.ctx)
 	defer cancel()
 	confirmCurrent := func() error {
-		if postNative && capability.freshHead != nil {
+		if mode != currentSelectionFullObservationV2 && capability.freshHead != nil {
 			return capability.freshHead(leaseContext)
 		}
 		_, err := capability.service.confirmSharedEvidenceHeadV2(leaseContext, capability.selection.Head)

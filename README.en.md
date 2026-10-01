@@ -193,40 +193,25 @@ npm ci --registry=https://registry.npmmirror.com
 
 ## Documentation Map
 
+Entries route current work. Select the relevant scope without recursively loading historical evidence.
+
 | Doc | Contents |
 | --- | --- |
-| [docs/analytix/README.md](docs/analytix/README.md) | documentation classes, sources of truth, and evidence freshness rules |
-| [packages/runtime-go/README.md](packages/runtime-go/README.md) | production Go runtime architecture, capabilities, and validation |
-| [packages/runtime/README.md](packages/runtime/README.md) | TypeScript launcher/contracts, CLI, and config boundary |
-| [docs/ANALYTIX_CONFIG.md](docs/ANALYTIX_CONFIG.md) | Local Provider credentials, desktop settings, and runtime config layers |
-| [docs/analytix/qa/windows-qa-operator-runbook.md](docs/analytix/qa/windows-qa-operator-runbook.md) | secret-free Windows QA SSH/RDP/RustDesk operator entry |
-| [docs/analytix/specs/01-identity-runtime-schema-reset.md](docs/analytix/specs/01-identity-runtime-schema-reset.md) | identity, runtime schema, and data directories |
-| [docs/analytix/specs/02-release-packaging-channels.md](docs/analytix/specs/02-release-packaging-channels.md) | release, packaging, and channels |
-| [docs/analytix/specs/03-brand-assets-visual-system.md](docs/analytix/specs/03-brand-assets-visual-system.md) | brand assets and visual system |
-| [docs/analytix/specs/04-analytix-derived-thread-virtualizer.md](docs/analytix/specs/04-analytix-derived-thread-virtualizer.md) | ThreadVirtualizer and chat feel |
-| [docs/analytix/specs/05-architecture-code-upgrade-inventory.md](docs/analytix/specs/05-architecture-code-upgrade-inventory.md) | code upgrade inventory |
-| [docs/analytix/specs/06-implementation-closure-and-acceptance.md](docs/analytix/specs/06-implementation-closure-and-acceptance.md) | closure and acceptance |
-| [docs/analytix/specs/07-desktop-qa-release-readiness.md](docs/analytix/specs/07-desktop-qa-release-readiness.md) | desktop QA and release readiness |
-| [docs/analytix/specs/08-upstream-absorption-and-go-runtime.md](docs/analytix/specs/08-upstream-absorption-and-go-runtime.md) | long-term Kun / Reasonix absorption and Go runtime evolution |
-| [docs/analytix/specs/09-agent-quality-product-benchmark.md](docs/analytix/specs/09-agent-quality-product-benchmark.md) | agent quality, product strength, and upstream comparison benchmarks |
-| [docs/analytix/specs/10-subagent-todo-goal-control-plane.md](docs/analytix/specs/10-subagent-todo-goal-control-plane.md) | subagent, todo, goal, and control-plane safety boundaries |
-| [docs/analytix/specs/11-agent-platform-brand-and-architecture.md](docs/analytix/specs/11-agent-platform-brand-and-architecture.md) | Agent Platform brand, Go Agent Harness, plugins, and Privacy Layer architecture |
-| [docs/analytix/upstreams/README.md](docs/analytix/upstreams/README.md) | upstream sync ledgers, conflict decisions, and conformance records |
-| [docs/analytix/upstreams/agent-platform-architecture-recheck-2026-08-25.md](docs/analytix/upstreams/agent-platform-architecture-recheck-2026-08-25.md) | architecture recheck evidence for Codex, Claude Code, DeepSeek Harness, and OpenCode |
-| [docs/analytix/upstreams/absorption-targets.md](docs/analytix/upstreams/absorption-targets.md) | what to absorb from Kun / Reasonix and how to prove it is better |
-| [docs/analytix/upstreams/code-level-absorption-blueprint.md](docs/analytix/upstreams/code-level-absorption-blueprint.md) | code-level reuse boundaries, landing areas, and proof requirements for Kun / Reasonix |
-| [docs/analytix/upstreams/code-level-implementation-plan.md](docs/analytix/upstreams/code-level-implementation-plan.md) | follow-up implementation stages, validation gates, and `/goal` usage guidance |
-| [docs/analytix/benchmarks/README.md](docs/analytix/benchmarks/README.md) | benchmark scenarios, quality gates, and upstream scorecards |
-| [docs/UI_PLUGINS.md](docs/UI_PLUGINS.md) | mascot / cameo UI plugins |
-| [docs/legacy/kun/README.md](docs/legacy/kun/README.md) | historical legacy notes for migration background only |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | local maintenance guide |
-| [SECURITY.md](SECURITY.md) | security disclosure policy |
+| [Documentation map](docs/analytix/README.md) | Current owners, sources of truth, validation and historical queries |
+| [Spec registry](docs/analytix/specs/README.md) | Accepted targets/contracts and historical classification |
+| [Handover entry](docs/analytix/handovers/README.md) | Fresh candidate, writer and evidence recovery |
+| [Go runtime](packages/runtime-go/README.md) | The only production Agent core |
+| [TypeScript runtime](packages/runtime/README.md) | Launcher/contracts/config |
+| [Configuration](docs/ANALYTIX_CONFIG.md) | Local Provider and desktop settings |
+| [Plugins](plugins/README.md) | Plugin sources and packaging boundaries |
+| [Upstream admission](docs/analytix/upstreams/README.md) | Pinned versions, licenses and provenance |
+| [Security disclosure](SECURITY.md) | Vulnerability reporting |
 
 ## Local Maintenance
 
 Bug fixes, UI/UX improvements, documentation, localization, build/release work, and runtime integration changes are maintained locally.
 
-Before committing local changes, run `npm run typecheck`, `npm run build`, and `npm run test` when possible.
+Before committing, choose validation from the current task, applicable `AGENTS.md`, and the affected source and consumers. Use `node scripts/validation-burden.mjs --plan <task-owned-paths> --json` for mapped maintenance routes. Check diffs and links for documentation changes; select type checks, tests, builds, and other applicable gates for the actual impact of source, localization, or build changes. Unmapped scopes require the affected owners and existing CI matrix. This route does not replace CI or formal acceptance.
 
 ## License
 

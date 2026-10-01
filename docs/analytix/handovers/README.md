@@ -1,42 +1,22 @@
-# Analytix 施工交接索引
+# Analytix 施工交接入口
 
-Status: Operational。唯一恢复入口；以下是 2026-09-29 PDT 的接续快照，
-恢复时重读 Git 与适用验证，不把此页当作实时锁或测试回执。
+Status: Operational。恢复入口只路由当前来源，不保存实时锁或继承 PASS。
+canonical `/Users/sun/Projects/analytix`；当前 branch/HEAD/index/dirty 以 fresh Git 为准。
 
-Repository `Eysn0130/analytix`；canonical `/Users/sun/Projects/analytix`；
-branch `codex/workbench-product-delivery-20260914`；[PR28](https://github.com/Eysn0130/analytix/pull/28)。
+1. 读取当前请求与适用 `AGENTS.md`；核对 Git、保护字节和 writer/process 状态。
+2. 使用 `node scripts/validation-burden.mjs --json` 获取派生 active OpenSpec 状态；
+   只读取已授权 target 与真实依赖，不递归读取全部 tasks 或日期 QA。
+3. 从 [执行方案](../delivery-execution-plan.md) 与 [产品矩阵](../product-completion.md)
+   读取任务所需段落，核对实际消费者和 candidate-bound evidence，继续下一有效缺口。
+4. 按 [runbook](../development-runbook.md) 的有关命令验证；同 shell source 缓存 helper。
+   历史安装、CI、Provider、签名结果不转移到当前 dirty。
 
-## 当前恢复点 — 2026-09-29 PDT
+当前 commissioned Owner 的控制记录由该 Owner 唯一维护。交接页与历史 writer
+标识不能授予 lease。候选完成后交付准确文件归属/哈希/命令/环境/结果与未验证范围。
+Git 与外部操作仍遵守当前任务授权及 [workflow](../git-workflow.md)。
 
-| 项目 | 当前观察与边界 |
-| --- | --- |
-| 继承 HEAD / tree | `c2cd3e29174e701569220e1c39076e0acff24a53` / `55893ead1fc3a6bce73ede22a251005a14810532`；延迟 bundled Funds activation。入口整理已在 `39250cafa` 本机提交；实时 HEAD 以 Git 为准。 |
-| writer | 本轮唯一主施工线程 `01a0f08d-4ef4-7f82-a30b-8a94c014ac26`，保存的 local analytix 项目；最新运行记录已核实 `gpt-6.1-sol / ultra`、Full access。协调桥只读。其他历史 worktree 不在本轮写入范围；不能把残留锁或进程等同于 active writer。 |
-| 继承 dirty | 开始时 34 tracked 修改、26 untracked 文件、0 staged；主要为 B1 host-local，另有用户 runbook 和 QA 草稿。保留原字节，按 hunk 来源审查，不 reset/clean/stash/跨分支迁移。该数量是开始快照，后续施工会增加任务自有修改。 |
-| 最新安装证据 | 精确 SOURCE `7dc07bb0973e2c5e6a5e5c9235bd585c9c3a1495`，两轮隔离合成 K10 正常退出、零残留；`032b8a147` 是 observer 修正，产品字节未改变。见[准确诊断](../qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md)。不转移到 c2cd/B1。 |
-| 当前 B1 | [原始 host-local checkpoint](../qa/pr28-b1-host-local-currentness-source-2026-09-27.md) 的继承候选已续补[清洗前驱与真实磁盘重开源码闭环](../qa/pr28-host-local-cleaning-successor-2026-09-29.md)，由包含该记录的聚焦本机提交交付，待 archive 验证。Final/recovery、完整清洗/epoch 链路、CAS loser 认证恢复及安装旅程仍缺。N06/B16 开放，整 profile 回滚 `UNVERIFIED`。 |
-| 远端 / main | 2026-09-29 PDT 已 fresh 读取：PR28 open/Draft，head `56231ff5e6b7dd8d321d1356b7208587df0841e9`，该 head 的 Development gate 通过；main `ce96cf12581acfa0e19fae7c6aa9c709371012c8`。远端 CI 不覆盖较新本机候选，提交后仍须更新 PR 并取得新证据。 |
-
-## 下一依赖有效动作
-
-1. 本轮已在 `39250cafa` 修薄入口，并运行 `node scripts/validation-burden.mjs`。报告只做
-   stdlib 只读盘点，基线与 matched read 范围见[小 manifest](../validation-burden-baseline.json)；
-   它不选掉测试，不宣称 token、时间、正确率或分析收益已改善。
-2. [投影保真源码检查点](../qa/pr28-account-flow-projection-fidelity-2026-09-29.md)
-   已记录主体/对手方身份错配修复、独立金额真值与调用方验证；不等于分析收益。
-   从已审查 host-local 合同与适用 OpenSpec 继续；在隔离数据上补最小缺失
-   行为和独立语义 oracle。所有安全/撤权/恢复检查针对实际稳定候选；普通
-   Agent 不依赖 Funds 初始化。命令先按 [runbook](../development-runbook.md)
-   同 shell 加载缓存 helper，任务资源隔离；不触碰既有用户 profile。
-3. 同模型/数据/预算的分析 pilot 区分表示保真、端到端增益、隐私权限与安装
-   可用性；只使用合成或已明确许可输入。费用与真实 Provider 权限未明时，
-   先推进确定性 oracle，不用合成结果替代真实 Provider/安装验收。
-4. 达到相应门槛后聚焦提交、正常源码同步、准确候选 CI/review/适用安装验收，
-   再决定 merge/main。公开发布另行满足资格；当前没有完成结论。
-
-长期方向与不变分母见[唯一执行方案](../delivery-execution-plan.md)，
-能力、候选、证据与缺口见[产品矩阵](../product-completion.md)。
-旧叙述已归入既有[日期 QA](../qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)，原锚点保留如下。
+历史接续可通过下面兼容锚点按具体事实查询；不会默认打开其正文。
+2026-09-29 接续快照及 B1 来源见 [保留 QA](../qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)。
 
 ## Historical entry anchors
 

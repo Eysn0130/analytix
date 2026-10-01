@@ -9,7 +9,7 @@ import http from 'node:http'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packagedSessionAcceptance as installed } from './runtime-go-packaged-session-soak.mjs'
-import { cdpComposerSubmit, cdpNormalQuit, dispatchCdpCommands } from './runtime-go-packaged-milestone-b.mjs'
+import { cdpComposerSubmit, cdpNormalQuit, dispatchCdpCommands, goJSON } from './runtime-go-packaged-milestone-b.mjs'
 
 const providerId = 'host-local-installed-synthetic'
 const model = 'mimo-v2.5-pro'
@@ -21,6 +21,13 @@ const timeoutMs = 180_000
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const requireCondition = (condition, code) => { if (!condition) throw new Error(code) }
+
+// Decode JSON text instead of embedding an object literal, which would treat
+// an own __proto__ key as prototype syntax. goJSON remains the JSON/hash owner.
+export function cdpValueExpression(value) {
+  if (value === undefined) throw new TypeError('CDP value must not be undefined.')
+  return `JSON.parse(${goJSON(goJSON(value))})`
+}
 
 export function ownedPackagedRenderer(pid, port, processInfo, targets) {
   const browsers = processInfo?.filter((process) => process.type === 'browser') || []
@@ -255,20 +262,20 @@ export async function runHostLocalInstalled(appPath, cacheRoot) {
     await dispatchCdpCommands(target.webSocketDebuggerUrl, [{ method: 'Page.navigate', params: {
       url: `analytix-app://renderer/index.html?threadId=${encodeURIComponent(threadId)}`
     } }], 10_000)
-    await poll(`!!window.analytix&&new URL(window.location.href).searchParams.get('threadId')===${JSON.stringify(threadId)}`, Boolean)
-    await poll(`(()=>{const h=document.querySelector('.ds-session-title-compact');return h?.title===${JSON.stringify(title)}||h?.textContent.trim()===${JSON.stringify(title)};})()`, Boolean)
+    await poll(`!!window.analytix&&new URL(window.location.href).searchParams.get('threadId')===${cdpValueExpression(threadId)}`, Boolean)
+    await poll(`(()=>{const h=document.querySelector('.ds-session-title-compact');return h?.title===${cdpValueExpression(title)}||h?.textContent.trim()===${cdpValueExpression(title)};})()`, Boolean)
   }
-  const readTurn = () => `(async()=>{const r=await window.analytix.runtime.runtimeRequest('/v1/threads/'+${JSON.stringify(threadId)},'GET');
+  const readTurn = () => `(async()=>{const r=await window.analytix.runtime.runtimeRequest('/v1/threads/'+${cdpValueExpression(threadId)},'GET');
     if(r.status!==200)return null;const t=JSON.parse(r.body);return {id:t.id,title:t.title,turns:t.turns};})()`
   const display = (turn) => evaluate(`window.analytix.runtime.acceptedSlotDisplay({kind:'accepted_slot_display',
-    threadId:${JSON.stringify(threadId)},turnId:${JSON.stringify(turn.id)},acceptedFinalDigest:${JSON.stringify(turn.acceptedFinalView?.acceptedFinalDigest)},displayMode:'full'})`)
+    threadId:${cdpValueExpression(threadId)},turnId:${cdpValueExpression(turn.id)},acceptedFinalDigest:${cdpValueExpression(turn.acceptedFinalView?.acceptedFinalDigest)},displayMode:'full'})`)
   const observeDisplay = async (turn, id) => {
     const user = turn.items?.find((item) => item.kind === 'user_message')
     requireCondition(!!user?.id, 'task_turn_user_item_missing')
-    const observed = await poll(`(()=>{const row=[...document.querySelectorAll('[data-turn-key]')].find(e=>e.getAttribute('data-turn-key')===${JSON.stringify(user.id)});
+    const observed = await poll(`(()=>{const row=[...document.querySelectorAll('[data-turn-key]')].find(e=>e.getAttribute('data-turn-key')===${cdpValueExpression(user.id)});
       const section=row?.querySelector('[data-analytix-local-display="accepted_slot_display"]');
       const values=section?[...section.querySelectorAll('dd')].map(e=>e.textContent):[];
-      return {full:section?.getAttribute('data-analytix-local-display-mode')==='full',exactAccount:values.includes(${JSON.stringify(account)}),slotCount:values.length};})()`,
+      return {full:section?.getAttribute('data-analytix-local-display-mode')==='full',exactAccount:values.includes(${cdpValueExpression(account)}),slotCount:values.length};})()`,
       (value) => value.full && value.exactAccount && value.slotCount > 0)
     check(id, observed.full && observed.exactAccount)
   }
@@ -290,17 +297,17 @@ export async function runHostLocalInstalled(appPath, cacheRoot) {
   try {
     await launch()
     phase = 'configure-synthetic-provider'
-    const configured = await evaluate(`(async()=>{const a=window.analytix;await a.settings.setSettings({workspaceRoot:${JSON.stringify(paths.workspace)},
-      runtime:{port:${runtimePort},dataDir:${JSON.stringify(paths.runtime)},providerId:${JSON.stringify(providerId)},model:${JSON.stringify(model)},autoStart:true},
-      provider:{activeProviderId:${JSON.stringify(providerId)},providers:[{id:${JSON.stringify(providerId)},
-        name:'Installed synthetic',baseUrl:${JSON.stringify(provider.url)},endpointFormat:'chat_completions',models:[${JSON.stringify(model)}],
-        modelProfiles:{${JSON.stringify(model)}:{contextWindowTokens:1000000,inputModalities:['text'],outputModalities:['text'],supportsToolCalling:true,
+    const configured = await evaluate(`(async()=>{const a=window.analytix;await a.settings.setSettings({workspaceRoot:${cdpValueExpression(paths.workspace)},
+      runtime:{port:${runtimePort},dataDir:${cdpValueExpression(paths.runtime)},providerId:${cdpValueExpression(providerId)},model:${cdpValueExpression(model)},autoStart:true},
+      provider:{activeProviderId:${cdpValueExpression(providerId)},providers:[{id:${cdpValueExpression(providerId)},
+        name:'Installed synthetic',baseUrl:${cdpValueExpression(provider.url)},endpointFormat:'chat_completions',models:[${cdpValueExpression(model)}],
+        modelProfiles:{[${cdpValueExpression(model)}]:{contextWindowTokens:1000000,inputModalities:['text'],outputModalities:['text'],supportsToolCalling:true,
           messageParts:['text'],reasoning:{supportedEfforts:['off','low','medium','high','max'],defaultEffort:'high',requestProtocol:'mimo-chat-completions'}}}}]}});
       await a.runtime.restartRuntime();const p=await a.providerRegistry.request({schemaVersion:1,operation:'list'});
       const c=await a.providerRegistry.request({schemaVersion:1,operation:'connect',expected:{registryRevision:p.registryRevision,registryIncarnation:p.registryIncarnation,
-        providerRevision:'0',providerGeneration:'0',providerIncarnation:'',providerCredentialPurpose:''},provider:{id:${JSON.stringify(providerId)},kind:'openai-compatible',
-        endpoint:${JSON.stringify(provider.url)},proxy:'',models:[${JSON.stringify(model)}],mediaModels:[],selectedModel:${JSON.stringify(model)},selectedMediaModel:'',selectedRoutes:[]},
-        credential:{kind:'set',purpose:'provider-api-key',valueBase64:btoa(${JSON.stringify(syntheticKey)})}});return !c.error;})()`, timeoutMs)
+        providerRevision:'0',providerGeneration:'0',providerIncarnation:'',providerCredentialPurpose:''},provider:{id:${cdpValueExpression(providerId)},kind:'openai-compatible',
+        endpoint:${cdpValueExpression(provider.url)},proxy:'',models:[${cdpValueExpression(model)}],mediaModels:[],selectedModel:${cdpValueExpression(model)},selectedMediaModel:'',selectedRoutes:[]},
+        credential:{kind:'set',purpose:'provider-api-key',valueBase64:btoa(${cdpValueExpression(syntheticKey)})}});return !c.error;})()`, timeoutMs)
     check('isolated-synthetic-registry-connect', configured)
     phase = 'native-import'
     await evaluate(`(()=>{window.__hostLocalInstalledStage={pending:true};window.analytix.runtime.stageFundsCSVSnapshot().then(
@@ -308,12 +315,12 @@ export async function runHostLocalInstalled(appPath, cacheRoot) {
     progress('native-file-selection-required', { pid: child.pid, appPath, csvPath })
     const staged = await poll(`window.__hostLocalInstalledStage`, (value) => value && !value.pending, 10 * 60_000)
     check('native-csv-stage', staged.ok && staged.totalRowCount === 3 && staged.items?.length === 1)
-    const confirmed = await evaluate(`window.analytix.runtime.confirmFundsCSVSnapshot(${JSON.stringify(staged.items[0].selector)})`, timeoutMs)
+    const confirmed = await evaluate(`window.analytix.runtime.confirmFundsCSVSnapshot(${cdpValueExpression(staged.items[0].selector)})`, timeoutMs)
     check('native-csv-confirm', confirmed.ok && confirmed.rowCount === 3)
     const firstSource = await evaluate(sourceExpression, timeoutMs)
     check('current-import-source', firstSource.kind === 'direct_source_preview' && firstSource.rows?.length === 3)
     const created = await evaluate(`(async()=>{const r=await window.analytix.runtime.runtimeRequest('/v1/threads','POST',JSON.stringify({title:'Host-local installed journey',
-      workspace:${JSON.stringify(paths.workspace)},providerId:${JSON.stringify(providerId)},model:${JSON.stringify(model)},mode:'agent'}));return r.status===201?JSON.parse(r.body):null;})()`)
+      workspace:${cdpValueExpression(paths.workspace)},providerId:${cdpValueExpression(providerId)},model:${cdpValueExpression(model)},mode:'agent'}));return r.status===201?JSON.parse(r.body):null;})()`)
     threadId = created?.id
     check('durable-thread-created', !!threadId)
     await selectThread()
@@ -326,7 +333,7 @@ export async function runHostLocalInstalled(appPath, cacheRoot) {
     phase = 'deterministic-cleaning'
     const cleaning = await evaluate(`window.analytix.runtime.runDeterministicFundsCleaning()`, timeoutMs)
     check('actual-cleaning-committed', cleaning.ok && cleaning.status === 'committed' && cleaning.rowCount === 3 && cleaning.changedRowCount === 2 && cleaning.inputSnapshot !== cleaning.outputSnapshot)
-    const diff = await evaluate(`window.analytix.runtime.cleaningDiffPreview({kind:'cleaning_diff_preview',selector:${JSON.stringify(cleaning.selector)},
+    const diff = await evaluate(`window.analytix.runtime.cleaningDiffPreview({kind:'cleaning_diff_preview',selector:${cdpValueExpression(cleaning.selector)},
       fields:['counterpartyAccount'],rowOffset:0,rowLimit:3,displayMode:'full'})`, timeoutMs)
     check('actual-cleaning-diff', diff.kind === 'cleaning_diff_preview' && diff.rows?.length === 3 &&
       diff.rows[0].cells[0].beforeDisplayValue === '9000-001 23' && diff.rows[0].cells[0].afterDisplayValue === '900000123' &&
