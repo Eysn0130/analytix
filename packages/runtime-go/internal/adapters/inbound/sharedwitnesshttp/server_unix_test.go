@@ -556,7 +556,19 @@ func TestServerRejectsUnenrolledClientAndMalformedHTTP(t *testing.T) {
 		{"oversized", http.MethodPost, monotonicheadhttp.ObservePath, protocolContentType, bytes.Repeat([]byte("x"), bodyLimit+1), http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			response := fixture.rawPost(t, requester, test.method, test.path, test.contentType, test.body)
+			client := requester
+			if len(test.body) > bodyLimit {
+				// Let net/http drain this bounded upload before completing its
+				// early Content-Length rejection. Connection: close can race
+				// the client's body write with shutdown instead of delivering 422.
+				transport := requester.Transport.(*http.Transport).Clone()
+				transport.DisableKeepAlives = false
+				t.Cleanup(transport.CloseIdleConnections)
+				copy := *requester
+				copy.Transport = transport
+				client = &copy
+			}
+			response := fixture.rawPost(t, client, test.method, test.path, test.contentType, test.body)
 			if response.StatusCode != test.status || response.Header.Get("Content-Type") != protocolContentType {
 				t.Fatalf("status/content type = %d/%q", response.StatusCode, response.Header.Get("Content-Type"))
 			}
