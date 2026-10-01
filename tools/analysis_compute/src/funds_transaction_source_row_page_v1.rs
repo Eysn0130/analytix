@@ -48,41 +48,41 @@ const INVENTORY_DIGEST_DOMAIN: &[u8] = b"analytix.funds-source-inventory/v1\0";
 const SNAPSHOT_DIGEST_DOMAIN: &[u8] = b"analytix.funds-source-snapshot/v1\0";
 const PAGE_DIGEST_DOMAIN: &[u8] = b"analytix.funds-transaction-source-page/v1\0";
 
-const TRANSACTION_RAW_TEXT_COLUMNS: &[(&str, &str)] = &[
-    ("raw.card_no", "cardNo"),
-    ("raw.acct_no", "acctNo"),
-    ("raw.account_open_name", "accountOpenName"),
-    ("raw.opener_id_no", "openerIdNo"),
-    ("raw.txn_time", "txnTime"),
-    ("raw.amount", "amount"),
-    ("raw.balance", "balance"),
-    ("raw.dc_flag", "dcFlag"),
-    ("raw.counterparty_acct", "counterpartyAcct"),
-    ("raw.cash_flag", "cashFlag"),
-    ("raw.counterparty_name", "counterpartyName"),
-    ("raw.counterparty_id_no", "counterpartyIdNo"),
-    ("raw.counterparty_bank", "counterpartyBank"),
-    ("raw.summary", "summary"),
-    ("raw.currency", "currency"),
-    ("raw.branch_name", "branchName"),
-    ("raw.branch_code", "branchCode"),
-    ("raw.location", "location"),
-    ("raw.is_success", "isSuccess"),
-    ("raw.voucher_no", "voucherNo"),
-    ("raw.terminal_no", "terminalNo"),
-    ("raw.ip_addr", "ipAddr"),
-    ("raw.mac_addr", "macAddr"),
-    ("raw.counterparty_balance", "counterpartyBalance"),
-    ("raw.txn_id", "txnId"),
-    ("raw.log_id", "logId"),
-    ("raw.voucher_type", "voucherType"),
-    ("raw.voucher_id", "voucherId"),
-    ("raw.teller_no", "tellerNo"),
-    ("raw.merchant_name", "merchantName"),
-    ("raw.merchant_no", "merchantNo"),
-    ("raw.remark", "remark"),
-    ("raw.txn_type", "txnType"),
-    ("raw.query_feedback_reason", "queryFeedbackReason"),
+const TRANSACTION_RAW_TEXT_KEYS: &[&str] = &[
+    "cardNo",
+    "acctNo",
+    "accountOpenName",
+    "openerIdNo",
+    "txnTime",
+    "amount",
+    "balance",
+    "dcFlag",
+    "counterpartyAcct",
+    "cashFlag",
+    "counterpartyName",
+    "counterpartyIdNo",
+    "counterpartyBank",
+    "summary",
+    "currency",
+    "branchName",
+    "branchCode",
+    "location",
+    "isSuccess",
+    "voucherNo",
+    "terminalNo",
+    "ipAddr",
+    "macAddr",
+    "counterpartyBalance",
+    "txnId",
+    "logId",
+    "voucherType",
+    "voucherId",
+    "tellerNo",
+    "merchantName",
+    "merchantNo",
+    "remark",
+    "txnType",
+    "queryFeedbackReason",
 ];
 
 const SOURCE_VALUES_JSON_SQL: &str = r#"to_json(struct_pack(
@@ -302,42 +302,44 @@ struct VerifiedProducerBinding {
 }
 
 impl SourceValues {
-    fn raw_values(&self) -> [&Option<String>; 34] {
+    // A semantic name and its source reference have one owner; their identity
+    // must not depend on the order of a separate SQL-column inventory.
+    fn raw_fields(&self) -> [(&str, &Option<String>); 34] {
         [
-            &self.card_no,
-            &self.acct_no,
-            &self.account_open_name,
-            &self.opener_id_no,
-            &self.txn_time,
-            &self.amount,
-            &self.balance,
-            &self.dc_flag,
-            &self.counterparty_acct,
-            &self.cash_flag,
-            &self.counterparty_name,
-            &self.counterparty_id_no,
-            &self.counterparty_bank,
-            &self.summary,
-            &self.currency,
-            &self.branch_name,
-            &self.branch_code,
-            &self.location,
-            &self.is_success,
-            &self.voucher_no,
-            &self.terminal_no,
-            &self.ip_addr,
-            &self.mac_addr,
-            &self.counterparty_balance,
-            &self.txn_id,
-            &self.log_id,
-            &self.voucher_type,
-            &self.voucher_id,
-            &self.teller_no,
-            &self.merchant_name,
-            &self.merchant_no,
-            &self.remark,
-            &self.txn_type,
-            &self.query_feedback_reason,
+            ("raw.card_no", &self.card_no),
+            ("raw.acct_no", &self.acct_no),
+            ("raw.account_open_name", &self.account_open_name),
+            ("raw.opener_id_no", &self.opener_id_no),
+            ("raw.txn_time", &self.txn_time),
+            ("raw.amount", &self.amount),
+            ("raw.balance", &self.balance),
+            ("raw.dc_flag", &self.dc_flag),
+            ("raw.counterparty_acct", &self.counterparty_acct),
+            ("raw.cash_flag", &self.cash_flag),
+            ("raw.counterparty_name", &self.counterparty_name),
+            ("raw.counterparty_id_no", &self.counterparty_id_no),
+            ("raw.counterparty_bank", &self.counterparty_bank),
+            ("raw.summary", &self.summary),
+            ("raw.currency", &self.currency),
+            ("raw.branch_name", &self.branch_name),
+            ("raw.branch_code", &self.branch_code),
+            ("raw.location", &self.location),
+            ("raw.is_success", &self.is_success),
+            ("raw.voucher_no", &self.voucher_no),
+            ("raw.terminal_no", &self.terminal_no),
+            ("raw.ip_addr", &self.ip_addr),
+            ("raw.mac_addr", &self.mac_addr),
+            ("raw.counterparty_balance", &self.counterparty_balance),
+            ("raw.txn_id", &self.txn_id),
+            ("raw.log_id", &self.log_id),
+            ("raw.voucher_type", &self.voucher_type),
+            ("raw.voucher_id", &self.voucher_id),
+            ("raw.teller_no", &self.teller_no),
+            ("raw.merchant_name", &self.merchant_name),
+            ("raw.merchant_no", &self.merchant_no),
+            ("raw.remark", &self.remark),
+            ("raw.txn_type", &self.txn_type),
+            ("raw.query_feedback_reason", &self.query_feedback_reason),
         ]
     }
 }
@@ -568,7 +570,7 @@ fn validate_schema(conn: &Connection) -> Result<()> {
         ("row_hash".to_string(), "VARCHAR"),
         ("extra_json".to_string(), "VARCHAR"),
     ];
-    for (_, key) in TRANSACTION_RAW_TEXT_COLUMNS {
+    for key in TRANSACTION_RAW_TEXT_KEYS {
         let snake = camel_to_snake(key);
         raw_columns.push((format!("{snake}_raw"), "VARCHAR"));
     }
@@ -815,9 +817,9 @@ fn validate_source_text_budget(conn: &Connection, case_id: &str) -> Result<()> {
         ("extra_json".to_string(), MAX_ROW_TEXT_BYTES),
     ];
     raw_columns.extend(
-        TRANSACTION_RAW_TEXT_COLUMNS
+        TRANSACTION_RAW_TEXT_KEYS
             .iter()
-            .map(|(_, key)| (format!("{}_raw", camel_to_snake(key)), MAX_CELL_TEXT_BYTES)),
+            .map(|key| (format!("{}_raw", camel_to_snake(key)), MAX_CELL_TEXT_BYTES)),
     );
     validate_table_text_budget(conn, case_id, "fc_transaction_raw", &raw_columns)?;
 
@@ -1173,9 +1175,9 @@ fn source_row_projection_sql(projection: &str) -> String {
 }
 
 fn candidate_input_bytes_sql() -> String {
-    let mut expressions = TRANSACTION_RAW_TEXT_COLUMNS
+    let mut expressions = TRANSACTION_RAW_TEXT_KEYS
         .iter()
-        .map(|(_, key)| {
+        .map(|key| {
             format!(
                 "COALESCE(octet_length(encode(r.{}_raw)), 0)",
                 camel_to_snake(key)
@@ -1204,7 +1206,7 @@ fn canonical_typed_row(
     values: &SourceValues,
 ) -> Result<Vec<FundsTransactionTypedFieldV1>> {
     let mut fields = Vec::with_capacity(42);
-    for ((name, _), value) in TRANSACTION_RAW_TEXT_COLUMNS.iter().zip(values.raw_values()) {
+    for (name, value) in values.raw_fields() {
         push_text(&mut fields, name, value.as_deref())?;
     }
     push_text(&mut fields, "norm.txn_ts", values.txn_ts.as_deref())?;
@@ -1592,6 +1594,142 @@ mod tests {
         }
     }
 
+    // Independent protocol oracle: neither input nor expected fields are
+    // generated from raw_fields, the SQL projection, or the column inventory.
+    fn identity_sentinel() -> (SourceValues, Value) {
+        let values = serde_json::from_value(serde_json::json!({
+            "cardNo": "", "acctNo": "subject-account", "accountOpenName": "subject-name",
+            "openerIdNo": "subject-id", "txnTime": "raw-time", "amount": "00012.3400",
+            "balance": "9999.900", "dcFlag": "raw-direction", "counterpartyAcct": "counterparty-account",
+            "cashFlag": "raw-cash", "counterpartyName": "counterparty-name", "counterpartyIdNo": "counterparty-id",
+            "counterpartyBank": "raw-bank", "summary": "raw-summary", "currency": "raw-currency",
+            "branchName": "raw-branch-name", "branchCode": "raw-branch-code", "location": "raw-location",
+            "isSuccess": "raw-success", "voucherNo": "raw-voucher-no", "terminalNo": "raw-terminal",
+            "ipAddr": "raw-ip", "macAddr": "raw-mac", "counterpartyBalance": "8888.80",
+            "txnId": "raw-txn-id", "logId": "raw-log-id", "voucherType": "raw-voucher-type",
+            "voucherId": "raw-voucher-id", "tellerNo": "raw-teller", "merchantName": "raw-merchant-name",
+            "merchantNo": "raw-merchant-no", "remark": "raw-remark", "txnType": "raw-txn-type",
+            "queryFeedbackReason": null, "txnTs": "2026-10-01 00:01:02", "cleanAmount": "+00012.3400",
+            "cleanBalance": "-0.000", "cleanDcFlag": "clean-direction", "cleanCardNo": "clean-card",
+            "cleanAcctNo": "clean-account"
+        })).expect("handwritten sentinel input");
+        let expected = [
+            ("raw.card_no", "text", ""),
+            ("raw.acct_no", "text", "subject-account"),
+            ("raw.account_open_name", "text", "subject-name"),
+            ("raw.opener_id_no", "text", "subject-id"),
+            ("raw.txn_time", "text", "raw-time"),
+            ("raw.amount", "text", "00012.3400"),
+            ("raw.balance", "text", "9999.900"),
+            ("raw.dc_flag", "text", "raw-direction"),
+            ("raw.counterparty_acct", "text", "counterparty-account"),
+            ("raw.cash_flag", "text", "raw-cash"),
+            ("raw.counterparty_name", "text", "counterparty-name"),
+            ("raw.counterparty_id_no", "text", "counterparty-id"),
+            ("raw.counterparty_bank", "text", "raw-bank"),
+            ("raw.summary", "text", "raw-summary"),
+            ("raw.currency", "text", "raw-currency"),
+            ("raw.branch_name", "text", "raw-branch-name"),
+            ("raw.branch_code", "text", "raw-branch-code"),
+            ("raw.location", "text", "raw-location"),
+            ("raw.is_success", "text", "raw-success"),
+            ("raw.voucher_no", "text", "raw-voucher-no"),
+            ("raw.terminal_no", "text", "raw-terminal"),
+            ("raw.ip_addr", "text", "raw-ip"),
+            ("raw.mac_addr", "text", "raw-mac"),
+            ("raw.counterparty_balance", "text", "8888.80"),
+            ("raw.txn_id", "text", "raw-txn-id"),
+            ("raw.log_id", "text", "raw-log-id"),
+            ("raw.voucher_type", "text", "raw-voucher-type"),
+            ("raw.voucher_id", "text", "raw-voucher-id"),
+            ("raw.teller_no", "text", "raw-teller"),
+            ("raw.merchant_name", "text", "raw-merchant-name"),
+            ("raw.merchant_no", "text", "raw-merchant-no"),
+            ("raw.remark", "text", "raw-remark"),
+            ("raw.txn_type", "text", "raw-txn-type"),
+            ("raw.query_feedback_reason", "null", ""),
+            ("norm.txn_ts", "text", "2026-10-01 00:01:02"),
+            ("norm.clean_amount", "decimal", "12.34"),
+            ("norm.clean_balance", "decimal", "0"),
+            ("norm.clean_dc_flag", "text", "clean-direction"),
+            ("norm.clean_card_no", "text", "clean-card"),
+            ("norm.clean_acct_no", "text", "clean-account"),
+            ("norm.clean_invalid", "integer", "1"),
+            ("norm.clean_failed", "integer", "0"),
+            ("norm.clean_reversal", "integer", "1"),
+        ];
+        let mut expected = expected.into_iter().map(|(name, kind, value)| {
+            serde_json::json!({"name": name, "scalar": {"kind": kind, "value": value}})
+        }).collect::<Vec<_>>();
+        expected.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+        (values, Value::Array(expected))
+    }
+
+    #[test]
+    fn every_field_matches_independent_identity_sentinel() {
+        let (mut values, mut expected) = identity_sentinel();
+        let fields = canonical_typed_row(1, 0, 1, &values).expect("sentinel projection");
+        assert_eq!(fields.len(), 43);
+        assert_eq!(
+            serde_json::to_value(fields).expect("typed fields"),
+            expected
+        );
+
+        // Null and empty text are different scalar identities, including at
+        // nonadjacent positions in the raw inventory.
+        values.acct_no = None;
+        values.query_feedback_reason = Some(String::new());
+        for field in expected.as_array_mut().expect("oracle fields") {
+            match field["name"].as_str() {
+                Some("raw.acct_no") => {
+                    field["scalar"] = serde_json::json!({"kind": "null", "value": ""})
+                }
+                Some("raw.query_feedback_reason") => {
+                    field["scalar"] = serde_json::json!({"kind": "text", "value": ""})
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            serde_json::to_value(canonical_typed_row(1, 0, 1, &values).expect("null projection"))
+                .expect("typed fields"),
+            expected
+        );
+    }
+
+    #[test]
+    fn identity_oracle_detects_subject_counterparty_swaps_despite_valid_digest() {
+        let (values, expected) = identity_sentinel();
+        let digest = digest_json(
+            CANONICAL_ROW_DOMAIN,
+            &canonical_typed_row(1, 0, 1, &values).expect("original sentinel"),
+        )
+        .expect("original digest");
+        for identity in ["account", "name", "id"] {
+            let (mut changed, _) = identity_sentinel();
+            match identity {
+                "account" => std::mem::swap(&mut changed.acct_no, &mut changed.counterparty_acct),
+                "name" => std::mem::swap(
+                    &mut changed.account_open_name,
+                    &mut changed.counterparty_name,
+                ),
+                "id" => std::mem::swap(&mut changed.opener_id_no, &mut changed.counterparty_id_no),
+                _ => unreachable!(),
+            }
+            let fields = canonical_typed_row(1, 0, 1, &changed).expect("well-typed swapped row");
+            assert_ne!(
+                serde_json::to_value(&fields).expect("swapped fields"),
+                expected,
+                "{identity}"
+            );
+            assert_ne!(
+                digest_json(CANONICAL_ROW_DOMAIN, &fields).expect("valid changed digest"),
+                digest,
+                "{identity}"
+            );
+        }
+    }
+
     #[test]
     fn arguments_are_closed_case_bound_and_pathless() {
         validate_funds_transaction_source_row_page_v1_arguments(&arguments(100), "case-a")
@@ -1828,9 +1966,9 @@ mod tests {
 
     fn seed_source(path: &Path) {
         let conn = Connection::open(path).expect("open source-row fixture");
-        let raw_columns = TRANSACTION_RAW_TEXT_COLUMNS
+        let raw_columns = TRANSACTION_RAW_TEXT_KEYS
             .iter()
-            .map(|(_, key)| format!("{}_raw VARCHAR", camel_to_snake(key)))
+            .map(|key| format!("{}_raw VARCHAR", camel_to_snake(key)))
             .collect::<Vec<_>>()
             .join(", ");
         conn.execute_batch(&format!(
