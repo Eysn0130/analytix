@@ -5,13 +5,16 @@ pub(super) fn build_paginated_data_sql(
     sort_order: &str,
     limit: i64,
     row_offset: i64,
+    matched_group_count: i64,
 ) -> String {
+    // The caller counted this same aggregate/search in its verified snapshot.
+    // Reuse that total instead of executing a redundant constant window.
     if is_unfiltered_search(search_where) {
         return format!(
             "WITH agg AS ({agg_sql}) \
              SELECT key_value, counterparty_account, counterparty_name, bank, location, \
                     placeholder_kind, key_label, in_amount, out_amount, in_count, out_count, \
-                    first_time, last_time, doc, CAST(COUNT(1) OVER() AS BIGINT) AS total_count \
+                    first_time, last_time, doc, CAST({matched_group_count} AS BIGINT) AS total_count \
                FROM agg \
               ORDER BY {sort_expr} {sort_order}, CAST(key_value AS VARCHAR) ASC \
               LIMIT {limit} OFFSET {row_offset}"
@@ -22,7 +25,7 @@ pub(super) fn build_paginated_data_sql(
          SELECT key_value, counterparty_account, counterparty_name, bank, location, \
                 placeholder_kind, key_label, in_amount, out_amount, in_count, out_count, \
                 CAST(first_time AS VARCHAR) AS first_time, CAST(last_time AS VARCHAR) AS last_time, \
-                doc, CAST(COUNT(1) OVER() AS BIGINT) AS total_count \
+                doc, CAST({matched_group_count} AS BIGINT) AS total_count \
            FROM agg \
           WHERE {search_where} \
           ORDER BY {sort_expr} {sort_order}, CAST(key_value AS VARCHAR) ASC \
@@ -82,12 +85,13 @@ mod tests {
 
     #[test]
     fn paginated_data_sql_skips_filtered_cte_when_search_is_empty() {
-        let sql = build_paginated_data_sql(AGG_SQL, "1=1", "key_value", "ASC", 10, 0);
+        let sql = build_paginated_data_sql(AGG_SQL, "1=1", "key_value", "ASC", 10, 0, 2);
 
         assert!(sql.contains("WITH agg AS"));
         assert!(!sql.contains("filtered AS"));
         assert!(!sql.contains("WHERE 1=1"));
-        assert!(sql.contains("CAST(COUNT(1) OVER() AS BIGINT) AS total_count"));
+        assert!(sql.contains("CAST(2 AS BIGINT) AS total_count"));
+        assert!(!sql.contains("OVER()"));
     }
 
     #[test]
@@ -98,6 +102,18 @@ mod tests {
             sql,
             format!("WITH agg AS ({AGG_SQL}) SELECT COUNT(1) FROM agg")
         );
+    }
+
+    #[test]
+    fn paginated_data_sql_keeps_filtered_total_before_limit_and_offset() {
+        let search = "LOWER(counterparty_name) LIKE '%a%'";
+        let sql = build_paginated_data_sql(AGG_SQL, search, "key_value", "ASC", 1, 16, 17);
+
+        assert!(sql.contains("CAST(17 AS BIGINT) AS total_count"));
+        assert!(sql.contains(&format!("WHERE {search}")));
+        assert!(sql.contains("ORDER BY key_value ASC, CAST(key_value AS VARCHAR) ASC"));
+        assert!(sql.contains("LIMIT 1 OFFSET 16"));
+        assert!(!sql.contains("OVER()"));
     }
 
     #[test]
