@@ -1248,6 +1248,7 @@ async function reconcileThreadSnapshotFromDetail(input: {
   loadThreadDetail: AgentProvider['getThreadDetail']
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
+  isCurrentStream: () => boolean
 }): Promise<void> {
   const threadId = input.event.threadId?.trim() || input.fallbackThreadId?.trim()
   if (!threadId) return
@@ -1255,10 +1256,10 @@ async function reconcileThreadSnapshotFromDetail(input: {
 
   try {
     const detail = await input.loadThreadDetail(threadId)
+    // A pending GET can outlive navigation or its original stream binding.
+    if (!input.isCurrentStream() || input.get().activeThreadId !== threadId) return
     input.set((state) => {
-      if (state.activeThreadId !== threadId) {
-        return cursorSeq ? { lastSeq: Math.max(state.lastSeq, cursorSeq) } : {}
-      }
+      if (!input.isCurrentStream() || state.activeThreadId !== threadId) return {}
       const busy = threadSnapshotLooksRunning(detail.blocks, detail.threadStatus)
       const blocks = busy ? detail.blocks : settlePendingRuntimeWorkAfterInterrupt(detail.blocks)
       clearActiveStream(threadId)
@@ -2149,7 +2150,8 @@ export function buildThreadEventSink(
         fallbackThreadId: boundThreadId || get().activeThreadId,
         loadThreadDetail,
         set,
-        get
+        get,
+        isCurrentStream
       })
     },
     onPublicProjectionRevoked: async (ev) => {
