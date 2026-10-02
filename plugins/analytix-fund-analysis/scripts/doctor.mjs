@@ -12,9 +12,9 @@ import {
   MARKETPLACE_NAME,
   PLUGIN_CACHE_FILES,
   PLUGIN_NAME,
-  REFERENCE_FILES,
   RUNTIME_SKILL_FILES,
   runtimeCacheContractViolations,
+  inspectReferenceCopies,
 } from "./runtime-cache-contract.mjs";
 import {
   classifyRuntimeInstallAuthority,
@@ -2519,13 +2519,6 @@ function main() {
   );
   const routerPath = path.join(pluginRoot, "references", "command-router.md");
   const releaseNotesPath = path.join(pluginRoot, "RELEASE_NOTES.md");
-  const embeddedReferenceDir = path.join(
-    pluginRoot,
-    "skills",
-    "analytix-fund-analysis",
-    "references",
-  );
-  const rootReferenceDir = path.join(pluginRoot, "references");
   let pluginManifest = {};
   let mcpManifest = {};
   let serverSource = "";
@@ -4032,22 +4025,11 @@ function main() {
     );
   }
 
-  const referenceDrift = REFERENCE_FILES.filter((relativePath) => {
-    const rootText = readTextIfExists(
-      path.join(rootReferenceDir, relativePath),
-    );
-    const embeddedText = readTextIfExists(
-      path.join(embeddedReferenceDir, relativePath),
-    );
-    return !rootText || !embeddedText || rootText !== embeddedText;
-  });
-  if (referenceDrift.length) {
-    report.fail("embedded reference sync", referenceDrift.join(", "));
-  } else {
-    report.pass(
-      "embedded reference sync",
-      `${REFERENCE_FILES.length} files match root references`,
-    );
+  try {
+    const references = inspectReferenceCopies(pluginRoot);
+    report.pass("embedded reference sync", `${references.files} files match root references`);
+  } catch (error) {
+    report.fail("embedded reference sync", error.message);
   }
 
   const runtimeCacheEvalOnlyViolations = runtimeCacheContractViolations();

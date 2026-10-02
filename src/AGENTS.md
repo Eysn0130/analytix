@@ -60,6 +60,9 @@ inventory.
 
 ## Validation
 
+For ordinary maintenance, use [bounded owner routing](../docs/analytix/development-baseline.md#bounded-maintenance-routing);
+the mapper covers docs and two fixed fixtures, not all affected dependencies.
+
 Use focused tests for the changed seam. Cross-layer settings, provider,
 runtime, or preload changes need the affected type checks. Add the appropriate
 build when bundling, generated output, or integration could change; do not run

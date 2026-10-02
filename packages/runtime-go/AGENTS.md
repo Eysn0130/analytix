@@ -69,6 +69,9 @@ the result; use the root diagnosis and verification rules.
 
 ## Validation
 
+For ordinary maintenance, use [bounded owner routing](../../docs/analytix/development-baseline.md#bounded-maintenance-routing);
+the mapper covers docs and two fixed fixtures, not all affected dependencies.
+
 Use the Go language level declared by `go.mod` and a compatible toolchain.
 Source `./scripts/use-analytix-cache.sh` in the same shell, format changed Go
 files, and select evidence proportionate to the changed seam:

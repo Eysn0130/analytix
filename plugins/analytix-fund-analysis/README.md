@@ -48,10 +48,23 @@ display；广泛研判、资金穿透、报告、导出和发布仍处于 fail-c
   fallback；正式 artifact、报告和外部发布仍有独立 gate。不得把旧模块直接加入
   闭包或把 cached catalog 当作在线证明。
 - `skills/`：Data Analytics 式多 skill 产品面。`analytix-fund-analysis` 保留兼容入口，`index` 做轻量路由，focused skills 覆盖当前案件上下文、数据质量与口径、资金事实快查、特定双方资金往来核验、账户/主体画像、对手方、资金追踪、开放式侦查实验室、全案分析、报告、补调取证、研判完整性复核、报告事实结论复核、研判材料交付复核、资金流向图谱、视觉证据和受控 Case Workbench。
-- `references/`：发布校验和脚本使用的根参考副本；完整 `/analytix ...` 命令表位于 `references/command-router.md`，机器可读路由位于 `references/command-metadata.json`，最小 capability registry 位于 `references/capability-registry.json` / `references/capability-registry.schema.json`，顶级插件化总方案位于 `references/top-pluginization-plan.md`，并声明 eval 覆盖门禁与 passive 非资金误触发题；Hub 生命周期位于 `references/hub-lifecycle.md`，反模式位于 `references/anti-patterns.md`。这些文件必须与 `skills/analytix-fund-analysis/references/` 保持一致，不包含本机路径、会话回归、真实案件样例、golden/oracle 数据或研发测试材料；eval rubric 和 golden/oracle 只允许留在本地 eval-only 脚本材料中。
+- `references/`：唯一维护源，供发布校验和脚本使用；完整 `/analytix ...` 命令表位于 `references/command-router.md`，机器可读路由位于 `references/command-metadata.json`，最小 capability registry 位于 `references/capability-registry.json` / `references/capability-registry.schema.json`，顶级插件化总方案位于 `references/top-pluginization-plan.md`，并声明 eval 覆盖门禁与 passive 非资金误触发题；Hub 生命周期位于 `references/hub-lifecycle.md`，反模式位于 `references/anti-patterns.md`。这些文件必须与 `skills/analytix-fund-analysis/references/` 保持一致，不包含本机路径、会话回归、真实案件样例、golden/oracle 数据或研发测试材料；eval rubric 和 golden/oracle 只允许留在本地 eval-only 脚本材料中。
+
 - `scripts/prepare-hub-package.mjs`：只在 `/tmp` 下生成可复核的 Hub 包源、marketplace stub 和 tar.gz 摘要；它不是 Hub publish/install/upgrade/remount 路径，不能写 Analytix runtime 或系统 Codex 状态。
 - `output/analytix-fund-analysis/functional-closure/`：当前候选版本的真实功能闭环证据目录。该目录只作本地验收输出，不进入发布包。插件源码目录下不再保留历史 `evidence/` A/B 产物，Hub 包源也会排除旧产物目录，避免旧证据、旧禁令或旧 golden 影响当前发布判断。
 - `assets/`：插件图标与 logo。
+
+维护参考材料时只编辑根 `references/`，再运行既有合同模块的同步入口：
+
+```bash
+# 配置的 Owner Mac：先在同一 shell source ./scripts/use-analytix-cache.sh
+node plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs --sync
+npm run test:plugin-contracts
+```
+
+`skills/analytix-fund-analysis/references/` 是 tracked 派生副本，保留 skill 相对路径。
+完整 25 文件清单、普通文件与逐字节一致检查同时供 doctor、Hub 包源准备和 runtime-cache
+快照使用；新增/删除文件须更新该合同清单。同步不会安装、remount 或发布插件。
 
 ## 开发启动
 
