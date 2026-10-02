@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
@@ -221,5 +222,46 @@ func TestFundsRecoveryPhaseJournalIsBoundedPrivateAndImmediate(t *testing.T) {
 	failed := &b1RecoveryPhaseWriter{persist: func([]byte) error { return errors.New("journal unavailable") }}
 	if _, err := failed.Write(line); err == nil {
 		t.Fatal("phase journal persistence failure was ignored")
+	}
+}
+
+func TestFundsRecoveryFinalReadbackFailureClassifiesStrictBoundaries(t *testing.T) {
+	expected := b1RecoveryExpectedFinal{ThreadID: "thread", TurnID: "turn", FinalDigest: strings.Repeat("a", 64)}
+	view := domainevidence.AcceptedFinalPublicViewV3{
+		SchemaVersion: domainevidence.AcceptedFinalPublicViewV3Version, AcceptedFinalDigest: expected.FinalDigest,
+		PublicationState: domainevidence.AcceptedFinalPublicationAccepted, Variant: domainevidence.GeneralGuidanceAnswer,
+		CoverageStatus: domainevidence.AcceptedFinalCoverageGuidanceOnly, ClaimTypes: []string{}, AcceptedAt: "2026-10-02T00:00:00Z",
+		ReceiptMetadata: domainevidence.AcceptedFinalPublicReceiptMetadataV1{Projection: domainevidence.AcceptedFinalReceiptProjection, SetDigest: strings.Repeat("b", 64), Citations: []domainevidence.AcceptedFinalPublicCitationV1{}},
+	}
+	valid := domainevidence.AcceptedFinalPublicViewRecordV3(view)
+	if valid == nil {
+		t.Fatal("invalid independent public-view fixture")
+	}
+	for _, tc := range []struct {
+		name string
+		turn map[string]any
+		want string
+	}{
+		{"turn-missing", nil, "final-turn-missing"},
+		{"view-missing", map[string]any{"id": "turn"}, "final-view-missing"},
+		{"view-invalid-before-label", map[string]any{"id": "turn", "acceptedFinalView": map[string]any{}, "factHistoryState": "retained_snapshot"}, "final-view-invalid"},
+		{"identity-before-label", map[string]any{"id": "turn", "acceptedFinalView": func() map[string]any {
+			bad := view
+			bad.AcceptedFinalDigest = strings.Repeat("c", 64)
+			return domainevidence.AcceptedFinalPublicViewRecordV3(bad)
+		}(), "factHistoryState": "retained_snapshot"}, "final-identity-mismatch"},
+		{"label-mismatch", map[string]any{"id": "turn", "acceptedFinalView": valid, "factHistoryState": "retained_snapshot"}, "final-history-label-mismatch"},
+		{"current", map[string]any{"id": "turn", "acceptedFinalView": valid}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			thread := map[string]any{"turns": []any{tc.turn}}
+			if got := b1RecoveryFinalReadbackFailure(expected, thread); got != tc.want {
+				t.Fatal("strict readback boundary was misclassified")
+			}
+		})
+	}
+	expected.HistoryState = "retained_snapshot"
+	if b1RecoveryFinalReadbackFailure(expected, map[string]any{"turns": []any{map[string]any{"id": "turn", "acceptedFinalView": valid, "factHistoryState": "retained_snapshot"}}}) != "" {
+		t.Fatal("exact retained expectation rejected")
 	}
 }

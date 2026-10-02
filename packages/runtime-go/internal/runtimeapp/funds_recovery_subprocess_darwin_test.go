@@ -90,6 +90,29 @@ func b1VisitRecoveryFinals(expected []b1RecoveryExpectedFinal, read func(string)
 	return nil
 }
 
+// Closed test-only diagnostics preserve the strict identity/history checks.
+// No response body, final digest or source identity enters the phase journal.
+func b1RecoveryFinalReadbackFailure(expected b1RecoveryExpectedFinal, thread map[string]any) string {
+	turn := packagedSourceUnavailableHydrationTurnV1(thread, expected.TurnID)
+	if turn == nil {
+		return "final-turn-missing"
+	}
+	if turn["acceptedFinalView"] == nil {
+		return "final-view-missing"
+	}
+	final, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(turn["acceptedFinalView"])
+	if err != nil {
+		return "final-view-invalid"
+	}
+	if final.AcceptedFinalDigest != expected.FinalDigest {
+		return "final-identity-mismatch"
+	}
+	if (expected.HistoryState == "" && turn["factHistoryState"] != nil) || (expected.HistoryState != "" && turn["factHistoryState"] != expected.HistoryState) {
+		return "final-history-label-mismatch"
+	}
+	return ""
+}
+
 const b1RecoveryPhasePrefix = "ANALYTIX_TEST_RECOVERY_PHASE "
 
 type b1RecoveryPhase struct {
@@ -104,6 +127,7 @@ func b1RecoveryPhaseAllowed(record b1RecoveryPhase) bool {
 	switch record.Phase {
 	case "input-ready", "lease-begin", "lease-end", "assembly-begin", "assembly-end", "native-owner-begin", "native-owner-end",
 		"fact-admission-report", "fact-admission-pass", "fact-admission-fail", "thread-get-begin", "thread-get-end",
+		"final-turn-missing", "final-view-missing", "final-view-invalid", "final-identity-mismatch", "final-history-label-mismatch", "public-privacy-fail",
 		"display-begin", "display-end", "readback-pass", "runtime-close-begin", "runtime-close-end", "owner-shutdown-begin", "owner-shutdown-end":
 	default:
 		return false
@@ -299,7 +323,7 @@ func TestFundsRecoveryFreshProcessHelper(t *testing.T) {
 	}
 	phase("fact-admission-pass")
 	client := &http.Client{Timeout: 45 * time.Second}
-	readOrdinal, displayOrdinal := 0, 0
+	readOrdinal, finalOrdinal, displayOrdinal := 0, 0, 0
 	err = b1VisitRecoveryFinals(input.ExpectedFinals, func(threadID string) (map[string]any, error) {
 		readOrdinal++
 		b1EmitRecoveryPhase(b1RecoveryPhase{Phase: "thread-get-begin", Ordinal: readOrdinal})
@@ -309,17 +333,17 @@ func TestFundsRecoveryFreshProcessHelper(t *testing.T) {
 		if err != nil {
 			return nil, errors.New("fresh process public thread could not be encoded")
 		}
-		deliveryAssertPublic(t, public)
+		if !deliveryAssertPublic(t, public) {
+			b1EmitRecoveryPhase(b1RecoveryPhase{Phase: "public-privacy-fail", Ordinal: readOrdinal})
+		}
 		return thread, nil
 	}, func(expected b1RecoveryExpectedFinal, thread map[string]any) error {
-		turn := packagedSourceUnavailableHydrationTurnV1(thread, expected.TurnID)
-		final, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(turn["acceptedFinalView"])
-		if err != nil || final.AcceptedFinalDigest != expected.FinalDigest {
-			return errors.New("fresh process changed an expected final identity")
+		finalOrdinal++
+		if failure := b1RecoveryFinalReadbackFailure(expected, thread); failure != "" {
+			b1EmitRecoveryPhase(b1RecoveryPhase{Phase: failure, Ordinal: finalOrdinal})
+			return errors.New("fresh process expected final readback failed: " + failure)
 		}
-		if (expected.HistoryState == "" && turn["factHistoryState"] != nil) || (expected.HistoryState != "" && turn["factHistoryState"] != expected.HistoryState) {
-			return errors.New("fresh process changed an expected snapshot history label")
-		}
+
 		displayOrdinal++
 		b1EmitRecoveryPhase(b1RecoveryPhase{Phase: "display-begin", Ordinal: displayOrdinal})
 		display := b1PublicChainRequest(t, client, runtime.URL, http.MethodPost, "/v1/local-display/accepted-slot-display", map[string]any{

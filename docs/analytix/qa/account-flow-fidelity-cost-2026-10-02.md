@@ -1,6 +1,7 @@
 # Account-flow 保真与本地 page 成本
 
-Status: source slice verified；full native vector **failed**，Draft PR38 的合并验收仍 blocked。
+Status: source slice verified；original full native **failed**，修正后唯一完整链外层超时；
+native 与 Rust CI disposition 未闭合，Draft PR38 的合并验收仍 blocked。
 不是模型优势或安装／发布验收。
 Scope: 现有 CSV → DuckDB → source-row 的 page 选择与编码，及相关 Go 消费边界。
 Base: PR37 main `28dbaface7cdab09adb896095ed138da0bea927e`，
@@ -132,10 +133,62 @@ B 的当前上下文；既有 `sameRetainedFactScopeV1` 包含同 snapshot 的�
 而 vector 的 B expectation 仍为空 HistoryState。两个既有纯 Go projection tests
 （stale epoch 隐藏与 exact retained admission）在 clean 5d7 上通过，package wall
 0.220s；这支持 history-label 假设，但子进程故障文字被既有安全 journal 丢弃，
-不能据此断言实际失败类别或排除伴随的 privacy t.Error。相关 producer/helper 与
-PR37 base 的源码相同；本轮不改原 expected/golden，不再次跑整套 native，不宣布
-产品恢复已修复或完整隐私验收。下一有界 seam 是仅保留 closed failure 分类的
-第二线程 readback 最小复现；其通过前，当前 Draft 不 merge。
+不能据此断言该次实际失败类别或排除伴随的 privacy t.Error。该次 freeze 的
+Go recovery/history/turnstart/helper 与 PR37 base 相同；Rust production page-builder
+确有本期改动，不能把整个失败归为历史问题。该次原完整 vector 的 expected/golden 未改。
+
+本次续行最小诊断（canonical `1a8d40c69` 上的 test-only overlay，production 与
+clean package 仍为 `5d7fde6e8`）：closed classifier／per-thread readback／expectation
+bounds／private journal 4 top-level、8 subtests **PASS**，package wall 10.952s。
+只运行一个 B 线程的原 9-row CSV：一次 fresh native numeric final → 实际 OwnerClose
+→ SourceUnavailable retry → 同进程 reopen；**PASS 323.26s**（package 323.864s）。
+严格 parser 验证原 final 与 digest 未变，旧 empty HistoryState 在 reopen 前后均得到
+closed `final-history-label-mismatch`，实际为 `retained_snapshot`。私有 frozen contexts
+确认 ThreadID／case binding／DSV2／manifest 相同、epoch 提高、risk policy digest 改变；
+只记录封闭分类，不保存私有 record 或正文。两次 synthetic Provider dispatch、一份
+native semantic；OwnerClose 后零新增 dispatch／preparation，所有 privacy 断言通过。
+该诊断未独立比较完整 principal/workspace scope 或 reopen 前后全部 frozen contexts；
+没有 fresh-process/display 第二次整链验收，不回填旧 FAIL 缺失的错误分类。
+accepted target 要求原 epoch/snapshot 与授权的历史投影；same DSV2+higher epoch 的
+保守 retained 语义由现 owner 实现。旧 vector 的阶段／状态期望存在具体 harness gap，
+协调方在该实际诊断后明确准入最小 harness 修正：仅第三回合 OwnerClose 后的旧 B
+要求 exact `retained_snapshot`；新增 numeric final 的 pre-current 与 A 的 current 状态、
+原 digest、严格 parser、privacy、exact refs 和 fresh-process display 均保留。
+新增 scope guard 检查完整 principal/workspace/case、原 DSV2/manifest、更高 epoch、
+Host policy 与 case-evidence 权限；minimal reopen 比较两个完整 frozen contexts。
+这些新增断言不回填上面的 323.26s 回执。修正后同一 closed-contract 4 top-level／
+8 subtests **PASS 10.629s**。未改生产 epoch、信任或授权。
+
+只读检查 clean cache 的 3594 个相关 tracked inputs：非 test 差异为零，无额外
+Go/Rust source，只有三个当前 Go test overlay，均与 canonical 字节一致。
+正确 `stage3-5d7fde6e8-clean-dir` app 的 raw runtime/analysis/authority SHA 未变。
+可复用该包验证同一 5d7 production generation 的新 harness，不重复装配；这不是
+新 test/report HEAD 的 exact package、安装或发布验收。canonical 的受保护 dirty
+`recovery_plan.go` 仍不进入 clean production 或任务提交。
+
+该修正后只追加一次完整链：同一 full/ad-hoc compiled identity、fresh 0700 Host profile、
+clean 5d7 production + 三个 test overlays、原 child 11m／parent context 12m／outer 20m；
+终态 **FAIL，package wall 1200.458s，outer timeout**。A/B 的两次 fresh native query、
+9/7 行、独立 gold、多重集／exact refs／lineage、同进程 reopen 2/2／零 held、
+原文 display 与 SourceUnavailable 均通过。新增完整 scope guard 实测 original epoch
+**1 → 2**，principal/workspace/case/DSV2/manifest 保持；原 B 严格 parser/digest 与
+exact retained 标签通过，OwnerClose 后零新增 dispatch/preparation。
+fresh child 的 bounded journal 仅到 `assembly-begin`（input-ready、lease-begin/end），
+没有 fact admission、正常 Owner、两个 display 或 readback-pass；不拼旧链片段为 PASS。
+本次未命中任何新增 readback failure class，不能断言旧 976.39s 的实际类别已补齐。
+只读检查后相关测试／runtime/native 进程为零；未延长时限、重启或再跑完整链。
+
+一秒采样与 40-frame addr2line 是诊断负担：出现 private-authority extended-security
+检查与 runtime waits，不是 codesign failure、CPU profile 或单项 SQL 时间的证据。
+outer-timeout stack 处于父进程 `b1AssertFreshProcessRecovery`／exec wait，另有
+private CAS inventory 工作；child assembly 的具体等待／错误原因仍 **UNKNOWN**。
+一次结束后 lsof 返回 exit 1，后续 inventory 证实进程已退出，未当作权限拒绝。
+新 full receipt 72045 bytes、SHA
+`13955fa13ee4b0667784be7c971b71721fa98c97b2704ed98656be8bef0afb14`；
+closed child journal 293 bytes、SHA
+`d250d8eceef0d27f3286ed68ef0b4221b697e220a96783b586e8aa23926fd6e0`。
+新增原始回执另存私有 `stage3-account-flow-1a8d40c69-r2`，原归档未改。
+缺口是 child assembly 的可区分证据及完整新进程验收；当前 Draft 仍不 merge。
 
 native 的四次合成 loopback dispatch 均完整捕获：request JSON 共 92646 bytes，
 messages/tools JSON 共 92314 bytes；context A/B 为 296/2879 bytes。均不是 tokens；
@@ -153,6 +206,38 @@ Branch `codex/account-flow-fidelity`；[Draft PR38](https://github.com/Eysn0130/
 两轮只读审查未发现 selector 或 failure-only generic diagnostics 的阻断；不是 GitHub approval。
 最终 task-owned test/report commit 的当前 CI/CodeQL 以 PR exact HEAD 回执为准。
 原四项 dirty SHA 未变、未提交；无 main 合并／postmerge PASS 声明。
+当前 `1a8d40c69` 的 CodeQL `36956724184` 四项 Analyze success。
+Development `36956726587` 的 fresh API 终态为 **50 success／2 failure**，共 52 jobs，
+无未完成项；失败为 Rust 与 aggregate Development gate。Rust job `110681212846` 的原
+`query_stats_rows_cli_search_pages_keep_total_and_stable_tie_order` 在
+`stats_rows.page_values` 触发 DuckDB INTERNAL index 0/vector size 0，exit 101；
+95 integration PASS／1 FAIL，lib 294 PASS／1 ignored。原 SQL/fixture/Cargo lock
+没有本期改动；仍不能据此称历史或 flaky。原日志 105611 bytes、SHA
+`31cd09fc7c649cc328d711cf1cbfe428e8333140c6f9b1fa4d44580fe24ab8e4`。
+该 test 仅新增 offset 的失败 context，原 SQL、排序、gold、预期不变。
+本地 exact CLI **PASS 1／209.27s**，编译 1m54s；一次 1s CLI sample 只有
+`_dyld_start`／112KB，不能算 DuckDB SQL 等待或 codesign 根因。
+既有 plan-probe owner 加真实 search/tie/offset 0/1 对照：原 window/default 8 threads、
+test-only 1 thread、仅 total 列替换为同 session 实际 count，生产 SQL 未改。
+初次 raw-key probe 的独立 expected 错用了 CLI id 前缀，**3 FAIL／2.68s**，保留；
+纠正 fixture 读取契约后 **3 PASS／6.64s**。完整 `query_stats_row_values` consumer
+及 JSON row/summary 的 6 pages **3 PASS／5.16s**，DuckDB `v1.5.4`；最后 wrapper
+resume transport 失败，shell exit **unknown**，完整 test 回执 PASS、fresh 相关进程为零。
+这组成功不能证明 Linux 内部错误已经消失。
+
+主源 [DuckDB issue 25713](https://github.com/duckdb/duckdb/issues/25713) 与
+[修复 PR25844](https://github.com/duckdb/duckdb/pull/25844/files) 提供相同 index 0/vector 0
+窗口并行故障的候选机制。固定依赖的 bundled archive SHA
+`53398a1a9ac6b8c0bd9314a07db61d4b0473cc2ad3a567e323f820cc18fe4ba8` 与实际 debug
+编译源确认仍使用 SINK `sunk == count`、按行累加的旧逻辑；不是已纳入修复的 engine。
+但本 fixture 的未匹配 LEFT JOIN 不等于最终输入为空，CI 无符号栈或 offset，不能
+把该源级故障路径当作本案因果结论。未复制／改编上游代码、未升级依赖或修改生产 SQL。
+一次固定上限的同 fixture scheduling diagnostic **PASS 1／29.32s**，重编译 22.82s：
+同 verified transaction 每 offset window 256、constant 32、single-thread 32，
+共 **640 个实际 page SQL**；EXPLAIN 确认原路径有 WINDOW、constant 控制没有。
+另有 EXPLAIN／metadata／aggregate／session 校验开销，全部 SQL 次数仍 unknown。
+没有错误或区分信号，停止该本地 lane，保留 incident cause **UNKNOWN**；不改生产
+SQL、不盲重跑旧 CI，也不把重复 GREEN 当成当前 finding 的关闭依据。
 
 ## 待授权的窄同模型对照
 

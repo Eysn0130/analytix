@@ -289,6 +289,9 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		aRequest, bRequest, aInput, bInput, correct := firstRequestBytes, secondRequestBytes, firstInputBytes, secondInputBytes, correctSemantics
 		aRoles, bRoles := firstRoles, secondRoles
 		mu.Unlock()
+		if secondTurn["factHistoryState"] != nil {
+			t.Fatal("new B final was not current before OwnerClose")
+		}
 		if beforeCalls != 4 || beforeSemantics != 2 {
 			t.Fatalf("two-thread Provider sequence calls=%d semantics=%d", beforeCalls, beforeSemantics)
 		}
@@ -389,7 +392,7 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		restored := request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
 		restoredTurn := packagedSourceUnavailableHydrationTurnV1(restored, turnID)
 		restoredFinal, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(restoredTurn["acceptedFinalView"])
-		if err != nil || restoredFinal.AcceptedFinalDigest != final.AcceptedFinalDigest {
+		if err != nil || restoredFinal.AcceptedFinalDigest != final.AcceptedFinalDigest || restoredTurn["factHistoryState"] != nil {
 			t.Fatal("reopen lost committed final")
 		}
 		restoredBody, _ := json.Marshal(restored)
@@ -424,6 +427,14 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		t.Logf("post-Owner-close public terminal hydration_ms=%d", time.Since(publicHydrationStarted).Milliseconds())
 		blockedDetail := request(http.MethodGet, "/v1/threads/"+secondID, nil, http.StatusOK)
 		blockedTurn := packagedSourceUnavailableHydrationTurnV1(blockedDetail, blockedTurnID)
+		originalBContext := runtimeWitnessedRegistryFrozenContextV2(t, config.ProductionDurableRoot, secondID, secondTurnID)
+		blockedBContext := runtimeWitnessedRegistryFrozenContextV2(t, config.ProductionDurableRoot, secondID, blockedTurnID)
+		b1AssertOwnerCloseRetainedScope(t, originalBContext, blockedBContext)
+		retainedB := b1RecoveryExpectedFinal{ThreadID: secondID, TurnID: secondTurnID, FinalDigest: secondFinal.AcceptedFinalDigest, HistoryState: "retained_snapshot"}
+		if b1RecoveryFinalReadbackFailure(retainedB, blockedDetail) != "" {
+			t.Fatal("OwnerClose did not preserve B's exact original final as retained history")
+		}
+
 		blockedBody, err := json.Marshal(blockedTurn)
 		if err != nil {
 			t.Fatal("native-source failure terminal could not be serialized")
@@ -450,7 +461,7 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		}
 		driver.assertNewProcess(rev14PrivateAccount,
 			b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: turnID, FinalDigest: final.AcceptedFinalDigest},
-			b1RecoveryExpectedFinal{ThreadID: secondID, TurnID: secondTurnID, FinalDigest: secondFinal.AcceptedFinalDigest},
+			retainedB,
 		)
 		mu.Lock()
 		unchanged = calls == beforeCalls
@@ -458,6 +469,156 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		if !unchanged {
 			t.Fatal("fresh process recovery reissued Provider work")
 		}
+	})
+}
+
+// Original finals keep their frozen identity; a new Host policy can advance
+// the same source's epoch. Eligibility is not admission: public readback and
+// fresh-process exact-ref display still perform their real authorization checks.
+func b1AssertOwnerCloseRetainedScope(t *testing.T, original, current domainsecurity.TurnSecurityContext) {
+	t.Helper()
+	if current.ThreadID != original.ThreadID || current.WorkspaceRealPath != original.WorkspaceRealPath ||
+		current.TenantID != original.TenantID || current.UserID != original.UserID || current.CaseID != original.CaseID ||
+		current.CaseBindingHash != original.CaseBindingHash || current.DatasetSnapshotID != original.DatasetSnapshotID ||
+		current.SourceManifestHash != original.SourceManifestHash || current.ContextEpoch <= original.ContextEpoch ||
+		!domainsecurity.TurnSecurityContextUsesHostRiskPolicy(original) || !domainsecurity.TurnSecurityContextUsesHostRiskPolicy(current) ||
+		!domainsecurity.TurnSecurityContextAllowsCaseEvidence(current) ||
+		current.PublicationPolicy.ThreadRiskPolicyDigest == original.PublicationPolicy.ThreadRiskPolicyDigest {
+		t.Fatal("same-source authorized higher-epoch history scope was not established")
+	}
+	t.Logf("native history scope=original-principal-workspace-case-preserved same_snapshot=true same_manifest=true host_policy_advanced=true original_epoch=%d current_epoch=%d", original.ContextEpoch, current.ContextEpoch)
+}
+
+// Single-thread causal diagnostic: the original current expectation is
+// compared before/after a real SourceUnavailable turn.
+// This does not substitute for the complete A/B fresh-process acceptance chain.
+func TestFundsDeliveryOwnerCloseHistoryReadback(t *testing.T) {
+	source := deliveryCNYCSV(t)
+	reference := b1ReferenceFlowFromCSVInWindow(t, source, "2026-09-")
+	rows := deliveryReferenceTransactions(t, source)
+	var mu sync.Mutex
+	calls, semantics := 0, 0
+	model := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		if err != nil || len(body) > 2<<20 || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-only" {
+			t.Error("unexpected loopback Provider request")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		deliveryAssertPublic(t, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		data := deliveryProviderSemantics(t, body)
+		if len(data) != 0 {
+			if len(data) != 1 || data[0].InflowMinor != reference.inflowMinor || data[0].OutflowMinor != reference.outflowMinor || data[0].NetMinor != reference.netMinor || !deliveryTransactionsMatch(rows, data[0].Transactions) {
+				t.Error("native diagnostic differs from independent CSV truth")
+			}
+			mu.Lock()
+			semantics++
+			mu.Unlock()
+			runtimeOptionalLifecycleModelResponseV1(w, "", nil, "合成账户流水分析完成。")
+			return
+		}
+		if call != 1 {
+			t.Error("unexpected repeated native request")
+		}
+		runtimeOptionalLifecycleModelResponseV1(w, rev14AccountFlowToolName, map[string]any{"subject_alias": "acct:1", "start_inclusive": "2026-09-01T00:00:00.000000Z", "end_inclusive": "2026-09-30T23:59:59.999999Z", "evidence_row_limit": 100}, "")
+	})
+	runB1ProductionPublicChain(t, source, model, func(config Config, root, workspace, sourcePath, authorityID string, sourceEvents func() []domainplugincapability.FundsSourceReadDecisionEventV1, driver b1PublicChainDriver) {
+		client := &http.Client{Timeout: 45 * time.Second}
+		request := func(method, path string, body map[string]any, status int) map[string]any {
+			return b1PublicChainRequest(t, client, driver.baseURL(), method, path, body, status)
+		}
+		staged := request(http.MethodPost, "/v1/local-display/funds-import/stage", map[string]any{"workspaceRoot": workspace, "sourcePath": sourcePath}, http.StatusOK)
+		items, _ := staged["items"].([]any)
+		if len(items) != 1 {
+			t.Fatal("diagnostic did not stage one source")
+		}
+		confirmed := request(http.MethodPost, "/v1/local-display/funds-import/confirm", map[string]any{"selector": items[0].(map[string]any)["selector"]}, http.StatusOK)
+		if confirmed["sourceRowCount"] != float64(9) {
+			t.Fatal("diagnostic import lost rows")
+		}
+		thread := request(http.MethodPost, "/v1/threads", map[string]any{"title": "Synthetic source-unavailable history", "workspace": workspace, "providerId": config.ProviderID, "model": config.Model}, http.StatusCreated)
+		threadID := contracts.StringField(thread, "id")
+		prompt := "分析银行账号 " + rev14PrivateAccount + " 在二〇二六年九月一日至九月三十日的收支。"
+		start := func() string {
+			started := request(http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{"prompt": prompt, "mode": "agent", "async": true, "approvalPolicy": "auto", "sandboxMode": "workspace-write"}, http.StatusAccepted)
+			turnID := contracts.StringField(started, "turnId")
+			driver.waitTurn(threadID, turnID, "owner-close-history")
+			return turnID
+		}
+		turnID := start()
+		turn := b1WaitTerminal(t, client, driver.baseURL(), threadID, turnID)
+		final, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(turn["acceptedFinalView"])
+		if err != nil || turn["status"] != "completed" || final.Variant != domainevidence.EvidenceBackedAnswer {
+			t.Fatal("diagnostic did not acquire a numeric final")
+		}
+		expected := b1RecoveryExpectedFinal{ThreadID: threadID, TurnID: turnID, FinalDigest: final.AcceptedFinalDigest}
+		if b1RecoveryFinalReadbackFailure(expected, request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)) != "" {
+			t.Fatal("pre-failure current final was invalid")
+		}
+		// Read the private durable contexts locally; never serialize them into logs.
+		readContext := func(turnID string) domainsecurity.TurnSecurityContext {
+			return runtimeWitnessedRegistryFrozenContextV2(t, config.ProductionDurableRoot, threadID, turnID)
+		}
+		original := readContext(turnID)
+		preparedRoot := filepath.Join(config.DataDir, "private", "evidence-settlements", "prepared")
+		beforePrepared := startupWholeTreeDigest(t, preparedRoot)
+		mu.Lock()
+		beforeCalls, beforeSemantics := calls, semantics
+		mu.Unlock()
+		if beforeCalls != 2 || beforeSemantics != 1 {
+			t.Fatal("diagnostic did not use one fresh native query")
+		}
+		if driver.closeNativeSource == nil || driver.closeNativeSource() != nil {
+			t.Fatal("diagnostic actual OwnerClose failed")
+		}
+		blockedID := start()
+		blockedTurn := b1WaitTerminal(t, client, driver.baseURL(), threadID, blockedID)
+		blockedBody, err := json.Marshal(blockedTurn)
+		if err != nil {
+			t.Fatal("diagnostic terminal could not be serialized")
+		}
+		deliveryAssertPublic(t, blockedBody)
+		if blockedTurn["status"] != "completed" || !bytes.Contains(blockedBody, []byte(domainevidence.CaseSourceUnavailableText)) {
+			t.Fatal("diagnostic did not complete SourceUnavailable")
+		}
+		if value := blockedTurn["acceptedFinalView"]; value != nil {
+			view, err := domainevidence.ParseAcceptedFinalPublicViewV3Value(value)
+			if err != nil || view.Variant == domainevidence.EvidenceBackedAnswer || view.Variant == domainevidence.PartialEvidenceAnswer {
+				t.Fatal("unavailable source generated authoritative numeric final")
+			}
+		}
+		current := readContext(blockedID)
+		b1AssertOwnerCloseRetainedScope(t, original, current)
+		mu.Lock()
+		unchanged := calls == beforeCalls && semantics == beforeSemantics
+		mu.Unlock()
+		if !unchanged || startupWholeTreeDigest(t, preparedRoot) != beforePrepared {
+			t.Fatal("OwnerClose reissued Provider or evidence work")
+		}
+		checkHistory := func(ordinal int) {
+			detail := request(http.MethodGet, "/v1/threads/"+threadID, nil, http.StatusOK)
+			public, err := json.Marshal(detail)
+			if err != nil {
+				t.Fatal("diagnostic history could not be serialized")
+			}
+			deliveryAssertPublic(t, public)
+			failure := b1RecoveryFinalReadbackFailure(expected, detail)
+			t.Logf("native diagnostic readback_failure=%s ordinal=%d", failure, ordinal)
+			if failure != "final-history-label-mismatch" || packagedSourceUnavailableHydrationTurnV1(detail, turnID)["factHistoryState"] != "retained_snapshot" {
+				t.Fatal("same-source higher-epoch retained-label hypothesis was falsified")
+			}
+		}
+		checkHistory(1)
+		driver.reopen()
+		if readContext(turnID) != original || readContext(blockedID) != current {
+			t.Fatal("reopen changed original frozen contexts")
+		}
+		checkHistory(2)
 	})
 }
 
@@ -639,13 +800,16 @@ func deliveryCNYCSV(t *testing.T) []byte {
 	return buffer.Bytes()
 }
 
-func deliveryAssertPublic(t *testing.T, body []byte) {
+func deliveryAssertPublic(t *testing.T, body []byte) bool {
 	t.Helper()
+	clean := true
 	for _, sentinel := range []string{rev14PrivateAccount, "6222021234567891", "SYNTH_PII_", "SYNTH_UNTRUSTED_MEMO_", "SYNTH_COUNTERPARTY_", "SELECT ", "baseline.csv"} {
 		if bytes.Contains(body, []byte(sentinel)) {
+			clean = false
 			t.Error("private vector content reached generic or Provider output")
 		}
 	}
+	return clean
 }
 
 func deliveryProviderSemantics(t *testing.T, body []byte) []domainnative.AccountFlowProviderSemanticResultV1 {
