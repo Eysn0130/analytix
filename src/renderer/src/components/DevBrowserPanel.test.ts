@@ -76,14 +76,18 @@ describe('DevBrowserPanel initial URL resolution', () => {
 })
 
 describe('DevBrowserPanel titlebar controls', () => {
-  it('keeps the right-panel collapse control in the preview titlebar', () => {
-    const titlebarStart = devBrowserPanelSource.indexOf('flex h-[var(--ax-chat-topbar-shell-height)] min-w-0 items-center')
+  it('keeps browser actions in the address row beneath the shared workspace tabs', () => {
     const addressbarStart = devBrowserPanelSource.indexOf('<form onSubmit={submitUrl}')
-    const collapseStart = devBrowserPanelSource.indexOf('<PanelCollapseButton')
+    const addressbarEnd = devBrowserPanelSource.indexOf('</form>', addressbarStart)
+    const collapseStart = devBrowserPanelSource.indexOf('onClick={onCollapse}')
 
-    expect(titlebarStart).toBeGreaterThan(-1)
-    expect(addressbarStart).toBeGreaterThan(titlebarStart)
-    expect(collapseStart).toBeGreaterThan(titlebarStart)
-    expect(collapseStart).toBeLessThan(addressbarStart)
+    expect(devBrowserPanelSource).not.toContain('flex h-[var(--ax-chat-topbar-shell-height)] min-w-0 items-center')
+    expect(addressbarStart).toBeGreaterThan(-1)
+    expect(collapseStart).toBeGreaterThan(addressbarStart)
+    expect(collapseStart).toBeLessThan(addressbarEnd)
+    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('onClick={resetPreview}')
+    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('onClick={reload}')
+    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('captureSelection()')
+    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain("captureSelection(t('browserExplainPrompt'))")
   })
 })

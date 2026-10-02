@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Globe2,
   Loader2,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Send,
@@ -28,7 +29,6 @@ import {
   removeBrowserStorageItem,
   writeBrowserStorageItem
 } from '../lib/browser-storage'
-import { PanelCollapseButton } from './workbench/PanelCollapseButton'
 import { useChatStore } from '../store/chat-store'
 import { useNativeReferenceStore } from '../office/native-reference-store'
 import { browserScopeSchema } from '../../../../packages/runtime/src/contracts/browser-selection'
@@ -438,45 +438,11 @@ export function DevBrowserPanel({
 
   return (
     <aside
+      style={{ containerType: 'inline-size' }}
       className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas backdrop-blur-xl ${className ?? ''}`}
     >
       <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
-        <div className="flex h-[var(--ax-chat-topbar-shell-height)] min-w-0 items-center gap-2 border-b border-ds-border-muted/70 bg-ds-subtle/55 px-3 dark:bg-white/[0.035]">
-          <div className="flex h-8 min-w-0 max-w-[15rem] items-center gap-2 rounded-[8px] bg-ds-card px-2.5 pl-3 text-[12px] font-semibold text-ds-ink shadow-none dark:bg-white/[0.09]">
-            <Globe2 className="h-3.5 w-3.5 shrink-0 text-ds-muted" strokeWidth={1.75} />
-            <span className="min-w-0 flex-1 truncate">{tabLabel}</span>
-            <button
-              type="button"
-              onClick={onCollapse}
-              className="-mr-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink dark:hover:bg-white/10"
-              aria-label={t('browserCloseTab')}
-              title={t('browserCloseTab')}
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.85} />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={resetPreview}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ds-faint transition hover:bg-white hover:text-ds-ink dark:hover:bg-white/10"
-            aria-label={t('browserNewTab')}
-            title={t('browserNewTab')}
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
-          </button>
-          <div className="ml-auto flex shrink-0 items-center">
-            {useElectronWebview && <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
-              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserQuoteSelection')}</button>}
-            {useElectronWebview && onSubmitPrompt && <button type="button" onClick={() => void captureSelection(t('browserExplainPrompt'))} disabled={capturingSelection}
-              className="mr-2 rounded px-2 py-1 text-xs text-ds-muted disabled:opacity-50">{t('browserExplainSelection')}</button>}
-            <PanelCollapseButton
-              onClick={onCollapse}
-              ariaLabel={t('rightPanelCollapse')}
-              title={t('rightPanelCollapse')}
-            />
-          </div>
-        </div>
-        <form onSubmit={submitUrl} className="flex h-12 min-w-0 items-center gap-2 px-3">
+        <form onSubmit={submitUrl} className="ds-browser-addressbar flex h-12 min-w-0 items-center gap-1.5 px-2">
           <div className="flex shrink-0 items-center gap-1 rounded-full bg-ds-surface-subtle p-0.5 dark:bg-white/[0.08]">
             <button
               type="button"
@@ -514,12 +480,14 @@ export function DevBrowserPanel({
             </button>
           </div>
 
-          <div className="flex h-8 min-w-[7rem] flex-1 items-center gap-2 rounded-full border border-ds-border-muted bg-ds-surface-subtle px-3 text-ds-muted transition focus-within:border-ds-border-strong focus-within:bg-white dark:bg-white/[0.07] dark:focus-within:bg-white/10">
+          <div title={tabLabel}
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border border-ds-border-muted bg-ds-surface-subtle px-3 text-ds-muted transition focus-within:border-ds-border-strong focus-within:bg-white dark:bg-white/[0.07] dark:focus-within:bg-white/10">
             <Globe2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             <input
               value={draftUrl}
               onChange={(event) => setDraftUrl(event.target.value)}
               className="h-full w-full min-w-0 bg-transparent text-[13px] font-medium text-ds-ink outline-none"
+              aria-label={t('browserAddressPlaceholder')}
               placeholder={t('browserAddressPlaceholder')}
               spellCheck={false}
             />
@@ -534,37 +502,47 @@ export function DevBrowserPanel({
             >
               <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
-            <button
-              type="button"
-              onClick={() => setAutoFollow((value) => !value)}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-ds-hover ${
-                autoFollow ? 'text-sky-500 dark:text-sky-300' : 'text-ds-faint hover:text-ds-ink'
-              }`}
-              aria-label={t('browserAutoFollow')}
-              aria-pressed={autoFollow}
-              title={t('browserAutoFollow')}
-            >
-              <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              onClick={resetPreview}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-              aria-label={t('browserReset')}
-              title={t('browserReset')}
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              onClick={openExternal}
-              disabled={!activeUrl}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-default disabled:opacity-35"
-              aria-label={t('browserOpenExternal')}
-              title={t('browserOpenExternal')}
-            >
-              <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
+            <details className="ds-browser-actions relative" onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.preventDefault(); event.stopPropagation()
+              event.currentTarget.open = false
+              event.currentTarget.querySelector('summary')?.focus()
+            }} onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false
+            }} onClick={(event) => {
+              if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.open = false
+            }}>
+              <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full text-ds-faint hover:bg-ds-hover hover:text-ds-ink [&::-webkit-details-marker]:hidden"
+                aria-label={t('browserMore')} title={t('browserMore')}>
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              </summary>
+              <div style={{ width: 'min(14rem, calc(100cqw - 16px))' }} className="absolute right-0 top-full z-50 mt-1 flex flex-col gap-1 rounded-xl border border-ds-border bg-ds-card p-1 text-[12px] shadow-lg">
+                <button type="button" onClick={() => setAutoFollow((value) => !value)}
+                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
+                  aria-label={t('browserAutoFollow')} aria-pressed={autoFollow}>
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{t('browserAutoFollow')}
+                </button>
+                <button type="button" onClick={resetPreview}
+                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
+                  aria-label={t('browserReset')}>
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />{t('browserReset')}
+                </button>
+                <button type="button" onClick={openExternal} disabled={!activeUrl}
+                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
+                  aria-label={t('browserOpenExternal')}>
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />{t('browserOpenExternal')}
+                </button>
+                {useElectronWebview ? <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
+                  className="min-h-8 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-50">{t('browserQuoteSelection')}</button> : null}
+                {useElectronWebview && onSubmitPrompt ? <button type="button" onClick={() => void captureSelection(t('browserExplainPrompt'))} disabled={capturingSelection}
+                  className="min-h-8 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-50">{t('browserExplainSelection')}</button> : null}
+                <button type="button" onClick={onCollapse}
+                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
+                  aria-label={t('browserCloseTab')}>
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />{t('browserCloseTab')}
+                </button>
+              </div>
+            </details>
           </div>
         </form>
 
