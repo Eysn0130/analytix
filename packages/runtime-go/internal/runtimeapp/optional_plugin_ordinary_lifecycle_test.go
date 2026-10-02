@@ -220,6 +220,22 @@ func runRuntimeOptionalPluginOrdinaryLifecycleModeV1(t *testing.T, fault string,
 			t.Fatal("ordinary lifecycle start omitted turn identity")
 		}
 		fixture.async.expect(thread, id, phase)
+		defer func() {
+			if !t.Failed() {
+				return
+			}
+			model.mu.Lock()
+			steps, results := model.steps[phase], model.lastToolResults[phase]
+			model.mu.Unlock()
+			fixture.async.mu.Lock()
+			record := *fixture.async.record(thread, id)
+			fixture.async.mu.Unlock()
+			// Observe before outer shutdown can cancel the turn. Only counters and
+			// closed observer fields are logged, never provider/history bodies.
+			t.Logf("phase=%s pre-shutdown steps=%d tool_results=%d starts=%d ends=%d completion_phase=%s completion_error=%s terminal_status=%s",
+				phase, steps, results, record.starts, record.ends, record.result.CompletionPhase,
+				record.result.CompletionErrorClass, record.result.TerminalStatus)
+		}()
 		turn := runtimeOptionalLifecycleWaitTurnV1(t, client, server.URL, thread, id, phase)
 		runtimeOptionalLifecycleAssertTurnV1(t, turn, "R131_"+strings.ToUpper(phase)+"_COMPLETE", tools)
 		turns[phase] = id
@@ -737,18 +753,21 @@ func runtimeOptionalLifecycleAssertReplayV1(t *testing.T, client *http.Client, b
 func runtimeOptionalLifecycleWaitTurnV1(t *testing.T, client *http.Client, baseURL, threadID, turnID, phase string) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
+	lastHTTP, lastState := 0, "not_observed"
 	for time.Now().Before(deadline) {
 		status, detail := packagedSourceUnavailableHydrationHTTPJSONV1(t, client, baseURL, http.MethodGet, "/v1/threads/"+threadID, nil)
+		lastHTTP = status
 		if status != http.StatusOK && status != http.StatusServiceUnavailable {
 			t.Fatalf("phase=%s history HTTP status=%d code=%s message=%.200s", phase, status, contracts.StringField(detail, "code"), contracts.StringField(detail, "message"))
 		}
 		turn := packagedSourceUnavailableHydrationTurnV1(detail, turnID)
 		if turn != nil {
 			state := contracts.StringField(turn, "status")
+			lastState = state
 			if state == "completed" {
 				return turn
 			}
-			if state == "failed" || state == "interrupted" || state == "cancelled" {
+			if state == "failed" || state == "interrupted" || state == "cancelled" || state == "aborted" {
 				codes := []string{}
 				items, _ := turn["items"].([]any)
 				for _, raw := range items {
@@ -762,7 +781,7 @@ func runtimeOptionalLifecycleWaitTurnV1(t *testing.T, client *http.Client, baseU
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("phase=%s did not publish completed history within 30s", phase)
+	t.Fatalf("phase=%s did not publish completed history within 30s: last_http=%d last_state=%s", phase, lastHTTP, lastState)
 	return nil
 }
 
