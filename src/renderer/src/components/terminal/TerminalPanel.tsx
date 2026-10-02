@@ -503,10 +503,10 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
 
   return (
     <aside
-      className={`ds-no-drag ds-surface-strong flex min-h-0 flex-col overflow-hidden border-t border-ds-border-muted text-ds-ink shadow-[var(--ax-shadow-panel)] dark:bg-[rgba(21,29,49,0.98)] ${className}`}
+      className={`ds-no-drag ds-surface-strong flex min-h-0 flex-col overflow-hidden border-t border-ds-border-muted text-ds-ink shadow-[var(--ax-shadow-panel)] ${className}`}
       style={height ? { height } : undefined}
     >
-      <div className="flex h-11 shrink-0 items-center border-b border-ds-border-muted bg-ds-card/92 text-ds-ink backdrop-blur-xl dark:bg-[rgba(24,33,54,0.92)]">
+      <div className="flex h-11 shrink-0 items-center border-b border-ds-border-muted bg-ds-card/92 text-ds-ink backdrop-blur-xl">
         <div
           className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto px-3 pt-2"
           role="tablist"
@@ -521,7 +521,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
                 key={tab.id}
                 className={`group flex h-8 max-w-[220px] shrink-0 items-center rounded-t-[10px] text-[13px] font-medium transition ${
                   active
-                    ? 'ds-surface-strong border border-b-transparent border-ds-border-muted text-ds-ink shadow-sm dark:bg-[rgba(38,49,76,0.96)]'
+                    ? 'ds-surface-strong border border-b-transparent border-ds-border-muted text-ds-ink shadow-sm'
                     : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
                 }`}
                 onContextMenu={(event) => openTabContextMenu(event, tab.id)}
@@ -622,7 +622,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
         ) : null}
       </div>
 
-      <div className="ds-surface-strong relative min-h-0 flex-1 overflow-hidden px-5 py-4 dark:bg-[rgba(21,29,49,0.98)]">
+      <div className="ds-surface-strong relative min-h-0 flex-1 overflow-hidden px-5 py-4">
         <div ref={containerRef} className="h-full w-full" key={activeTab?.id} />
         {error ? (
           <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
@@ -632,7 +632,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
               <button
                 type="button"
                 onClick={() => void handleRestart()}
-                className="mt-4 rounded-full bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-white/20"
+                className="mt-4 rounded-full bg-ds-subtle px-3 py-1.5 text-[12px] font-semibold text-ds-ink transition hover:bg-ds-hover"
               >
                 {t('terminalRestart')}
               </button>
@@ -644,7 +644,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
             <button
               type="button"
               onClick={() => void handleRestart()}
-              className="pointer-events-auto rounded-full bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white shadow-lg backdrop-blur transition hover:bg-white/20"
+              className="pointer-events-auto rounded-full bg-ds-subtle px-3 py-1.5 text-[12px] font-semibold text-ds-ink shadow-lg backdrop-blur transition hover:bg-ds-hover"
             >
               {t('terminalExitMessage')}
             </button>
