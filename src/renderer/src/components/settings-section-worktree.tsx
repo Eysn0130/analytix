@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
-import { CheckCircle2, GitBranch, GitMerge, Loader2, RefreshCw, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, GitBranch, GitMerge, Loader2, RefreshCw, Trash2, XCircle } from '../design/AnalytixUiIcons'
 import { MAX_WORKTREE_POOL_SIZE, parseWorktreeHasChangesError } from '@shared/worktree'
 import type { WorktreePoolStatus } from '@shared/worktree'
 import { useWorktreeStore } from '../stores/worktree-store'

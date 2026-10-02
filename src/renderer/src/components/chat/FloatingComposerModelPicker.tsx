@@ -11,7 +11,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   MODEL_REASONING_EFFORTS,

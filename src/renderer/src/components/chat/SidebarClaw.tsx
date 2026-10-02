@@ -5,7 +5,7 @@ import {
   Plus,
   RefreshCw,
   Settings
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { ClawImChannelV1 } from '@shared/app-settings'
 import {
   SidebarIconButton,

@@ -72,6 +72,13 @@ export function useShellPanelMotion({
     let frameId = 0
 
     const tick = (now: number): void => {
+      // Preference changes during a running transition take effect on the next frame.
+      if (isShellMotionReduced()) {
+        progressRef.current = target
+        setProgress(target)
+        setIsMounted(isVisible)
+        return
+      }
       const elapsed = clampProgress((now - startedAt) / durationMs)
       const nextProgress = startProgress + (target - startProgress) * easeOutCubic(elapsed)
       progressRef.current = nextProgress

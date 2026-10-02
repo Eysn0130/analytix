@@ -1,3 +1,4 @@
+import { Check, ChevronDown, Copy, CreditCard, UserRound, X } from "../../../../../design/AnalytixUiIcons";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { WorkbenchButton, WorkbenchSegmentedControl } from "../../../../components/workbench-ui";
 import type { StatsTreeTab } from "../../api/stats-api";
@@ -276,10 +277,7 @@ export function AnalysisTreePanel({
                 tabIndex={leftSearchExpanded ? 0 : -1}
                 onClick={onCollapseLeftSearch}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M7 7L17 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  <path d="M17 7L7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
+                <X size={14} aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -356,22 +354,13 @@ export function AnalysisTreePanel({
                   }}
                   aria-label="切换分组选择"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M20 6L9 17l-5-5" stroke="rgba(31,111,235,.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <Check size={14} aria-hidden="true" />
                 </button>
                 <div className={`gAvatar ${group.isAccountLikeGroup ? "card" : "user"}`} aria-hidden="true">
                   {group.isAccountLikeGroup ? (
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <rect x="4.25" y="6.75" width="15.5" height="10.5" rx="2.2" />
-                      <path d="M4.25 10.35h15.5" strokeLinecap="round" />
-                      <path d="M7.4 14.1h3.2" strokeLinecap="round" />
-                    </svg>
+                    <CreditCard size={18} aria-hidden="true" />
                   ) : (
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="3.2" />
-                      <path d="M6.8 18.2c1.4-3 3.3-4.4 5.2-4.4s3.8 1.4 5.2 4.4" strokeLinecap="round" />
-                    </svg>
+                    <UserRound size={18} aria-hidden="true" />
                   )}
                 </div>
                 <div className="gMain">
@@ -391,9 +380,7 @@ export function AnalysisTreePanel({
                       aria-expanded={expanded}
                     >
                       <span className="gToggleChipCount">{group.items.length}</span>
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path d="m8 10 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                      </svg>
+                      <ChevronDown size={16} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -415,9 +402,7 @@ export function AnalysisTreePanel({
                           }}
                         >
                           <div className={`cb ${checked ? "checked" : ""}`}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                              <path d="M20 6L9 17l-5-5" stroke="rgba(31,111,235,.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
+                            <Check size={14} aria-hidden="true" />
                           </div>
                           <div className="iMain">
                             <MiddleEllipsisText className="iTitle" text={projectedCardNumber} tailChars={4} />
@@ -438,10 +423,7 @@ export function AnalysisTreePanel({
                                     onCopyTreeItemCardNumber(item.primaryText);
                                   }}
                                 >
-                                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-                                    <rect x="8" y="8" width="10" height="10" rx="2" strokeWidth="2" />
-                                    <path d="M6 14H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" strokeWidth="2" strokeLinecap="round" />
-                                  </svg>
+                                  <Copy size={12} aria-hidden="true" />
                                 </button>
                               </div>
                             ) : null}

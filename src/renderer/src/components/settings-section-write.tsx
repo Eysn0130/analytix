@@ -24,7 +24,7 @@ import {
 } from '@shared/app-settings'
 import { WRITE_DESIGN_DRAFT_DEFAULT_PROMPT, WRITE_INFOGRAPHIC_DEFAULT_PROMPT } from '@shared/write-infographic'
 import { WRITE_PROTOTYPE_DEFAULT_PROMPT } from '@shared/write-prototype'
-import { PencilLine, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { PencilLine, Plus, RotateCcw, Trash2 } from '../design/AnalytixUiIcons'
 import { builtinWriteQuickActionDefaults } from '../write/quick-actions'
 import {
   AdvancedSettingsDisclosure,

@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
   Trash2
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import {
   MODEL_ENDPOINT_FORMATS,
   type ModelEndpointFormat,

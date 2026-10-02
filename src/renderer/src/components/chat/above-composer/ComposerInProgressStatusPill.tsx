@@ -1,4 +1,4 @@
-import { Ban, Check, Circle, Loader2, X } from 'lucide-react'
+import { Ban, Check, Circle, Loader2, X } from '../../../design/AnalytixUiIcons'
 import { type CSSProperties, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ThreadTodoList, ThreadTodoStatus } from '../../../agent/types'

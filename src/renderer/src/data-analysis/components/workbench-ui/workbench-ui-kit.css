@@ -17,18 +17,18 @@
   --workbench-ui-accent-end: var(--sidebar-segment-active-end);
   --workbench-ui-accent-shadow: var(--sidebar-segment-active-shadow);
   --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-elevated));
-  --workbench-ui-on-accent: color-mix(in oklab, var(--color-bg-elevated) 88%, var(--color-text) 12%);
+  --workbench-ui-on-accent: var(--color-bg);
   --workbench-ui-focus-ring: color-mix(in oklab, var(--color-accent) 22%, transparent);
   --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 6%, var(--sidebar-surface));
   --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 26%, var(--workbench-ui-border));
   --workbench-ui-danger-text: color-mix(in oklab, var(--color-danger) 72%, var(--color-text));
   --workbench-ui-table-head-bg: color-mix(in oklab, var(--sidebar-surface) 98%, var(--color-bg-elevated));
-  --workbench-ui-table-font-size: 11.5px;
-  --workbench-ui-table-row-font-size: 11px;
+  --workbench-ui-table-font-size: 12.5px;
+  --workbench-ui-table-row-font-size: 12px;
   --workbench-ui-toolbar-radius: 6px;
   --workbench-ui-toolbar-control-height: 32px;
   --workbench-ui-toolbar-pad-x: 22px;
-  --workbench-ui-toolbar-font-size: 10px;
+  --workbench-ui-toolbar-font-size: 12px;
   --workbench-ui-toolbar-font-weight: 600;
   --workbench-ui-toolbar-text: color-mix(in oklab, var(--sidebar-nav-active-text) 82%, var(--color-text) 18%);
   --workbench-ui-toolbar-surface: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated) 8%);
@@ -42,10 +42,9 @@
   --workbench-ui-toolbar-danger-text: color-mix(in oklab, var(--color-danger) 76%, var(--workbench-ui-toolbar-text));
   --workbench-ui-panel-border: color-mix(in oklab, var(--sidebar-control-border) 84%, var(--color-border) 16%);
   --workbench-ui-panel-border-hover: color-mix(in oklab, var(--color-accent) 14%, var(--workbench-ui-panel-border));
-  --workbench-ui-panel-shadow: 0 10px 24px rgba(23, 45, 88, 0.035);
+  --workbench-ui-panel-shadow: none;
   --workbench-ui-panel-shadow-hover:
-    0 26px 58px rgba(27, 50, 95, 0.12),
-    0 10px 22px rgba(78, 102, 156, 0.08);
+    none;
 }
 
 .data-analysis-surface[data-theme="dark"] {
@@ -58,7 +57,7 @@
   --workbench-ui-border: color-mix(in oklab, var(--color-border) 78%, transparent);
   --workbench-ui-border-strong: color-mix(in oklab, var(--color-accent) 30%, var(--color-border));
   --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 16%, var(--color-bg-elevated));
-  --workbench-ui-on-accent: color-mix(in oklab, var(--color-text) 92%, var(--color-bg) 8%);
+  --workbench-ui-on-accent: var(--color-bg);
   --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 14%, var(--color-bg-elevated));
   --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 38%, var(--workbench-ui-border));
   --workbench-ui-danger-text: color-mix(in oklab, var(--color-danger) 78%, var(--color-text));
@@ -73,10 +72,9 @@
   --workbench-ui-toolbar-danger-text: color-mix(in oklab, var(--color-danger) 80%, var(--workbench-ui-toolbar-text));
   --workbench-ui-panel-border: color-mix(in oklab, var(--color-border) 76%, transparent);
   --workbench-ui-panel-border-hover: color-mix(in oklab, var(--color-accent) 34%, var(--color-border));
-  --workbench-ui-panel-shadow: 0 16px 34px rgba(4, 8, 18, 0.34);
+  --workbench-ui-panel-shadow: none;
   --workbench-ui-panel-shadow-hover:
-    0 28px 58px rgba(3, 8, 18, 0.52),
-    0 12px 24px color-mix(in oklab, var(--color-accent) 18%, transparent);
+    none;
 }
 
 .workbench-ui-btn {
@@ -143,7 +141,7 @@
 }
 
 .workbench-ui-btn--accent {
-  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 84%, #1f3bb8);
+  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--workbench-ui-accent-start) 0%, var(--workbench-ui-accent-end) 100%);
   color: var(--workbench-ui-on-accent);
   box-shadow: var(--workbench-ui-accent-shadow);
@@ -152,14 +150,14 @@
 .workbench-ui-btn--accent:hover:not(:disabled),
 .workbench-ui-btn--accent:focus-visible:not(:disabled),
 .workbench-ui-btn--accent:active:not(:disabled) {
-  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 88%, #1639ba);
+  border-color: color-mix(in oklab, var(--workbench-ui-accent-end) 88%, var(--color-border));
   background: linear-gradient(
     136deg,
-    color-mix(in oklab, var(--workbench-ui-accent-start) 90%, #6180ff) 0%,
-    color-mix(in oklab, var(--workbench-ui-accent-end) 94%, #214cdc) 100%
+    color-mix(in oklab, var(--workbench-ui-accent-start) 90%, var(--color-bg)) 0%,
+    color-mix(in oklab, var(--workbench-ui-accent-end) 94%, var(--color-bg)) 100%
   );
   color: var(--workbench-ui-on-accent);
-  box-shadow: 0 16px 32px rgba(44, 94, 219, 0.22);
+  box-shadow: var(--shadow-card);
 }
 
 .workbench-ui-btn--accent:active:not(:disabled) {
@@ -210,7 +208,7 @@
 }
 
 .workbench-ui-toolbar-btn.workbench-ui-btn--accent {
-  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 84%, #1f3bb8);
+  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 84%, var(--color-border));
   background: linear-gradient(
     136deg,
     var(--workbench-ui-toolbar-accent-start) 0%,
@@ -223,11 +221,11 @@
 .workbench-ui-toolbar-btn.workbench-ui-btn--accent:hover:not(:disabled),
 .workbench-ui-toolbar-btn.workbench-ui-btn--accent:focus-visible:not(:disabled),
 .workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) {
-  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, #1639ba);
+  border-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, var(--color-border));
   background: linear-gradient(
     136deg,
-    color-mix(in oklab, var(--workbench-ui-toolbar-accent-start) 90%, #6180ff) 0%,
-    color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 94%, #214cdc) 100%
+    color-mix(in oklab, var(--workbench-ui-toolbar-accent-start) 90%, var(--color-bg)) 0%,
+    color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 94%, var(--color-bg)) 100%
   );
   box-shadow: none;
   color: var(--workbench-ui-on-accent);
@@ -334,7 +332,7 @@
   bottom: 0;
   left: 0;
   width: calc(100% / var(--workbench-ui-segment-count, 1));
-  border: 1px solid color-mix(in oklab, var(--workbench-ui-accent-end) 84%, #1f3bb8);
+  border: 1px solid color-mix(in oklab, var(--workbench-ui-accent-end) 84%, var(--color-border));
   border-radius: var(--workbench-ui-radius);
   background: linear-gradient(136deg, var(--workbench-ui-accent-start) 0%, var(--workbench-ui-accent-end) 100%);
   box-shadow: var(--workbench-ui-accent-shadow);
@@ -442,7 +440,7 @@
   box-shadow:
     inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 14%, transparent),
     0 10px 24px rgba(68, 92, 233, 0.08);
-  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+  color: color-mix(in oklab, var(--color-accent) 82%, var(--color-border));
 }
 
 .workbench-ui-metric-strip {
@@ -800,19 +798,13 @@
   padding-left: 36px;
 }
 
-.workbench-ui-toolbar-search-field::before {
-  content: "";
+.workbench-ui-toolbar-search-field__icon {
   position: absolute;
   left: 12px;
   top: 50%;
-  width: 18px;
-  height: 18px;
   transform: translateY(-50%);
+  color: var(--workbench-ui-text-muted);
   pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M9 3.5a5.5 5.5 0 1 0 3.39 9.83l3.14 3.14a.75.75 0 1 0 1.06-1.06l-3.14-3.14A5.5 5.5 0 0 0 9 3.5Zm0 1.5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z' fill='%237a8699'/%3E%3C/svg%3E");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 18px 18px;
 }
 
 .workbench-ui-toolbar-search-field__input {
@@ -933,8 +925,8 @@
   padding: 12px 10px 11px;
   border-top: none;
   background: var(--workbench-ui-toolbar-accent-end);
-  border-bottom-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, #1639ba);
-  color: #ffffff;
+  border-bottom-color: color-mix(in oklab, var(--workbench-ui-toolbar-accent-end) 88%, var(--color-border));
+  color: var(--workbench-ui-on-accent);
   font-size: 10.8px;
   font-weight: 650;
   letter-spacing: 0.02em;

@@ -1,3 +1,4 @@
+import { Eye, Download, RotateCcw, Trash2, TableProperties, UserRound, FileText, Users, Sparkles } from "../../../design/AnalytixUiIcons";
 import { CSSProperties, Dispatch, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, MutableRefObject, ReactNode, SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   WorkbenchButton,
@@ -1291,69 +1292,9 @@ function canDeleteExecutionRow(row: ExecutionTaskTableRow): boolean {
   return Boolean(row.record?.ledgerRow) && !isExecutionPendingOrRunning(row.statusText);
 }
 
-function ImportTaskActionIcon({
-  kind,
-}: {
-  kind: "view" | "download" | "retry" | "delete";
-}): JSX.Element {
-  if (kind === "view") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="is-view">
-        <path
-          d="M14 2.75C15.9068 2.75 17.2615 2.75159 18.2892 2.88976C19.2952 3.02503 19.8749 3.27869 20.2981 3.7019C20.7852 4.18904 20.9973 4.56666 21.1147 5.23984C21.2471 5.9986 21.25 7.08092 21.25 9C21.25 9.41422 21.5858 9.75 22 9.75C22.4142 9.75 22.75 9.41422 22.75 9L22.75 8.90369C22.7501 7.1045 22.7501 5.88571 22.5924 4.98199C22.417 3.97665 22.0432 3.32568 21.3588 2.64124C20.6104 1.89288 19.6615 1.56076 18.489 1.40314C17.3498 1.24997 15.8942 1.24998 14.0564 1.25H14C13.5858 1.25 13.25 1.58579 13.25 2C13.25 2.41421 13.5858 2.75 14 2.75Z"
-          fill="currentColor"
-          opacity="0.5"
-        />
-        <path
-          d="M2.00001 14.25C2.41422 14.25 2.75001 14.5858 2.75001 15C2.75001 16.9191 2.75289 18.0014 2.88529 18.7602C3.00275 19.4333 3.21477 19.811 3.70191 20.2981C4.12512 20.7213 4.70476 20.975 5.71085 21.1102C6.73852 21.2484 8.09318 21.25 10 21.25C10.4142 21.25 10.75 21.5858 10.75 22C10.75 22.4142 10.4142 22.75 10 22.75H9.94359C8.10583 22.75 6.6502 22.75 5.51098 22.5969C4.33856 22.4392 3.38961 22.1071 2.64125 21.3588C1.95681 20.6743 1.58304 20.0233 1.40762 19.018C1.24992 18.1143 1.24995 16.8955 1.25 15.0964L1.25001 15C1.25001 14.5858 1.58579 14.25 2.00001 14.25Z"
-          fill="currentColor"
-          opacity="0.5"
-        />
-        <path
-          d="M22 14.25C22.4142 14.25 22.75 14.5858 22.75 15L22.75 15.0963C22.7501 16.8955 22.7501 18.1143 22.5924 19.018C22.417 20.0233 22.0432 20.6743 21.3588 21.3588C20.6104 22.1071 19.6615 22.4392 18.489 22.5969C17.3498 22.75 15.8942 22.75 14.0564 22.75H14C13.5858 22.75 13.25 22.4142 13.25 22C13.25 21.5858 13.5858 21.25 14 21.25C15.9068 21.25 17.2615 21.2484 18.2892 21.1102C19.2952 20.975 19.8749 20.7213 20.2981 20.2981C20.7852 19.811 20.9973 19.4333 21.1147 18.7602C21.2471 18.0014 21.25 16.9191 21.25 15C21.25 14.5858 21.5858 14.25 22 14.25Z"
-          fill="currentColor"
-          opacity="0.5"
-        />
-        <path
-          d="M9.94359 1.25H10C10.4142 1.25 10.75 1.58579 10.75 2C10.75 2.41421 10.4142 2.75 10 2.75C8.09319 2.75 6.73852 2.75159 5.71085 2.88976C4.70476 3.02503 4.12512 3.27869 3.70191 3.7019C3.21477 4.18904 3.00275 4.56666 2.88529 5.23984C2.75289 5.9986 2.75001 7.08092 2.75001 9C2.75001 9.41422 2.41422 9.75 2.00001 9.75C1.58579 9.75 1.25001 9.41422 1.25001 9L1.25 8.90369C1.24995 7.10453 1.24992 5.8857 1.40762 4.98199C1.58304 3.97665 1.95681 3.32568 2.64125 2.64124C3.38961 1.89288 4.33856 1.56076 5.51098 1.40314C6.65019 1.24997 8.10584 1.24998 9.94359 1.25Z"
-          fill="currentColor"
-          opacity="0.5"
-        />
-        <path d="M12 10.75C11.3096 10.75 10.75 11.3096 10.75 12C10.75 12.6904 11.3096 13.25 12 13.25C12.6904 13.25 13.25 12.6904 13.25 12C13.25 11.3096 12.6904 10.75 12 10.75Z" fill="currentColor" />
-        <path
-          fillRule="evenodd"
-          clipRule="evenodd"
-          d="M5.89243 14.0598C5.29747 13.3697 5 13.0246 5 12C5 10.9754 5.29748 10.6303 5.89242 9.94021C7.08037 8.56222 9.07268 7 12 7C14.9273 7 16.9196 8.56222 18.1076 9.94021C18.7025 10.6303 19 10.9754 19 12C19 13.0246 18.7025 13.3697 18.1076 14.0598C16.9196 15.4378 14.9273 17 12 17C9.07268 17 7.08038 15.4378 5.89243 14.0598ZM9.25 12C9.25 10.4812 10.4812 9.25 12 9.25C13.5188 9.25 14.75 10.4812 14.75 12C14.75 13.5188 13.5188 14.75 12 14.75C10.4812 14.75 9.25 13.5188 9.25 12Z"
-          fill="currentColor"
-        />
-      </svg>
-    );
-  }
-  if (kind === "download") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="is-download">
-        <path d="M12 7L12 14M12 14L15 11M12 14L9 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M16 17H12H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12Z" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
-    );
-  }
-  if (kind === "retry") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="is-retry">
-        <path
-          d="M8.25005 8.5C8.25005 8.91421 8.58584 9.25 9.00005 9.25C9.41426 9.25 9.75005 8.91421 9.75005 8.5H8.25005ZM9.00005 8.267H9.75006L9.75004 8.26283L9.00005 8.267ZM9.93892 5.96432L10.4722 6.49171L9.93892 5.96432ZM12.2311 5V4.24999L12.2269 4.25001L12.2311 5ZM16.269 5L16.2732 4.25H16.269V5ZM18.5612 5.96432L18.0279 6.49171V6.49171L18.5612 5.96432ZM19.5 8.267L18.75 8.26283V8.267H19.5ZM19.5 12.233H18.75L18.7501 12.2372L19.5 12.233ZM18.5612 14.5357L18.0279 14.0083L18.5612 14.5357ZM16.269 15.5V16.25L16.2732 16.25L16.269 15.5ZM16 14.75C15.5858 14.75 15.25 15.0858 15.25 15.5C15.25 15.9142 15.5858 16.25 16 16.25V14.75ZM9.00005 9.25C9.41426 9.25 9.75005 8.91421 9.75005 8.5C9.75005 8.08579 9.41426 7.75 9.00005 7.75V9.25ZM8.73105 8.5V7.74999L8.72691 7.75001L8.73105 8.5ZM6.43892 9.46432L6.97218 9.99171L6.43892 9.46432ZM5.50005 11.767H6.25006L6.25004 11.7628L5.50005 11.767ZM5.50005 15.734L6.25005 15.7379V15.734H5.50005ZM8.73105 19L8.72691 19.75H8.73105V19ZM12.769 19V19.75L12.7732 19.75L12.769 19ZM15.0612 18.0357L14.5279 17.5083L15.0612 18.0357ZM16 15.733H15.25L15.2501 15.7372L16 15.733ZM16.75 15.5C16.75 15.0858 16.4143 14.75 16 14.75C15.5858 14.75 15.25 15.0858 15.25 15.5H16.75ZM9.00005 7.75C8.58584 7.75 8.25005 8.08579 8.25005 8.5C8.25005 8.91421 8.58584 9.25 9.00005 9.25V7.75ZM12.7691 8.5L12.7732 7.75H12.7691V8.5ZM15.0612 9.46432L15.5944 8.93694V8.93694L15.0612 9.46432ZM16.0001 11.767L15.2501 11.7628V11.767H16.0001ZM15.2501 15.5C15.2501 15.9142 15.5858 16.25 16.0001 16.25C16.4143 16.25 16.7501 15.9142 16.7501 15.5H15.2501ZM9.75005 8.5V8.267H8.25005V8.5H9.75005ZM9.75004 8.26283C9.74636 7.60005 10.0061 6.96296 10.4722 6.49171L9.40566 5.43694C8.65985 6.19106 8.24417 7.21056 8.25006 8.27117L9.75004 8.26283ZM10.4722 6.49171C10.9382 6.02046 11.5724 5.75365 12.2352 5.74999L12.2269 4.25001C11.1663 4.25587 10.1515 4.68282 9.40566 5.43694L10.4722 6.49171ZM12.2311 5.75H16.269V4.25H12.2311V5.75ZM16.2649 5.74999C16.9277 5.75365 17.5619 6.02046 18.0279 6.49171L19.0944 5.43694C18.3486 4.68282 17.3338 4.25587 16.2732 4.25001L16.2649 5.74999ZM18.0279 6.49171C18.494 6.96296 18.7537 7.60005 18.7501 8.26283L20.25 8.27117C20.2559 7.21056 19.8402 6.19106 19.0944 5.43694L18.0279 6.49171ZM18.75 8.267V12.233H20.25V8.267H18.75ZM18.7501 12.2372C18.7537 12.8999 18.494 13.537 18.0279 14.0083L19.0944 15.0631C19.8402 14.3089 20.2559 13.2894 20.25 12.2288L18.7501 12.2372ZM18.0279 14.0083C17.5619 14.4795 16.9277 14.7463 16.2649 14.75L16.2732 16.25C17.3338 16.2441 18.3486 15.8172 19.0944 15.0631L18.0279 14.0083ZM16.269 14.75H16V16.25H16.269V14.75ZM9.00005 7.75H8.73105V9.25H9.00005V7.75ZM8.72691 7.75001C7.6663 7.75587 6.65146 8.18282 5.90566 8.93694L6.97218 9.99171C7.43824 9.52046 8.07241 9.25365 8.73519 9.24999L8.72691 7.75001ZM5.90566 8.93694C5.15985 9.69106 4.74417 10.7106 4.75006 11.7712L6.25004 11.7628C6.24636 11.1001 6.50612 10.463 6.97218 9.99171L5.90566 8.93694ZM4.75005 11.767V15.734H6.25005V11.767H4.75005ZM4.75006 15.7301C4.73847 17.9382 6.51879 19.7378 8.72691 19.75L8.7352 18.25C7.35533 18.2424 6.2428 17.1178 6.25004 15.7379L4.75006 15.7301ZM8.73105 19.75H12.769V18.25H8.73105V19.75ZM12.7732 19.75C13.8338 19.7441 14.8486 19.3172 15.5944 18.5631L14.5279 17.5083C14.0619 17.9795 13.4277 18.2463 12.7649 18.25L12.7732 19.75ZM15.5944 18.5631C16.3402 17.8089 16.7559 16.7894 16.75 15.7288L15.2501 15.7372C15.2537 16.3999 14.994 17.037 14.5279 17.5083L15.5944 18.5631ZM16.75 15.733V15.5H15.25V15.733H16.75ZM9.00005 9.25H12.7691V7.75H9.00005V9.25ZM12.7649 9.24999C13.4277 9.25365 14.0619 9.52046 14.5279 9.99171L15.5944 8.93694C14.8486 8.18282 13.8338 7.75587 12.7732 7.75001L12.7649 9.24999ZM14.5279 9.99171C14.994 10.463 15.2537 11.1001 15.2501 11.7628L16.75 11.7712C16.7559 10.7106 16.3402 9.69106 15.5944 8.93694L14.5279 9.99171ZM15.2501 11.767V15.5H16.7501V11.767H15.2501Z"
-          fill="currentColor"
-        />
-      </svg>
-    );
-  }
-  return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="is-delete">
-      <path d="M3 6C3 4.34315 4.34315 3 6 3H8.75C9.37951 3 9.97229 3.29639 10.35 3.8L11.4 5.2C11.7777 5.70361 12.3705 6 13 6H18C19.6569 6 21 7.34315 21 9V18C21 19.6569 19.6569 21 18 21H6C4.34315 21 3 19.6569 3 18V6Z" stroke="currentColor" strokeWidth="2" />
-      <path d="M9.5 12L14.5 17M14.5 12L9.5 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+function ImportTaskActionIcon({ kind }: { kind: "view" | "download" | "retry" | "delete" }): JSX.Element {
+  const Icon = { view: Eye, download: Download, retry: RotateCcw, delete: Trash2 }[kind];
+  return <Icon className={`is-${kind}`} aria-hidden="true" />;
 }
 
 function ImportTaskStatusIcon({
@@ -1471,43 +1412,12 @@ const CATEGORY_META: Array<{
 ];
 
 function renderImportCategoryIcon(category: ImportCategoryCardModel["key"]): JSX.Element {
-  if (category === "structured") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="3.5" y="3.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M5.25 6.5H14.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="M5.25 10H14.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="M5.25 13.5H11.25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (category === "entity") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M10 9.5A2.75 2.75 0 1 0 10 4A2.75 2.75 0 0 0 10 9.5Z" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M4.5 15.5C5.1 12.95 6.98 11.7 10 11.7C13.02 11.7 14.9 12.95 15.5 15.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="M6 4.25H11.5L14.5 7.25V15.25C14.5 16.08 13.83 16.75 13 16.75H6C5.17 16.75 4.5 16.08 4.5 15.25V5.75C4.5 4.92 5.17 4.25 6 4.25Z" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M11.25 4.5V7.5H14.25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M7.25 10.25H11.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M7.25 13H10.25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
+  const Icon = category === "structured" ? TableProperties : category === "entity" ? UserRound : FileText;
+  return <Icon aria-hidden="true" />;
 }
 
 function renderImportLedgerIcon(): JSX.Element {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="M6.25 8.25A2.25 2.25 0 1 0 6.25 3.75A2.25 2.25 0 0 0 6.25 8.25Z" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M13.75 7.25A1.75 1.75 0 1 0 13.75 3.75A1.75 1.75 0 0 0 13.75 7.25Z" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M2.75 14.75C3.18 12.58 4.71 11.5 6.75 11.5C8.79 11.5 10.32 12.58 10.75 14.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11.9 14.25C12.17 12.82 13.23 12 14.7 12C16.15 12 17.16 12.8 17.45 14.25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
+  return <Users aria-hidden="true" />;
 }
 
 function mappingChildSummaryMetaItems(child: ImportWizardArchiveChild, insight: MappingInsight): string[] {
@@ -1793,13 +1703,7 @@ function MappingAssistButton(props: {
   const { disabled, running, onClick } = props;
   return (
     <button type="button" className="import-console-mapping-card__ai-action" disabled={disabled} onClick={onClick}>
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path
-          d="M10 2.5 11.664 6.336 15.5 8l-3.836 1.664L10 13.5 8.336 9.664 4.5 8l3.836-1.664L10 2.5Z"
-          fill="currentColor"
-        />
-        <path d="M15.25 12.25 15.915 13.835 17.5 14.5l-1.585.665L15.25 16.75l-.665-1.585L13 14.5l1.585-.665.665-1.585Z" fill="currentColor" opacity="0.8" />
-      </svg>
+      <Sparkles aria-hidden="true" />
       <span>{running ? "AI 识别中" : "AI 智能补全"}</span>
     </button>
   );
@@ -7039,17 +6943,7 @@ export function ImportPage({ active = true }: { active?: boolean }): JSX.Element
                                       disabled={mappingStageAssistTargets.length === 0 || mappingStageAssistBusy}
                                       onClick={() => void applyMappingStageAssist()}
                                     >
-                                      <svg className="import-console-stage-toolbar__action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                        <path
-                                          d="M10 2.5 11.664 6.336 15.5 8l-3.836 1.664L10 13.5 8.336 9.664 4.5 8l3.836-1.664L10 2.5Z"
-                                          fill="currentColor"
-                                        />
-                                        <path
-                                          d="M15.25 12.25 15.915 13.835 17.5 14.5l-1.585.665L15.25 16.75l-.665-1.585L13 14.5l1.585-.665.665-1.585Z"
-                                          fill="currentColor"
-                                          opacity="0.8"
-                                        />
-                                      </svg>
+                                      <Sparkles className="import-console-stage-toolbar__action-icon" aria-hidden="true" />
                                       <span>{mappingStageAssistBusy ? "AI 识别中" : "AI 智能补全"}</span>
                                     </WorkbenchButton>
                                   </>

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { Clock3, LayoutGrid, MessageSquare, Settings } from 'lucide-react'
+import { Clock3, LayoutGrid, MessageSquare, Settings } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { ToolbarTooltip } from './ShellToolbar'
 import { AnalytixIconRegistry } from '../../design/AnalytixIconRegistry'

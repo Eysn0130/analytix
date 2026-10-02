@@ -36,7 +36,7 @@ import {
   Moon,
   Monitor,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 
 type ThemePref = AppSettingsV1['theme']
 type SetupFormPatch = AppSettingsPatch

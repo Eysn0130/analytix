@@ -6,7 +6,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCw
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { shellToolbarIconButtonClass, ToolbarTooltip } from './ShellToolbar'
 

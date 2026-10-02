@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { Check, ChevronDown, Folder, FolderPlus, Loader2, Search } from 'lucide-react'
+import { Check, ChevronDown, Folder, FolderPlus, Loader2, Search } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../../store/chat-store'
 import { workspaceLabelFromPath } from '../../lib/workspace-label'

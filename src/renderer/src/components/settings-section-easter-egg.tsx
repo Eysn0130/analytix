@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
-import { FolderPlus, Trash2 } from 'lucide-react'
+import { FolderPlus, Trash2 } from '../design/AnalytixUiIcons'
 import { UI_MODE_DEFAULT, UI_MODE_MASCOT } from '../lib/ui-mode'
 import { useUiPluginStore } from '../store/ui-plugin-store'
 import xiezhiProfile from '../../../asset/img/xiezhi_profile.png'
@@ -37,7 +37,7 @@ function ModeCardButton({
     <div
       className={`relative flex flex-col items-center gap-2 rounded-2xl border p-4 text-center transition ${
         active
-          ? 'border-accent/45 bg-accent/8 shadow-[0_10px_28px_rgba(59,130,216,0.12)]'
+          ? 'border-accent/45 bg-accent/8 shadow-[var(--ax-shadow-floating)]'
           : 'border-ds-border bg-ds-card hover:border-accent/25 hover:bg-ds-hover'
       }`}
     >

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Globe2 } from 'lucide-react'
+import { Check, Globe2 } from '../design/AnalytixUiIcons'
 import { formatDevPreviewUrlLabel } from '../lib/dev-preview-detection'
 
 export function DevPreviewLaunchCard({

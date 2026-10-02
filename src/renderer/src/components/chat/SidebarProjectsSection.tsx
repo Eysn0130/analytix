@@ -2,7 +2,7 @@ import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactElem
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
 import {
   Archive,
   BarChart3,
@@ -26,7 +26,7 @@ import {
   Sparkles,
   SquareStack,
   Trash2
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
 import { getProvider } from '../../agent/registry'
 import { ActionMenuItem, ActionMenuSeparator } from '../common/ActionMenu'

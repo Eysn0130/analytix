@@ -12,7 +12,7 @@ import type { CSSProperties, ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown } from '../design/AnalytixUiIcons'
 import {
   modelSupportsImageInput,
   type ApprovalPolicy,
@@ -993,13 +993,8 @@ export function Workbench(): ReactElement {
   const [runtimeDiagnosticsFocus, setRuntimeDiagnosticsFocus] = useState<RuntimeDiagnosticsFocus | null>(null)
 
   useEffect(() => {
-    if (!leftSidebarCollapsed) {
-      setLeftSidebarMounted(true)
-      return undefined
-    }
-
-    const timeoutId = window.setTimeout(() => setLeftSidebarMounted(false), 520)
-    return () => window.clearTimeout(timeoutId)
+    // Retain local expansion and scroll state once the sidebar has been opened.
+    if (!leftSidebarCollapsed) setLeftSidebarMounted(true)
   }, [leftSidebarCollapsed])
 
   useEffect(() => {
@@ -3023,9 +3018,16 @@ export function Workbench(): ReactElement {
         : 'chat'
 
   const closeRightPanel = (): void => {
+    const restoreFocus = rightPaneRef.current?.contains(document.activeElement)
     setDocumentFocused(false)
     useWorkspaceTabsStore.getState().setOpen(false)
-    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.focus())
+    if (restoreFocus) {
+      requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.focus())
+    }
+  }
+  const toggleRightPanel = (): void => {
+    if (useWorkspaceTabsStore.getState().open) closeRightPanel()
+    else useWorkspaceTabsStore.getState().setOpen(true)
   }
 
   const renderRuntimeBanner = (message: string, detail?: string | null): ReactElement => (
@@ -3047,6 +3049,11 @@ export function Workbench(): ReactElement {
   )
 
   const rightPanelDockedVisible = rightPanelVisible && !planPanelInOverlay
+  const [rightPanelRetained, setRightPanelRetained] = useState(rightPanelDockedVisible)
+  useEffect(() => {
+    // Collapsing must not discard a child-agent draft or mounted tool state.
+    if (rightPanelDockedVisible) setRightPanelRetained(true)
+  }, [rightPanelDockedVisible])
   const fileTreeSidePanelOffset = 0
   const currentDockedRightPanelMode: DockedRightPanelRenderMode | null = rightPanelMode
   const rightPanelMotion = useShellPanelMotion({
@@ -3098,6 +3105,7 @@ export function Workbench(): ReactElement {
 
   const renderSummaryPanel = (): ReactElement => (
     <ThreadSummaryPanelIsland activeThreadId={activeThreadId} className="h-full w-full"
+      visible={rightPanelDockedVisible && !workspaceSelectorOpen}
       diagnosticsFocus={runtimeDiagnosticsFocus} onDiagnosticsFocusHandled={() => setRuntimeDiagnosticsFocus(null)}
       onCollapse={closeRightPanel} onInspectChildAgent={inspectChildAgent}
       onSubagentsChange={syncSubagentInspector} onOpenChanges={() => setRightPanelMode('changes')} />
@@ -3139,7 +3147,7 @@ export function Workbench(): ReactElement {
   const workspaceCommandHandler = useRef<(command: NativeWorkspaceCommand['command']) => void>(() => {})
   workspaceCommandHandler.current = command => {
     const tabs = useWorkspaceTabsStore.getState()
-    if (command === 'toggle-workspace') tabs.toggleOpen()
+    if (command === 'toggle-workspace') toggleRightPanel()
     else if (command === 'toggle-terminal') toggleTerminal()
     else if (tabs.activeTabId) void closeWorkspaceTab(tabs.activeTabId)
   }
@@ -3156,7 +3164,7 @@ export function Workbench(): ReactElement {
   }, [])
 
   const renderRightPanel = (): ReactElement | null => {
-    if (!rightPanelDockedVisible && !rightPanelMotion.isMounted && !documentsMounted) return null
+    if (!rightPanelDockedVisible && !rightPanelMotion.isMounted && !rightPanelRetained && !documentsMounted) return null
     const panelMode = rightPanelDockedVisible ? currentDockedRightPanelMode : rightPanelRenderMode
 
     return (
@@ -3229,9 +3237,10 @@ export function Workbench(): ReactElement {
                 </div>
               ) : null}
               {panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'summary' ? (
-                rightPanelDockedVisible && !workspaceSelectorOpen ? renderSummaryPanel() : null
+                renderSummaryPanel()
               ) : panelMode === 'child-agent' && activeSubagentInspector ? (
                 <SubagentInspectorPanelIsland tabbedWorkspace
+                  visible={rightPanelDockedVisible && !workspaceSelectorOpen}
                   subagents={activeSubagentInspector.subagents}
                   selectedKey={activeSubagentInspector.selectedKey}
                   runtimeConnection={runtimeConnection}
@@ -3381,6 +3390,8 @@ export function Workbench(): ReactElement {
       />
       <div
         ref={leftPaneRef}
+        id="workbench-project-sidebar"
+        inert={leftSidebarCollapsed}
         className="ds-left-sidebar-pane min-h-0 shrink-0"
         data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
         data-resizing={leftResizing ? 'true' : 'false'}
@@ -3510,7 +3521,7 @@ export function Workbench(): ReactElement {
                             </span>
                           ) : null}
                           <WorkbenchTopBar workspaceOpen={rightPanelVisible}
-                            onToggleWorkspace={useWorkspaceTabsStore.getState().toggleOpen}
+                            onToggleWorkspace={toggleRightPanel}
                             terminalOpen={terminalOpen} onToggleTerminal={toggleTerminal} />
                         </div>
                       </div>

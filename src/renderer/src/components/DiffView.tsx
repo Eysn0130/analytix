@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy } from '../design/AnalytixUiIcons'
 
 type Props = {
   patch: string

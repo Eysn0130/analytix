@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Loader2, QrCode, RadioTower } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Loader2, QrCode, RadioTower } from '../../design/AnalytixUiIcons'
 import type { ClawRunMode } from '@shared/app-settings'
 import { ClawProviderLogo } from './SidebarClaw'
 import {

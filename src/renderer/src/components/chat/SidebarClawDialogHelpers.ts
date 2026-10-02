@@ -1,5 +1,5 @@
-import type { LucideIcon } from 'lucide-react'
-import { MessageSquare, QrCode, Settings } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
+import { MessageSquare, QrCode, Settings } from '../../design/AnalytixUiIcons'
 import type {
   ClawImAgentProfileV1,
   ClawImChannelV1,

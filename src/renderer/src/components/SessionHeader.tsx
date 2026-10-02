@@ -14,7 +14,7 @@ import {
   SquareStack,
   TableProperties,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { FundsCSVSnapshotStageResult } from '@shared/analytix-api'
 import { useChatStore } from '../store/chat-store'

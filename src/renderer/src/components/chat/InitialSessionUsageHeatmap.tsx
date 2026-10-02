@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronUp, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, RefreshCw, Sparkles } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   formatCompactNumber,

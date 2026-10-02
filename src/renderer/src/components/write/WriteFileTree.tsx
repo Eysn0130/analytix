@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, FileText, FilePlus2, Folder, FolderPlus, Image, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, FilePlus2, Folder, FolderPlus, Image, Pencil, Plus, RefreshCw, Trash2 } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import { isWriteImageFileExtension } from '@shared/write-text-file'

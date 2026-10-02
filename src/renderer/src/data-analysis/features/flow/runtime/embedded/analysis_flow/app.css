@@ -3816,7 +3816,7 @@ body {
   --panelSolid: var(--color-bg-elevated, #ffffff);
   --border: color-mix(in oklab, var(--color-border, #dce3f1) 88%, transparent);
   --shadow: var(--shadow-card, 0 14px 32px rgba(15, 23, 42, 0.06));
-  --shadow2: 0 10px 24px color-mix(in oklab, var(--color-text, #1a2740) 8%, transparent);
+  --shadow2: var(--shadow-elevated);
   --focus: 0 0 0 3px color-mix(in oklab, var(--color-accent, #4f63ff) 24%, transparent);
   --flow-toolbar-surface: color-mix(in oklab, var(--color-bg-elevated, #ffffff) 96%, var(--color-bg-subtle, #edf1f8));
   --flow-toolbar-surface-subtle: color-mix(in oklab, var(--color-bg-subtle, #edf1f8) 72%, var(--color-bg-elevated, #ffffff));
@@ -3844,8 +3844,8 @@ body {
   --flow-toolbar-combo-height: 26px;
   --flow-toolbar-combo-min-width: 182px;
   --flow-toolbar-combo-label-max: 76px;
-  --flow-toolbar-control-radius: 4px;
-  --flow-toolbar-control-radius-compact: 4px;
+  --flow-toolbar-control-radius: 8px;
+  --flow-toolbar-control-radius-compact: 8px;
   --flow-toolbar-mini-size: 22px;
   --flow-toolbar-mini-tall-size: 26px;
   --flow-toolbar-color-height: 26px;
@@ -3866,31 +3866,15 @@ body {
   --tab-min-width-active: 142px;
   --flow-program-shell-bg: var(--bg);
   --flow-program-shell-border: var(--flow-toolbar-border);
-  --flow-program-toolbar-bg: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--flow-toolbar-surface) 96%, white 4%),
-    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 94%, var(--bg) 6%)
-  );
-  --flow-program-tabs-bg: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--flow-toolbar-surface) 92%, var(--bg) 8%),
-    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 90%, var(--bg) 10%)
-  );
-  --flow-program-canvas-bg: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--flow-toolbar-surface) 66%, var(--bg) 34%),
-    color-mix(in oklab, var(--bg) 92%, var(--flow-toolbar-surface-subtle) 8%)
-  );
-  --flow-floating-bg: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--flow-toolbar-surface) 84%, transparent),
-    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 76%, transparent)
-  );
+  --flow-program-toolbar-bg: var(--flow-toolbar-surface);
+  --flow-program-tabs-bg: var(--flow-toolbar-surface);
+  --flow-program-canvas-bg: var(--bg);
+  --flow-floating-bg: var(--flow-toolbar-surface);
   --flow-floating-border: color-mix(in oklab, var(--flow-toolbar-border) 82%, transparent);
   --flow-floating-shadow: var(--flow-toolbar-shadow);
-  --flow-floating-radius: 10px;
-  --flow-floating-radius-inner: 7px;
-  --flow-floating-radius-compact: 5px;
+  --flow-floating-radius: 16px;
+  --flow-floating-radius-inner: 10px;
+  --flow-floating-radius-compact: 8px;
   --flow-active-bg: var(--flow-toolbar-accent-surface-strong);
   --flow-active-border: color-mix(in oklab, var(--flow-toolbar-accent) 34%, var(--flow-toolbar-border) 66%);
   --flow-active-text: color-mix(in oklab, var(--flow-toolbar-accent-strong) 58%, var(--flow-toolbar-text) 42%);
@@ -4870,10 +4854,10 @@ body {
   --panel: var(--color-bg-elevated, #181f2b);
   --panelSolid: var(--color-bg-elevated, #181f2b);
   --border: color-mix(in oklab, var(--color-border, #313b50) 82%, transparent);
-  --shadow: 0 18px 42px rgba(3, 8, 15, 0.44);
-  --shadow2: 0 14px 30px rgba(3, 8, 15, 0.34);
-  --flow-toolbar-surface: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 90%, #101827);
-  --flow-toolbar-surface-subtle: color-mix(in oklab, var(--color-bg-subtle, #232c3b) 76%, #111827);
+  --shadow: var(--shadow-card);
+  --shadow2: var(--shadow-elevated);
+  --flow-toolbar-surface: var(--color-bg-elevated, #212121);
+  --flow-toolbar-surface-subtle: var(--color-bg-subtle, #2f2f2f);
   --flow-toolbar-surface-hover: color-mix(in oklab, var(--color-accent, #5f74ff) 12%, var(--flow-toolbar-surface-subtle));
   --flow-toolbar-border: color-mix(in oklab, var(--color-border, #313b50) 76%, transparent);
   --flow-toolbar-border-strong: color-mix(in oklab, var(--color-accent, #5f74ff) 38%, var(--flow-toolbar-border));
@@ -4884,16 +4868,12 @@ body {
   --flow-toolbar-accent-surface-strong: color-mix(in oklab, var(--flow-toolbar-accent) 22%, var(--flow-toolbar-surface));
   --flow-program-shell-bg: var(--color-bg, #111620);
   --flow-program-shell-border: color-mix(in oklab, var(--color-border, #313b50) 78%, transparent);
-  --flow-program-toolbar-bg: linear-gradient(180deg, var(--flow-toolbar-surface), var(--flow-toolbar-surface-subtle));
-  --flow-program-tabs-bg: linear-gradient(180deg, color-mix(in oklab, var(--flow-toolbar-surface) 90%, var(--bg)), var(--bg));
-  --flow-program-canvas-bg: linear-gradient(180deg, color-mix(in oklab, var(--flow-toolbar-surface-subtle) 74%, var(--bg)), var(--bg));
-  --flow-floating-bg: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--flow-toolbar-surface) 88%, transparent),
-    color-mix(in oklab, var(--flow-toolbar-surface-subtle) 80%, transparent)
-  );
+  --flow-program-toolbar-bg: var(--flow-toolbar-surface);
+  --flow-program-tabs-bg: var(--flow-toolbar-surface);
+  --flow-program-canvas-bg: var(--bg);
+  --flow-floating-bg: var(--flow-toolbar-surface);
   --flow-floating-border: color-mix(in oklab, var(--flow-toolbar-border) 86%, transparent);
-  --flow-floating-shadow: 0 16px 34px rgba(3, 8, 15, 0.38);
+  --flow-floating-shadow: var(--shadow-elevated);
   --flow-active-bg: color-mix(in oklab, var(--flow-toolbar-accent) 22%, var(--flow-toolbar-surface));
   --flow-active-border: color-mix(in oklab, var(--flow-toolbar-accent) 42%, var(--flow-toolbar-border));
   --flow-active-text: color-mix(in oklab, var(--flow-toolbar-accent-strong) 62%, var(--flow-toolbar-text));
@@ -4922,7 +4902,7 @@ body {
 
 :root[data-theme="dark"] .graphContainer {
   background-color: var(--flow-program-shell-bg);
-  background-image: var(--flow-program-canvas-bg);
+  background-image: none;
 }
 
 :root[data-theme="dark"] .graphWrap::before,
@@ -4980,7 +4960,7 @@ body {
   color: var(--flow-toolbar-text);
   background: var(--flow-toolbar-surface);
   border-color: var(--flow-toolbar-border);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+  box-shadow: none;
 }
 
 :root[data-theme="dark"] .viewClose {
@@ -5017,7 +4997,7 @@ body {
   color: var(--flow-active-text);
   background: var(--flow-toolbar-surface-hover);
   border-color: var(--flow-toolbar-border-strong);
-  box-shadow: 0 8px 18px rgba(3, 8, 15, 0.24);
+  box-shadow: none;
 }
 
 :root[data-theme="dark"] .ribbonMini.active,

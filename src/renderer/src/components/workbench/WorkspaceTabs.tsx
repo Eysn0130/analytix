@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
-import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from 'lucide-react'
+import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { CanvasOpenButton } from '../../canvas/CanvasOpenButton'
 import type { WorkspaceTab } from '../../store/workspace-tabs-store'
@@ -24,11 +24,11 @@ function SortableWorkspaceTab({ tab, active, focusable, onFocus, onSelect, onClo
       <button {...attributes} {...listeners} type="button" role="tab" id={workspaceTabDomId(tab.id)} aria-selected={active}
         aria-controls={workspacePanelDomId(tab.id)} aria-label={status ? `${tab.title} · ${status}` : tab.title}
         tabIndex={focusable ? 0 : -1} title={tab.title} onFocus={onFocus} onClick={onSelect} onKeyDown={onKeyDown}>
-        <Icon aria-hidden="true" size={15} />
+        <Icon aria-hidden="true" size={16} />
         <span className="workspace-tab-title">{tab.title}</span>
         {status ? <span className="workspace-tab-status" data-error={tab.error} aria-hidden="true">{tab.error ? '!' : tab.loading ? '…' : '•'}</span> : null}
       </button>
-      <button type="button" className="workspace-tab-close" aria-label={t('closeTab', { defaultValue: '关闭 {{title}}', title: tab.title })} title={t('close')} onClick={onClose}><X size={13} aria-hidden="true" /></button>
+      <button type="button" className="workspace-tab-close" aria-label={t('closeTab', { defaultValue: '关闭 {{title}}', title: tab.title })} title={t('close')} onClick={onClose}><X size={14} aria-hidden="true" /></button>
     </div>
   )
 }
@@ -89,12 +89,12 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
         </SortableContext>
       </DndContext>
       <div className="workspace-tabs-actions">
-        <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={16} /></button>
-        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
+        <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={20} /></button>
+        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
         <button type="button" onClick={() => {
           onCollapse()
           requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.focus())
-        }} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={16} /></button>
+        }} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={20} /></button>
       </div>
     </header>
   )
@@ -118,6 +118,6 @@ export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, p
   ]
   return <section className="workspace-tool-selector" aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })}>
     <h2>{t('workspaceSelectTool', { defaultValue: '打开工作面' })}</h2>
-    <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={17} aria-hidden="true" /><span>{label}</span></button>)}</div>
+    <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={18} aria-hidden="true" /><span>{label}</span></button>)}</div>
   </section>
 }

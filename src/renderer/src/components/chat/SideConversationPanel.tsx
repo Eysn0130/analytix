@@ -24,7 +24,7 @@ import {
   Trash2,
   Wrench,
   X
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useChatStore } from '../../store/chat-store'
 import type { ChatBlock, ToolBlock } from '../../agent/types'
 import { splitThink } from '../../thread/projection/thread-turns'

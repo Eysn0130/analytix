@@ -1,79 +1,79 @@
 :root {
-  --bg: #f6f7fb;
-  --panel: rgba(255, 255, 255, 0.78);
-  --panelSolid: #ffffff;
-  --text: #0f172a;
-  --muted: #64748b;
-  --border: rgba(15, 23, 42, 0.1);
-  --shadow: 0 14px 40px rgba(2, 6, 23, 0.08);
-  --shadow2: 0 10px 26px rgba(2, 6, 23, 0.07);
+  --bg: var(--color-bg);
+  --panel: var(--color-bg-elevated);
+  --panelSolid: var(--color-bg-elevated);
+  --text: var(--color-text);
+  --muted: var(--color-text-muted);
+  --border: var(--color-border);
+  --shadow: var(--shadow-card);
+  --shadow2: var(--shadow-card);
   --radius: 18px;
   --radius2: 14px;
-  --primary: #1f6feb;
+  --primary: var(--color-accent);
   --ok: #10b981;
   --warn: #f59e0b;
   --danger: #ef4444;
-  --focus: 0 0 0 3px rgba(31, 111, 235, 0.16);
+  --focus: 0 0 0 2px color-mix(in srgb, var(--color-text) 24%, transparent);
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
   --gridCols: 180px 140px 110px 120px 150px 90px 120px 100px 130px 150px 150px 160px 160px;
   --gridMinWidth: 1460px;
   --txnModalMaxW: 1680px;
   --statsLeftW: 232px;
-  --stats-table-head-bg: var(--workbench-ui-accent-end);
-  --stats-table-head-border: color-mix(in oklab, var(--workbench-ui-accent-end) 88%, #1639ba);
-  --stats-table-head-text: #ffffff;
-  --stats-table-head-divider: color-mix(in oklab, #ffffff 18%, var(--stats-table-head-border));
-  --stats-table-head-hover: color-mix(in oklab, var(--stats-table-head-bg) 92%, #6f98ff);
-  --stats-table-scroll-bg: rgba(255, 255, 255, 0.35);
-  --stats-table-row-bg: rgba(255, 255, 255, 0.62);
-  --stats-table-row-even-bg: rgba(255, 255, 255, 0.52);
-  --stats-table-row-hover-bg: rgba(31, 111, 235, 0.08);
-  --stats-table-row-selected-bg: rgba(31, 111, 235, 0.14);
-  --stats-table-row-selected-hover-bg: rgba(31, 111, 235, 0.18);
-  --stats-table-row-border: rgba(15, 23, 42, 0.06);
-  --stats-table-cell-text: rgba(2, 6, 23, 0.82);
-  --stats-table-cell-divider: rgba(15, 23, 42, 0.06);
-  --stats-table-link-text: rgba(31, 111, 235, 0.95);
-  --stats-table-link-underline: rgba(31, 111, 235, 0.28);
-  --stats-table-link-hover-bg: rgba(31, 111, 235, 0.06);
-  --stats-table-tag-bg: rgba(255, 255, 255, 0.65);
-  --stats-table-tag-border: rgba(15, 23, 42, 0.1);
-  --stats-table-footer-bg: rgba(255, 255, 255, 0.58);
-  --stats-table-footer-border: var(--border);
-  --stats-table-footer-text: rgba(2, 6, 23, 0.6);
+  --stats-table-head-bg: var(--color-bg-subtle);
+  --stats-table-head-border: var(--color-border);
+  --stats-table-head-text: var(--color-text);
+  --stats-table-head-divider: var(--color-border);
+  --stats-table-head-hover: var(--sidebar-hover);
+  --stats-table-scroll-bg: var(--color-bg);
+  --stats-table-row-bg: var(--color-bg-elevated);
+  --stats-table-row-even-bg: var(--color-bg);
+  --stats-table-row-hover-bg: var(--sidebar-hover);
+  --stats-table-row-selected-bg: var(--sidebar-nav-active-bg);
+  --stats-table-row-selected-hover-bg: var(--sidebar-hover);
+  --stats-table-row-border: var(--color-border);
+  --stats-table-cell-text: var(--color-text);
+  --stats-table-cell-divider: var(--color-border);
+  --stats-table-link-text: var(--color-text);
+  --stats-table-link-underline: var(--color-text-muted);
+  --stats-table-link-hover-bg: var(--sidebar-hover);
+  --stats-table-tag-bg: var(--color-bg-subtle);
+  --stats-table-tag-border: var(--color-border);
+  --stats-table-footer-bg: var(--color-bg);
+  --stats-table-footer-border: var(--color-border);
+  --stats-table-footer-text: var(--color-text-muted);
 }
 
 :root[data-theme="dark"] {
-  --bg: var(--color-bg, #111620);
-  --panel: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 88%, transparent);
-  --panelSolid: var(--color-bg-elevated, #181f2b);
-  --text: var(--color-text, #ecf2ff);
-  --muted: var(--color-text-muted, #9baaca);
-  --border: color-mix(in oklab, var(--color-border, #313b50) 80%, transparent);
-  --shadow: 0 18px 42px rgba(3, 8, 15, 0.44);
-  --shadow2: 0 14px 30px rgba(3, 8, 15, 0.34);
-  --stats-table-head-bg: color-mix(in oklab, var(--color-accent, #5f74ff) 78%, #18233a);
-  --stats-table-head-border: color-mix(in oklab, var(--color-accent, #5f74ff) 44%, var(--color-border, #313b50));
-  --stats-table-head-divider: color-mix(in oklab, #ffffff 14%, var(--stats-table-head-border));
-  --stats-table-head-hover: color-mix(in oklab, var(--stats-table-head-bg) 86%, var(--color-accent-strong, #8ea0ff));
-  --stats-table-scroll-bg: color-mix(in oklab, var(--color-bg, #111620) 92%, var(--color-bg-elevated, #181f2b));
-  --stats-table-row-bg: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 88%, var(--color-bg, #111620));
-  --stats-table-row-even-bg: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 78%, var(--color-bg, #111620));
-  --stats-table-row-hover-bg: color-mix(in oklab, var(--color-accent, #5f74ff) 12%, var(--color-bg-elevated, #181f2b));
-  --stats-table-row-selected-bg: color-mix(in oklab, var(--color-accent, #5f74ff) 18%, var(--color-bg-elevated, #181f2b));
-  --stats-table-row-selected-hover-bg: color-mix(in oklab, var(--color-accent, #5f74ff) 24%, var(--color-bg-elevated, #181f2b));
-  --stats-table-row-border: color-mix(in oklab, var(--color-border, #313b50) 68%, transparent);
-  --stats-table-cell-text: color-mix(in oklab, var(--color-text, #ecf2ff) 84%, var(--color-text-muted, #9baaca));
-  --stats-table-cell-divider: color-mix(in oklab, var(--color-border, #313b50) 58%, transparent);
-  --stats-table-link-text: color-mix(in oklab, var(--color-accent-strong, #8ea0ff) 76%, #ffffff);
-  --stats-table-link-underline: color-mix(in oklab, var(--color-accent-strong, #8ea0ff) 52%, transparent);
-  --stats-table-link-hover-bg: color-mix(in oklab, var(--color-accent, #5f74ff) 16%, transparent);
-  --stats-table-tag-bg: color-mix(in oklab, var(--color-bg-subtle, #232c3b) 72%, transparent);
-  --stats-table-tag-border: color-mix(in oklab, var(--color-border, #313b50) 76%, transparent);
-  --stats-table-footer-bg: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 86%, var(--color-bg, #111620));
-  --stats-table-footer-border: color-mix(in oklab, var(--color-border, #313b50) 72%, transparent);
-  --stats-table-footer-text: color-mix(in oklab, var(--color-text-muted, #9baaca) 78%, var(--color-text, #ecf2ff));
+  --bg: var(--color-bg);
+  --panel: var(--color-bg-elevated);
+  --panelSolid: var(--color-bg-elevated);
+  --text: var(--color-text);
+  --muted: var(--color-text-muted);
+  --border: var(--color-border);
+  --shadow: var(--shadow-card);
+  --shadow2: var(--shadow-card);
+  --stats-table-head-bg: var(--color-bg-subtle);
+  --stats-table-head-border: var(--color-border);
+  --stats-table-head-divider: var(--color-border);
+  --stats-table-head-hover: var(--sidebar-hover);
+  --stats-table-scroll-bg: var(--color-bg);
+  --stats-table-row-bg: var(--color-bg-elevated);
+  --stats-table-row-even-bg: var(--color-bg);
+  --stats-table-row-hover-bg: var(--sidebar-hover);
+  --stats-table-row-selected-bg: var(--sidebar-nav-active-bg);
+  --stats-table-row-selected-hover-bg: var(--sidebar-hover);
+  --stats-table-row-border: var(--color-border);
+  --stats-table-cell-text: var(--color-text);
+  --stats-table-cell-divider: var(--color-border);
+  --stats-table-link-text: var(--color-text);
+  --stats-table-link-underline: var(--color-text-muted);
+  --stats-table-link-hover-bg: var(--sidebar-hover);
+  --stats-table-tag-bg: var(--color-bg-subtle);
+  --stats-table-tag-border: var(--color-border);
+  --stats-table-footer-bg: var(--color-bg);
+  --stats-table-footer-border: var(--color-border);
+  --stats-table-footer-text: var(--color-text-muted);
 }
 
 * {
@@ -336,9 +336,9 @@ body.is-resizing .card {
   left: 0;
   width: 50%;
   border-radius: 8px;
-  border: 1px solid rgba(68, 92, 233, 0.92);
-  background: linear-gradient(136deg, #5b73ff 0%, #445ce9 100%);
-  box-shadow: 0 10px 18px rgba(77, 98, 246, 0.26);
+  border: 1px solid var(--color-border);
+  background: var(--color-accent);
+  box-shadow: none;
   pointer-events: none;
   transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -371,7 +371,7 @@ body.is-resizing .card {
 }
 
 .treeSwitchChip.active {
-  color: #fff;
+  color: var(--color-bg);
 }
 
 .leftSearch {
@@ -1320,7 +1320,7 @@ body.is-resizing .card {
 
 .hSort {
   font-size: 12px;
-  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+  color: var(--stats-table-head-text);
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -1848,12 +1848,12 @@ body.stable .modalHead {
   line-height: 1;
   opacity: 0.72;
   transform: translateY(-0.5px);
-  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+  color: var(--stats-table-head-text);
 }
 
 .txnSortIcon.active {
   opacity: 1;
-  color: #ffffff;
+  color: var(--stats-table-head-text);
 }
 
 .txnTable th.sortable {
@@ -1862,7 +1862,7 @@ body.stable .modalHead {
 
 .txnTable th.sorted {
   background: var(--stats-table-head-hover);
-  color: #ffffff;
+  color: var(--stats-table-head-text);
 }
 
 .txnSkCell {

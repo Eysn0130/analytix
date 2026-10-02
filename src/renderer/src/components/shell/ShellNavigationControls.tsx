@@ -1,5 +1,5 @@
 import type { MouseEvent, PointerEvent, ReactElement } from 'react'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Plus } from '../../design/AnalytixUiIcons'
 import { SidebarTitlebarToggleButton } from '../sidebar/SidebarPrimitives'
 import { ShellGuiUpdateAction, shellGuiUpdateActionMode } from './ShellGuiUpdateAction'
 import { shellToolbarIconButtonClass, ToolbarTooltip } from './ShellToolbar'
@@ -50,6 +50,7 @@ export function ShellNavigationControls({
           onClick={onToggleSidebar}
           title={sidebarLabel}
           ariaLabel={sidebarLabel}
+          controlsId="workbench-project-sidebar"
           collapsed={leftSidebarCollapsed}
           className="ds-toolbar-icon-button ds-shell-sidebar-toggle"
           cursorSpotlight={false}

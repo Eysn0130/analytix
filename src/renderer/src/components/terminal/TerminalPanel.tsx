@@ -9,7 +9,7 @@ import {
   PencilLine,
   PanelRightClose,
   PanelsTopLeft
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import '@xterm/xterm/css/xterm.css'
 import { Terminal } from '@xterm/xterm'

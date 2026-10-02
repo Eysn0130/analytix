@@ -1,5 +1,5 @@
-import { createElement, type ReactElement, type SVGProps } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { createElement, forwardRef } from 'react'
+import type { LucideIcon, LucideProps } from 'lucide-react'
 import {
   Bug,
   ChevronDown,
@@ -30,7 +30,7 @@ import symbolMonoBlack from '../../../asset/brand/analytix-symbol-mono-black.png
 import symbolMonoWhite from '../../../asset/brand/analytix-symbol-mono-white.png'
 import symbolReversed from '../../../asset/brand/analytix-symbol-reversed.png'
 
-type AnalytixSvgIcon = (props: SVGProps<SVGSVGElement>) => ReactElement
+type AnalytixSvgIcon = LucideIcon
 type AnalytixRegistryIcon = LucideIcon | AnalytixSvgIcon
 
 export type AnalytixIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
@@ -44,16 +44,16 @@ export const AnalytixIconSizes: Record<AnalytixIconSize, number> = {
 }
 
 // Use the existing ISC/MIT Lucide dependency; no private desktop SVG paths are bundled.
-function createSystemIcon(icon: LucideIcon, filled = false): AnalytixSvgIcon {
-  return function AnalytixIcon(props: SVGProps<SVGSVGElement>): ReactElement {
-    return createElement(icon, {
-      width: 20,
-      height: 20,
-      strokeWidth: 1.75,
-      ...props,
-      fill: filled ? 'currentColor' : props.fill ?? 'none'
-    })
-  }
+export function createSystemIcon(icon: LucideIcon, filled = false): AnalytixSvgIcon {
+  const SystemIcon = forwardRef<SVGSVGElement, LucideProps>((props, ref) => createElement(icon, {
+    size: 20,
+    ...props,
+    ref,
+    strokeWidth: 1.75,
+    fill: filled ? 'currentColor' : props.fill ?? 'none'
+  }))
+  SystemIcon.displayName = `Analytix${icon.displayName ?? 'Icon'}`
+  return SystemIcon
 }
 
 export const AnalytixDisclosureDownIcon = createSystemIcon(ChevronDown)
@@ -82,27 +82,27 @@ export const AnalytixIconRegistry = {
   },
   icons: {
     browser: AnalytixBrowserIcon,
-    bug: Bug,
+    bug: createSystemIcon(Bug),
     comment: AnalytixCommentIcon,
     disclosureDown: AnalytixDisclosureDownIcon,
     disclosureRight: AnalytixDisclosureRightIcon,
     edit: AnalytixEditIcon,
-    fork: GitFork,
-    idea: Lightbulb,
-    panel: PanelTop,
+    fork: createSystemIcon(GitFork),
+    idea: createSystemIcon(Lightbulb),
+    panel: createSystemIcon(PanelTop),
     pin: AnalytixPinIcon,
     pinFilled: AnalytixPinFilledIcon,
     plan: AnalytixPlanIcon,
-    refresh: RefreshCw,
-    settings: Settings,
+    refresh: createSystemIcon(RefreshCw),
+    settings: createSystemIcon(Settings),
     sidebarHide: AnalytixSidebarHideIcon,
     sidebarShow: AnalytixSidebarShowIcon,
-    sparkles: Sparkles,
+    sparkles: createSystemIcon(Sparkles),
     taskList: AnalytixTaskListIcon,
     terminal: AnalytixTerminalIcon,
     workspace: AnalytixWorkspaceIcon,
     write: AnalytixEditIcon,
-    writeNew: FilePlus2
+    writeNew: createSystemIcon(FilePlus2)
   } satisfies Record<string, AnalytixRegistryIcon>,
   sizes: AnalytixIconSizes
 } as const

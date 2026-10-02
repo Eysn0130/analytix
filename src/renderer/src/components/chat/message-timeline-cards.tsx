@@ -1,7 +1,7 @@
 import type { ReactElement, RefObject } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, Hammer, ListTodo, MessageSquareQuote, RotateCcw, SearchCode, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, Hammer, ListTodo, MessageSquareQuote, RotateCcw, SearchCode, TriangleAlert } from '../../design/AnalytixUiIcons'
 import type { ReviewBlock, ToolBlock } from '../../agent/types'
 import { countDiffStats, sumDiffStats } from '../../lib/diff-stats'
 import { useDeferredRender } from '../../hooks/use-deferred-render'

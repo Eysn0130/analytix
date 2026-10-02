@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefObject } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   GlobalWorkerOptions,

@@ -3,7 +3,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, Plug, RotateCcw, Sparkles, Terminal, Video, Wrench } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, Plug, RotateCcw, Sparkles, Terminal, Video, Wrench } from '../../design/AnalytixUiIcons'
 import type { HubAgentPluginListItem } from '@shared/analytix-api'
 import { generatedArtifactMetadataSchema } from '../../../../../packages/runtime/src/contracts/generated-artifact'
 import { GeneratedOfficeArtifact } from './GeneratedOfficeArtifact'

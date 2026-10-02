@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, Hand, LockKeyholeOpen, Settings, ShieldQuestion } from 'lucide-react'
+import { Check, ChevronDown, Hand, LockKeyholeOpen, Settings, ShieldQuestion } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   analytixToolPermissionModeFromSettings,

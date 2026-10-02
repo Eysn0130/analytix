@@ -1,6 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Loader2, MessageCirclePlus, Plus, X } from 'lucide-react'
+import { AlertCircle, Loader2, MessageCirclePlus, Plus, X } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { buildCodeRuntimePrompt } from '@shared/app-settings'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
@@ -359,6 +359,7 @@ export function SubagentInspectorPanel({
   onCreateSideChat,
   createSideChatDisabled = false,
   tabbedWorkspace = false,
+  visible = true,
   onCollapse,
   onRetryConnection,
   onOpenSettings,
@@ -380,6 +381,7 @@ export function SubagentInspectorPanel({
   onCreateSideChat?: () => void | Promise<void>
   createSideChatDisabled?: boolean
   tabbedWorkspace?: boolean
+  visible?: boolean
   onCollapse: () => void
   onRetryConnection: () => void
   onOpenSettings: () => void
@@ -716,6 +718,7 @@ export function SubagentInspectorPanel({
   }, [provider, selectedThreadId])
 
   useEffect(() => {
+    if (!visible) return undefined
     if (!selectedThreadId) {
       void loadSelectedDetail('initial')
       return undefined
@@ -736,10 +739,10 @@ export function SubagentInspectorPanel({
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [detailLooksRunning, loadSelectedDetail, selectedAgent?.status, selectedRunningTurnId, selectedThreadId])
+  }, [detailLooksRunning, loadSelectedDetail, selectedAgent?.status, selectedRunningTurnId, selectedThreadId, visible])
 
   useEffect(() => {
-    if (!selectedThreadId || runtimeConnection !== 'ready') return undefined
+    if (!visible || !selectedThreadId || runtimeConnection !== 'ready') return undefined
     if (detailState.threadId !== selectedThreadId || detailState.status === 'loading') return undefined
 
     const threadId = selectedThreadId
@@ -1159,7 +1162,8 @@ export function SubagentInspectorPanel({
     provider,
     runtimeConnection,
     selectedSubscriptionRestartToken,
-    selectedThreadId
+    selectedThreadId,
+    visible
   ])
 
   const setSelectedInput = useCallback((value: string): void => {
@@ -1289,10 +1293,10 @@ export function SubagentInspectorPanel({
 
   return (
     <aside
-      className={`write-assistant-panel ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-white backdrop-blur-xl dark:bg-ds-canvas ${className}`}
+      className={`write-assistant-panel ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas backdrop-blur-xl ${className}`}
       data-subagent-inspector-panel
     >
-      <div className="shrink-0 border-b border-ds-border-muted bg-white/92 dark:bg-ds-card">
+      <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
         <div className="ds-right-panel-topbar">
           <div className="ds-right-panel-title-group">
             {selectedAgent ? (

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { ExternalLink, FileText } from 'lucide-react'
+import { ExternalLink, FileText } from '../../design/AnalytixUiIcons'
 import type { CoreThreadSummaryOutputJson } from '../../agent/analytix-contract'
 import { SummaryRow } from './SummaryRow'
 

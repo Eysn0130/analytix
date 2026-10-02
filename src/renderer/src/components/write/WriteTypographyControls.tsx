@@ -8,7 +8,7 @@ import {
   ChevronDown,
   Pilcrow,
   ScrollText
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   WRITE_FONT_PRESETS,

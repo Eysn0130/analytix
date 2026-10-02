@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
 import {
   AlertCircle,
   Bell,
@@ -15,7 +15,7 @@ import {
   RotateCcw,
   SendHorizontal,
   Square
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type {
   CoreThreadSummaryResponseJson,
   CoreThreadSummarySubagentJson,

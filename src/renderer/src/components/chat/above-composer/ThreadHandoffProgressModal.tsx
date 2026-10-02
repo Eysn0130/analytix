@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, GitBranch, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, GitBranch, X, XCircle } from '../../../design/AnalytixUiIcons'
 import { type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { threadHandoffStepsWithRollback, type ThreadHandoffOperation } from '@shared/thread-handoff'

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Loader2, X } from 'lucide-react'
+import { AlertTriangle, Loader2, X } from '../design/AnalytixUiIcons'
 import { useChatStore } from '../store/chat-store'
 
 /**

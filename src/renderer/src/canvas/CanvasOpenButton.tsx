@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { Shapes } from 'lucide-react'
+import { Shapes } from '../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../store/chat-store'
 import { openCanvasWorkspaceObject } from './canvas-workspace-open'

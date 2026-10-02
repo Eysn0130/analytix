@@ -4,7 +4,7 @@ import {
   DEFAULT_SPEECH_TO_TEXT_PROTOCOL,
   SPEECH_TO_TEXT_PROTOCOLS
 } from '@shared/app-settings'
-import { Loader2, PlugZap } from 'lucide-react'
+import { Loader2, PlugZap } from '../design/AnalytixUiIcons'
 import {
   AdvancedSettingsDisclosure,
   InlineNoticeView,

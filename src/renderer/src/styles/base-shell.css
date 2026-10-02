@@ -1861,7 +1861,7 @@ pre {
 .sdd-draft-topbar:hover .sdd-draft-file-icon,
 .sdd-assistant-header:hover .sdd-assistant-title-pill {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(59, 130, 216, 0.12);
+  box-shadow: var(--ax-shadow-floating);
 }
 
 .sdd-status-pill {
@@ -1877,7 +1877,7 @@ pre {
 }
 
 .sdd-next-button {
-  box-shadow: 0 10px 22px rgba(59, 130, 216, 0.2);
+  box-shadow: var(--ax-shadow-floating);
   transition:
     box-shadow 160ms ease,
     filter 160ms ease,
@@ -1887,7 +1887,7 @@ pre {
 
 .sdd-next-button:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 30px rgba(59, 130, 216, 0.25);
+  box-shadow: var(--ax-shadow-floating);
 }
 
 .sdd-next-button:not(:disabled):hover svg {
@@ -1909,9 +1909,7 @@ pre {
 
 .sdd-editor-card.is-upgrading {
   border-color: color-mix(in srgb, var(--ds-accent) 28%, var(--ds-border));
-  box-shadow:
-    0 24px 70px rgba(20, 47, 95, 0.08),
-    0 0 0 1px rgba(59, 130, 216, 0.08);
+  box-shadow: var(--ax-shadow-floating), 0 0 0 1px var(--ds-border);
 }
 
 .sdd-editor-progress {
@@ -1939,7 +1937,7 @@ pre {
 
 .sdd-assistant-panel {
   animation: sdd-panel-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  box-shadow: -16px 0 38px rgba(20, 47, 95, 0.035);
+  box-shadow: var(--ax-shadow-panel);
 }
 
 .sdd-assistant-header,
@@ -2926,11 +2924,11 @@ pre {
 @keyframes sdd-status-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(59, 130, 216, 0.14);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ds-accent) 14%, transparent);
     transform: translateY(0);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(59, 130, 216, 0.05);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ds-accent) 5%, transparent);
     transform: translateY(-0.5px);
   }
 }
@@ -3739,6 +3737,12 @@ pre {
 .ds-left-sidebar-pane-content {
   height: 100%;
   overflow: hidden;
+  transform: translateX(0);
+  transition: transform var(--ax-motion-sidebar-collapse);
+}
+
+.ds-left-sidebar-pane[data-collapsed='true'] .ds-left-sidebar-pane-content {
+  transform: translateX(-16px);
 }
 
 .ds-left-sidebar-pane[data-collapsed='true'] {
@@ -4025,7 +4029,7 @@ pre {
 .ds-toolbar-tooltip-bubble {
   pointer-events: none;
   position: absolute;
-  left: 50%;
+  left: calc(50% + var(--ds-tooltip-shift, 0px));
   top: calc(100% + 9px);
   z-index: 70;
   width: max-content;
@@ -4041,7 +4045,7 @@ pre {
   font-weight: 400;
   line-height: 18px;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   opacity: 0;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
   backdrop-filter: blur(12px);
@@ -4559,12 +4563,8 @@ pre {
   width: 216px;
   border: 1px solid color-mix(in srgb, var(--ds-border-strong) 68%, transparent);
   border-radius: 12px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.9)),
-    var(--ds-surface-card);
-  box-shadow:
-    0 20px 58px rgba(20, 47, 95, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.64);
+  background: var(--ds-surface-elevated);
+  box-shadow: var(--ax-shadow-popover);
   padding: 4px;
   color: var(--ds-text);
   backdrop-filter: blur(18px) saturate(118%);
@@ -4866,15 +4866,12 @@ pre {
 
 [data-theme='dark'] .ds-session-actions-menu,
 [data-theme='dark'] .ds-session-actions-submenu {
-  background:
-    linear-gradient(180deg, rgba(27, 35, 56, 0.96), rgba(22, 29, 47, 0.92)),
-    var(--ds-surface-card);
-  box-shadow:
-    0 24px 64px rgba(2, 6, 16, 0.42),
-    inset 0 1px 0 rgba(151, 192, 235, 0.08);
+  background: var(--ds-surface-elevated);
+  box-shadow: var(--ax-shadow-popover);
 }
 
 :root[data-motion-reduced='true'] .ds-left-sidebar-pane,
+:root[data-motion-reduced='true'] .ds-left-sidebar-pane-content,
 :root[data-motion-reduced='true'] .ds-shell-controls-safe-motion,
 :root[data-motion-reduced='true'] .ds-plugin-marketplace-tabs {
   transition: none;

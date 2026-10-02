@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, FolderOpen } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, FolderOpen } from '../design/AnalytixUiIcons'
 
 export function RuntimeBanner({
   message,

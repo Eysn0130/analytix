@@ -1,5 +1,28 @@
-import { isValidElement, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { ChevronDown, Eye, EyeOff } from 'lucide-react'
+import { Children, Fragment, cloneElement, isValidElement, useId, useRef, useState, type AriaAttributes, type ReactElement, type ReactNode } from 'react'
+import { ChevronDown, Eye, EyeOff } from '../design/AnalytixUiIcons'
+
+type SettingFieldLabels = Pick<AriaAttributes, 'aria-label' | 'aria-labelledby' | 'aria-describedby'>
+
+// Label only native fields and the shared controls that explicitly forward these attributes.
+// Existing field names, values, refs and event handlers remain owned by their callers.
+function labelSettingFields(node: ReactNode, labelId: string, descriptionId?: string, insideNativeLabel = false): ReactNode {
+  return Children.map(node, child => {
+    if (!isValidElement<SettingFieldLabels & { children?: ReactNode }>(child)) return child
+    const nativeField = ['input', 'select', 'textarea'].includes(String(child.type))
+    const sharedField = child.type === Toggle || child.type === ModelSelect || child.type === SecretInput
+    if (nativeField || sharedField) {
+      const props = child.props
+      return cloneElement(child, {
+        'aria-labelledby': props['aria-label'] || insideNativeLabel ? props['aria-labelledby'] : props['aria-labelledby'] ?? labelId,
+        'aria-describedby': [props['aria-describedby'], descriptionId].filter(Boolean).join(' ') || undefined
+      })
+    }
+    if (typeof child.type === 'string' || child.type === Fragment) {
+      return cloneElement(child, { children: labelSettingFields(child.props.children, labelId, descriptionId, insideNativeLabel || child.type === 'label') })
+    }
+    return child
+  })
+}
 
 export type InlineNotice = {
   tone: 'success' | 'error' | 'info'
@@ -16,8 +39,9 @@ export function SecretInput({
   invalid = false,
   showLabel,
   hideLabel,
-  className = ''
-}: {
+  className = '',
+  ...fieldLabels
+}: SettingFieldLabels & {
   value: string
   onChange: (value: string) => void
   visible: boolean
@@ -38,6 +62,7 @@ export function SecretInput({
       }`}
     >
       <input
+        {...fieldLabels}
         type={visible ? 'text' : 'password'}
         autoComplete={autoComplete}
         placeholder={placeholder}
@@ -127,6 +152,10 @@ export function SettingRow({
   control: ReactNode
   wideControl?: boolean
 }): ReactElement {
+  const rowId = useId()
+  const labelId = `${rowId}-label`
+  const descriptionId = description ? `${rowId}-description` : undefined
+  const labelledControl = labelSettingFields(control, labelId, descriptionId)
   const compactControl =
     !wideControl
     && isValidElement(control)
@@ -141,9 +170,9 @@ export function SettingRow({
       }`}
     >
       <div className={`min-w-0 ${wideControl ? 'w-full max-w-none shrink-0' : 'flex-1'}`}>
-        <div className="text-[14px] font-semibold text-ds-ink">{title}</div>
+        <div id={labelId} className="text-[14px] font-semibold text-ds-ink">{title}</div>
         {description ? (
-          <p className="mt-0.5 text-[13px] leading-relaxed text-ds-muted">{description}</p>
+          <p id={descriptionId} className="mt-0.5 text-[13px] leading-relaxed text-ds-muted">{description}</p>
         ) : null}
       </div>
       <div
@@ -155,7 +184,7 @@ export function SettingRow({
               : 'flex justify-end sm:max-w-[420px]'
         }`}
       >
-        {control}
+        {labelledControl}
       </div>
     </div>
   )
@@ -179,8 +208,9 @@ export function ModelSelect({
   customPlaceholder = '',
   disabled = false,
   selectClassName = '',
-  onChange
-}: {
+  onChange,
+  ...fieldLabels
+}: SettingFieldLabels & {
   value: string
   options: string[]
   defaultLabel?: string
@@ -214,6 +244,7 @@ export function ModelSelect({
   return (
     <div className="grid w-full min-w-0 gap-2">
       <select
+        {...fieldLabels}
         className={selectClassName}
         value={selectValue}
         disabled={disabled}
@@ -239,6 +270,7 @@ export function ModelSelect({
       </select>
       {customActive ? (
         <input
+          {...fieldLabels}
           className="w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 font-mono text-[13px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
           value={customDraft}
           placeholder={customPlaceholder}
@@ -294,8 +326,9 @@ export function AdvancedSettingsDisclosure({
 export function Toggle({
   checked,
   onChange,
-  disabled = false
-}: {
+  disabled = false,
+  ...fieldLabels
+}: SettingFieldLabels & {
   checked: boolean
   onChange: (v: boolean) => void
   disabled?: boolean
@@ -304,6 +337,7 @@ export function Toggle({
     <button
       type="button"
       role="switch"
+      {...fieldLabels}
       aria-checked={checked}
       aria-disabled={disabled}
       disabled={disabled}
@@ -311,12 +345,12 @@ export function Toggle({
         if (!disabled) onChange(!checked)
       }}
       className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-out ${
-        checked ? 'bg-emerald-500' : 'bg-ds-faint'
+        checked ? 'bg-accent' : 'bg-ds-faint'
       } ${disabled ? 'cursor-not-allowed opacity-60' : 'active:scale-[0.98]'}`}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ease-out ${
-          checked ? 'translate-x-5' : 'translate-x-0'
+        className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full shadow transition-transform duration-200 ease-out ${
+          checked ? 'translate-x-5 bg-[var(--ds-primary-button-fg)]' : 'translate-x-0 bg-ds-card'
         }`}
       />
     </button>

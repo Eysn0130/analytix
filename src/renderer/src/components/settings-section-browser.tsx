@@ -5,7 +5,7 @@ import type {
   AnalytixBrowserLocalUrlTarget,
   AnalytixBrowserUseSettingsV1
 } from '@shared/app-settings'
-import { Plus, ShieldAlert, SquareMousePointer } from 'lucide-react'
+import { Plus, ShieldAlert, SquareMousePointer } from '../design/AnalytixUiIcons'
 import {
   CodexEmptyState,
   CodexSelect,

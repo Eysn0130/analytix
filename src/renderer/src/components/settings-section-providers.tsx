@@ -59,7 +59,7 @@ import {
   Plus,
   Trash2,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import {
   InlineNoticeView,
   SecretInput,

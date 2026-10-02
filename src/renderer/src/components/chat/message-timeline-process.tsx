@@ -1,7 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
 import {
   Ban,
   Bot,
@@ -17,7 +17,7 @@ import {
   Search,
   Terminal,
   Wrench
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { ChatBlock, ToolBlock } from '../../agent/types'
 import { redactSecretText } from '@shared/secret-redaction'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'

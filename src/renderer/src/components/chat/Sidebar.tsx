@@ -6,7 +6,7 @@ import {
   FileQuestion,
   Focus,
   Plus
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
 import { useChatStore, type SettingsRouteSection } from '../../store/chat-store'
 import type { SddDraft } from '../../sdd/sdd-draft-store'

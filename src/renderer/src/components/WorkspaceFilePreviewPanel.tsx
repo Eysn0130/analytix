@@ -10,7 +10,7 @@ import {
   Loader2,
   PanelRightClose,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { harden } from 'rehype-harden'

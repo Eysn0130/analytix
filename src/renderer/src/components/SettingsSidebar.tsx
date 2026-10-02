@@ -22,7 +22,7 @@ import {
   Sparkles,
   UserCircle,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 
 type SettingsCategory =
   | 'account'

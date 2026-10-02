@@ -8,7 +8,7 @@ import {
   Save,
   ShieldCheck,
   TriangleAlert
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { WriteMarkdownEditor } from '../write/WriteMarkdownEditor'
@@ -238,9 +238,9 @@ export function PlanPanel({
 
   return (
     <aside
-      className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-white dark:bg-ds-canvas ${className}`}
+      className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas ${className}`}
     >
-      <div className="shrink-0 border-b border-ds-border-muted bg-white/92 dark:bg-ds-card">
+      <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
         <div className="ds-right-panel-topbar">
           <PanelCollapseButton
             onClick={onCollapse}
@@ -335,7 +335,7 @@ export function PlanPanel({
           </div>
         ) : (
           <div className="flex h-full min-h-0 min-w-0">
-            <div className="min-h-0 min-w-0 flex-1 bg-white dark:bg-ds-canvas">
+            <div className="min-h-0 min-w-0 flex-1 bg-ds-canvas">
               <WriteRichEditor
                 value={content}
                 workspaceRoot={activePlan!.workspaceRoot}
@@ -400,7 +400,7 @@ export function PlanPanel({
       </div>
 
       {hasPlan ? (
-        <div className="shrink-0 border-t border-ds-border-muted bg-white/94 p-3 dark:bg-ds-card">
+        <div className="shrink-0 border-t border-ds-border-muted bg-ds-card p-3">
           {error ? (
             <div className="mb-2 rounded-lg border border-red-300/70 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-red-700 dark:border-red-800/60 dark:text-red-300">
               {error}

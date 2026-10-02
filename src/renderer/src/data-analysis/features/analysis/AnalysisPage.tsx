@@ -1,3 +1,4 @@
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, UserRound } from "../../../design/AnalytixUiIcons";
 import {
   CSSProperties,
   MouseEvent as ReactMouseEvent,
@@ -579,40 +580,13 @@ function formatGridTrack(column: ColumnDef, width: number): string {
 }
 
 function renderModeFlowIcon(flow: ModeOption["flow"]): JSX.Element {
-  if (flow === "in") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none">
-        <path d="M5 12H19" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-        <path d="M11 6L5 12L11 18" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg viewBox="0 0 24 24" fill="none">
-      <path d="M5 12H19" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M13 6L19 12L13 18" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  const Icon = flow === "in" ? ArrowLeft : ArrowRight;
+  return <Icon aria-hidden="true" />;
 }
 
 function renderModeSubjectIcon(subject: ModeOption["subject"]): JSX.Element {
-  if (subject === "account") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none">
-        <rect x="4" y="6.5" width="16" height="11" rx="2.75" stroke="currentColor" strokeWidth="1.8" />
-        <path d="M4.75 10.25H19.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M8 14.25H11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="8.25" r="3.1" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M6.5 18.5C7.7 15.9 9.66 14.6 12 14.6C14.34 14.6 16.3 15.9 17.5 18.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
+  const Icon = subject === "account" ? CreditCard : UserRound;
+  return <Icon aria-hidden="true" />;
 }
 
 function fmtMoney(value: unknown): string {
@@ -3175,9 +3149,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                 onClick={(event) => onHeaderDateTailClick("start", event)}
               >
                 <span className="dateRangeFieldChevron">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path d="m8 10 4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <ChevronDown size={16} aria-hidden="true" />
                 </span>
               </button>
             </div>
@@ -3217,9 +3189,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                 onClick={(event) => onHeaderDateTailClick("end", event)}
               >
                 <span className="dateRangeFieldChevron">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path d="m8 10 4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <ChevronDown size={16} aria-hidden="true" />
                 </span>
               </button>
             </div>
@@ -3373,9 +3343,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
           aria-expanded={!leftCollapsed}
           onClick={() => setLeftCollapsed((prev) => !prev)}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M15 6l-6 6 6 6" stroke="rgba(2,6,23,.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <ChevronLeft size={16} aria-hidden="true" />
         </button>
 
         <section className={`right ${activeWorkspaceTab === "charts" ? "right--charts" : ""}`}>
@@ -3508,9 +3476,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                                   aria-pressed={allVisibleRowsSelected}
                                   onClick={() => onToggleSelectAllRows(!allVisibleRowsSelected)}
                                 >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                    <path d="M20 6L9 17l-5-5" stroke="rgba(31,111,235,.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                                  </svg>
+                                  <Check size={14} aria-hidden="true" />
                                 </button>
                                 <div className="resizer" onMouseDown={(event) => onStartResize(index, event)} />
                               </div>
@@ -3566,9 +3532,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                                       onToggleRowSelect(row.id, !rowSelected);
                                     }}
                                   >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                      <path d="M20 6L9 17l-5-5" stroke="rgba(31,111,235,.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
+                                    <Check size={14} aria-hidden="true" />
                                   </button>
                                 </div>
                                 {columns.slice(1).map((column) => {
@@ -3759,9 +3723,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                     disabled={datePopoverPrevDisabled}
                     onClick={() => setDatePopoverMonth((prev) => addMonths(prev, -1))}
                   >
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path d="M14 7l-5 5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    <ChevronLeft size={16} aria-hidden="true" />
                   </button>
                   <div className="dateCalendarMonthLabel">{datePopoverMonthLabel}</div>
                   <button
@@ -3771,9 +3733,7 @@ export function AnalysisPage({ active = true }: { active?: boolean }): JSX.Eleme
                     disabled={datePopoverNextDisabled}
                     onClick={() => setDatePopoverMonth((prev) => addMonths(prev, 1))}
                   >
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path d="M10 7l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    <ChevronRight size={16} aria-hidden="true" />
                   </button>
                 </div>
                 <div className="dateCalendarWeekdays" aria-hidden="true">

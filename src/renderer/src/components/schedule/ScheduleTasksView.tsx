@@ -17,7 +17,7 @@ import {
   Timer,
   Trash2,
   X
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import {
   DEFAULT_SCHEDULE_MODEL,
   DEFAULT_SCHEDULE_REASONING_EFFORT,
@@ -691,7 +691,7 @@ export function ScheduleTasksView({
                 className="sr-only"
               />
               <span className={`relative h-5 w-9 rounded-full transition ${schedule?.keepAwake ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${schedule?.keepAwake ? 'left-[18px]' : 'left-0.5'}`} />
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${schedule?.keepAwake ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
               </span>
             </label>
           </div>
@@ -787,7 +787,7 @@ export function ScheduleTasksView({
                             className="sr-only"
                           />
                           <span className={`relative h-5 w-9 rounded-full transition ${task.enabled ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
-                            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${task.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                            <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${task.enabled ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
                           </span>
                         </label>
                       </div>
@@ -803,7 +803,7 @@ export function ScheduleTasksView({
                                 : t('scheduleLastResult')}
                           </span>
                         </div>
-                        <div className="font-mono text-[12px] leading-5 text-ds-muted">
+                        <div className="text-[12px] leading-5 text-ds-muted">
                           {t(scheduledTaskMessageTranslationKey(task))}
                         </div>
                       </div>
@@ -1223,7 +1223,7 @@ function ScheduleTaskDialog({
                       <span className="truncate">{t('scheduleTaskEnabled')}</span>
                     </span>
                     <span className={`relative h-5 w-9 shrink-0 rounded-full transition ${draft.enabled ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${draft.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${draft.enabled ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
                     </span>
                   </button>
                 </div>

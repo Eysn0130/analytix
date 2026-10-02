@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, Circle, Loader2, X, XCircle } from 'lucide-react'
+import { Check, CheckCircle2, Circle, Loader2, X, XCircle } from '../../../design/AnalytixUiIcons'
 import { type ReactElement, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ThreadHandoffStepStatus } from '@shared/thread-handoff'

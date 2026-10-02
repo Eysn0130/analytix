@@ -358,16 +358,16 @@ html[data-theme='dark'] .ds-markdown .ds-code-block-html > pre span {
 }
 
 .ds-code-sidebar {
-  --ds-code-sidebar-editor-bg: #fbfcff;
-  --ds-code-sidebar-gutter-bg: #f3f6fb;
-  --ds-code-sidebar-active-line-bg: rgba(59, 130, 216, 0.13);
+  --ds-code-sidebar-editor-bg: var(--ds-bg-canvas);
+  --ds-code-sidebar-gutter-bg: var(--ds-card-muted);
+  --ds-code-sidebar-active-line-bg: var(--ds-surface-hover);
   background: var(--ds-bg-canvas);
 }
 
 html[data-theme='dark'] .ds-code-sidebar {
-  --ds-code-sidebar-editor-bg: #151c2e;
-  --ds-code-sidebar-gutter-bg: #1b2338;
-  --ds-code-sidebar-active-line-bg: rgba(111, 176, 232, 0.18);
+  --ds-code-sidebar-editor-bg: var(--ds-bg-canvas);
+  --ds-code-sidebar-gutter-bg: var(--ds-card-muted);
+  --ds-code-sidebar-active-line-bg: var(--ds-surface-hover);
 }
 
 .ds-code-sidebar-topbar {
@@ -458,9 +458,9 @@ html[data-theme='dark'] .ds-code-sidebar {
   align-items: center;
   justify-content: center;
   border-radius: 5px;
-  background: #1b2338;
+  background: var(--ds-chip-muted-bg);
   padding: 0 0.3rem;
-  color: #ffffff;
+  color: var(--ds-text-muted);
   font-family: 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace;
   font-size: 9px;
   font-weight: 700;
