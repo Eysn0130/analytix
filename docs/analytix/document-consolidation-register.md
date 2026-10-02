@@ -76,6 +76,38 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-10-02 Windows AnyIO 冻结链修复
+
+基线 `f5173060908d1e185cb6f6e036e9a21872140b6d`。Windows 的 AnyIO4.14.1
+与已接受的 `backend/uv.lock`4.15.1 分叉；仅更新这一依赖，不将独立 Windows
+冻结清单改为 uv 全量镜像，也不声称已证明产品可利用性或 Windows 发布资格。
+
+复用现有 builder/identity/prune owner，加 `--freeze-candidate <empty-temporary-directory>`；
+输出必须在实际 `os.tmpdir()` 下、源码树外且为空，不覆盖 accepted locks 或生产
+staging。由正式 cache helper 建立隔离目录后运行该入口，审查候选两锁，再执行
+`verifyWheelhouse` / `verifySitePackages`；普通构建仍严格匹配冻结 authority。
+AnyIO 官方 universal wheel 来自 uv 的 URL/hash，pip 保留 Windows CPython3.11、
+binary-only 和 require-hashes；当前只支持 uv 的单一正式 universal wheel格式，
+格式改变会 fail closed。既有 packaging contract 测试和正常 builder 检查 AnyIO
+版本/hash一致性；缓存 key 加入 `backend/uv.lock`，防止复用遗漏修复的旧 staging。
+
+实际45个 wheel下载、静态解包和签名稳定内容计算 pass。其余44行字节和
+`pythonRuntime` block 不变；AnyIO4.15.1 wheel132079 bytes，SHA256
+`6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101`。
+`METADATA/WHEEL/RECORD`及声明的 MIT `licenses/LICENSE`保留；license1081 bytes，
+SHA256 `5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0`。
+
+新 requirements SHA256 `1f8dfa741fb95e082a26f6766389a1b6196d0efa03807cea591efdeaa4b176d8`；
+wheel-set SHA256 `226854f5b6f22cc4c8f2484e2c36a5d1f304a116e241768d1f2c7f4a66476a37`；
+content SHA256 `7abd65f40ed18526b8887f6dc2d536a7f2e191227e0fed7290eaa143cb6b4f2a`，
+fileCount3017→3018。正常两guard pass；同数量wheel/site字节篡改拒绝并恢复后pass。
+原测试 owner 六项定向测试pass（57项筛选未运行），覆盖分叉/hash/重复pin/非官方
+来源、空输出/源码重叠/symlink拒绝、许可保留、签名稳定和缓存边界。独立只读审查
+发现临时源码树内空生产目录可误作候选、同一行第二条wheel记录可漏检，均已修复
+并补负例；路径段规则对应1项重验pass（62项筛选未运行）。
+未执行 Windows 二进制、native/整包/Provider；旧API worktree创建不支持任务类型，
+父明确批准正常本机Git隔离路线。GitHub发布与后续治理单元由父排序，当前交付查Git。
+
 ### 2026-10-02 当前事实、历史路由与 reference 单源治理
 
 基线 `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`；仅修四项已批准治理，

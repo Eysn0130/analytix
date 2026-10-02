@@ -153,6 +153,7 @@ const steps = {
       'scripts/windows-python-runtime-contract.cjs',
       'scripts/windows-python-runtime-lock.json',
       'scripts/windows-backend-requirements.lock.txt',
+      'backend/uv.lock',
       'package.json',
       'package-lock.json',
       'node_modules/7zip-bin/package.json',
