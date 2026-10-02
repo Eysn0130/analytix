@@ -10968,7 +10968,7 @@ func TestRuntimeServerWriteFileAllowsConfiguredAllowWriteRoot(t *testing.T) {
 func TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot(t *testing.T) {
 	dataDir := runtimeServerPrivateToolArgumentTempDir(t, "allow-read-edit")
 	workspace := filepath.Join(dataDir, "workspace")
-	allowRoot := filepath.Join(dataDir, "allowed")
+	allowRoot := runtimeServerNumericLegacyReadAliasRoot(t, dataDir)
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -11035,6 +11035,36 @@ func TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot(t *test
 		stringField(editResult, "code") != "" || stringField(editResult, "error") != "" {
 		t.Fatalf("provider continuation did not contain concrete successful allow_write read/edit results: read=%#v edit=%#v", readResult, editResult)
 	}
+}
+
+// Exercise the original public read/edit contract with a legitimate root whose
+// independently derived legacy alias collides with the numeric PII guard.
+func runtimeServerNumericLegacyReadAliasRoot(t *testing.T, parent string) string {
+	t.Helper()
+	realParent, err := filestore.WorkspaceRealPath(parent)
+	if err != nil {
+		t.Fatal("canonical synthetic read root unavailable")
+	}
+	for index := 0; index < 10000; index++ {
+		number := index
+		var suffix [8]byte
+		for offset := range suffix {
+			suffix[offset] = 'a' + byte(number&15)
+			number >>= 4
+		}
+		root := filepath.Join(realParent, "allowed-"+string(suffix[:]))
+		sum := sha256.Sum256([]byte(root))
+		digest := hex.EncodeToString(sum[:6])
+		if strings.IndexFunc(digest, func(value rune) bool { return value < '0' || value > '9' }) >= 0 {
+			continue
+		}
+		legacy := filestore.ExternalReadRootAliasPrefix + "/" + digest + "/" + filepath.Base(root)
+		if !domainsecurity.ContainsProtectedCaseData(root) && domainsecurity.ContainsProtectedCaseData(legacy) {
+			return root
+		}
+	}
+	t.Fatal("bounded synthetic legacy-alias collision unavailable")
+	return ""
 }
 
 func TestRuntimeServerProtectedReadDirsBlockDirectReadAndPruneWalk(t *testing.T) {

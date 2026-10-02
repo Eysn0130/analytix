@@ -1,9 +1,15 @@
 package filestore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 )
 
 func TestResolveWorkspacePathKeepsAccessInsideWorkspace(t *testing.T) {
@@ -177,21 +183,81 @@ func TestResolveExternalReadAliasMapsConfiguredRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(readRoot, "sub"), 0o755); err != nil {
 		t.Fatalf("mkdir sub: %v", err)
 	}
-	alias := ExternalReadRootAlias(readRoot)
-	resolved, ok := ResolveReadPathInfo(t.TempDir(), "@"+alias+"/sub/file.txt", "workspace-write", []string{readRoot})
-	if !ok {
-		t.Fatalf("expected external read alias to resolve")
-	}
 	expectedRoot, err := WorkspaceRealPath(readRoot)
 	if err != nil {
 		t.Fatalf("real path: %v", err)
 	}
 	expected := filepath.Join(expectedRoot, "sub", "file.txt")
-	if resolved.Path != expected || resolved.OutputPath() != alias+"/sub/file.txt" || !resolved.ExternalAlias {
-		t.Fatalf("unexpected resolved alias: %#v expected path %q", resolved, expected)
+	sum := sha256.Sum256([]byte(expectedRoot))
+	legacy := ExternalReadRootAliasPrefix + "/" + hex.EncodeToString(sum[:6]) + "/" + safeExternalReadAliasComponent(filepath.Base(expectedRoot))
+	for _, alias := range []string{ExternalReadRootAlias(readRoot), legacy} {
+		resolved, ok := ResolveReadPathInfo(t.TempDir(), "@"+alias+"/sub/file.txt", "workspace-write", []string{readRoot})
+		if !ok {
+			t.Fatalf("expected external read alias to resolve")
+		}
+		if resolved.Path != expected || resolved.OutputPath() != alias+"/sub/file.txt" || !resolved.ExternalAlias {
+			t.Fatalf("unexpected resolved alias: %#v expected path %q", resolved, expected)
+		}
+		if _, ok := ResolveReadPathInfo(t.TempDir(), alias+"/../escape.txt", "workspace-write", []string{readRoot}); ok {
+			t.Fatalf("external read alias must reject parent traversal")
+		}
+		if _, ok := ResolveExternalReadAlias(nil, alias+"/sub/file.txt"); ok {
+			t.Fatal("alias retained authority after its root was removed")
+		}
+		if _, ok := ResolveExternalReadAlias([]string{t.TempDir()}, alias+"/sub/file.txt"); ok {
+			t.Fatal("alias authorized another root")
+		}
 	}
-	if _, ok := ResolveReadPathInfo(t.TempDir(), alias+"/../escape.txt", "workspace-write", []string{readRoot}); ok {
-		t.Fatalf("external read alias must reject parent traversal")
+}
+
+func TestExternalReadAliasDigestPreservesBitsWithoutRestrictedNumbers(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "documents")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realRoot, err := WorkspaceRealPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := ExternalReadRootAlias(root)
+	parts := strings.Split(strings.TrimPrefix(alias, ExternalReadRootAliasPrefix+"/"), "/")
+	if len(parts) != 2 || len(parts[0]) != 12 {
+		t.Fatal("external read alias digest shape changed")
+	}
+	sum := sha256.Sum256([]byte(realRoot))
+	for index, character := range []byte(parts[0]) {
+		if character < 'a' || character > 'p' {
+			t.Fatal("external read digest is not opaque alphabetic text")
+		}
+		want := sum[index/2] & 0x0f
+		if index%2 == 0 {
+			want = sum[index/2] >> 4
+		}
+		if character-'a' != want {
+			t.Fatal("external read digest changed its original bits")
+		}
+	}
+	validate := func(path string) error {
+		return domainevent.ValidatePublicRecord(map[string]any{"kind": "tool_call", "arguments": map[string]any{"path": path}})
+	}
+	if err := validate(alias + "/note.txt"); err != nil {
+		t.Fatal("host-issued opaque alias failed unchanged public privacy validation")
+	}
+	for _, negative := range []struct {
+		name, suffix string
+		want         error
+	}{
+		{"restricted numeric subpath", "/123456789012.txt", domainevent.ErrPrivacyProjection},
+		{"private reasoning subpath", "/<think>private</think>.txt", domainevent.ErrPrivateReasoningPersistence},
+	} {
+		t.Run(negative.name, func(t *testing.T) {
+			if !errors.Is(validate("/documents"+negative.suffix), negative.want) {
+				t.Fatal("negative control did not exercise the original privacy guard")
+			}
+			if !errors.Is(validate(alias+negative.suffix), negative.want) {
+				t.Fatal("opaque digest bypassed privacy inspection of its subpath")
+			}
+		})
 	}
 }
 
@@ -206,11 +272,6 @@ func TestResolveExternalReadAliasRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(outsideRoot, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	alias := ExternalReadRootAlias(readRoot)
-	if resolved, ok := ResolveExternalReadAlias([]string{readRoot}, alias+"/escape/secret.txt"); ok {
-		t.Fatalf("external alias symlink escape should be rejected: %#v", resolved)
-	}
-
 	inside := filepath.Join(readRoot, "inside")
 	if err := os.MkdirAll(inside, 0o755); err != nil {
 		t.Fatalf("mkdir inside: %v", err)
@@ -219,9 +280,15 @@ func TestResolveExternalReadAliasRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(inside, insideLink); err != nil {
 		t.Skipf("inside symlink unavailable: %v", err)
 	}
-	resolved, ok := ResolveExternalReadAlias([]string{readRoot}, alias+"/inside-link/note.txt")
-	if !ok || !PathWithinRoot(readRoot, resolved.Path) {
-		t.Fatalf("contained alias symlink should remain allowed: %#v ok=%v", resolved, ok)
+	alias, legacy := externalReadRootAliases(readRoot)
+	for _, token := range []string{alias, legacy} {
+		if resolved, ok := ResolveExternalReadAlias([]string{readRoot}, token+"/escape/secret.txt"); ok {
+			t.Fatalf("external alias symlink escape should be rejected: %#v", resolved)
+		}
+		resolved, ok := ResolveExternalReadAlias([]string{readRoot}, token+"/inside-link/note.txt")
+		if !ok || !PathWithinRoot(readRoot, resolved.Path) {
+			t.Fatalf("contained alias symlink should remain allowed: %#v ok=%v", resolved, ok)
+		}
 	}
 }
 

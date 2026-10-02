@@ -351,6 +351,44 @@ SQL/token 总数仍 unknown；旧 Rust UNKNOWN 与全部不利成本结果保留
 任务测试与本报告组成最终候选；其 exact HEAD CI/CodeQL、审查与 main 合并事实
 由 [PR38](https://github.com/Eysn0130/analytix/pull/38) 的对应候选/终态单独证明。
 
+## 当前 Go CI：外部读取 alias 的最小兼容修复
+
+`260107c1fb784f0d513b7befee36f18742ea7e5a` Development
+[36982572571](https://github.com/Eysn0130/analytix/actions/runs/36982572571)
+实际终态 **50 success / 2 failure（52 jobs）**：普通 Go package 中原
+`TestRuntimeServerEditAllowsReadBeforeEditInConfiguredAllowWriteRoot` 返回 500 而非
+202，`tool_private_arguments`；另一失败为 aggregate gate。CodeQL
+`36982568658` 四项 Analyze 与 aggregate success。原 CI 未记录 toolName/token，
+实际 alias 和具体触发类型仍 **UNKNOWN**，不称 flaky，也不重跑旧候选。
+
+独立合成最小复现确认真实契约缺口：原 SHA 前 6 bytes 的 12-char hex alias
+可能成为纯数字账号形状；合法非 PII root 经当前 readRoots 实际授权解析，但原
+完整 public privacy guard 拒绝该 host-issued alias。只读 producer/validator/resolver
+probe PASS / 120.041s；原 HTTP 用例只强制这个合法 root 后 **RED / 84.372s**，
+重现相同 500，不能反推原 CI 的未记录 token。
+
+最小生产修复仅在 filestore：将相同 48 bits 逐 nibble 编为 `a`–`p`；兼容原
+hex locator，但每次仍从当前 readRoots 匹配并检查 realpath/containment。alias 不
+授予权限；撤除/换 root、parent traversal、外部 symlink 均拒绝。PII/reasoning guard
+源码未改；原 HTTP 202、两次 Provider 请求、真实 read/edit 内容与路径不外泄断言保留。
+
+首轮 full filestore FAIL / 84.909s（651 named PASS、2 既有资源条件 SKIP、1 新
+负向 fixture FAIL）：Temp basename `001` 与后续数字 filename 被原扫描器合并成
+非规范数字分组。仅新测试根改为 `documents`，加裸路径 typed-error negative control；
+该失败原样保留。修正后相关 alias 普通/prod 两模式各 **6 PASS / 48.122s、39.919s**；
+event/security **585 PASS / 10.813s**；既有 loop guard **6 PASS / 8.092s**；
+原 HTTP read/edit **1 PASS / 171.093s**（用例 79.42s），上述均 0 skip。
+仅旧 hex emitter 的行为 mutation **RED / exit 1 / 42.074s**，确实进入新摘要断言，
+不是 compile failure；产品源码未被 mutation。独立三个文件只读 review 无 blocker。
+私有检查 receipt SHA `fc9d28db49948a1061dd8d4273fe7b5c6d36ad94dd65c7b4e50f37df7644ae41`。
+
+全部命令同 shell cache preflight；继承 dirty recovery source 用 clean committed
+HEAD overlay，原文件不改；只有隔离合成 HTTP Provider，无 paid/live 调用。编译、
+首次失败和诊断负担均保留。R5 四测试与 page-builder bytes 不变；上述 generic alias
+修复不改变其 Funds native 验证行为，因此不重复装配/长链。R5 native 仍只绑定
+原 `5d7fde6e8` production freeze，不能称后续候选所有 Go 生产字节都与该包相同。
+新修复须经自己的 exact HEAD CI/CodeQL 和正常 PR38/main 门禁，不沿用 260107 结果。
+
 ## 待授权的窄同模型对照
 
 只准备协议，不调用 Provider。建议用户指定同一 connected local Provider 的精确

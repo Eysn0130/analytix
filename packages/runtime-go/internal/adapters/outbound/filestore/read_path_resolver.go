@@ -47,9 +47,12 @@ func ResolveExternalReadAlias(readRoots []string, path string) (ResolvedReadPath
 		return ResolvedReadPath{}, false
 	}
 	for _, root := range NormalizeRealRoots(readRoots) {
-		token := ExternalReadRootAlias(root)
+		token, legacy := externalReadRootAliases(root)
 		if key != token && !strings.HasPrefix(key, token+"/") {
-			continue
+			token = legacy
+			if key != token && !strings.HasPrefix(key, token+"/") {
+				continue
+			}
 		}
 		sub := "."
 		if strings.HasPrefix(key, token+"/") {
@@ -81,17 +84,30 @@ func ResolveExternalReadAlias(readRoots []string, path string) (ResolvedReadPath
 }
 
 func ExternalReadRootAlias(root string) string {
+	alias, _ := externalReadRootAliases(root)
+	return alias
+}
+
+func externalReadRootAliases(root string) (string, string) {
 	root = filepath.Clean(strings.TrimSpace(root))
 	if root == "" {
-		return ""
+		return "", ""
 	}
 	if realRoot, err := WorkspaceRealPath(root); err == nil {
 		root = filepath.Clean(realRoot)
 	}
 	sum := sha256.Sum256([]byte(root))
-	hash := hex.EncodeToString(sum[:])[:12]
+	// Keep the same 48 digest bits without generating an account-shaped numeric
+	// token in Provider arguments. Legacy locators still resolve only through
+	// the current authorized roots and the same real-path containment checks.
+	var opaque [12]byte
+	for index, value := range sum[:6] {
+		opaque[index*2] = 'a' + value>>4
+		opaque[index*2+1] = 'a' + value&0x0f
+	}
 	name := safeExternalReadAliasComponent(filepath.Base(root))
-	return ExternalReadRootAliasPrefix + "/" + hash + "/" + name
+	prefix, suffix := ExternalReadRootAliasPrefix+"/", "/"+name
+	return prefix + string(opaque[:]) + suffix, prefix + hex.EncodeToString(sum[:6]) + suffix
 }
 
 func (p ResolvedReadPath) OutputPath() string {
