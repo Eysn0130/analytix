@@ -103,4 +103,3 @@ export function bindFlowThemeSync(targetDocument: Document, sourceRoot: HTMLElem
     }
   };
 }
-
