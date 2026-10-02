@@ -1,8 +1,10 @@
 # Account-flow 保真与本地 page 成本
 
-Status: source slice verified；original full native **failed**，修正后唯一完整链外层超时；
-CDP fixture 已确定化；留存 fixture 的 original witness 前置 seam 不可用，native
-分阶段验收仍 blocked。旧 Rust incident 保留 UNKNOWN，停止无信号复现。
+Status: source slice verified；R5 同源新 fixture 分阶段 native 恢复 **pass**，
+predecessor 1011.415s、fresh-child 409.697s，同一 witness 正常退出。
+original full 两次失败、R3 witness-unavailable、R4 前序失败分别保留，不改为 PASS。
+冻结候选 CI／main 终态须按 PR38 当前事实核实，不能转用旧候选绿色状态。
+旧 Rust incident 保留 UNKNOWN，停止无信号复现。
 不是模型优势或安装／发布验收。
 Scope: 现有 CSV → DuckDB → source-row 的 page 选择与编码，及相关 Go 消费边界。
 Base: PR37 main `28dbaface7cdab09adb896095ed138da0bea927e`，
@@ -284,6 +286,70 @@ SQL、不盲重跑旧 CI，也不把重复 GREEN 当成当前 finding 的关闭�
 `search_page_window_exact_ci_shape`／single_thread／count_literal controls：同一
 verified session，COUNT OVER search/tie、threads 8/1、DuckDB v1.5.4、offset 0/1；
 CLI 原失败也附 offset context。只在新失败给出区分信号时继续，不重跑 ignored stress。
+
+## R4：一次新匹配 fixture 与已定位 reader 错误
+
+已授权的一次新合成 fixture 使用既有 `formal-authority-sidecar`，同一独立 owner
+持有临时 witness；caller-owned source／Host／authority／durable paths 不随 TestMain
+删除。完整链入口拒绝 staged mode；新增 predecessor-only 入口复用原全部断言，
+只有前序正常关闭后才独占写入恢复 input。bootstrap/key bytes、原 anchor 与 fresh
+nonce/signature 仍必需；source、DSV2 四 leaf、证据/final stores 另有前后摘要。
+非 test 输入 2094 项与冻结 `5d7fde6e8` 字节一致；两处既有 Rust cfg(test)/tests
+诊断单独列为排除项，四个 Go 测试 overlay 逐字节绑定。不重新打包或改 trust。
+
+实际 `TestFundsDeliveryVectorPredecessorStage -test.timeout=20m` **FAIL exit 1 / 1123.779s**，
+不是超时。9/7 gold、逐笔多重集/refs/lineage、前序 protected display 与 reopen
+2/2 admission 已走过；OwnerClose terminal hydration 后，private scope reader 误用
+`NewTempDurableEventSessionStore`，拒绝 TestMain 临时目录之外的 production durable root。
+这不是完整前序 PASS；恢复 input 未 seal，fresh-child **not_run**。sidecar 正常
+SIGTERM / exit 0；不把前序 Provider counter 移作 child 的零请求证明。
+
+最小 test-only 修复：scope reader 使用实际 runtime 的既有 store factory，仍解析
+原完整 frozen context、执行原全 scope/epoch/history 断言；未删除 Temp containment。
+新回归真实持久化/reopen exact context，并检查 reader 不改记录及 Temp 拒绝。
+九个短合同 **PASS / 13.487s，16 subtests，0 skip**；不等于 native acceptance。
+失败工作账保留：production/test 分类断言错误后 compiler 停止 exit143；不存在的
+archive pathspec exit1 后无编译；短 fixture 缺 owner dir／错误 cwd FAIL 后修正，
+8 top/16 sub PASS 16.572s；reader 回归 import 路径 compile FAIL 后按既有路径修正。
+测量/装配负担没有扣除；全部 SQL/token 数仍 unknown，无整阶段总效率下降声明。
+
+R4 收口时四测试与本结果为 **uncommitted**。已发布 `ccf219d4e` Development
+`36970005577` **52/52 success**、CodeQL `36970001512` **4/4 Analyze + aggregate success**，
+不覆盖 R4 修复。当时 PR38 保持 Draft，main 未合并。单次新 fixture 已正常结束；
+另一轮前序20m与同 fixture fresh-child11m/outer12m当时须追加执行授权。
+原两次完整链失败、R3 original-witness unavailable、此次失败分别保留，不拼接 PASS。
+
+## R5：同一新 fixture 的实际分阶段恢复
+
+用户明确追加授权第二个同源新 fixture，正常 GitHub 门禁通过后推进 PR38/main。
+先核旧 lease CLOSED、原四 dirty SHA、空 index、五项 task-owned bytes；重新登记
+同任务唯一 writer。四个 Go overlay、已编译 test binary 与九项短检查 SHA 全匹配，
+直接复用已有检查；两处实际 scope reader 均为 runtime store factory。
+运行期间 source 冻结，未重打 native 包、改 production bytes 或 trust／timeout。
+
+实际独立进程命令：`TestFundsDeliveryVectorPredecessorStage -test.timeout=20m`
+**PASS / exit 0 / 1011.415s**，随后同 fixture
+`TestFundsRecoveryFreshProcessHelper -test.timeout=11m` **PASS / exit 0 / 409.697s**；
+fresh 外层仍 12m，原 full-chain 20m 不变。测试源码为 `ccf219d4e` 加本次四个
+逐字节绑定 overlay；native 与 2094 个非 test 输入仍绑定冻结 `5d7fde6e8`。
+caller-owned 私有路径未随前序 TestMain 删除，原独立 sidecar/witness 持续存活；
+没有复制旧 fixture、旧 witness 私钥或历史 PASS 回执。
+
+前序重新执行 9/7 gold、逐笔/重复/refs/lineage、A/B current native query、protected
+display、reopen 和实际 OwnerClose；B 的原 final digest 不变，完整原 scope 保持、
+epoch 1→2，历史为 exact retained_snapshot。fresh 的 25 个 closed phase 实测覆盖
+原随机 nonce witness、lease、装配、2 candidates/2 admitted/0 held、normal native
+Owner、两个原线程 GET 与 exact-ref display、readback-pass、runtime/Owner 正常关闭。
+source、恢复 input、原 bootstrap 与全部 protected leaf 摘要保持；sidecar SIGTERM
+正常 exit 0，driver exit 0／inflight 空。仅记 **PASS_SAME_NEW_FIXTURE_STAGED_ONLY**，
+不将任一旧 full-chain 失败改为通过，也不等于安装、发布或真实模型验收。
+
+私有 receipt SHA `cb6575525107ef012c94d734baf9adf2cef9ca4557aef57239176277d057208f`；
+test binary SHA `8ce89c2395354ff25c81074b6ec6c9ea53e999366fb82fee8f5269fef7f6a400`。
+本轮不重复短检查或 native 链；两个阶段及装配/测量负担均计入工作账。
+SQL/token 总数仍 unknown；旧 Rust UNKNOWN 与全部不利成本结果保留。
+任务测试与本报告组成最终候选；其 exact HEAD CI/CodeQL、审查与 main 合并事实
+由 [PR38](https://github.com/Eysn0130/analytix/pull/38) 的对应候选/终态单独证明。
 
 ## 待授权的窄同模型对照
 

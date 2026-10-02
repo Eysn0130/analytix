@@ -31,6 +31,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
+	domainplugin "analytix.local/runtime-go/internal/domain/pluginmaterialization"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authorityfixture "analytix.local/runtime-go/internal/formalauthority"
 	"analytix.local/runtime-go/internal/server"
@@ -166,7 +167,25 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 		t.Fatal("B1 requires the existing compiled development signing policy; no package or receipt trust override")
 	}
 	runtimePath := b1SelectedNativeInput(t)
-	root := workspacetest.New(t)
+	stagedRoot := os.Getenv(b1StagedFixtureEnv)
+	if stagedRoot != "" && t.Name() != "TestFundsDeliveryVectorPredecessorStage" {
+		t.Fatal("staged lifecycle requires its explicit predecessor-only test entry")
+	}
+	var root, authorityKeyID string
+	var config Config
+	if stagedRoot == "" {
+		root = workspacetest.New(t)
+	} else {
+		var err error
+		config, authorityKeyID, err = b1StagedAuthorityConfig(stagedRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root = filepath.Join(stagedRoot, "fixture")
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal("staged fixture must be fresh")
+		}
+	}
 	authorityRoot := strings.TrimSpace(os.Getenv("ANALYTIX_TEST_PROFILE_ROOT"))
 	if authorityRoot == "" {
 		authorityRoot = root
@@ -174,7 +193,10 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 	if blocker := authorityfixture.SecureConfigurationFilesystemBlocker(authorityRoot); blocker != "" {
 		t.Fatalf("B1 authority configuration prerequisite: %s", blocker)
 	}
-	fixture, config := runtimeWitnessedRegistryConfigV2(t)
+	if stagedRoot == "" {
+		fixture, ordinaryConfig := runtimeWitnessedRegistryConfigV2(t)
+		config, authorityKeyID = ordinaryConfig, fixture.Authority.KeyID()
+	}
 	defer func() {
 		if !t.Failed() {
 			return
@@ -203,7 +225,12 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 	defer provider.Close()
 	config.BaseURL, config.ProviderID, config.Model = provider.URL+"/v1", "b1-synthetic", "b1-synthetic-model"
 	seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "test-only")
-	host := newBundledFundsHostValidationFixtureV1(t)
+	var host bundledFundsHostValidationFixtureV1
+	if stagedRoot == "" {
+		host = newBundledFundsHostValidationFixtureV1(t)
+	} else {
+		host = newBundledFundsHostValidationFixtureAtRuntimeHomeV1(t, filepath.Join(stagedRoot, "host"), "0.16.16", domainplugin.EntrypointRelativePathV1, nil)
+	}
 	dependencies := host.dependencies
 	dependencies.resolveRuntimeRoots = func(string) (string, string, error) {
 		return bundledFundsRuntimeRootsV1(host.config.DataDir)
@@ -251,12 +278,25 @@ func runB1ProductionPublicChain(t *testing.T, source []byte, model http.Handler,
 		shutdownOwnedRuntimeHandler(t, owned)
 		async.assertDrained(t)
 	}()
-	verify(config, root, workspace, sourcePath, fixture.Authority.KeyID(), sourceEvents, b1PublicChainDriver{
+	verify(config, root, workspace, sourcePath, authorityKeyID, sourceEvents, b1PublicChainDriver{
 		assertNewProcess: func(account string, expected ...b1RecoveryExpectedFinal) {
 			runtime.Close()
 			shutdownOwnedRuntimeHandler(t, owned)
 			async.assertDrained(t)
 			closed = true
+			if stagedRoot != "" {
+				if t.Failed() {
+					t.Fatal("failed predecessor cannot seal fresh-process input")
+				}
+				input := b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, Account: account, ExpectedFinals: expected, ParentPID: os.Getpid(), StagedRoot: stagedRoot}
+				input.Config.APIKey = ""
+				input.ProtectedDigest = b1StagedProtectedDigest(t, input)
+				if err := b1WriteRecoveryInput(filepath.Join(stagedRoot, "input.json"), input); err != nil {
+					t.Fatal("seal private predecessor recovery input")
+				}
+				t.Log("predecessor only: strict A/B assertions and normal runtime shutdown passed; same-fixture fresh process remains required")
+				return
+			}
 			before := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))
 			b1AssertFreshProcessRecovery(t, b1RecoveryProcessInput{Config: config, HostDataDir: host.config.DataDir, NativePath: runtimePath, Account: account, ExpectedFinals: expected})
 			after := startupWholeTreeDigest(t, filepath.Join(config.DataDir, "private", "evidence-registry"), filepath.Join(config.DataDir, "private", "evidence-settlements"), filepath.Join(config.DataDir, "private", "accepted-finals"))

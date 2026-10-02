@@ -17,17 +17,36 @@ import (
 	"time"
 
 	caseentityapp "analytix.local/runtime-go/internal/app/caseentity"
+	appturn "analytix.local/runtime-go/internal/app/turn"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/server"
 )
 
 // Real Go import/DSV2/Host/native/Provider/Final Gate/local display/reopen. The
 // native generation is bound to the selected input's sealed source identity;
 // package admission and Provider are synthetic, so this is not installation QA.
 func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
+	if os.Getenv(b1StagedFixtureEnv) != "" {
+		t.Fatal("full-chain acceptance cannot use the predecessor-only lifecycle")
+	}
+	runFundsDeliveryVectorProductionPublicChain(t)
+}
+
+// This entry proves only the existing predecessor assertions. Its caller must
+// keep the same independent witness alive and run the actual new-process helper
+// against this fixture before claiming staged native recovery acceptance.
+func TestFundsDeliveryVectorPredecessorStage(t *testing.T) {
+	if os.Getenv(b1StagedFixtureEnv) == "" {
+		t.Skip("caller-owned staged fixture is not configured")
+	}
+	runFundsDeliveryVectorProductionPublicChain(t)
+}
+
+func runFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 	source := deliveryCNYCSV(t)
 	sourceHash := domainsecurity.SHA256Hex(source)
 	reference := b1ReferenceFlowFromCSVInWindow(t, source, "2026-09-")
@@ -427,8 +446,14 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 		t.Logf("post-Owner-close public terminal hydration_ms=%d", time.Since(publicHydrationStarted).Milliseconds())
 		blockedDetail := request(http.MethodGet, "/v1/threads/"+secondID, nil, http.StatusOK)
 		blockedTurn := packagedSourceUnavailableHydrationTurnV1(blockedDetail, blockedTurnID)
-		originalBContext := runtimeWitnessedRegistryFrozenContextV2(t, config.ProductionDurableRoot, secondID, secondTurnID)
-		blockedBContext := runtimeWitnessedRegistryFrozenContextV2(t, config.ProductionDurableRoot, secondID, blockedTurnID)
+		originalBContext, err := deliveryFrozenContext(config, secondID, secondTurnID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedBContext, err := deliveryFrozenContext(config, secondID, blockedTurnID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		b1AssertOwnerCloseRetainedScope(t, originalBContext, blockedBContext)
 		retainedB := b1RecoveryExpectedFinal{ThreadID: secondID, TurnID: secondTurnID, FinalDigest: secondFinal.AcceptedFinalDigest, HistoryState: "retained_snapshot"}
 		if b1RecoveryFinalReadbackFailure(retainedB, blockedDetail) != "" {
@@ -470,6 +495,17 @@ func TestFundsDeliveryVectorProductionPublicChain(t *testing.T) {
 			t.Fatal("fresh process recovery reissued Provider work")
 		}
 	})
+}
+
+// Match the runtime's explicit store mode when inspecting this private fixture.
+// A caller-owned production root survives TestMain and need not be inside its
+// temporary directory. The Temp constructor's containment rule stays intact.
+func deliveryFrozenContext(config Config, threadID, turnID string) (domainsecurity.TurnSecurityContext, error) {
+	store, err := server.NewRuntimeEventSessionStore(config)
+	if err != nil {
+		return domainsecurity.TurnSecurityContext{}, err
+	}
+	return appturn.LoadFrozenSecurityContext(store, strings.TrimSpace(threadID), strings.TrimSpace(turnID))
 }
 
 // Original finals keep their frozen identity; a new Host policy can advance
