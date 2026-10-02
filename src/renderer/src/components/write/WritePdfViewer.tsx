@@ -741,7 +741,7 @@ export function WritePdfViewer({
             {t('writePdfLoadFailed', { message: error })}
           </div>
         ) : pdfDocument ? (
-          <div className="mx-auto flex w-max max-w-full flex-col items-center gap-5">
+          <div className="mx-auto flex w-max flex-col items-center gap-5">
             {allPageTextLoaded && !pdfHasText ? (
               <div className="max-w-[560px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] leading-5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/36 dark:text-amber-100">
                 {t('writePdfNoTextLayer')}
