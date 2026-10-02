@@ -1133,7 +1133,7 @@ function MessageTurn({
             stepCount={displayProcessBlocks.length + liveProcessStepCount}
             durationMs={durationMs}
             expanded={workExpanded}
-            collapsible={!forceExpandForError}
+            collapsible={!forceExpandForError && displayProcessBlocks.length > 0}
             onToggle={() => setWorkExpandedOverride(!workExpanded)}
           />
           {workExpanded && processSections.length > 0 ? (
