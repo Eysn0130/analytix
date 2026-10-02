@@ -1,5 +1,6 @@
 import * as Lucide from 'lucide-react'
 import { createSystemIcon } from './AnalytixIconRegistry'
+import { OpenAiUiIcons } from './openai-icons/OpenAiUiIcons'
 
 export type { LucideIcon, LucideProps } from 'lucide-react'
 
@@ -117,7 +118,7 @@ export const MessageSquare = createSystemIcon(Lucide.MessageSquare)
 export const MessageSquarePlus = createSystemIcon(Lucide.MessageSquarePlus)
 export const MessageSquareQuote = createSystemIcon(Lucide.MessageSquareQuote)
 export const MessageSquareText = createSystemIcon(Lucide.MessageSquareText)
-export const Mic = createSystemIcon(Lucide.Mic)
+export const Mic = OpenAiUiIcons.mic
 export const Minimize = createSystemIcon(Lucide.Minimize)
 export const Minimize2 = createSystemIcon(Lucide.Minimize2)
 export const Minus = createSystemIcon(Lucide.Minus)
@@ -149,7 +150,7 @@ export const Play = createSystemIcon(Lucide.Play)
 export const PlayCircle = createSystemIcon(Lucide.PlayCircle)
 export const Plug = createSystemIcon(Lucide.Plug)
 export const PlugZap = createSystemIcon(Lucide.PlugZap)
-export const Plus = createSystemIcon(Lucide.Plus)
+export const Plus = OpenAiUiIcons.plus
 export const PlusCircle = createSystemIcon(Lucide.PlusCircle)
 export const Power = createSystemIcon(Lucide.Power)
 export const Presentation = createSystemIcon(Lucide.Presentation)
@@ -167,7 +168,7 @@ export const Save = createSystemIcon(Lucide.Save)
 export const Scaling = createSystemIcon(Lucide.Scaling)
 export const ScanEye = createSystemIcon(Lucide.ScanEye)
 export const ScrollText = createSystemIcon(Lucide.ScrollText)
-export const Search = createSystemIcon(Lucide.Search)
+export const Search = OpenAiUiIcons.search
 export const SearchCode = createSystemIcon(Lucide.SearchCode)
 export const Send = createSystemIcon(Lucide.Send)
 export const SendHorizontal = createSystemIcon(Lucide.SendHorizontal)
@@ -217,3 +218,6 @@ export const X = createSystemIcon(Lucide.X)
 export const XCircle = createSystemIcon(Lucide.XCircle)
 export const ZoomIn = createSystemIcon(Lucide.ZoomIn)
 export const ZoomOut = createSystemIcon(Lucide.ZoomOut)
+
+// Existing new-chat commands have their own semantic icon, separate from generic add.
+export const NewChat = OpenAiUiIcons.newChat

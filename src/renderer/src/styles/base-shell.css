@@ -3559,39 +3559,79 @@ pre {
 
 .ds-workbench-shell {
   position: relative;
-  /* Collapsed header slot is the padding needed inside the stage topbar so title text clears the fixed shell controls. */
   --ds-shell-navigation-sidebar-width: 240px;
-  --ds-shell-navigation-control-gap: 4px;
-  --ds-shell-navigation-base-control-width: calc(
-    (var(--ax-toolbar-button-size) * 3) + (var(--ds-shell-navigation-control-gap) * 2)
-  );
-  --ds-shell-navigation-collapsed-control-width: calc(
-    (var(--ax-toolbar-button-size) * 4) + (var(--ds-shell-navigation-control-gap) * 3)
-  );
-  --ds-shell-navigation-fixed-control-width: var(--ds-shell-navigation-base-control-width);
-  --ds-shell-collapsed-controls-right: calc(
-    ((var(--ds-shell-navigation-sidebar-width) - var(--ds-shell-navigation-base-control-width)) / 2) +
-      var(--ds-shell-navigation-collapsed-control-width)
-  );
-  --ds-shell-collapsed-header-title-gap: var(--ds-shell-navigation-control-gap);
-  --ds-shell-collapsed-header-slot-width: max(
-    0px,
-    calc(
-      var(--ds-shell-collapsed-controls-right) - var(--ds-shell-topbar-content-left-padding, 20px) +
-        var(--ds-shell-collapsed-header-title-gap)
-    )
-  );
-  --ds-shell-navigation-top: calc((var(--ax-chat-topbar-shell-height) - var(--ax-toolbar-button-size)) / 2);
 }
 
-:root[data-platform='darwin'] .ds-workbench-shell {
-  --ds-shell-collapsed-controls-right: calc(
-    var(--ds-titlebar-safe-header-left) + var(--ds-shell-navigation-collapsed-control-width)
+.ds-window-chrome {
+  --ds-window-chrome-navigation-width: max(
+    calc(56px + var(--ds-window-chrome-sidebar-width)),
+    calc(var(--ds-titlebar-safe-header-left) + 152px)
   );
-  --ds-shell-navigation-top: calc(
-    (var(--ds-macos-traffic-light-top) / var(--ds-ui-scale) / 2) +
-      ((var(--ax-chat-topbar-shell-height) - var(--ax-toolbar-button-size)) / 2)
-  );
+  display: flex;
+  flex: 0 0 max(42px, var(--ds-window-controls-safe-block));
+  align-items: center;
+  min-width: 0;
+  background: var(--ds-bg-sidebar);
+  color: var(--ds-text);
+  border-bottom: 1px solid var(--ds-border-muted);
+  -webkit-app-region: drag;
+}
+.ds-window-chrome-navigation {
+  display: flex;
+  flex: 0 0 var(--ds-window-chrome-navigation-width);
+  align-items: center;
+  padding-left: var(--ds-titlebar-safe-header-left);
+  transition: flex-basis var(--ax-motion-sidebar-collapse);
+}
+.ds-window-chrome[data-resizing='true'] .ds-window-chrome-navigation { transition: none; }
+:root[data-motion-reduced='true'] .ds-window-chrome-navigation { transition: none; }
+@media (prefers-reduced-motion: reduce) { .ds-window-chrome-navigation { transition: none; } }
+.ds-window-chrome-session {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+}
+.ds-window-chrome-session .chat-workbench-topbar,
+.ds-window-chrome-session .chat-workbench-topbar .ds-toolbar-tooltip-anchor,
+.ds-window-chrome-session .chat-workbench-topbar button {
+  pointer-events: auto;
+}
+.ds-window-chrome-session .chat-workbench-topbar,
+.ds-window-chrome-session .chat-workbench-topbar * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.ds-window-chrome-running {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgb(245 158 11 / 16%);
+  color: var(--ds-text);
+  font-size: 11.5px;
+}
+.ds-window-chrome-workspace {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ds-window-chrome-workspace[data-open='false'] { pointer-events: none; }
+.ds-sidebar-brand-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  min-height: 52px;
+  gap: 8px;
+}
+.ds-sidebar-brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .ds-sidebar-titlebar-spacer {
@@ -3614,30 +3654,14 @@ pre {
 }
 
 .ds-shell-navigation-controls {
-  --ds-shell-navigation-hit-slop: 0px;
-  position: absolute;
-  top: var(--ds-shell-navigation-top);
-  left: var(--ds-titlebar-safe-header-left);
-  z-index: 220;
   display: inline-flex;
+  flex-shrink: 0;
   height: var(--ax-toolbar-button-size);
   align-items: center;
-  gap: var(--ds-shell-navigation-control-gap);
-  margin: calc(-1 * var(--ds-shell-navigation-hit-slop));
-  padding: var(--ds-shell-navigation-hit-slop);
+  gap: 4px;
   pointer-events: auto;
   -webkit-app-region: no-drag;
   app-region: no-drag;
-}
-
-:root[data-platform='darwin'] .ds-shell-navigation-controls {
-  --ds-shell-navigation-hit-slop: 10px;
-}
-
-:root:not([data-platform='darwin']) .ds-shell-navigation-controls {
-  top: 9px;
-  left: calc((var(--ds-shell-navigation-sidebar-width) - var(--ds-shell-navigation-fixed-control-width)) / 2);
-  transform: none;
 }
 
 .ds-shell-navigation-controls .ds-toolbar-tooltip-anchor {
@@ -3694,28 +3718,6 @@ pre {
   border-color: transparent;
   background: color-mix(in srgb, var(--ds-accent) 88%, black);
   color: white;
-}
-
-.ds-shell-controls-safe-inset {
-  padding-left: var(--ds-shell-collapsed-header-slot-width);
-}
-
-.ds-shell-controls-safe-motion {
-  transition: padding-left var(--ax-motion-sidebar-collapse);
-  will-change: padding-left;
-}
-
-:root:not([data-platform='darwin']) .ds-shell-controls-safe-inset {
-  padding-left: var(--ds-shell-collapsed-header-slot-width);
-}
-
-.ds-plugin-marketplace-tabs {
-  transition: padding-left var(--ax-motion-sidebar-collapse);
-  will-change: padding-left;
-}
-
-.ds-plugin-marketplace-tabs[data-left-sidebar-collapsed='true'] {
-  padding-left: var(--ds-shell-navigation-sidebar-width);
 }
 
 .ds-left-sidebar-pane {

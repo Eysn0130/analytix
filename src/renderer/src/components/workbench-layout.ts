@@ -353,6 +353,9 @@ export function useWorkbenchLayout({
   const [rightResizing, setRightResizing] = useState(false)
   const [terminalResizing, setTerminalResizing] = useState(false)
   const shellRef = useRef<HTMLDivElement | null>(null)
+  const windowChromeRef = useRef<HTMLElement | null>(null)
+  const rightTabsPaneRef = useRef<HTMLDivElement | null>(null)
+  const rightTabsContentRef = useRef<HTMLDivElement | null>(null)
   const leftPaneRef = useRef<HTMLDivElement | null>(null)
   const leftPaneContentRef = useRef<HTMLDivElement | null>(null)
   const rightPaneRef = useRef<HTMLElement | null>(null)
@@ -494,6 +497,7 @@ export function useWorkbenchLayout({
 
   const applyLeftSidebarDomWidth = (width: number): void => {
     const px = `${Math.round(width)}px`
+    windowChromeRef.current?.style.setProperty('--ds-window-chrome-sidebar-width', px)
     if (leftPaneRef.current) {
       leftPaneRef.current.style.width = px
     }
@@ -505,6 +509,11 @@ export function useWorkbenchLayout({
 
   const applyRightSidebarDomWidth = (width: number): void => {
     const px = `${Math.round(width)}px`
+    if (rightTabsPaneRef.current) rightTabsPaneRef.current.style.width = px
+    if (rightTabsContentRef.current) {
+      rightTabsContentRef.current.style.minWidth = px
+      rightTabsContentRef.current.style.width = px
+    }
     if (rightPaneRef.current) {
       rightPaneRef.current.style.width = px
     }
@@ -723,6 +732,9 @@ export function useWorkbenchLayout({
     setRightPanelMode,
     setRightSidebarWidth,
     shellRef,
+    windowChromeRef,
+    rightTabsPaneRef,
+    rightTabsContentRef,
     terminalHeight,
     terminalOpen,
     terminalResizing,

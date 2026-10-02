@@ -41,6 +41,11 @@
   gap: 12px;
 }
 
+.ds-product-shell .ds-navigation-rail { padding: 12px 8px; }
+.ds-product-shell .ds-navigation-rail-destinations { flex: 0; }
+.ds-navigation-rail-divider { width: 28px; border-top: 1px solid var(--ds-border); }
+.ds-navigation-rail-spacer { flex: 1; }
+
 .ds-navigation-rail-button {
   display: grid;
   width: 36px;

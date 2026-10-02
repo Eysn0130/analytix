@@ -60,7 +60,7 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
     }))
   }
   const handleKey = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return
     const tab = tabs[index]
     if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault(); onReorder(tab.id, index + (event.key === 'ArrowLeft' ? -1 : 1)); return

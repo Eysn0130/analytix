@@ -6,6 +6,7 @@ import { AnalytixIconRegistry } from '../../design/AnalytixIconRegistry'
 import './navigation-rail.css'
 
 type NavigationRailProps = {
+  windowChrome?: boolean
   active: 'chat' | 'plugins' | 'schedule' | 'settings' | 'other'
   onChat: () => void
   onPlugins: () => void
@@ -14,7 +15,7 @@ type NavigationRailProps = {
 }
 
 /** Existing product destinations stay available when the project sidebar closes. */
-export function NavigationRail({ active, onChat, onPlugins, onSchedule, onSettings }: NavigationRailProps): ReactElement {
+export function NavigationRail({ windowChrome = false, active, onChat, onPlugins, onSchedule, onSettings }: NavigationRailProps): ReactElement {
   const { t } = useTranslation('common')
   const destinations = [
     { id: 'chat', label: t('chatNavigationLabel'), icon: MessageSquare, onClick: onChat },
@@ -24,10 +25,10 @@ export function NavigationRail({ active, onChat, onPlugins, onSchedule, onSettin
 
   return (
     <nav className="ds-navigation-rail ds-no-drag" aria-label={t('appName')}>
-      <div className="ds-navigation-rail-brand" aria-hidden>
+      {!windowChrome ? <div className="ds-navigation-rail-brand" aria-hidden>
         <img className="ds-navigation-rail-brand-light" src={AnalytixIconRegistry.brand.symbolMonoBlack} alt="" />
         <img className="ds-navigation-rail-brand-dark" src={AnalytixIconRegistry.brand.symbolMonoWhite} alt="" />
-      </div>
+      </div> : null}
       <div className="ds-navigation-rail-destinations">
         {destinations.map(({ id, label, icon: Icon, onClick }) => (
           <ToolbarTooltip key={id} label={label}>
@@ -38,6 +39,7 @@ export function NavigationRail({ active, onChat, onPlugins, onSchedule, onSettin
           </ToolbarTooltip>
         ))}
       </div>
+      {windowChrome ? <><div className="ds-navigation-rail-divider" aria-hidden /><div className="ds-navigation-rail-spacer" aria-hidden /></> : null}
       <ToolbarTooltip label={t('settings')}>
         <button type="button" className="ds-navigation-rail-button" aria-label={t('settings')}
           aria-current={active === 'settings' ? 'page' : undefined} onClick={onSettings}>

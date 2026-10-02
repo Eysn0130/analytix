@@ -78,6 +78,7 @@ type SidebarProjectsSectionProps = {
   activeThreadId: string | null
   runtimeReady: boolean
   searchQuery: string
+  searchOpen?: boolean
   showArchived: boolean
   workspaceRoot: string
   workspaceRoots: string[]
@@ -549,6 +550,7 @@ export function SidebarProjectsSection({
   activeThreadId,
   runtimeReady,
   searchQuery,
+  searchOpen: headerSearchOpen,
   showArchived,
   workspaceRoot,
   workspaceRoots,
@@ -711,7 +713,7 @@ export function SidebarProjectsSection({
     })
   }, [filteredDraftHistoryByWorkspace, groups, workspaceRoot])
 
-  const searchVisible = searchOpen || searchQuery.trim().length > 0
+  const searchVisible = (headerSearchOpen ?? searchOpen) || searchQuery.trim().length > 0
   const allGroupsCollapsed = displayGroups.length > 0 && displayGroups.every(([workspacePath]) => {
     const project = usingCaseProjects
       ? caseProjectByWorkspaceKey.get(workspaceRootIdentityKey(workspacePath))
@@ -1078,6 +1080,7 @@ export function SidebarProjectsSection({
           )}
         </button>
         <div className="flex shrink-0 items-center gap-1">
+          {headerSearchOpen === undefined ? (
           <SidebarIconButton
             onClick={() => setSearchOpen((open) => !open)}
             active={searchVisible}
@@ -1087,6 +1090,7 @@ export function SidebarProjectsSection({
           >
             <Search className="h-3.5 w-3.5" strokeWidth={1.85} />
           </SidebarIconButton>
+          ) : null}
           <SidebarIconButton
             onClick={onPickWorkspace}
             className="h-7 w-7"
@@ -1098,6 +1102,7 @@ export function SidebarProjectsSection({
         </div>
       </div>
 
+      <div id="sidebar-thread-search">
       <SidebarCollapseMotion
         open={searchVisible}
         className="ds-sidebar-search-motion"
@@ -1110,6 +1115,7 @@ export function SidebarProjectsSection({
           clearLabel={t('clear')}
         />
       </SidebarCollapseMotion>
+      </div>
 
       <div className="ds-sidebar-projects-scroll min-h-0 flex-1 overflow-y-auto px-1 pb-2 pt-0.5">
         {displayGroups.length === 0 && usingCaseProjects && caseProjectIndexStatus === 'building' ? (

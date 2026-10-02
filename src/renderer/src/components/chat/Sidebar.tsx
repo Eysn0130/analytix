@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next'
 import {
   FileQuestion,
   Focus,
-  Plus
+  NewChat,
+  Search
 } from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
 import { useChatStore, type SettingsRouteSection } from '../../store/chat-store'
@@ -24,7 +25,8 @@ import { ConnectPhoneSidebarPanel } from './ConnectPhoneView'
 import { SidebarProjectsSection } from './SidebarProjectsSection'
 import {
   SidebarCommandRow,
-  SidebarFrame
+  SidebarFrame,
+  SidebarIconButton
 } from '../sidebar/SidebarPrimitives'
 
 type Props = {
@@ -117,6 +119,7 @@ export function Sidebar({
   const deleteClawChannel = useChatStore((s) => s.deleteClawChannel)
   const resetClawChannelSession = useChatStore((s) => s.resetClawChannelSession)
 
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false)
   const [imDialogMode, setImDialogMode] = useState<ClawImDialogMode | null>(null)
   const imDialogPortalTarget = typeof document === 'undefined' ? null : document.body
 
@@ -129,6 +132,18 @@ export function Sidebar({
     <>
     <SidebarFrame
       title={t('appName')}
+      header={<>
+        <span className="ds-sidebar-brand-name">{t('appName')}</span>
+        {activeView !== 'claw' && !connectPhoneSidebarOpen ? <SidebarIconButton
+          onClick={() => {
+            setProjectSearchOpen((open) => !open)
+            if (!projectSearchOpen) requestAnimationFrame(() =>
+              document.querySelector<HTMLInputElement>('#sidebar-thread-search input')?.focus())
+          }}
+          active={projectSearchOpen || Boolean(threadSearch.trim())}
+          title={t('sidebarSearchThreads')} ariaLabel={t('sidebarSearchThreads')}
+        ><Search className="h-4 w-4" aria-hidden /></SidebarIconButton> : null}
+      </>}
       footer={
         <div className="space-y-1">
           <div className="flex min-h-[42px] items-center justify-center gap-2.5 pb-1">
@@ -153,7 +168,7 @@ export function Sidebar({
         {activeView !== 'claw' && activeView !== 'schedule' ? (
           <>
             <SidebarCommandRow
-              icon={<Plus className="h-4 w-4" strokeWidth={2} />}
+              icon={<NewChat className="h-4 w-4" />}
               label={t('newAgent')}
               onClick={runtimeReady ? onNewChat : undefined}
               disabled={!runtimeReady}
@@ -209,6 +224,7 @@ export function Sidebar({
           activeThreadId={activeThreadId}
           runtimeReady={runtimeReady}
           searchQuery={threadSearch}
+          searchOpen={projectSearchOpen}
           showArchived={showArchivedThreads}
           workspaceRoot={workspaceRoot}
           workspaceRoots={codeWorkspaceRoots}
@@ -247,6 +263,7 @@ export function Sidebar({
         activeThreadId={activeThreadId}
         runtimeReady={runtimeReady}
         searchQuery={threadSearch}
+          searchOpen={projectSearchOpen}
         showArchived={showArchivedThreads}
         workspaceRoot={workspaceRoot}
         workspaceRoots={codeWorkspaceRoots}

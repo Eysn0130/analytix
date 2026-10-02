@@ -61,6 +61,17 @@ describe('manual workspace tabs', () => {
     await key(tabButtons()[0], 'Enter', { isComposing: true })
     expect(onClose).not.toHaveBeenCalled(); expect(onSelect).not.toHaveBeenCalled()
   })
+  it('does not close twice when the shell already consumed the workspace shortcut', async () => {
+    const consume = (event: KeyboardEvent): void => event.preventDefault()
+    container.addEventListener('keydown', consume, true)
+    try {
+      await key(tabButtons()[0], 'w', { ctrlKey: true })
+      expect(onClose).not.toHaveBeenCalled()
+      expect(useWorkspaceTabsStore.getState().tabs.map((tab) => tab.id)).toEqual([a.id, b.id])
+    } finally {
+      container.removeEventListener('keydown', consume, true)
+    }
+  })
   it('closes a tab by keyboard and retains the workspace', async () => {
     await key(tabButtons()[0], 'Delete')
     expect(onClose).toHaveBeenCalledExactlyOnceWith(a.id)

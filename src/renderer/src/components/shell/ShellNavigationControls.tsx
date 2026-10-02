@@ -1,5 +1,5 @@
 import type { MouseEvent, PointerEvent, ReactElement } from 'react'
-import { ArrowLeft, Plus } from '../../design/AnalytixUiIcons'
+import { ArrowLeft, NewChat } from '../../design/AnalytixUiIcons'
 import { SidebarTitlebarToggleButton } from '../sidebar/SidebarPrimitives'
 import { ShellGuiUpdateAction, shellGuiUpdateActionMode } from './ShellGuiUpdateAction'
 import { shellToolbarIconButtonClass, ToolbarTooltip } from './ShellToolbar'
@@ -45,17 +45,6 @@ export function ShellNavigationControls({
       onMouseDown={stopShellNavigationEvent}
       onClick={stopShellNavigationEvent}
     >
-      <ToolbarTooltip label={sidebarLabel}>
-        <SidebarTitlebarToggleButton
-          onClick={onToggleSidebar}
-          title={sidebarLabel}
-          ariaLabel={sidebarLabel}
-          controlsId="workbench-project-sidebar"
-          collapsed={leftSidebarCollapsed}
-          className="ds-toolbar-icon-button ds-shell-sidebar-toggle"
-          cursorSpotlight={false}
-        />
-      </ToolbarTooltip>
       <ToolbarTooltip label={backLabel}>
         <button
           type="button"
@@ -78,6 +67,17 @@ export function ShellNavigationControls({
           <ArrowLeft className="ds-toolbar-icon-svg ds-shell-forward-icon" strokeWidth={1.85} />
         </button>
       </ToolbarTooltip>
+      <ToolbarTooltip label={sidebarLabel}>
+        <SidebarTitlebarToggleButton
+          onClick={onToggleSidebar}
+          title={sidebarLabel}
+          ariaLabel={sidebarLabel}
+          controlsId="workbench-project-sidebar"
+          collapsed={leftSidebarCollapsed}
+          className="ds-toolbar-icon-button ds-shell-sidebar-toggle"
+          cursorSpotlight={false}
+        />
+      </ToolbarTooltip>
       <ShellGuiUpdateAction mode={shellGuiUpdateActionMode(leftSidebarCollapsed)} />
       <ToolbarTooltip label={newChatLabel} hidden={!leftSidebarCollapsed}>
         <button
@@ -90,7 +90,7 @@ export function ShellNavigationControls({
           aria-hidden={leftSidebarCollapsed ? undefined : true}
           data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
         >
-          <Plus className="ds-toolbar-icon-svg" strokeWidth={1.9} />
+          <NewChat className="ds-toolbar-icon-svg" />
         </button>
       </ToolbarTooltip>
     </div>

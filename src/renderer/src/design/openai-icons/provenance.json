@@ -1,0 +1,84 @@
+{
+  "repository": "https://github.com/openai/apps-sdk-ui",
+  "commit": "0f00143c7a639906f1621fe58e1b6be7b5bea46d",
+  "license": "MIT",
+  "copyright": "Copyright 2025 OpenAI",
+  "licensePath": "LICENSE",
+  "licenseBlobSha": "b8ac8dc0f960bbe0b0cc90cd06d58b672151773f",
+  "admission": "docs/analytix/upstreams/code-reuse-provenance.md",
+  "packagedNotice": "THIRD_PARTY_NOTICES.md",
+  "scope": "Five non-brand vector sources only; remaining UI glyphs and current-web exact identity remain unverified. Data/document/brand SVG semantics are unchanged.",
+  "icons": [
+    {
+      "name": "Sidebar",
+      "sourcePath": "src/components/Icon/svg/Sidebar.tsx",
+      "sourceBlobSha": "5189967d00927d5b2b1753434bd21235b504a4b3",
+      "sourceSha256": "7891eeb573c1d4293aac184f490882f53b607c21cc5fde0f0cb65af2efd98112",
+      "destination": "src/renderer/src/design/openai-icons/svg/Sidebar.tsx",
+      "exports": [
+        "AnalytixSidebarHideIcon",
+        "AnalytixSidebarShowIcon"
+      ],
+      "viewBox": "0 0 24 24",
+      "geometryModified": false,
+      "webMatch": "visual-verified official-near",
+      "exactWebPathOrPixelMatch": false
+    },
+    {
+      "name": "ComposeEditSquare",
+      "sourcePath": "src/components/Icon/svg/ComposeEditSquare.tsx",
+      "sourceBlobSha": "50cfcfd3301b4cd0fa8bed8f392f30bdb8b94d34",
+      "sourceSha256": "294e51478c584e687986d3757a52029d051c0bad7ed615dc3921416f1f0ad2b8",
+      "destination": "src/renderer/src/design/openai-icons/svg/ComposeEditSquare.tsx",
+      "exports": [
+        "NewChat"
+      ],
+      "viewBox": "0 0 24 24",
+      "geometryModified": false,
+      "webMatch": "visual-verified official-near",
+      "exactWebPathOrPixelMatch": false
+    },
+    {
+      "name": "Search",
+      "sourcePath": "src/components/Icon/svg/Search.tsx",
+      "sourceBlobSha": "6c7fcb265c8b023a73781231db0ef60de0f35301",
+      "sourceSha256": "b45c5ef06df5866b6e48dfd1c2ccf766a7aac3a3ea25630e6c8b028c582e702c",
+      "destination": "src/renderer/src/design/openai-icons/svg/Search.tsx",
+      "exports": [
+        "Search"
+      ],
+      "viewBox": "0 0 24 24",
+      "geometryModified": false,
+      "webMatch": "visual-verified official-near",
+      "exactWebPathOrPixelMatch": false
+    },
+    {
+      "name": "PlusComposer",
+      "sourcePath": "src/components/Icon/svg/PlusComposer.tsx",
+      "sourceBlobSha": "938d0b97c4b5114b0379586557c3684f435e754a",
+      "sourceSha256": "a413b9fcb4e0c783492fd4b9240a7c5b6dc8598564101b0c1982922f7a538c4a",
+      "destination": "src/renderer/src/design/openai-icons/svg/PlusComposer.tsx",
+      "exports": [
+        "Plus"
+      ],
+      "viewBox": "0 0 24 24",
+      "geometryModified": false,
+      "webMatch": "visual-verified official-near",
+      "exactWebPathOrPixelMatch": false
+    },
+    {
+      "name": "MicLgDictate",
+      "sourcePath": "src/components/Icon/svg/MicLgDictate.tsx",
+      "sourceBlobSha": "6d0ce3876ed704da790f07fe388b0ed6ade7d8d6",
+      "sourceSha256": "066c64e3c31588de37d6f85f589f207660a1d40acd982cb94c9592ab96fd1d23",
+      "destination": "src/renderer/src/design/openai-icons/svg/MicLgDictate.tsx",
+      "exports": [
+        "Mic"
+      ],
+      "viewBox": "0 0 24 24",
+      "geometryModified": false,
+      "webMatch": "visual-verified official-near",
+      "exactWebPathOrPixelMatch": false
+    }
+  ]
+}

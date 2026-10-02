@@ -883,6 +883,9 @@ export function Workbench(): ReactElement {
     setRightPanelMode,
     setRightSidebarWidth,
     shellRef,
+    windowChromeRef,
+    rightTabsPaneRef,
+    rightTabsContentRef,
     terminalHeight,
     terminalOpen,
     terminalResizing,
@@ -1241,7 +1244,10 @@ export function Workbench(): ReactElement {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
-      if (workspaceCommand && (workspaceCommand !== 'close-tab' || (event.target instanceof Element && event.target.closest('#workbench-right-workspace')))) {
+      // Tab buttons own close-and-focus restoration; skip the desktop fallback.
+      if (workspaceCommand === 'close-tab' && event.target instanceof Element &&
+        event.target.closest('[role="tab"]') && rightTabsPaneRef.current?.contains(event.target)) return
+      if (workspaceCommand && (workspaceCommand !== 'close-tab' || (event.target instanceof Element && (event.target.closest('#workbench-right-workspace') || rightTabsPaneRef.current?.contains(event.target))))) {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', {detail:workspaceCommand}))
         return
@@ -3018,7 +3024,7 @@ export function Workbench(): ReactElement {
         : 'chat'
 
   const closeRightPanel = (): void => {
-    const restoreFocus = rightPaneRef.current?.contains(document.activeElement)
+    const restoreFocus = rightPaneRef.current?.contains(document.activeElement) || rightTabsPaneRef.current?.contains(document.activeElement)
     setDocumentFocused(false)
     useWorkspaceTabsStore.getState().setOpen(false)
     if (restoreFocus) {
@@ -3179,7 +3185,7 @@ export function Workbench(): ReactElement {
         style={{
           opacity: rightPanelMotion.opacity,
           width: documentFocused ? 'auto' : rightPanelMotion.animatedSize,
-          ...(documentFocused ? { position: 'absolute', inset: `48px 8px ${terminalOpen ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
+          ...(documentFocused ? { position: 'absolute', inset: `8px 8px ${terminalOpen ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
         }}
       >
         {rightPanelDockedVisible ? (
@@ -3203,10 +3209,6 @@ export function Workbench(): ReactElement {
               contain: panelMode === 'documents' ? 'none' : undefined
             }}
           >
-            <WorkspaceTabs tabs={workspaceTabs} activeTabId={workspaceActiveTabId} selectorOpen={workspaceSelectorOpen}
-              focused={documentFocused} onSelect={activateWorkspaceTab} onClose={closeWorkspaceTab}
-              onReorder={useWorkspaceTabsStore.getState().reorderTab} onAdd={useWorkspaceTabsStore.getState().showSelector}
-              onToggleFocus={() => setDocumentFocused((value) => !value)} onCollapse={closeRightPanel} />
             {workspaceSelectorOpen ? <WorkspaceToolSelector filesEnabled={Boolean(fileTreeWorkspaceRoot)}
               sideChatEnabled={runtimeConnection === 'ready' && Boolean(activeThreadId)} planEnabled={Boolean(activeGuiPlan)}
               onOpen={(action) => {
@@ -3365,8 +3367,53 @@ export function Workbench(): ReactElement {
   }
 
   return (
-    <div className="ds-product-body flex h-full min-h-0 min-w-0">
-      <NavigationRail
+    <div className="ds-product-shell flex h-full min-h-0 min-w-0 flex-col">
+      <header ref={windowChromeRef} className="ds-window-chrome" data-resizing={leftResizing} style={{
+        '--ds-window-chrome-sidebar-width': `${leftSidebarCollapsed ? 0 : leftSidebarWidth}px`
+      } as CSSProperties}>
+        <div className="ds-window-chrome-navigation">
+          <ShellNavigationControls
+            leftSidebarCollapsed={leftSidebarCollapsed}
+            sidebarLabel={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
+            backLabel={t('navigateBack')}
+            forwardLabel={t('navigateForward')}
+            newChatLabel={t('newAgent')}
+            canGoBack={shellHistory.back.length > 0}
+            canGoForward={shellHistory.forward.length > 0}
+            newChatDisabled={runtimeConnection !== 'ready'}
+            onToggleSidebar={toggleLeftSidebar}
+            onBack={navigateShellHistoryBack}
+            onForward={navigateShellHistoryForward}
+            onNewChat={startNewChat}
+          />
+        </div>
+        <div className="ds-window-chrome-session ds-no-drag">
+          {route === 'chat' && !activeSddDraft && !activeDataAnalysis ? (
+            <>
+              <SessionHeader compact className="min-w-0 flex-1" onOpenSideChat={openSideChat} />
+              {busy ? <span className="ds-window-chrome-running">{t('running')}</span> : null}
+              <WorkbenchTopBar workspaceOpen={rightPanelVisible}
+                onToggleWorkspace={toggleRightPanel}
+                terminalOpen={terminalOpen} onToggleTerminal={toggleTerminal} />
+            </>
+          ) : null}
+        </div>
+        {route !== 'plugins' && route !== 'schedule' && (rightPanelRetained || rightPanelMotion.isMounted || documentsMounted) ? (
+          <div ref={rightTabsPaneRef} className="ds-window-chrome-workspace ds-no-drag"
+            inert={!rightPanelDockedVisible} aria-hidden={!rightPanelDockedVisible}
+            data-open={rightPanelDockedVisible ? 'true' : 'false'}
+            style={{ width: rightPanelMotion.animatedSize, opacity: rightPanelMotion.opacity }}>
+            <div ref={rightTabsContentRef} style={{ width: rightSidebarWidth, minWidth: rightSidebarWidth }}>
+            <WorkspaceTabs tabs={workspaceTabs} activeTabId={workspaceActiveTabId} selectorOpen={workspaceSelectorOpen}
+              focused={documentFocused} onSelect={activateWorkspaceTab} onClose={closeWorkspaceTab}
+              onReorder={useWorkspaceTabsStore.getState().reorderTab} onAdd={useWorkspaceTabsStore.getState().showSelector}
+              onToggleFocus={() => setDocumentFocused((value) => !value)} onCollapse={closeRightPanel} />
+            </div>
+          </div>
+        ) : null}
+      </header>
+    <div className="ds-product-body flex min-h-0 min-w-0">
+      <NavigationRail windowChrome
         active={route === 'plugins' ? 'plugins' : route === 'schedule' ? 'schedule' : route === 'chat' ? 'chat' : 'other'}
         onChat={openCodeMode}
         onPlugins={openPluginsView}
@@ -3374,20 +3421,6 @@ export function Workbench(): ReactElement {
         onSettings={() => openSettings('general')}
       />
     <WorkbenchShell ref={shellRef} style={workbenchShellStyle}>
-      <ShellNavigationControls
-        leftSidebarCollapsed={leftSidebarCollapsed}
-        sidebarLabel={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
-        backLabel={t('navigateBack')}
-        forwardLabel={t('navigateForward')}
-        newChatLabel={t('newAgent')}
-        canGoBack={shellHistory.back.length > 0}
-        canGoForward={shellHistory.forward.length > 0}
-        newChatDisabled={runtimeConnection !== 'ready'}
-        onToggleSidebar={toggleLeftSidebar}
-        onBack={navigateShellHistoryBack}
-        onForward={navigateShellHistoryForward}
-        onNewChat={startNewChat}
-      />
       <div
         ref={leftPaneRef}
         id="workbench-project-sidebar"
@@ -3504,28 +3537,6 @@ export function Workbench(): ReactElement {
                     data-bottom-panel-open={workbenchScrollReserve.bottomPanelOpen ? 'true' : 'false'}
                     style={chatStageStyle}
                   >
-                    <header className="chat-topbar ds-chat-shell-header ds-topbar-surface relative z-50 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible">
-                      <div aria-hidden="true" className="chat-topbar-drag-region" />
-                      <div className="chat-topbar-grid grid w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
-                        <div
-                          className={`chat-topbar-session ds-shell-controls-safe-motion flex min-w-0 items-center gap-2.5 ${
-                            leftSidebarCollapsed ? 'ds-shell-controls-safe-inset' : ''
-                          }`}
-                        >
-                          <SessionHeader compact className="min-w-0 flex-1" onOpenSideChat={openSideChat} />
-                        </div>
-                        <div className="chat-topbar-actions flex min-w-0 flex-nowrap items-center justify-end gap-1.5 self-center">
-                          {busy ? (
-                            <span className="inline-flex shrink-0 rounded-full bg-amber-500/16 px-2.5 py-1 text-[11.5px] font-semibold text-amber-950 dark:text-amber-100">
-                              {t('running')}
-                            </span>
-                          ) : null}
-                          <WorkbenchTopBar workspaceOpen={rightPanelVisible}
-                            onToggleWorkspace={toggleRightPanel}
-                            terminalOpen={terminalOpen} onToggleTerminal={toggleTerminal} />
-                        </div>
-                      </div>
-                    </header>
                     <div className={`${stageInsetClass} flex min-h-0 min-w-0 flex-1 flex-col`}>
                       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                         <ChatTimelineIsland
@@ -3710,6 +3721,7 @@ export function Workbench(): ReactElement {
         {renderPlanPanelOverlay()}
       </WorkbenchStage>
     </WorkbenchShell>
+    </div>
     </div>
   )
 }

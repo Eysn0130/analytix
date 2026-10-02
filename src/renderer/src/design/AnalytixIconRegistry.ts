@@ -9,8 +9,6 @@ import {
   ListChecks,
   ListTodo,
   MessageSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Pin,
   SquareTerminal,
@@ -22,6 +20,7 @@ import {
   Settings,
   Sparkles
 } from 'lucide-react'
+import { OpenAiUiIcons } from './openai-icons/OpenAiUiIcons'
 import appIcon512 from '../../../asset/brand/analytix-app-icon-512.png'
 import splashImage from '../../../asset/brand/analytix-splash.png'
 import symbolColor from '../../../asset/brand/analytix-symbol-color.png'
@@ -43,7 +42,7 @@ export const AnalytixIconSizes: Record<AnalytixIconSize, number> = {
   xl: 24
 }
 
-// Use the existing ISC/MIT Lucide dependency; no private desktop SVG paths are bundled.
+// Unmatched controls keep the existing licensed Lucide glyphs; this is not a web-match claim.
 export function createSystemIcon(icon: LucideIcon, filled = false): AnalytixSvgIcon {
   const SystemIcon = forwardRef<SVGSVGElement, LucideProps>((props, ref) => createElement(icon, {
     size: 20,
@@ -58,8 +57,8 @@ export function createSystemIcon(icon: LucideIcon, filled = false): AnalytixSvgI
 
 export const AnalytixDisclosureDownIcon = createSystemIcon(ChevronDown)
 export const AnalytixDisclosureRightIcon = createSystemIcon(ChevronRight)
-export const AnalytixSidebarHideIcon = createSystemIcon(PanelLeftClose)
-export const AnalytixSidebarShowIcon = createSystemIcon(PanelLeftOpen)
+export const AnalytixSidebarHideIcon = OpenAiUiIcons.sidebar
+export const AnalytixSidebarShowIcon = OpenAiUiIcons.sidebar
 export const AnalytixTerminalIcon = createSystemIcon(SquareTerminal)
 export const AnalytixBrowserIcon = createSystemIcon(Globe)
 export const AnalytixEditIcon = createSystemIcon(Pencil)

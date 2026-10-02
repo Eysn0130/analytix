@@ -1,7 +1,7 @@
-.workspace-tabs-header { display: flex; align-items: center; flex: 0 0 var(--ax-chat-topbar-shell-height); min-width: 0; border-bottom: 1px solid var(--ds-border-muted); background: var(--ds-bg-sidebar); }
+.workspace-tabs-header { display: flex; align-items: center; min-width: 0; height: 42px; border-left: 1px solid var(--ds-border-muted); background: transparent; }
 .workspace-tablist { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
-.workspace-tab { display: flex; align-items: center; flex: 0 0 auto; max-width: 210px; border-right: 1px solid var(--ds-border-muted); border-bottom: 2px solid transparent; }
-.workspace-tab[data-active=true] { border-bottom-color: var(--ds-border-strong); background: var(--ds-surface-hover); }
+.workspace-tab { display: flex; align-items: center; flex: 0 0 auto; max-width: 210px; margin: 0 4px; border: 1px solid transparent; border-radius: 8px; }
+.workspace-tab[data-active=true] { border-color: var(--ds-border-muted); background: var(--ds-surface-hover); }
 .workspace-tab[data-dragging=true] { opacity: .6; }
 .workspace-tab > [role=tab] { display: flex; align-items: center; gap: 8px; min-width: 0; height: 38px; padding: 0 10px; font-size: 13px; text-align: left; touch-action: none; }
 .workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
