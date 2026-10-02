@@ -348,7 +348,7 @@ function UserMessageBubble({
                 type="button"
                 onClick={() => void submit()}
                 disabled={!draft.trim() || busy}
-                className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t('rewindResend')}
               </button>

@@ -435,7 +435,7 @@ export function FloatingComposerModelPicker({
             role="menu"
             aria-label={activeProviderGroup.label}
             style={submenuStyle}
-            className="ds-model-menu fixed z-[1001] overflow-y-auto rounded-xl border border-ds-border bg-ds-card p-1.5 text-[13px] text-ds-muted shadow-lg"
+            className="ds-model-menu fixed z-[1001] overflow-y-auto rounded-2xl border border-ds-border-muted bg-ds-elevated p-2 text-[14px] text-ds-muted shadow-[var(--ax-shadow-popover)]"
           >
             {activeProviderModelIds.length > 0 ? (
               activeProviderModelIds.map((id) => (
@@ -527,7 +527,7 @@ export function FloatingComposerModelPicker({
             <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.8} />
           </span>
         </button>
-        {renderMenu('fixed z-[1000] overflow-x-hidden overflow-y-auto rounded-xl border border-ds-border bg-white p-1.5 text-[12.5px] shadow-[0_18px_50px_rgba(20,47,95,0.16)] dark:bg-ds-card')}
+        {renderMenu('fixed z-[1000] overflow-x-hidden overflow-y-auto rounded-2xl border border-ds-border-muted bg-ds-elevated p-2 text-[14px] text-ds-muted shadow-[var(--ax-shadow-popover)]')}
       </div>
     )
   }
@@ -565,7 +565,7 @@ export function FloatingComposerModelPicker({
       </button>
 
       {menuOpen && canOpenModelControls ? (
-        renderMenu('fixed z-[1000] overflow-x-hidden overflow-y-auto rounded-xl border border-ds-border bg-white p-1.5 text-[13px] text-ds-muted shadow-[0_22px_64px_rgba(20,47,95,0.18)] dark:bg-ds-card')
+        renderMenu('fixed z-[1000] overflow-x-hidden overflow-y-auto rounded-2xl border border-ds-border-muted bg-ds-elevated p-2 text-[14px] text-ds-muted shadow-[var(--ax-shadow-popover)]')
       ) : null}
     </div>
   )
@@ -1037,7 +1037,7 @@ function MenuSectionTitle({
   children: string
 }): ReactElement {
   return (
-    <div className="flex h-7 items-center px-2 text-[12.5px] font-bold text-ds-faint">
+    <div className="flex h-7 items-center px-2 text-[12px] font-medium text-ds-faint">
       <span>{children}</span>
     </div>
   )

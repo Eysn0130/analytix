@@ -130,9 +130,9 @@ export function SettingsSidebar({
   }, [normalizedQuery, t])
 
   const catCls = (c: SettingsCategory): string =>
-    `flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] font-medium transition ${
+    `flex h-[35px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-[14px] font-normal transition ${
       category === c
-        ? 'bg-ds-subtle text-ds-ink shadow-sm ring-1 ring-ds-border-muted'
+        ? 'bg-ds-subtle text-ds-ink'
         : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
     }`
 
@@ -144,6 +144,7 @@ export function SettingsSidebar({
         type="button"
         className={catCls(item.category)}
         onClick={() => setCategory(item.category)}
+        aria-current={category === item.category ? 'page' : undefined}
       >
         <Icon className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
         <span className="min-w-0 flex-1 truncate">{t(item.labelKey)}</span>
@@ -155,7 +156,7 @@ export function SettingsSidebar({
   }
 
   return (
-    <aside className="ds-drag flex w-[264px] shrink-0 flex-col border-r border-ds-border bg-ds-sidebar backdrop-blur-md">
+    <aside className="ds-settings-sidebar ds-drag flex w-[288px] shrink-0 flex-col border-r border-ds-border bg-ds-sidebar">
       <div className="px-3 pb-3 pt-3">
         <div aria-hidden className="ds-titlebar-safe-block" />
         <button

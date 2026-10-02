@@ -1898,18 +1898,18 @@ export function ThreadRenameDialog({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, state.submitting])
 
-  return (
+  const dialog = (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="thread-rename-dialog-title"
-      className="ds-no-drag fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/18 px-4 backdrop-blur-[2px] dark:bg-black/35"
+      className="ds-no-drag fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 backdrop-blur-[2px] dark:bg-black/35"
       onMouseDown={onClose}
     >
       <form
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
-        className="w-full max-w-sm rounded-[24px] border border-ds-border bg-ds-card p-5 shadow-[0_24px_72px_rgba(20,47,95,0.22)]"
+        className="w-full max-w-sm rounded-[24px] border border-ds-border bg-ds-card p-5 shadow-[var(--ax-shadow-modal)]"
       >
         <h2
           id="thread-rename-dialog-title"
@@ -1941,7 +1941,7 @@ export function ThreadRenameDialog({
           <button
             type="submit"
             disabled={!canSubmit}
-            className="rounded-xl bg-accent px-3 py-2 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55"
+            className="rounded-xl bg-accent px-3 py-2 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {state.submitting ? t('loading') : t('confirm')}
           </button>
@@ -1949,6 +1949,8 @@ export function ThreadRenameDialog({
       </form>
     </div>
   )
+
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body)
 }
 
 function ThreadContextMenu({

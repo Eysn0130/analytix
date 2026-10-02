@@ -33,6 +33,7 @@
   "workbenchReferences": "本次引用",
   "workbenchReferenceChanged": "引用已失效或不属于当前会话工作区，请重新选择。",
   "appName": "Analytix",
+  "chatNavigationLabel": "会话",
   "runtimeStatusRestarting": "Analytix 正在自动重启…",
   "runtimeStatusRestartingAttempt": "Analytix 正在自动重启(第 {{attempt}}/{{max}} 次)…",
   "runtimeStatusCrashed": "Analytix 意外退出,正在自动恢复…",

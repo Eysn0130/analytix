@@ -339,7 +339,7 @@ export function ProviderModelImportDialog({
               type="button"
               onClick={handleConfirm}
               disabled={totalSelected === 0}
-              className="inline-flex h-8 items-center rounded-full bg-accent px-4 text-[12.5px] font-semibold text-white shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-8 items-center rounded-full bg-accent px-4 text-[12.5px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('providerModelImportConfirm', { count: totalSelected })}
             </button>

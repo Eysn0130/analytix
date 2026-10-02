@@ -60,7 +60,7 @@ export function ReviewPlanCard({
           type="button"
           onClick={onBuild}
           disabled={busy}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-white shadow-[var(--ax-shadow-focus)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-[var(--ax-shadow-focus)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Hammer className="h-3.5 w-3.5" strokeWidth={1.9} />
           {t('planBuild')}

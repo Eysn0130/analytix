@@ -643,7 +643,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-[var(--ds-composer-primary-action-fg)] transition hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
                 disabled={fundsCSVStageState === 'running' || fundsCSVStageState === 'confirming'}
                 onClick={() => void stageFundsCSVSnapshot()}
               >
@@ -687,7 +687,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                     <button
                       key={item.selector}
                       type="button"
-                      className={`rounded-md px-2.5 py-1 text-xs transition ${index === selectedImportItem ? 'bg-accent text-white' : 'bg-ds-hover text-ds-muted hover:text-ds-ink'}`}
+                      className={`rounded-md px-2.5 py-1 text-xs transition ${index === selectedImportItem ? 'bg-accent text-[var(--ds-composer-primary-action-fg)]' : 'bg-ds-hover text-ds-muted hover:text-ds-ink'}`}
                       onClick={() => setSelectedImportItem(index)}
                     >
                       {item.sourceLabel}

@@ -3,12 +3,9 @@ import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Clock3,
   FileQuestion,
   Focus,
-  LayoutGrid,
-  Plus,
-  Settings
+  Plus
 } from 'lucide-react'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
 import { useChatStore, type SettingsRouteSection } from '../../store/chat-store'
@@ -81,7 +78,6 @@ export function Sidebar({
   activeThreadId,
   activeView,
   connectPhoneSidebarOpen,
-  pluginsActive,
   runtimeReady,
   threadSearch,
   showArchivedThreads,
@@ -101,7 +97,6 @@ export function Sidebar({
   activeDataAnalysis,
   onOpenDataAnalysis,
   onOpenSettings,
-  onOpenPlugins,
   focusModeEnabled,
   onFocusModeChange,
   onToggleConnectPhone,
@@ -151,11 +146,6 @@ export function Sidebar({
               ariaLabel={t('focusModeToggleLabel')}
             />
           </div>
-          <SidebarCommandRow
-            icon={<Settings className="h-4 w-4" strokeWidth={1.75} />}
-            label={t('settings')}
-            onClick={() => onOpenSettings('general')}
-          />
         </div>
       }
     >
@@ -180,18 +170,6 @@ export function Sidebar({
             />
           </>
         ) : null}
-        <SidebarCommandRow
-          icon={<LayoutGrid className="h-4 w-4" strokeWidth={1.75} />}
-          label={t('plugins')}
-          onClick={onOpenPlugins}
-          active={pluginsActive}
-        />
-        <SidebarCommandRow
-          icon={<Clock3 className="h-4 w-4" strokeWidth={1.75} />}
-          label={t('schedule')}
-          onClick={onScheduleOpen}
-          active={activeView === 'schedule'}
-        />
       </div>
 
       <div className="ds-no-drag mx-1 my-1" />

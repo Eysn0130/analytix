@@ -33,6 +33,7 @@
   "workbenchReferences": "Selected references",
   "workbenchReferenceChanged": "The reference changed or belongs to a different conversation workspace. Select it again.",
   "appName": "Analytix",
+  "chatNavigationLabel": "Chat",
   "runtimeStatusRestarting": "Analytix is restarting automatically…",
   "runtimeStatusRestartingAttempt": "Analytix is restarting automatically (attempt {{attempt}}/{{max}})…",
   "runtimeStatusCrashed": "Analytix exited unexpectedly; recovering…",

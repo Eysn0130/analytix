@@ -411,7 +411,7 @@ export function PlanPanel({
             type="button"
             disabled={!canUseAgent}
             onClick={onBuildPlan}
-            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Hammer className="h-3.5 w-3.5" strokeWidth={1.9} />
             {t('planBuild')}

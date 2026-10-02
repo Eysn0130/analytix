@@ -1,0 +1,92 @@
+.ds-product-body {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.ds-navigation-rail {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  width: 56px;
+  flex: 0 0 56px;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: calc(var(--ds-window-controls-safe-block) + 12px) 8px 12px;
+  border-right: 1px solid var(--ds-border);
+  background: var(--ds-bg-sidebar);
+  color: var(--ds-text-muted);
+}
+
+.ds-navigation-rail-brand {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--ds-text);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.ds-navigation-rail-brand img { width: 24px; height: 24px; object-fit: contain; }
+.ds-navigation-rail-brand-dark { display: none; }
+[data-theme='dark'] .ds-navigation-rail-brand-light { display: none; }
+[data-theme='dark'] .ds-navigation-rail-brand-dark { display: block; }
+
+.ds-navigation-rail-destinations {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.ds-navigation-rail-button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  transition: background-color var(--ax-motion-hover), color var(--ax-motion-hover);
+}
+
+.ds-navigation-rail-button:hover,
+.ds-navigation-rail-button[aria-current='page'] {
+  background: var(--ds-sidebar-row-active);
+  color: var(--ds-text);
+}
+
+.ds-navigation-rail-button:focus-visible {
+  outline: 2px solid var(--ax-border-focus);
+  outline-offset: 2px;
+}
+
+.ds-navigation-rail .ds-toolbar-tooltip-bubble,
+.ds-navigation-rail .ds-toolbar-tooltip-anchor:hover .ds-toolbar-tooltip-bubble,
+.ds-navigation-rail .ds-toolbar-tooltip-anchor > :focus-visible ~ .ds-toolbar-tooltip-bubble {
+  top: 50%;
+  left: calc(100% + 12px);
+  transform: translateY(-50%);
+}
+
+@media (max-width: 800px) {
+  .ds-settings-sidebar { width: 220px; }
+  .ds-settings-content { padding: 24px 20px; }
+}
+
+@media (max-width: 600px) {
+  .ds-settings-sidebar { width: 176px; }
+  .ds-settings-content { padding: 20px 12px; }
+}
+
+:root[data-motion-reduced='true'] .ds-navigation-rail-button {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-navigation-rail-button { transition: none; }
+}

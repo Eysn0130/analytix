@@ -336,11 +336,11 @@ export function SidebarCommandRow({
       title={disabled ? disabledHint : undefined}
       onClick={onClick}
       className={cx(
-        'flex min-h-[34px] w-full items-center gap-2.5 rounded-[8px] px-3 py-1.5 text-[13px] font-normal transition',
+        'flex min-h-[35px] w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[14px] font-normal transition',
         disabled
           ? 'cursor-not-allowed text-[#a8a8a8] opacity-55'
           : active
-            ? 'bg-[var(--ds-sidebar-row-active)] text-[#1f1f1f] shadow-[inset_0_0_0_1px_var(--ds-sidebar-row-ring)] dark:text-white'
+            ? 'bg-[var(--ds-sidebar-row-active)] text-ds-ink'
             : footer
               ? 'text-[#4f4f4f] hover:bg-[var(--ds-sidebar-row-hover)] hover:text-[#1f1f1f] dark:text-white/70 dark:hover:text-white'
               : accent

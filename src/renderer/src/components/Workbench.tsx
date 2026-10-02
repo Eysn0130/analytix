@@ -141,6 +141,7 @@ import {
 } from './workbench/RightPanelIslands'
 import { WorkbenchResizeHandle } from './workbench/WorkbenchResizeHandle'
 import { WorkbenchShell, WorkbenchStage } from './workbench/WorkbenchShell'
+import { NavigationRail } from './shell/NavigationRail'
 import { useShellPanelMotion } from './workbench/useShellPanelMotion'
 import type { DataAnalysisItemId } from '../data-analysis/DataAnalysisSurface'
 
@@ -2881,6 +2882,7 @@ export function Workbench(): ReactElement {
   }
 
   const openCodeMode = (): void => {
+    if (activeSddDraft) dismissActiveSddDraft({ closeAssistant: true })
     setConnectPhoneSidebarOpen(false)
     setActiveDataAnalysis(null)
     void openCode()
@@ -3354,6 +3356,14 @@ export function Workbench(): ReactElement {
   }
 
   return (
+    <div className="ds-product-body flex h-full min-h-0 min-w-0">
+      <NavigationRail
+        active={route === 'plugins' ? 'plugins' : route === 'schedule' ? 'schedule' : route === 'chat' ? 'chat' : 'other'}
+        onChat={openCodeMode}
+        onPlugins={openPluginsView}
+        onSchedule={openScheduleView}
+        onSettings={() => openSettings('general')}
+      />
     <WorkbenchShell ref={shellRef} style={workbenchShellStyle}>
       <ShellNavigationControls
         leftSidebarCollapsed={leftSidebarCollapsed}
@@ -3689,5 +3699,6 @@ export function Workbench(): ReactElement {
         {renderPlanPanelOverlay()}
       </WorkbenchStage>
     </WorkbenchShell>
+    </div>
   )
 }

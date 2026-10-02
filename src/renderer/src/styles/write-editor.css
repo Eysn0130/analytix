@@ -1,5 +1,5 @@
 .ds-chat-answer {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -16,10 +16,10 @@
   background: var(--ds-bubble-user);
   padding: 0.72rem 1.05rem;
   color: var(--ds-bubble-user-fg);
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1.58;
-  box-shadow: 0 8px 22px rgba(20, 47, 95, 0.06);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  box-shadow: none;
 }
 
 @media (max-width: 640px) {
