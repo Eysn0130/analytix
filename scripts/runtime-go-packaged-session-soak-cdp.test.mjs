@@ -53,7 +53,7 @@ function fixture(t, plans, options = {}) {
   }
   const api = vm.runInNewContext(`${functions}\n({ evaluateCdp, evaluateRendererWithRetries, waitForRendererReady })`, {
     WebSocket: options.noWebSocket ? undefined : Socket,
-    Error, Date, Number, JSON, Object, String,
+    Error, Date: options.clock || Date, Number, JSON, Object, String,
     setTimeout(fn, ms) {
       const timer = setTimeout(() => { timers.delete(timer); fn() }, ms)
       timers.add(timer)
@@ -163,16 +163,30 @@ test('read-only startup probe waits for two healthy observations before mutation
   assert.equal(f.messages.length, 3)
 })
 test('startup probe reports a fixed bridge phase without remote details', async (t) => {
+  let now = 1_000
+  const deadline = now + 300
+  let bridgeObservations = 0
+  let stalledConnections = 0
   const f = fixture(t, [
     opened((socket, message) => {
+      bridgeObservations += 1
       socket.reply({ id: message.id, result: { result: { value: 'runtime_bridge_missing' } } })
     }),
-    {} // The final read-only connection may consume the remaining deadline.
-  ])
-  // Leave fixture scheduling slack; the product deadline is supplied by the caller.
-  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline: Date.now() + 300 }), 700)
+    { connect() {
+      stalledConnections += 1
+      // This final read-only handshake consumes the caller's remaining budget.
+      // Its deadline classification must not depend on real timer rounding.
+      now = deadline
+    } }
+  ], { clock: { now: () => now } })
+  const result = await outcome(f.waitForRendererReady({ debugPort: 1, deadline }), 700)
   assert.equal(result.error?.message, 'cdp_renderer_readiness_timeout')
   assert.equal(result.error?.cdpPreflightLastFailure, 'runtime_bridge_missing')
+  assert.equal(bridgeObservations, 1)
+  assert.equal(stalledConnections, 1)
+  assert.equal(f.sockets.length, 2)
+  assert.equal(f.messages.length, 1)
+  assert.equal(f.callbackErrors.length, 0)
   assert.ok(f.messages.every((message) => message.params.expression.includes("runtimeRequest('/health', 'GET')")))
 })
 test('startup probe classifies unavailable debug targets without a raw fetch error', async (t) => {

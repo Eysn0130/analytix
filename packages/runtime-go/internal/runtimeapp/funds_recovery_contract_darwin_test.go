@@ -4,6 +4,7 @@ package runtimeapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -12,11 +13,63 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	domainenrollment "analytix.local/runtime-go/internal/domain/authorityenrollment"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
+
+func TestFundsRecoveryWitnessPreflightRequiresOriginalLiveAuthority(t *testing.T) {
+	fixture, config := runtimeWitnessedRegistryConfigV2(t)
+	before := startupWholeTreeDigest(t, fixture.DataDir, fixture.ManifestRoot, fixture.CredentialProfileRoot, fixture.CredentialBundleRoot)
+	for _, tc := range []struct {
+		name      string
+		available bool
+		want      string
+	}{
+		{"live original witness", true, "witness-end"},
+		{"original witness unavailable", false, "witness-unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !fixture.SetWitnessAvailable(domainenrollment.SharedEvidenceNamespaceV1, tc.available) {
+				t.Fatal("configure isolated witness availability")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if got := b1RecoveryWitnessPhase(ctx, config); got != tc.want {
+				t.Fatalf("original witness preflight: got %s, want %s", got, tc.want)
+			}
+		})
+	}
+	t.Run("missing original authority", func(t *testing.T) {
+		missing := config
+		missing.DataDir = t.TempDir()
+		missingBefore := startupWholeTreeDigest(t, missing.DataDir)
+		if got := b1RecoveryWitnessPhase(context.Background(), missing); got != "witness-credentials-unavailable" {
+			t.Fatalf("missing authority was replaced or accepted: %s", got)
+		}
+		if after := startupWholeTreeDigest(t, missing.DataDir); after != missingBefore {
+			t.Fatal("missing original authority triggered bootstrap")
+		}
+	})
+	t.Run("other installation key is not the enrolled authority", func(t *testing.T) {
+		other, otherConfig := runtimeWitnessedRegistryConfigV2(t)
+		mismatch := config
+		mismatch.DataDir = otherConfig.DataDir
+		originalAttempts, otherAttempts := fixture.TotalAttempts(), other.TotalAttempts()
+		if got := b1RecoveryWitnessPhase(context.Background(), mismatch); got != "witness-credentials-unavailable" {
+			t.Fatalf("other installation key was accepted: %s", got)
+		}
+		if fixture.TotalAttempts() != originalAttempts || other.TotalAttempts() != otherAttempts {
+			t.Fatal("mismatched installation key reached a witness")
+		}
+	})
+	if after := startupWholeTreeDigest(t, fixture.DataDir, fixture.ManifestRoot, fixture.CredentialProfileRoot, fixture.CredentialBundleRoot); after != before {
+		t.Fatal("read-only witness preflight changed protected stores or credentials")
+	}
+}
 
 // Offline independent CSV truth checks the numerical/multiplicity assertion
 // used by the native vector without executing a native adapter or Provider.

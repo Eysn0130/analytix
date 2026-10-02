@@ -4,6 +4,8 @@ package runtimeapp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,11 +20,15 @@ import (
 	"testing"
 	"time"
 
+	finalauthority "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	nativecomponenthost "analytix.local/runtime-go/internal/adapters/outbound/nativecomponenthost"
 	packagedauthorityfs "analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs"
 	pluginstore "analytix.local/runtime-go/internal/adapters/outbound/pluginmaterializationfs"
+	domainenrollment "analytix.local/runtime-go/internal/domain/authorityenrollment"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainauthority "analytix.local/runtime-go/internal/domain/packagedbuildauthority"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	monotonicheadport "analytix.local/runtime-go/internal/ports/monotonichead"
 )
 
 // Only synthetic configuration, fixture root paths and readback
@@ -126,6 +132,7 @@ type b1RecoveryPhase struct {
 func b1RecoveryPhaseAllowed(record b1RecoveryPhase) bool {
 	switch record.Phase {
 	case "input-ready", "lease-begin", "lease-end", "assembly-begin", "assembly-end", "native-owner-begin", "native-owner-end",
+		"witness-begin", "witness-end", "witness-credentials-unavailable", "witness-request-invalid", "witness-unavailable", "witness-deadline", "witness-invalid",
 		"fact-admission-report", "fact-admission-pass", "fact-admission-fail", "thread-get-begin", "thread-get-end",
 		"final-turn-missing", "final-view-missing", "final-view-invalid", "final-identity-mismatch", "final-history-label-mismatch", "public-privacy-fail",
 		"display-begin", "display-end", "readback-pass", "runtime-close-begin", "runtime-close-end", "owner-shutdown-begin", "owner-shutdown-end":
@@ -185,6 +192,49 @@ func b1EmitRecoveryPhase(record b1RecoveryPhase) {
 	}
 	body, _ := json.Marshal(record)
 	_, _ = fmt.Fprintf(os.Stdout, "%s%s\n", b1RecoveryPhasePrefix, body)
+}
+
+// A retained fixture needs its original live authority, not just saved client
+// credentials. This read-only fresh challenge fails before assembly when that
+// prerequisite is absent; it never creates an identity or advances a head.
+func b1RecoveryWitnessPhase(ctx context.Context, config Config) string {
+	authority, err := finalauthority.OpenExistingFileAuthority(filepath.Join(config.DataDir, "private", "authority", "final-answer-ed25519-v1.json"))
+	if err != nil {
+		return "witness-credentials-unavailable"
+	}
+	enrolled, configured, err := loadRuntimeSharedEvidenceEnrollmentV2(ctx, config, authority)
+	if ctx.Err() != nil {
+		return "witness-deadline"
+	}
+	if err != nil || !configured || enrolled.credentials.SharedEvidence == nil {
+		return "witness-credentials-unavailable"
+	}
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "witness-request-invalid"
+	}
+	request, err := domainsecurity.NewMonotonicHeadObserveRequestV1(domainsecurity.MonotonicHeadObserveRequestInputV1{
+		InstallationID: enrolled.projection.InstallationID, EnrollmentID: enrolled.projection.Enrollment.EnrollmentID,
+		Namespace: domainenrollment.SharedEvidenceNamespaceV1, ChallengeNonce: hex.EncodeToString(nonce[:]),
+		AuthorityKeyID: authority.KeyID(), AuthorityPublicKey: authority.PublicKey(),
+	}, func(body []byte) ([]byte, error) { return authority.Sign(ctx, body) })
+	if err != nil {
+		if ctx.Err() != nil {
+			return "witness-deadline"
+		}
+		return "witness-request-invalid"
+	}
+	_, err = enrolled.credentials.SharedEvidence.Observe(ctx, request)
+	if ctx.Err() != nil {
+		return "witness-deadline"
+	}
+	if errors.Is(err, monotonicheadport.ErrUnavailable) {
+		return "witness-unavailable"
+	}
+	if err != nil {
+		return "witness-invalid"
+	}
+	return "witness-end"
 }
 
 func b1AssertFreshProcessRecovery(t *testing.T, input b1RecoveryProcessInput) {
@@ -259,6 +309,14 @@ func TestFundsRecoveryFreshProcessHelper(t *testing.T) {
 	}
 	phase := func(name string) { b1EmitRecoveryPhase(b1RecoveryPhase{Phase: name}) }
 	phase("input-ready")
+	phase("witness-begin")
+	witnessContext, cancelWitness := context.WithTimeout(context.Background(), 10*time.Second)
+	witnessPhase := b1RecoveryWitnessPhase(witnessContext, input.Config)
+	cancelWitness()
+	phase(witnessPhase)
+	if witnessPhase != "witness-end" {
+		t.Fatal("fresh process original witness prerequisite failed: " + witnessPhase)
+	}
 	dependencies := defaultBundledFundsHostValidationDependenciesV1()
 	dependencies.inspectPackage = func(ctx context.Context) (packagedauthorityfs.InspectionV2, error) {
 		// Reconstruct the same declared synthetic package fixture from a fresh

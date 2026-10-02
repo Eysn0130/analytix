@@ -1,7 +1,8 @@
 # Account-flow 保真与本地 page 成本
 
 Status: source slice verified；original full native **failed**，修正后唯一完整链外层超时；
-native 与 Rust CI disposition 未闭合，Draft PR38 的合并验收仍 blocked。
+CDP fixture 已确定化；留存 fixture 的 original witness 前置 seam 不可用，native
+分阶段验收仍 blocked。旧 Rust incident 保留 UNKNOWN，停止无信号复现。
 不是模型优势或安装／发布验收。
 Scope: 现有 CSV → DuckDB → source-row 的 page 选择与编码，及相关 Go 消费边界。
 Base: PR37 main `28dbaface7cdab09adb896095ed138da0bea927e`，
@@ -198,6 +199,46 @@ OwnerClose 只证明 SourceUnavailable；DSV2/grant/head drift 的 existing fail
 不等于持久 DSV2 revoke 的完整 public-chain PASS。模型只获 authorized projection；
 alias 不是 capability，原文展示仍按 exact refs 回查。
 
+## 本轮有界修复与留存阶段入口
+
+候选 `3042b4d31` 的 Source baseline job `110708817191`：133 PASS／1 FAIL，
+CDP startup 最后阶段为 `cdp_handshake_timeout`，预期 `runtime_bridge_missing`；
+302.316ms 内失败。原日志没有首个观察／catch 时钟，具体触发时序仍 unknown。
+仅现有 VM fixture 注入受控 `Date.now`，明确一次 bridge reply 后 stalled handshake
+到原 deadline；保留 300ms caller／700ms watchdog、两个 exact expected 和只读 GET。
+默认 fixture 仍用真实 Date，owner SHA
+`ff370d6b1825166f14e384d2e740442975cb5dd43fa7830b0b15369f843bf61c` 不变。
+VM 内删除阶段保留分支的 mutation **RED 1／304.812ms**；真实 owner 的窄 case
+**GREEN 1／304.902ms**。最终 `npm run test:baseline` **134 PASS／0 skip，32.300s**。
+该 mutation 证明断言抓错，不把真实 owner 宣称为已修复的生产回归。
+
+原 R2 留存 input 0600／3006 bytes、SHA
+`7360e402d00b0b5879367f2bdb354d5ffc50c4d63def497fd845ab763c827754`，两个独立
+thread/turn 的持久化 digest 匹配，A current／B retained_snapshot，`Config.APIKey` 为空。
+复用生产 freeze `5d7fde6e8` 与原 native SHA `d0c9ff29…512b50`；新增内容仅为
+canonical Go test overlays。原完整命令在进入 fresh child 前已耗约 17.5m，外层约
+剩 151s，不能据此认定 child 自身超过原 11m／12m 阶段限制。
+现有 `TestFundsRecoveryFreshProcessHelper` 已可通过
+`ANALYTIX_FUNDS_RECOVERY_PROCESS_INPUT` 独立调用，保留 `-test.timeout=11m`。
+现于 lease／assembly 前用 OpenExisting 原 key → anchored LoadCurrent → 签名随机
+nonce → 原 mTLS `Observe` 做 10s 有界只读 prerequisite；不创建身份或 Advance。
+live／unavailable／missing key／另一安装 key 四向量 **PASS 1 top／4 sub，0.736s**，
+缺失目录与原 protected stores 不变；原四项严格 readback/journal tests 仍 PASS。
+留存 input 的实际独立调用 **FAIL 0.01s（package 0.040s）**，closed journal 为
+input-ready → witness-begin → **witness-unavailable**；未执行 assembly、native、
+admission、display 或 Provider，不能称阶段 PASS。其原 544 files／2020066 bytes
+前后 tree SHA 同为 `efb1811204bcb97ffedb9b19b2dc482bd50cb17d2518c34771ac146544cd57f7`。
+
+原 `formalauthority` fixture 仅内存持有随机 witness/server/CA 私钥和 checkpoint；
+落盘 client 凭据不能恢复签名者。原两个 loopback endpoints 均 connection refused，
+没有现有 restore seam；不能新建 genesis／替换 manifest 或重放旧 observation。
+本次 unavailable 只证明当前 prerequisite 缺失，不能回填旧 976s／1200s 的因果。
+原 fixture 已无法满足 fresh 2/2 admission/readback/display；恢复 live 原 authority
+或另行授权新的前序 fixture 前，native 验收与 merge 保持 blocked。
+执行负担：baseline 1、窄 case 2（含 mutation）、Go 编译 2、原合同组 1、补强后的
+preflight 组 1、留存 stage 1；无第三次完整链或本轮 Rust stress。完整编译 wall unknown；
+原合同组 package 16.729s，实际退出和不利结果均保留于独立 private R3 回执。
+
 ## 集成状态
 
 Branch `codex/account-flow-fidelity`；[Draft PR38](https://github.com/Eysn0130/analytix/pull/38)。
@@ -238,6 +279,11 @@ resume transport 失败，shell exit **unknown**，完整 test 回执 PASS、fre
 另有 EXPLAIN／metadata／aggregate／session 校验开销，全部 SQL 次数仍 unknown。
 没有错误或区分信号，停止该本地 lane，保留 incident cause **UNKNOWN**；不改生产
 SQL、不盲重跑旧 CI，也不把重复 GREEN 当成当前 finding 的关闭依据。
+后续 `3042b4d31` analysis_compute job `110708817028` PASS；父已明确将旧事件
+按 UNKNOWN 保留，不再无信号重跑或改生产 SQL。新失败的诊断入口是现有
+`search_page_window_exact_ci_shape`／single_thread／count_literal controls：同一
+verified session，COUNT OVER search/tie、threads 8/1、DuckDB v1.5.4、offset 0/1；
+CLI 原失败也附 offset context。只在新失败给出区分信号时继续，不重跑 ignored stress。
 
 ## 待授权的窄同模型对照
 
