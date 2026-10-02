@@ -52,6 +52,67 @@ fn delivery_csv(rows: &[serde_json::Value], canonical: bool) -> Vec<u8> {
 
 #[cfg(unix)]
 #[test]
+#[ignore = "bounded local cost diagnostic; run explicitly with --ignored --nocapture"]
+fn delivery_vectors_source_page_cost() {
+    let all = delivery_vectors();
+    let base: Vec<_> = all
+        .into_iter()
+        .filter(|r| {
+            r["case_id"] == "SYNTH_CASE_A"
+                && r["snapshot_id"] == "SYNTH_SNAPSHOT_A1"
+                && r["currency"] == "CNY"
+                && r["row_id"] != "A011"
+                && r["row_id"] != "A001_DUP"
+        })
+        .collect();
+    assert_eq!(base.len(), 9);
+    for size in [9, 100] {
+        let mut records = Vec::new();
+        for index in 0..size {
+            let mut row = base[index % base.len()].clone();
+            if size != 9 {
+                // Larger cost control preserves the vector's monetary/text
+                // features while giving every synthetic observation a new ID.
+                row["source_record_id"] = serde_json::json!(format!("cost-{index}"));
+            }
+            records.push(row);
+        }
+        let source = delivery_csv(&records, true);
+        let (directory, _, mut output) = temp_unlinked_output("page-cost");
+        let started = std::time::Instant::now();
+        let built = run_funds_build_canonical_csv_snapshot_v1_in(
+            arguments(),
+            &source,
+            &mut output,
+            &directory,
+        )
+        .expect("real CSV/DuckDB cost input");
+        eprintln!(
+            "PAGE_COST_INPUT {}",
+            serde_json::json!({"rows": size,
+            "csv_sha256": format!("{:x}", Sha256::digest(&source)), "csv_bytes": source.len(),
+            "import_materialize_ns": started.elapsed().as_nanos() as u64,
+            "producer_content_id": built.materialization.producer_content_id})
+        );
+        crate::funds_transaction_source_row_page_v1::tests::measure_page_cost(
+            crate::FundsTransactionSourceRowPageV1Arguments {
+                case_id: "case-a".to_string(),
+                binding_key_digest: "1".repeat(64),
+                parsed_generation_identity_sha256: "2".repeat(64),
+                relation: "fc_transaction_raw".to_string(),
+                max_rows: 100,
+                cursor: None,
+            },
+            &output_descriptor_path(&output),
+            &format!("derived-cny-{size}"),
+        );
+        drop(output);
+        fs::remove_dir(directory).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn delivery_vectors_reject_unsupported_inputs_before_database_output() {
     let all = delivery_vectors();
     for (label, records, canonical) in [

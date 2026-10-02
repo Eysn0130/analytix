@@ -4,6 +4,7 @@ package runtimeapp
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,6 +19,27 @@ import (
 
 // Offline independent CSV truth checks the numerical/multiplicity assertion
 // used by the native vector without executing a native adapter or Provider.
+func TestFundsDeliveryNineRowCSVIndependentGold(t *testing.T) {
+	source := deliveryCNYCSV(t)
+	rows, err := csv.NewReader(bytes.NewReader(source)).ReadAll()
+	if err != nil || len(rows) != 10 {
+		t.Fatal("delivery source must retain the original nine imported observations")
+	}
+	flow := b1ReferenceFlowFromCSVInWindow(t, source, "2026-09-")
+	if flow.inflowMinor != "1301001" || flow.outflowMinor != "120060" || flow.netMinor != "1180941" || flow.transactionCount != 7 {
+		t.Fatal("independent CSV/big.Int truth differs from the existing nine-row/seven-transaction contract")
+	}
+	transactions := deliveryReferenceTransactions(t, source)
+	count := 0
+	for _, occurrences := range transactions {
+		count += occurrences
+	}
+	if count != 7 {
+		t.Fatal("independent transaction multiset lost target observations")
+	}
+	t.Logf("independent delivery gold source_sha256=%s imported_rows=9 target_transactions=7 inflow_minor=%s outflow_minor=%s net_minor=%s", domainsecurity.SHA256Hex(source), flow.inflowMinor, flow.outflowMinor, flow.netMinor)
+}
+
 func TestFundsDeliveryIndependentCSVTruthRejectsSemanticDrift(t *testing.T) {
 	source := []byte("交易账号,交易时间,交易金额,收付标志,交易币种\n" +
 		rev14PrivateAccount + ",2026-09-01 10:00:00,90071992547409.93,进,CNY\n" +
