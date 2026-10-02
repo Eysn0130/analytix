@@ -23,6 +23,7 @@ vi.mock('../agent/registry', () => ({
 }))
 
 import { createThreadActions } from './chat-store-thread-actions'
+import { createMaintenanceActions } from './chat-store-maintenance-actions'
 import {
   clearActiveStream,
   getActiveStreamSnapshotFor,
@@ -948,6 +949,158 @@ describe('chat-store-thread-actions queued messages', () => {
       'update the structured Todo',
       expect.not.objectContaining({ riskIntent: 'case' })
     )
+  })
+
+  it.each(['resolve', 'reject'] as const)('discards an obsolete recovery %s after real A-B-A binding replacement', async (outcome) => {
+    type Detail = { blocks: Array<{ kind: 'assistant'; id: string; text: string }>; latestSeq: number; threadStatus: string }
+    let resolveRecovery!: (detail: Detail) => void
+    let rejectRecovery!: (error: Error) => void
+    const pendingDetail = new Promise<Detail>((resolve, reject) => {
+      resolveRecovery = resolve
+      rejectRecovery = reject
+    })
+    const provider = {
+      getThreadDetail: vi.fn()
+        .mockResolvedValueOnce({ blocks: [], latestSeq: 5, threadStatus: 'running' })
+        .mockImplementationOnce(() => pendingDetail)
+        .mockResolvedValueOnce({ blocks: [], latestSeq: 2, threadStatus: 'running' })
+        .mockResolvedValueOnce({ blocks: [], latestSeq: 5, threadStatus: 'running' }),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, sseAbortRef, state } = buildHarness()
+    await actions.subscribeThreadEventsLive('thr_existing')
+    const pending = actions.recoverActiveTurn()
+    await actions.subscribeThreadEventsLive('thr_other')
+    await actions.subscribeThreadEventsLive('thr_existing')
+    const currentController = sseAbortRef.current
+    const projection = () => ({ blocks: state.blocks, lastSeq: state.lastSeq, busy: state.busy,
+      error: state.error, currentTurnId: state.currentTurnId, currentTurnUserId: state.currentTurnUserId })
+    const before = projection()
+
+    if (outcome === 'resolve') resolveRecovery({ blocks: [{ kind: 'assistant', id: 'obsolete', text: 'obsolete detail' }], latestSeq: 99, threadStatus: 'idle' })
+    else rejectRecovery(new Error('obsolete recovery error'))
+
+    await expect(pending).resolves.toBe(false)
+    expect(projection()).toEqual(before)
+    expect(sseAbortRef.current).toBe(currentController)
+    expect(currentController?.signal.aborted).toBe(false)
+    expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(3)
+  })
+
+  it('invalidates a naturally retired binding before real A-B-A navigation can reuse its callbacks', async () => {
+    let finishStream!: () => void
+    const stream = new Promise<void>((resolve) => { finishStream = resolve })
+    const provider = {
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 5, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined))
+        .mockImplementationOnce(() => stream)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, sseAbortRef, state } = buildHarness()
+    await actions.subscribeThreadEventsLive('thr_existing')
+    const retiredController = sseAbortRef.current
+    const retiredSink = provider.subscribeThreadEvents.mock.calls[0][2]
+    finishStream()
+    await waitForAssertion(() => expect(sseAbortRef.current).toBeNull())
+    expect(state.recoverActiveTurn).not.toHaveBeenCalled()
+    await actions.subscribeThreadEventsLive('thr_other')
+    await actions.subscribeThreadEventsLive('thr_existing')
+    const currentController = sseAbortRef.current
+    const before = { lastSeq: state.lastSeq, busy: state.busy, error: state.error, blocks: state.blocks }
+
+    retiredSink.onSeq(99)
+
+    expect(retiredController?.signal.aborted).toBe(true)
+    expect({ lastSeq: state.lastSeq, busy: state.busy, error: state.error, blocks: state.blocks }).toEqual(before)
+    expect(sseAbortRef.current).toBe(currentController)
+    expect(currentController?.signal.aborted).toBe(false)
+    expect(provider.getThreadDetail).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['pending', 'subscribed'] as const)('preserves send and ACK ownership during %s recovery', async (phase) => {
+    const detail = { blocks: [], latestSeq: 5, threadStatus: 'idle' }
+    let finishRecovery!: (value: typeof detail) => void
+    const recoveryDetail = new Promise<typeof detail>((resolve) => { finishRecovery = resolve })
+    let acknowledge!: (receipt: { threadId: string; turnId: string; userMessageItemId: string }) => void
+    const receipt = new Promise<Parameters<typeof acknowledge>[0]>((resolve) => { acknowledge = resolve })
+    const provider = {
+      getThreadDetail: vi.fn(() => recoveryDetail),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)),
+      sendUserMessage: vi.fn(() => receipt)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+      logs: { error: vi.fn(async () => undefined) }
+    } })
+    const { actions, sseAbortRef, state } = buildHarness()
+    state.busy = false
+    const recovery = actions.recoverActiveTurn()
+    const recoveryController = sseAbortRef.current
+    if (phase === 'subscribed') {
+      finishRecovery(detail)
+      await expect(recovery).resolves.toBe(false)
+      expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(1)
+    }
+
+    const send = actions.sendMessage('send after recovery', 'agent')
+    await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledTimes(1))
+    const currentController = sseAbortRef.current
+    expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(1)
+    expect(provider.subscribeThreadEvents.mock.invocationCallOrder[0]).toBeLessThan(provider.sendUserMessage.mock.invocationCallOrder[0])
+    expect(provider.subscribeThreadEvents.mock.calls[0][3]).toBe(currentController?.signal)
+    expect(currentController?.signal.aborted).toBe(false)
+    if (phase === 'pending') {
+      expect(recoveryController?.signal.aborted).toBe(true)
+      expect(currentController).not.toBe(recoveryController)
+      finishRecovery({ blocks: [], latestSeq: 99, threadStatus: 'idle' })
+      await expect(recovery).resolves.toBe(false)
+      expect(sseAbortRef.current).toBe(currentController)
+      expect(state.lastSeq).not.toBe(99)
+    } else expect(currentController).toBe(recoveryController)
+
+    acknowledge({ threadId: 'thr_existing', turnId: 'turn_current', userMessageItemId: 'user_current' })
+    await expect(send).resolves.toBe(true)
+    expect(state.currentTurnId).toBe('turn_current')
+    expect(state.currentTurnUserId).toBe('user_current')
+    expect(state.blocks).toContainEqual(expect.objectContaining({ kind: 'user', id: 'user_current', text: 'send after recovery' }))
+    expect(state.refreshThreads).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the existing interrupt owner revoke a pending recovery before its GET returns', async () => {
+    const detail = { blocks: [], latestSeq: 99, threadStatus: 'running', latestTurnId: 'turn_cancel' }
+    let finishRecovery!: (value: typeof detail) => void
+    const recoveryDetail = new Promise<typeof detail>((resolve) => { finishRecovery = resolve })
+    const provider = {
+      getThreadDetail: vi.fn(() => recoveryDetail),
+      subscribeThreadEvents: vi.fn(),
+      interruptTurn: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, sseAbortRef, state } = buildHarness()
+    state.currentTurnId = 'turn_cancel'
+    state.currentTurnUserId = 'user_cancel'
+    const maintenance = createMaintenanceActions({
+      set: partial => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) },
+      get: () => state,
+      sseAbortRef
+    })
+    const recovery = actions.recoverActiveTurn()
+    const recoveryController = sseAbortRef.current
+    // Keep the synthetic runtime interrupt pending to inspect its immediate
+    // renderer cancellation seam independently of terminal reconciliation.
+    void maintenance.interrupt()
+    expect(provider.interruptTurn).toHaveBeenCalledWith('thr_existing', 'turn_cancel', { discard: false })
+    expect(recoveryController?.signal.aborted).toBe(true)
+    const before = { busy: state.busy, currentTurnId: state.currentTurnId, lastSeq: state.lastSeq, error: state.error }
+    finishRecovery(detail)
+
+    await expect(recovery).resolves.toBe(false)
+    expect({ busy: state.busy, currentTurnId: state.currentTurnId, lastSeq: state.lastSeq, error: state.error }).toEqual(before)
+    expect(state.busy).toBe(false)
+    expect(sseAbortRef.current).toBeNull()
+    expect(provider.subscribeThreadEvents).not.toHaveBeenCalled()
   })
 
   it('clears a terminal SSE ref so the next send resubscribes from the latest seq', async () => {
