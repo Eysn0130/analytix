@@ -389,6 +389,50 @@ HEAD overlay，原文件不改；只有隔离合成 HTTP Provider，无 paid/liv
 原 `5d7fde6e8` production freeze，不能称后续候选所有 Go 生产字节都与该包相同。
 新修复须经自己的 exact HEAD CI/CodeQL 和正常 PR38/main 门禁，不沿用 260107 结果。
 
+## PR38 main postmerge 分页故障与后续修复
+
+PR38 候选 `b5d280dbe7c159fb7924203ee0b2dbbbf6771dd6` 的 Development
+`36990002694` 为 52/52 success，CodeQL `36989998348` 四 Analyze 加 aggregate
+success、57/57 exact-head checks，独立审查无阻断。经正常 Ready/exact-head merge，
+2026-10-02 10:27:06 UTC 的 merge/main 为
+`9e1eb602223c83db8bc3bfdd6a7171aa04484cf3`，tree
+`2272f6815bf8a2de566dd6818716fee549590572` 与候选相同；canonical 已 ff 同步。
+
+该 main 自己的 [Development run](https://github.com/Eysn0130/analytix/actions/runs/36995541540)
+不能借候选绿：[Rust job110801296290](https://github.com/Eysn0130/analytix/actions/runs/36995541540/job/110801296290)
+在 replacement-card metadata 去重用例实际 **95 CLI PASS / 1 FAIL / 73.19s**，
+`stats_rows.page_values` 的 DuckDB INTERNAL index0/vector0、exit101。它与旧
+search/tie/page 不是同一用例，分别经过 unfiltered/filtered 分支，但共有外层
+`COUNT(1) OVER()`。共同 SQL 路径已证，具体 engine 因果仍未证；上述上游机制只作
+支持推断，不将任一旧失败回填 PASS。main [CodeQL36995541257](https://github.com/Eysn0130/analytix/actions/runs/36995541257)
+event=dynamic，四 Analyze 与四 `refs/heads/main` analyses exact9e1 成功；此 main
+没有独立 CodeQL aggregate，记 absent/not_configured，不借 PR aggregate。
+
+父明确授权从 exact9e1 建立 `codex/stats-page-total` 修复分支。最小生产差异仅保存
+同一 `VerifiedStatsQuerySession` 已算出的 `matched_group_count`，两条分页 SQL
+使用其 BIGINT 常量列；原聚合/去重/过滤/排序/LIMIT/OFFSET、解码列布局、页内摘要、
+空匹配/越页拒绝、currentness 与实际读取行数 receipt 保持。该 count 限于一次上下文，
+不缓存长期授权；必需的去重 `ROW_NUMBER()` 保留。DuckDB 的
+[snapshot isolation](https://duckdb.org/docs/current/sql/statements/transactions)
+及同 connection BEGIN/验证/count/page/COMMIT 路径支持完整组数语义等价。
+
+本机 debug、pinned DuckDB v1.5.4：locked query_rows owner **17 PASS / 93.967s wall**，
+仅一项原有历史诊断 ignored；普通 8-thread 页面 EXPLAIN 无 WINDOW。现有 CLI 全组
+**96 PASS / 351.828s wall**（test250.18s、0skip），含两个失败用例、替换卡两页
+完整 total2 与各页摘要、offset==total 和原超限值、零匹配/不写文件/array/output parity；
+既有并发快照 **1 PASS / 19.269s wall**。独立五文件只读审查无阻断。
+隔离归档只恢复旧 COUNT window 的 mutation **named RED / exit101 / 72.343s**，
+实测 EXPLAIN 断言抓错，非 compile failure，也不是已复现 Linux crash；canonical
+五文件 bytes 不变。没有压力循环、全局单线程、吞错、依赖升级或 native 长链重复。
+
+负担保留：初次 fmt-check exit1 后正常格式化；误调用完整 cache verifier 开始了
+live 只读卷验证，正常 SIGINT 停止确切本任务 child，原脚本恢复 mount job。
+只读 UUID/mount/owners/writable 及任务恢复已核，卷验证不记 PASS。后续命令均
+fresh 同 shell helper；helper/archive/copy 的单独 wall 未计时，记 unknown。
+私有回执为 `stage3-stats-page-repair-r1/receipt.json`；新分支自己的当前候选 CI、
+正常 Draft 修复 PR 与后续 main 仍须独立核实。R5 仍只绑定旧 freeze/四测试 bytes，
+不代表新 stats 生产源码的整包 native 验收。四项原 dirty SHA/归属不变，不混提交。
+
 ## 待授权的窄同模型对照
 
 只准备协议，不调用 Provider。建议用户指定同一 connected local Provider 的精确

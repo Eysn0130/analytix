@@ -51,6 +51,7 @@ fn probe(stage: &str) -> Result<()> {
         request.sort_order_sql(),
         request.limit_sql(),
         request.row_offset,
+        2,
     );
     let sql = match stage {
         "aggregate_count" => build_paginated_count_sql(&agg, &search),
@@ -139,7 +140,7 @@ fn probe_search_page(control: &str, offset: i64, iterations: usize) -> Result<()
     )?;
     let conn = crate::open_readonly_connection(db.path())?;
     crate::configure_connection(&conn)?;
-    if control == "single_thread" {
+    if matches!(control, "single_thread" | "legacy_single_thread") {
         conn.execute_batch("SET threads=1")?;
     }
     let mut session = VerifiedStatsQuerySession::begin(&conn, &args)?;
@@ -161,14 +162,18 @@ fn probe_search_page(control: &str, offset: i64, iterations: usize) -> Result<()
         request.sort_order_sql(),
         request.limit_sql(),
         request.row_offset,
+        total,
     );
     match control {
-        "window" | "single_thread" => {}
-        "count_literal" => {
+        "window" | "legacy_single_thread" => {
+            // Historical diagnostic control only; normal page probes use the
+            // production snapshot total and never restore this engine path.
             let window = "CAST(COUNT(1) OVER() AS BIGINT) AS total_count";
-            assert_eq!(page.matches(window).count(), 1);
-            page = page.replace(window, &format!("CAST({total} AS BIGINT) AS total_count"));
+            let literal = format!("CAST({total} AS BIGINT) AS total_count");
+            assert_eq!(page.matches(&literal).count(), 1);
+            page = page.replace(&literal, window);
         }
+        "count_literal" | "single_thread" => {}
         _ => unreachable!(),
     }
     let threads: String =
@@ -181,6 +186,11 @@ fn probe_search_page(control: &str, offset: i64, iterations: usize) -> Result<()
         .query_map([], |row| row.get(1))?
         .collect::<duckdb::Result<_>>()?;
     let has_window = plan.iter().any(|part| part.contains("WINDOW"));
+    assert_eq!(
+        has_window,
+        matches!(control, "window" | "legacy_single_thread"),
+        "single-account page plan must only use a window in the explicit historical control"
+    );
     eprintln!(
         "R_H1_SEARCH_INPUT {}",
         serde_json::json!({"control":control,"offset":offset,"iterations":iterations,"has_window":has_window,"threads":threads,"version":version,"fixture_sha256":format!("{:x}",Sha256::digest(include_bytes!("../../../tests/stats_query_cli/fixtures.rs")))})
@@ -219,15 +229,15 @@ fn probe_search_page(control: &str, offset: i64, iterations: usize) -> Result<()
 }
 
 #[test]
-fn search_page_window_exact_ci_shape() -> Result<()> {
+fn search_page_snapshot_total_exact_ci_shape() -> Result<()> {
     for offset in 0..2 {
-        probe_search_page("window", offset, 1)
-            .with_context(|| format!("window control offset={offset}"))?;
+        probe_search_page("count_literal", offset, 1)
+            .with_context(|| format!("snapshot-total control offset={offset}"))?;
     }
     Ok(())
 }
 #[test]
-fn search_page_single_thread_control() -> Result<()> {
+fn search_page_snapshot_total_single_thread_control() -> Result<()> {
     for offset in 0..2 {
         probe_search_page("single_thread", offset, 1)
             .with_context(|| format!("single-thread control offset={offset}"))?;
@@ -248,7 +258,7 @@ fn search_page_count_literal_control() -> Result<()> {
 fn search_page_bounded_window_scheduling_diagnostic() -> Result<()> {
     // Controls use fresh verified sessions before the suspected path, so an
     // engine-invalidating failure cannot contaminate their results. No retries.
-    for control in ["count_literal", "single_thread", "window"] {
+    for control in ["count_literal", "legacy_single_thread", "window"] {
         let iterations = if control == "window" { 256 } else { 32 };
         for offset in 0..2 {
             probe_search_page(control, offset, iterations)?;

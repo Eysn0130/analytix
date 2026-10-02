@@ -59,6 +59,7 @@ struct StatsRowsQueryContext<'session, 'conn> {
     search_where: String,
     sort_expr: String,
     sort_order: &'static str,
+    matched_group_count: i64,
     diagnostics: StatsQueryDiagnostics,
 }
 
@@ -106,6 +107,7 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             search_where,
             sort_expr,
             sort_order,
+            matched_group_count,
             diagnostics,
         })
     }
@@ -299,6 +301,7 @@ impl<'session, 'conn> StatsRowsQueryContext<'session, 'conn> {
             self.sort_order,
             self.request.limit_sql(),
             self.request.row_offset,
+            self.matched_group_count,
         )
     }
 
