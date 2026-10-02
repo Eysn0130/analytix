@@ -14,6 +14,8 @@ import {
   RUNTIME_CACHE_COMMIT_ORDER,
   RUNTIME_CACHE_TRANSACTION_VERSION,
   RUNTIME_SKILL_FILES,
+  REFERENCE_FILES,
+  inspectReferenceCopies,
 } from "./runtime-cache-contract.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -233,6 +235,7 @@ function captureSourceSnapshot(sourceRoot = pluginRoot) {
     throw new Error(`plugin source root is missing: ${sourceRoot}`);
   }
   const canonicalRoot = fs.realpathSync.native(sourceRoot);
+  inspectReferenceCopies(canonicalRoot);
   const files = new Map();
   const missing = [];
   for (const relativePath of PLUGIN_CACHE_FILES) {
@@ -248,6 +251,12 @@ function captureSourceSnapshot(sourceRoot = pluginRoot) {
   }
   if (missing.length) {
     throw new Error(`Missing source files; runtime state was not touched: ${missing.join(", ")}`);
+  }
+  // Compare captured bytes too: a source edit during capture cannot remount drift.
+  for (const name of REFERENCE_FILES) {
+    if (!files.get(`references/${name}`).equals(files.get(`skills/${PLUGIN_NAME}/references/${name}`))) {
+      throw new Error(`Embedded reference snapshot drift: ${name}`);
+    }
   }
   const hash = crypto.createHash("sha256");
   for (const relativePath of PLUGIN_CACHE_FILES) {
@@ -1455,7 +1464,9 @@ function createSourceFixture(rootPath, version, omittedPath = "") {
     if (relativePath === omittedPath) continue;
     const target = path.join(rootPath, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    let bytes = Buffer.from(`fixture:${relativePath}\n`, "utf8");
+    const sourcePath = relativePath.startsWith(`skills/${PLUGIN_NAME}/references/`)
+      ? relativePath.slice(`skills/${PLUGIN_NAME}/`.length) : relativePath;
+    let bytes = Buffer.from(`fixture:${sourcePath}\n`, "utf8");
     if (relativePath === ".codex-plugin/plugin.json") {
       bytes = canonicalJson({
         name: PLUGIN_NAME,

@@ -143,9 +143,11 @@ resources and host prerequisites prepared, use `npm run doctor -- --native`
 and `npm run dev` for the full development chain. See the
 [development baseline](docs/analytix/development-baseline.md) for asset supply,
 platform limits, CI and packaging. `dev:fast` is not full initialization.
-`dev` / `dev:fast` retain their existing behavior and are not automatically
-isolated from real user data. The explicit `dev:isolated` entrypoint additionally
-requires a provisioned task Keychain; prepared directories are not launch readiness.
+`dev`, `dev:fast`, and `dev:isolated` default to private HOME / user-data and
+share a protected development Provider Registry / Secret Store. Credential
+isolation is a separate explicit choice: macOS `--isolated-keychain` uses a
+task Keychain that must be provisioned. These boundaries do not establish OS
+containment or installer acceptance.
 
 On the configured Owner macOS host only, source
 `./scripts/use-analytix-cache.sh` before install/test/build commands. Other

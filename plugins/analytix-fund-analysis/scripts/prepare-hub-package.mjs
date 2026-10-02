@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { inspectReferenceCopies } from "./runtime-cache-contract.mjs";
 
 import {
   inspectProductionMcpEntryClosure,
@@ -252,6 +253,7 @@ function createArchive(outRoot, archivePath, packageId, force) {
 
 function preparePackage(options) {
   const pluginRoot = path.resolve(options.pluginRoot);
+  inspectReferenceCopies(pluginRoot);
   const projection = inspectFundsPluginSourceProjectionsV1(pluginRoot);
   const { packageId, packageVersion, manifest, runtimeIdentity } = projection;
   const sourceMcpClosure = inspectProductionMcpEntryClosure(pluginRoot);
@@ -265,6 +267,7 @@ function preparePackage(options) {
   fs.mkdirSync(path.join(outRoot, "plugins"), { recursive: true });
   const destinationPluginRoot = path.join(outRoot, "plugins", packageId);
   copyPluginSource(pluginRoot, destinationPluginRoot);
+  const references = inspectReferenceCopies(destinationPluginRoot);
   const productionMcpPayload = validateProductionMcpPayload(destinationPluginRoot);
   const marketplacePath = writeMarketplace(outRoot, projection);
   const goldenIsolation = validateGoldenIsolation(destinationPluginRoot);
@@ -288,6 +291,7 @@ function preparePackage(options) {
       edge_count: sourceMcpClosure.edges.length
     },
     production_mcp_payload: productionMcpPayload,
+    references,
     golden_isolation: goldenIsolation,
     boundaries: {
       writes_only_under_tmp: true,

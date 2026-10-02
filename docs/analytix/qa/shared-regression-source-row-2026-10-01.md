@@ -100,3 +100,25 @@ reporter `74cb69648c0f6248d3ca59a416cbd823b7185d7e56f38c3ab4b49dd948ad9afd`。
 四项继承 dirty 保持原哈希。`validation-burden --plan` 对本范围为 unmapped，仍走 affected
 owner 与原 CI matrix。未重跑全 native 长测、9 行/7 笔完整产品向量、安装/恢复或正式包；
 未调用 paid Provider。OwnerClose 不等于持久撤权，fresh query 不等于数值缓存复用；没有模型 pilot。
+
+<a id="snapshot-d469-consolidation-81"></a>
+
+### consolidation: original lines 81–95
+
+Source: `docs/analytix/document-consolidation-register.md` at `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`; original block SHA256 `c33132580a29daa0602d08b87f99d967ddfa56028a8bc7a4767432df50f845ca`.
+
+### 2026-10-01 共享测试执行与 source-row 原子配对
+
+初次观察冻结于 `3a7c7bba9938c0d17852cafb52a80d756f687eb4`；最终源码
+`ca7a73a4e5330bc3127a14538e9ff2900d30b024` 补齐真实 Vitest interrupted 完成状态。
+均基于 PR28 合并 main。
+两个重复 Vitest 文件各保留一次执行 owner，59 named gates、实际 288 唯一 ID 与原断言保留；
+34 raw 名称与成员引用由同一处原子配对，SQL/协议/金额/null/权限与原固定 golden 未改。
+定向验证、实际身份交换 RED→恢复 GREEN、独立观察与 baseline 失败均记录于
+[紧凑结果](shared-regression-source-row-2026-10-01.md)。原四会话中 A candidate 读错
+baseline HEAD，B candidate 读取反升且 partial；不宣称总体维护摄入或模型收益。唯一一次
+clean pinned A 配对纠偏返回文本为 287590/186861 bytes，均定位正确；单样本不证明长期收益。
+初次三 source/test 文件 corpus 增加 15551 bytes；最终含专用 reporter 四项增加 18841 bytes，
+配对观察未覆盖后续修正；
+结构退役重复执行不等于总量下降。四项继承 dirty 保留；当前候选 CI/main 状态查 GitHub，
+本记录不授权安装包或正式发布。

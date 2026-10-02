@@ -119,10 +119,9 @@ test/conformance entry points and are not a product API.
   durable SSE frame writers now live in
   `internal/adapters/inbound/httpapi` while `internal/server` keeps
   compatibility wrappers during route migration.
-- `internal/server/path_policy.go`: transitional compatibility wrappers for
-  workspace/write-root/protected-path checks. New path policy behavior belongs
-  in `internal/adapters/outbound/filestore`, keeping `tool_catalog.go` focused
-  on tool schema assembly while route/tool callers are migrated.
+- `internal/adapters/outbound/filestore/path_policy.go`: the current
+  symlink-aware workspace/write-root/protected-path policy owner. Follow its
+  live consumers and focused tests for path-policy maintenance.
 - `internal/adapters/outbound/*`: outbound implementations for file stores,
   provider wire clients, MCP transports, schema caches, and redaction. JSONL
   line reading plus append/atomic rewrite helpers, JSON map-file read/write,
@@ -158,8 +157,8 @@ test/conformance entry points and are not a product API.
   mutations, turn/compaction settlement, and restart/sidecar recovery now live
   in separate same-package files while the store migrates toward outbound
   repositories and app services.
-- `internal/server/runtime_server.go`: compatibility facade only. The old
-  same-package test factory is isolated in `runtime_compat_factory.go`, and
+- `internal/server/runtime_handler.go`: transitional HTTP handler facade.
+  The same-package test factory is isolated in `runtime_compat_factory_test.go`, and
   concrete handler wiring is centralized behind `runtime_components.go` so
   runtimeapp can own production assembly.
 - `internal/runtimeapp`: the runtime composition root used by `analytix serve`
@@ -205,7 +204,7 @@ test/conformance entry points and are not a product API.
 - `internal/server`: HTTP server, durable stores, runtime
   readiness, production capability metadata, agent-loop host wiring, sub-agent execution,
   usage, attachments, and SSE replay. This package is now a transitional
-  compatibility facade with same-package split anchors: `runtime_server.go`
+  compatibility facade with same-package split anchors: `runtime_components.go`
   holds handler construction wiring, `runtime_handler.go` owns handler state
   contracts, and behavior is split
   across `routes.go`, `thread_routes.go`,
