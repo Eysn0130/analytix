@@ -30,6 +30,23 @@ afterEach(async () => {
 })
 
 describe('conversation composer drafts', () => {
+  it('retains pending upload counts and errors only on their original draft', async () => {
+    await render()
+    let finishFirst!: () => void, finishSecond!: () => void
+    const originalError = current.setAttachmentUploadError
+    await act(async () => { finishFirst = current.beginAttachmentUpload(); finishSecond = current.beginAttachmentUpload() })
+    expect(current.draft.pendingAttachmentUploads).toBe(2)
+    await render('/synthetic/a', 'b')
+    expect(current.draft.pendingAttachmentUploads).toBe(0)
+    await act(async () => { originalError('Synthetic A upload failure'); finishFirst(); finishFirst() })
+    expect(current.draft.attachmentUploadError).toBeNull()
+    await render()
+    expect(current.draft.pendingAttachmentUploads).toBe(1)
+    expect(current.draft.attachmentUploadError).toBe('Synthetic A upload failure')
+    await act(async () => finishSecond())
+    expect(current.draft.pendingAttachmentUploads).toBe(0)
+  })
+
   it('retains text and explicit references through settings-style unmount/remount', async () => {
     await render()
     await act(async () => {

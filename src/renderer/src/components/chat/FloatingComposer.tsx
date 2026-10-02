@@ -799,7 +799,7 @@ export function FloatingComposer({
       : (hasActiveThread || !!effectiveWorkspaceRoot)
   )
   const canChangeModel = canCompose && !busy
-  const canSend = canCompose && (
+  const canSend = canCompose && !attachmentUploadBusy && (
     input.trim().length > 0 ||
     documentReferenceCount > 0 ||
     (attachmentUploadEnabled && attachments.length > 0) ||
@@ -1369,7 +1369,7 @@ export function FloatingComposer({
     && runtimeReady
     && canOpenGoalPanel
     && goalPanelDraftObjective.length > 0
-  const busyCanSendFollowup = busy && input.trim().length > 0
+  const busyCanSendFollowup = busy && input.trim().length > 0 && !attachmentUploadBusy
   const primaryActionLabel = busy
     ? busyCanSendFollowup
       ? t('composerSteerSend')
@@ -1797,6 +1797,7 @@ export function FloatingComposer({
   }
 
   const handlePrimaryAction = (): void => {
+    if (!busy && attachmentUploadBusy) return
     if (busy && !busyCanSendFollowup) {
       onInterrupt()
       return
@@ -1927,6 +1928,7 @@ export function FloatingComposer({
     if (!sendByEnter || composing) return
 
     event.preventDefault()
+    if (attachmentUploadBusy) return
     handlePrimaryAction()
   }
 
@@ -1948,7 +1950,7 @@ export function FloatingComposer({
     const active = document.activeElement
     const activeIsExternalEditor =
       active instanceof HTMLElement &&
-      Boolean(active.closest("input,textarea,select,[contenteditable='true']")) &&
+      Boolean(active.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
       !composerRootRef.current?.contains(active)
     if (activeIsExternalEditor) return
 
@@ -1956,7 +1958,7 @@ export function FloatingComposer({
       const current = document.activeElement
       const currentIsExternalEditor =
         current instanceof HTMLElement &&
-        Boolean(current.closest("input,textarea,select,[contenteditable='true']")) &&
+        Boolean(current.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
         !composerRootRef.current?.contains(current)
       if (!currentIsExternalEditor) {
         draft.textareaRef.current?.focus()
@@ -2129,6 +2131,15 @@ export function FloatingComposer({
             <ThreadHandoffInlineProgress />
           </AboveComposerPanelStack>
         </>
+      )}
+
+      {compact ? null : (
+        <div className="ds-composer-context ds-no-drag mb-1 flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3">
+          {route === 'chat' ? (
+            <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
+          ) : null}
+          <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
+        </div>
       )}
 
       <div className="relative">
@@ -2850,13 +2861,9 @@ export function FloatingComposer({
       {compact ? null : (
         <div className="ds-composer-footer mt-1 flex min-h-7 flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5 px-3">
           <div className="ds-composer-footer-left flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            {route === 'chat' ? (
-              <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
-            ) : null}
-            <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
             {showThreadUsageFooter ? (
               <div
-                className="ds-composer-usage ds-no-drag inline-flex min-h-7 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 overflow-visible rounded-lg border border-ds-border-muted bg-ds-card/72 px-2.5 py-0.5 text-[12.5px] font-medium leading-5 text-ds-muted shadow-sm"
+                className="ds-composer-usage ds-no-drag inline-flex min-h-6 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] font-medium leading-5 text-ds-muted"
                 title={threadUsageFooterTitle ?? t('sessionUsageUnavailable')}
               >
                 <BarChart3 className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />

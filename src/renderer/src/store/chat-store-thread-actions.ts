@@ -1,3 +1,4 @@
+import { getThreadBinding } from './chat-store-thread-binding'
 import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { AgentProvider, AttachmentReference, ChatBlock, NormalizedThread, ReviewTarget, ThreadEventSink, UserFileReference } from '../agent/types'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
@@ -488,22 +489,22 @@ async function steerActiveTurn(options: {
 export function createThreadActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'createThread' | 'recoverActiveTurn' | 'selectThread' | 'subscribeThreadEventsLive' | 'drainQueuedMessages' | 'editQueuedMessage' | 'removeQueuedMessage' | 'reorderQueuedMessages' | 'sendQueuedMessageNow' | 'resumeInterruptedQueue' | 'setQueuedMessagesPausedReason' | 'startThreadHandoff' | 'retryThreadHandoff' | 'cancelThreadHandoff' | 'closeThreadHandoffOperation' | 'hydrateThreadHandoffOperations' | 'handleThreadHandoffEvent' | 'sendMessage' | 'reviewActiveThread'> {
-  // Receipt ownership is local to this action factory, never persisted. A later
-  // send or subscription/snapshot replacement revokes the older completion.
+  // This factory owns send receipts; they never persist. The shared binding
+  // generation lets maintenance revoke older completions.
   let currentReceiptOwner: symbol | null = null
   let sendGeneration = 0
-  let bindingGeneration = 0
+  const binding = getThreadBinding(sseAbortRef)
   const pendingRecoveries = new WeakSet<AbortController>()
   const naturallyRetired = new WeakSet<AbortController>()
   const bindController = (): AbortController => {
     sseAbortRef.current?.abort()
     const controller = new AbortController()
-    bindingGeneration += 1
+    binding.generation += 1
     sseAbortRef.current = controller
     return controller
   }
   const ownsDetailBinding = (controller: AbortController, generation: number): boolean =>
-    bindingGeneration === generation &&
+    binding.generation === generation &&
     (!controller.signal.aborted || naturallyRetired.has(controller)) &&
     (sseAbortRef.current === controller ||
       (sseAbortRef.current === null && naturallyRetired.has(controller)))
@@ -534,7 +535,7 @@ export function createThreadActions(
       if (!options.useWorktreePool && !options.materialize) {
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
-        bindingGeneration += 1
+        binding.generation += 1
         clearBusyWatchdog()
         const state = get()
         const nextWatch = { ...state.watchTurnCompletion }
@@ -804,7 +805,7 @@ export function createThreadActions(
         ac.abort()
         if (sseAbortRef.current === ac) {
           sseAbortRef.current = null
-          bindingGeneration += 1
+          binding.generation += 1
         }
       }
     }
@@ -846,7 +847,7 @@ export function createThreadActions(
 
       sseAbortRef.current?.abort()
       sseAbortRef.current = null
-      bindingGeneration += 1
+      binding.generation += 1
       resetBusyRecoveryAttempts()
       clearBusyWatchdog()
       const blocks = hydrateBlockModelLabels(id, rawBlocks)
@@ -923,7 +924,7 @@ export function createThreadActions(
     // detail fetch, otherwise a slow /v1/threads/{id} call hides live deltas.
     sseAbortRef.current?.abort()
     sseAbortRef.current = null
-    bindingGeneration += 1
+    binding.generation += 1
     const p = getProvider()
     const prevState = get()
     const keepExistingBlocks = prevState.activeThreadId === targetThreadId
@@ -954,7 +955,7 @@ export function createThreadActions(
       queuedMessagesPausedReason: null
     })
     const ac = bindController()
-    const liveBindingGeneration = bindingGeneration
+    const liveBindingGeneration = binding.generation
     const liveSinceSeq = keepExistingBlocks ? prevState.lastSeq : 0
     const publicSink = buildThreadEventSink(set, get, { threadId: targetThreadId, signal: ac.signal, sinceSeq: liveSinceSeq })
     const sink = knownBoundaryOnlyHistory
@@ -1583,11 +1584,11 @@ export function createThreadActions(
     invalidateThreadDetailCache(activeThreadId)
     let submissionSubscription: AbortController | null = null
     let receiptSubscription: AbortController | null = null
-    let receiptBindingGeneration = bindingGeneration
+    let receiptBindingGeneration = binding.generation
     let acknowledged = false
     const ownsFollowupContext = (): boolean => sendGeneration === receiptGeneration &&
       get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready' &&
-      receiptBindingGeneration === bindingGeneration && receiptSubscription !== null &&
+      receiptBindingGeneration === binding.generation && receiptSubscription !== null &&
       (!receiptSubscription.signal.aborted || naturallyRetired.has(receiptSubscription)) &&
       (sseAbortRef.current === receiptSubscription || sseAbortRef.current === null)
     const ownsReceiptContext = (): boolean => currentReceiptOwner === receiptOwner && ownsFollowupContext()
@@ -1630,7 +1631,7 @@ export function createThreadActions(
       submissionSubscription?.abort()
       if (sseAbortRef.current === submissionSubscription) {
         sseAbortRef.current = null
-        bindingGeneration += 1
+        binding.generation += 1
       }
       if (ownsState && activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
       // A later thread/turn owns its own state. Remove only our unsent optimistic
@@ -1653,7 +1654,7 @@ export function createThreadActions(
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac, naturallyRetired)
       }
       receiptSubscription = sseAbortRef.current
-      receiptBindingGeneration = bindingGeneration
+      receiptBindingGeneration = binding.generation
       const channel = get().route === 'claw' ? activeClawChannel(get()) : null
       if (!channel && composerModel) {
         rememberThreadComposerSelection(activeThreadId, composerModel, composerProviderId)
@@ -1805,7 +1806,7 @@ export function createThreadActions(
       if (!sseAbortRef.current || sseAbortRef.current.signal.aborted || pendingRecoveries.has(sseAbortRef.current)) {
         const ac = bindController()
         receiptSubscription = ac
-        receiptBindingGeneration = bindingGeneration
+        receiptBindingGeneration = binding.generation
         const sink = buildThreadEventSink(set, get, { threadId: activeThreadId, signal: ac.signal, sinceSeq: seqAtSend })
         subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get, sseAbortRef, ac, naturallyRetired)
       }
@@ -1842,7 +1843,7 @@ export function createThreadActions(
           submissionSubscription?.abort()
           if (sseAbortRef.current === submissionSubscription) {
             sseAbortRef.current = null
-            bindingGeneration += 1
+            binding.generation += 1
           }
         }
         if (activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
@@ -1952,7 +1953,7 @@ export function createThreadActions(
       resetBusyRecoveryAttempts()
       sseAbortRef.current?.abort()
       sseAbortRef.current = null
-      bindingGeneration += 1
+      binding.generation += 1
       clearBusyWatchdog()
       set({
         busy: true,

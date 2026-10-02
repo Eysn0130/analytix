@@ -5760,9 +5760,14 @@ pre {
     padding-inline: 0.5rem;
   }
 
+  .ds-composer-context,
+  .ds-composer-footer {
+    padding-inline: 0.5rem;
+  }
+
   .ds-composer-footer-left,
   .ds-composer-footer-hint {
-    flex-basis: 100%;
+    flex: 0 1 auto;
   }
 
   .ds-composer-footer-hint {
@@ -5774,7 +5779,14 @@ pre {
   }
 
   .ds-composer-usage {
-    flex: 0 1 100%;
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .ds-composer-usage > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 

@@ -1,5 +1,6 @@
+import { useInputComposition } from './use-composer-draft'
 import type { ReactElement, ReactNode } from 'react'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
@@ -246,6 +247,7 @@ function UserMessageBubble({
   block: Extract<ChatBlock, { kind: 'user' }>
 }): ReactElement {
   const { t } = useTranslation('common')
+  const composition = useInputComposition()
   const busy = useChatStore((s) => s.busy)
   const route = useChatStore((s) => s.route)
   const rewindAndResend = useChatStore((s) => s.rewindAndResend)
@@ -322,7 +324,10 @@ function UserMessageBubble({
               el.style.height = 'auto'
               el.style.height = `${Math.min(el.scrollHeight, 360)}px`
             }}
+            onCompositionStart={composition.onCompositionStart}
+            onCompositionEnd={composition.onCompositionEnd}
             onKeyDown={(e) => {
+              if (composition.isComposingEvent(e) || e.repeat) return
               if (e.key === 'Escape') {
                 e.preventDefault()
                 cancelEdit()
@@ -1202,6 +1207,24 @@ function CopyFeedbackButton({
   )
 }
 
+/** A secondary timeline can display a gate, but only its owning main-thread
+ * responder may submit it. No action falls back to another thread's blocks. */
+export const GateResponseContext = createContext<{
+  onOpenOwnerThread?: (requestId: string) => void
+} | null>(null)
+
+function OpenGateOwnerButton({ requestId }: { requestId: string }): ReactElement | null {
+  const context = useContext(GateResponseContext)
+  const { t } = useTranslation('common')
+  if (!context) return null
+  return <div className="mt-3 text-[13px] text-ds-muted">
+    <p>{t('pendingRequestNotResolved')}</p>
+    {context.onOpenOwnerThread ? <button type="button" className="mt-2 rounded-lg bg-ds-ink px-3 py-2 font-medium text-ds-main"
+      onClick={() => context.onOpenOwnerThread?.(requestId)}>{t('respondInOwnedThread')}</button>
+      : <p className="mt-1">{t('ownedThreadUnavailable')}</p>}
+  </div>
+}
+
 function UserInputBubble({
   block,
   nested = false
@@ -1211,17 +1234,21 @@ function UserInputBubble({
 }): ReactElement {
   const { t } = useTranslation('common')
   const resolveUserInput = useChatStore((s) => s.resolveUserInput)
+  const responseContext = useContext(GateResponseContext)
+  const composition = useInputComposition()
+  const resolving = useChatStore(state => state.pendingGateResolutionIds?.[`user_input:${block.requestId}`] === true)
   const [answers, setAnswers] = useState<Record<string, UserInputAnswer>>(() =>
     answersByQuestionId(block.answers)
   )
-  const pending = block.status === 'pending'
-  const done = block.status !== 'pending'
+  const pending = block.status === 'pending' && !responseContext
+  const done = !pending
 
   useEffect(() => {
     setAnswers(answersByQuestionId(block.answers))
   }, [block.id, block.answers])
 
   const chooseOption = (question: UserInputQuestion, label: string, value = label): void => {
+    if (!pending || useChatStore.getState().pendingGateResolutionIds?.[`user_input:${block.requestId}`]) return
     setAnswers((prev) => ({
       ...prev,
       [question.id]: { id: question.id, label, value }
@@ -1238,17 +1265,17 @@ function UserInputBubble({
   })
 
   const submit = (): void => {
-    if (!canSubmit || !pending) return
+    if (!canSubmit || !pending || resolving) return
     const ordered = block.questions.map((question) => answers[question.id]).filter(Boolean)
     void resolveUserInput(block.id, { kind: 'submit', answers: ordered })
   }
 
   const cancel = (): void => {
-    if (!pending) return
+    if (!pending || resolving) return
     void resolveUserInput(block.id, { kind: 'cancel' })
   }
 
-  const statusLabel =
+  const statusLabel = resolving ? t('requestResolving') :
     block.status === 'submitted'
       ? t('userInputSubmitted')
       : block.status === 'cancelled'
@@ -1314,7 +1341,7 @@ function UserInputBubble({
     )
 
   return (
-    <div className={containerClass}>
+    <div className={containerClass} data-gate-request-id={block.requestId} tabIndex={-1} aria-busy={resolving}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
           <span
@@ -1339,7 +1366,8 @@ function UserInputBubble({
           const answer = answers[question.id]
           const hasOptions = question.options.length > 0
           const otherSelected = answer?.label === USER_INPUT_OTHER_LABEL
-          const submittedAnswer = done ? (answer?.value || answer?.label || '') : ''
+          const committedAnswer = block.answers?.find(candidate => candidate.id === question.id)
+          const submittedAnswer = block.status === 'submitted' ? (committedAnswer?.value || committedAnswer?.label || '') : ''
           const showProgress = questionCount > 1
           const showHeader =
             typeof question.header === 'string' &&
@@ -1348,6 +1376,8 @@ function UserInputBubble({
           return (
             <div
               key={question.id}
+              role="group"
+              aria-label={question.question}
               className={`min-w-0 rounded-[12px] border px-3 py-3 ${
                 submittedAnswer
                   ? 'border-ds-border-muted bg-ds-main/35'
@@ -1402,7 +1432,8 @@ function UserInputBubble({
                       <button
                         key={option.label}
                         type="button"
-                        disabled={done}
+                        disabled={done || resolving}
+                        aria-pressed={selected}
                         onClick={() => chooseOption(question, option.label)}
                         className={`group flex min-w-0 gap-2.5 rounded-[10px] border px-3 py-2.5 text-left transition disabled:cursor-default ${
                           selected
@@ -1434,7 +1465,8 @@ function UserInputBubble({
                   })}
                   <button
                     type="button"
-                    disabled={done}
+                    disabled={done || resolving}
+                    aria-pressed={otherSelected}
                     onClick={() =>
                       chooseOption(
                         question,
@@ -1467,12 +1499,16 @@ function UserInputBubble({
                   {otherSelected ? (
                     <textarea
                       rows={2}
-                      disabled={done}
+                      disabled={done || resolving}
                       value={answer?.value ?? ''}
                       onChange={(e) =>
                         chooseOption(question, USER_INPUT_OTHER_LABEL, e.target.value)
                       }
+                      aria-label={question.question}
+                      onCompositionStart={composition.onCompositionStart}
+                      onCompositionEnd={composition.onCompositionEnd}
                       onKeyDown={(e) => {
+                        if (composition.isComposingEvent(e) || e.repeat) return
                         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                           e.preventDefault()
                           submit()
@@ -1487,12 +1523,16 @@ function UserInputBubble({
                 <div className="mt-3">
                   <textarea
                     rows={3}
-                    disabled={done}
+                    disabled={done || resolving}
                     value={answer?.value ?? ''}
                     onChange={(e) =>
                       chooseOption(question, USER_INPUT_FREEFORM_LABEL, e.target.value)
                     }
+                    aria-label={question.question}
+                    onCompositionStart={composition.onCompositionStart}
+                    onCompositionEnd={composition.onCompositionEnd}
                     onKeyDown={(e) => {
+                      if (composition.isComposingEvent(e) || e.repeat) return
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         e.preventDefault()
                         submit()
@@ -1512,11 +1552,12 @@ function UserInputBubble({
         <p className="mt-3 text-[12px] text-red-700 dark:text-red-300">{block.errorMessage}</p>
       ) : null}
 
+      {block.status === 'pending' && responseContext ? <OpenGateOwnerButton requestId={block.requestId} /> : null}
       {pending ? (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-ds-border-muted pt-3">
           <button
             type="button"
-            disabled={!canSubmit}
+            disabled={!canSubmit || resolving}
             className="inline-flex min-h-8 items-center gap-1.5 rounded-[9px] bg-ds-ink px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45 dark:text-black"
             onClick={submit}
           >
@@ -1526,6 +1567,7 @@ function UserInputBubble({
           <button
             type="button"
             className="min-h-8 rounded-[9px] border border-ds-border-muted bg-ds-card/80 px-3 py-1.5 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
+            disabled={resolving}
             onClick={cancel}
           >
             {t('userInputCancel')}
@@ -1582,6 +1624,8 @@ function MessageBubbleImpl({
 }): ReactElement {
   const { t, i18n } = useTranslation('common')
   const resolveApproval = useChatStore((s) => s.resolveApproval)
+  const responseContext = useContext(GateResponseContext)
+  const resolving = useChatStore(state => block.kind === 'approval' && state.pendingGateResolutionIds?.[`approval:${block.approvalId}`] === true)
   const traceThreadId = useChatStore((s) => s.activeThreadId)
   const answerRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -1658,8 +1702,8 @@ function MessageBubbleImpl({
     return <UserInputBubble block={block} nested={nested} />
   }
   if (block.kind === 'approval') {
-    const done = block.status !== 'pending'
-    const statusLabel =
+    const done = block.status !== 'pending' || Boolean(responseContext)
+    const statusLabel = resolving ? t('requestResolving') :
       block.status === 'allowed'
         ? t('approvalAllowed')
         : block.status === 'denied'
@@ -1668,7 +1712,7 @@ function MessageBubbleImpl({
             ? t('approvalFailed')
             : t('approvalPending')
     return (
-      <div
+      <div data-gate-request-id={block.approvalId} tabIndex={-1} aria-busy={resolving}
         className={`rounded-[22px] border px-4 py-4 text-[13px] leading-6 shadow-[0_12px_30px_rgba(86,103,136,0.04)] ${
           block.status === 'error'
             ? 'border-red-300/80 bg-red-500/10 dark:border-red-800/60 dark:bg-red-950/35'
@@ -1685,11 +1729,13 @@ function MessageBubbleImpl({
         {block.errorMessage ? (
           <p className="mt-2 text-[12px] text-red-700 dark:text-red-300">{block.errorMessage}</p>
         ) : null}
+        {block.status === 'pending' && responseContext ? <OpenGateOwnerButton requestId={block.approvalId} /> : null}
         {!done ? (
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-emerald-700"
+              disabled={resolving}
               onClick={() => void resolveApproval(block.id, 'allow')}
             >
               {t('approvalAllow')}
@@ -1697,6 +1743,7 @@ function MessageBubbleImpl({
             <button
               type="button"
               className="rounded-lg border border-ds-border bg-ds-card px-3 py-1.5 text-[13px] font-medium text-ds-ink hover:bg-ds-hover"
+              disabled={resolving}
               onClick={() => void resolveApproval(block.id, 'deny')}
             >
               {t('approvalDeny')}

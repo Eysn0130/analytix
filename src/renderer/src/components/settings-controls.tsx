@@ -163,13 +163,13 @@ export function SettingRow({
 
   return (
     <div
-      className={`flex gap-3 px-3 py-4 ${
+      className={`flex flex-wrap gap-3 px-3 py-4 ${
         wideControl
           ? 'flex-col sm:gap-3.5'
           : 'flex-col sm:flex-row sm:items-start sm:justify-between sm:gap-8'
       }`}
     >
-      <div className={`min-w-0 ${wideControl ? 'w-full max-w-none shrink-0' : 'flex-1'}`}>
+      <div className={`min-w-0 ${wideControl ? 'w-full max-w-none shrink-0' : 'basis-48 flex-1'}`}>
         <div id={labelId} className="text-[14px] font-semibold text-ds-ink">{title}</div>
         {description ? (
           <p id={descriptionId} className="mt-0.5 text-[13px] leading-relaxed text-ds-muted">{description}</p>
@@ -181,7 +181,7 @@ export function SettingRow({
             ? ''
             : compactControl
               ? 'flex justify-end sm:w-fit sm:max-w-none sm:shrink-0'
-              : 'flex justify-end sm:max-w-[420px]'
+              : 'flex justify-end sm:w-auto sm:basis-80 sm:flex-1 sm:max-w-[420px]'
         }`}
       >
         {labelledControl}

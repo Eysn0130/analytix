@@ -29,7 +29,7 @@ import type { SkillRootListItem } from '@shared/analytix-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
-import { SettingsSidebar } from './SettingsSidebar'
+import { SettingsSidebar, settingsCategoryLabelKey } from './SettingsSidebar'
 import { NavigationRail } from './shell/NavigationRail'
 import { WriteDebugLogModal } from './settings-debug-log'
 import { useSettingsGuiUpdate } from './use-settings-gui-update'
@@ -1001,7 +1001,7 @@ export function SettingsView(): ReactElement {
           {category !== 'account' && category !== 'browser' && category !== 'computerUse' ? (
             <div className="mb-8 flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t('title')}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t(settingsCategoryLabelKey(category))}</h1>
                 <p className="mt-1 text-[14px] text-ds-muted">{t('subtitle')}</p>
               </div>
               <span

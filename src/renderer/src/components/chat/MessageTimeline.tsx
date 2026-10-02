@@ -25,7 +25,7 @@ import { extractPlanMetadataFromBlock } from '../../plan/plan-tool'
 import { planDisplayNameFromRelativePath } from '../../plan/plan-path'
 import { buildThreadProjection } from '../../thread/projection/thread-projection-store'
 import {
-  groupThreadTurns,
+  groupThreadTurns, stableThreadTurnKey,
   sameThreadTurnContent as sameTurnContent,
   type ThreadTurn as Turn
 } from '../../thread/projection/thread-turns'
@@ -114,6 +114,8 @@ type Props = {
   edgeAlignedScroll?: boolean
   contentClassName?: string
   runtimeStateOverride?: TimelineRuntimeStateOverride
+  focusRequestId?: string | null
+  onRequestFocused?: () => void
   onReturnToBottomStateChange?: (state: TimelineReturnToBottomState | null) => void
 }
 
@@ -291,7 +293,9 @@ export function MessageTimeline({
   edgeAlignedScroll = false,
   contentClassName,
   runtimeStateOverride,
-  onReturnToBottomStateChange
+  onReturnToBottomStateChange,
+  focusRequestId,
+  onRequestFocused
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const timelineStores = useTimelineStores(activeThreadId)
@@ -811,6 +815,38 @@ export function MessageTimeline({
       turnTarget?.scrollIntoView({ behavior, block: 'center' })
     })()
   }, [findNavigationTarget, scrollToEstimatedTurn, waitForNavigationTarget])
+
+  useEffect(() => {
+    if (!focusRequestId) return undefined
+    const turnIndex = turns.findIndex(turn => turn.blocks.some(block =>
+      (block.kind === 'user_input' && block.requestId === focusRequestId) ||
+      (block.kind === 'approval' && block.approvalId === focusRequestId)))
+    if (turnIndex < 0) return undefined
+    if (turns.length - turnIndex > visibleTurnCount) {
+      loadEarlierTurns()
+      return undefined
+    }
+    const row = projection.rows.find(row => row.kind === 'turn' && row.turn.key === stableThreadTurnKey(turns[turnIndex], turnIndex))
+    if (row?.kind === 'turn') scrollToEstimatedTurn(row.turn.key, 'auto')
+    let cancelled = false
+    void (async () => {
+      // The existing virtualizer renders the requested row after scrolling.
+      const started = performance.now()
+      while (!cancelled && performance.now() - started < 2000) {
+        const gate = Array.from(containerRef.current?.querySelectorAll<HTMLElement>('[data-gate-request-id]') ?? [])
+          .find(node => node.dataset.gateRequestId === focusRequestId)
+        if (gate) {
+          gate.scrollIntoView({ behavior: 'auto', block: 'center' })
+          const control = gate.querySelector<HTMLElement>('button:not(:disabled), textarea:not(:disabled)')
+          ;(control ?? gate).focus({ preventScroll: true })
+          onRequestFocused?.()
+          return
+        }
+        await nextAnimationFrame()
+      }
+    })()
+    return () => { cancelled = true }
+  }, [activeThreadId, focusRequestId, turns, visibleTurnCount, loadEarlierTurns, projection.rows, scrollToEstimatedTurn, onRequestFocused])
 
   return (
     <Profiler id="message-timeline" onRender={recordReactCommit}>

@@ -29,6 +29,7 @@ import { useChatStore } from '../../store/chat-store'
 import type { ChatBlock, ToolBlock } from '../../agent/types'
 import { splitThink } from '../../thread/projection/thread-turns'
 import { useActiveStreamSnapshot } from '../../thread/streaming/active-stream-store'
+import { GateResponseContext, MessageBubble } from './message-timeline-bubbles'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { summarizeToolBlock } from './message-timeline-process'
 import { formatChildAgentChip } from './message-timeline-tools'
@@ -37,6 +38,7 @@ import { redactSecretText } from '@shared/secret-redaction'
 type Props = {
   className?: string
   rightOffset?: number
+  onOpenThreadRequest?: (threadId: string, requestId: string) => void
 }
 
 const SIDE_STICK_TO_BOTTOM_PX = 96
@@ -213,7 +215,10 @@ function SideToolBubble({ block }: { block: ToolBlock }): ReactElement {
   )
 }
 
-function SideMessageBubble({ block }: { block: ChatBlock }): ReactElement | null {
+function SideMessageBubble({ block, onOpenOwnerThread }: { block: ChatBlock; onOpenOwnerThread?: (requestId: string) => void }): ReactElement | null {
+  if (block.kind === 'approval' || block.kind === 'user_input') {
+    return <GateResponseContext.Provider value={{ onOpenOwnerThread }}><MessageBubble block={block} /></GateResponseContext.Provider>
+  }
   if (block.kind === 'user') {
     return (
       <div className="flex justify-end">
@@ -237,17 +242,10 @@ function SideMessageBubble({ block }: { block: ChatBlock }): ReactElement | null
   if (block.kind === 'tool') {
     return <SideToolBubble block={block} />
   }
-  if (block.kind === 'approval' || block.kind === 'compaction') {
+  if (block.kind === 'compaction') {
     return (
       <div className="rounded-full border border-ds-border-muted bg-ds-card/60 px-3 py-1.5 text-[12px] text-ds-muted">
         {block.summary}
-      </div>
-    )
-  }
-  if (block.kind === 'user_input') {
-    return (
-      <div className="rounded-full border border-ds-border-muted bg-ds-card/60 px-3 py-1.5 text-[12px] text-ds-muted">
-        {block.questions.map((q) => q.question).join(' · ') || 'user input'}
       </div>
     )
   }
@@ -314,7 +312,8 @@ function SideActiveStreamRows({
 
 export function SideConversationPanel({
   className,
-  rightOffset = 24
+  rightOffset = 24,
+  onOpenThreadRequest
 }: Props): ReactElement | null {
   const { t, i18n } = useTranslation('common')
   const [draftInput, setDraftInput] = useState('')
@@ -658,7 +657,7 @@ export function SideConversationPanel({
                 </div>
               ) : null}
               {activeSide.blocks.map((block) => (
-                <SideMessageBubble key={block.id} block={block} />
+                <SideMessageBubble key={block.id} block={block} onOpenOwnerThread={onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined} />
               ))}
               {activeSide.liveAssistant ? (
                 <SideMessageBubble

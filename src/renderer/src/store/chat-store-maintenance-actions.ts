@@ -1,3 +1,4 @@
+import { getThreadBinding } from './chat-store-thread-binding'
 import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
 import { getProvider } from '../agent/registry'
@@ -172,13 +173,15 @@ async function reconcileInterruptedTurn(
   get: ChatStoreGet,
   threadId: string,
   turnId: string,
-  userBlockId: string | null
+  userBlockId: string | null,
+  isCurrent: () => boolean
 ): Promise<boolean> {
   return reconcileTerminalTurnFromThreadDetail({
     threadId,
     turnId,
     userBlockId,
     terminalStatus: 'aborted',
+    isCurrent,
     loadThreadDetail: (id) => getProvider().getThreadDetail(id),
     set,
     get
@@ -212,6 +215,88 @@ function forkBlocksThroughTurn(blocks: ChatBlock[], turnId: string): ChatBlock[]
 export function createMaintenanceActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
+  const binding = getThreadBinding(sseAbortRef)
+  const resolvingGates = new Set<string>()
+  type GateBlock = Extract<ChatBlock, { kind: 'approval' | 'user_input' }>
+  const gateKey = (block: GateBlock): string =>
+    `${block.kind}:${block.kind === 'approval' ? block.approvalId : block.requestId}`
+
+  const resolveGate = async (
+    block: GateBlock,
+    invoke: () => Promise<void>,
+    success: Partial<GateBlock>,
+    supported: boolean
+  ): Promise<void> => {
+    const threadId = get().activeThreadId
+    const generation = binding.generation
+    const key = gateKey(block)
+    if (!threadId || block.status !== 'pending' || resolvingGates.has(key)) return
+    const belongs = (candidate: ChatBlock): candidate is GateBlock =>
+      (candidate.kind === 'approval' || candidate.kind === 'user_input') &&
+      candidate.id === block.id && gateKey(candidate) === key
+    const current = (): boolean => get().activeThreadId === threadId && binding.generation === generation
+    const pending = (): boolean => current() && get().blocks.some(candidate => belongs(candidate) && candidate.status === 'pending')
+    resolvingGates.add(key)
+    set(state => ({ pendingGateResolutionIds: { ...state.pendingGateResolutionIds, [key]: true } }))
+    try {
+      await invoke()
+      if (!current()) return
+      set(state => ({ blocks: state.blocks.map(candidate => {
+        if (!belongs(candidate)) return candidate
+        if (candidate.status === 'pending') return { ...candidate, ...success, errorMessage: undefined } as GateBlock
+        // A public resolved event may arrive before its HTTP acknowledgement.
+        // Attach only this successful answer's projection to the same outcome.
+        if (candidate.kind === 'user_input' && candidate.status === 'submitted' && success.status === 'submitted') {
+          return { ...candidate, ...success, errorMessage: undefined } as GateBlock
+        }
+        return candidate
+      }) }))
+      if (success.status === 'submitted' && current() && get().busy) armBusyWatchdog(set, get)
+    } catch (error) {
+      if (!pending()) return
+      const message = formatRuntimeError(error)
+      // An ambiguous POST failure is not permission to repeat a decision.
+      // Reconcile just this gate from the existing public detail authority.
+      let authoritative: GateBlock | undefined
+      if (supported) {
+        try {
+          const detail = await getProvider().getThreadDetail(threadId)
+          if (!pending()) return
+          if ((detail.latestSeq ?? 0) >= (get().lastSeq ?? 0)) {
+            authoritative = detail.blocks.find(belongs) as GateBlock | undefined
+          }
+        } catch {
+          // Keep an explicit error when authority cannot be recovered.
+        }
+      }
+      if (!pending()) return
+      if (authoritative && authoritative.status !== 'pending' && authoritative.status !== 'error') {
+        const settled = authoritative
+        set(state => ({ blocks: state.blocks.map(candidate => belongs(candidate)
+          ? { ...candidate, status: settled.status, errorMessage: undefined } as GateBlock
+          : candidate) }))
+        return
+      }
+      void window.analytix.logs.error(block.kind === 'approval' ? 'approval' : 'user-input', 'Failed to resolve pending request', {
+        message, blockId: block.id
+      }).catch(() => undefined)
+      set(state => ({
+        error: message,
+        ...(shouldOpenSettingsForError(error) ? { route: 'settings' as const, settingsSection: 'agents' as const } : {}),
+        blocks: state.blocks.map(candidate => belongs(candidate) && candidate.status === 'pending'
+          ? { ...candidate, status: authoritative?.status === 'pending' ? 'pending' : 'error', errorMessage: message } as GateBlock
+          : candidate)
+      }))
+    } finally {
+      resolvingGates.delete(key)
+      set(state => {
+        const next = { ...state.pendingGateResolutionIds }
+        delete next[key]
+        return { pendingGateResolutionIds: next }
+      })
+    }
+  }
+
   const forkActiveThreadWithOptions = async (options: { turnId?: string } = {}): Promise<void> => withImageThreadNavigation(undefined, async navigationCurrent => {
     const { activeThreadId, busy, blocks } = get()
     if (!activeThreadId) return
@@ -320,6 +405,7 @@ export function createMaintenanceActions(
         throw new Error(i18n.t('common:runtimeFeatureUnsupported'))
       }
       if (archivingActive && navigationCurrent()) {
+        binding.generation += 1
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
         clearBusyWatchdog()
@@ -677,6 +763,7 @@ export function createMaintenanceActions(
       saveThreadForkRegistry(forgetThreadFork(targetId))
       if (wtRecord) saveThreadWorktreeRegistry(forgetThreadWorktree(targetId))
       if (deletingActive && navigationCurrent()) {
+        binding.generation += 1
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
         clearBusyWatchdog()
@@ -772,6 +859,7 @@ export function createMaintenanceActions(
       delete turnDurationByUserId[id]
     }
 
+    binding.generation += 1
     sseAbortRef.current?.abort()
     sseAbortRef.current = null
     clearBusyWatchdog()
@@ -840,103 +928,31 @@ export function createMaintenanceActions(
   },
 
   resolveApproval: async (blockId, decision) => {
-    const { blocks } = get()
-    const block = blocks.find((b) => b.id === blockId)
+    const block = get().blocks.find(candidate => candidate.id === blockId)
     if (!block || block.kind !== 'approval' || block.status !== 'pending') return
-    const p = getProvider()
-    if (typeof p.submitApprovalDecision !== 'function') {
-      set({ error: i18n.t('common:runtimeFeatureUnsupported') })
-      return
-    }
-    try {
-      await p.submitApprovalDecision(
-        block.approvalId,
-        decision === 'allow' ? 'allow' : 'deny',
-        false
-      )
-      set((s) => ({
-        blocks: s.blocks.map((b) =>
-          b.id === blockId && b.kind === 'approval'
-            ? { ...b, status: decision === 'allow' ? ('allowed' as const) : ('denied' as const) }
-            : b
-        )
-      }))
-    } catch (e) {
-      const msg = formatRuntimeError(e)
-      void window.analytix.logs.error('approval', 'Failed to submit approval decision', {
-        message: msg,
-        blockId
-      }).catch(() => undefined)
-      set((s) => ({
-        error: msg,
-        ...(shouldOpenSettingsForError(e)
-          ? { route: 'settings' as const, settingsSection: 'agents' as const }
-          : {}),
-        blocks: s.blocks.map((b) =>
-          b.id === blockId && b.kind === 'approval'
-            ? { ...b, status: 'error' as const, errorMessage: msg }
-            : b
-        )
-      }))
-    }
+    const provider = getProvider()
+    const supported = typeof provider.submitApprovalDecision === 'function'
+    await resolveGate(block, async () => {
+      if (!supported) throw new Error(i18n.t('common:runtimeFeatureUnsupported'))
+      await provider.submitApprovalDecision!(block.approvalId, decision === 'allow' ? 'allow' : 'deny', false)
+    }, { status: decision === 'allow' ? 'allowed' : 'denied' }, supported)
   },
 
   resolveUserInput: async (blockId, action) => {
-    const { blocks } = get()
-    const block = blocks.find((b) => b.id === blockId)
+    const block = get().blocks.find(candidate => candidate.id === blockId)
     if (!block || block.kind !== 'user_input' || block.status !== 'pending') return
-    const p = getProvider()
-    try {
-      if (action.kind === 'submit') {
-        const publicAnswers = action.answers.map((answer) => ({
-          ...answer,
-          label: projectOrdinaryPublicText(answer.label),
-          value: projectOrdinaryPublicText(answer.value)
-        }))
-        if (typeof p.submitUserInputResponse !== 'function') {
-          throw new Error(i18n.t('common:runtimeUserInputUnsupported'))
-        }
-        await p.submitUserInputResponse(block.requestId, action.answers)
-        if (get().busy) armBusyWatchdog(set, get)
-        set((s) => ({
-          blocks: s.blocks.map((b) =>
-            b.id === blockId && b.kind === 'user_input'
-              ? { ...b, status: 'submitted' as const, answers: publicAnswers }
-              : b
-          )
-        }))
-        return
-      }
-
-      if (typeof p.cancelUserInput !== 'function') {
-        throw new Error(i18n.t('common:runtimeUserInputUnsupported'))
-      }
-      await p.cancelUserInput(block.requestId)
-      set((s) => ({
-        blocks: s.blocks.map((b) =>
-          b.id === blockId && b.kind === 'user_input'
-            ? { ...b, status: 'cancelled' as const }
-            : b
-        )
-      }))
-    } catch (e) {
-      const msg = formatRuntimeError(e)
-      void window.analytix.logs.error('user-input', 'Failed to resolve user input', {
-        message: msg,
-        blockId
-      }).catch(() => undefined)
-      set((s) => ({
-        error: msg,
-        ...(shouldOpenSettingsForError(e)
-          ? { route: 'settings' as const, settingsSection: 'agents' as const }
-          : {}),
-        blocks: s.blocks.map((b) =>
-          b.id === blockId && b.kind === 'user_input'
-            ? { ...b, status: 'error' as const, errorMessage: msg }
-            : b
-        )
-      }))
-    }
+    const provider = getProvider()
+    const supported = action.kind === 'submit'
+      ? typeof provider.submitUserInputResponse === 'function'
+      : typeof provider.cancelUserInput === 'function'
+    const publicAnswers = action.kind === 'submit' ? action.answers.map(answer => ({
+      ...answer, label: projectOrdinaryPublicText(answer.label), value: projectOrdinaryPublicText(answer.value)
+    })) : undefined
+    await resolveGate(block, async () => {
+      if (!supported) throw new Error(i18n.t('common:runtimeUserInputUnsupported'))
+      if (action.kind === 'submit') await provider.submitUserInputResponse!(block.requestId, action.answers)
+      else await provider.cancelUserInput!(block.requestId)
+    }, action.kind === 'submit' ? { status: 'submitted', answers: publicAnswers } : { status: 'cancelled' }, supported)
   },
 
   interrupt: async (options) => {
@@ -948,17 +964,21 @@ export function createMaintenanceActions(
     // interruptTurn must not keep the stop button unresponsive. The event
     // stream is aborted first because onDeltas/onTool flip `busy` back on
     // while the backend turn is still streaming.
+    binding.generation += 1
     sseAbortRef.current?.abort()
     sseAbortRef.current = null
     quarantineInterruptedTurn(set, get, activeThreadId, currentTurnId, currentTurnUserId)
     if (get().queuedMessages.length > 0) {
       set({ queuedMessagesPausedReason: 'interrupted' })
     }
+    const interruptGeneration = binding.generation
+    const ownsInterrupt = () => get().activeThreadId === activeThreadId && binding.generation === interruptGeneration
     try {
       if (!pendingRuntimeTurn) {
         await p.interruptTurn(activeThreadId, currentTurnId, { discard: options?.discard === true })
       }
     } catch (e) {
+      if (!ownsInterrupt()) return
       const msg = formatRuntimeError(e)
       void window.analytix.logs.error('interrupt', 'Failed to interrupt turn', { message: msg }).catch(() => undefined)
       set({
@@ -968,15 +988,16 @@ export function createMaintenanceActions(
           : {})
       })
     }
-    if (get().activeThreadId === activeThreadId && sseAbortRef.current === null) {
+    if (ownsInterrupt() && sseAbortRef.current === null) {
       const reconciled = await reconcileInterruptedTurn(
         set,
         get,
         activeThreadId,
         currentTurnId,
-        currentTurnUserId
+        currentTurnUserId,
+        ownsInterrupt
       )
-      if (reconciled) {
+      if (reconciled && ownsInterrupt()) {
         void get().refreshThreads()
         if (get().queuedMessages.length === 0) {
           releaseThreadWorktreeIfNeeded(activeThreadId)

@@ -672,7 +672,8 @@ export function Workbench(): ReactElement {
   )
   const {
     draft: composerDraft, setInput, setAttachments: setComposerAttachments,
-    setFileReferences: setComposerFileReferences, clearSubmitted: clearSubmittedComposer
+    setFileReferences: setComposerFileReferences, clearSubmitted: clearSubmittedComposer,
+    beginAttachmentUpload, setAttachmentUploadError
   } = useThreadComposerDraft(
     threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot || '',
     activeThreadId
@@ -688,8 +689,8 @@ export function Workbench(): ReactElement {
   const [composerExecutionSettings, setComposerExecutionSettings] =
     useState<ComposerExecutionSettings | null>(null)
   const [composerExecutionApplying, setComposerExecutionApplying] = useState(false)
-  const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false)
-  const [attachmentUploadError, setAttachmentUploadError] = useState<string | null>(null)
+  const attachmentUploadBusy = (composerDraft.pendingAttachmentUploads ?? 0) > 0
+  const attachmentUploadError = composerDraft.attachmentUploadError ?? null
   const [connectPhoneSidebarOpen, setConnectPhoneSidebarOpen] = useState(false)
   const [activeDataAnalysis, setActiveDataAnalysis] = useState<ActiveDataAnalysis | null>(null)
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
@@ -699,6 +700,7 @@ export function Workbench(): ReactElement {
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
   const [timelineReturnToBottomState, setTimelineReturnToBottomState] =
     useState<TimelineReturnToBottomState | null>(null)
+  const [ownedRequestNavigation, setOwnedRequestNavigation] = useState<{ threadId: string; requestId: string | null; returnThreadId: string | null } | null>(null)
   const writeAssistantOpen = useWriteWorkspaceStore((s) => s.assistantOpen)
   const writeAssistantModel = useWriteWorkspaceStore((s) => s.assistantModel)
   const writeAssistantProviderId = useWriteWorkspaceStore((s) => s.assistantProviderId)
@@ -1576,9 +1578,13 @@ export function Workbench(): ReactElement {
   }, [composerModelGroups, runtimeInfo, selectedComposerModel, selectedComposerProviderId])
   const visionBridgeAvailable = runtimeInfo?.capabilities.visionBridge?.available === true
 
+  const attachmentModelSelection = `${route}:${selectedComposerProviderId ?? ''}:${selectedComposerModel}`
+  const previousAttachmentModelSelection = useRef(attachmentModelSelection)
   useEffect(() => {
+    if (previousAttachmentModelSelection.current === attachmentModelSelection) return
+    previousAttachmentModelSelection.current = attachmentModelSelection
     setAttachmentUploadError(null)
-  }, [route, selectedComposerModel, selectedComposerProviderId])
+  }, [attachmentModelSelection, setAttachmentUploadError])
 
   const attachmentUploadEnabled = isChatAttachmentUploadEnabled({
     runtimeConnection,
@@ -1671,7 +1677,7 @@ export function Workbench(): ReactElement {
       setAttachmentUploadError(t('composerAttachmentUnavailable'))
       return
     }
-    setAttachmentUploadBusy(true)
+    const finishUpload = beginAttachmentUpload()
     setAttachmentUploadError(null)
     try {
       const workspace = activeComposerWorkspace()
@@ -1759,7 +1765,7 @@ export function Workbench(): ReactElement {
     } catch (error) {
       setAttachmentUploadError(error instanceof Error ? error.message : String(error))
     } finally {
-      setAttachmentUploadBusy(false)
+      finishUpload()
     }
   }
 
@@ -2097,7 +2103,7 @@ export function Workbench(): ReactElement {
   // directory) should land on a clean new conversation in the selected
   // directory — not silently reopen the last requirement. Remembered drafts
   // stay reachable from the sidebar (需求草稿) and the "新建需求" restore-or-create
-  // flow; they just no longer hijack startup. See the workspace picker below
+  // flow; they just no longer hijack startup. See the workspace picker above
   // the composer for switching directories.
 
   // Inject a PM-skill framework prompt (see pm-skill-frameworks.ts) into the
@@ -2115,6 +2121,9 @@ export function Workbench(): ReactElement {
   }
 
   const sendSddAssistantPrompt = async (value: string): Promise<void> => {
+    const current = useChatStore.getState()
+    const currentWorkspace = current.threads.find(thread => thread.id === current.activeThreadId)?.workspace || current.workspaceRoot
+    if ((current.composerDrafts[JSON.stringify([currentWorkspace, current.activeThreadId])]?.pendingAttachmentUploads ?? 0) > 0) return
     const v = value.trim()
     const draft = useSddDraftStore.getState().activeDraft
     const attachments = composerAttachments
@@ -2509,9 +2518,11 @@ export function Workbench(): ReactElement {
 
   const handleSendAsync = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
     const chat = useChatStore.getState()
+    if (chat.runtimeConnection !== 'ready') return
     if (chat.activeThreadId !== activeThreadId || !submissionOwnerMounted.current) return
     const threadWorkspace = chat.threads.find(thread => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot
     const key = JSON.stringify([threadWorkspace, chat.activeThreadId])
+    if ((chat.composerDrafts[key]?.pendingAttachmentUploads ?? 0) > 0) return
     if (submissionsInFlight.current.has(key)) return
     submissionsInFlight.current.add(key)
     try {
@@ -2836,22 +2847,31 @@ export function Workbench(): ReactElement {
       route === 'chat' || route === 'claw' ? setComposerReasoningEffort : undefined
   })
 
-  const openThread = (id: string): void => {
+  const openThread = async (id: string): Promise<void> => {
     setConnectPhoneSidebarOpen(false)
     setActiveDataAnalysis(null)
-    void (async () => {
-      const thread = threads.find((item) => item.id === id) ?? null
-      const sddDraft = await findSddDraftForSidebarThread(id, thread)
-      if (sddDraft) {
-        markSddAssistantThread(sddDraft, id)
-        await openSddRequirementDraftFromHistory(sddDraft)
-        void useChatStore.getState().refreshThreads()
-        return
-      }
-      if (useSddDraftStore.getState().activeDraft) dismissActiveSddDraft({ closeAssistant: true })
-      setRoute('chat')
-      await selectThread(id)
-    })()
+    const thread = threads.find((item) => item.id === id) ?? null
+    const sddDraft = await findSddDraftForSidebarThread(id, thread)
+    if (sddDraft) {
+      markSddAssistantThread(sddDraft, id)
+      await openSddRequirementDraftFromHistory(sddDraft)
+      void useChatStore.getState().refreshThreads()
+      return
+    }
+    if (useSddDraftStore.getState().activeDraft) dismissActiveSddDraft({ closeAssistant: true })
+    setRoute('chat')
+    await selectThread(id)
+  }
+
+  useEffect(() => {
+    if (ownedRequestNavigation && activeThreadId !== ownedRequestNavigation.threadId) setOwnedRequestNavigation(null)
+  }, [activeThreadId, ownedRequestNavigation])
+
+  const openOwnedThreadRequest = (threadId: string, requestId: string): void => {
+    const returnThreadId = useChatStore.getState().activeThreadId
+    void openThread(threadId).then(() => {
+      if (useChatStore.getState().activeThreadId === threadId) setOwnedRequestNavigation({ threadId, requestId, returnThreadId })
+    }).catch(() => setOwnedRequestNavigation(null))
   }
 
   const startNewChat = (): void => {
@@ -3109,7 +3129,7 @@ export function Workbench(): ReactElement {
     />
   )
 
-  const renderSummaryPanel = (): ReactElement => (
+  const renderSummaryPanel = (): ReactElement | null => !rightPanelDockedVisible ? null : (
     <ThreadSummaryPanelIsland activeThreadId={activeThreadId} className="h-full w-full"
       visible={rightPanelDockedVisible && !workspaceSelectorOpen}
       diagnosticsFocus={runtimeDiagnosticsFocus} onDiagnosticsFocusHandled={() => setRuntimeDiagnosticsFocus(null)}
@@ -3254,6 +3274,7 @@ export function Workbench(): ReactElement {
                   setComposerModel={setComposerModel}
                   setComposerReasoningEffort={setComposerReasoningEffort}
                   onSelectSubagent={selectSubagentInspector}
+                  onOpenThreadRequest={openOwnedThreadRequest}
                   onCloseSubagentTab={closeSubagentInspectorTab}
                   onCreateSideChat={() => void createSideChatInInspector()}
                   createSideChatDisabled={runtimeConnection !== 'ready' || !activeThreadId}
@@ -3539,7 +3560,18 @@ export function Workbench(): ReactElement {
                   >
                     <div className={`${stageInsetClass} flex min-h-0 min-w-0 flex-1 flex-col`}>
                       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                        {ownedRequestNavigation?.threadId === activeThreadId && ownedRequestNavigation.returnThreadId && ownedRequestNavigation.returnThreadId !== activeThreadId ? (
+                          <div className="ds-no-drag flex shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-5 py-2 text-xs text-ds-muted">
+                            <span>{t('pendingRequestNotResolved')}</span>
+                            <button type="button" className="shrink-0 rounded-md px-2 py-1 text-ds-ink hover:bg-ds-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ds-accent"
+                              onClick={() => { const id = ownedRequestNavigation.returnThreadId; setOwnedRequestNavigation(null); if (id) void openThread(id) }}>
+                              {t('returnFromOwnedRequest')}
+                            </button>
+                          </div>
+                        ) : null}
                         <ChatTimelineIsland
+                          focusRequestId={ownedRequestNavigation?.threadId === activeThreadId ? ownedRequestNavigation.requestId : null}
+                          onRequestFocused={() => setOwnedRequestNavigation(current => current ? { ...current, requestId: null } : null)}
                           activeThreadId={activeThreadId}
                           onReturnToBottomStateChange={setTimelineReturnToBottomState}
                           runtimeConnection={runtimeConnection}
@@ -3710,6 +3742,7 @@ export function Workbench(): ReactElement {
 
               {route === 'chat' && !activeSddDraft && !activeDataAnalysis ? (
                 <SideConversationPanel
+                  onOpenThreadRequest={openOwnedThreadRequest}
                   rightOffset={(rightPanelDockedVisible ? rightSidebarWidth + 24 : 24) + fileTreeSidePanelOffset}
                 />
               ) : null}

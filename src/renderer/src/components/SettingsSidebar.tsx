@@ -101,6 +101,10 @@ const NAV_GROUPS: NavGroup[] = [
   }
 ]
 
+export function settingsCategoryLabelKey(category: SettingsCategory): string {
+  return NAV_GROUPS.flatMap(group => group.items).find(item => item.category === category)?.labelKey ?? 'title'
+}
+
 export function SettingsSidebar({
   category,
   goBack,

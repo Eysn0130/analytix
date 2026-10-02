@@ -1148,7 +1148,7 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const goalButton = html.match(/<button[^>]*>[\s\S]*?\/goal[\s\S]*?<\/button>/)?.[0] ?? ''
+    const goalButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/goal')) ?? ''
     expect(goalButton).toContain('/goal')
     expect(goalButton).not.toContain('disabled=""')
   })
@@ -1184,7 +1184,7 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const newButton = html.match(/<button[^>]*>[\s\S]*?\/new[\s\S]*?<\/button>/)?.[0] ?? ''
+    const newButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/new')) ?? ''
     expect(newButton).toContain('/new')
     expect(newButton).not.toContain('disabled=""')
   })
@@ -1220,7 +1220,7 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const planButton = html.match(/<button[^>]*>[\s\S]*?\/plan[\s\S]*?<\/button>/)?.[0] ?? ''
+    const planButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/plan')) ?? ''
     expect(planButton).toContain('/plan')
     expect(planButton).not.toContain('disabled=""')
   })
