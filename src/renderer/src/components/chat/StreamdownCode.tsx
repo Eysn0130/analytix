@@ -11,6 +11,7 @@ import {
   memo,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
   type ReactNode
 } from 'react'
 import { StreamdownContext } from 'streamdown'
+import { useTranslation } from 'react-i18next'
 import {
   findFileReferences,
   type FileReferenceTarget
@@ -136,17 +138,6 @@ function scheduleCodeHighlight(callback: () => void): () => void {
   }
 }
 
-function PlainTextBlock({ code }: { code: string }): ReactNode {
-  const trimmedCode = code.replace(TRAILING_NEWLINES_REGEX, '')
-  if (!trimmedCode.trim()) return null
-
-  return (
-    <div className="ds-plain-text-block ds-plain-code-block" data-streamdown="plain-text-block">
-      {trimmedCode}
-    </div>
-  )
-}
-
 function inlineFileReference(text: string): { text: string; target: FileReferenceTarget } | null {
   const trimmed = text.trim()
   if (!trimmed) return null
@@ -218,8 +209,15 @@ function CodeBlock({
   language: string
 }): ReactNode {
   const { isAnimating } = useContext(StreamdownContext)
+  const { t } = useTranslation('common')
+  const bodyId = useId()
+  const disclosureRef = useRef<HTMLButtonElement>(null)
   const trimmedCode = useMemo(() => code.replace(TRAILING_NEWLINES_REGEX, ''), [code])
-  const [html, setHtml] = useState(() => renderFallbackCodeHtml(trimmedCode))
+  const fallbackHtml = useMemo(() => renderFallbackCodeHtml(trimmedCode), [trimmedCode])
+  const [highlighted, setHighlighted] = useState<{ code: string; language: string; html: string } | null>(null)
+  const html = highlighted?.code === trimmedCode && highlighted.language === language
+    ? highlighted.html
+    : fallbackHtml
   const [isCopied, setIsCopied] = useState(false)
   const [expandable, setExpandable] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -228,8 +226,8 @@ function CodeBlock({
 
   useEffect(() => {
     let cancelled = false
-    setHtml(renderFallbackCodeHtml(trimmedCode))
-    if (shouldDeferCodeHighlight(trimmedCode) && !expanded) {
+    setHighlighted(null)
+    if (isPlainTextLanguage(language) || (shouldDeferCodeHighlight(trimmedCode) && !expanded)) {
       return () => {
         cancelled = true
       }
@@ -237,7 +235,7 @@ function CodeBlock({
 
     const cancelHighlight = scheduleCodeHighlight(() => {
       void highlightCodeHtml(trimmedCode, language).then((nextHtml) => {
-        if (!cancelled) setHtml(nextHtml)
+        if (!cancelled) setHighlighted({ code: trimmedCode, language, html: nextHtml })
       })
     })
 
@@ -277,7 +275,7 @@ function CodeBlock({
   const handleCopy = async (): Promise<void> => {
     if (!navigator?.clipboard?.writeText) return
     try {
-      await navigator.clipboard.writeText(trimmedCode)
+      await navigator.clipboard.writeText(code)
       setIsCopied(true)
       if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current)
       copyResetRef.current = window.setTimeout(() => setIsCopied(false), COPY_RESET_MS)
@@ -302,9 +300,9 @@ function CodeBlock({
           <button
             type="button"
             className="ds-code-block-action"
-            title="Download code"
-            aria-label="Download code"
-            onClick={() => downloadCode(trimmedCode, language)}
+            title={t('codeBlockDownload')}
+            aria-label={t('codeBlockDownload')}
+            onClick={() => downloadCode(code, language)}
             disabled={isAnimating}
           >
             <Download className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -312,8 +310,8 @@ function CodeBlock({
           <button
             type="button"
             className="ds-code-block-action"
-            title="Copy code"
-            aria-label="Copy code"
+            title={t('codeBlockCopy')}
+            aria-label={t('codeBlockCopy')}
             onClick={() => void handleCopy()}
             disabled={isAnimating}
           >
@@ -327,8 +325,11 @@ function CodeBlock({
             <button
               type="button"
               className="ds-code-block-action"
-              title={expanded ? 'Collapse code' : 'Expand code'}
-              aria-label={expanded ? 'Collapse code' : 'Expand code'}
+              ref={disclosureRef}
+              title={t(expanded ? 'codeBlockCollapse' : 'codeBlockExpand')}
+              aria-label={t(expanded ? 'codeBlockCollapse' : 'codeBlockExpand')}
+              aria-expanded={expanded}
+              aria-controls={bodyId}
               onClick={() => setExpanded((value) => !value)}
             >
               {expanded ? (
@@ -342,6 +343,7 @@ function CodeBlock({
       </div>
 
       <div
+        id={bodyId}
         className={`ds-code-block-body ${expandable && !expanded ? 'is-collapsed' : ''}`}
       >
         <div
@@ -353,8 +355,13 @@ function CodeBlock({
           <button
             type="button"
             className="ds-code-block-fade"
-            aria-label="Expand code"
-            onClick={() => setExpanded(true)}
+            aria-label={t('codeBlockExpand')}
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            onClick={() => {
+              setExpanded(true)
+              disclosureRef.current?.focus()
+            }}
           />
         ) : null}
       </div>
@@ -401,9 +408,7 @@ function CodeComponent({ node, className, children, ...props }: CodeProps) {
   const match = className?.match(LANGUAGE_REGEX)
   const language = match?.[1] ?? ''
 
-  if (isPlainTextLanguage(language)) {
-    return <PlainTextBlock code={text} />
-  }
+  if (isPlainTextLanguage(language) && !text.trim()) return null
 
   return <CodeBlock code={text} language={language} />
 }

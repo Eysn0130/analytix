@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
-import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { sharedMarkdownFinalizationScheduler } from '../../thread/streaming/markdown-finalization-queue'
 import {
   createThreadTraceEvent,
@@ -243,10 +244,14 @@ export function AssistantMarkdown({
   rowId?: string
   onFinalized?: () => void
 }): ReactElement {
+  const { t } = useTranslation('common')
+  const finalizationPolicy = useMemo(() => (
+    streaming ? null : getMarkdownFinalizationPolicy(text)
+  ), [streaming, text])
   const generatedRowId = useId()
   const effectiveRowId = rowId ?? `assistant-markdown:${generatedRowId}`
   const [finalized, setFinalized] = useState(() => (
-    !streaming && getMarkdownFinalizationPolicy(text).mode === 'immediate'
+    finalizationPolicy?.mode === 'immediate'
   ))
   const latestTextRef = useRef(text)
   const lastFinalizedTextRef = useRef(finalized ? text : '')
@@ -275,7 +280,8 @@ export function AssistantMarkdown({
     }
     if (finalized && lastFinalizedTextRef.current === text) return
 
-    const policy = getMarkdownFinalizationPolicy(text)
+    const policy = finalizationPolicy
+    if (!policy) return
     setFinalized(false)
     if (policy.mode === 'lightweight') {
       lastFinalizedTextRef.current = ''
@@ -317,10 +323,10 @@ export function AssistantMarkdown({
     }
 
     return enqueue()
-  }, [effectiveRowId, finalized, pacedPlainText.caughtUp, streaming, text])
+  }, [effectiveRowId, finalizationPolicy, finalized, pacedPlainText.caughtUp, streaming, text])
 
   useEffect(() => {
-    if (!finalized || streaming || !onFinalized || typeof window === 'undefined') return
+    if (!finalized || streaming || finalizationPolicy?.mode === 'lightweight' || !onFinalized || typeof window === 'undefined') return
     let frame = 0
     let frameId: number | null = null
     const settle = (): void => {
@@ -334,20 +340,15 @@ export function AssistantMarkdown({
     return () => {
       if (frameId !== null) window.cancelAnimationFrame(frameId)
     }
-  }, [finalized, onFinalized, streaming, text])
+  }, [finalizationPolicy, finalized, onFinalized, streaming, text])
 
-  if (shouldPacePlainText) {
+  if (shouldPacePlainText || !finalized || finalizationPolicy?.mode === 'lightweight') {
     return (
       <div className={className}>
-        <span className="whitespace-pre-wrap break-words">{pacedPlainText.text}</span>
-      </div>
-    )
-  }
-
-  if (!finalized) {
-    return (
-      <div className={className}>
-        <span className="whitespace-pre-wrap break-words">{text}</span>
+        <span className="whitespace-pre-wrap break-words">{shouldPacePlainText ? pacedPlainText.text : text}</span>
+        {!streaming && pacedPlainText.caughtUp && finalizationPolicy?.mode === 'lightweight' ? (
+          <p className="ds-markdown-fallback-note" role="note">{t('markdownPlainTextFallback')}</p>
+        ) : null}
       </div>
     )
   }
