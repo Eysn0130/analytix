@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileEdit, RotateCcw } from 'lucide-react'
+import { FileEdit, RotateCcw } from '../design/AnalytixUiIcons'
 import type { ChatBlock, ToolBlock } from '../agent/types'
 import {
   countDiffStats,

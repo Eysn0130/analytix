@@ -703,6 +703,68 @@ describe('chat-store-maintenance-actions goal actions', () => {
     }
   })
 
+  it('serializes user-input submit and cancel while a host response is pending', async () => {
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+    const { actions, provider, state } = buildHarness()
+    let complete!: () => void
+    const submit = vi.fn(() => new Promise<void>(resolve => { complete = resolve }))
+    const cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { submitUserInputResponse: submit, cancelUserInput: cancel })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
+    const first = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
+    await actions.resolveUserInput('input-1', { kind: 'cancel' })
+    expect(submit).toHaveBeenCalledOnce()
+    expect(cancel).not.toHaveBeenCalled()
+    complete()
+    await first
+    expect(state.blocks[0]).toMatchObject({ status: 'submitted' })
+  })
+
+  it('keeps a resolved user-input state when its older HTTP response fails', async () => {
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+    const { actions, provider, state } = buildHarness()
+    let fail!: (error: Error) => void
+    Object.assign(provider, { submitUserInputResponse: vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject })) })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
+    const pending = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
+    state.blocks = state.blocks.map(block => ({ ...block, status: 'submitted' })) as ChatBlock[]
+    fail(new Error('host already resolved'))
+    await pending
+    expect(state.blocks[0]).toMatchObject({ status: 'submitted' })
+    expect(state.error).toBeNull()
+  })
+
+  it('does not report an old user-input HTTP failure on a different thread', async () => {
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+    const { actions, provider, state } = buildHarness()
+    let fail!: (error: Error) => void
+    Object.assign(provider, { submitUserInputResponse: vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject })) })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
+    const pending = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
+    Object.assign(state, { activeThreadId: 'thr_other', blocks: [], error: null })
+    fail(new Error('old thread HTTP failure'))
+    await pending
+    expect(state.error).toBeNull()
+    expect(state.blocks).toEqual([])
+  })
+
+  it('serializes approval decisions and never overwrites a resolved approval with a late error', async () => {
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+    const { actions, provider, state } = buildHarness()
+    let fail!: (error: Error) => void
+    const submit = vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject }))
+    Object.assign(provider, { submitApprovalDecision: submit })
+    Object.assign(state, { blocks: [{ kind: 'approval', id: 'approval-1', approvalId: 'gate-1', status: 'pending', summary: 'Synthetic operation' }] })
+    const first = actions.resolveApproval('approval-1', 'allow')
+    const duplicate = actions.resolveApproval('approval-1', 'deny')
+    expect(submit).toHaveBeenCalledOnce()
+    state.blocks = state.blocks.map(block => ({ ...block, status: 'allowed' })) as ChatBlock[]
+    fail(new Error('host already resolved'))
+    await Promise.all([first, duplicate])
+    expect(state.blocks[0]).toMatchObject({ status: 'allowed' })
+    expect(state.error).toBeNull()
+  })
+
   it('submits exact user-input answers to the host but persists only ordinary projections', async () => {
     const account = '6222020202020202020'
     vi.stubGlobal('window', {

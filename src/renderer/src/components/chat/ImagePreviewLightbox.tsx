@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Minus, Plus, X } from 'lucide-react'
+import { Download, Minus, Plus, X } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 
 type ImagePreviewLightboxProps = {

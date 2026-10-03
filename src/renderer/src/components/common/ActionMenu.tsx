@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '../../design/AnalytixUiIcons'
 
 export function ActionMenuSeparator(): ReactElement {
   return <div className="ds-session-actions-menu-separator" role="separator" />

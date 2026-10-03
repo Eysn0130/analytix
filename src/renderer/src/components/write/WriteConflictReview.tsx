@@ -55,7 +55,7 @@ export function WriteConflictReview() {
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <button type="button" disabled={busy} className="rounded-md px-3 py-2" onClick={() => { dialog.current?.close(); setComparison(null) }}>{t('cancel')}</button>
         <button type="button" disabled={busy} className="rounded-md border border-ds-border px-3 py-2" onClick={() => void resolve('use-disk')}>{t('writeUseDiskVersion')}</button>
-        <button type="button" disabled={busy} className="rounded-md bg-accent px-3 py-2 text-white" onClick={() => void resolve('keep-draft')}>{t('writeSaveComparedDraft')}</button>
+        <button type="button" disabled={busy} className="rounded-md bg-accent px-3 py-2 text-[var(--ds-composer-primary-action-fg)]" onClick={() => void resolve('keep-draft')}>{t('writeSaveComparedDraft')}</button>
       </div>
     </dialog>}
   </>

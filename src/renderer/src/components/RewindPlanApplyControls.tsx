@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw } from '../design/AnalytixUiIcons'
 import type { CoreCheckpointRewindApplyResultJson } from '../agent/analytix-contract'
 import type { AgentProvider, ToolBlock } from '../agent/types'
 import { getProvider } from '../agent/registry'

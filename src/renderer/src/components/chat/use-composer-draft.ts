@@ -14,6 +14,16 @@ type UseComposerDraftOptions = {
 
 type ComposerInputElement = HTMLTextAreaElement | HTMLDivElement
 
+export function useInputComposition() {
+  const composing = useRef(false)
+  return {
+    onCompositionStart: () => { composing.current = true },
+    onCompositionEnd: () => { composing.current = false },
+    isComposingEvent: (event: ReactKeyboardEvent<HTMLElement>) =>
+      event.nativeEvent.isComposing || composing.current || event.keyCode === 229
+  }
+}
+
 export function useComposerDraft({ input, canCompose }: UseComposerDraftOptions): {
   textareaRef: React.RefObject<ComposerInputElement | null>
   focused: boolean
@@ -25,7 +35,7 @@ export function useComposerDraft({ input, canCompose }: UseComposerDraftOptions)
   isComposingEvent: (event: ReactKeyboardEvent<ComposerInputElement>) => boolean
 } {
   const textareaRef = useRef<ComposerInputElement | null>(null)
-  const composingRef = useRef(false)
+  const composition = useInputComposition()
   const [focused, setFocused] = useState(false)
 
   const resizeTextarea = useCallback(() => {
@@ -80,13 +90,6 @@ export function useComposerDraft({ input, canCompose }: UseComposerDraftOptions)
     focusComposer,
     onFocus: () => setFocused(true),
     onBlur: () => setFocused(false),
-    onCompositionStart: () => {
-      composingRef.current = true
-    },
-    onCompositionEnd: () => {
-      composingRef.current = false
-    },
-    isComposingEvent: (event) =>
-      event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229
+    ...composition
   }
 }

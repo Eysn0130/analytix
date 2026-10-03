@@ -12,7 +12,7 @@ import {
   isAnalytixRuntimeInsecure
 } from '@shared/app-settings'
 import type { SkillRootId } from '../lib/skill-root-preference'
-import { FolderOpen, Loader2, PencilLine, RefreshCw, Settings } from 'lucide-react'
+import { FolderOpen, Loader2, PencilLine, RefreshCw, Settings } from '../design/AnalytixUiIcons'
 import {
   InlineNoticeView,
   SectionJumpButton,

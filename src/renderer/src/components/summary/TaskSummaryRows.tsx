@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { CircleDot, Loader2, Terminal } from 'lucide-react'
+import { CircleDot, Loader2, Terminal } from '../../design/AnalytixUiIcons'
 import type { CoreThreadSummaryTaskJson } from '../../agent/analytix-contract'
 import { SummaryRow } from './SummaryRow'
 

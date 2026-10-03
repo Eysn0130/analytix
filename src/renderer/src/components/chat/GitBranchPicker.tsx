@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { AlertCircle, Check, ChevronDown, GitBranch, Loader2, Plus, Search } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, GitBranch, Loader2, Plus, Search } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { GitBranchesResult } from '@shared/git-branches'
 

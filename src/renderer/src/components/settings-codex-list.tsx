@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown } from '../design/AnalytixUiIcons'
 
 export type CodexSelectOption = {
   value: string
@@ -186,12 +186,12 @@ export function CodexToggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-7 w-[48px] shrink-0 items-center rounded-full transition ${
-        checked ? 'bg-[#2f9bff]' : 'bg-ds-border-muted'
+        checked ? 'bg-accent' : 'bg-ds-border-muted'
       } disabled:cursor-not-allowed disabled:opacity-60`}
     >
       <span
-        className={`h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform ${
-          checked ? 'translate-x-[23px]' : 'translate-x-[3px]'
+        className={`h-[22px] w-[22px] rounded-full shadow-sm transition-transform ${
+          checked ? 'translate-x-[23px] bg-[var(--ds-composer-primary-action-fg)]' : 'translate-x-[3px] bg-ds-card'
         }`}
       />
     </button>

@@ -4,6 +4,12 @@
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
+  --program-shell-bg: var(--color-bg);
+  --program-shell-border: var(--color-border);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
   background: var(--color-bg, #edf1f8);
 }
 
@@ -18,3 +24,68 @@
 .data-analysis-surface__page[hidden] {
   display: none !important;
 }
+
+
+/* Renderer overlays share desktop chrome; embedded native canvases stay isolated. */
+.data-analysis-surface .ui-context-menu,
+.data-analysis-surface .ui-dialog,
+.ui-confirm-dialog,
+.ui-prompt-dialog,
+.ui-toast {
+  border: 1px solid var(--ds-border);
+  border-radius: 16px;
+  background: var(--ds-surface-elevated);
+  color: var(--ds-text);
+  box-shadow: var(--ax-shadow-popover);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.data-analysis-surface .ui-context-menu { position: fixed; z-index: 2200; padding: 6px; min-width: 180px; }
+.data-analysis-surface .ui-context-menu button { width: 100%; min-height: 35px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; }
+.data-analysis-surface .ui-context-menu button:hover:not(:disabled) { background: var(--ds-surface-hover); }
+.data-analysis-surface .ui-context-menu button:disabled { opacity: .45; cursor: not-allowed; }
+.data-analysis-surface .ui-context-menu button.danger { color: var(--ds-danger); }
+.data-analysis-surface .ui-dialog-mask,
+.ui-confirm-mask,
+.ui-prompt-mask { position: fixed; inset: 0; z-index: 2200; display: grid; place-items: center; padding: 16px; background: rgba(0,0,0,.25); }
+.data-analysis-surface .ui-dialog,
+.ui-confirm-dialog,
+.ui-prompt-dialog { display: flex; flex-direction: column; max-width: 100%; max-height: calc(100vh - 32px); overflow: hidden; box-shadow: var(--ax-shadow-modal); }
+.ui-dialog-header,
+.ui-dialog-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; }
+.ui-dialog-header { border-bottom: 1px solid var(--ds-border); }
+.ui-dialog-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.ui-dialog-header p { margin: 4px 0 0; color: var(--ds-text-muted); }
+.ui-dialog-header__actions,
+.ui-dialog-footer { display: flex; gap: 8px; }
+.ui-dialog-body { min-height: 0; padding: 20px; overflow: auto; }
+.ui-dialog-footer { justify-content: flex-end; border-top: 1px solid var(--ds-border); }
+.ui-confirm-dialog .btn,
+.ui-prompt-dialog .btn,
+.data-analysis-surface .ui-dialog .btn,
+.ui-toast-action { min-height: 35px; padding: 6px 12px; border: 1px solid var(--ds-border); border-radius: 8px; background: var(--ds-surface-card); color: var(--ds-text); font: inherit; }
+.ui-confirm-submit,
+.ui-prompt-submit { background: var(--ds-accent) !important; color: var(--ds-composer-primary-action-fg) !important; }
+.ui-confirm-submit.is-danger { background: var(--ds-danger) !important; color: white !important; }
+.ui-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.ui-prompt-input { width: 100%; min-height: 36px; padding: 8px 10px; border: 1px solid var(--ds-border); border-radius: 8px; background: var(--ds-surface-card); color: var(--ds-text); font: inherit; }
+.ui-prompt-fields { display: grid; gap: 16px; }
+.ui-prompt-field { display: grid; gap: 6px; }
+.ui-dialog button:focus-visible,
+.ui-prompt-input:focus-visible,
+.ui-context-menu button:focus-visible { outline: 2px solid var(--ds-text-muted); outline-offset: 2px; }
+.ui-toast-center { position: fixed; z-index: 2300; right: 20px; bottom: 20px; display: grid; gap: 10px; max-width: min(400px,calc(100vw - 40px)); }
+.ui-toast { display: flex; align-items: flex-start; gap: 12px; padding: 16px; }
+.ui-toast-content { flex: 1; min-width: 0; }
+.ui-toast-content p { margin: 4px 0 0; color: var(--ds-text-muted); overflow-wrap: anywhere; }
+.ui-toast-icon svg,
+.ui-toast-action svg,
+.ui-toast-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.ui-toast-close { flex: 0 0 auto; border: 0; border-radius: 6px; background: transparent; color: var(--ds-text-muted); }
+.ui-toast-success .ui-toast-icon { color: var(--ds-success); }
+.ui-toast-error .ui-toast-icon { color: var(--ds-danger); }
+.ui-toast-warning .ui-toast-icon { color: #cd8a22; }
+
+.data-analysis-surface .ui-context-menu-separator { height: 1px; margin: 4px 6px; background: var(--ds-border); }

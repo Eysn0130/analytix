@@ -24,7 +24,7 @@ import type {
   ComputerUsePermissionState,
   ModelCapabilityProbeResult
 } from '@shared/analytix-api'
-import { ArrowLeft, ChevronRight, Loader2, Plus, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Loader2, Plus, RefreshCw, ShieldAlert } from '../design/AnalytixUiIcons'
 import computerUseIcon from '../../../../plugins/analytix-computer-use/assets/icon.png'
 import chromeIcon from '../../../asset/img/chrome-production-large.png'
 import {

@@ -12,6 +12,7 @@ import {
 } from 'react'
 import {
   Archive,
+  ArrowUp,
   BarChart3,
   FileEdit,
   FileText,
@@ -39,7 +40,7 @@ import {
   Target,
   Trash2,
   X
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { HubAgentPluginListItem, ModelProviderModelGroup } from '@shared/analytix-api'
 import type { AttachmentReference, ChatBlock, ReviewTarget } from '../../agent/types'
@@ -368,38 +369,11 @@ function ComposerImageAttachmentPreview({
 }
 
 function ComposerPrimarySendIcon({ className }: { className?: string }): ReactElement {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 20 20"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden
-    >
-      <path
-        d="M9.33467 16.6663V4.93978L4.6374 9.63704L4.1667 9.16634L3.69599 8.69661L9.52998 2.86263L9.63447 2.77767C9.8925 2.60753 10.2433 2.63564 10.4704 2.86263L16.3034 8.69661L16.3884 8.80111C16.5588 9.05922 16.5306 9.40982 16.3034 9.63704C16.0762 9.86414 15.7255 9.89242 15.4675 9.722L15.363 9.63704L10.6647 4.9388V16.6663C10.6647 17.0336 10.367 17.3314 9.99971 17.3314C9.63259 17.3312 9.33467 17.0335 9.33467 16.6663ZM4.6374 9.63704C4.3777 9.89674 3.95569 9.89674 3.69599 9.63704C3.43657 9.37744 3.43668 8.95628 3.69599 8.69661L4.6374 9.63704Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
+  return <ArrowUp size={20} className={className} aria-hidden />
 }
 
 function ComposerPrimaryStopIcon({ className }: { className?: string }): ReactElement {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden
-    >
-      <path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z" />
-    </svg>
-  )
+  return <Square size={20} fill="currentColor" className={className} aria-hidden />
 }
 
 function arrayLikeValues<T>(value: ArrayLike<T> | null | undefined): T[] {
@@ -825,7 +799,7 @@ export function FloatingComposer({
       : (hasActiveThread || !!effectiveWorkspaceRoot)
   )
   const canChangeModel = canCompose && !busy
-  const canSend = canCompose && (
+  const canSend = canCompose && !attachmentUploadBusy && (
     input.trim().length > 0 ||
     documentReferenceCount > 0 ||
     (attachmentUploadEnabled && attachments.length > 0) ||
@@ -1395,7 +1369,7 @@ export function FloatingComposer({
     && runtimeReady
     && canOpenGoalPanel
     && goalPanelDraftObjective.length > 0
-  const busyCanSendFollowup = busy && input.trim().length > 0
+  const busyCanSendFollowup = busy && input.trim().length > 0 && !attachmentUploadBusy
   const primaryActionLabel = busy
     ? busyCanSendFollowup
       ? t('composerSteerSend')
@@ -1823,6 +1797,7 @@ export function FloatingComposer({
   }
 
   const handlePrimaryAction = (): void => {
+    if (!busy && attachmentUploadBusy) return
     if (busy && !busyCanSendFollowup) {
       onInterrupt()
       return
@@ -1953,6 +1928,7 @@ export function FloatingComposer({
     if (!sendByEnter || composing) return
 
     event.preventDefault()
+    if (attachmentUploadBusy) return
     handlePrimaryAction()
   }
 
@@ -1974,7 +1950,7 @@ export function FloatingComposer({
     const active = document.activeElement
     const activeIsExternalEditor =
       active instanceof HTMLElement &&
-      Boolean(active.closest("input,textarea,select,[contenteditable='true']")) &&
+      Boolean(active.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
       !composerRootRef.current?.contains(active)
     if (activeIsExternalEditor) return
 
@@ -1982,7 +1958,7 @@ export function FloatingComposer({
       const current = document.activeElement
       const currentIsExternalEditor =
         current instanceof HTMLElement &&
-        Boolean(current.closest("input,textarea,select,[contenteditable='true']")) &&
+        Boolean(current.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
         !composerRootRef.current?.contains(current)
       if (!currentIsExternalEditor) {
         draft.textareaRef.current?.focus()
@@ -2155,6 +2131,15 @@ export function FloatingComposer({
             <ThreadHandoffInlineProgress />
           </AboveComposerPanelStack>
         </>
+      )}
+
+      {compact ? null : (
+        <div className="ds-composer-context ds-no-drag mb-1 flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3">
+          {route === 'chat' ? (
+            <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
+          ) : null}
+          <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
+        </div>
       )}
 
       <div className="relative">
@@ -2680,7 +2665,7 @@ export function FloatingComposer({
                       type="button"
                       disabled={!canOpenComposerMenu}
                       onClick={handleComposerMenuButtonClick}
-                      className={`ds-no-drag flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 ${
+                      className={`ds-composer-utility-button ds-no-drag flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ds-muted hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 ${
                         composerMenuOpen ? 'bg-ds-hover text-ds-ink' : ''
                       }`}
                       aria-label={t('composerMenuTitle')}
@@ -2876,13 +2861,9 @@ export function FloatingComposer({
       {compact ? null : (
         <div className="ds-composer-footer mt-1 flex min-h-7 flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5 px-3">
           <div className="ds-composer-footer-left flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            {route === 'chat' ? (
-              <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
-            ) : null}
-            <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
             {showThreadUsageFooter ? (
               <div
-                className="ds-composer-usage ds-no-drag inline-flex min-h-7 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 overflow-visible rounded-lg border border-ds-border-muted bg-ds-card/72 px-2.5 py-0.5 text-[12.5px] font-medium leading-5 text-ds-muted shadow-sm"
+                className="ds-composer-usage ds-no-drag inline-flex min-h-6 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] font-medium leading-5 text-ds-muted"
                 title={threadUsageFooterTitle ?? t('sessionUsageUnavailable')}
               >
                 <BarChart3 className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
-import { ExternalLink, Image as ImageIcon, RotateCw, ZoomIn, ZoomOut } from 'lucide-react'
+import { ExternalLink, Image as ImageIcon, RotateCw, ZoomIn, ZoomOut } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { ImageRegion } from '../../../../../packages/runtime/src/contracts/object-editing'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
@@ -169,7 +169,7 @@ export function WriteImagePreview({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,rgba(59,130,216,0.08),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.82),rgba(247,250,255,0.68))] dark:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.13),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))]">
+    <div className="flex h-full min-h-0 flex-col bg-ds-canvas">
       <div className="flex min-h-[54px] shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-4 py-2.5 sm:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">

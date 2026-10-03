@@ -33,9 +33,7 @@
   height: min(720px, calc(100vh - 40px));
   border-radius: 12px;
   border: 1px solid color-mix(in oklab, var(--workbench-ui-border, rgba(148, 163, 184, 0.28)) 82%, rgba(15, 23, 42, 0.08));
-  background:
-    radial-gradient(1200px 460px at 12% -18%, rgba(31, 111, 235, 0.08), transparent 55%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 255, 0.94));
+  background: var(--color-bg-elevated);
   box-shadow: 0 24px 72px rgba(2, 6, 23, 0.24);
   overflow: hidden;
   display: flex;
@@ -77,7 +75,7 @@
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: rgba(2, 6, 23, 0.9);
+  color: var(--color-text);
 }
 
 .txnModalToolbarMeta {
@@ -86,7 +84,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: rgba(2, 6, 23, 0.56);
+  color: var(--color-text-muted);
 }
 
 .txnModalToolbarActions {
@@ -228,7 +226,7 @@
   border-spacing: 0;
   table-layout: fixed;
   font-size: 12px;
-  color: rgba(2, 6, 23, 0.82);
+  color: var(--color-text);
 }
 
 .txnTable th,
@@ -255,8 +253,8 @@
   top: 0;
   z-index: 1;
   padding-right: 18px;
-  background: rgba(255, 255, 255, 0.94);
-  color: rgba(2, 6, 23, 0.72);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
   font-weight: 900;
   user-select: none;
 }
@@ -402,7 +400,7 @@
 .txnEmpty {
   padding: 14px 12px;
   font-size: 12px;
-  color: rgba(2, 6, 23, 0.55);
+  color: var(--color-text-muted);
 }
 
 .txnTable th .resizer {
@@ -414,19 +412,19 @@
 }
 
 .txnModalThemeStats {
-  --stats-tree-secondary-title-size: 11.5px;
+  --stats-tree-secondary-title-size: 12.5px;
   --stats-table-font-size: var(--stats-tree-secondary-title-size);
-  --stats-table-row-font-size: 11px;
+  --stats-table-row-font-size: 12px;
   --stats-toolbar-button-pad-x: 10px;
   --left-control-radius: 7px;
-  --left-control-border: color-mix(in oklab, var(--sidebar-control-border, #d5deef) 84%, #d5deef);
-  --workbench-ui-accent-start: color-mix(in oklab, var(--sidebar-segment-active-start, #3d67f3) 88%, #3d67f3);
-  --workbench-ui-accent-end: color-mix(in oklab, var(--sidebar-segment-active-end, #1f51da) 88%, #1f51da);
-  --stats-table-head-bg: var(--workbench-ui-accent-end, #1f51da);
-  --stats-table-head-border: color-mix(in oklab, var(--workbench-ui-accent-end, #1f51da) 88%, #1639ba);
-  --stats-table-head-text: #ffffff;
-  --stats-table-head-divider: color-mix(in oklab, #ffffff 18%, var(--stats-table-head-border));
-  --stats-table-head-hover: color-mix(in oklab, var(--stats-table-head-bg) 92%, #6f98ff);
+  --left-control-border: var(--color-border);
+  --workbench-ui-accent-start: var(--sidebar-segment-active-start);
+  --workbench-ui-accent-end: var(--sidebar-segment-active-end);
+  --stats-table-head-bg: var(--color-bg-subtle);
+  --stats-table-head-border: var(--color-border);
+  --stats-table-head-text: var(--color-text);
+  --stats-table-head-divider: var(--color-border);
+  --stats-table-head-hover: var(--sidebar-hover);
 }
 
 .txnModalThemeStats .chipBtn.navStyle {
@@ -485,7 +483,7 @@
 .txnModalThemeStats .txnTable td {
   overflow: hidden;
   text-overflow: ellipsis;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--color-bg-elevated);
 }
 
 .txnModalThemeStats .txnTable th > span {
@@ -509,17 +507,17 @@
 
 .txnModalThemeStats .txnSortIcon {
   opacity: 0.72;
-  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+  color: var(--stats-table-head-text);
 }
 
 .txnModalThemeStats .txnSortIcon.active {
   opacity: 1;
-  color: #ffffff;
+  color: var(--stats-table-head-text);
 }
 
 .txnModalThemeStats .txnTable th.sorted {
   background: var(--stats-table-head-hover);
-  color: #ffffff;
+  color: var(--stats-table-head-text);
 }
 
 .txnModalThemeStats .tableToolbar {
@@ -609,7 +607,7 @@
 }
 
 .txnModalFooterSummaryLabel {
-  color: rgba(2, 6, 23, 0.72);
+  color: var(--color-text);
   font-weight: 600;
 }
 

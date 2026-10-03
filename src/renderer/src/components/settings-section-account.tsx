@@ -12,7 +12,7 @@ import {
   Sparkles,
   type LucideIcon,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import type {
   HubAccountSnapshot,
   HubAvatarStyle,

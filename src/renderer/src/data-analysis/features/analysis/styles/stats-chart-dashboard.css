@@ -1,12 +1,12 @@
 .chart-analysis-dashboard {
-  --chart-dashboard-divider: rgba(217, 223, 231, 0.82);
-  --chart-dashboard-divider-strong: rgba(207, 214, 224, 0.94);
-  --chart-dashboard-panel-bg: #fff;
-  --chart-dashboard-panel-bg-soft: #fff;
-  --chart-dashboard-control-bg: #fff;
-  --chart-dashboard-control-border: rgba(216, 223, 231, 0.96);
-  --chart-dashboard-shadow: 0 1px 0 rgba(255, 255, 255, 0.82), 0 10px 22px rgba(15, 23, 42, 0.035);
-  --chart-dashboard-shadow-quiet: 0 1px 0 rgba(255, 255, 255, 0.76), 0 6px 14px rgba(15, 23, 42, 0.024);
+  --chart-dashboard-divider: var(--color-border);
+  --chart-dashboard-divider-strong: var(--color-border);
+  --chart-dashboard-panel-bg: var(--color-bg-elevated);
+  --chart-dashboard-panel-bg-soft: var(--color-bg-subtle);
+  --chart-dashboard-control-bg: var(--color-bg-elevated);
+  --chart-dashboard-control-border: var(--color-border);
+  --chart-dashboard-shadow: none;
+  --chart-dashboard-shadow-quiet: none;
   --chart-dashboard-body-height-base: 180px;
   --chart-dashboard-body-height-support: 188px;
   --chart-dashboard-body-height-keyword: 264px;
@@ -19,18 +19,18 @@
   width: min(100%, 1440px);
   margin: 0 auto;
   padding: 18px 20px 28px;
-  background: #fff;
+  background: var(--color-bg-elevated);
 }
 
 .data-analysis-surface[data-theme="dark"] .chart-analysis-dashboard {
-  --chart-dashboard-divider: color-mix(in oklab, var(--color-border) 70%, transparent);
-  --chart-dashboard-divider-strong: color-mix(in oklab, var(--color-border) 88%, transparent);
-  --chart-dashboard-panel-bg: color-mix(in oklab, var(--color-bg-elevated) 90%, var(--color-bg));
-  --chart-dashboard-panel-bg-soft: color-mix(in oklab, var(--color-bg-subtle) 76%, var(--color-bg-elevated));
-  --chart-dashboard-control-bg: color-mix(in oklab, var(--color-bg-elevated) 86%, var(--color-bg-subtle));
-  --chart-dashboard-control-border: color-mix(in oklab, var(--color-border) 76%, transparent);
-  --chart-dashboard-shadow: 0 12px 28px rgba(3, 8, 15, 0.28);
-  --chart-dashboard-shadow-quiet: 0 8px 20px rgba(3, 8, 15, 0.22);
+  --chart-dashboard-divider: var(--color-border);
+  --chart-dashboard-divider-strong: var(--color-border);
+  --chart-dashboard-panel-bg: var(--color-bg-elevated);
+  --chart-dashboard-panel-bg-soft: var(--color-bg-subtle);
+  --chart-dashboard-control-bg: var(--color-bg-elevated);
+  --chart-dashboard-control-border: var(--color-border);
+  --chart-dashboard-shadow: none;
+  --chart-dashboard-shadow-quiet: none;
   background: var(--program-shell-bg, var(--color-bg));
 }
 
@@ -64,7 +64,7 @@
   border: 1px solid var(--chart-dashboard-control-border);
   border-radius: 999px;
   background: var(--chart-dashboard-control-bg);
-  color: #44556e;
+  color: var(--color-text-muted);
   padding: 0 11px;
   font-size: 11px;
   font-weight: 700;
@@ -120,7 +120,7 @@
 }
 
 .chart-object-hero__title {
-  color: #0f172a;
+  color: var(--color-text);
   font-size: 18px;
   line-height: 1.18;
   font-weight: 850;
@@ -159,7 +159,7 @@
 
 .chart-object-hero__subtitle {
   max-width: 56ch;
-  color: #6f7f93;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.45;
   font-weight: 600;
@@ -184,7 +184,7 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  color: #111827;
+  color: var(--color-text);
   font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
@@ -198,7 +198,7 @@
   height: 30px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.05);
-  color: #111827;
+  color: var(--color-text);
 }
 
 .chart-object-hero__date-icon svg {
@@ -290,7 +290,7 @@
 }
 
 .chart-object-hero__stat-label {
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
@@ -298,7 +298,7 @@
 
 .chart-object-hero__stat-value {
   margin-top: 0;
-  color: #0f172a;
+  color: var(--color-text);
   font-size: 12px;
   line-height: 1;
   font-weight: 750;
@@ -311,7 +311,7 @@
 
 .chart-object-hero__stat-note {
   margin-top: 0;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.35;
@@ -328,7 +328,7 @@
 }
 
 .chart-object-hero__stat-note--neutral {
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 .chart-section-shell {
@@ -481,7 +481,7 @@
   width: 36px;
   height: 36px;
   border-radius: 999px;
-  background: #f3f5f7;
+  background: var(--color-bg-subtle);
   color: #1f2937;
   box-shadow: none;
 }
@@ -531,7 +531,7 @@
   font-size: clamp(16px, 0.95vw, 18px);
   line-height: 1.05;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--color-text);
   letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
@@ -780,7 +780,7 @@
 }
 
 .chart-panel__title {
-  color: #17283f;
+  color: var(--color-text);
   font-size: 13px;
   font-weight: 800;
   line-height: 1.25;
@@ -791,7 +791,7 @@
 }
 
 .chart-panel--trend-workzone .chart-panel__title {
-  color: #13253f;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 0;
@@ -800,23 +800,23 @@
 .chart-panel--support .chart-panel__title {
   font-size: 14px;
   font-weight: 800;
-  color: #1a2c44;
+  color: var(--color-text);
 }
 
 .chart-panel__subtitle {
-  color: #6f7f93;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.35;
 }
 
 .chart-panel--trend-workzone .chart-panel__subtitle {
-  color: #7a8798;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
 .chart-panel--support .chart-panel__subtitle {
-  color: #8190a2;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
@@ -856,7 +856,7 @@
   border: 1px solid var(--chart-dashboard-control-border);
   border-radius: 999px;
   background: var(--chart-dashboard-control-bg);
-  color: #506178;
+  color: var(--color-text-muted);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -871,7 +871,7 @@
 .chart-trend-status__legend.is-active {
   border-color: rgba(205, 213, 223, 0.96);
   background: rgba(255, 255, 255, 0.98);
-  color: #17283f;
+  color: var(--color-text);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -895,7 +895,7 @@
 }
 
 .chart-trend-status__reset {
-  color: #52657d;
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 
@@ -917,12 +917,12 @@
 .chart-panel-segment__option {
   font-size: 11px;
   font-weight: 700;
-  color: #627389;
+  color: var(--color-text-muted);
 }
 
 .chart-panel-segment__option:hover:not(.workbench-ui-segmented__option--active):not(:disabled) {
   background: rgba(255, 255, 255, 0.5);
-  color: #4f6178;
+  color: var(--color-text-muted);
 }
 
 .chart-panel-segment__indicator {
@@ -933,7 +933,7 @@
 }
 
 .chart-panel-segment__option.workbench-ui-segmented__option--active {
-  color: #17283f;
+  color: var(--color-text);
 }
 
 .chart-panel--support .chart-panel-segment {
@@ -946,7 +946,7 @@
 .chart-panel--support .chart-panel-segment__option {
   font-size: 10px;
   font-weight: 700;
-  color: #63748b;
+  color: var(--color-text-muted);
 }
 
 .chart-panel--support .chart-panel-segment__indicator {
@@ -977,7 +977,7 @@
   border: 1px solid var(--chart-dashboard-control-border);
   border-radius: 999px;
   background: var(--chart-dashboard-control-bg);
-  color: #4b5d73;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 700;
   appearance: none;
@@ -996,7 +996,7 @@
   min-height: 26px;
   border-color: var(--chart-dashboard-control-border);
   background: rgba(245, 247, 250, 0.9);
-  color: #5e7189;
+  color: var(--color-text-muted);
   font-size: 10px;
 }
 
@@ -1019,13 +1019,13 @@
 }
 
 .chart-panel__micro-label {
-  color: #6c7c92;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 700;
 }
 
 .chart-panel--support .chart-panel__micro-label {
-  color: #7a8798;
+  color: var(--color-text-muted);
   font-size: 10px;
 }
 
@@ -1087,7 +1087,7 @@
   align-items: center;
   justify-content: center;
   min-height: 180px;
-  color: #6d7d92;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1114,7 +1114,7 @@
   height: 24px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.04);
-  color: #7a8a9f;
+  color: var(--color-text-muted);
 }
 
 .chart-panel__empty-icon svg {
@@ -1123,7 +1123,7 @@
 }
 
 .chart-panel__empty-title {
-  color: #23364f;
+  color: var(--color-text);
   font-size: 13px;
   font-weight: 800;
 }
@@ -2144,7 +2144,7 @@
 }
 
 .chart-detail-toolbar__summary {
-  color: #13253f;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 800;
 }
@@ -2217,7 +2217,7 @@
 .chart-detail-columns__item.is-active {
   border-color: rgba(205, 213, 223, 0.96);
   background: rgba(255, 255, 255, 0.98);
-  color: #17283f;
+  color: var(--color-text);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -2287,7 +2287,7 @@
 }
 
 .chart-detail-table .vt-head {
-  background: #fff;
+  background: var(--color-bg-elevated);
   border-top: 1px solid rgba(217, 223, 231, 0.58);
 }
 

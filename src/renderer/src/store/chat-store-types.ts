@@ -203,6 +203,7 @@ export type ChatState = {
   turnDurationByUserId: Record<string, number>
   inspectorSelectedId: string | null
   composerModel: string
+  pendingGateResolutionIds: Record<string, true>
   composerDrafts: Record<string, ComposerDraft>
   updateComposerDraft: (key: string, update: (draft: ComposerDraft) => ComposerDraft) => void
   composerProviderId: string

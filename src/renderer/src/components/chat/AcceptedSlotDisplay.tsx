@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Eye, EyeOff, ShieldCheck } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { AcceptedFinalProjectionReceiptV1 } from '../../agent/types'
 import type {

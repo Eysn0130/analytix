@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
   Trash2
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import {
   MODEL_ENDPOINT_FORMATS,
   type ModelEndpointFormat,
@@ -710,7 +710,7 @@ export function ProviderModelsManager({
               type="button"
               disabled={errors.length > 0}
               onClick={saveEditor}
-              className="inline-flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('providerModelSave')}
             </button>

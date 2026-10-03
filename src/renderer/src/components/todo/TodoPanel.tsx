@@ -8,7 +8,7 @@ import {
   ListTodo,
   PlayCircle,
   Trash2
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../../store/chat-store'
 import type { ThreadTodoItem, ThreadTodoStatus } from '../../agent/types'
@@ -41,9 +41,9 @@ export function TodoPanel({
 
   return (
     <aside
-      className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-white dark:bg-ds-canvas ${className}`}
+      className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas ${className}`}
     >
-      <div className="shrink-0 border-b border-ds-border-muted bg-white/92 dark:bg-ds-card">
+      <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
         <div className="ds-right-panel-topbar">
           <div className="ds-right-panel-title-group">
             <ListTodo className="ds-right-panel-title-icon" strokeWidth={1.85} />

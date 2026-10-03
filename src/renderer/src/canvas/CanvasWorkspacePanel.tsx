@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement, type KeyboardEvent } from 'react'
-import { Copy, FolderOpen, RotateCw, MessageSquarePlus } from 'lucide-react'
+import { Copy, FolderOpen, RotateCw, MessageSquarePlus } from '../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceTab } from '../store/workspace-tabs-store'
 import type { CanvasDocument } from '../../../../packages/runtime/src/contracts/canvas-host'

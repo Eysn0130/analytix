@@ -6,7 +6,7 @@ import {
   Eye,
   FileCode2,
   Type
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WriteExportFormat } from '@shared/write-export'
 import { WRITE_INFOGRAPHIC_MAX_TEXT_CHARS } from '@shared/write-infographic'

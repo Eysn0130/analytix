@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { FilePlus2, FolderOpen, MessageSquare, RefreshCw } from 'lucide-react'
+import { FilePlus2, FolderOpen, MessageSquare, RefreshCw } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 
 type WriteWorkspaceStartProps = {

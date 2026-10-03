@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { FileText, Sheet, Presentation, Loader2 } from 'lucide-react'
+import { FileText, Sheet, Presentation, Loader2 } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { GeneratedArtifactMetadata } from '../../../../../packages/runtime/src/contracts/generated-artifact'
 import { openGeneratedArtifact } from '../../office/open-generated-artifact'

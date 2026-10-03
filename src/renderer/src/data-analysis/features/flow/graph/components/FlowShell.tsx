@@ -1,3 +1,5 @@
+import { AArrowDown, AArrowUp, ArrowRight, Bold, Box, ChevronDown, Download, Expand, Filter, GitFork, Italic, LayoutGrid, Minus, Network, Palette, Plus, Redo2, RefreshCw, Minimize, Scaling, Shapes, SlidersHorizontal, Spline, Square, SquareStack, TableProperties, TriangleAlert, Type, Undo2, Users, UsersRound, Waypoints, type LucideIcon } from "../../../../../design/AnalytixUiIcons";
+import { Check, ChevronRight, X, ChevronLeft } from "../../../../../design/AnalytixUiIcons";
 import {
   DragEvent,
   Fragment,
@@ -37,54 +39,19 @@ const FlowToolbarOverlays = lazy(async () => {
 });
 
 function CheckIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M20 6L9 17l-5-5"
-        stroke="rgba(31,111,235,.95)"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <Check size={14} aria-hidden="true" />;
 }
 
 function ChevronIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M9 6l6 6-6 6"
-        stroke="rgba(2,6,23,.55)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ChevronRight size={16} aria-hidden="true" />;
 }
 
 function CloseIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 6L18 18" stroke="rgba(2,6,23,.65)" strokeWidth="2" strokeLinecap="round" />
-      <path d="M18 6L6 18" stroke="rgba(2,6,23,.65)" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <X size={16} aria-hidden="true" />;
 }
 
 function GapIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M15 6l-6 6 6 6"
-        stroke="rgba(2,6,23,.6)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ChevronLeft size={16} aria-hidden="true" />;
 }
 
 function groupCheckboxState(group: FlowShellState["treeData"][number], selected: Set<string>): {
@@ -107,13 +74,54 @@ function groupCheckboxState(group: FlowShellState["treeData"][number], selected:
   return { checked: false, indeterminate: true };
 }
 
+const FLOW_CONTROL_ICONS: Record<string, LucideIcon> = {
+  "ico-font": Type,
+  "ico-fontsize": Type,
+  "ico-text-plus": AArrowUp,
+  "ico-text-minus": AArrowDown,
+  "ico-detail": TableProperties,
+  "ico-undo": Undo2,
+  "ico-redo": Redo2,
+  "ico-bold": Bold,
+  "ico-italic": Italic,
+  "ico-underline": Type,
+  "ico-shadow": SquareStack,
+  "ico-color": Palette,
+  "ico-line-style": Spline,
+  "ico-line-width": Minus,
+  "ico-line-color": Palette,
+  "ico-arrow": ArrowRight,
+  "ico-plus": Plus,
+  "ico-link": Network,
+  "ico-node-shape": Shapes,
+  "ico-node-fill": Palette,
+  "ico-node-stroke": Square,
+  "ico-icon-library": LayoutGrid,
+  "ico-icon-size": Scaling,
+  "ico-layout-compact": Network,
+  "ico-layout-network": Network,
+  "ico-layout-hierarchy": GitFork,
+  "ico-layout-flow": Waypoints,
+  "ico-group-1": Users,
+  "ico-group-2": UsersRound,
+  "ico-group-3": Box,
+  "ico-filter": Filter,
+  "ico-collapse": Minimize,
+  "ico-encode-width": SlidersHorizontal,
+  "ico-encode-color": Palette,
+  "ico-node-scale": Scaling,
+  "ico-anomaly": TriangleAlert,
+  "ico-fit": Expand,
+  "ico-relayout": RefreshCw,
+  "ico-export": Download,
+  "ico-caret": ChevronDown,
+};
+
 function renderSymbolIcon(id: string, props: JSX.IntrinsicElements["svg"] = {}): JSX.Element {
   const { className, ...restProps } = props;
-  return (
-    <svg className={className ? `ico ${className}` : "ico"} aria-hidden="true" {...restProps}>
-      <use href={`#${id}`} />
-    </svg>
-  );
+  const Icon = FLOW_CONTROL_ICONS[id];
+  if (Icon) return <Icon className={className ? `ico ${className}` : "ico"} aria-hidden="true" {...restProps} />;
+  return <svg className={className ? `ico ${className}` : "ico"} aria-hidden="true" {...restProps}><use href={`#${id}`} /></svg>;
 }
 
 type RectLike = {
@@ -540,9 +548,7 @@ function renderStyleGroup(
                 >
                   {renderSymbolIcon("ico-font")}
                   <span className="comboLabel">{state.style.fontFamilyLabel}</span>
-                  <svg className="ico caret" aria-hidden="true">
-                    <use href="#ico-caret" />
-                  </svg>
+                  <ChevronDown className="ico caret" aria-hidden="true" />
                 </button>
                 <button
                   className={`comboBtn narrow ${isStylePopoverOpen("style-font-size") ? "active" : ""}`}
@@ -555,9 +561,7 @@ function renderStyleGroup(
                   }
                 >
                   <span className="comboLabel">{state.style.fontSizeLabel}</span>
-                  <svg className="ico caret" aria-hidden="true">
-                    <use href="#ico-caret" />
-                  </svg>
+                  <ChevronDown className="ico caret" aria-hidden="true" />
                 </button>
               </div>
               <div className="splitBtns">
@@ -628,9 +632,7 @@ function renderStyleGroup(
                 >
                   <span className="colorSwatch" style={{ background: state.style.textColor }} />
                   <span className="colorLabel">字体</span>
-                  <svg className="ico caret" aria-hidden="true">
-                    <use href="#ico-caret" />
-                  </svg>
+                  <ChevronDown className="ico caret" aria-hidden="true" />
                 </button>
                 <button
                   className={`ribbonColorBtn compact ${isStylePopoverOpen("style-outline-color") ? "active" : ""}`}
@@ -643,9 +645,7 @@ function renderStyleGroup(
                 >
                   <span className="colorSwatch" style={{ background: state.style.outlineColor }} />
                   <span className="colorLabel">轮廓</span>
-                  <svg className="ico caret" aria-hidden="true">
-                    <use href="#ico-caret" />
-                  </svg>
+                  <ChevronDown className="ico caret" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -668,9 +668,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-line-style")}
               <span className="btnText">线型</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className={`ribbonCellBtn inline ${isStylePopoverOpen("style-line-width") ? "active" : ""}`}
@@ -683,9 +681,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-line-width")}
               <span className="btnText">线宽</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className={`ribbonCellBtn inline ${isStylePopoverOpen("style-line-arrow") ? "active" : ""}`}
@@ -699,9 +695,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-arrow")}
               <span className="btnText">方向</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
           </div>
           <div className="ribbonSubCaption ribbonSubBaseline" aria-hidden="true" />
@@ -722,9 +716,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-node-shape")}
               <span className="btnText">形状</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className={`ribbonColorBtn compact nodeCell nodeCell-fill nodeFillBtn ${isStylePopoverOpen("style-node-fill") ? "active" : ""}`}
@@ -737,9 +729,7 @@ function renderStyleGroup(
             >
               <span className="colorSwatch" style={{ background: state.style.nodeFill }} />
               <span className="colorLabel">填充</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className={`ribbonCellBtn inline nodeCell nodeCell-size ${isStylePopoverOpen("style-icon-size") ? "active" : ""}`}
@@ -752,9 +742,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-icon-size")}
               <span className="btnText">大小</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className={`ribbonCellBtn inline nodeCell nodeCell-new ${state.style.createNodeMode ? "active" : ""}`}
@@ -778,9 +766,7 @@ function renderStyleGroup(
             >
               {renderSymbolIcon("ico-icon-library")}
               <span className="btnText">样式</span>
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
             <button
               className="ribbonCellBtn inline nodeCell nodeCell-link"
@@ -875,9 +861,7 @@ function renderLayoutGroup(
                   bridge.commands.layout.openEdgeRoutingMenu(mode, toMenuAnchorRect(event.currentTarget));
                 }}
               >
-                <svg className="ico caret" aria-hidden="true">
-                  <use href="#ico-caret" />
-                </svg>
+                <ChevronDown className="ico caret" aria-hidden="true" />
               </button>
             </div>
           );
@@ -915,9 +899,7 @@ function renderAnalyzeGroup(
           >
             {renderSymbolIcon("ico-filter")}
             <span className="btnText">筛选</span>
-            <svg className="ico caret" aria-hidden="true">
-              <use href="#ico-caret" />
-            </svg>
+            <ChevronDown className="ico caret" aria-hidden="true" />
           </button>
           <button
             className={`ribbonTile analysisCmdBtn ${state.analysis.collapseChildren ? "active" : ""}`}
@@ -967,9 +949,7 @@ function renderAnalyzeGroup(
             }
           >
             <span className="btnText">更多</span>
-            <svg className="ico caret" aria-hidden="true">
-              <use href="#ico-caret" />
-            </svg>
+            <ChevronDown className="ico caret" aria-hidden="true" />
           </button>
         </div>
         <div className="ribbonRow row3 analyzeBottomRow">
@@ -1052,9 +1032,7 @@ function renderOpsGroup(
                 bridge.commands.ops.openMergeMenu(toMenuAnchorRect(event.currentTarget));
               }}
             >
-              <svg className="ico caret" aria-hidden="true">
-                <use href="#ico-caret" />
-              </svg>
+              <ChevronDown className="ico caret" aria-hidden="true" />
             </button>
           </div>
           <button className="ribbonTile" type="button" title="适配当前视图" onClick={() => bridge.commands.ops.fitGraph()}>
@@ -1072,9 +1050,7 @@ function renderOpsGroup(
           >
             {renderSymbolIcon("ico-export")}
             <span className="btnText">导出</span>
-            <svg className="ico caret" aria-hidden="true">
-              <use href="#ico-caret" />
-            </svg>
+            <ChevronDown className="ico caret" aria-hidden="true" />
           </button>
         </div>
         <div className="ribbonRow row2">

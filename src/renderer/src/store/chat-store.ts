@@ -162,6 +162,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   turnDurationByUserId: {},
   inspectorSelectedId: null,
   composerModel: initialComposerSelection?.model ?? DEFAULT_ANALYTIX_MODEL,
+  pendingGateResolutionIds: {},
   composerDrafts: {},
   updateComposerDraft: (key, update) => set((state) => {
     const current = state.composerDrafts[key] ?? emptyComposerDraft

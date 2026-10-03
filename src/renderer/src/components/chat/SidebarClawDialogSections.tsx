@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, Loader2, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, Loader2, Trash2 } from '../../design/AnalytixUiIcons'
 import { ClawProviderLogo, clawProviderDisplayLabel } from './SidebarClaw'
 import { CLAW_ADD_PROVIDER_OPTIONS, CLAW_DIALOG_STEPS, clawConnectionStatusKey } from './SidebarClawDialogHelpers'
 

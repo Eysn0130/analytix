@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
-import { Ban, BrainCircuit, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Ban, BrainCircuit, Pencil, Plus, Trash2 } from '../design/AnalytixUiIcons'
 import type { CoreMemoryRecordJson } from '../agent/analytix-contract'
 import { SettingsCard, SettingRow } from './settings-controls'
 

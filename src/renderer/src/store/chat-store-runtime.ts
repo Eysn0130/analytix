@@ -1053,7 +1053,7 @@ function stateTurnMatchesExpected(
   return current === expected || isPendingActiveStreamTurnId(current)
 }
 
-function stripProvisionalAssistantForTurn(
+export function stripProvisionalAssistantForTurn(
   blocks: ChatBlock[],
   turnId: string | null | undefined,
   userBlockId: string | null | undefined
@@ -1122,10 +1122,12 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
   terminalErrorDetail?: string | null
   terminalStatus?: 'completed' | 'failed' | 'aborted'
   acceptedFinalDigest?: string
+  isCurrent?: () => boolean
   loadThreadDetail: AgentProvider['getThreadDetail']
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
 }): Promise<boolean> {
+  if (input.isCurrent && !input.isCurrent()) return false
   const threadId = input.threadId?.trim()
   if (!threadId) return false
   const expectedTurnId = input.turnId?.trim() || input.get().currentTurnId?.trim() || null
@@ -1144,6 +1146,7 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
 
   try {
     const detail = await input.loadThreadDetail(threadId)
+    if (input.isCurrent && !input.isCurrent()) return false
     const detailTurnId = detail.latestTurnId?.trim()
     if (expectedTurnId && detailTurnId && detailTurnId !== expectedTurnId) {
       throw new Error('terminal thread snapshot belongs to a different turn')
@@ -1174,6 +1177,7 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
     }
     let applied = false
     input.set((state) => {
+      if (input.isCurrent && !input.isCurrent()) return {}
       if (state.activeThreadId !== threadId) return {}
       if (!stateTurnMatchesExpected(state.currentTurnId, expectedTurnId)) return {}
       applied = true
@@ -1215,7 +1219,9 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
     clearActiveStream(threadId)
     return true
   } catch (error) {
+    if (input.isCurrent && !input.isCurrent()) return false
     input.set((state) => {
+      if (input.isCurrent && !input.isCurrent()) return {}
       if (state.activeThreadId !== threadId || !stateTurnMatchesExpected(state.currentTurnId, expectedTurnId)) {
         return {}
       }
@@ -1248,6 +1254,7 @@ async function reconcileThreadSnapshotFromDetail(input: {
   loadThreadDetail: AgentProvider['getThreadDetail']
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
+  isCurrentStream: () => boolean
 }): Promise<void> {
   const threadId = input.event.threadId?.trim() || input.fallbackThreadId?.trim()
   if (!threadId) return
@@ -1255,10 +1262,10 @@ async function reconcileThreadSnapshotFromDetail(input: {
 
   try {
     const detail = await input.loadThreadDetail(threadId)
+    // A pending GET can outlive navigation or its original stream binding.
+    if (!input.isCurrentStream() || input.get().activeThreadId !== threadId) return
     input.set((state) => {
-      if (state.activeThreadId !== threadId) {
-        return cursorSeq ? { lastSeq: Math.max(state.lastSeq, cursorSeq) } : {}
-      }
+      if (!input.isCurrentStream() || state.activeThreadId !== threadId) return {}
       const busy = threadSnapshotLooksRunning(detail.blocks, detail.threadStatus)
       const blocks = busy ? detail.blocks : settlePendingRuntimeWorkAfterInterrupt(detail.blocks)
       clearActiveStream(threadId)
@@ -2149,7 +2156,8 @@ export function buildThreadEventSink(
         fallbackThreadId: boundThreadId || get().activeThreadId,
         loadThreadDetail,
         set,
-        get
+        get,
+        isCurrentStream
       })
     },
     onPublicProjectionRevoked: async (ev) => {

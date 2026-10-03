@@ -29,6 +29,19 @@ export function useThreadComposerDraft(workspace: string, threadId: string | nul
       ...current, fileReferences: typeof action === 'function' ? action(current.fileReferences) : action
     }))
   }, [key, update])
+  const setAttachmentUploadError = useCallback((error: string | null) => {
+    update(key, current => current.attachmentUploadError === error ? current : { ...current, attachmentUploadError: error })
+  }, [key, update])
+  const beginAttachmentUpload = useCallback(() => {
+    update(key, current => ({ ...current, pendingAttachmentUploads: (current.pendingAttachmentUploads ?? 0) + 1, attachmentUploadError: null }))
+    let finished = false
+    // This completion owns the captured draft even across unmount/navigation.
+    return () => {
+      if (finished) return
+      finished = true
+      update(key, current => ({ ...current, pendingAttachmentUploads: Math.max(0, (current.pendingAttachmentUploads ?? 0) - 1) }))
+    }
+  }, [key, update])
   // This callback retains the submitting identity and revision across navigation
   // and async receipts; it cannot clear a different conversation's new draft.
   const clearSubmitted = useCallback((submitted: {
@@ -40,5 +53,5 @@ export function useThreadComposerDraft(workspace: string, threadId: string | nul
       ...draft, attachments: submitted.attachments, fileReferences: submitted.fileReferences
     }, submitted.includeInput))
   }, [key, draft, update])
-  return { draft, setInput, setAttachments, setFileReferences, clearSubmitted }
+  return { draft, setInput, setAttachments, setFileReferences, clearSubmitted, beginAttachmentUpload, setAttachmentUploadError }
 }

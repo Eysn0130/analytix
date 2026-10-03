@@ -1,6 +1,6 @@
 import { workspaceShortcutLabels } from '@shared/native-office'
 import type { ReactElement } from 'react'
-import { PanelBottomClose, PanelBottomOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { PanelBottomClose, PanelBottomOpen, PanelRightClose, PanelRightOpen } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { shellToolbarIconButtonClass, ToolbarTooltip } from '../shell/ShellToolbar'
 

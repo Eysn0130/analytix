@@ -99,6 +99,17 @@ async function readBaseShellSource(): Promise<string> {
   return readFile(new URL('../styles/base-shell.css', import.meta.url), 'utf8')
 }
 
+// The accepted global chrome owns both navigation and workspace tabs.
+function windowChromeOwnsControls(source: string): boolean {
+  const header = source.indexOf('<header ref={windowChromeRef} className="ds-window-chrome"')
+  const end = source.indexOf('</header>', header)
+  const body = source.indexOf('<div className="ds-product-body')
+  const shell = source.indexOf('<WorkbenchShell')
+  if (header < 0 || end < header || body < end || shell < body) return false
+  const chrome = source.slice(header, end)
+  return chrome.includes('<ShellNavigationControls') && chrome.includes('<WorkspaceTabs')
+}
+
 describe('Workbench route surface', () => {
   it('keeps private document text out of user-message prompts', () => {
     expect(workbenchSource).not.toContain('buildComposerDocumentContextPrompt')
@@ -169,15 +180,20 @@ describe('Workbench route surface', () => {
     expect(workbenchSource).not.toContain('ds-shell-header-drag-slot')
     expect(workbenchSource).toContain('navigateShellHistoryBack')
     expect(workbenchSource).toContain('--ds-shell-navigation-sidebar-width')
-    expect(workbenchSource).toMatch(/<WorkbenchShell ref=\{shellRef\} style=\{workbenchShellStyle\}>\s+<ShellNavigationControls/)
+    expect(windowChromeOwnsControls(workbenchSource)).toBe(true)
     expect(workbenchShellSource).toContain('ds-workbench-shell ds-no-drag')
     expect(workbenchShellSource).toContain('ds-no-drag ds-stage-surface')
     expect(workbenchShellSource).not.toContain('ds-drag ds-stage-surface')
     expect(workbenchShellSource).not.toContain('ds-workbench-shell ds-drag')
     expect(workbenchSource).toContain('ds-chat-stage ds-no-drag')
     expect(workbenchSource).not.toContain('ds-chat-stage ds-drag')
-    expect(workbenchSource).toContain('chat-topbar ds-chat-shell-header ds-topbar-surface')
-    expect(workbenchSource).toContain('className="chat-topbar-drag-region"')
+    expect(workbenchSource).not.toContain('<header className="chat-topbar ds-chat-shell-header')
+    expect(workbenchSource.match(/<SessionHeader /g)).toHaveLength(1)
+    expect(workbenchSource.match(/<WorkbenchTopBar /g)).toHaveLength(1)
+    expect(workbenchSource.match(/<ShellNavigationControls\s/g)).toHaveLength(1)
+    expect(shellNavigationControlsSource.indexOf('onClick={onBack}')).toBeLessThan(shellNavigationControlsSource.indexOf('onClick={onForward}'))
+    expect(shellNavigationControlsSource.indexOf('onClick={onForward}')).toBeLessThan(shellNavigationControlsSource.indexOf('onClick={onToggleSidebar}'))
+    expect(workbenchSource).toContain('className="ds-window-chrome-session ds-no-drag"')
     expect(workbenchSource).toContain('<PluginMarketplaceView leftSidebarCollapsed={leftSidebarCollapsed} />')
     expect(pluginMarketplaceViewSource).toContain('leftSidebarCollapsed?: boolean')
     expect(pluginMarketplaceViewSource).toContain('ds-plugin-marketplace-tabs flex items-center gap-1')
@@ -185,9 +201,7 @@ describe('Workbench route surface', () => {
     expect(pluginMarketplaceViewSource.indexOf('ds-plugin-marketplace-tabs')).toBeLessThan(
       pluginMarketplaceViewSource.indexOf('mx-auto w-full max-w-[960px]')
     )
-    expect(workbenchSource).toMatch(
-      /<section[\s\S]*?className="ds-chat-stage ds-no-drag[\s\S]*?<header className="chat-topbar ds-chat-shell-header[\s\S]*?<div className=\{`\$\{stageInsetClass\}/
-    )
+    expect(workbenchSource).toContain('inert={!rightPanelDockedVisible} aria-hidden={!rightPanelDockedVisible}')
     expect(scheduleTasksViewSource).toContain('ds-no-drag flex h-full')
     expect(scheduleTasksViewSource).not.toContain('ds-drag flex h-full')
     expect(workbenchSource).not.toContain('toggleChatTopbarSidebar')
@@ -211,6 +225,14 @@ describe('Workbench route surface', () => {
     expect(sidebarPrimitivesSource).not.toContain('ds-drag ds-sidebar-shell')
   })
 
+  it('rejects a regression that moves either chrome control owner back into the body', () => {
+    const moveAfterHeader = (symbol: string): string => workbenchSource
+      .replace(symbol, '<LegacyMovedControl')
+      .replace('<div className="ds-product-body', symbol + ' /><div className="ds-product-body')
+    expect(windowChromeOwnsControls(moveAfterHeader('<ShellNavigationControls'))).toBe(false)
+    expect(windowChromeOwnsControls(moveAfterHeader('<WorkspaceTabs'))).toBe(false)
+  })
+
   it('anchors the return-to-bottom button above the full composer surface', () => {
     const anchorIndex = workbenchSource.indexOf('data-analytix-return-to-bottom-anchor')
     const composerIndex = workbenchSource.indexOf('<FloatingComposerIsland')
@@ -231,23 +253,23 @@ describe('Workbench route surface', () => {
     expect(baseShellSource).toContain('--ds-macos-traffic-light-gap: 18px')
     expect(baseShellSource).toContain('--ds-window-controls-safe-inset: calc(')
     expect(baseShellSource).toContain('/ var(--ds-ui-scale)')
-    expect(baseShellSource).toContain('--ds-shell-navigation-control-gap: 4px')
-    expect(baseShellSource).toContain('--ds-shell-navigation-base-control-width: calc(')
-    expect(baseShellSource).toContain('(var(--ax-toolbar-button-size) * 3) + (var(--ds-shell-navigation-control-gap) * 2)')
-    expect(baseShellSource).toContain('--ds-shell-navigation-collapsed-control-width: calc(')
-    expect(baseShellSource).toContain('(var(--ax-toolbar-button-size) * 4) + (var(--ds-shell-navigation-control-gap) * 3)')
-    expect(baseShellSource).toContain('--ds-shell-navigation-fixed-control-width: var(--ds-shell-navigation-base-control-width)')
-    expect(baseShellSource).toContain('--ds-shell-collapsed-controls-right: calc(')
-    expect(baseShellSource).toContain('--ds-shell-collapsed-header-title-gap: var(--ds-shell-navigation-control-gap)')
-    expect(baseShellSource).toContain('--ds-shell-collapsed-header-slot-width: max(')
-    expect(baseShellSource).toContain('var(--ds-shell-collapsed-controls-right) - var(--ds-shell-topbar-content-left-padding, 20px)')
-    expect(baseShellSource).toContain('--ds-shell-navigation-top: calc((var(--ax-chat-topbar-shell-height) - var(--ax-toolbar-button-size)) / 2)')
-    expect(baseShellSource).toMatch(/:root\[data-platform='darwin'\] \.ds-workbench-shell \{[\s\S]*?--ds-shell-collapsed-controls-right: calc\([\s\S]*?var\(--ds-titlebar-safe-header-left\) \+ var\(--ds-shell-navigation-collapsed-control-width\)[\s\S]*?\);[\s\S]*?\}/)
-    expect(baseShellSource).toMatch(/:root\[data-platform='darwin'\] \.ds-workbench-shell \{[\s\S]*?--ds-shell-navigation-top: calc\([\s\S]*?\(var\(--ds-macos-traffic-light-top\) \/ var\(--ds-ui-scale\) \/ 2\)[\s\S]*?\(\(var\(--ax-chat-topbar-shell-height\) - var\(--ax-toolbar-button-size\)\) \/ 2\)[\s\S]*?\);[\s\S]*?\}/)
-    expect(baseShellSource).toContain('left: var(--ds-titlebar-safe-header-left)')
-    expect(baseShellSource).toContain('--ds-shell-navigation-hit-slop: 0px')
-    expect(baseShellSource).toContain('top: var(--ds-shell-navigation-top)')
-    expect(baseShellSource).toContain('z-index: 220')
+    expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[^}]*gap: 4px;/)
+    expect(baseShellSource).toContain('--ds-window-chrome-navigation-width: max(')
+    expect(baseShellSource).toContain('calc(56px + var(--ds-window-chrome-sidebar-width))')
+    expect(baseShellSource).toContain('calc(var(--ds-titlebar-safe-header-left) + 152px)')
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-navigation \{[^}]*flex: 0 0 var\(--ds-window-chrome-navigation-width\);/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-navigation \{[^}]*padding-left: var\(--ds-titlebar-safe-header-left\);/)
+    expect(workbenchLayoutSource).toContain("windowChromeRef.current?.style.setProperty('--ds-window-chrome-sidebar-width', px)")
+    expect(workbenchLayoutSource).toContain('if (rightTabsPaneRef.current) rightTabsPaneRef.current.style.width = px')
+    expect(workbenchLayoutSource).toContain('rightTabsContentRef.current.style.width = px')
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-session \{[^}]*min-width: 0;/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome \{[^}]*flex: 0 0 max\(42px, var\(--ds-window-controls-safe-block\)\);/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-navigation \{[^}]*align-items: center;/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome \{[^}]*align-items: center;/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-navigation \{[^}]*padding-left: var\(--ds-titlebar-safe-header-left\);/)
+    expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[^}]*display: inline-flex;[^}]*flex-shrink: 0;/)
+    expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[^}]*height: var\(--ax-toolbar-button-size\);[^}]*align-items: center;/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome \{[^}]*-webkit-app-region: drag;/)
     expect(baseShellSource).toContain('.ds-native-window-controls-hitbox')
     expect(baseShellSource).toContain('.ds-sidebar-titlebar-spacer')
     expect(baseShellSource).toContain('.ds-sidebar-titlebar-spacer .ds-titlebar-safe-block')
@@ -257,12 +279,14 @@ describe('Workbench route surface', () => {
     expect(baseShellSource).toMatch(/html,\s+body,\s+#root \{[\s\S]*?-webkit-app-region: no-drag;/)
     expect(baseShellSource).toContain('.ds-shell-navigation-controls .ds-toolbar-tooltip-anchor')
     expect(baseShellSource).toContain('.ds-shell-navigation-controls button')
+    expect(baseShellSource).toMatch(/\.ds-toolbar-tooltip-bubble \{[^}]*pointer-events: none;/)
+    expect(baseShellSource).not.toMatch(/\.ds-window-chrome-session \.chat-workbench-topbar \* \{[^}]*pointer-events: auto;/)
     expect(baseShellSource).toContain('.ds-shell-navigation-controls *')
     expect(baseShellSource).toContain('-webkit-app-region: no-drag')
     expect(baseShellSource).not.toContain('.ds-shell-header-drag-slot')
     expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[\s\S]*?pointer-events: auto;[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
-    expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[\s\S]*?margin: calc\(-1 \* var\(--ds-shell-navigation-hit-slop\)\);[\s\S]*?padding: var\(--ds-shell-navigation-hit-slop\);/)
-    expect(baseShellSource).toMatch(/:root\[data-platform='darwin'\] \.ds-shell-navigation-controls \{\s+--ds-shell-navigation-hit-slop: 10px;\s+\}/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome\[data-resizing='true'\] \.ds-window-chrome-navigation \{ transition: none; \}/)
+    expect(baseShellSource).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.ds-window-chrome-navigation \{ transition: none; \} \}/)
     expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \.ds-toolbar-tooltip-anchor \{[\s\S]*?pointer-events: auto;[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
     expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls button \{[\s\S]*?pointer-events: auto;[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
     expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls,\s+\.ds-shell-navigation-controls \* \{[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
@@ -289,9 +313,7 @@ describe('Workbench route surface', () => {
     expect(baseShellSource).toMatch(/\.chat-topbar :is\(button, input, textarea, select, option, a, summary, \[role='button'\], \[role='menu'\], \[role='menuitem'\], \[role='tab'\], \[contenteditable='true'\]\) \{[\s\S]*?pointer-events: auto;[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
     expect(baseShellSource).toContain('Windows/Linux have a dedicated desktop titlebar; workbench chrome must not mask clicks.')
     expect(baseShellSource).toMatch(/:root:not\(\[data-platform='darwin'\]\) \.ds-sidebar-titlebar-spacer,[\s\S]*?:root:not\(\[data-platform='darwin'\]\) \.chat-workbench-topbar \{[\s\S]*?-webkit-app-region: no-drag;[\s\S]*?app-region: no-drag;/)
-    expect(baseShellSource).toMatch(
-      /\.ds-shell-controls-safe-inset \{\s+padding-left: var\(--ds-shell-collapsed-header-slot-width\);\s+\}/
-    )
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-session \.chat-workbench-topbar \.ds-toolbar-tooltip-anchor,[\s\S]*?\.ds-window-chrome-session \.chat-workbench-topbar button \{\s+pointer-events: auto;\s+\}[\s\S]*?\.ds-window-chrome-session \.chat-workbench-topbar \* \{\s+-webkit-app-region: no-drag;\s+app-region: no-drag;/)
     expect(baseShellSource).toMatch(/\.chat-topbar-grid \{[\s\S]*?--ds-shell-topbar-content-left-padding: 0\.75rem;/)
     expect(baseShellSource).toMatch(/\.ds-shell-topbar-grid \{[\s\S]*?--ds-shell-topbar-content-left-padding: 0\.75rem;/)
     expect(baseShellSource).toMatch(/@media \(min-width: 640px\) \{[\s\S]*?--ds-shell-topbar-content-left-padding: 1rem;/)
@@ -300,26 +322,20 @@ describe('Workbench route surface', () => {
     expect(baseShellSource).not.toContain(
       'padding-left: calc(var(--ds-window-controls-safe-inset) + var(--ds-shell-collapsed-header-slot-width))'
     )
-    expect(baseShellSource).toMatch(/\.ds-shell-controls-safe-motion \{[\s\S]*?transition: padding-left var\(--ax-motion-sidebar-collapse\);/)
-    expect(baseShellSource).toMatch(/\.ds-plugin-marketplace-tabs \{[\s\S]*?transition: padding-left var\(--ax-motion-sidebar-collapse\);/)
+    expect(baseShellSource).toMatch(/\.ds-window-chrome-navigation \{[^}]*transition: flex-basis var\(--ax-motion-sidebar-collapse\);/)
+    expect(baseShellSource).not.toContain('.ds-plugin-marketplace-tabs[data-left-sidebar-collapsed=')
     expect(baseShellSource).toContain(":root[data-motion-reduced='true'] .ds-left-sidebar-pane")
     expect(baseShellSource).toContain(":root[data-motion-reduced='true'] .ds-shell-controls-safe-motion")
     expect(baseShellSource).toContain(":root[data-motion-reduced='true'] .ds-thread-summary-content-motion")
     expect(baseShellSource).not.toContain('@media (prefers-reduced-motion: reduce) {\n  .ds-left-sidebar-pane')
     expect(baseShellSource).not.toContain('@media (prefers-reduced-motion: reduce) {\n  .ds-thread-summary-content-motion')
-    expect(baseShellSource).toMatch(
-      /\.ds-plugin-marketplace-tabs\[data-left-sidebar-collapsed='true'\] \{\s+padding-left: var\(--ds-shell-navigation-sidebar-width\);\s+\}/
-    )
-    expect(baseShellSource).toContain(":root:not([data-platform='darwin']) .ds-shell-navigation-controls")
-    expect(baseShellSource).toMatch(
-      /:root:not\(\[data-platform='darwin'\]\) \.ds-shell-navigation-controls \{\s+top: 9px;\s+left: calc\(\(var\(--ds-shell-navigation-sidebar-width\) - var\(--ds-shell-navigation-fixed-control-width\)\) \/ 2\);\s+transform: none;\s+\}/
-    )
+    expect(workbenchSource).toContain("route !== 'plugins' && route !== 'schedule' && (rightPanelRetained")
+    expect(baseShellSource).toMatch(/:root \{[^}]*--ds-window-controls-safe-block: 0px;[^}]*--ds-window-controls-safe-inset: 0px;/)
+    expect(baseShellSource).toContain(".ds-window-chrome[data-resizing='true'] .ds-window-chrome-navigation { transition: none; }")
     expect(baseShellSource).not.toContain(
       ".ds-shell-navigation-controls[data-left-sidebar-collapsed='true']"
     )
-    expect(baseShellSource).toMatch(
-      /:root:not\(\[data-platform='darwin'\]\) \.ds-shell-controls-safe-inset \{\s+padding-left: var\(--ds-shell-collapsed-header-slot-width\);\s+\}/
-    )
+    expect(baseShellSource).toContain(":root[data-motion-reduced='true'] .ds-window-chrome-navigation { transition: none; }")
   })
 })
 

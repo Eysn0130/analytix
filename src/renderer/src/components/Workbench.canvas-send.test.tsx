@@ -13,7 +13,7 @@ const io = vi.hoisted(() => ({
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
   summaryMounted: vi.fn(),
   document: null as { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void } | null,
-  provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn() },
+  provider: { sendUserMessage: vi.fn(), subscribeThreadEvents: vi.fn(), listThreads: vi.fn(), getThreadDetail: vi.fn(), uploadAttachment: vi.fn(), getRuntimeInfo: vi.fn() },
   browser: vi.fn(), retrieve: vi.fn(), settings: vi.fn(), canvas: vi.fn(), read: vi.fn(), directory: vi.fn(), checkpoint: vi.fn(),
   t: (key: string) => key
 }))
@@ -99,6 +99,10 @@ beforeEach(async () => {
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   io.settings.mockResolvedValue({ workspaceRoot: workspace } as AppSettingsV1)
   vi.spyOn(rendererRuntimeClient, 'getSettings').mockImplementation(() => io.settings())
+  io.provider.getRuntimeInfo.mockResolvedValue({ capabilities: {
+    attachments: { available: true }, model: { id: 'synthetic-model', inputModalities: ['text'], contextWindowTokens: 128000 },
+    mcp: { toolCount: 0 }, skills: { discoveredSkills: 0 }, web: { fetch: { available: false }, search: { available: false } }
+  } })
   io.provider.listThreads.mockResolvedValue([thread('a'), thread('b')])
   io.provider.sendUserMessage.mockResolvedValue({ turnId: 'turn-a', userMessageItemId: 'message-a' })
   io.provider.subscribeThreadEvents.mockImplementation(() => new Promise<void>(resolve => streams.push(resolve)))
@@ -110,7 +114,8 @@ beforeEach(async () => {
     workspace: { onThreadHandoffEvent: () => () => {}, getThreadHandoffOperations: async () => ({ ok: true, operations: [] }),
       createGitCheckpoint: io.checkpoint },
     write: { retrieveWriteContext: io.retrieve },
-    files: { read: io.read, listDirectory: io.directory }, canvas: { request: io.canvas }, browserSelection: { request: io.browser },
+    files: { read: io.read, listDirectory: io.directory, getPathForFile: () => workspace + '/synthetic.pdf',
+      readLocalPdfText: async () => ({ ok: true, path: workspace + '/synthetic.pdf', text: 'Synthetic attachment text', pageCount: 1 }) }, canvas: { request: io.canvas }, browserSelection: { request: io.browser },
     logs: { error: async () => {} }
   } })
   element = document.createElement('div')
@@ -142,6 +147,31 @@ describe('Workbench Canvas consumer path', () => {
     io.summaryMounted.mockClear()
     await act(async () => useWorkspaceTabsStore.getState().setOpen(false))
     expect(io.summaryMounted).not.toHaveBeenCalled()
+  })
+
+  it('holds the actual send owner until its selected attachment upload completes', async () => {
+    let complete!: (value: object) => void
+    io.provider.uploadAttachment.mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    const file = new File(['synthetic'], 'synthetic.pdf', { type: 'application/pdf' })
+    Object.assign(file, { arrayBuffer: async () => new TextEncoder().encode('synthetic').buffer })
+    await act(async () => {
+      useNativeReferenceStore.setState({ references: [] })
+      composer().onPickAttachments!([file])
+    })
+    await settle()
+    expect(io.provider.uploadAttachment).toHaveBeenCalledOnce()
+    expect(composer().attachmentUploadBusy).toBe(true)
+    try {
+      await send()
+      expect(io.provider.sendUserMessage).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => complete({ id: 'uploaded-pdf', name: 'synthetic.pdf', mimeType: 'application/pdf', byteSize: 9, pageCount: 1 }))
+      await settle()
+    }
+    expect(composer().attachmentUploadBusy).toBe(false)
+    await send()
+    expect(io.provider.sendUserMessage).toHaveBeenCalledOnce()
+    expect(io.provider.sendUserMessage.mock.calls[0][2]).toMatchObject({ attachmentIds: ['uploaded-pdf'] })
   })
 
   it('does not send on attachment; ordinary success clears only the submitted draft and Canvas scope', async () => {

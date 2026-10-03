@@ -8,7 +8,7 @@ import {
   Loader2,
   Save,
   Sparkles
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WriteTextAlign, WriteTypographySettingsV1 } from '@shared/app-settings'
 import type { WriteExportFormat } from '@shared/write-export'
@@ -197,7 +197,7 @@ export function WriteWorkspaceToolbar({
               {modeMenuOpen ? (
                 <div
                   role="menu"
-                  className="absolute left-0 top-full z-30 mt-2 min-w-[188px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_40px_rgba(20,47,95,0.12)] dark:border-white/10 dark:bg-[#131722]"
+                  className="absolute left-0 top-full z-30 mt-2 min-w-[188px] overflow-hidden rounded-2xl border border-ds-border bg-ds-elevated p-1.5 shadow-[var(--ax-shadow-popover)]"
                 >
                   {modeMenuItems.map((item) => (
                     <button

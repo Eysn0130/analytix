@@ -12,7 +12,7 @@ import { Editor, Extension, type AnyExtension } from '@tiptap/core'
 import { StarterKit } from '@tiptap/starter-kit'
 import { TableKit } from '@tiptap/extension-table'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
-import { TriangleAlert } from 'lucide-react'
+import { TriangleAlert } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../../store/chat-store'
 import type {

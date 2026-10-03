@@ -1329,6 +1329,41 @@ describe('thread event sink binding', () => {
     })
   })
 
+  it.each(['switch-thread', 'abort-binding', 'return-with-new-binding'] as const)(
+    'ignores a delayed snapshot response after %s', async (transition) => {
+      const controller = new AbortController()
+      const harness = makeSinkHarness({
+        activeThreadId: 'thread-a', lastSeq: 3, busy: true,
+        blocks: [{ kind: 'user', id: 'old-a-user', text: 'old public turn' }]
+      })
+      type Detail = { blocks: ChatBlock[]; latestSeq: number; threadStatus: 'idle' }
+      let resolveDetail!: (detail: Detail) => void
+      const getThreadDetail = vi.fn(() => new Promise<Detail>((resolve) => { resolveDetail = resolve }))
+      const sink = buildThreadEventSink(harness.set, harness.get, {
+        threadId: 'thread-a', signal: controller.signal, getThreadDetail
+      })
+      const pending = sink.onSnapshotRequired?.({
+        threadId: 'thread-a', seq: 99, highestSeq: 99, replayEventCount: 99
+      })
+      expect(getThreadDetail).toHaveBeenCalledExactlyOnceWith('thread-a')
+      if (transition !== 'abort-binding') harness.set({ activeThreadId: 'thread-b' })
+      if (transition !== 'switch-thread') controller.abort()
+      // Returning to A has a new subscription generation; the old binding stays aborted.
+      harness.set({
+        activeThreadId: transition === 'switch-thread' ? 'thread-b' : 'thread-a',
+        blocks: [{ kind: 'user', id: 'current-user', text: 'current public turn' }],
+        lastSeq: 7, busy: true, currentTurnId: 'current-new-turn', currentTurnUserId: 'current-user'
+      })
+      const current = harness.getState()
+      resolveDetail({
+        blocks: [{ kind: 'assistant', id: 'obsolete-answer', text: 'obsolete public snapshot' }],
+        latestSeq: 99, threadStatus: 'idle'
+      })
+      await pending
+      expect(harness.getState()).toEqual(current)
+    }
+  )
+
   it('reconciles a snapshot-required replay gap from thread detail', async () => {
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current',

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
-import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from 'lucide-react'
+import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { CanvasOpenButton } from '../../canvas/CanvasOpenButton'
 import type { WorkspaceTab } from '../../store/workspace-tabs-store'
@@ -24,11 +24,11 @@ function SortableWorkspaceTab({ tab, active, focusable, onFocus, onSelect, onClo
       <button {...attributes} {...listeners} type="button" role="tab" id={workspaceTabDomId(tab.id)} aria-selected={active}
         aria-controls={workspacePanelDomId(tab.id)} aria-label={status ? `${tab.title} · ${status}` : tab.title}
         tabIndex={focusable ? 0 : -1} title={tab.title} onFocus={onFocus} onClick={onSelect} onKeyDown={onKeyDown}>
-        <Icon aria-hidden="true" size={15} />
+        <Icon aria-hidden="true" size={16} />
         <span className="workspace-tab-title">{tab.title}</span>
         {status ? <span className="workspace-tab-status" data-error={tab.error} aria-hidden="true">{tab.error ? '!' : tab.loading ? '…' : '•'}</span> : null}
       </button>
-      <button type="button" className="workspace-tab-close" aria-label={t('closeTab', { defaultValue: '关闭 {{title}}', title: tab.title })} title={t('close')} onClick={onClose}><X size={13} aria-hidden="true" /></button>
+      <button type="button" className="workspace-tab-close" aria-label={t('closeTab', { defaultValue: '关闭 {{title}}', title: tab.title })} title={t('close')} onClick={onClose}><X size={14} aria-hidden="true" /></button>
     </div>
   )
 }
@@ -42,12 +42,39 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
   const [focusedId, setFocusedId] = useState<string | null>(activeTabId)
   useEffect(() => setFocusedId(activeTabId), [activeTabId])
   const addRef = useRef<HTMLButtonElement>(null)
+  const tablistRef = useRef<HTMLDivElement>(null)
+  const tabIds = JSON.stringify(tabs.map(tab => tab.id))
+  const revealTab = useCallback((id: string): void => {
+    const list = tablistRef.current
+    const tab = document.getElementById(workspaceTabDomId(id))?.closest<HTMLElement>('.workspace-tab')
+    if (!list || !tab || !list.contains(tab) || !list.clientWidth) return
+    const viewport = list.getBoundingClientRect(), bounds = tab.getBoundingClientRect()
+    if (!viewport.width) return
+    const delta = bounds.width > viewport.width
+      ? bounds.right - viewport.right
+      : Math.min(bounds.left - viewport.left, 0) || Math.max(bounds.right - viewport.right, 0)
+    if (Math.abs(delta) > 0.5) {
+      // Scroll only this strip, including close. Instant also honors reduced motion.
+      list.scrollTo({ left: list.scrollLeft + delta / (viewport.width / list.clientWidth), behavior: 'instant' })
+    }
+  }, [])
+  useLayoutEffect(() => {
+    if (!activeTabId || selectorOpen) return
+    revealTab(activeTabId)
+    if (typeof ResizeObserver === 'undefined') return
+    const list = tablistRef.current
+    const tab = document.getElementById(workspaceTabDomId(activeTabId))?.closest<HTMLElement>('.workspace-tab')
+    if (!list || !tab || !list.contains(tab)) return
+    const observer = new ResizeObserver(() => revealTab(activeTabId))
+    observer.observe(list); observer.observe(tab)
+    return () => observer.disconnect()
+  }, [activeTabId, selectorOpen, tabIds, revealTab])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const rovingId = tabs.some((tab) => tab.id === focusedId) ? focusedId : activeTabId ?? tabs[0]?.id
   const focusTab = (id: string): void => {
     setFocusedId(id)
-    document.getElementById(workspaceTabDomId(id))?.focus()
-    document.getElementById(workspaceTabDomId(id))?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    document.getElementById(workspaceTabDomId(id))?.focus({ preventScroll: true })
+    revealTab(id)
   }
   const closeAndRestoreFocus = (index: number): void => {
     const tab = tabs[index]
@@ -60,7 +87,7 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
     }))
   }
   const handleKey = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return
     const tab = tabs[index]
     if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault(); onReorder(tab.id, index + (event.key === 'ArrowLeft' ? -1 : 1)); return
@@ -82,19 +109,19 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
     <header className="workspace-tabs-header">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
-          <div className="workspace-tablist" role="tablist" aria-label={t('workspaceTabs', { defaultValue: '工作区标签' })}>
+          <div ref={tablistRef} className="workspace-tablist" role="tablist" aria-label={t('workspaceTabs', { defaultValue: '工作区标签' })}>
             {tabs.map((tab, index) => <SortableWorkspaceTab key={tab.id} tab={tab} active={!selectorOpen && tab.id === activeTabId}
               focusable={tab.id === rovingId} onFocus={() => setFocusedId(tab.id)} onSelect={() => onSelect(tab.id)} onClose={() => closeAndRestoreFocus(index)} onKeyDown={(event) => handleKey(event, index)} />)}
           </div>
         </SortableContext>
       </DndContext>
       <div className="workspace-tabs-actions">
-        <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={16} /></button>
-        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
+        <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={20} /></button>
+        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
         <button type="button" onClick={() => {
           onCollapse()
           requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.focus())
-        }} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={16} /></button>
+        }} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={20} /></button>
       </div>
     </header>
   )
@@ -118,6 +145,6 @@ export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, p
   ]
   return <section className="workspace-tool-selector" aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })}>
     <h2>{t('workspaceSelectTool', { defaultValue: '打开工作面' })}</h2>
-    <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={17} aria-hidden="true" /><span>{label}</span></button>)}</div>
+    <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={18} aria-hidden="true" /><span>{label}</span></button>)}</div>
   </section>
 }

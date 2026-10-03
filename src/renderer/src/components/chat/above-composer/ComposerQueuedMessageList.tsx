@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Check, GripVertical, Pencil, RotateCcw, SendHorizontal, Trash2, X } from 'lucide-react'
+import { Check, GripVertical, Pencil, RotateCcw, SendHorizontal, Trash2, X } from '../../../design/AnalytixUiIcons'
 import { useState, type CSSProperties, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
