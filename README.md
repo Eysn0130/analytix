@@ -143,8 +143,10 @@ npm run verify:baseline
 `npm run doctor -- --native`、`npm run dev` 启动完整开发链路。公开 clone 的
 资源准备、平台限制、CI 和封包状态见
 [开发基线](docs/analytix/development-baseline.md)；不把 `dev:fast` 当作完整初始化。
-`dev` / `dev:fast` 保留既有行为，不承诺自动隔离真实资料。新的显式
-`dev:isolated` 入口还要求已配置的专属 Keychain；目录准备不等于启动就绪。
+`dev`、`dev:fast` 与 `dev:isolated` 默认使用 private HOME / user-data，
+并共享受保护的 development Provider Registry / Secret Store。凭据隔离是另一项
+显式选择：macOS 的 `--isolated-keychain` 使用专属任务 Keychain，须完成其准备。
+这些目录与凭据边界不等于 OS 沙箱或安装验收。
 
 ### macOS 本机开发缓存
 

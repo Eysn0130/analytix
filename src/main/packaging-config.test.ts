@@ -1315,6 +1315,69 @@ describe('electron-builder Analytix packaging', () => {
     expect(auditScript).toContain('analytix-private-pwsh-manifest.json')
   })
 
+  it('detects an AnyIO freeze fork without admitting a generated candidate', () => {
+    const requirements = readFileSync(pythonRuntimeContract.REQUIREMENTS_LOCK_PATH, 'utf8')
+    const backendLock = readFileSync(join(process.cwd(), 'backend/uv.lock'), 'utf8')
+    const expected = pythonRuntimeContract.backendAnyioRequirement(backendLock)
+    expect(() => pythonRuntimeContract.assertBackendAnyioRequirement(requirements, backendLock)).not.toThrow()
+    expect(() => pythonRuntimeContract.assertBackendAnyioRequirement(
+      requirements.replace(/^anyio==[^\n]+/mu, 'anyio==4.14.1 --hash=sha256:' + '0'.repeat(64)), backendLock
+    )).toThrow(/Windows AnyIO pin differs/)
+    expect(() => pythonRuntimeContract.assertBackendAnyioRequirement(
+      requirements.replace(expected, expected.replace(/sha256:[0-9a-f]{64}$/u, 'sha256:' + '0'.repeat(64))), backendLock
+    )).toThrow(/Windows AnyIO pin differs/)
+    expect(() => pythonRuntimeContract.assertBackendAnyioRequirement(`${requirements}${expected}\n`, backendLock))
+      .toThrow(/Windows AnyIO pin differs/)
+    expect(() => pythonRuntimeContract.backendAnyioRequirement(backendLock.replaceAll('https://files.pythonhosted.org/', 'https://untrusted.invalid/'))).toThrow(/official, hashed universal wheel/)
+    expect(() => pythonRuntimeContract.backendAnyioRequirement(`${backendLock}\n[[package]]\nname = "anyio"\nversion = "4.15.1"\n`))
+      .toThrow(/must be unique/)
+    const inlineTwoWheels = '[[package]]\nname = "anyio"\nversion = "4.15.1"\nwheels = [' +
+      '{ url = "https://files.pythonhosted.org/packages/fixture/anyio-4.15.1-py3-none-any.whl", hash = "sha256:' + '1'.repeat(64) + '", size = 1 }, ' +
+      '{ url = "https://untrusted.invalid/other.whl", hash = "sha256:' + '2'.repeat(64) + '", size = 2 }]\n'
+    expect(() => pythonRuntimeContract.backendAnyioRequirement(inlineTwoWheels)).toThrow(/official, hashed universal wheel/)
+    expect(officialWinCache._internals.steps['backend-win-runtime'].inputs).toContain('backend/uv.lock')
+  })
+
+  it('refuses to overwrite candidate directories or trust changed wheel and site bytes', () => {
+    const root = tempRoot()
+    expect(pythonRuntimeBuild.assertCandidateDirectory(root)).toBe(root)
+    writeFileSync(join(root, 'existing'), 'preserve me')
+    expect(() => pythonRuntimeBuild.assertCandidateDirectory(root)).toThrow(/existing empty regular directory/)
+    expect(readFileSync(join(root, 'existing'), 'utf8')).toBe('preserve me')
+    const link = join(tempRoot(), 'output')
+    symlinkSync(root, link, 'dir')
+    expect(() => pythonRuntimeBuild.assertCandidateDirectory(link)).toThrow(/existing empty regular directory/)
+    const temporaryCheckout = tempRoot()
+    const productionStage = join(temporaryCheckout, 'build/windows-backend-runtime')
+    mkdirSync(productionStage, { recursive: true })
+    expect(() => pythonRuntimeBuild.assertCandidateDirectory(productionStage, temporaryCheckout)).toThrow(/outside the source tree/)
+    const dotNamedStage = join(temporaryCheckout, '..named-staging')
+    mkdirSync(dotNamedStage)
+    expect(() => pythonRuntimeBuild.assertCandidateDirectory(dotNamedStage, temporaryCheckout)).toThrow(/outside the source tree/)
+    const wheelhouse = tempRoot()
+    writeFileSync(join(wheelhouse, 'anyio-4.15.1-py3-none-any.whl'), 'changed bytes')
+    expect(() => pythonRuntimeContract.verifyWheelhouse(wheelhouse)).toThrow(/frozen hash lock/)
+    const sitePackages = tempRoot()
+    writeFileSync(join(sitePackages, pythonRuntimeContract.SITE_PACKAGES_MANIFEST_NAME), '{}\n')
+    expect(() => pythonRuntimeContract.verifySitePackages(sitePackages)).toThrow()
+  })
+
+  it('preserves wheel license metadata while removing build-only material', () => {
+    const root = tempRoot()
+    const distInfo = join(root, 'anyio-4.15.1.dist-info')
+    mkdirSync(join(distInfo, 'licenses'), { recursive: true })
+    writeFileSync(join(distInfo, 'METADATA'), 'Name: anyio\nLicense-File: LICENSE\n')
+    writeFileSync(join(distInfo, 'WHEEL'), 'Wheel-Version: 1.0\n')
+    writeFileSync(join(distInfo, 'RECORD'), 'licenses/LICENSE,,\n')
+    writeFileSync(join(distInfo, 'licenses/LICENSE'), 'synthetic license and copyright\n')
+    mkdirSync(join(root, 'anyio/tests'), { recursive: true })
+    writeFileSync(join(root, 'anyio/tests/build-only.py'), 'build-only fixture\n')
+    pythonRuntimeContract.pruneProductionPythonTree(root)
+    for (const name of ['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE']) expect(existsSync(join(distInfo, name))).toBe(true)
+    expect(readFileSync(join(distInfo, 'licenses/LICENSE'), 'utf8')).toBe('synthetic license and copyright\n')
+    expect(existsSync(join(root, 'anyio/tests'))).toBe(false)
+  })
+
   it('binds the Windows Python runtime and wheels to signing-stable frozen content', () => {
     expect(pythonRuntimeContract.lock.pythonRuntime.archiveSha256).toBe(
       '7e0a8abfee952efc63dff290022a73f0185b586f522678ae7a757a56f23c289b'

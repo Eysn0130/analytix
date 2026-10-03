@@ -275,6 +275,29 @@ function wheelSetSha256(wheels) {
   return hash.digest('hex')
 }
 
+// AnyIO is intentionally shared with the accepted backend lock. Other Windows
+// pins have their own frozen authority; this is not a full uv-to-pip conversion.
+function backendAnyioRequirement(backendLockText) {
+  const packages = backendLockText.split(/^\[\[package\]\]\s*$/mu)
+    .filter((block) => /^name = "anyio"$/mu.test(block))
+  if (packages.length !== 1) throw new Error('[python-runtime] Backend AnyIO package must be unique')
+  const block = packages[0]
+  const versions = [...block.matchAll(/^version = "(\d+\.\d+\.\d+)"$/gmu)]
+  const wheels = block.match(/^wheels = \[\s*\{ url = "(https:\/\/files\.pythonhosted\.org\/packages\/[^"\s]+\/anyio-[^"/]+-py3-none-any\.whl)", hash = "sha256:([0-9a-f]{64})",[^\n{}]+\}\s*,?\s*\]$/mu)
+  if (versions.length !== 1 || !wheels ||
+      path.posix.basename(new URL(wheels[1]).pathname) !== `anyio-${versions[0][1]}-py3-none-any.whl`) {
+    throw new Error('[python-runtime] Backend AnyIO requires one official, hashed universal wheel')
+  }
+  return `anyio==${versions[0][1]} --hash=sha256:${wheels[2]}`
+}
+
+function assertBackendAnyioRequirement(requirementsText, backendLockText) {
+  const lines = requirementsText.split('\n').filter((line) => /^anyio(?:==|\s|$)/u.test(line))
+  if (lines.length !== 1 || lines[0] !== backendAnyioRequirement(backendLockText)) {
+    throw new Error('[python-runtime] Windows AnyIO pin differs from backend/uv.lock; regenerate and review the frozen candidate')
+  }
+}
+
 function verifyWheelhouse(root) {
   const wheels = wheelInventory(root)
   const digest = wheelSetSha256(wheels)
@@ -384,6 +407,8 @@ module.exports = {
   verifyPythonRuntime,
   verifySitePackages,
   verifyWheelhouse,
+  backendAnyioRequirement,
+  assertBackendAnyioRequirement,
   wheelInventory,
   wheelSetSha256
 }

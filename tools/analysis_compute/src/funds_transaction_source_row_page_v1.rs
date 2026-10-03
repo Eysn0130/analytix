@@ -445,33 +445,112 @@ fn build_page(
         arguments.cursor.as_ref(),
         arguments.max_rows as usize + 1,
     )?;
+    select_page(
+        arguments,
+        &producer_binding,
+        source_snapshot,
+        inventory,
+        candidates,
+        MAX_PAGE_BYTES,
+    )
+}
+
+// Evaluate every prefix in the original order, including the first over-budget
+// prefix. Wire size is exact: rows are independent JSON values; only the cursor
+// and complete flag change in the envelope. No page-size monotonicity is assumed.
+fn select_page(
+    arguments: &FundsTransactionSourceRowPageV1Arguments,
+    producer_binding: &VerifiedProducerBinding,
+    source_snapshot: FundsTransactionSourceSnapshotV1,
+    inventory: Vec<FundsTransactionSourceInventoryEntryV1>,
+    mut candidates: Vec<FundsTransactionSourceRowV1>,
+    byte_limit: usize,
+) -> Result<FundsTransactionSourceRowPageV1Result> {
     if candidates.is_empty() {
         bail!("transaction_source_row_page_unavailable");
     }
-
+    let mut result = result_envelope(
+        arguments,
+        producer_binding,
+        source_snapshot,
+        inventory,
+        Vec::new(),
+        false,
+    )?;
+    // Every SHA256 hex digest has the same serialized width. The actual digest
+    // still uses the unchanged canonical Go-compatible encoding, once selected.
+    result.page_digest = "0".repeat(64);
+    let base_bytes = serde_json::to_vec(&result)
+        .map_err(|_| anyhow!("transaction_source_row_result_contract_invalid"))?
+        .len();
     let maximum = usize::from(arguments.max_rows).min(candidates.len());
-    let mut accepted = None;
-    for count in 1..=maximum {
+    let mut row_bytes = 0;
+    let mut accepted = 0;
+    for (index, row) in candidates.iter().take(maximum).enumerate() {
+        row_bytes += serde_json::to_vec(row)
+            .map_err(|_| anyhow!("transaction_source_row_result_contract_invalid"))?
+            .len();
+        let count = index + 1;
         let has_more = candidates.len() > count;
-        let candidate = build_result(
-            arguments,
-            &producer_binding,
-            source_snapshot.clone(),
-            inventory.clone(),
-            candidates[..count].to_vec(),
-            has_more,
-        )?;
-        let encoded = serde_json::to_vec(&candidate)
-            .map_err(|_| anyhow!("transaction_source_row_result_contract_invalid"))?;
-        if encoded.len() > MAX_PAGE_BYTES {
+        let cursor_bytes = if has_more {
+            serde_json::to_vec(&FundsTransactionSourceRowCursorV1 {
+                source_file_id_digest: row.source_file_id_digest.clone(),
+                source_row_number: row.source_row_number,
+            })
+            .map_err(|_| anyhow!("transaction_source_row_result_contract_invalid"))?
+            .len()
+        } else {
+            4
+        }; // null
+        let encoded_bytes =
+            base_bytes + row_bytes + index + cursor_bytes - 4 + usize::from(has_more);
+        if encoded_bytes > byte_limit {
             break;
         }
-        accepted = Some(candidate);
+        accepted = count;
     }
-    accepted.ok_or_else(|| anyhow!("transaction_source_row_result_limit_exceeded"))
+    if accepted == 0 {
+        bail!("transaction_source_row_result_limit_exceeded");
+    }
+    let has_more = candidates.len() > accepted;
+    candidates.truncate(accepted);
+    result.next_cursor = if has_more {
+        let last = candidates.last().expect("nonempty accepted prefix");
+        Some(FundsTransactionSourceRowCursorV1 {
+            source_file_id_digest: last.source_file_id_digest.clone(),
+            source_row_number: last.source_row_number,
+        })
+    } else {
+        None
+    };
+    result.rows = candidates;
+    result.complete = !has_more;
+    result.page_digest = page_digest(&result)?;
+    Ok(result)
 }
 
+#[cfg(test)]
 fn build_result(
+    arguments: &FundsTransactionSourceRowPageV1Arguments,
+    producer_binding: &VerifiedProducerBinding,
+    source_snapshot: FundsTransactionSourceSnapshotV1,
+    inventory: Vec<FundsTransactionSourceInventoryEntryV1>,
+    rows: Vec<FundsTransactionSourceRowV1>,
+    has_more: bool,
+) -> Result<FundsTransactionSourceRowPageV1Result> {
+    let mut result = result_envelope(
+        arguments,
+        producer_binding,
+        source_snapshot,
+        inventory,
+        rows,
+        has_more,
+    )?;
+    result.page_digest = page_digest(&result)?;
+    Ok(result)
+}
+
+fn result_envelope(
     arguments: &FundsTransactionSourceRowPageV1Arguments,
     producer_binding: &VerifiedProducerBinding,
     source_snapshot: FundsTransactionSourceSnapshotV1,
@@ -490,7 +569,7 @@ fn build_result(
     } else {
         None
     };
-    let mut result = FundsTransactionSourceRowPageV1Result {
+    let result = FundsTransactionSourceRowPageV1Result {
         schema_version: 1,
         operation: OPERATION.to_string(),
         case_id: arguments.case_id.clone(),
@@ -518,7 +597,6 @@ fn build_result(
         complete: !has_more,
         page_digest: String::new(),
     };
-    result.page_digest = page_digest(&result)?;
     Ok(result)
 }
 
@@ -1551,13 +1629,249 @@ fn camel_to_snake(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use duckdb::Connection;
     use serde_json::Value;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Diagnostic only: rows come from the real CSV importer and DuckDB query.
+    // Keep the first readonly open separate from subsequent process-warm calls;
+    // neither condition claims an evicted OS cache or a cold compiler cache.
+    pub(crate) fn measure_page_cost(
+        arguments: FundsTransactionSourceRowPageV1Arguments,
+        path: &Path,
+        label: &str,
+    ) {
+        use std::time::Instant;
+        let mut end_to_end_ns = Vec::new();
+        let mut final_page = None;
+        for _ in 0..8 {
+            let started = Instant::now();
+            let page = run_funds_transaction_source_row_page_v1(
+                arguments.clone(),
+                &arguments.case_id,
+                path,
+            )
+            .expect("real source-row measurement");
+            end_to_end_ns.push(started.elapsed().as_nanos() as u64);
+            final_page = Some(page);
+        }
+        let page = final_page.unwrap();
+        assert!(page.complete);
+        let producer = VerifiedProducerBinding {
+            materialization_identity: page.materialization_identity.clone(),
+            producer_content_contract: page.producer_content_contract.clone(),
+            producer_content_id: page.producer_content_id.clone(),
+            producer_content_manifest_sha256: page.producer_content_manifest_sha256.clone(),
+            raw_artifact_manifest_sha256: page.raw_artifact_manifest_sha256.clone(),
+            duckdb_content_snapshot_digest: page.duckdb_content_snapshot_digest.clone(),
+            duckdb_snapshot_manifest_sha256: page.duckdb_snapshot_manifest_sha256.clone(),
+            analytical_schema_digest: page.analytical_schema_digest.clone(),
+        };
+        let mut samples = Vec::new();
+        let measurement_started = Instant::now();
+        for _ in 0..7 {
+            let (mut clone_ns, mut build_digest_ns, mut serialize_ns, mut serialized_bytes) =
+                (0, 0, 0, 0);
+            let started = Instant::now();
+            let mut accepted = None;
+            for count in 1..=page.rows.len() {
+                let phase = Instant::now();
+                let snapshot = page.source_snapshot.clone();
+                let inventory = page.inventory.clone();
+                let rows = page.rows[..count].to_vec();
+                clone_ns += phase.elapsed().as_nanos() as u64;
+                let phase = Instant::now();
+                let result = build_result(
+                    &arguments,
+                    &producer,
+                    snapshot,
+                    inventory,
+                    rows,
+                    page.rows.len() > count,
+                )
+                .expect("baseline prefix build and digest");
+                build_digest_ns += phase.elapsed().as_nanos() as u64;
+                let phase = Instant::now();
+                let bytes = serde_json::to_vec(&result).unwrap();
+                serialize_ns += phase.elapsed().as_nanos() as u64;
+                serialized_bytes += bytes.len();
+                if bytes.len() > MAX_PAGE_BYTES {
+                    break;
+                }
+                accepted = Some(result);
+            }
+            let prefix_total_ns = started.elapsed().as_nanos() as u64;
+            assert_eq!(
+                serde_json::to_vec(&accepted.unwrap()).unwrap(),
+                serde_json::to_vec(&page).unwrap()
+            );
+            let phase = Instant::now();
+            assert_eq!(page_digest(&page).unwrap(), page.page_digest);
+            let additional_digest_probe_ns = phase.elapsed().as_nanos() as u64;
+            let phase = Instant::now();
+            let optimized = select_page(
+                &arguments,
+                &producer,
+                page.source_snapshot.clone(),
+                page.inventory.clone(),
+                page.rows.clone(),
+                MAX_PAGE_BYTES,
+            )
+            .expect("selected page");
+            let optimized_bytes = serde_json::to_vec(&optimized).unwrap();
+            let optimized_total_ns = phase.elapsed().as_nanos() as u64;
+            assert_eq!(optimized_bytes, serde_json::to_vec(&page).unwrap());
+            samples.push(serde_json::json!({"clone_ns": clone_ns, "build_digest_ns": build_digest_ns,
+                "serialize_ns": serialize_ns, "serialized_bytes": serialized_bytes,
+                "prefix_total_ns": prefix_total_ns, "additional_digest_probe_ns": additional_digest_probe_ns,
+                "optimized_total_ns_including_test_input_clone_and_final_serialize": optimized_total_ns}));
+        }
+        eprintln!(
+            "PAGE_COST {}",
+            serde_json::json!({"label": label, "rows": page.rows.len(),
+            "readonly_page_invocations": 8, "all_sql_statement_count": "unknown", "token_count": "unknown",
+            "first_open_ns": end_to_end_ns[0], "warm_end_to_end_ns": &end_to_end_ns[1..],
+            "legacy_prefix_samples": samples, "measurement_loop_wall_ns": measurement_started.elapsed().as_nanos() as u64,
+            "final_wire_bytes": serde_json::to_vec(&page).unwrap().len(), "page_digest": page.page_digest})
+        );
+    }
+
+    // Original linear implementation is an independent selection oracle. The
+    // protocol schema, canonical encoder and existing Go golden stay unchanged.
+    fn legacy_select(
+        page: &FundsTransactionSourceRowPageV1Result,
+        args: &FundsTransactionSourceRowPageV1Arguments,
+        producer: &VerifiedProducerBinding,
+        candidates: &[FundsTransactionSourceRowV1],
+        limit: usize,
+    ) -> Result<FundsTransactionSourceRowPageV1Result> {
+        if candidates.is_empty() {
+            bail!("transaction_source_row_page_unavailable");
+        }
+        let mut accepted = None;
+        for count in 1..=usize::from(args.max_rows).min(candidates.len()) {
+            let result = build_result(
+                args,
+                producer,
+                page.source_snapshot.clone(),
+                page.inventory.clone(),
+                candidates[..count].to_vec(),
+                candidates.len() > count,
+            )?;
+            if serde_json::to_vec(&result)?.len() > limit {
+                break;
+            }
+            accepted = Some(result);
+        }
+        accepted.ok_or_else(|| anyhow!("transaction_source_row_result_limit_exceeded"))
+    }
+
+    #[test]
+    fn selection_preserves_exact_wire_digest_cursor_and_first_budget_failure() {
+        let db = TempDb::new("selection");
+        seed_source(&db.0);
+        let page =
+            run_funds_transaction_source_row_page_v1(arguments(100), "case-a", &db.0).unwrap();
+        let producer = VerifiedProducerBinding {
+            materialization_identity: page.materialization_identity.clone(),
+            producer_content_contract: page.producer_content_contract.clone(),
+            producer_content_id: page.producer_content_id.clone(),
+            producer_content_manifest_sha256: page.producer_content_manifest_sha256.clone(),
+            raw_artifact_manifest_sha256: page.raw_artifact_manifest_sha256.clone(),
+            duckdb_content_snapshot_digest: page.duckdb_content_snapshot_digest.clone(),
+            duckdb_snapshot_manifest_sha256: page.duckdb_snapshot_manifest_sha256.clone(),
+            analytical_schema_digest: page.analytical_schema_digest.clone(),
+        };
+        for (count, text) in [
+            (0, ""),
+            (1, ""),
+            (2, "中文<>&\u{2028}\u{2029}\"\\\n"),
+            (100, "unicode/é/🙂"),
+            (101, "x"),
+            (100, "large"),
+        ] {
+            let rows: Vec<_> = (0..count)
+                .map(|index| {
+                    let mut row = page.rows[index % page.rows.len()].clone();
+                    row.source_row_number = (index + 1) as u64;
+                    let (values, _) = identity_sentinel();
+                    row.canonical_typed_row = canonical_typed_row(1, 0, 1, &values).unwrap();
+                    row.canonical_typed_row
+                        .iter_mut()
+                        .find(|f| f.name == "raw.remark")
+                        .unwrap()
+                        .scalar
+                        .value = if text == "large" {
+                        "中\"\\".repeat(3000)
+                    } else {
+                        text.to_string()
+                    };
+                    row.canonical_row_sha256 =
+                        digest_json(CANONICAL_ROW_DOMAIN, &row.canonical_typed_row).unwrap();
+                    row
+                })
+                .collect();
+            for max_rows in [1, 100] {
+                let args = arguments(max_rows);
+                let mut limits = vec![0, MAX_PAGE_BYTES];
+                for prefix in [1, 2, count.min(100)] {
+                    if prefix == 0 || prefix > count || prefix > usize::from(max_rows) {
+                        continue;
+                    }
+                    let reference = build_result(
+                        &args,
+                        &producer,
+                        page.source_snapshot.clone(),
+                        page.inventory.clone(),
+                        rows[..prefix].to_vec(),
+                        count > prefix,
+                    )
+                    .unwrap();
+                    let bytes = serde_json::to_vec(&reference).unwrap().len();
+                    limits.extend([bytes - 1, bytes, bytes + 1]);
+                }
+                limits.sort_unstable();
+                limits.dedup();
+                for limit in limits {
+                    let expected = legacy_select(&page, &args, &producer, &rows, limit);
+                    let actual = select_page(
+                        &args,
+                        &producer,
+                        page.source_snapshot.clone(),
+                        page.inventory.clone(),
+                        rows.clone(),
+                        limit,
+                    );
+                    match (expected, actual) {
+                        (Ok(expected), Ok(actual)) => {
+                            let wire = serde_json::to_vec(&actual).unwrap();
+                            assert!(wire.len() <= limit);
+                            assert_eq!(
+                                wire,
+                                serde_json::to_vec(&expected).unwrap(),
+                                "count={count} max={max_rows} limit={limit}"
+                            );
+                            assert_eq!(
+                                go_compatible_json_bytes(&actual).unwrap(),
+                                go_compatible_json_bytes(&expected).unwrap()
+                            );
+                            assert_eq!(actual.page_digest, page_digest(&actual).unwrap());
+                        }
+                        (Err(expected), Err(actual)) => {
+                            assert_eq!(expected.to_string(), actual.to_string())
+                        }
+                        _ => {
+                            panic!("selection differs: count={count} max={max_rows} limit={limit}")
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     struct TempDb(PathBuf);
 

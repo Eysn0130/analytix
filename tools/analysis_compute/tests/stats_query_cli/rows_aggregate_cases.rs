@@ -166,6 +166,42 @@ fn query_stats_rows_cli_dedupes_replacement_card_rows_with_different_account_met
     assert_eq!(output["rows"][0]["counterparty_name"], json!("对手甲"));
     assert_eq!(output["rows"][0]["in_amount"], json!(10000.0));
     assert_eq!(output["rows"][0]["in_count"], json!(1));
+    assert_eq!(output["total"], json!(2));
+
+    // The page total counts deduped groups, while the summary counts only the
+    // returned page. Replacement-card metadata must not add a transaction.
+    for (offset, name, amount) in [(0, "对手甲", 10000.0), (1, "对手乙", 3000.0)] {
+        let page = run_analysis_compute_command(&[
+            "query-stats-rows",
+            "--case-id",
+            CASE_ID,
+            "--db-path",
+            &db.path().to_string_lossy(),
+            "--mode",
+            "inName",
+            "--selected-key",
+            "CARD-001",
+            "--selected-key",
+            "CARD-003",
+            "--row-sort-col",
+            "total_amount",
+            "--row-sort-dir",
+            "desc",
+            "--row-limit",
+            "1",
+            "--row-offset",
+            &offset.to_string(),
+        ])?;
+        assert_eq!(page["total"], json!(2));
+        assert_eq!(page["rows"].as_array().map(Vec::len), Some(1));
+        assert_eq!(page["rows"][0]["counterparty_name"], json!(name));
+        assert_eq!(page["rows"][0]["total_amount"], json!(amount));
+        assert_eq!(page["rows"][0]["total_count"], json!(1));
+        assert_eq!(
+            page["row_summary"],
+            json!({"total_amount": amount, "total_count": 1}),
+        );
+    }
     Ok(())
 }
 

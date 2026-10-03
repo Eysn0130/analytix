@@ -64,6 +64,9 @@ Use these status terms consistently:
 
 ## Validation
 
+For ordinary maintenance, use [bounded owner routing](analytix/development-baseline.md#bounded-maintenance-routing);
+the mapper covers docs and two fixed fixtures, not all affected dependencies.
+
 For documentation-only changes, run `git diff --check` and verify changed
 relative links and referenced paths. Add executable checks only when the claim
 depends on code, generated output, runtime behavior, or packaging. Never report

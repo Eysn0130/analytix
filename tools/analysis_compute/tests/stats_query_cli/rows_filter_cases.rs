@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::json;
 
 use crate::command::{run_analysis_compute_command, run_analysis_compute_failure};
@@ -192,7 +192,8 @@ fn query_stats_rows_cli_search_pages_keep_total_and_stable_tie_order() -> Result
             "1",
             "--row-offset",
             &offset.to_string(),
-        ])?;
+        ])
+        .with_context(|| format!("search page read failed at offset={offset}"))?;
 
         assert_eq!(output["ok"], json!(true));
         assert_eq!(output["total"], json!(2));

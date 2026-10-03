@@ -2,7 +2,7 @@
 
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
-Current as of: 2026-09-29
+Current as of: 2026-10-02
 Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
@@ -59,14 +59,12 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 4. 已发现的碎片与重复
 
-1. 资金插件 `references/` 与 owner skill 下的 `references/` 有 25 组同名
-   文件；2026-08-26 在 `c31dc3afb7a4be1d5193dd4085a0e434074dfbf0`
-   跟踪树上按同名文件逐组执行 `shasum -a 256`，结果为 25 组一致、
-   0 组差异。这不是
-   可直接删除的无效重复：根 `references/` 是发布校验和脚本 source，
-   `skills/analytix-fund-analysis/references/` 是 skill 打包副本，README 与
-   focused gate 明确要求它们字节一致。在生成/同步和消费者合同未改变前，
-   保留两个位置并把“字节一致”作为可执行门禁。
+1. Funds 根 `references/` 为唯一维护源，skill 副本保留自包含相对路径。
+   现有 `runtime-cache-contract.mjs --sync` 生成完整 25 文件镜像；
+   `test:plugin-contracts`、doctor、Hub 包源准备与 runtime-cache 快照检查
+   inventory、普通文件及逐字节一致。命令和清单由
+   [插件 owner](../../plugins/analytix-fund-analysis/README.md) 管理；
+   不把消费副本当无效代码删除，也不借此恢复 dormant MCP。
 2. upstream、QA、benchmark 多份日期报告使用 `final`、`closure`、`passed`
    命名。保留原始证据，但引用必须经过目录 README 的 currentness 规则。
 3. `docs/legacy/kun` 包含中英文历史材料。已增加 `docs/legacy/README.md`，
@@ -78,110 +76,111 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
-### 2026-10-01 共享测试执行与 source-row 原子配对
+### 2026-10-02 Windows AnyIO 冻结链修复
 
-初次观察冻结于 `3a7c7bba9938c0d17852cafb52a80d756f687eb4`；最终源码
-`ca7a73a4e5330bc3127a14538e9ff2900d30b024` 补齐真实 Vitest interrupted 完成状态。
-均基于 PR28 合并 main。
-两个重复 Vitest 文件各保留一次执行 owner，59 named gates、实际 288 唯一 ID 与原断言保留；
-34 raw 名称与成员引用由同一处原子配对，SQL/协议/金额/null/权限与原固定 golden 未改。
-定向验证、实际身份交换 RED→恢复 GREEN、独立观察与 baseline 失败均记录于
-[紧凑结果](qa/shared-regression-source-row-2026-10-01.md)。原四会话中 A candidate 读错
-baseline HEAD，B candidate 读取反升且 partial；不宣称总体维护摄入或模型收益。唯一一次
-clean pinned A 配对纠偏返回文本为 287590/186861 bytes，均定位正确；单样本不证明长期收益。
-初次三 source/test 文件 corpus 增加 15551 bytes；最终含专用 reporter 四项增加 18841 bytes，
-配对观察未覆盖后续修正；
-结构退役重复执行不等于总量下降。四项继承 dirty 保留；当前候选 CI/main 状态查 GitHub，
-本记录不授权安装包或正式发布。
+基线 `f5173060908d1e185cb6f6e036e9a21872140b6d`。Windows 的 AnyIO4.14.1
+与已接受的 `backend/uv.lock`4.15.1 分叉；仅更新这一依赖，不将独立 Windows
+冻结清单改为 uv 全量镜像，也不声称已证明产品可利用性或 Windows 发布资格。
 
-### 2026-09-30 有界资源与 quarantine 治理
+复用现有 builder/identity/prune owner，加 `--freeze-candidate <empty-temporary-directory>`；
+输出必须在实际 `os.tmpdir()` 下、源码树外且为空，不覆盖 accepted locks 或生产
+staging。由正式 cache helper 建立隔离目录后运行该入口，审查候选两锁，再执行
+`verifyWheelhouse` / `verifySitePackages`；普通构建仍严格匹配冻结 authority。
+AnyIO 官方 universal wheel 来自 uv 的 URL/hash，pip 保留 Windows CPython3.11、
+binary-only 和 require-hashes；当前只支持 uv 的单一正式 universal wheel格式，
+格式改变会 fail closed。既有 packaging contract 测试和正常 builder 检查 AnyIO
+版本/hash一致性；缓存 key 加入 `backend/uv.lock`，防止复用遗漏修复的旧 staging。
 
-基于 `fb210a84426f8bcce55e515c681422702f54232c` 的 canonical worktree；
-四项继承 dirty 不属于本切片，哈希保持不变。此记录是局部源码验收，
-不是系统治理、安装验收、同模型分析增益或 main/发布就绪结论。
+实际45个 wheel下载、静态解包和签名稳定内容计算 pass。其余44行字节和
+`pythonRuntime` block 不变；AnyIO4.15.1 wheel132079 bytes，SHA256
+`6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101`。
+`METADATA/WHEEL/RECORD`及声明的 MIT `licenses/LICENSE`保留；license1081 bytes，
+SHA256 `5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0`。
 
-- `runtimeapp/app.go` 的七处资源绑定失败出口收敛为一次有序绑定和一个出口；
-  owner 仍在 `owned_runtime_resource.go`，原可选条件、defer、错误链与最终
-  接管时点保留。反向顺序 fixture 得到行为 RED；多资源 drain/close 重试、
-  已关闭前缀、未关闭后缀、必需 nil 与并发 shutdown 的定向 race 检查通过，
-  真实 handler/maintenance 定向组装检查通过。
-- quarantine 的唯一行为 owner 为 `backend-manager.test.ts`：synthetic overrides、
-  冷导入、默认 GET/POST、并发 ensure、合法 renderer lease 与 stop 路径，
-  覆盖进程、目录、监听、网络和清理写入。五项临时语义回归均得到行为 RED，
-  原生产 blob 恢复哈希相同后才退役旧八项禁词及 packaging 的重复簇。
-  规范化 module identity 检查保留执行 authority 的架构边界。
-  与 native-runtime-paths/packaging 的聚合报告实际发现并通过 79/79，
-  其他授权、泄露、平台与聚合门禁不变。
-- 根指南初次只减 363 字节；在 `62aa16969` 冻结基线继续收敛自动适用链，
-  root 15,467 → 13,945，src/go/docs 分别 -565/-73/-581。重复语义依赖
-  已自动读取的 root，不新增全 imports，独立仓库安全守卫保留。
-  global 9,094 不动，常驻 global+root 24,561 → 23,039；scope 按路径追加，
-  不能把本次跨三 scope 的指南总量当作日常常驻。
-- 旧三文件所选文本脚本计数 4,602 → 7,987：app -556、helper +557、test
-  +3,384。app 缺少完整初始化/defer/接管上下文，旧 receipt 未绑定完整
-  返回 payload；不能称为完整需求读取或 Agent 摄入。replay 各一调用，
-  排除初始化/定位/实现/失败/轮询；这些成本并未消失，全任务总量未知。
-  原 cache 失败、基线取消（130）及旧 null 保留。20.356s / 8.943s 的
-  warm/编译缓存未受控，新增测试工作量不同，不推导速度、token 或费用收益。
-- 本切片生产源码净 +1 字节，测试净 +7,086 字节；维护收益是失败处理
-  修改点 7 → 1，不能以总 LOC/字节下降代替覆盖或收益。没有新增治理工具。
+新 requirements SHA256 `1f8dfa741fb95e082a26f6766389a1b6196d0efa03807cea591efdeaa4b176d8`；
+wheel-set SHA256 `226854f5b6f22cc4c8f2484e2c36a5d1f304a116e241768d1f2c7f4a66476a37`；
+content SHA256 `7abd65f40ed18526b8887f6dc2d536a7f2e191227e0fed7290eaa143cb6b4f2a`，
+fileCount3017→3018。正常两guard pass；同数量wheel/site字节篡改拒绝并恢复后pass。
+原测试 owner 六项定向测试pass（57项筛选未运行），覆盖分叉/hash/重复pin/非官方
+来源、空输出/源码重叠/symlink拒绝、许可保留、签名稳定和缓存边界。独立只读审查
+发现临时源码树内空生产目录可误作候选、同一行第二条wheel记录可漏检，均已修复
+并补负例；路径段规则对应1项重验pass（62项筛选未运行）。
+未执行 Windows 二进制、native/整包/Provider；旧API worktree创建不支持任务类型，
+父明确批准正常本机Git隔离路线。GitHub发布与后续治理单元由父排序，当前交付查Git。
 
-已启动的第二生产 owner 切片将 adapter 六条路由的 body/schema 注册合为一处，
-summary 的 schema、identity 和精确投影选择由同一私有 resolver 负责；
-严格 canonical equality、AcceptedFinal/currentMain pin 与两边 sanitation 未迁移。
-同一 `runtimeRequestViaHost` 测试组 before/after 各 43 通过、73 未选，
-最终候选 44 通过（包含两项实际 HTTP 回归）；组内其余项目混合直接 sanitizer
-与 HTTP 测试，不称为全组真实 transport 证据。精确投影相关三文件 43/43、
-web/node typecheck 通过；独立只读 review 无具体缺陷。该切片生产 +601 字节、
-测试 +2,477 字节，不宣称整个 adapter 或系统技术债已收口。
+### 2026-10-02 当前事实、历史路由与 reference 单源治理
 
-本机小 receipt 在 `/private/tmp/analytix-debt-resource-matched-{before,after}-20260930.json`
-及 `analytix-quarantine-{red,green}-20260930.json`；前者是明示范围的读取 proxy，
-后者保留五项 RED 与执行式发现结果，不复制大型 inventory。
+基线 `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`；仅修四项已批准治理，
+没有全仓 dead-code、adapter 重拆、产品/native/Provider/安装验收。现行事实从
+launcher、实际 Go owner 和 required CI 核验；main 自己的 Development52/52、
+CodeQL4/4 为源码证据，完整产品 Ready 与同模型优势仍未建立。
 
-整改固定 17 个完整必要文件（含新增 helper/测试、适用指南及既有 fixture），
-清单和哈希在 `analytix-debt-cost-frozen-{before,after}-20260930.json`；物理
-corpus 与实际完整指南返回 payload 分开计数，register 增量是 corpus 内的
-治理成本分解，小 receipt 和验证证据另计。测试数据表减少 529 字节，
-关闭/错误身份/重试/并发及冷导入、caught 副作用、两 packaged 态、lease
-覆盖保留；反向关闭及五类副作用在新测试上再次 RED，生产 blob 恢复一致。
+25 块原文（285271 bytes）迁入既有日期 review/PR37 QA，保失败、日期、SHA、
+13 个旧 heading anchors；1360-byte 重复 Owner snapshot 单份保留。
+case196/116、brand30/17 checkbox 原文及10.3a多行要求不变，accepted 与 active
+delta 分开。当前剩余安装/import→Final→display→restart、平台和 paid 同模型证据
+仍由 [product completion](product-completion.md) 路由，历史 blocked 不改写为 pass。
 
-在 `aa76582cc3e66af5c5b3609d0bd9d9bee535ff1f` 上，packaged Milestone A
-测试的八处 Git 仓库种子声明收敛为一处本地 fixture，各场景仍独立建库和清理；
-完整 test owner 含新增 helper/import 从 567,614 降至 565,458 字节（-2,156），
-生产 owner 的读取需求未减少。前后实际发现的 179 个 ID 相同，选定 8/8 通过，
-18 处断言原文不变，171 项未执行；web/node typecheck 通过，独立只读复核无缺陷。
-同进程快照缺失、消费后失败/replay、目标隔离、dirty/prepackaged、symlink 和
-Git closure 边界保留。固定比较的 10 个完整文件基线为 823,568 字节；另读的
-CI、validation-command、packaging-config 测试共 210,352 字节为定位/复核输入，
-不能省略为全任务成本。小 receipt `analytix-milestone-source-fixture-{before,after}-20260930.json`
-分别绑定文件哈希、register 增量和验证结果，不推导全套测试、token、速度或发布结论。
+Funds 根资料是维护源；既有合同清单补第25项 `database-site-diagnostics.md`，
+sync/check 与 doctor、包源准备、cache captured buffers 和既有 gate 共享。
+25 对输出每套913199 bytes，排序 name+NUL+bytes+NUL SHA256
+`b25f77bf031ad329094571a2feaa057a9823a7f672f3b28b6978ad487b949a36` 不变；
+license/notices 未改。定向临时fixture证明遗漏文件漂移、缺失源/额外镜像/symlink
+拒绝、缺镜像文件再生与幂等。既有 remount fixture 的两套旧路径标签不同，已让
+producer 从同一根标签派生；事务 self-test pass（含八个crash恢复点），
+skip-archive包源输出检查未通过：调用用了字面 `/tmp`，但cache helper将当前
+临时目录置于缓存卷，脚本拒绝输出路径，未生成包源。没有换路径或改TMPDIR重试；
+父随后明确允许按同一CLI原约束纠正一次：读取helper实际os.tmpdir、mkdtemp
+专属容器并核realpath在边界内，新skip-archive包源检查pass，25对913199 bytes、
+production MCP payload/golden isolation均通过，archive=null。未改TMPDIR/权限/
+helper，未触碰旧拒绝路径或UI产物；旧失败仍保留。
 
-`790b1b140` 基线上的 raw 账户 ingress 修复恢复既有案件纵向索引；冷启动不造索引，
-同一当前 lease、原生实体 descriptor 和受限 projection 保留。owner 回归先 RED、后
-8 项通过；实际 HTTP 连续性及撤权请求回归通过。新增两线程 CNY 数值 fixture
-复用原 Go/native/Final 链和独立整数 oracle，但原生执行仍 blocked：旧输入的 Host
-信任校验失败，`aac3ccef` 包的 Darwin fuse 摘要也不符合当前契约。元数据恢复不含
-金额/笔数复用；完整初始请求字节与请求级数值计数尚待原生执行，不宣称 SQL 次数、
-token、智能或安装验收收益。小 receipt 为 `/private/tmp/analytix-longitudinal-verification-20260930.json`。
+固定三任务只做一次机械路由演练，无模型benchmark或源码fixture改写；每项固定
+200000-byte完整文件读取预算，baseline在候选前冻结，读取清单/哈希为8/10/10文件。
+下表是实际driver读取与路由stdout，不是模型返回全文或token。子验证器读取未计量，
+错误定位和首次验证不是独立baseline耗时对照；源码fixture哈希相同才复用其验证。
+
+| 固定任务 | baseline / candidate driver bytes | candidate route stdout bytes | 首个有效验证与修改触点 |
+| --- | ---: | ---: | --- |
+| docs-only | 160294 / 112153 | 569 | diff/link pass，52.527ms；修README开发隔离真值，指南/基线提供owner路线 |
+| local-typescript | 160157 / 111773 | 820 | typecheck pass，23524.532ms；fixture/consumer未改，明确映射边界 |
+| go-authority | 186719 / 138262 | 1900 | 三grant tests普通/tag各pass，首次113990.101ms；修包README错误owner，fixture未改 |
+
+固定读取范围含完整development-baseline，因此迁移历史会减少driver bytes；
+实际模型、tokens、模型time与长期效益均unknown，共享warm/编译缓存未受控，
+不推导速度/费用/智能收益。baseline未读候选答案，candidate仍基于当时HEAD并绑定
+文件SHA，不误称旧SHA是候选提交。现有mapper只覆盖docs+两个固定fixture；
+PR37同调用shared test owner、普通/tag/platform语义和所有CI阈值保留。
+
+验证：plugin合同gate pass，router/CI回归15/15、14 Markdown路径、两active change
+strict validation、四脚本syntax、原文/anchors/requirements机械核验pass；三固定
+维护任务pass。进程盘点 `ps` 被系统权限拒绝，未另路重试；自身command sessions
+按原工具追踪。四项继承dirty SHA不变，未纳提交；Git交付按父统一排序；父已授权本候选的focused commit及正常Draft PR准备。
+
+四个operational owner总量由409044降至134464 bytes；
+全部19文件含历史迁移、工具、指南与本条的净变化为+23429 bytes。
+本轮不承诺全仓净减或全部技术债
+已清。当前候选与main/CI状态查Git，日期证据不转为新的安装或发布授权。
+
+<a id="2026-10-01-共享测试执行与-source-row-原子配对"></a>
+Historical evidence: [consolidation 81–95](qa/shared-regression-source-row-2026-10-01.md#snapshot-d469-consolidation-81).
+
+
+<a id="2026-09-30-有界资源与-quarantine-治理"></a>
+Historical evidence: [consolidation 97–166](documentation-delivery-review-2026-09-09.md#snapshot-d469-consolidation-97).
+
 
 按实际影响验证整理涉及的链接和消费者。相关文档可合并修订；本队列不是产品交付的前置门禁，也不要求每项另建 change、切片或全量验证。
 
-当前交接与矩阵的 2026-09-27 叙述已迁入既有
-[日期 QA 的 Historical appendix](qa/pr28-next-execution-2026-09-26.md#historical-entry-snapshots-relocated-from-c2cd--2026-09-29-pdt)，
-保留旧 entry anchors。入口现在区分 c2cd HEAD、继承的未提交 host-local B1、
-7dc 准确安装证据与当前未知远端状态。只读
-`node scripts/validation-burden.mjs --json` 使用
-[小基线 manifest](validation-burden-baseline.json) 比较声明读取字节并盘点静态测试范围，
-接入既有 `verify:baseline`。静态入口重叠不等于 CI 重跑，未知依赖仍走原全量门禁；
-报告不是低价值测试删除列表，也没有实际 token、正确率或首次有效验证时间基线。
+Historical evidence: [consolidation 170–177](documentation-delivery-review-2026-09-09.md#snapshot-d469-consolidation-170).
+
 
 | 优先级 | 动作 | 最小完成证据 |
 | --- | --- | --- |
 | P0-doc | 为会被当作当前入口的旧 `final/closure` 报告加 historical banner | 无正文改写；链接检查通过 |
 | P1-doc | 把 `重构升级方案.md` 的 current-state 摘要拆为短索引，原文件保留 decision ledger | 所有旧 anchor 可追踪 |
 | P1-doc | 为 upstream 大 ledger 生成按 source/date/decision-id 的机器可读索引 | marker 与 commit 校验 |
-| P1-doc | 将插件 reference 镜像收敛为明确的单源生成/同步流程，不直接删除消费者要求的副本 | 生成器或同步命令、运行时路径测试、全量哈希 |
+| 已完成本轮 | Funds references 单源生成/完整漂移检查 | 现有合同模块与 gate；完整 25 对字节保持，证据见本轮条目 |
 | P2-doc | 将 QA 证据元数据统一为 commit/platform/command/result/skips | checker 验证 |
 | P2-doc | 从 scorecard 迁移到 `CapabilityBenchmarkV1` 原始结果索引 | 可执行测试绑定，禁止主观 exceeded |
 | P2-doc | 清理过期双语文档的 currentness 漂移 | 中英文同步、链接检查 |
@@ -205,30 +204,6 @@ skip 状态。仅规划、只读审计、fixture、历史包或外部条件缺�
 完整银行账号、完整 PII、reasoning 或原始外部错误正文。
 
 
-## 2026-09-09 本轮处置
-
-本轮 [审阅记录](documentation-delivery-review-2026-09-09.md) 修正当前入口的
-Hub-first 冲突、插件身份归属与规范分类。文档地图中的 2026-07-29 外部指南比较
-迁至 [Historical reference](upstreams/agent-guidance-review-2026-07-29.md)，
-原入口保留链接。历史报告、归档 change 和打包要求的 reference 镜像保留；
-不会因为文件长、旧或重复就删除仍被消费或用于证据追溯的内容。
-
-## 2026-09-21 PR28 current-entry consolidation
-
-Scope: the two actual current entry files and their existing dated evidence owner,
-not a whole-repository documentation approval. START d8640957c; product SOURCE2f25c22f7.
-
-| Original at d8640957c | Exact original SHA256 | Preserved owner / action |
-| --- | --- | --- |
-| `handovers/README.md` | `57d367da2f4971651f1627f9ccdd71c674c83700716d2cf566b93379ea4714c2` | Complete snapshot moved to `handovers/2026-09-16-pr28-continuation.md`, explicit historical heading IDs; README now current identity/gaps/recovery with compatibility links |
-| `product-completion.md` | `c2d7429c6fc7a389587535ef0a606e322bed94704ac7461b4339144491aa881e` | Complete snapshot in the same dated owner; product-relative links rebased, current file becomes P0–P5 as-built/gap/evidence/gate matrix |
-
-Original text remains recoverable at the exact Git commit; migration changes heading
-currentness labels and link locations, not recorded outcomes. Private migration
-receipts bind original/relocated hashes and each heading's old/new anchor. The current
-QA adds errata for the wrong LibreOffice anchor, browser-red executed-versus-discovered
-counts, and old65ab totals. It does not rewrite immutable command receipts.
-The document map and knowledge governance now preserve a newer unsynchronized local
-writer/checkpoint before consulting an older remote. No license, historical failure,
-compatibility reader or product feature was removed. Other documents are UNREVIEWED
-unless a specific reading/validation record says otherwise.
+<a id="2026-09-09-本轮处置"></a>
+<a id="2026-09-21-pr28-current-entry-consolidation"></a>
+Historical evidence: [consolidation 208–234](documentation-delivery-review-2026-09-09.md#snapshot-d469-consolidation-208).

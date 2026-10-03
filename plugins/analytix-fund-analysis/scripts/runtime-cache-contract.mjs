@@ -23,6 +23,7 @@ export const REFERENCE_FILES = [
   "casegraph-roadmap.md",
   "command-metadata.json",
   "command-router.md",
+  "database-site-diagnostics.md",
   "domain-playbook.md",
   "economic-investigation-analysis.md",
   "economic-investigation-language.md",
@@ -110,3 +111,61 @@ export function runtimeCacheContractViolations() {
   });
 }
 import { PRODUCTION_MCP_ENTRY_CLOSURE_FILES } from "./production-mcp-entry-closure-contract.mjs";
+
+// Root references are maintained source; embedded copies keep skills portable.
+function referenceDirectory(pluginRoot, relative, allowMissing = false) {
+  const root = fs.realpathSync(pluginRoot);
+  const directory = path.join(root, relative);
+  if (!fs.lstatSync(directory).isDirectory() || fs.realpathSync(directory) !== directory) {
+    throw new Error(`Reference directory must be a regular source directory: ${relative}`);
+  }
+  const names = fs.readdirSync(directory).sort();
+  const expected = [...REFERENCE_FILES].sort();
+  if (names.some(name => !expected.includes(name)) ||
+      (!allowMissing && JSON.stringify(names) !== JSON.stringify(expected))) {
+    throw new Error(`Reference inventory mismatch: ${relative}`);
+  }
+  for (const name of names) {
+    const stat = fs.lstatSync(path.join(directory, name));
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`Reference must be a regular file: ${relative}/${name}`);
+    }
+  }
+  return directory;
+}
+
+export function inspectReferenceCopies(pluginRoot) {
+  const source = referenceDirectory(pluginRoot, "references");
+  const destination = referenceDirectory(pluginRoot, `skills/${PLUGIN_NAME}/references`);
+  let bytes = 0;
+  for (const name of REFERENCE_FILES) {
+    const value = fs.readFileSync(path.join(source, name));
+    if (!value.equals(fs.readFileSync(path.join(destination, name)))) {
+      throw new Error(`Embedded reference drift: ${name}`);
+    }
+    bytes += value.length;
+  }
+  return { files: REFERENCE_FILES.length, bytes };
+}
+
+export function synchronizeReferenceCopies(pluginRoot) {
+  const source = referenceDirectory(pluginRoot, "references");
+  const destination = referenceDirectory(pluginRoot, `skills/${PLUGIN_NAME}/references`, true);
+  for (const name of REFERENCE_FILES) {
+    fs.writeFileSync(path.join(destination, name), fs.readFileSync(path.join(source, name)));
+  }
+  return inspectReferenceCopies(pluginRoot);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--sync")) {
+    throw new Error("Usage: runtime-cache-contract.mjs [--sync]");
+  }
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const result = args[0] === "--sync" ? synchronizeReferenceCopies(root) : inspectReferenceCopies(root);
+  console.log(JSON.stringify({ status: "pass", ...result }));
+}
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";

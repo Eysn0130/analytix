@@ -14,7 +14,11 @@ const {
   signingInvariantTreeIdentity,
   verifyPythonRuntime,
   verifySitePackages,
-  verifyWheelhouse
+  verifyWheelhouse,
+  wheelInventory,
+  wheelSetSha256,
+  backendAnyioRequirement,
+  assertBackendAnyioRequirement
 } = require('./windows-python-runtime-contract.cjs')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
@@ -272,19 +276,20 @@ function installPythonRuntime() {
   console.log(`[backend-runtime] Python ready at ${preparePythonRuntime(currentRoot)}`)
 }
 
-function installBackendWheelhouse() {
+function downloadBackendWheels(wheelhouse, requirementsPath, isolated = false) {
   const python = resolvePythonCommand()
-  fs.rmSync(WHEELHOUSE_DIR, { recursive: true, force: true })
-  fs.mkdirSync(WHEELHOUSE_DIR, { recursive: true })
+  fs.mkdirSync(wheelhouse, { recursive: true })
   run(
     python.command,
     [
       ...python.argsPrefix,
       '-m',
       'pip',
+      ...(isolated ? ['--isolated'] : []),
       'download',
+      ...(isolated ? ['--index-url', 'https://pypi.org/simple', '--no-cache-dir'] : []),
       '--dest',
-      WHEELHOUSE_DIR,
+      wheelhouse,
       '--only-binary=:all:',
       '--platform',
       'win_amd64',
@@ -296,10 +301,15 @@ function installBackendWheelhouse() {
       'cp311',
       '--require-hashes',
       '--requirement',
-      REQUIREMENTS_LOCK_PATH
+      requirementsPath
     ],
     { stdio: 'inherit' }
   )
+}
+
+function installBackendWheelhouse() {
+  fs.rmSync(WHEELHOUSE_DIR, { recursive: true, force: true })
+  downloadBackendWheels(WHEELHOUSE_DIR, REQUIREMENTS_LOCK_PATH)
   const verified = verifyWheelhouse(WHEELHOUSE_DIR)
   console.log(
     `[backend-runtime] Wheelhouse ready with ${verified.wheels.length} locked wheels ` +
@@ -307,13 +317,9 @@ function installBackendWheelhouse() {
   )
 }
 
-function stageBackendPythonSitePackages() {
+function extractBackendWheels(wheels, destination) {
   const python = resolvePythonCommand()
-  const verifiedWheelhouse = verifyWheelhouse(WHEELHOUSE_DIR)
-  const wheels = verifiedWheelhouse.wheels.map((item) => path.join(WHEELHOUSE_DIR, item.fileName))
-
-  fs.rmSync(SITE_PACKAGES_DIR, { recursive: true, force: true })
-  fs.mkdirSync(SITE_PACKAGES_DIR, { recursive: true })
+  fs.mkdirSync(destination, { recursive: true })
   const extractScript = [
     'import pathlib, shutil, stat, sys, zipfile',
     'target = pathlib.Path(sys.argv[1]).resolve()',
@@ -347,33 +353,96 @@ function stageBackendPythonSitePackages() {
       ...python.argsPrefix,
       '-c',
       extractScript,
-      SITE_PACKAGES_DIR,
+      destination,
       ...wheels
     ],
     { stdio: 'inherit' }
   )
-  pruneProductionPythonTree(SITE_PACKAGES_DIR)
-  const identity = signingInvariantTreeIdentity(SITE_PACKAGES_DIR, [SITE_PACKAGES_MANIFEST_NAME])
-  if (
-    identity.sha256 !== pythonRuntimeLock.sitePackages.contentSha256 ||
-    identity.fileCount !== pythonRuntimeLock.sitePackages.fileCount
-  ) {
-    throw new Error('Staged Python site-packages do not match the frozen content authority')
-  }
-  writeCanonicalJsonAtomic(path.join(SITE_PACKAGES_DIR, SITE_PACKAGES_MANIFEST_NAME), {
+  pruneProductionPythonTree(destination)
+  return signingInvariantTreeIdentity(destination, [SITE_PACKAGES_MANIFEST_NAME])
+}
+
+function writeSitePackagesManifest(destination, frozenLock, frozenLockSha256, verifiedWheelhouse, identity) {
+  writeCanonicalJsonAtomic(path.join(destination, SITE_PACKAGES_MANIFEST_NAME), {
     schemaVersion: 2,
-    lockSha256: pythonRuntimeLockSha256,
-    requirementsLockSha256: pythonRuntimeLock.sitePackages.requirementsLockSha256,
+    lockSha256: frozenLockSha256,
+    requirementsLockSha256: frozenLock.sitePackages.requirementsLockSha256,
     pythonSeries: PYTHON_SERIES,
-    platform: pythonRuntimeLock.sitePackages.platform,
+    platform: frozenLock.sitePackages.platform,
     wheelCount: verifiedWheelhouse.wheels.length,
     wheelSetSha256: verifiedWheelhouse.wheelSetSha256,
     wheels: verifiedWheelhouse.wheels,
     contentSha256: identity.sha256,
     fileCount: identity.fileCount
   })
+}
+
+function stageBackendPythonSitePackages() {
+  const verifiedWheelhouse = verifyWheelhouse(WHEELHOUSE_DIR)
+  const wheels = verifiedWheelhouse.wheels.map((item) => path.join(WHEELHOUSE_DIR, item.fileName))
+  fs.rmSync(SITE_PACKAGES_DIR, { recursive: true, force: true })
+  const identity = extractBackendWheels(wheels, SITE_PACKAGES_DIR)
+  if (
+    identity.sha256 !== pythonRuntimeLock.sitePackages.contentSha256 ||
+    identity.fileCount !== pythonRuntimeLock.sitePackages.fileCount
+  ) {
+    throw new Error('Staged Python site-packages do not match the frozen content authority')
+  }
+  writeSitePackagesManifest(SITE_PACKAGES_DIR, pythonRuntimeLock, pythonRuntimeLockSha256, verifiedWheelhouse, identity)
   verifySitePackages(SITE_PACKAGES_DIR)
   console.log(`[backend-runtime] Staged python site-packages from ${wheels.length} wheels`)
+}
+
+// Candidate authoring never replaces accepted locks or production staging.
+// Admission is a separate reviewed source change followed by the normal guards.
+function assertCandidateDirectory(outputRoot, sourceRoot = REPO_ROOT) {
+  const resolved = path.resolve(outputRoot)
+  const stat = fs.lstatSync(resolved)
+  const real = fs.realpathSync(resolved)
+  const temporaryRoot = fs.realpathSync(os.tmpdir())
+  const relative = path.relative(temporaryRoot, real)
+  const sourceRelative = path.relative(fs.realpathSync(sourceRoot), real)
+  const insideSource = !sourceRelative || (sourceRelative !== '..' && !sourceRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(sourceRelative))
+  if (!stat.isDirectory() || stat.isSymbolicLink() || real !== resolved ||
+      insideSource || !relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || fs.readdirSync(real).length) {
+    throw new Error('Frozen candidate output must be an existing empty regular directory below the temporary root and outside the source tree')
+  }
+  return real
+}
+
+function authorFrozenCandidate(outputRoot) {
+  const output = assertCandidateDirectory(outputRoot)
+  const backendLockText = fs.readFileSync(path.join(REPO_ROOT, 'backend', 'uv.lock'), 'utf8')
+  const acceptedRequirements = fs.readFileSync(REQUIREMENTS_LOCK_PATH, 'utf8')
+  const anyioLines = acceptedRequirements.match(/^anyio==[^\n]+$/gmu)
+  if (!anyioLines || anyioLines.length !== 1) throw new Error('Frozen requirements must contain one AnyIO pin')
+  const requirements = acceptedRequirements.replace(/^anyio==[^\n]+$/mu, backendAnyioRequirement(backendLockText))
+  assertBackendAnyioRequirement(requirements, backendLockText)
+  const requirementsPath = path.join(output, path.basename(REQUIREMENTS_LOCK_PATH))
+  fs.writeFileSync(requirementsPath, requirements, { flag: 'wx', mode: 0o600 })
+  const wheelhouse = path.join(output, 'backend-wheelhouse')
+  downloadBackendWheels(wheelhouse, requirementsPath, true)
+  const wheels = wheelInventory(wheelhouse)
+  if (wheels.length !== pythonRuntimeLock.sitePackages.wheelCount) throw new Error('Candidate changes the frozen dependency count')
+  const verified = { wheels, wheelSetSha256: wheelSetSha256(wheels) }
+  const sitePackages = path.join(output, 'python-site-packages')
+  const identity = extractBackendWheels(wheels.map((wheel) => path.join(wheelhouse, wheel.fileName)), sitePackages)
+  const candidate = {
+    ...pythonRuntimeLock,
+    sitePackages: {
+      ...pythonRuntimeLock.sitePackages,
+      requirementsLockSha256: fileSha256(requirementsPath),
+      wheelCount: wheels.length,
+      wheelSetSha256: verified.wheelSetSha256,
+      contentSha256: identity.sha256,
+      fileCount: identity.fileCount
+    }
+  }
+  const candidateLockPath = path.join(output, 'windows-python-runtime-lock.json')
+  writeCanonicalJsonAtomic(candidateLockPath, candidate)
+  writeSitePackagesManifest(sitePackages, candidate, fileSha256(candidateLockPath), verified, identity)
+  console.log(`[backend-runtime] Review frozen candidate at ${output}; accepted locks and production staging are unchanged`)
+  return candidate
 }
 
 function stageArchiveExtractor() {
@@ -400,7 +469,11 @@ function stageArchiveExtractor() {
   console.log(`[backend-runtime] Staged archive extractor 7za.exe sha256=${sha256}`)
 }
 
-function main() {
+function main(args = process.argv.slice(2)) {
+  if (args.length === 2 && args[0] === '--freeze-candidate') return authorFrozenCandidate(args[1])
+  if (args.length) throw new Error('Usage: build-windows-backend-runtime-assets.cjs [--freeze-candidate <empty-temporary-directory>]')
+  assertBackendAnyioRequirement(fs.readFileSync(REQUIREMENTS_LOCK_PATH, 'utf8'),
+    fs.readFileSync(path.join(REPO_ROOT, 'backend', 'uv.lock'), 'utf8'))
   installPythonRuntime()
   installBackendWheelhouse()
   stageBackendPythonSitePackages()
@@ -421,6 +494,9 @@ module.exports = {
   PYTHON_ASSET_SHA256,
   PYTHON_RUNTIME_VERSION,
   REQUIREMENTS_LOCK_PATH,
+  assertCandidateDirectory,
+  authorFrozenCandidate,
+  extractBackendWheels,
   installBackendWheelhouse,
   installPythonRuntime,
   preparePythonRuntime,
