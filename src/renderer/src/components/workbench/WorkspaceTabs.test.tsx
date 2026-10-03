@@ -197,6 +197,31 @@ describe('manual workspace tabs', () => {
       expect(strip.list.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }))
     } finally { delete document.documentElement.dataset.motionReduced }
   })
+  it('dispatches shared layout commands once and leaves collapse focus to its owner', async () => {
+    const onCollapse = vi.fn()
+    const onToggleFocus = vi.fn()
+    const globalToggle = document.createElement('button')
+    globalToggle.setAttribute('aria-controls', 'workbench-right-workspace')
+    document.body.append(globalToggle)
+    const stealFocus = vi.spyOn(globalToggle, 'focus')
+    try {
+      for (const focused of [false, true]) {
+        await act(async () => root.render(createElement(WorkspaceTabs, {tabs:[a,b],activeTabId:a.id,selectorOpen:false,focused,onSelect,onClose,onReorder:vi.fn(),onAdd:vi.fn(),onToggleFocus,onCollapse})))
+        const label = i18n.t(focused ? 'common:workbenchDock' : 'common:workbenchFocus')
+        const focusButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === label)
+        expect(focusButtons).toHaveLength(1)
+        expect(focusButtons[0].getAttribute('aria-pressed')).toBe(String(focused))
+        await act(async () => focusButtons[0].click())
+      }
+      expect(onToggleFocus).toHaveBeenCalledTimes(2)
+      const collapseButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === i18n.t('common:workbenchCollapse'))
+      expect(collapseButtons).toHaveLength(1)
+      await act(async () => collapseButtons[0].click())
+      await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+      expect(onCollapse).toHaveBeenCalledExactlyOnceWith()
+      expect(stealFocus).not.toHaveBeenCalled()
+    } finally { globalToggle.remove() }
+  })
   it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
     const onOpen = vi.fn()
     await act(async () => root.render(createElement(WorkspaceToolSelector, { onOpen, filesEnabled: true, sideChatEnabled: false, planEnabled: false })))

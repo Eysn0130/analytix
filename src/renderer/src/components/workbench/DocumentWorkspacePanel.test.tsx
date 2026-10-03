@@ -27,9 +27,9 @@ afterEach(async () => {
   Reflect.deleteProperty(window,'analytix');vi.unstubAllGlobals()
   useNativeOfficeStore.setState({target:null,view:null,error:null})
 })
-async function render() {
+async function render(focused = false) {
   await act(async () => root.render(createElement(DocumentWorkspacePanel,{
-    threadId:'current-main',visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt,focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
+    threadId:'current-main',visible:true,input:'existing draft',setInput:vi.fn(),onSubmitPrompt,focused,onToggleFocus:vi.fn(),onCollapse:vi.fn(),onOpenSettings:vi.fn(),onFocusConversation:vi.fn(),fileBrowser:createElement('div',{'data-testid':'file-browser'},'Files')
   })))
 }
 async function select(action:string) {
@@ -68,4 +68,50 @@ it('passes the same main thread into the text document export surface', async ()
   expect(container.querySelector('[data-testid="write-panel"]')?.getAttribute('data-thread')).toBe('current-main')
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="write-panel"]')!.click())
   expect(onSubmitPrompt).toHaveBeenCalledExactlyOnceWith('Revise the selected paragraph')
+})
+
+it('keeps document actions while the shared workspace chrome owns layout controls', async () => {
+  useNativeOfficeStore.setState({target:null,view:null})
+  useWriteWorkspaceStore.setState({activeFilePath:'/synthetic/notes.md'})
+  for (const focused of [false, true]) {
+    await render(focused)
+    expect(container.querySelector('[aria-label="rightPanelFiles"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="workbenchCloseDocument"]')).not.toBeNull()
+    expect(container.querySelectorAll('[aria-label="workbenchFocus"], [aria-label="workbenchDock"], [aria-label="workbenchCollapse"]')).toHaveLength(0)
+  }
+  const files = container.querySelector<HTMLButtonElement>('[aria-label="rightPanelFiles"]')!
+  await act(async () => files.click())
+  expect(container.querySelector('[data-testid="file-browser"]')).not.toBeNull()
+  await act(async () => container.querySelector('section')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
+  expect(container.querySelector('[data-testid="file-browser"]')).toBeNull()
+  expect(document.activeElement).toBe(files)
+})
+
+it('preserves text close rejection, recent reopen and workspace files', async () => {
+  useNativeOfficeStore.setState({target:null,view:null})
+  const original = useWriteWorkspaceStore.getState()
+  const openWorkspaceHome = vi.fn(async () => false)
+  const openFile = vi.fn(async () => undefined)
+  useWriteWorkspaceStore.setState({activeFilePath:'/synthetic/notes.md',openWorkspaceHome,openFile})
+  try {
+    await render()
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="workbenchCloseDocument"]')!
+    await act(async () => close.click())
+    expect(openWorkspaceHome).toHaveBeenCalledExactlyOnceWith('/synthetic')
+    expect(container.querySelector('[aria-label="workbenchReopenDocument"]')).toBeNull()
+    expect(container.querySelector('[data-testid="file-browser"]')).toBeNull()
+    openWorkspaceHome.mockImplementationOnce(async () => {
+      useWriteWorkspaceStore.setState({activeFilePath:null})
+      return true
+    })
+    await act(async () => close.click())
+    expect(openWorkspaceHome).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-testid="file-browser"]')).not.toBeNull()
+    const reopen = container.querySelector<HTMLButtonElement>('[aria-label="workbenchReopenDocument"]')!
+    expect(reopen).not.toBeNull()
+    await act(async () => reopen.click())
+    expect(openFile).toHaveBeenCalledExactlyOnceWith('/synthetic','/synthetic/notes.md')
+  } finally {
+    useWriteWorkspaceStore.setState({openWorkspaceHome:original.openWorkspaceHome,openFile:original.openFile})
+  }
 })

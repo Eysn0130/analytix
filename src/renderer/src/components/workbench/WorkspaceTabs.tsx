@@ -118,10 +118,7 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
       <div className="workspace-tabs-actions">
         <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={20} /></button>
         <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-        <button type="button" onClick={() => {
-          onCollapse()
-          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.focus())
-        }} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={20} /></button>
+        <button type="button" onClick={() => onCollapse()} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={20} /></button>
       </div>
     </header>
   )
