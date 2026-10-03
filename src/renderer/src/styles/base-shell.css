@@ -3548,6 +3548,14 @@ pre {
   }
 }
 
+.ds-browser-compact-actions { display: none; }
+@container (max-width: 320px) {
+  .ds-browser-history,
+  .ds-browser-open-inline,
+  .ds-browser-address-icon { display: none; }
+  .ds-browser-compact-actions { display: flex; }
+}
+
 .ds-frosted {
   backdrop-filter: blur(18px);
 }

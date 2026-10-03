@@ -443,7 +443,7 @@ export function DevBrowserPanel({
     >
       <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
         <form onSubmit={submitUrl} className="ds-browser-addressbar flex h-12 min-w-0 items-center gap-1.5 px-2">
-          <div className="flex shrink-0 items-center gap-1 rounded-full bg-ds-surface-subtle p-0.5 dark:bg-white/[0.08]">
+          <div className="ds-browser-history flex shrink-0 items-center gap-1 rounded-full bg-ds-surface-subtle p-0.5 dark:bg-white/[0.08]">
             <button
               type="button"
               onClick={goBack}
@@ -482,7 +482,7 @@ export function DevBrowserPanel({
 
           <div title={tabLabel}
             className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border border-ds-border-muted bg-ds-surface-subtle px-3 text-ds-muted transition focus-within:border-ds-border-strong focus-within:bg-white dark:bg-white/[0.07] dark:focus-within:bg-white/10">
-            <Globe2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            <Globe2 className="ds-browser-address-icon h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             <input
               value={draftUrl}
               onChange={(event) => setDraftUrl(event.target.value)}
@@ -496,7 +496,7 @@ export function DevBrowserPanel({
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="submit"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+              className="ds-browser-open-inline inline-flex h-8 w-8 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
               aria-label={t('browserOpen')}
               title={t('browserOpen')}
             >
@@ -517,6 +517,28 @@ export function DevBrowserPanel({
                 <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
               </summary>
               <div style={{ width: 'min(14rem, calc(100cqw - 16px))' }} className="absolute right-0 top-full z-50 mt-1 flex flex-col gap-1 rounded-xl border border-ds-border bg-ds-card p-1 text-[12px] shadow-lg">
+                <div className="ds-browser-compact-actions flex-col gap-1">
+                  <button type="button" onClick={goBack} disabled={!canNavigateBack}
+                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
+                    aria-label={t('browserBack')}>
+                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />{t('browserBack')}
+                  </button>
+                  <button type="button" onClick={goForward} disabled={!canNavigateForward}
+                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
+                    aria-label={t('browserForward')}>
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />{t('browserForward')}
+                  </button>
+                  <button type="button" onClick={reload} disabled={!activeUrl}
+                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
+                    aria-label={t('browserReload')}>
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />{t('browserReload')}
+                  </button>
+                  <button type="submit"
+                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
+                    aria-label={t('browserOpen')}>
+                    <Send className="h-3.5 w-3.5" aria-hidden="true" />{t('browserOpen')}
+                  </button>
+                </div>
                 <button type="button" onClick={() => setAutoFollow((value) => !value)}
                   className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
                   aria-label={t('browserAutoFollow')} aria-pressed={autoFollow}>

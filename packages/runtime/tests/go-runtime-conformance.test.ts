@@ -2967,7 +2967,10 @@ function desktopMainIpcBoundaryControlCase() {
   }
 }
 
-function rendererRouteSurfaceSovereigntyControlCase() {
+function rendererRouteSurfaceSovereigntyControlCase(sourceOverrides: {
+  workbench?: string
+  baseShellCss?: string
+} = {}) {
   const sourceFiles = {
     workbench: 'src/renderer/src/components/Workbench.tsx' as const,
     workbenchRouteSurfaceTest: 'src/renderer/src/components/Workbench.route-surface.test.ts' as const,
@@ -2981,7 +2984,7 @@ function rendererRouteSurfaceSovereigntyControlCase() {
     workbenchShell: 'src/renderer/src/components/workbench/WorkbenchShell.tsx' as const,
     baseShellCss: 'src/renderer/src/styles/base-shell.css' as const
   }
-  const workbenchSource = repoSource(sourceFiles.workbench)
+  const workbenchSource = sourceOverrides.workbench ?? repoSource(sourceFiles.workbench)
   const routeSurfaceTestSource = repoSource(sourceFiles.workbenchRouteSurfaceTest)
   const chatStoreTypesSource = repoSource(sourceFiles.chatStoreTypes)
   const sidebarSource = repoSource(sourceFiles.sidebar)
@@ -2991,7 +2994,7 @@ function rendererRouteSurfaceSovereigntyControlCase() {
   const createLoopRuntimeSource = repoSource(sourceFiles.createLoopRuntime)
   const shellNavigationControlsSource = repoSource(sourceFiles.shellNavigationControls)
   const workbenchShellSource = repoSource(sourceFiles.workbenchShell)
-  const baseShellCssSource = repoSource(sourceFiles.baseShellCss)
+  const baseShellCssSource = sourceOverrides.baseShellCss ?? repoSource(sourceFiles.baseShellCss)
   const topLevelRouteSurfaceSource = [
     workbenchSource,
     pluginMarketplaceViewSource,
@@ -3059,6 +3062,24 @@ function rendererRouteSurfaceSovereigntyControlCase() {
   const appRouteUnionKunCompatible = chatStoreTypesSource.includes(
     "export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule'"
   ) && appRoutes.every((route) => routeSurfaceTestSource.includes(route))
+  const headerStart = workbenchSource.indexOf('<header ref={windowChromeRef} className="ds-window-chrome"')
+  const headerEnd = workbenchSource.indexOf('</header>', headerStart)
+  const bodyStart = workbenchSource.indexOf('<div className="ds-product-body')
+  const chromeOwnsNavigation = headerStart >= 0 && headerEnd > headerStart && bodyStart > headerEnd &&
+    workbenchSource.slice(headerStart, headerEnd).includes('<ShellNavigationControls')
+  const nativeRule = baseShellCssSource.match(/:root\[data-platform='darwin'\]\s*\{([^}]*)\}/)?.[1] ?? ''
+  const chromeRule = baseShellCssSource.match(/\.ds-window-chrome\s*\{([^}]*)\}/)?.[1] ?? ''
+  const navigationRule = baseShellCssSource.match(/\.ds-window-chrome-navigation\s*\{([^}]*)\}/)?.[1] ?? ''
+  // The shared chrome now reserves the native exclusion area for every body
+  // route; the old route-local plugin-tab selector is no longer its owner.
+  const nativeSafeInsetCssPresent = chromeOwnsNavigation &&
+    nativeRule.includes('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))') &&
+    /--ds-window-controls-safe-inset: calc\(\s*\(\s*var\(--ds-macos-traffic-light-left\) \+ var\(--ds-macos-traffic-light-width\) \+ var\(--ds-macos-traffic-light-gap\)\s*\) \/ var\(--ds-ui-scale\)\s*\);/.test(nativeRule) &&
+    nativeRule.includes('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);') &&
+    chromeRule.includes('flex: 0 0 max(42px, var(--ds-window-controls-safe-block));') &&
+    chromeRule.includes('calc(var(--ds-titlebar-safe-header-left) + 152px)') &&
+    navigationRule.includes('flex: 0 0 var(--ds-window-chrome-navigation-width);') &&
+    navigationRule.includes('padding-left: var(--ds-titlebar-safe-header-left);')
   const evidence = {
     dormantWorkflowCodeExists: workflowCreateLoopViewSource.includes('WorkflowCreateLoopView') &&
       createLoopRuntimeSource.includes('runCreateLoopWorkflow'),
@@ -3080,10 +3101,7 @@ function rendererRouteSurfaceSovereigntyControlCase() {
       workbenchShellSource.includes('ds-no-drag ds-stage-surface') &&
       !workbenchShellSource.includes('ds-drag ds-stage-surface') &&
       !workbenchShellSource.includes('ds-workbench-shell ds-drag'),
-    nativeSafeInsetCssPresent: baseShellCssSource.includes('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))') &&
-      baseShellCssSource.includes('--ds-window-controls-safe-inset: calc(') &&
-      baseShellCssSource.includes('.ds-shell-navigation-controls') &&
-      baseShellCssSource.includes('.ds-plugin-marketplace-tabs[data-left-sidebar-collapsed')
+    nativeSafeInsetCssPresent
   }
   return {
     sourceContractId: 'renderer-route-surface-sovereignty-v1' as const,
@@ -5928,6 +5946,37 @@ async function establishD0242ExplicitProviderRegistryWinner(
   }
   await selectD0242ProviderRegistryWinner(server, context, 'deepseek')
 }
+
+describe('renderer native safe area source contract', () => {
+  const workbench = repoSource('src/renderer/src/components/Workbench.tsx')
+  const css = repoSource('src/renderer/src/styles/base-shell.css')
+
+  it('retains the independent true native-safe-area fixture and no-drag controls', () => {
+    const result = rendererRouteSurfaceSovereigntyControlCase()
+    const fixture = loadGoG5FullLoopContract().controlExecutableCases.rendererRouteSurfaceSovereignty
+    expect(result.evidence.nativeSafeInsetCssPresent).toBe(true)
+    expect(result.expected.nativeControlsSafeInset).toBe(true)
+    expect(result.evidence.shellNavigationControlsNoDrag).toBe(true)
+    expect(fixture.evidence.nativeSafeInsetCssPresent).toBe(true)
+    expect(fixture.expected.nativeControlsSafeInset).toBe(true)
+  })
+
+  it.each([
+    ['safe height', { baseShellCss: css.replace('flex: 0 0 max(42px, var(--ds-window-controls-safe-block));', 'flex: 0 0 42px;') }],
+    ['safe padding', { baseShellCss: css.replace('padding-left: var(--ds-titlebar-safe-header-left);', 'padding-left: 0px;') }],
+    ['native inset token chain', { baseShellCss: css.replace('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);', '--ds-titlebar-safe-header-left: 0px;') }],
+    ['scaled safe block', { baseShellCss: css.replace('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))', '--ds-window-controls-safe-block: 0px') }],
+    ['non-shrinking navigation reservation', { baseShellCss: css.replace('flex: 0 0 var(--ds-window-chrome-navigation-width);', 'flex: 1 1 auto;') }],
+    ['navigation owner before body', { workbench: workbench
+      .replace('<ShellNavigationControls', '<LegacyMovedControl')
+      .replace('<div className="ds-product-body', '<ShellNavigationControls /><div className="ds-product-body') }]
+  ] as const)('rejects removal of %s', (_name, sourceOverrides) => {
+    const result = rendererRouteSurfaceSovereigntyControlCase(sourceOverrides)
+    expect(result.evidence.nativeSafeInsetCssPresent).toBe(false)
+    expect(result.expected.nativeControlsSafeInset).toBe(false)
+    expect(result.evidence.shellNavigationControlsNoDrag).toBe(true)
+  })
+})
 
 describe('Go runtime kernel conformance manifest', () => {
   // The real protected command probe needs macOS containment. Linux's
