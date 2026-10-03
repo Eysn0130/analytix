@@ -116,11 +116,11 @@ export const REQUIRED_PRODUCT_LICENSE_TEXT = Object.freeze([
 export const REQUIRED_PRODUCT_LICENSE_SHA256 =
   '339d7dd55119d76a0286d2be28868671e8905ad65df2967324a1b75db8d1f7a8'
 
-// Bind the complete reviewed notice, including the already recorded Office
-// generation dependency inventory. Keep this expected digest independent of
+// Bind the complete reviewed notice, including the Office generation
+// inventory and the admitted OpenAI Apps SDK UI MIT icon notices. Keep this expected digest independent of
 // the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '1b6896b8f7e985fcb10a46ebe32dd3531e42b402e0e68f12fb2ff0372962f64b'
+  'f616fad3d31c19dfd6a6988c84cc97f85a07344252b933683524e4e1bd1dcd83'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 
@@ -2092,6 +2092,27 @@ function selfTest() {
     exactArtifactPath: join(REPO_ROOT, 'this-exact-artifact-does-not-exist.asar')
   }).exactFormalArtifact
   const sourcePlanMissing = evaluateArtifactLegalPlan({ ...base, noticeText: '' })
+  // These variants must fail against the independent fixed digest above.
+  // The drift replaces exactly the final newline byte, retaining all other bytes.
+  const noticeVariants = [null, `${validNotice.slice(0, -1)}x`]
+  const sourceNoticeDrift = noticeVariants.map((noticeText) =>
+    evaluateArtifactLegalPlan({ ...base, noticeText }).sourcePackagePlan)
+  const exactNoticeDrift = noticeVariants.map((noticeText, index) => {
+    const entries = { ...artifactBaseEntries }
+    if (noticeText === null) delete entries[NOTICE_ENTRY]
+    else entries[NOTICE_ENTRY] = noticeText
+    return evaluateArtifactLegalPlan({ ...base, artifact: {
+      label: `self-test-notice-missing-or-one-byte-drift-${index + 1}`,
+      entries
+    } }).exactFormalArtifact
+  })
+  const sourceNoticeMissingAndDriftBlocked = sourceNoticeDrift.every((plan) =>
+    plan.passed === false && plan.blockers.some((entry) =>
+      entry.code === 'third-party-notice-content'))
+  const exactNoticeMissingAndDriftBlocked = exactNoticeDrift.every((inventory) =>
+    inventory.engineeringAdmission === false && inventory.status === 'blocked' &&
+    inventory.mandatoryBlockers.some((entry) =>
+      entry.code === 'EXACT_ARTIFACT_THIRD_PARTY_NOTICE_MISSING_OR_DRIFTED'))
   const sourcePlanLicenseDrift = evaluateArtifactLegalPlan({
     ...base,
     productLicenseText: `${validProductLicense}\ntrailing drift\n`
@@ -2341,6 +2362,8 @@ function selfTest() {
     sourcePlanMissing.passed === false &&
     sourcePlanMissing.sourcePackagePlan.passed === false &&
     sourcePlanLicenseDrift.sourcePackagePlan.passed === false &&
+    sourceNoticeMissingAndDriftBlocked &&
+    exactNoticeMissingAndDriftBlocked &&
     sha256Text(legacyProductLicense) === '4a0f06cea251953ef0b0a5c91f914ad371fef6ae6efc9cb3f9096d3f09863adb' &&
     sourceCopyrightIdentityDrift.every((entry) => entry.sourcePackagePlan.passed === false) &&
     exactCopyrightIdentityDrift.every((entry) =>
@@ -2414,6 +2437,8 @@ function selfTest() {
       commercialDecisionSeparated: inventory.commercialLicenseDecisions.length >= 1 && inventory.engineeringAdmission === true,
       sourcePlanDoesNotAuthorizeExact: sourcePlanMissing.artifactAdmissionGatePassed === false && sourcePlanMissing.sourcePackagePlan.passed === false,
       sourceLicenseDriftBlocked: sourcePlanLicenseDrift.sourcePackagePlan.passed === false,
+      sourceNoticeMissingAndOneByteDriftBlocked: sourceNoticeMissingAndDriftBlocked,
+      exactNoticeMissingAndOneByteDriftBlocked: exactNoticeMissingAndDriftBlocked,
       legacyOwnerAndHashBlocked: sha256Text(legacyProductLicense) ===
         '4a0f06cea251953ef0b0a5c91f914ad371fef6ae6efc9cb3f9096d3f09863adb' &&
         sourceCopyrightIdentityDrift[0].sourcePackagePlan.passed === false &&

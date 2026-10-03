@@ -1,7 +1,7 @@
 .ds-markdown {
   color: var(--ds-text);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 .ds-markdown .space-y-4 > :not([hidden]) ~ :not([hidden]) {
@@ -22,29 +22,29 @@
 .ds-markdown blockquote,
 .ds-markdown pre,
 .ds-markdown table {
-  margin: 0 0 0.42rem;
+  margin: 0 0 0.75rem;
 }
 
 .ds-markdown h1,
 .ds-markdown h2,
 .ds-markdown h3 {
-  margin: 0 0 0.42rem;
-  font-family: 'SF Pro Display', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  margin: 0 0 0.75rem;
+  font-family: inherit;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.2;
 }
 
 .ds-markdown h1 {
-  font-size: 1.24rem;
+  font-size: 1.5rem;
 }
 
 .ds-markdown h2 {
-  font-size: 1.08rem;
+  font-size: 1.25rem;
 }
 
 .ds-markdown h3 {
-  font-size: 0.98rem;
+  font-size: 1.125rem;
 }
 
 .ds-markdown ul,
@@ -218,14 +218,14 @@
 }
 
 .ds-markdown .ds-code-block {
-  margin: 0 0 0.48rem;
+  margin: 0 0 0.75rem;
   width: 100%;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--ds-border-strong) 72%, var(--ds-border));
-  border-radius: 14px;
+  border: 1px solid var(--ds-border);
+  border-radius: 16px;
   background: var(--ds-code-block-bg, var(--ds-pre-bg));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ds-bg-canvas) 62%, transparent);
+  box-shadow: none;
   box-sizing: border-box;
 }
 
@@ -262,7 +262,7 @@
 .ds-markdown .ds-code-block-language {
   min-width: 0;
   font-family: 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: lowercase;
   letter-spacing: 0.02em;
   color: var(--ds-text-muted);
@@ -276,8 +276,8 @@
 
 .ds-markdown .ds-code-block-action {
   display: inline-flex;
-  height: 1.35rem;
-  width: 1.35rem;
+  height: 1.75rem;
+  width: 1.75rem;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -325,9 +325,9 @@
   border: 0;
   border-radius: 0;
   background: transparent !important;
-  padding: 0.52rem 0.66rem;
-  font-size: 12px;
-  line-height: 1.4;
+  padding: 1rem;
+  font-size: 14px;
+  line-height: 1.6;
   box-sizing: border-box;
 }
 
@@ -358,16 +358,16 @@ html[data-theme='dark'] .ds-markdown .ds-code-block-html > pre span {
 }
 
 .ds-code-sidebar {
-  --ds-code-sidebar-editor-bg: #fbfcff;
-  --ds-code-sidebar-gutter-bg: #f3f6fb;
-  --ds-code-sidebar-active-line-bg: rgba(59, 130, 216, 0.13);
+  --ds-code-sidebar-editor-bg: var(--ds-bg-canvas);
+  --ds-code-sidebar-gutter-bg: var(--ds-card-muted);
+  --ds-code-sidebar-active-line-bg: var(--ds-surface-hover);
   background: var(--ds-bg-canvas);
 }
 
 html[data-theme='dark'] .ds-code-sidebar {
-  --ds-code-sidebar-editor-bg: #151c2e;
-  --ds-code-sidebar-gutter-bg: #1b2338;
-  --ds-code-sidebar-active-line-bg: rgba(111, 176, 232, 0.18);
+  --ds-code-sidebar-editor-bg: var(--ds-bg-canvas);
+  --ds-code-sidebar-gutter-bg: var(--ds-card-muted);
+  --ds-code-sidebar-active-line-bg: var(--ds-surface-hover);
 }
 
 .ds-code-sidebar-topbar {
@@ -458,9 +458,9 @@ html[data-theme='dark'] .ds-code-sidebar {
   align-items: center;
   justify-content: center;
   border-radius: 5px;
-  background: #1b2338;
+  background: var(--ds-chip-muted-bg);
   padding: 0 0.3rem;
-  color: #ffffff;
+  color: var(--ds-text-muted);
   font-family: 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace;
   font-size: 9px;
   font-weight: 700;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowRight, FileText, Loader2, Save, Sparkles, X } from 'lucide-react'
+import { ArrowRight, FileText, Loader2, Save, Sparkles, X } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { sddUnitImageDir, sddUnitProtoDir } from '@shared/sdd'
@@ -1104,7 +1104,7 @@ export function SddDraftEditorView({
                 type="button"
                 onClick={onNext}
                 disabled={nextDisabled || readOnly}
-                className="sdd-next-button inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                className="sdd-next-button inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {readOnly ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
@@ -1134,7 +1134,7 @@ export function SddDraftEditorView({
 
       <div ref={editorPaneRef} className="min-h-0 min-w-0 flex-1 overflow-hidden pb-3 pt-2">
         <div
-          className={`sdd-editor-card relative h-full min-h-0 overflow-hidden rounded-[18px] border border-ds-border bg-ds-card/88 shadow-[0_20px_56px_rgba(20,47,95,0.06)] ${
+          className={`sdd-editor-card relative h-full min-h-0 overflow-hidden rounded-[18px] border border-ds-border bg-ds-card/88 shadow-[var(--ax-shadow-floating)] ${
             upgrading ? 'is-upgrading' : ''
           }`}
         >

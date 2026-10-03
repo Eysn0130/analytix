@@ -45,16 +45,18 @@ describe('Analytix visual system baseline', () => {
     expect(AnalytixIconRegistry.icons.terminal).toBeTruthy()
   })
 
-  it('uses the CodexDesktop pin icon geometry for pinned thread states', () => {
+  it('uses consistent licensed outline icons and a distinct pinned fill', () => {
     const outline = renderToStaticMarkup(createElement(AnalytixIconRegistry.icons.pin))
     const filled = renderToStaticMarkup(createElement(AnalytixIconRegistry.icons.pinFilled))
 
     expect(outline).toContain('width="20"')
-    expect(outline).toContain('viewBox="0 0 20 20"')
-    expect(outline).toContain('M11.8349 12.5C11.8349')
-    expect(filled).toContain('width="24"')
+    expect(outline).toContain('viewBox="0 0 24 24"')
+    expect(outline).toContain('stroke-width="1.75"')
+    expect(outline).toContain('fill="none"')
+    expect(filled).toContain('width="20"')
     expect(filled).toContain('viewBox="0 0 24 24"')
-    expect(filled).toContain('M12.8636 3.26029C13.9444')
+    expect(filled).toContain('fill="currentColor"')
+    expect(renderToStaticMarkup(createElement(AnalytixIconRegistry.icons.pin, { width: 14, height: 14 }))).toContain('width="14"')
   })
 
   it('maps surface, elevation, border, radius, and motion tokens to CSS variables', () => {

@@ -20,7 +20,7 @@ import {
   Search,
   Settings,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import {
   loadPreferredSkillRootId,
@@ -3379,14 +3379,14 @@ function HubSkillDetailModal({
               aria-label={enabled ? t('pluginSkillDisable') : t('pluginSkillEnable')}
               disabled={!canToggleSkill || toggleBusy}
               onClick={() => void handleToggleSkill()}
-              className={`mt-1 flex h-7 w-12 items-center rounded-full p-0.5 transition disabled:cursor-not-allowed disabled:opacity-60 ${enabled ? 'justify-end bg-[#2f98ff]' : 'justify-start bg-[#d8d8d8] dark:bg-ds-border'}`}
+              className={`mt-1 flex h-7 w-12 items-center rounded-full p-0.5 transition disabled:cursor-not-allowed disabled:opacity-60 ${enabled ? 'justify-end bg-accent' : 'justify-start bg-[#d8d8d8] dark:bg-ds-border'}`}
             >
               {toggleBusy ? (
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm">
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full shadow-sm ${enabled ? 'bg-[var(--ds-composer-primary-action-fg)]' : 'bg-ds-card'}`}>
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-[#6f6f6f]" strokeWidth={2} />
                 </span>
               ) : (
-                <span className="h-6 w-6 rounded-full bg-white shadow-sm" />
+                <span className={`h-6 w-6 rounded-full shadow-sm ${enabled ? 'bg-[var(--ds-composer-primary-action-fg)]' : 'bg-ds-card'}`} />
               )}
             </button>
             <div className="relative">

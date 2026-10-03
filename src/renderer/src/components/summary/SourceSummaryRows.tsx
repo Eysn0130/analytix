@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { ExternalLink, Globe2, Wrench } from 'lucide-react'
+import { ExternalLink, Globe2, Wrench } from '../../design/AnalytixUiIcons'
 import type {
   CoreThreadSummarySideChatJson,
   CoreThreadSummarySourceJson

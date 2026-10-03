@@ -15,7 +15,7 @@ import {
   ReceiptText,
   UsersRound,
   X
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { GitBranchesResult } from '@shared/git-branches'
 import type {
   CoreThreadSummaryResponseJson,
@@ -137,7 +137,7 @@ export function isThreadSummaryPublicationBlocked(threadId: string): boolean {
   ))
 }
 
-function useCaseOverviewState(): CaseOverviewState {
+function useCaseOverviewState(visible: boolean): CaseOverviewState {
   const [caseContext, setCaseContext] = useState(() => getSharedActiveCaseContext())
   const [state, setState] = useState<CaseOverviewState>(() => {
     const caseId = String(caseContext?.caseId || '').trim()
@@ -188,15 +188,18 @@ function useCaseOverviewState(): CaseOverviewState {
       })
   }, [])
 
-  useEffect(() => subscribeSharedActiveCaseContext(setCaseContext, { emitCurrent: true }), [])
+  useEffect(() => {
+    if (!visible) return undefined
+    return subscribeSharedActiveCaseContext(setCaseContext, { emitCurrent: true })
+  }, [visible])
 
   useEffect(() => {
-    loadCaseOverview(caseContext?.caseId ?? '')
-  }, [caseContext?.caseId, loadCaseOverview])
+    if (visible) loadCaseOverview(caseContext?.caseId ?? '')
+  }, [caseContext?.caseId, loadCaseOverview, visible])
 
   useEffect(() => {
     const caseId = String(caseContext?.caseId || '').trim()
-    if (!caseId) return undefined
+    if (!visible || !caseId) return undefined
     return subscribeSharedCaseOverview(
       caseId,
       (overview) => {
@@ -204,13 +207,14 @@ function useCaseOverviewState(): CaseOverviewState {
       },
       { emitCurrent: true }
     )
-  }, [caseContext?.caseId])
+  }, [caseContext?.caseId, visible])
 
   return state
 }
 
 export function ThreadSummaryPanel({
   activeThreadId,
+  visible = true,
   className = '',
   onCollapse,
   onInspectChildAgent,
@@ -220,6 +224,7 @@ export function ThreadSummaryPanel({
   onDiagnosticsFocusHandled
 }: {
   activeThreadId: string | null
+  visible?: boolean
   className?: string
   onCollapse: () => void
   onInspectChildAgent?: (subagents: CoreThreadSummarySubagentJson[], selectedKey: string) => void
@@ -240,7 +245,7 @@ export function ThreadSummaryPanel({
   const [localDiagnosticsFocus, setLocalDiagnosticsFocus] = useState<RuntimeDiagnosticsFocus | null>(null)
   const [outputState, setOutputState] = useState<OutputState>({ status: 'closed' })
   const [gitInfo, setGitInfo] = useState<GitBranchesResult | null>(null)
-  const caseOverview = useCaseOverviewState()
+  const caseOverview = useCaseOverviewState(visible)
   const liveRefreshMarkerRef = useRef<ThreadSummarySeqRefreshMarker>({ threadId: null, seq: 0 })
   const activeThreadIdRef = useRef(activeThreadId)
   const summaryLoadGenerationRef = useRef(0)
@@ -261,6 +266,7 @@ export function ThreadSummaryPanel({
   const effectiveDiagnosticsFocus = diagnosticsFocus ?? localDiagnosticsFocus
 
   useEffect(() => {
+    if (!visible) return undefined
     const root = workspaceRoot.trim()
     if (!root || typeof window.analytix?.workspace?.getGitBranches !== 'function') {
       setGitInfo(null)
@@ -278,9 +284,10 @@ export function ThreadSummaryPanel({
     return () => {
       cancelled = true
     }
-  }, [workspaceRoot])
+  }, [visible, workspaceRoot])
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'refresh') => {
+    if (!visible) return
     if (!activeThreadId) {
       summaryLoadGenerationRef.current += 1
       setState({ status: 'ready', data: emptySummary(activeThreadId ?? ''), error: null })
@@ -324,34 +331,36 @@ export function ThreadSummaryPanel({
         error: message
       }))
     }
-  }, [activeThreadId, onSubagentsChange, provider])
+  }, [activeThreadId, onSubagentsChange, visible])
 
   useEffect(() => {
+    if (!visible) return undefined
     void load('initial')
-  }, [load])
+    return () => { summaryLoadGenerationRef.current += 1 }
+  }, [load, visible])
 
   useEffect(() => {
-    if (!shouldRefreshThreadSummaryForSeq(liveRefreshMarkerRef.current, activeThreadId, runtimeLastSeq)) return
+    if (!visible || !shouldRefreshThreadSummaryForSeq(liveRefreshMarkerRef.current, activeThreadId, runtimeLastSeq)) return
     const timer = window.setTimeout(() => void load('refresh'), THREAD_SUMMARY_LIVE_REFRESH_DELAY_MS)
     return () => window.clearTimeout(timer)
-  }, [activeThreadId, load, runtimeLastSeq])
+  }, [activeThreadId, load, runtimeLastSeq, visible])
 
   const active = state.data
     ? state.data.subagents.some((agent) => agent.status === 'active') ||
       state.data.tasks.some((task) => task.active === true)
     : false
   useEffect(() => {
-    if (!active && !threadBusy) return
+    if (!visible || (!active && !threadBusy)) return
     void load('refresh')
     const timer = window.setInterval(() => void load('refresh'), 1_000)
     return () => window.clearInterval(timer)
-  }, [active, load, threadBusy])
+  }, [active, load, threadBusy, visible])
 
   useEffect(() => {
-    if (!activeThreadId || active || threadBusy) return
+    if (!visible || !activeThreadId || active || threadBusy) return
     const timer = window.setInterval(() => void load('refresh'), THREAD_SUMMARY_IDLE_REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [active, activeThreadId, load, threadBusy])
+  }, [active, activeThreadId, load, threadBusy, visible])
 
   const openThread = (
     threadId: string,

@@ -1,7 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
 import {
   Ban,
   Bot,
@@ -17,7 +17,7 @@ import {
   Search,
   Terminal,
   Wrench
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { ChatBlock, ToolBlock } from '../../agent/types'
 import { redactSecretText } from '@shared/secret-redaction'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'
@@ -301,6 +301,7 @@ export function ProcessSectionRow({
       {canToggleSection ? (
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setUserExpanded(!(userExpanded ?? defaultExpanded))}
           className={`group flex w-fit max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-[14px] font-medium transition hover:opacity-85 ${
             hasError ? processErrorTextClass(errorTone) : 'text-ds-muted'
@@ -481,7 +482,7 @@ function ProcessStackRows({
           handleToggle()
         }
         const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-          if (!canToggle) return
+          if (!canToggle || event.target !== event.currentTarget) return
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
           handleToggle()
@@ -590,7 +591,7 @@ function ProcessEntryRow({
     handleToggle()
   }
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (!canToggle) return
+    if (!canToggle || event.target !== event.currentTarget) return
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     handleToggle()

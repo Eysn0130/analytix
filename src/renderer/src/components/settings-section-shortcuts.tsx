@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Keyboard, RotateCcw, Search } from 'lucide-react'
+import { Keyboard, RotateCcw, Search } from '../design/AnalytixUiIcons'
 import {
   KEYBOARD_SHORTCUT_COMMANDS,
   findKeyboardShortcutConflict,

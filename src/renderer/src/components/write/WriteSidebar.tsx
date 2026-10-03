@@ -12,7 +12,7 @@ import {
   Plus,
   RefreshCw,
   Trash2
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import type { ComposerFileReference } from '../../lib/composer-file-references'

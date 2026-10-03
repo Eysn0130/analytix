@@ -157,7 +157,7 @@ export function WorkflowCreateLoopView({
             type="button"
             onClick={() => void runWorkflow()}
             disabled={!canRun}
-            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-sm transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play className="h-4 w-4" strokeWidth={2} />
             {t('workflowRun')}
@@ -227,7 +227,7 @@ export function WorkflowCreateLoopView({
                 <button
                   type="button"
                   onClick={() => void runWorkflow(activeRun)}
-                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-white hover:bg-accent/90"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-[var(--ds-composer-primary-action-fg)] hover:bg-accent/90"
                 >
                   <RotateCw className="h-4 w-4" strokeWidth={1.9} />
                   {activeRun.status === 'waiting' ? t('workflowResume') : t('workflowRetry')}

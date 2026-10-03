@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
-import { Archive, Folder, RotateCcw, Search, Trash2 } from 'lucide-react'
+import { Archive, Folder, RotateCcw, Search, Trash2 } from '../design/AnalytixUiIcons'
 import type { NormalizedThread } from '../agent/types'
 import { confirmDialog } from '../lib/confirm-dialog'
 import { formatRelativeTime } from '../lib/format-relative-time'

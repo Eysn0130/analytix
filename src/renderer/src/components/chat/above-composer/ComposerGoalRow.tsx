@@ -1,4 +1,4 @@
-import { PauseCircle, Pencil, PlayCircle, Target, Trash2 } from 'lucide-react'
+import { PauseCircle, Pencil, PlayCircle, Target, Trash2 } from '../../../design/AnalytixUiIcons'
 import { type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ThreadGoal } from '../../../agent/types'

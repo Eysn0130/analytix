@@ -3,7 +3,7 @@ import { useChatStore } from '../store/chat-store'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileText, Presentation, RefreshCw, Sheet } from 'lucide-react'
+import { FileText, Presentation, RefreshCw, Sheet } from '../design/AnalytixUiIcons'
 import type { PluginPackageView } from '../../../../packages/runtime/src/contracts/plugin-package-host'
 
 /** State comes exclusively from the signed Core package host, including after

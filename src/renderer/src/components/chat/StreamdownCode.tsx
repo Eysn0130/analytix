@@ -5,7 +5,7 @@ import {
   ChevronUp,
   Copy,
   Download
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import {
   isValidElement,
   memo,

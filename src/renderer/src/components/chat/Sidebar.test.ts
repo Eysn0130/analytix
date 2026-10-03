@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../../i18n'
 import { useChatStore } from '../../store/chat-store'
 import { Sidebar } from './Sidebar'
+import { NavigationRail } from '../shell/NavigationRail'
+import workbenchSource from '../Workbench.tsx?raw'
 import sidebarSource from './Sidebar.tsx?raw'
 import sidebarClawDialogSource from './SidebarClawDialog.tsx?raw'
 
@@ -52,6 +54,13 @@ function renderSidebar(activeView: 'chat' | 'write' | 'claw' | 'schedule' = 'cha
   )
 }
 
+function renderNavigation(): string {
+  const noop = (): void => {}
+  return renderToStaticMarkup(createElement(NavigationRail, {
+    active: 'chat', onChat: noop, onPlugins: noop, onSchedule: noop, onSettings: noop
+  })) + renderSidebar()
+}
+
 const forbiddenTopLevelEntrypointLabels = [
   'Workflow',
   'Create Loop',
@@ -78,7 +87,7 @@ describe('Sidebar route entries', () => {
   })
 
   it('keeps Workflow/Create Loop out of the top-level sidebar entry set', () => {
-    const html = renderSidebar()
+    const html = renderNavigation()
 
     expect(html).toContain('Plugins')
     expect(html).toContain('Schedule')
@@ -87,13 +96,13 @@ describe('Sidebar route entries', () => {
     }
   })
 
-  it('renders a direct Settings footer without mounting Hub account behavior', () => {
-    const html = renderSidebar()
+  it('keeps direct Settings in the persistent rail without mounting Hub account behavior', () => {
+    const html = renderNavigation()
 
     expect(html).toContain('Settings')
     expect(sidebarSource).not.toContain("import { SidebarAccountMenu } from './SidebarAccountMenu'")
     expect(sidebarSource).not.toContain('<SidebarAccountMenu')
-    expect(sidebarSource).toContain("onOpenSettings('general')")
+    expect(workbenchSource).toContain("onSettings={() => openSettings('general')}")
   })
 
   it('portals the WeChat setup dialog above sidebar clipping layers', () => {

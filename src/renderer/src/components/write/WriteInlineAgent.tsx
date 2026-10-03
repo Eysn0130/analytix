@@ -35,7 +35,7 @@ import {
   Wand2,
   WandSparkles,
   type LucideIcon
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import { WRITE_BLOCK_TYPES, type WriteBlockType } from '../../write/block-type'
 import type { WriteInlineFormatKind } from '../../write/inline-format'

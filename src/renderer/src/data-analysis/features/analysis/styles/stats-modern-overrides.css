@@ -8,13 +8,13 @@
   font-family: var(--font-sans);
   background: var(--program-shell-bg);
   --workbench-ui-card-radius: 10px;
-  --stats-tree-secondary-title-size: 11.5px;
+  --stats-tree-secondary-title-size: 12.5px;
   --stats-table-font-size: var(--stats-tree-secondary-title-size);
-  --stats-table-row-font-size: 11px;
+  --stats-table-row-font-size: 12px;
   --stats-toolbar-button-pad-x: 10px;
   --left-control-radius: 7px;
   --left-control-inner-radius: 6px;
-  --left-control-border: color-mix(in oklab, var(--sidebar-control-border) 84%, #d5deef);
+  --left-control-border: var(--color-border);
 }
 
 .data-analysis-surface[data-active-item="stats"] {
@@ -64,7 +64,7 @@
 }
 
 .data-analysis-surface[data-theme="dark"] .stats-react-shell > .page-topbar.stats-header .page-topbar__tab.is-active {
-  color: #b9c5ff !important;
+  color: var(--color-text) !important;
 }
 
 .stats-react-shell[data-theme="dark"] > .page-topbar.stats-header,
@@ -84,7 +84,7 @@
 
 .stats-react-shell[data-theme="dark"] > .page-topbar.stats-header .page-topbar__tab.is-active,
 .data-analysis-surface[data-theme="dark"] .stats-react-shell[data-theme="dark"] > .page-topbar.stats-header .page-topbar__tab.is-active {
-  color: #b9c5ff !important;
+  color: var(--color-text) !important;
 }
 
 .stats-react-shell > .page-topbar.stats-header .page-topbar__tabs {
@@ -376,7 +376,7 @@
 
 .stats-react-shell .summaryPill.info {
   background: var(--sidebar-badge-accent);
-  color: #4662f0;
+  color: var(--color-accent);
 }
 
 .stats-react-shell .gAside {
@@ -478,7 +478,7 @@
   background: var(--program-shell-bg);
   --left-control-radius: 7px;
   --left-control-inner-radius: 6px;
-  --left-control-border: color-mix(in oklab, var(--sidebar-control-border) 84%, #d5deef);
+  --left-control-border: var(--color-border);
 }
 
 .stats-react-shell .app.ui-classic-refined > .card {
@@ -737,7 +737,7 @@
   left: 0;
   width: 50%;
   border-radius: var(--left-control-radius);
-  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
   box-shadow: var(--sidebar-segment-active-shadow);
   transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1);
@@ -777,7 +777,7 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip.active {
-  color: #fff;
+  color: var(--color-bg);
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip:hover:not(.active) {
@@ -901,9 +901,9 @@
 
 .stats-react-shell .app.ui-classic-refined .btn.primary,
 .stats-react-shell .app.ui-classic-refined .qBtn.active {
-  border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
-  color: #fff;
+  color: var(--color-bg);
   box-shadow: var(--sidebar-segment-active-shadow);
 }
 
@@ -1010,7 +1010,7 @@
   padding: 0 3px;
   border-radius: 999px;
   background: var(--sidebar-badge-accent);
-  color: #4662f0;
+  color: var(--color-accent);
   font-size: 7px;
   font-weight: 700;
   line-height: 1;
@@ -1082,7 +1082,7 @@
   border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 64%, var(--left-control-border));
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--sidebar-segment-active-end) 18%, transparent),
-    0 12px 24px rgba(49, 78, 207, 0.12);
+    var(--shadow-card);
   color: var(--color-text);
 }
 
@@ -1829,15 +1829,16 @@
 }
 
 .statsDateEditorPopover {
-  --stats-datepicker-border: var(--left-control-border, #dbe4f3);
-  --stats-datepicker-text: var(--sidebar-nav-active-text, var(--color-text, #1d2a44));
-  --stats-datepicker-muted: var(--color-text-muted, #68758f);
+  --stats-datepicker-on-accent: #fcfcfc;
+  --stats-datepicker-border: var(--left-control-border, #dddddd);
+  --stats-datepicker-text: var(--sidebar-nav-active-text, var(--color-text, #0d0d0d));
+  --stats-datepicker-muted: var(--color-text-muted, #5d5d5d);
   --stats-datepicker-surface: #ffffff;
-  --stats-datepicker-surface-muted: var(--sidebar-surface, #f8fafc);
-  --stats-datepicker-hover: var(--sidebar-hover, #f2f6fd);
-  --stats-datepicker-range: var(--sidebar-nav-active-bg, #e8efff);
-  --stats-datepicker-accent-start: var(--sidebar-segment-active-start, #5b73ff);
-  --stats-datepicker-accent-end: var(--sidebar-segment-active-end, #425bed);
+  --stats-datepicker-surface-muted: var(--sidebar-surface, #f3f3f3);
+  --stats-datepicker-hover: var(--sidebar-hover, #ebebeb);
+  --stats-datepicker-range: var(--sidebar-nav-active-bg, #ebebeb);
+  --stats-datepicker-accent-start: var(--sidebar-segment-active-start, #0d0d0d);
+  --stats-datepicker-accent-end: var(--sidebar-segment-active-end, #0d0d0d);
   position: fixed;
   top: 0;
   left: 0;
@@ -1846,7 +1847,7 @@
   max-width: min(72vw, 258px);
   padding: 7px;
   border-radius: 8px;
-  border: 1px solid color-mix(in oklab, var(--stats-datepicker-border) 86%, #dbe4f3);
+  border: 1px solid color-mix(in oklab, var(--stats-datepicker-border) 86%, #dddddd);
   background: var(--stats-datepicker-surface);
   color: var(--color-text, #0f172a);
   box-shadow:
@@ -1972,7 +1973,7 @@
 .statsDateEditorPopover .dateCalendarCell.range-start,
 .statsDateEditorPopover .dateCalendarCell.range-end {
   background: linear-gradient(136deg, var(--stats-datepicker-accent-start) 0%, var(--stats-datepicker-accent-end) 100%);
-  color: #fff;
+  color: var(--stats-datepicker-on-accent);
 }
 
 .statsDateEditorPopover .dateCalendarCell.anchor-active {
@@ -2100,7 +2101,7 @@
   left: 0;
   width: 25%;
   border-radius: 6px;
-  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
   box-shadow: 0 5px 12px color-mix(in oklab, var(--sidebar-segment-active-end) 16%, transparent);
   transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1), opacity var(--motion-fast) ease;
@@ -2112,7 +2113,7 @@
   bottom: 0;
   left: 0;
   border-radius: var(--left-control-radius);
-  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, #1f3bb8);
+  border: 1px solid color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
   box-shadow: var(--sidebar-segment-active-shadow);
   transition: transform var(--motion-medium) cubic-bezier(0.22, 1, 0.36, 1), opacity var(--motion-fast) ease;
@@ -2178,7 +2179,7 @@
 .stats-react-shell .stats-page-topbar__content .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.workbench-ui-segmented__option--active {
-  color: #fff;
+  color: var(--color-bg);
 }
 
 .stats-react-shell .app.ui-classic-refined .quickSwitchChip:hover:not(.active),
@@ -2304,20 +2305,20 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard.active {
-  border-color: color-mix(in oklab, var(--color-accent) 22%, #cdd9f8);
-  background: #f0f5ff;
+  border-color: color-mix(in oklab, var(--color-accent) 22%, var(--color-border));
+  background: var(--sidebar-nav-active-bg);
   box-shadow:
     inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 14%, transparent),
-    0 10px 24px rgba(68, 92, 233, 0.08);
-  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+    var(--shadow-card);
+  color: color-mix(in oklab, var(--color-accent) 82%, var(--color-border));
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard:focus-visible {
   outline: none;
-  border-color: color-mix(in oklab, var(--color-accent) 34%, #c5d5ff);
+  border-color: color-mix(in oklab, var(--color-accent) 34%, var(--color-border));
   box-shadow:
     0 0 0 2px color-mix(in oklab, var(--color-accent) 18%, transparent),
-    0 10px 24px rgba(68, 92, 233, 0.08);
+    var(--shadow-card);
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard .mText {
@@ -2330,36 +2331,36 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgePrimary {
-  background: color-mix(in oklab, var(--sidebar-subtle) 86%, #f4f7fc);
-  border: 1px solid color-mix(in oklab, var(--left-control-border) 76%, #e5ebf6);
+  background: color-mix(in oklab, var(--sidebar-subtle) 86%, var(--color-bg-subtle));
+  border: 1px solid color-mix(in oklab, var(--left-control-border) 76%, var(--color-border));
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard .mIconBadgeSecondary {
   background: #ffffff;
-  border: 1px solid color-mix(in oklab, var(--left-control-border) 74%, #e4ebf8);
+  border: 1px solid color-mix(in oklab, var(--left-control-border) 74%, var(--color-border));
   box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgePrimary {
   background: color-mix(in oklab, var(--color-accent) 12%, #ffffff);
-  border-color: color-mix(in oklab, var(--color-accent) 18%, #d1dcfa);
+  border-color: color-mix(in oklab, var(--color-accent) 18%, var(--color-border));
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard.active .mIconBadgeSecondary {
   background: color-mix(in oklab, var(--color-accent) 8%, #ffffff);
-  border-color: color-mix(in oklab, var(--color-accent) 16%, #d6e0fb);
+  border-color: color-mix(in oklab, var(--color-accent) 16%, var(--color-border));
 }
 
 .stats-react-shell .app.ui-classic-refined .mTitle {
-  color: #4f5f78;
+  color: var(--color-text);
   font-size: 15px;
   line-height: 1.2;
   font-weight: 600;
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard.active .mTitle {
-  color: color-mix(in oklab, var(--color-accent) 82%, #1f3bb8);
+  color: color-mix(in oklab, var(--color-accent) 82%, var(--color-border));
   font-weight: 700;
 }
 
@@ -2368,31 +2369,32 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  color: #8a96ab;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.25;
   white-space: normal;
 }
 
 .stats-react-shell .app.ui-classic-refined .modeCard.active .mMetaLine {
-  color: color-mix(in oklab, var(--color-accent) 56%, #7283a2);
+  color: color-mix(in oklab, var(--color-accent) 56%, var(--color-text-muted));
 }
 
 .stats-react-shell .app.ui-classic-refined .mMetaSep {
-  color: #b4bfd2;
+  color: var(--color-text-muted);
 }
 
 .statsDateEditorPopover[data-theme="dark"],
 .data-analysis-surface[data-theme="dark"] .statsDateEditorPopover {
-  --stats-datepicker-border: var(--color-border, #313b50);
-  --stats-datepicker-text: var(--color-text, #ecf2ff);
-  --stats-datepicker-muted: var(--color-text-muted, #9baaca);
-  --stats-datepicker-surface: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 94%, var(--color-bg-subtle, #232c3b));
-  --stats-datepicker-surface-muted: color-mix(in oklab, var(--color-bg-elevated, #181f2b) 88%, var(--color-bg-subtle, #232c3b));
-  --stats-datepicker-hover: color-mix(in oklab, var(--color-accent, #5f74ff) 12%, var(--color-bg-subtle, #232c3b));
-  --stats-datepicker-range: color-mix(in oklab, var(--color-accent, #5f74ff) 18%, var(--color-bg-elevated, #181f2b));
-  --stats-datepicker-accent-start: color-mix(in oklab, var(--color-accent, #5f74ff) 88%, #ffffff 12%);
-  --stats-datepicker-accent-end: color-mix(in oklab, var(--color-accent-strong, #8ea0ff) 86%, var(--color-accent, #5f74ff));
+  --stats-datepicker-on-accent: #181818;
+  --stats-datepicker-border: var(--color-border, #383838);
+  --stats-datepicker-text: var(--color-text, #ececec);
+  --stats-datepicker-muted: var(--color-text-muted, #b4b4b4);
+  --stats-datepicker-surface: color-mix(in oklab, var(--color-bg-elevated, #212121) 94%, var(--color-bg-subtle, #2f2f2f));
+  --stats-datepicker-surface-muted: color-mix(in oklab, var(--color-bg-elevated, #212121) 88%, var(--color-bg-subtle, #2f2f2f));
+  --stats-datepicker-hover: color-mix(in oklab, var(--color-accent, #ececec) 12%, var(--color-bg-subtle, #2f2f2f));
+  --stats-datepicker-range: color-mix(in oklab, var(--color-accent, #ececec) 18%, var(--color-bg-elevated, #212121));
+  --stats-datepicker-accent-start: color-mix(in oklab, var(--color-accent, #ececec) 88%, #ffffff 12%);
+  --stats-datepicker-accent-end: color-mix(in oklab, var(--color-accent-strong, #ececec) 86%, var(--color-accent, #ececec));
   border-color: var(--stats-datepicker-border);
   background: var(--stats-datepicker-surface);
   color: var(--stats-datepicker-text);
@@ -2502,7 +2504,7 @@
   border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 64%, var(--left-control-border));
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--sidebar-segment-active-end) 18%, transparent),
-    0 12px 24px rgba(49, 78, 207, 0.12);
+    var(--shadow-card);
   color: var(--color-text);
 }
 
@@ -2560,7 +2562,7 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .hSort {
-  color: color-mix(in oklab, var(--stats-table-head-text) 84%, #cfe0ff);
+  color: var(--stats-table-head-text);
 }
 
 .stats-react-shell .app.ui-classic-refined .row {

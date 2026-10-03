@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import type { GuiUpdateInfo, GuiUpdateProgress } from '@shared/gui-update'
-import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw } from '../design/AnalytixUiIcons'
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'

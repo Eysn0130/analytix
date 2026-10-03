@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw } from '../design/AnalytixUiIcons'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { SettingsCard } from './settings-controls'
 

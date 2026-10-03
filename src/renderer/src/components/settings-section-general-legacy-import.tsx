@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { ArchiveRestore, FolderOpen, Loader2 } from 'lucide-react'
+import { ArchiveRestore, FolderOpen, Loader2 } from '../design/AnalytixUiIcons'
 import type { LegacySessionDetectResult } from '@shared/analytix-api'
 import { SettingsCard, SettingRow } from './settings-controls'
 import { useChatStore } from '../store/chat-store'

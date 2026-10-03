@@ -1,7 +1,7 @@
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Ban, Bot, Check, ChevronDown, ChevronRight, Diff, ExternalLink, ListTodo, Loader2, Pause, Play, RotateCcw, SendHorizontal, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import { Ban, Bot, Check, ChevronDown, ChevronRight, Diff, ExternalLink, ListTodo, Loader2, Pause, Play, RotateCcw, SendHorizontal, Square, SquareTerminal, Trash2 } from '../../design/AnalytixUiIcons'
 import type { ChatBlock, RuntimeChildMetadata, RuntimeJobDiagnosticsMetadata, ToolBlock } from '../../agent/types'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { useChatStore } from '../../store/chat-store'

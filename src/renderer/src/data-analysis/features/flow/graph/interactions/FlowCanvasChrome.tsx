@@ -1,3 +1,4 @@
+import { X, Plus, Expand, Waypoints } from "../../../../../design/AnalytixUiIcons";
 import {
   DragEvent,
   KeyboardEvent,
@@ -18,44 +19,19 @@ interface FlowCanvasChromeProps {
 }
 
 function CloseIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <X size={16} aria-hidden="true" />;
 }
 
 function PlusIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5V19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <Plus size={16} aria-hidden="true" />;
 }
 
 function ViewportExpandIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 9V5h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15 5h4v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M19 15v4h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M9 19H5v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <Expand size={16} aria-hidden="true" />;
 }
 
 function PathExpandIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="2" fill="currentColor" />
-      <circle cx="18" cy="18" r="2" fill="currentColor" />
-      <circle cx="18" cy="6" r="2" fill="currentColor" />
-      <path d="M8 6H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M18 8V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <Waypoints size={16} aria-hidden="true" />;
 }
 
 function displayViewTitle(rawTitle: string): string {

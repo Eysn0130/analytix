@@ -1,8 +1,8 @@
 .cleaning-page {
-  --cleaning-bg: color-mix(in oklab, var(--color-bg-elevated) 90%, var(--color-bg) 10%);
-  --cleaning-surface: color-mix(in oklab, var(--color-bg-elevated) 94%, var(--sidebar-surface) 6%);
-  --cleaning-surface-muted: color-mix(in oklab, var(--color-bg-subtle) 54%, var(--color-bg-elevated) 46%);
-  --cleaning-surface-soft: color-mix(in oklab, var(--color-bg-subtle) 70%, var(--color-bg-elevated) 30%);
+  --cleaning-bg: var(--color-bg);
+  --cleaning-surface: var(--color-bg-elevated);
+  --cleaning-surface-muted: var(--color-bg-subtle);
+  --cleaning-surface-soft: var(--color-bg-subtle);
   --cleaning-border: color-mix(in oklab, var(--color-border) 56%, transparent);
   --cleaning-border-strong: color-mix(in oklab, var(--color-border) 82%, transparent);
   --cleaning-module-border: color-mix(in oklab, var(--sidebar-control-border) 84%, var(--color-border) 16%);
@@ -13,15 +13,16 @@
   --cleaning-accent: var(--color-accent);
   --cleaning-accent-strong: var(--color-accent-strong);
   --cleaning-accent-soft: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-elevated));
-  --cleaning-import-accent-start: color-mix(in oklab, var(--sidebar-segment-active-start) 88%, #3d67f3);
-  --cleaning-import-accent-end: color-mix(in oklab, var(--sidebar-segment-active-end) 88%, #1f51da);
+  --cleaning-import-accent-start: var(--sidebar-segment-active-start);
+  --cleaning-import-accent-end: var(--sidebar-segment-active-end);
+  --cleaning-status-info: color-mix(in oklab, #4355e6 88%, #1f51da);
   --page-topbar-accent: var(--cleaning-import-accent-end);
-  --cleaning-import-accent-shadow: 0 12px 24px rgba(44, 94, 219, 0.18);
-  --cleaning-primary-action-on-accent: color-mix(in oklab, white 96%, var(--cleaning-import-accent-end));
+  --cleaning-import-accent-shadow: none;
+  --cleaning-primary-action-on-accent: var(--color-bg);
   --cleaning-hero-action-height: 32px;
   --cleaning-hero-action-radius: 6px;
   --cleaning-hero-action-pad-x: 22px;
-  --cleaning-hero-action-font-size: 10px;
+  --cleaning-hero-action-font-size: 12px;
   --cleaning-hero-action-font-weight: 600;
   --cleaning-hero-action-text: color-mix(in oklab, var(--sidebar-nav-active-text) 82%, var(--color-text) 18%);
   --cleaning-hero-action-surface: color-mix(in oklab, var(--sidebar-surface) 92%, var(--color-bg-elevated) 8%);
@@ -34,9 +35,9 @@
   --cleaning-hero-status-idle-border: color-mix(in oklab, var(--color-border) 58%, transparent);
   --cleaning-hero-status-idle-bg: color-mix(in oklab, var(--cleaning-surface-soft) 74%, var(--cleaning-surface));
   --cleaning-hero-status-idle-text: color-mix(in oklab, var(--cleaning-text-muted) 90%, var(--cleaning-text) 10%);
-  --cleaning-hero-status-running-border: color-mix(in oklab, var(--cleaning-import-accent-end) 18%, var(--cleaning-hero-action-border));
-  --cleaning-hero-status-running-bg: color-mix(in oklab, var(--cleaning-import-accent-end) 8%, var(--cleaning-surface));
-  --cleaning-hero-status-running-text: color-mix(in oklab, var(--cleaning-import-accent-end) 64%, var(--cleaning-text));
+  --cleaning-hero-status-running-border: color-mix(in oklab, var(--cleaning-status-info) 18%, var(--cleaning-hero-action-border));
+  --cleaning-hero-status-running-bg: color-mix(in oklab, var(--cleaning-status-info) 8%, var(--cleaning-surface));
+  --cleaning-hero-status-running-text: color-mix(in oklab, var(--cleaning-status-info) 64%, var(--cleaning-text));
   --cleaning-hero-status-done-border: color-mix(in oklab, var(--cleaning-success) 28%, var(--cleaning-hero-action-border));
   --cleaning-hero-status-done-bg: color-mix(in oklab, var(--cleaning-success) 10%, var(--cleaning-surface));
   --cleaning-hero-status-done-text: color-mix(in oklab, var(--cleaning-success) 76%, var(--cleaning-text));
@@ -373,11 +374,11 @@
 }
 
 .cleaning-hero__actions > .workbench-ui-toolbar-btn.workbench-ui-btn--accent.workbench-ui-btn--loading {
-  border-color: color-mix(in oklab, var(--cleaning-import-accent-end) 88%, #1639ba);
+  border-color: color-mix(in oklab, var(--cleaning-import-accent-end) 88%, var(--color-border));
   background: linear-gradient(
     136deg,
-    color-mix(in oklab, var(--cleaning-import-accent-start) 90%, #6180ff) 0%,
-    color-mix(in oklab, var(--cleaning-import-accent-end) 94%, #214cdc) 100%
+    color-mix(in oklab, var(--cleaning-import-accent-start) 90%, var(--color-bg)) 0%,
+    color-mix(in oklab, var(--cleaning-import-accent-end) 94%, var(--color-bg)) 100%
   );
   color: var(--cleaning-primary-action-on-accent);
 }
@@ -1428,10 +1429,11 @@
 }
 
 .data-analysis-surface[data-theme="dark"] .cleaning-page {
-  --cleaning-bg: color-mix(in oklab, var(--color-bg) 92%, #0f1521);
-  --cleaning-surface: color-mix(in oklab, var(--color-bg-elevated) 88%, #111a28);
-  --cleaning-surface-muted: color-mix(in oklab, var(--color-bg-subtle) 74%, #121a28);
-  --cleaning-surface-soft: color-mix(in oklab, var(--sidebar-subtle) 84%, #141d2c);
+  --cleaning-status-info: color-mix(in oklab, #4a5ce5 88%, #1f51da);
+  --cleaning-bg: var(--color-bg);
+  --cleaning-surface: var(--color-bg-elevated);
+  --cleaning-surface-muted: var(--color-bg-subtle);
+  --cleaning-surface-soft: var(--color-bg-subtle);
   --cleaning-border: color-mix(in oklab, var(--color-border) 72%, transparent);
   --cleaning-border-strong: color-mix(in oklab, var(--color-border) 86%, transparent);
   --cleaning-module-border: color-mix(in oklab, var(--color-border) 72%, transparent);

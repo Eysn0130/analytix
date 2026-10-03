@@ -29,7 +29,8 @@ import type { SkillRootListItem } from '@shared/analytix-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
-import { SettingsSidebar } from './SettingsSidebar'
+import { SettingsSidebar, settingsCategoryLabelKey } from './SettingsSidebar'
+import { NavigationRail } from './shell/NavigationRail'
 import { WriteDebugLogModal } from './settings-debug-log'
 import { useSettingsGuiUpdate } from './use-settings-gui-update'
 import {
@@ -730,6 +731,16 @@ export function SettingsView(): ReactElement {
     })()
   }
 
+  const navigateFromSettings = (destination: 'chat' | 'plugins' | 'schedule'): void => {
+    void (async () => {
+      await flushPendingSave()
+      await reloadUiSettings()
+      if (destination === 'plugins') openPlugins()
+      else if (destination === 'schedule') openSchedule()
+      else await openCode()
+    })()
+  }
+
   const openOnboardingPreview = (): void => {
     void (async () => {
       await flushPendingSave()
@@ -976,15 +987,21 @@ export function SettingsView(): ReactElement {
   }
 
   return (
-    <div className="ds-drag flex h-full min-h-0 w-full min-w-0 bg-ds-main">
+    <div className="ds-product-body ds-settings-layout ds-drag flex h-full min-h-0 w-full min-w-0 bg-ds-main">
+      <NavigationRail active="settings"
+        onChat={() => navigateFromSettings('chat')}
+        onPlugins={() => navigateFromSettings('plugins')}
+        onSchedule={() => navigateFromSettings('schedule')}
+        onSettings={() => setCategory('general')}
+      />
       <SettingsSidebar category={category} setCategory={setCategory} goBack={goBack} t={t} />
 
-      <div className="ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
+      <div className="ds-settings-content ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
         <div className={`mx-auto ${category === 'account' ? 'max-w-[732px]' : 'max-w-3xl'}`}>
           {category !== 'account' && category !== 'browser' && category !== 'computerUse' ? (
             <div className="mb-8 flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t('title')}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t(settingsCategoryLabelKey(category))}</h1>
                 <p className="mt-1 text-[14px] text-ds-muted">{t('subtitle')}</p>
               </div>
               <span

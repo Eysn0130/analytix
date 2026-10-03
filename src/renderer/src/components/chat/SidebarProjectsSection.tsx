@@ -2,7 +2,7 @@ import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactElem
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../../design/AnalytixUiIcons'
 import {
   Archive,
   BarChart3,
@@ -26,7 +26,7 @@ import {
   Sparkles,
   SquareStack,
   Trash2
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
 import { getProvider } from '../../agent/registry'
 import { ActionMenuItem, ActionMenuSeparator } from '../common/ActionMenu'
@@ -78,6 +78,7 @@ type SidebarProjectsSectionProps = {
   activeThreadId: string | null
   runtimeReady: boolean
   searchQuery: string
+  searchOpen?: boolean
   showArchived: boolean
   workspaceRoot: string
   workspaceRoots: string[]
@@ -549,6 +550,7 @@ export function SidebarProjectsSection({
   activeThreadId,
   runtimeReady,
   searchQuery,
+  searchOpen: headerSearchOpen,
   showArchived,
   workspaceRoot,
   workspaceRoots,
@@ -711,7 +713,7 @@ export function SidebarProjectsSection({
     })
   }, [filteredDraftHistoryByWorkspace, groups, workspaceRoot])
 
-  const searchVisible = searchOpen || searchQuery.trim().length > 0
+  const searchVisible = (headerSearchOpen ?? searchOpen) || searchQuery.trim().length > 0
   const allGroupsCollapsed = displayGroups.length > 0 && displayGroups.every(([workspacePath]) => {
     const project = usingCaseProjects
       ? caseProjectByWorkspaceKey.get(workspaceRootIdentityKey(workspacePath))
@@ -1078,6 +1080,7 @@ export function SidebarProjectsSection({
           )}
         </button>
         <div className="flex shrink-0 items-center gap-1">
+          {headerSearchOpen === undefined ? (
           <SidebarIconButton
             onClick={() => setSearchOpen((open) => !open)}
             active={searchVisible}
@@ -1087,6 +1090,7 @@ export function SidebarProjectsSection({
           >
             <Search className="h-3.5 w-3.5" strokeWidth={1.85} />
           </SidebarIconButton>
+          ) : null}
           <SidebarIconButton
             onClick={onPickWorkspace}
             className="h-7 w-7"
@@ -1098,6 +1102,7 @@ export function SidebarProjectsSection({
         </div>
       </div>
 
+      <div id="sidebar-thread-search">
       <SidebarCollapseMotion
         open={searchVisible}
         className="ds-sidebar-search-motion"
@@ -1110,6 +1115,7 @@ export function SidebarProjectsSection({
           clearLabel={t('clear')}
         />
       </SidebarCollapseMotion>
+      </div>
 
       <div className="ds-sidebar-projects-scroll min-h-0 flex-1 overflow-y-auto px-1 pb-2 pt-0.5">
         {displayGroups.length === 0 && usingCaseProjects && caseProjectIndexStatus === 'building' ? (
@@ -1898,18 +1904,18 @@ export function ThreadRenameDialog({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, state.submitting])
 
-  return (
+  const dialog = (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="thread-rename-dialog-title"
-      className="ds-no-drag fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/18 px-4 backdrop-blur-[2px] dark:bg-black/35"
+      className="ds-no-drag fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 backdrop-blur-[2px] dark:bg-black/35"
       onMouseDown={onClose}
     >
       <form
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
-        className="w-full max-w-sm rounded-[24px] border border-ds-border bg-ds-card p-5 shadow-[0_24px_72px_rgba(20,47,95,0.22)]"
+        className="w-full max-w-sm rounded-[24px] border border-ds-border bg-ds-card p-5 shadow-[var(--ax-shadow-modal)]"
       >
         <h2
           id="thread-rename-dialog-title"
@@ -1941,7 +1947,7 @@ export function ThreadRenameDialog({
           <button
             type="submit"
             disabled={!canSubmit}
-            className="rounded-xl bg-accent px-3 py-2 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55"
+            className="rounded-xl bg-accent px-3 py-2 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {state.submitting ? t('loading') : t('confirm')}
           </button>
@@ -1949,6 +1955,8 @@ export function ThreadRenameDialog({
       </form>
     </div>
   )
+
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body)
 }
 
 function ThreadContextMenu({

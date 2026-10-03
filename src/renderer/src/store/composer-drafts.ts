@@ -7,10 +7,12 @@ export type ComposerDraft = {
   inputRevision: number
   attachments: AttachmentReference[]
   fileReferences: ComposerFileReference[]
+  pendingAttachmentUploads?: number
+  attachmentUploadError?: string | null
 }
 
 export const emptyComposerDraft: ComposerDraft = {
-  input: '', inputRevision: 0, attachments: [], fileReferences: []
+  input: '', inputRevision: 0, attachments: [], fileReferences: [], pendingAttachmentUploads: 0, attachmentUploadError: null
 }
 
 export function composerDraftKey(workspace: string, threadId: string | null): string {
@@ -24,6 +26,7 @@ export function clearSubmittedComposerDraft(
 ): ComposerDraft {
   const clearInput = includeInput && current.inputRevision === submitted.inputRevision
   return {
+    ...current,
     input: clearInput ? '' : current.input,
     inputRevision: current.inputRevision + (clearInput ? 1 : 0),
     attachments: current.attachments.filter((item) => !submitted.attachments.includes(item)),

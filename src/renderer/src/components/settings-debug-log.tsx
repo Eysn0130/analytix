@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import type { WriteInlineCompletionDebugEntry } from '@shared/write-inline-completion'
-import { Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Loader2, RefreshCw, Trash2 } from '../design/AnalytixUiIcons'
 
 function formatWriteEditDebugTime(value: string): string {
   const date = new Date(value)
@@ -51,8 +51,8 @@ export function WriteDebugLogModal({
     completionEntries.find((entry) => entry.id === completionSelectedId) ?? completionEntries[0] ?? null
 
   return (
-    <div className="ds-no-drag fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-      <div className="flex h-[min(86vh,820px)] w-[min(1180px,96vw)] min-w-0 flex-col overflow-hidden rounded-2xl border border-ds-border bg-ds-card shadow-[0_26px_80px_rgba(20,47,95,0.28)]">
+    <div className="ds-no-drag fixed inset-0 z-[100] flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
+      <div className="flex h-[min(86vh,820px)] w-[min(1180px,96vw)] min-w-0 flex-col overflow-hidden rounded-2xl border border-ds-border bg-ds-card shadow-[var(--ax-shadow-modal)]">
         <div className="flex min-h-[64px] shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-4 py-3">
           <div className="min-w-0">
             <h2 className="text-[16px] font-semibold text-ds-ink">{t('writeDebugLogTitle')}</h2>

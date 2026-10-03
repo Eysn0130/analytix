@@ -21,7 +21,7 @@ import {
   Settings,
   Smile,
   Wifi
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type {
   ClawImAgentProfileV1,

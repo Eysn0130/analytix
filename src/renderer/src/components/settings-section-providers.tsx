@@ -59,7 +59,7 @@ import {
   Plus,
   Trash2,
   X
-} from 'lucide-react'
+} from '../design/AnalytixUiIcons'
 import {
   InlineNoticeView,
   SecretInput,
@@ -2022,7 +2022,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       <button
                         type="button"
                         onClick={() => void selectModelProvider(activeRegistryProvider.id)}
-                        className="inline-flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90"
+                        className="inline-flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:opacity-90"
                       >
                         {t('modelProviderSelect')}
                       </button>
@@ -2678,7 +2678,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       <button
                         type="button"
                         onClick={commitProviderDraft}
-                        className="inline-flex h-9 w-fit items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-white shadow-sm transition hover:opacity-90"
+                        className="inline-flex h-9 w-fit items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:opacity-90"
                       >
                         <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                         {t('modelProviderDraftConfirm')}

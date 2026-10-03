@@ -1,3 +1,4 @@
+import { Search, X } from "../../../design/AnalytixUiIcons";
 import {
   ButtonHTMLAttributes,
   CSSProperties,
@@ -447,6 +448,7 @@ export interface WorkbenchSearchFieldProps extends Omit<InputHTMLAttributes<HTML
   clearClassName?: string;
   clearLabel?: string;
   wrapperRole?: HTMLAttributes<HTMLDivElement>["role"];
+  leadingIcon?: ReactNode;
 }
 
 export function WorkbenchSearchField({
@@ -457,11 +459,13 @@ export function WorkbenchSearchField({
   clearClassName,
   clearLabel = "清空搜索",
   wrapperRole,
+  leadingIcon,
   disabled,
   ...props
 }: WorkbenchSearchFieldProps): JSX.Element {
   return (
     <div className={cx("workbench-ui-search-field", className)} role={wrapperRole}>
+      {leadingIcon}
       <input
         className={cx("workbench-ui-search-field__input", inputClassName)}
         value={value}
@@ -477,10 +481,7 @@ export function WorkbenchSearchField({
         disabled={disabled || !value}
         onClick={() => onChange("")}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 7L17 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          <path d="M17 7L7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <X size={14} aria-hidden />
       </button>
     </div>
   );
@@ -499,6 +500,7 @@ export function WorkbenchToolbarSearchField({
       className={cx("workbench-ui-toolbar-search-field", className)}
       inputClassName={cx("workbench-ui-toolbar-search-field__input", inputClassName)}
       clearClassName={cx("workbench-ui-toolbar-search-field__clear", clearClassName)}
+      leadingIcon={<Search size={18} className="workbench-ui-toolbar-search-field__icon" aria-hidden />}
       {...props}
     />
   );

@@ -21,7 +21,7 @@ import type { GuiUpdateChannel } from '@shared/gui-update'
 import type {
   SkillRootListItem
 } from '@shared/analytix-api'
-import { Ban, FolderOpen, Loader2, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react'
+import { Ban, FolderOpen, Loader2, Plus, RefreshCw, Settings, Trash2 } from '../design/AnalytixUiIcons'
 import { GuiUpdateControl } from './settings-gui-update'
 import {
   AdvancedSettingsDisclosure,

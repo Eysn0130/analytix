@@ -18,7 +18,7 @@ import {
   Sparkles,
   SpellCheck,
   Users
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import {
   SDD_ASSISTANT_FRAMEWORK_GROUPS,
@@ -138,9 +138,9 @@ export function SddAssistantPanel({
 
   return (
     <aside
-      className={`sdd-assistant-panel ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-white backdrop-blur-xl dark:bg-ds-canvas ${busy ? 'is-busy' : ''} ${className}`}
+      className={`sdd-assistant-panel ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas backdrop-blur-xl ${busy ? 'is-busy' : ''} ${className}`}
     >
-      <div className="sdd-assistant-header shrink-0 border-b border-ds-border-muted bg-white/92 dark:bg-ds-card">
+      <div className="sdd-assistant-header shrink-0 border-b border-ds-border-muted bg-ds-card">
         <div className="ds-right-panel-topbar">
           <PanelCollapseButton
             onClick={onCollapse}

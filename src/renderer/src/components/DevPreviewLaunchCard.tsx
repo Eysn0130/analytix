@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Globe2 } from 'lucide-react'
+import { Check, Globe2 } from '../design/AnalytixUiIcons'
 import { formatDevPreviewUrlLabel } from '../lib/dev-preview-detection'
 
 export function DevPreviewLaunchCard({
@@ -41,7 +41,7 @@ export function DevPreviewLaunchCard({
         <button
           type="button"
           onClick={onOpen}
-          className="inline-flex h-9 shrink-0 items-center justify-center rounded-full bg-accent px-4 text-[13px] font-semibold text-white shadow-[var(--ax-shadow-focus)] transition hover:brightness-110"
+          className="inline-flex h-9 shrink-0 items-center justify-center rounded-full bg-accent px-4 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-[var(--ax-shadow-focus)] transition hover:brightness-110"
           title={t('devPreviewCardOpen')}
         >
           {t('devPreviewCardOpen')}

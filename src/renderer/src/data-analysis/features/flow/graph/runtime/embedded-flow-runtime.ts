@@ -9,6 +9,7 @@ import {
 } from "../model/flow-summary-boundary";
 import { createEmbeddedFlowRuntimeStore, type EmbeddedFlowRuntimeStore } from "./embedded-flow-runtime-store";
 import { projectFlowPerfSnapshot } from "./flow-perf-public-projection";
+import { bindFlowThemeSync } from "./embedded-flow-theme";
 import {
   EMBEDDED_FLOW_RUNTIME_APP_PATH,
   EMBEDDED_FLOW_RUNTIME_LOADER_PATH,
@@ -748,107 +749,6 @@ function resolveEmbeddedRuntimeUrl(relativePath: string): string {
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
-}
-
-const EMBEDDED_THEME_CUSTOM_PROPERTIES = [
-  "--font-sans",
-  "--font-mono",
-  "--motion-fast",
-  "--motion-medium",
-  "--color-bg",
-  "--color-bg-elevated",
-  "--color-bg-subtle",
-  "--color-text",
-  "--color-text-muted",
-  "--color-border",
-  "--color-accent",
-  "--color-accent-strong",
-  "--color-success",
-  "--color-warning",
-  "--color-danger",
-  "--shadow-card",
-  "--shadow-elevated",
-  "--gradient-atmosphere",
-  "--program-shell-bg",
-  "--program-shell-border",
-  "--radius-sm",
-  "--radius-md",
-  "--radius-lg",
-  "--radius-xl",
-  "--space-1",
-  "--space-2",
-  "--space-3",
-  "--space-4",
-  "--space-5",
-  "--space-6"
-];
-
-function syncEmbeddedThemeToIframe(targetDocument: Document, sourceDocument: Document = document): void {
-  const sourceRoot = sourceDocument.documentElement;
-  const targetRoot = targetDocument.documentElement;
-  const sourceWindow = sourceDocument.defaultView || window;
-  const sourceStyles = sourceWindow.getComputedStyle(sourceRoot);
-
-  EMBEDDED_THEME_CUSTOM_PROPERTIES.forEach((propertyName) => {
-    const value = sourceStyles.getPropertyValue(propertyName).trim();
-    if (value) {
-      targetRoot.style.setProperty(propertyName, value);
-    } else {
-      targetRoot.style.removeProperty(propertyName);
-    }
-  });
-
-  const themeName = String(sourceRoot.dataset.theme || "").trim();
-  if (themeName) {
-    targetRoot.dataset.theme = themeName;
-  } else {
-    delete targetRoot.dataset.theme;
-  }
-
-  const colorScheme = String(sourceStyles.getPropertyValue("color-scheme") || sourceRoot.style.colorScheme || "").trim();
-  if (colorScheme) {
-    targetRoot.style.colorScheme = colorScheme;
-  } else {
-    targetRoot.style.removeProperty("color-scheme");
-  }
-}
-
-function bindFlowThemeSync(targetDocument: Document, sourceDocument: Document = document): () => void {
-  const sourceRoot = sourceDocument.documentElement;
-  syncEmbeddedThemeToIframe(targetDocument, sourceDocument);
-
-  const observer = new MutationObserver(() => {
-    syncEmbeddedThemeToIframe(targetDocument, sourceDocument);
-  });
-  observer.observe(sourceRoot, {
-    attributes: true,
-    attributeFilter: ["data-theme", "style", "class"]
-  });
-
-  const handleMediaChange = (): void => {
-    syncEmbeddedThemeToIframe(targetDocument, sourceDocument);
-  };
-
-  const media =
-    typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-  if (media) {
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", handleMediaChange);
-    } else if (typeof media.addListener === "function") {
-      media.addListener(handleMediaChange);
-    }
-  }
-
-  return () => {
-    observer.disconnect();
-    if (media) {
-      if (typeof media.removeEventListener === "function") {
-        media.removeEventListener("change", handleMediaChange);
-      } else if (typeof media.removeListener === "function") {
-        media.removeListener(handleMediaChange);
-      }
-    }
-  };
 }
 
 async function loadEmbeddedFlowPage(): Promise<ParsedEmbeddedFlowPage> {
@@ -1930,7 +1830,10 @@ async function createEmbeddedFlowCanvasAdapter(
       }
       themeSyncCleanup?.();
       requireCurrentAuthority();
-      themeSyncCleanup = bindFlowThemeSync(liveIframeDocument, document);
+      themeSyncCleanup = bindFlowThemeSync(
+        liveIframeDocument,
+        host.closest<HTMLElement>(".data-analysis-surface") || host.ownerDocument.documentElement,
+      );
 
       requireCurrentAuthority();
       const service = createEmbeddedFlowBridgeService({

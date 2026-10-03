@@ -3,7 +3,7 @@
 Status: Operational admission and attribution ledger.
 Applies to: copied, ported, vendored, generated, extracted, or substantially
 adapted upstream code, tests, prompts, documentation, binaries, and assets.
-Current as of: 2026-08-23.
+Current as of: 2026-10-02.
 Source of truth: pinned Git objects, written authorization records, source
 history, file-level licenses/notices, and reviewed Analytix diffs.
 
@@ -45,6 +45,8 @@ substantially adapted implementation.
 | CodexDesktop extracted assets and scripts | `research-only` | `codexdesktop-rebuild` | Reviewed commit has no project license; generated `src/` extraction is not tracked | `rejected` absent authorization | Clean-room behavior study only, or record separate written authorization with asset hashes and scope. |
 | Claude Code code/prompts/plugin text | `research-only` | `claude-code` | `LICENSE.md` is all-rights-reserved under commercial terms | `rejected` absent authorization | Clean-room behavioral requirements/tests only. |
 | OpenCode, Hermes, Lazy, and Claw candidate files | `research-only` | `multiple` | Root licenses are MIT, with file-level exceptions in Hermes/Lazy; no Analytix destination admitted | `candidate` | Record exact source/destination blobs and preserve applicable MIT/Apache/NOTICE material before copying. |
+
+| OpenAI Apps SDK UI renderer icon candidates | `artifact-entering` | `openai/apps-sdk-ui` | Five exact public MIT source blobs, destination mapping, notice and bounded adapter recorded below | `approved` for these vector sources only | Preserve pinned vectors/notice; complete candidate renderer checks. Current-web exact path/pixel identity and remaining glyphs are not proven. |
 
 ## File-level closure records
 
@@ -359,3 +361,60 @@ Canonical verification: `npm --prefix plugins/atlasflow/skills/atlasflow test`
 passed five existing byte-identical golden renders and 105 Node tests, including
 six new pure-import, layout, complete-ID and hostile-input checks. GUI, packaged
 Canvas admission and full provenance for external redistribution remain separate.
+
+### OpenAI Apps SDK UI — five bounded renderer icon candidates (2026-10-02)
+
+- Source: official [openai/apps-sdk-ui](https://github.com/openai/apps-sdk-ui),
+  commit `0f00143c7a639906f1621fe58e1b6be7b5bea46d`. This is the public SDK icon source;
+  it is not a claim that ChatGPT web or Codex desktop GUI source is public.
+- Mode: `vendor`. Only these non-brand vector modules enter the renderer:
+
+| Source at the pinned commit | Git blob | Analytix destination |
+| --- | --- | --- |
+| `src/components/Icon/svg/Sidebar.tsx` | `5189967d00927d5b2b1753434bd21235b504a4b3` | `src/renderer/src/design/openai-icons/svg/Sidebar.tsx` |
+| `src/components/Icon/svg/ComposeEditSquare.tsx` | `50cfcfd3301b4cd0fa8bed8f392f30bdb8b94d34` | `src/renderer/src/design/openai-icons/svg/ComposeEditSquare.tsx` |
+| `src/components/Icon/svg/Search.tsx` | `6c7fcb265c8b023a73781231db0ef60de0f35301` | `src/renderer/src/design/openai-icons/svg/Search.tsx` |
+| `src/components/Icon/svg/PlusComposer.tsx` | `938d0b97c4b5114b0379586557c3684f435e754a` | `src/renderer/src/design/openai-icons/svg/PlusComposer.tsx` |
+| `src/components/Icon/svg/MicLgDictate.tsx` | `6d0ce3876ed704da790f07fe388b0ed6ade7d8d6` | `src/renderer/src/design/openai-icons/svg/MicLgDictate.tsx` |
+
+- License: SPDX `MIT`, Copyright 2025 OpenAI. Root source `LICENSE`
+  blob `b8ac8dc0f960bbe0b0cc90cd06d58b672151773f`; these five files have
+  no separate notices, external imports, embedded brands or linked assets.
+  No upstream `NOTICE` or gitlink enters this selection.
+- Attribution: exact MIT text in
+  `src/renderer/src/design/openai-icons/LICENSE` and the OpenAI icon section of
+  `THIRD_PARTY_NOTICES.md`. The latter is already included by
+  `electron-builder.config.cjs` `extraResources`; no packaging rules change.
+- Object mapping and scope: the adjacent `provenance.json` records each
+  source/destination, blob id and SHA-256. Vector files remain byte-identical.
+  `OpenAiUiIcons.ts` is an Analytix-owned adapter for size, inherited color,
+  accessibility, ref and existing event props; it does not rewrite vector
+  geometry or apply Lucide stroke/fill conventions.
+- Mapping: `Sidebar` → existing left-panel disclosure; `ComposeEditSquare` →
+  new-chat actions; `Search` → existing thread search; `PlusComposer` →
+  existing add controls; `MicLgDictate` → existing microphone controls.
+  Existing data/document SVG, product brands and unmatched UI icons remain
+  explicitly outside this five-source admission.
+- Evidence boundary: a current-web screenshot comparison at equal display
+  size supports `visual-verified official-near` for these five groups.
+  Microphone weight/base differ. Conservative literal/normalized path
+  matching of 19 visible controls against 755 official vectors proves no
+  exact hit; it does not prove pixel dissimilarity. None is marked exact,
+  and this record does not claim that every UI icon has been replaced.
+- Authority/reviewer: the human's visual/icon request and coordinating parent
+  task's explicit five-candidate integration decision; renderer writer
+  `01a0fc03-b4cc-71e4-8f2c-ad2c14326032`, 2026-10-02, reviewed source blobs,
+  MIT text, selected file boundaries and packaged notice consumer.
+  MIT grants this bounded reuse without separate written commercial permission.
+- Validation: source object hashes verified before copying and by the
+  adapter test; renderer typecheck, scoped lint and renderer build pass.
+  Nine focused owner files pass 61 tests, including the accepted chrome
+  placement and an old-layout regression negative. Isolated renderer
+  screenshots cover 1440/900 windows, light/dark, actual workspace-button
+  clicks, search focus/filter, dock navigation/resize/collapse and tab-close
+  focus; small/medium/large scales have no page overflow at 900. Native
+  titlebar geometry is CSS-simulated here. No performance, native-window,
+  package, provider or release claim is made.
+- Current disposition: `approved` admission for these five licensed vectors
+  and candidate adaptation. Functional verification and any final shipping
+  decision remain separate; unrelated inherited-license blockers are unchanged.

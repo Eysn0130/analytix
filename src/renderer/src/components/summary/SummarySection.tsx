@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactElement, ReactNode } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '../../design/AnalytixUiIcons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 const AUTO_COLLAPSE_DELAY_MS = 30_000

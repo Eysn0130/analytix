@@ -16,7 +16,7 @@ import {
   Settings,
   Trash2,
   X
-} from 'lucide-react'
+} from '../../design/AnalytixUiIcons'
 import type {
   ClawImAgentProfileV1,
   ClawImChannelV1,

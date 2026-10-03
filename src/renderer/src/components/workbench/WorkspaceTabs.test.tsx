@@ -30,8 +30,51 @@ beforeEach(async () => {
   await act(async () => root.render(createElement(Harness)))
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals()
+  await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
+const c: WorkspaceTab = { id: 'doc-c', kind: 'document', mode: 'documents', title: '隔离的长标题_恢复后仍应显示关闭按钮.xlsx' }
+function tabStripLayout(viewportWidth = 240, scale = 1) {
+  const list = container.querySelector<HTMLDivElement>('[role="tablist"]')!
+  const resizeCallbacks = new Set<() => void>()
+  vi.stubGlobal('ResizeObserver', class {
+    private notify: () => void
+    constructor(callback: ResizeObserverCallback) {
+      this.notify = () => callback([], this as unknown as ResizeObserver)
+      resizeCallbacks.add(this.notify)
+    }
+    observe() {}
+    disconnect() { resizeCallbacks.delete(this.notify) }
+  })
+  const layout = { viewportWidth, scale }
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+  const tabWidth = 170
+  const tabRect = (tab: HTMLElement) => {
+    const index = [...list.querySelectorAll('.workspace-tab')].indexOf(tab)
+    return new DOMRect(50 + (index * (tabWidth + 8) - list.scrollLeft) * layout.scale, 20, tabWidth * layout.scale, 40 * layout.scale)
+  }
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === list) return new DOMRect(50, 20, layout.viewportWidth * layout.scale, 40 * layout.scale)
+    if (this.matches('.workspace-tab')) return tabRect(this)
+    if (this.matches('.workspace-tab-close')) {
+      const rect = tabRect(this.parentElement!)
+      return new DOMRect(rect.right - 28 * layout.scale, rect.y, 26 * layout.scale, 28 * layout.scale)
+    }
+    return originalRect.call(this)
+  })
+  Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => layout.viewportWidth })
+  list.scrollTo = vi.fn((options: ScrollToOptions | number) => {
+    if (typeof options === 'object' && options.left !== undefined) list.scrollLeft = options.left
+  }) as typeof list.scrollTo
+  const visible = (id: string) => {
+    const button = tabButtons().find(tab => tab.title === useWorkspaceTabsStore.getState().tabs.find(tab => tab.id === id)?.title)!
+    const wrapper = button.parentElement!
+    const rect = wrapper.getBoundingClientRect(), viewport = list.getBoundingClientRect()
+    const close = wrapper.querySelector<HTMLButtonElement>('.workspace-tab-close')!.getBoundingClientRect()
+    return rect.left >= viewport.left - 0.5 && rect.right <= viewport.right + 0.5 && close.right <= viewport.right + 0.5
+  }
+  return { list, layout, visible, resize: () => resizeCallbacks.forEach(callback => callback()) }
+}
+
 describe('manual workspace tabs', () => {
   it('moves focus with arrows without opening a native object until Enter', async () => {
     await act(async () => tabButtons()[0].focus())
@@ -61,10 +104,98 @@ describe('manual workspace tabs', () => {
     await key(tabButtons()[0], 'Enter', { isComposing: true })
     expect(onClose).not.toHaveBeenCalled(); expect(onSelect).not.toHaveBeenCalled()
   })
+  it('does not close twice when the shell already consumed the workspace shortcut', async () => {
+    const consume = (event: KeyboardEvent): void => event.preventDefault()
+    container.addEventListener('keydown', consume, true)
+    try {
+      await key(tabButtons()[0], 'w', { ctrlKey: true })
+      expect(onClose).not.toHaveBeenCalled()
+      expect(useWorkspaceTabsStore.getState().tabs.map((tab) => tab.id)).toEqual([a.id, b.id])
+    } finally {
+      container.removeEventListener('keydown', consume, true)
+    }
+  })
   it('closes a tab by keyboard and retains the workspace', async () => {
     await key(tabButtons()[0], 'Delete')
     expect(onClose).toHaveBeenCalledExactlyOnceWith(a.id)
     expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, activeTabId: b.id })
+  })
+  it('reveals a newly opened tab including its close button without stealing editor focus or vertical scroll', async () => {
+    const strip = tabStripLayout(240, 0.88)
+    const editor = document.createElement('textarea'); container.append(editor); editor.focus()
+    strip.list.scrollTop = 91; document.documentElement.scrollTop = 44
+    await act(async () => useWorkspaceTabsStore.getState().openTab(c))
+    expect(strip.visible(c.id)).toBe(true)
+    expect(document.activeElement).toBe(editor)
+    expect(strip.list.scrollTop).toBe(91)
+    expect(document.documentElement.scrollTop).toBe(44)
+    expect(useWorkspaceTabsStore.getState().tabs.map(tab => tab.id)).toEqual([a.id, b.id, c.id])
+    document.documentElement.scrollTop = 0
+  })
+  it('reveals programmatic activation and a restored set of tabs', async () => {
+    const strip = tabStripLayout()
+    await act(async () => useWorkspaceTabsStore.getState().activateTab(b.id))
+    expect(strip.visible(b.id)).toBe(true)
+    await act(async () => useWorkspaceTabsStore.setState({ tabs: [], activeTabId: null, selectorOpen: true }))
+    strip.list.scrollLeft = 0
+    await act(async () => useWorkspaceTabsStore.setState({ tabs: [a, b, c], activeTabId: c.id, selectorOpen: false }))
+    expect(strip.visible(c.id)).toBe(true)
+    expect(tabButtons().filter(tab => tab.tabIndex === 0)).toHaveLength(1)
+  })
+  it('keeps the active tab and its close button visible after a narrow strip resize', async () => {
+    const strip = tabStripLayout(280)
+    await act(async () => useWorkspaceTabsStore.getState().openTab(c))
+    strip.layout.viewportWidth = 180
+    await act(async () => strip.resize())
+    expect(strip.visible(c.id)).toBe(true)
+  })
+  it('preserves a manual horizontal scroll across unrelated tab metadata renders', async () => {
+    const strip = tabStripLayout()
+    await act(async () => useWorkspaceTabsStore.getState().openTab(c))
+    strip.list.scrollLeft = 0
+    await act(async () => useWorkspaceTabsStore.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, loading: tab.id === c.id })) })))
+    expect(strip.list.scrollLeft).toBe(0)
+  })
+  it('reveals the complete keyboard-focused tab without selecting it', async () => {
+    const strip = tabStripLayout()
+    await act(async () => useWorkspaceTabsStore.setState({ tabs: [a, b, c] }))
+    await act(async () => tabButtons()[0].focus())
+    await key(tabButtons()[0], 'End')
+    expect(document.activeElement).toBe(tabButtons()[2])
+    expect(strip.visible(c.id)).toBe(true)
+    expect(useWorkspaceTabsStore.getState().activeTabId).toBe(a.id)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+  it('reveals the neighboring tab and restores focus after closing the active tab', async () => {
+    const strip = tabStripLayout()
+    await act(async () => useWorkspaceTabsStore.getState().openTab(c))
+    await act(async () => tabButtons()[2].focus())
+    await key(tabButtons()[2], 'Delete')
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(useWorkspaceTabsStore.getState().activeTabId).toBe(b.id)
+    expect(document.activeElement).toBe(tabButtons()[1])
+    expect(strip.visible(b.id)).toBe(true)
+  })
+  it('preserves dirty-close rejection focus and order', async () => {
+    tabStripLayout()
+    await act(async () => useWorkspaceTabsStore.getState().activateTab(b.id))
+    await act(async () => tabButtons()[1].focus())
+    onClose.mockImplementationOnce(() => {})
+    await key(tabButtons()[1], 'Delete')
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(document.activeElement).toBe(tabButtons()[1])
+    expect(useWorkspaceTabsStore.getState().tabs.map(tab => tab.id)).toEqual([a.id, b.id])
+    expect(useWorkspaceTabsStore.getState().activeTabId).toBe(b.id)
+  })
+  it('reveals immediately under reduced motion even if CSS requests smooth scrolling', async () => {
+    const strip = tabStripLayout()
+    document.documentElement.dataset.motionReduced = 'true'
+    strip.list.style.scrollBehavior = 'smooth'
+    try {
+      await act(async () => useWorkspaceTabsStore.getState().openTab(c))
+      expect(strip.visible(c.id)).toBe(true)
+      expect(strip.list.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }))
+    } finally { delete document.documentElement.dataset.motionReduced }
   })
   it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
     const onOpen = vi.fn()

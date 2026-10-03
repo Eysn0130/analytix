@@ -1,7 +1,7 @@
 import type { ResolvedWriteQuickAction } from '../write/quick-actions'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileText, RotateCcw, Undo2, Quote, Pencil } from 'lucide-react'
+import { FileText, RotateCcw, Undo2, Quote, Pencil } from '../design/AnalytixUiIcons'
 import type { NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeSelection } from '@shared/native-office'
 import { useNativeOfficeStore } from './native-office-store'
 import { nativeSelectionActions } from './native-selection-actions'

@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
-import { GitFork, RefreshCw, Settings } from 'lucide-react'
+import { GitFork, RefreshCw, Settings } from '../../design/AnalytixUiIcons'
 import type { ClawImChannelV1 } from '@shared/app-settings'
 import { AnalytixBrandMark } from '../brand/AnalytixBrandMark'
 import { InitialSessionUsageHeatmap } from './InitialSessionUsageHeatmap'
