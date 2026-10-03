@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { File, Files, Globe, ListChecks, MessageSquare, Plus, ScanEye, Terminal, Users, X, Maximize2, Minimize2, PanelRightClose, FilePlus2, Shapes } from '../../design/AnalytixUiIcons'
@@ -42,12 +42,39 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
   const [focusedId, setFocusedId] = useState<string | null>(activeTabId)
   useEffect(() => setFocusedId(activeTabId), [activeTabId])
   const addRef = useRef<HTMLButtonElement>(null)
+  const tablistRef = useRef<HTMLDivElement>(null)
+  const tabIds = JSON.stringify(tabs.map(tab => tab.id))
+  const revealTab = useCallback((id: string): void => {
+    const list = tablistRef.current
+    const tab = document.getElementById(workspaceTabDomId(id))?.closest<HTMLElement>('.workspace-tab')
+    if (!list || !tab || !list.contains(tab) || !list.clientWidth) return
+    const viewport = list.getBoundingClientRect(), bounds = tab.getBoundingClientRect()
+    if (!viewport.width) return
+    const delta = bounds.width > viewport.width
+      ? bounds.right - viewport.right
+      : Math.min(bounds.left - viewport.left, 0) || Math.max(bounds.right - viewport.right, 0)
+    if (Math.abs(delta) > 0.5) {
+      // Scroll only this strip, including close. Instant also honors reduced motion.
+      list.scrollTo({ left: list.scrollLeft + delta / (viewport.width / list.clientWidth), behavior: 'instant' })
+    }
+  }, [])
+  useLayoutEffect(() => {
+    if (!activeTabId || selectorOpen) return
+    revealTab(activeTabId)
+    if (typeof ResizeObserver === 'undefined') return
+    const list = tablistRef.current
+    const tab = document.getElementById(workspaceTabDomId(activeTabId))?.closest<HTMLElement>('.workspace-tab')
+    if (!list || !tab || !list.contains(tab)) return
+    const observer = new ResizeObserver(() => revealTab(activeTabId))
+    observer.observe(list); observer.observe(tab)
+    return () => observer.disconnect()
+  }, [activeTabId, selectorOpen, tabIds, revealTab])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const rovingId = tabs.some((tab) => tab.id === focusedId) ? focusedId : activeTabId ?? tabs[0]?.id
   const focusTab = (id: string): void => {
     setFocusedId(id)
-    document.getElementById(workspaceTabDomId(id))?.focus()
-    document.getElementById(workspaceTabDomId(id))?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    document.getElementById(workspaceTabDomId(id))?.focus({ preventScroll: true })
+    revealTab(id)
   }
   const closeAndRestoreFocus = (index: number): void => {
     const tab = tabs[index]
@@ -82,7 +109,7 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
     <header className="workspace-tabs-header">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
-          <div className="workspace-tablist" role="tablist" aria-label={t('workspaceTabs', { defaultValue: '工作区标签' })}>
+          <div ref={tablistRef} className="workspace-tablist" role="tablist" aria-label={t('workspaceTabs', { defaultValue: '工作区标签' })}>
             {tabs.map((tab, index) => <SortableWorkspaceTab key={tab.id} tab={tab} active={!selectorOpen && tab.id === activeTabId}
               focusable={tab.id === rovingId} onFocus={() => setFocusedId(tab.id)} onSelect={() => onSelect(tab.id)} onClose={() => closeAndRestoreFocus(index)} onKeyDown={(event) => handleKey(event, index)} />)}
           </div>

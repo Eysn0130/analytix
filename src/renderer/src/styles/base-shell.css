@@ -4008,11 +4008,11 @@ pre {
   user-select: none;
   white-space: nowrap;
   transition:
-    background-color 90ms ease,
-    border-color 90ms ease,
-    box-shadow 90ms ease,
-    color 90ms ease,
-    opacity 90ms ease;
+    background-color var(--ax-motion-hover),
+    border-color var(--ax-motion-hover),
+    box-shadow var(--ax-motion-hover),
+    color var(--ax-motion-hover),
+    opacity var(--ax-motion-hover);
 }
 
 .ds-toolbar-icon-button {
@@ -4228,6 +4228,15 @@ pre {
 .ds-sidebar-footer-settings-button:focus-visible,
 .ds-sidebar-footer-phone-button:focus-visible {
   outline: 2px solid var(--ds-sidebar-footer-focus);
+  outline-offset: 2px;
+}
+
+.ds-composer-utility-button {
+  transition: background-color var(--ax-motion-hover), color var(--ax-motion-hover);
+}
+
+.ds-composer-utility-button:focus-visible {
+  outline: 2px solid var(--ax-border-focus);
   outline-offset: 2px;
 }
 

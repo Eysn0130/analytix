@@ -2665,7 +2665,7 @@ export function FloatingComposer({
                       type="button"
                       disabled={!canOpenComposerMenu}
                       onClick={handleComposerMenuButtonClick}
-                      className={`ds-no-drag flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 ${
+                      className={`ds-composer-utility-button ds-no-drag flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ds-muted hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 ${
                         composerMenuOpen ? 'bg-ds-hover text-ds-ink' : ''
                       }`}
                       aria-label={t('composerMenuTitle')}

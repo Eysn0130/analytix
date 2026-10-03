@@ -59,7 +59,11 @@
   transition: background-color var(--ax-motion-hover), color var(--ax-motion-hover);
 }
 
-.ds-navigation-rail-button:hover,
+.ds-navigation-rail-button:hover {
+  background: var(--ds-sidebar-row-hover);
+  color: var(--ds-text);
+}
+
 .ds-navigation-rail-button[aria-current='page'] {
   background: var(--ds-sidebar-row-active);
   color: var(--ds-text);
