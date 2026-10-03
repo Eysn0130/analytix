@@ -1495,7 +1495,13 @@ if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'))
     }
   }, 20_000)
 
-  it.each(['passed', 'failed', 'missing', 'cancelled', 'cancelled-exit', 'abnormal-exit', 'duplicate', 'pending', 'other-file-failed', 'other-file-failed-missing', 'other-file-failed-pending', 'run-state-missing', 'interrupted-other-file-failed', 'other-file-hook-failed'])
+  it.each([
+    'passed', 'failed', 'missing', 'cancelled', 'cancelled-exit', 'abnormal-exit',
+    'duplicate', 'pending', 'other-file-failed', 'other-file-failed-missing',
+    'other-file-failed-pending', 'run-state-missing', 'interrupted-other-file-failed',
+    'other-file-hook-failed', 'second-shared-missing', 'second-shared-pending',
+    'second-shared-duplicate', 'preload-retained-file-failed'
+  ])
     ('shares each overlapping Vitest file once with %s evidence without losing named gates', (scenario) => {
       const dir = mkdtempSync(join(tmpdir(), 'analytix-product-regression-shared-vitest-'))
       try {
@@ -1516,9 +1522,18 @@ if (args.includes('TestProductRegressionMatrixJSONSnapshot')) {
         writeExecutable(fakeNpm, `#!/usr/bin/env node
 const args = process.argv.slice(2)
 require('node:fs').appendFileSync(${JSON.stringify(marker)}, JSON.stringify(args) + '\\n')
+const scenario = ${JSON.stringify(scenario)}
+if (scenario === 'preload-retained-file-failed' && args.includes('src/preload/preload-sse-bridge.test.ts')) {
+  console.error('synthetic retained preload file failure')
+  process.exit(9)
+}
 if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs')) {
-  const scenario = ${JSON.stringify(scenario)}
-  const sharedFiles = ['src/main/packaging-config.test.ts', 'src/renderer/src/components/settings-section-agents.test.ts']
+  const sharedFiles = [
+    'src/main/packaging-config.test.ts',
+    'src/renderer/src/components/settings-section-agents.test.ts',
+    'src/main/ipc/register-app-ipc-handlers.test.ts',
+    'src/preload/preload-runtime-request.test.ts'
+  ]
   const otherFileFailed = scenario.startsWith('other-file-failed') || scenario === 'interrupted-other-file-failed' || scenario === 'other-file-hook-failed'
   const testResults = scenario === 'missing' ? [] : args.filter((arg) => arg.endsWith('.test.ts')).map((file) => ({
     name: process.cwd().split(require('node:path').sep).join('/') + '/' + file,
@@ -1528,6 +1543,12 @@ if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'))
       { fullName: scenario === 'duplicate' ? 'contract first assertion' : 'contract second assertion', status: 'passed' }
     ]
   }))
+  const secondSharedIndex = testResults.findIndex(({ name }) => name.endsWith('/src/preload/preload-runtime-request.test.ts'))
+  if (secondSharedIndex >= 0) {
+    if (scenario === 'second-shared-missing') testResults.splice(secondSharedIndex, 1)
+    if (scenario === 'second-shared-pending') testResults[secondSharedIndex].assertionResults[1].status = 'pending'
+    if (scenario === 'second-shared-duplicate') testResults[secondSharedIndex].assertionResults[1].fullName = 'contract first assertion'
+  }
   if (scenario === 'other-file-failed-missing') testResults.pop()
   if (scenario === 'other-file-failed-pending') testResults.at(-1).assertionResults[1].status = 'pending'
   if (scenario === 'other-file-hook-failed') {
@@ -1558,27 +1579,55 @@ if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'))
         const report = JSON.parse(result.stdout) as Record<string, any>
         const checks = report.checks as Array<Record<string, any>>
         const calls = readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[])
-        const expectedStatus = scenario === 'passed' ? 'passed' : 'failed'
-        const expectedSharedStatus = scenario === 'passed' || scenario === 'other-file-failed' || scenario === 'other-file-hook-failed' ? 'passed' : 'failed'
+        const secondSharedInvalid = scenario.startsWith('second-shared-')
+        const retainedPreloadFailed = scenario === 'preload-retained-file-failed'
+        const targetedPreloadScenario = secondSharedInvalid || retainedPreloadFailed
+        const expectedStatus = scenario === 'passed' || targetedPreloadScenario ? 'passed' : 'failed'
+        const expectedSharedStatus = scenario === 'passed' || targetedPreloadScenario || scenario === 'other-file-failed' || scenario === 'other-file-hook-failed' ? 'passed' : 'failed'
         expect(result.status).toBe(scenario === 'passed' ? 0 : 1)
         expect(checks).toHaveLength(59)
         expect(new Set(checks.map((check) => check.id)).size).toBe(59)
         for (const [owner, consumer, file] of [
           ['p0-packaging-config-contract', 'packaged-go-boundary', 'src/main/packaging-config.test.ts'],
-          ['p0-provider-settings-probe-contract', 'p0-mcp-ui-contract', 'src/renderer/src/components/settings-section-agents.test.ts']
+          ['p0-provider-settings-probe-contract', 'p0-mcp-ui-contract', 'src/renderer/src/components/settings-section-agents.test.ts'],
+          ['desktop-git-checkpoint', 'p0-preload-bridge-contract', 'src/main/ipc/register-app-ipc-handlers.test.ts'],
+          ['desktop-git-checkpoint', 'p0-preload-bridge-contract', 'src/preload/preload-runtime-request.test.ts']
         ]) {
           expect(calls.filter((args) => args.includes(file))).toHaveLength(1)
           const ownerCheck = checks.find((check) => check.id === owner)!
           const consumerCheck = checks.find((check) => check.id === consumer)!
-          expect(ownerCheck.status).toBe(expectedStatus)
-          expect(consumerCheck.status).toBe(expectedSharedStatus)
+          const desktopOwner = owner === 'desktop-git-checkpoint'
+          expect(ownerCheck.status).toBe(desktopOwner && secondSharedInvalid ? 'failed' : expectedStatus)
+          expect(consumerCheck.status).toBe(desktopOwner && targetedPreloadScenario ? 'failed' : expectedSharedStatus)
+          expect(ownerCheck.sharedVitestResults).toHaveLength(desktopOwner ? 2 : 1)
           expect(consumerCheck.reusedVitestResults).toEqual(ownerCheck.sharedVitestResults)
-          if (scenario === 'passed') {
-            expect(ownerCheck.sharedVitestResults[0].testIds).toEqual([
+          const receipt = ownerCheck.sharedVitestResults.find((evidence: Record<string, any>) => evidence.file === file)
+          expect(receipt).toBeDefined()
+          const invalidReceipt = desktopOwner && secondSharedInvalid && (
+            scenario === 'second-shared-missing' || file === 'src/preload/preload-runtime-request.test.ts'
+          )
+          expect(receipt.status).toBe(invalidReceipt ? 'failed' : expectedSharedStatus)
+          if (receipt.status === 'passed') {
+            expect(receipt.testIds).toEqual([
               JSON.stringify([file, 'contract first assertion']),
               JSON.stringify([file, 'contract second assertion'])
             ])
           }
+        }
+        const preloadCalls = calls.filter((args) => args.includes('src/preload/preload-sse-bridge.test.ts'))
+        expect(preloadCalls).toHaveLength(1)
+        expect(preloadCalls[0].filter((arg) => arg.endsWith('.test.ts'))).toEqual([
+          'src/preload/preload-sandbox.test.ts',
+          'src/preload/preload-sse-bridge.test.ts',
+          'src/main/ipc/app-ipc-schemas.test.ts'
+        ])
+        for (const file of preloadCalls[0].filter((arg) => arg.endsWith('.test.ts'))) {
+          expect(calls.filter((args) => args.includes(file))).toHaveLength(1)
+        }
+        if (retainedPreloadFailed) {
+          expect(result.stderr).toContain('synthetic retained preload file failure')
+          expect(report.status).toBe('failed')
+          expect(report.passed).toBe(false)
         }
       } finally {
         rmSync(dir, { recursive: true, force: true })

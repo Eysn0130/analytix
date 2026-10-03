@@ -1,6 +1,6 @@
 import { JsonReporter } from 'vitest/node'
 
-// JSON alone omits interrupted runs. Only the two shared regression owners use
+// JSON alone omits interrupted runs. The shared regression owners use
 // this reporter; keep Vitest's assertion evidence and add its completion state.
 export default class SharedVitestReporter extends JsonReporter {
   constructor() {
