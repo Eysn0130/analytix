@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { CircleDot, ExternalLink, Square } from '../../design/AnalytixUiIcons'
+import { CircleDot, ExternalLink, StopIcon as Square } from '../../design/AnalytixUiIcons'
 import type { CoreThreadSummarySubagentJson } from '../../agent/analytix-contract'
 import { SummaryRow } from './SummaryRow'
 

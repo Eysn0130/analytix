@@ -1,3 +1,4 @@
+import { XCircle } from "../../../design/AnalytixUiIcons";
 import { FeedbackLottieIcon, type FeedbackLottieVariant } from "./FeedbackLottieIcon";
 
 type FailAlertLottieProps = {
@@ -12,11 +13,7 @@ export function FailAlertLottie({ variant = "toast", className }: FailAlertLotti
       variant={variant}
       className={className}
       fallback={
-        <svg className="ui-fail-alert-lottie__fallback" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="8.6" />
-        <path d="M8.9 8.9 15.1 15.1" />
-        <path d="M15.1 8.9 8.9 15.1" />
-        </svg>
+        <XCircle className="ui-fail-alert-lottie__fallback" aria-hidden="true" />
       }
     />
   );

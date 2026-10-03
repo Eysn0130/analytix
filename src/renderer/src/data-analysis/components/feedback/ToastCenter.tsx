@@ -1,3 +1,4 @@
+import { ArrowRight, X } from "../../../design/AnalytixUiIcons";
 import {
   ReactNode,
   useCallback,
@@ -227,10 +228,7 @@ function ToastCenter({
                   aria-label={toast.actionAriaLabel || toast.actionLabel}
                 >
                   <span>{toast.actionLabel}</span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M8 12h8" />
-                    <path d="m12 8 4 4-4 4" />
-                  </svg>
+                  <ArrowRight aria-hidden="true" />
                 </button>
               </div>
             ) : null}
@@ -242,10 +240,7 @@ function ToastCenter({
               onClick={() => onDismiss(toast.id)}
               aria-label="关闭提示"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M7 7 17 17" />
-                <path d="M17 7 7 17" />
-              </svg>
+              <X aria-hidden="true" />
             </button>
           ) : null}
         </article>

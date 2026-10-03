@@ -1,25 +1,6 @@
 import { createElement, forwardRef } from 'react'
 import type { LucideIcon, LucideProps } from 'lucide-react'
-import {
-  Bug,
-  ChevronDown,
-  ChevronRight,
-  FolderOpen,
-  Globe,
-  ListChecks,
-  ListTodo,
-  MessageSquare,
-  Pencil,
-  Pin,
-  SquareTerminal,
-  FilePlus2,
-  GitFork,
-  Lightbulb,
-  PanelTop,
-  RefreshCw,
-  Settings,
-  Sparkles
-} from 'lucide-react'
+import { PanelTop } from 'lucide-react'
 import { OpenAiUiIcons } from './openai-icons/OpenAiUiIcons'
 import appIcon512 from '../../../asset/brand/analytix-app-icon-512.png'
 import splashImage from '../../../asset/brand/analytix-splash.png'
@@ -55,19 +36,19 @@ export function createSystemIcon(icon: LucideIcon, filled = false): AnalytixSvgI
   return SystemIcon
 }
 
-export const AnalytixDisclosureDownIcon = createSystemIcon(ChevronDown)
-export const AnalytixDisclosureRightIcon = createSystemIcon(ChevronRight)
+export const AnalytixDisclosureDownIcon = OpenAiUiIcons.chevronDown
+export const AnalytixDisclosureRightIcon = OpenAiUiIcons.chevronRight
 export const AnalytixSidebarHideIcon = OpenAiUiIcons.sidebar
 export const AnalytixSidebarShowIcon = OpenAiUiIcons.sidebar
-export const AnalytixTerminalIcon = createSystemIcon(SquareTerminal)
-export const AnalytixBrowserIcon = createSystemIcon(Globe)
-export const AnalytixEditIcon = createSystemIcon(Pencil)
-export const AnalytixTaskListIcon = createSystemIcon(ListTodo)
-export const AnalytixPinIcon = createSystemIcon(Pin)
-export const AnalytixPinFilledIcon = createSystemIcon(Pin, true)
-export const AnalytixPlanIcon = createSystemIcon(ListChecks)
-export const AnalytixCommentIcon = createSystemIcon(MessageSquare)
-export const AnalytixWorkspaceIcon = createSystemIcon(FolderOpen)
+export const AnalytixTerminalIcon = OpenAiUiIcons.terminal
+export const AnalytixBrowserIcon = OpenAiUiIcons.globe
+export const AnalytixEditIcon = OpenAiUiIcons.editPencil
+export const AnalytixTaskListIcon = OpenAiUiIcons.tasks
+export const AnalytixPinIcon = OpenAiUiIcons.pin
+export const AnalytixPinFilledIcon = OpenAiUiIcons.pinFilled
+export const AnalytixPlanIcon = OpenAiUiIcons.tasks
+export const AnalytixCommentIcon = OpenAiUiIcons.chat
+export const AnalytixWorkspaceIcon = OpenAiUiIcons.folderOpen
 
 export const AnalytixIconRegistry = {
   brand: {
@@ -81,27 +62,27 @@ export const AnalytixIconRegistry = {
   },
   icons: {
     browser: AnalytixBrowserIcon,
-    bug: createSystemIcon(Bug),
+    bug: OpenAiUiIcons.bug,
     comment: AnalytixCommentIcon,
     disclosureDown: AnalytixDisclosureDownIcon,
     disclosureRight: AnalytixDisclosureRightIcon,
     edit: AnalytixEditIcon,
-    fork: createSystemIcon(GitFork),
-    idea: createSystemIcon(Lightbulb),
+    fork: OpenAiUiIcons.branchAlt,
+    idea: OpenAiUiIcons.lightbulb,
     panel: createSystemIcon(PanelTop),
     pin: AnalytixPinIcon,
     pinFilled: AnalytixPinFilledIcon,
     plan: AnalytixPlanIcon,
-    refresh: createSystemIcon(RefreshCw),
-    settings: createSystemIcon(Settings),
+    refresh: OpenAiUiIcons.reload,
+    settings: OpenAiUiIcons.settingsCog,
     sidebarHide: AnalytixSidebarHideIcon,
     sidebarShow: AnalytixSidebarShowIcon,
-    sparkles: createSystemIcon(Sparkles),
+    sparkles: OpenAiUiIcons.sparkles,
     taskList: AnalytixTaskListIcon,
     terminal: AnalytixTerminalIcon,
     workspace: AnalytixWorkspaceIcon,
     write: AnalytixEditIcon,
-    writeNew: createSystemIcon(FilePlus2)
+    writeNew: OpenAiUiIcons.pageBlank
   } satisfies Record<string, AnalytixRegistryIcon>,
   sizes: AnalytixIconSizes
 } as const

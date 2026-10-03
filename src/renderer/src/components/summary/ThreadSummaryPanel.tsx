@@ -7,7 +7,7 @@ import {
   ChevronDown,
   CircleDot,
   Database,
-  FilePlus2,
+  EditDocumentIcon as FilePlus2,
   GitBranch,
   Laptop,
   Loader2,

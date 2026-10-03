@@ -5,7 +5,7 @@ import {
   Columns2,
   Eye,
   FileCode2,
-  Type
+  TextIcon as Type
 } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WriteExportFormat } from '@shared/write-export'

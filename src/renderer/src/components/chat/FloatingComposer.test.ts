@@ -1701,7 +1701,7 @@ describe('FloatingComposer capability controls', () => {
     expect(html).toContain('aria-label="Permissions"')
     expect(html).toContain('Permissions: Full access')
     expect(html).toContain('>Full access<')
-    expect(html).toContain('lucide-settings')
+    expect(html).toContain('data-analytix-icon="SettingsCog"')
   })
 
   it('renders the standalone permission picker with the current mode label', () => {
@@ -1889,6 +1889,6 @@ describe('FloatingComposer capability controls', () => {
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
     const sendButton = html.match(/<button[^>]*aria-label="Send"[^>]*>/)?.[0] ?? ''
     expect(sendButton).toContain('disabled=""')
-    expect(html).toContain('lucide-loader-circle')
+    expect(html).toContain('data-analytix-icon="CircleDashed"')
   })
 })

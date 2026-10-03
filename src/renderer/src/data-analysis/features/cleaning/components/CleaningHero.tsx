@@ -1,3 +1,4 @@
+import { Sheet } from "../../../../design/AnalytixUiIcons";
 import { WorkbenchToolbarButton } from "../../../components/workbench-ui";
 import type { CleaningHeroActionsViewModel } from "../model/hero-actions";
 import type { CleaningBoardStatus } from "../model/types";
@@ -28,11 +29,7 @@ export function CleaningHero({
       <div className="cleaning-hero__copy">
         <div className="cleaning-hero__title">
           <span className="cleaning-hero__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" focusable="false">
-              <rect x="4.25" y="5.25" width="15.5" height="13.5" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M8 9.25H16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              <path d="M8 13H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
+            <Sheet aria-hidden="true" focusable="false" />
           </span>
           <div className="cleaning-hero__title-copy">
             <div className="cleaning-hero__title-main">

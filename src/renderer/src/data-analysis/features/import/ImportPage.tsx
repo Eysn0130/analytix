@@ -1,4 +1,4 @@
-import { Eye, Download, RotateCcw, Trash2, TableProperties, UserRound, FileText, Users, Sparkles } from "../../../design/AnalytixUiIcons";
+import { CheckCircle2, AlertCircle, Copy, X, ErrorIcon, Loader2, Clock3, Eye, Download, RotateCcw, Trash2, Sheet as TableProperties, UserRound, FileText, Users, Sparkles } from "../../../design/AnalytixUiIcons";
 import { CSSProperties, Dispatch, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, MutableRefObject, ReactNode, SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   WorkbenchButton,
@@ -1302,87 +1302,16 @@ function ImportTaskStatusIcon({
 }: {
   kind: "success" | "successAttention" | "duplicate" | "error" | "warn" | "running" | "waiting";
 }): JSX.Element {
-  if (kind === "success") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M16.0303 10.0303C16.3232 9.73744 16.3232 9.26256 16.0303 8.96967C15.7374 8.67678 15.2626 8.67678 14.9697 8.96967L10.5 13.4393L9.03033 11.9697C8.73744 11.6768 8.26256 11.6768 7.96967 11.9697C7.67678 12.2626 7.67678 12.7374 7.96967 13.0303L9.96967 15.0303C10.2626 15.3232 10.7374 15.3232 11.0303 15.0303L16.0303 10.0303Z"
-          fill="currentColor"
-        />
-        <path
-          fillRule="evenodd"
-          clipRule="evenodd"
-          d="M12.0574 1.25H11.9426C9.63424 1.24999 7.82519 1.24998 6.41371 1.43975C4.96897 1.63399 3.82895 2.03933 2.93414 2.93414C2.03933 3.82895 1.63399 4.96897 1.43975 6.41371C1.24998 7.82519 1.24999 9.63422 1.25 11.9426V12.0574C1.24999 14.3658 1.24998 16.1748 1.43975 17.5863C1.63399 19.031 2.03933 20.1711 2.93414 21.0659C3.82895 21.9607 4.96897 22.366 6.41371 22.5603C7.82519 22.75 9.63423 22.75 11.9426 22.75H12.0574C14.3658 22.75 16.1748 22.75 17.5863 22.5603C19.031 22.366 20.1711 21.9607 21.0659 21.0659C21.9607 20.1711 22.366 19.031 22.5603 17.5863C22.75 16.1748 22.75 14.3658 22.75 12.0574V11.9426C22.75 9.63423 22.75 7.82519 22.5603 6.41371C22.366 4.96897 21.9607 3.82895 21.0659 2.93414C20.1711 2.03933 19.031 1.63399 17.5863 1.43975C16.1748 1.24998 14.3658 1.24999 12.0574 1.25ZM3.9948 3.9948C4.56445 3.42514 5.33517 3.09825 6.61358 2.92637C7.91356 2.75159 9.62177 2.75 12 2.75C14.3782 2.75 16.0864 2.75159 17.3864 2.92637C18.6648 3.09825 19.4355 3.42514 20.0052 3.9948C20.5749 4.56445 20.9018 5.33517 21.0736 6.61358C21.2484 7.91356 21.25 9.62177 21.25 12C21.25 14.3782 21.2484 16.0864 21.0736 17.3864C20.9018 18.6648 20.5749 19.4355 20.0052 20.0052C19.4355 20.5749 18.6648 20.9018 17.3864 21.0736C16.0864 21.2484 14.3782 21.25 12 21.25C9.62177 21.25 7.91356 21.2484 6.61358 21.0736C5.33517 20.9018 4.56445 20.5749 3.9948 20.0052C3.42514 19.4355 3.09825 18.6648 2.92637 17.3864C2.75159 16.0864 2.75 14.3782 2.75 12C2.75 9.62177 2.75159 7.91356 2.92637 6.61358C3.09825 5.33517 3.42514 4.56445 3.9948 3.9948Z"
-          fill="currentColor"
-        />
-      </svg>
-    );
-  }
-  if (kind === "successAttention") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 8L12 13" stroke="currentColor" strokeWidth="1.56" strokeLinecap="round" />
-        <path d="M12 16V15.9888" stroke="currentColor" strokeWidth="1.56" strokeLinecap="round" />
-        <path d="M3 12C3 4.5885 4.5885 3 12 3C19.4115 3 21 4.5885 21 12C21 19.4115 19.4115 21 12 21C4.5885 21 3 19.4115 3 12Z" stroke="currentColor" strokeWidth="1.56" />
-      </svg>
-    );
-  }
-  if (kind === "duplicate") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          opacity="0.4"
-          d="M22 11.1V6.9C22 3.4 20.6 2 17.1 2H12.9C9.4 2 8 3.4 8 6.9V8H11.1C14.6 8 16 9.4 16 12.9V16H17.1C20.6 16 22 14.6 22 11.1Z"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M16 17.1V12.9C16 9.4 14.6 8 11.1 8H6.9C3.4 8 2 9.4 2 12.9V17.1C2 20.6 3.4 22 6.9 22H11.1C14.6 22 16 20.6 16 17.1Z"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path d="M6.08008 14.9998L8.03008 16.9498L11.9201 13.0498" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (kind === "error") {
-    return (
-      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M5.1 5.1 10.9 10.9M10.9 5.1 5.1 10.9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (kind === "running") {
-    return (
-      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="is-spinning">
-        <path d="M8 2.3a5.7 5.7 0 1 0 4.9 2.9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (kind === "warn") {
-    return (
-      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M8 4.1v4.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <circle cx="8" cy="11.6" r=".9" fill="currentColor" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <line x1="16" y1="3" x2="16" y2="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="6.8" y1="6.8" x2="10.3" y2="10.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="3" y1="16" x2="8" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="6.8" y1="25.2" x2="10.3" y2="21.7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="16" y1="29" x2="16" y2="24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="25.2" y1="25.2" x2="21.7" y2="21.7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="29" y1="16" x2="24" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="25.2" y1="6.8" x2="21.7" y2="10.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  const Icon = {
+    success: CheckCircle2,
+    successAttention: AlertCircle,
+    duplicate: Copy,
+    error: X,
+    warn: ErrorIcon,
+    running: Loader2,
+    waiting: Clock3,
+  }[kind];
+  return <Icon aria-hidden="true" className={kind === "running" ? "is-spinning" : undefined} />;
 }
 
 const CATEGORY_META: Array<{
@@ -6612,16 +6541,7 @@ export function ImportPage({ active = true }: { active?: boolean }): JSX.Element
     previewQueueStatus ? (
       <div className={`import-console-dropzone__queue-progress${className ? ` ${className}` : ""}`} role="status" aria-live="polite">
         <span className="import-console-dropzone__queue-progress-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <circle cx="12" cy="12" r="8.25" fill="none" opacity="0.2" stroke="currentColor" strokeWidth="1.6" />
-            <path
-              d="M12 3.75a8.25 8.25 0 0 1 7.78 5.52"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeWidth="2.3"
-            />
-          </svg>
+          <Loader2 focusable="false" aria-hidden="true" />
         </span>
         <div className="import-console-dropzone__queue-progress-copy">
           <strong>正在导入数据</strong>

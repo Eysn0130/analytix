@@ -34,9 +34,9 @@ import {
   RotateCcw,
   Search,
   SearchCode,
-  Send,
+  SubmitIcon as Send,
   Sparkles,
-  Square,
+  StopIcon as Square,
   Target,
   Trash2,
   X

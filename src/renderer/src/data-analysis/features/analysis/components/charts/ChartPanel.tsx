@@ -1,3 +1,4 @@
+import { FileText } from "../../../../../design/AnalytixUiIcons";
 import { ReactNode, useMemo } from "react";
 
 type ChartPanelHeaderMode = "default" | "primary" | "compact";
@@ -63,12 +64,7 @@ export function ChartPanel({
         {!loading && empty ? (
           <div className={`chart-panel__empty chart-panel__empty--${emptyVariant}`}>
             <div className="chart-panel__empty-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M5 7.5h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path d="M7.25 12h9.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path d="M9.25 16.5h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <rect x="3.75" y="4.75" width="16.5" height="14.5" rx="3.25" stroke="currentColor" strokeWidth="1.5" />
-              </svg>
+              <FileText aria-hidden="true" />
             </div>
             <div className="chart-panel__empty-title">{emptyTitle || emptyText}</div>
             {emptyDescription ? <div className="chart-panel__empty-description">{emptyDescription}</div> : null}

@@ -879,7 +879,7 @@ SUCH DAMAGE.
 
 ## OpenAI Apps SDK UI icon vectors
 
-Five non-brand renderer vectors are vendored from the official
+139 non-brand renderer vectors are vendored from the official
 [openai/apps-sdk-ui](https://github.com/openai/apps-sdk-ui) repository,
 commit `0f00143c7a639906f1621fe58e1b6be7b5bea46d`, under the MIT License.
 The original vector sources and exact object mapping are retained under

@@ -45,14 +45,15 @@ describe('Analytix visual system baseline', () => {
     expect(AnalytixIconRegistry.icons.terminal).toBeTruthy()
   })
 
-  it('uses consistent licensed outline icons and a distinct pinned fill', () => {
+  it('uses distinct official pin state geometry and preserves sizes', () => {
     const outline = renderToStaticMarkup(createElement(AnalytixIconRegistry.icons.pin))
     const filled = renderToStaticMarkup(createElement(AnalytixIconRegistry.icons.pinFilled))
 
     expect(outline).toContain('width="20"')
     expect(outline).toContain('viewBox="0 0 24 24"')
-    expect(outline).toContain('stroke-width="1.75"')
-    expect(outline).toContain('fill="none"')
+    expect(outline).toContain('stroke="none"')
+    expect(outline).toContain('fill="currentColor"')
+    expect(outline).not.toBe(filled)
     expect(filled).toContain('width="20"')
     expect(filled).toContain('viewBox="0 0 24 24"')
     expect(filled).toContain('fill="currentColor"')

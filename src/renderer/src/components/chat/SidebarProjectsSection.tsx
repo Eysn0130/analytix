@@ -8,7 +8,6 @@ import {
   BarChart3,
   ClipboardList,
   Clock3,
-  Copy,
   Database,
   FileText,
   Folder,
@@ -24,7 +23,7 @@ import {
   RotateCcw,
   Search,
   Sparkles,
-  SquareStack,
+  Copy, OpenWindowIcon, StackedLayersIcon,
   Trash2
 } from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
@@ -1565,7 +1564,7 @@ export function DataAnalysisWorkspaceRows({
         ) : (
           <AnalytixIconRegistry.icons.disclosureDown className="h-3 w-3 shrink-0 text-ds-faint" />
         )}
-        <SquareStack className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.85} />
+        <StackedLayersIcon className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.85} />
         <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-ds-faint">
           {t('sidebarDataAnalysisTitle')}
         </span>
@@ -2077,7 +2076,7 @@ function ThreadContextMenu({
               onClick={() => run(onCopyMarkdown)}
             />
             <ActionMenuItem
-              icon={<SquareStack className="h-4 w-4" strokeWidth={1.9} />}
+              icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyThreadId')}
               onClick={() => run(onCopyThreadId)}
             />
@@ -2128,7 +2127,7 @@ function ThreadContextMenu({
       />
       <ActionMenuSeparator />
       <ActionMenuItem
-        icon={<SquareStack className="h-4 w-4" strokeWidth={1.9} />}
+        icon={<OpenWindowIcon className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionOpenInNewWindow')}
         disabled={!runtimeReady}
         title={!runtimeReady ? t('runtimeActionNeedsConnection') : undefined}
