@@ -4,15 +4,15 @@ import { createPortal } from 'react-dom'
 import {
   Archive,
   Clock3,
-  Copy,
   GitBranch,
   GitFork,
   MessageCirclePlus,
   MoreHorizontal,
   PencilLine,
   RotateCcw,
-  SquareStack,
-  TableProperties,
+  Copy,
+  OpenWindowIcon,
+  Sheet as TableProperties,
   X
 } from '../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
@@ -548,7 +548,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                 onClick={copyThreadMarkdown}
               />
               <ActionMenuItem
-                icon={<SquareStack className="h-5 w-5" strokeWidth={1.9} />}
+                icon={<Copy className="h-5 w-5" strokeWidth={1.9} />}
                 label={t('sessionActionCopyThreadId')}
                 onClick={copyThreadId}
               />
@@ -600,7 +600,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
         />
         <ActionMenuSeparator />
         <ActionMenuItem
-          icon={<SquareStack className="h-5 w-5" strokeWidth={1.9} />}
+          icon={<OpenWindowIcon className="h-5 w-5" strokeWidth={1.9} />}
           label={t('sessionActionOpenInNewWindow')}
           disabled={threadActionsDisabled}
           title={threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}

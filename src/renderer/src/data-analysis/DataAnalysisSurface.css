@@ -82,7 +82,7 @@
 .ui-toast-content p { margin: 4px 0 0; color: var(--ds-text-muted); overflow-wrap: anywhere; }
 .ui-toast-icon svg,
 .ui-toast-action svg,
-.ui-toast-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.ui-toast-close svg { width: 18px; height: 18px; }
 .ui-toast-close { flex: 0 0 auto; border: 0; border-radius: 6px; background: transparent; color: var(--ds-text-muted); }
 .ui-toast-success .ui-toast-icon { color: var(--ds-success); }
 .ui-toast-error .ui-toast-icon { color: var(--ds-danger); }

@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, ArrowRight, Bold, Box, ChevronDown, Download, Expand, Filter, GitFork, Italic, LayoutGrid, Minus, Network, Palette, Plus, Redo2, RefreshCw, Minimize, Scaling, Shapes, SlidersHorizontal, Spline, Square, SquareStack, TableProperties, TriangleAlert, Type, Undo2, Users, UsersRound, Waypoints, type LucideIcon } from "../../../../../design/AnalytixUiIcons";
+import { AArrowDown, AArrowUp, ArrowRight, Bold, Box, ChevronDown, Download, Expand, Filter, GitFork, Italic, LayoutGrid, Minus, Network, Palette, Plus, Redo2, RefreshCw, Minimize, Scaling, Shapes, SlidersHorizontal, Spline, Square, SquareStack, TableProperties, TriangleAlert, TextIcon, Type, Undo2, Users, UsersRound, Waypoints, type LucideIcon } from "../../../../../design/AnalytixUiIcons";
 import { Check, ChevronRight, X, ChevronLeft } from "../../../../../design/AnalytixUiIcons";
 import {
   DragEvent,
@@ -75,8 +75,8 @@ function groupCheckboxState(group: FlowShellState["treeData"][number], selected:
 }
 
 const FLOW_CONTROL_ICONS: Record<string, LucideIcon> = {
-  "ico-font": Type,
-  "ico-fontsize": Type,
+  "ico-font": TextIcon,
+  "ico-fontsize": TextIcon,
   "ico-text-plus": AArrowUp,
   "ico-text-minus": AArrowDown,
   "ico-detail": TableProperties,

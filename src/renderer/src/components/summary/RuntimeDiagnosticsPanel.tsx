@@ -14,7 +14,7 @@ import {
   Play,
   RotateCcw,
   SendHorizontal,
-  Square
+  StopIcon as Square
 } from '../../design/AnalytixUiIcons'
 import type {
   CoreThreadSummaryResponseJson,

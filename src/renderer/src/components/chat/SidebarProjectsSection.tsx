@@ -8,7 +8,6 @@ import {
   BarChart3,
   ClipboardList,
   Clock3,
-  Copy,
   Database,
   FileText,
   Folder,
@@ -24,7 +23,7 @@ import {
   RotateCcw,
   Search,
   Sparkles,
-  SquareStack,
+  Copy, OpenWindowIcon, StackedLayersIcon,
   Trash2
 } from '../../design/AnalytixUiIcons'
 import type { CaseProjectIndexStatus, NormalizedCaseProject, NormalizedThread } from '../../agent/types'
@@ -1565,7 +1564,7 @@ export function DataAnalysisWorkspaceRows({
         ) : (
           <AnalytixIconRegistry.icons.disclosureDown className="h-3 w-3 shrink-0 text-ds-faint" />
         )}
-        <SquareStack className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.85} />
+        <StackedLayersIcon className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.85} />
         <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-ds-faint">
           {t('sidebarDataAnalysisTitle')}
         </span>
@@ -1828,22 +1827,26 @@ function ThreadRow({
         </>
       }
       className="min-h-[34px]"
-      buttonClassName="items-center gap-2 px-2.5 py-1.5"
+      buttonClassName={`items-center gap-2 px-2.5 py-1.5 ${
+        deleting ? 'pr-[72px]' : 'group-hover:pr-[72px] group-focus-within:pr-[72px]'
+      }`}
       disabled={deleting}
       ariaLabel={ariaLabel}
       title={forkLabel ? `${thread.title}\n${forkLabel}` : thread.title}
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
-      {pinned ? (
-        <PinIcon
-          className={`h-3.5 w-3.5 shrink-0 ${active ? 'text-accent' : 'text-ds-faint/90'}`}
-        />
-      ) : forked ? (
-        <GitFork
-          className={`h-3.5 w-3.5 shrink-0 ${active ? 'text-accent' : 'text-ds-faint/90'}`}
-          strokeWidth={1.8}
-        />
+      {pinned || forked ? (
+        <span
+          className={`flex w-3.5 shrink-0 flex-col items-center justify-center ${
+            active ? 'text-accent' : 'text-ds-faint/90'
+          }`}
+        >
+          {pinned ? <PinIcon className={forked ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'} /> : null}
+          {forked ? (
+            <GitFork className={pinned ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'} strokeWidth={1.8} />
+          ) : null}
+        </span>
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         <span
@@ -1853,26 +1856,19 @@ function ThreadRow({
         >
           {thread.title}
         </span>
-        {forked ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/15 bg-accent/8 px-1.5 py-0.5 text-[10.5px] font-semibold leading-none text-accent">
-            <GitFork className="h-2.5 w-2.5" strokeWidth={1.8} />
-            {t('sidebarThreadForkBadge')}
-          </span>
-        ) : null}
         <span
-          className={`ml-auto flex shrink-0 items-center gap-1.5 transition ${
-            deleting ? 'opacity-0' : 'group-hover:opacity-0 group-focus-within:opacity-0'
+          className={`max-w-[3em] shrink-0 truncate text-right text-[12px] leading-4 text-ds-faint tabular-nums ${
+            deleting ? 'hidden' : 'group-hover:hidden group-focus-within:hidden'
           }`}
+          title={updatedLabel}
         >
-          <span className="shrink-0 text-right text-[12px] leading-4 text-ds-faint tabular-nums">
-            {updatedLabel}
-          </span>
-          <ThreadActivityDot
-            running={showRunning}
-            unread={showUnreadDot}
-            unreadLabel={t('sidebarThreadUnread')}
-          />
+          {updatedLabel}
         </span>
+        <ThreadActivityDot
+          running={showRunning}
+          unread={showUnreadDot}
+          unreadLabel={t('sidebarThreadUnread')}
+        />
       </span>
     </SidebarTreeRow>
   )
@@ -2080,7 +2076,7 @@ function ThreadContextMenu({
               onClick={() => run(onCopyMarkdown)}
             />
             <ActionMenuItem
-              icon={<SquareStack className="h-4 w-4" strokeWidth={1.9} />}
+              icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyThreadId')}
               onClick={() => run(onCopyThreadId)}
             />
@@ -2131,7 +2127,7 @@ function ThreadContextMenu({
       />
       <ActionMenuSeparator />
       <ActionMenuItem
-        icon={<SquareStack className="h-4 w-4" strokeWidth={1.9} />}
+        icon={<OpenWindowIcon className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionOpenInNewWindow')}
         disabled={!runtimeReady}
         title={!runtimeReady ? t('runtimeActionNeedsConnection') : undefined}

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedThread } from '../../agent/types'
 import type { SddDraftHistoryItem } from '../../sdd/sdd-draft-history'
+import * as pinnedThreads from '../../lib/pinned-threads'
 import { sidebarWorkspaceCollapseKey } from '../../lib/sidebar-collapsed-workspaces'
 import {
 	  buildSidebarPinnedThreadOrder,
@@ -170,6 +171,53 @@ describe('SidebarProjectsSection groups', () => {
 
     expect(groups).toHaveLength(1)
     expect(groups[0]?.[1].map((item) => item.id)).toEqual(['loaded-thread', 'active-thread'])
+  })
+
+  it('preserves full thread identity, fork provenance and status alongside compact row controls', () => {
+    const root = '/synthetic/sidebar-project'
+    const unread = {
+      ...thread({ id: 'unread-thread', title: '未读研究线程_长标题完整保留', workspace: root }),
+      forkedFromThreadId: 'parent-thread',
+      forkedFromTitle: '合成父线程'
+    }
+    const running = thread({
+      id: 'running-thread', title: 'RunningLongUnspacedSyntheticThreadTitle',
+      workspace: root, status: 'running'
+    })
+    const pinned = vi.spyOn(pinnedThreads, 'readPinnedThreadIds').mockReturnValue(new Set([unread.id]))
+    let html: string
+    try {
+      html = renderSidebarProjectsSection({
+        threads: [unread, running],
+        caseProjects: [{
+          id: 'sidebar-project', name: 'sidebar-project', rootPath: root,
+          updatedAt: '2026-06-12T00:00:00.000Z', threadCount: 2,
+          runningCount: 1, archivedCount: 0, status: 'ready'
+        }],
+        caseProjectThreadsById: { 'sidebar-project': [unread, running] },
+        caseProjectExpandedById: { 'sidebar-project': true },
+        unreadThreadIds: { [unread.id]: true },
+        workspaceRoot: root,
+        workspaceRoots: [root]
+      })
+    } finally {
+      pinned.mockRestore()
+    }
+    const rowLabels = [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)]
+      .map((match) => match[1])
+    expect(rowLabels.filter((label) => label.startsWith(unread.title))).toHaveLength(1)
+    expect(rowLabels.find((label) => label.startsWith(unread.title))).toContain('合成父线程')
+    expect(rowLabels.filter((label) => label.startsWith(running.title))).toHaveLength(1)
+    expect(html).toContain(`>${unread.title}</span>`)
+    expect(html).toContain(`>${running.title}</span>`)
+    expect(html).toContain('animate-spin text-accent')
+    expect(html).toContain('rounded-full bg-accent')
+    const unreadRow = html.match(new RegExp(`<button[^>]+aria-label="${unread.title}[^"]*"[^>]*>([\\s\\S]*?)</button>`))?.[1] ?? ''
+    expect(unreadRow.match(/<svg/g)).toHaveLength(2)
+    const archiveLabels = rowLabels.filter((label) => /archive|归档/i.test(label))
+    const deleteLabels = rowLabels.filter((label) => /delete|删除/i.test(label))
+    expect(archiveLabels).toHaveLength(2)
+    expect(deleteLabels).toHaveLength(2)
   })
 
   it('shows loading instead of an empty project list while the case-project index is building', () => {

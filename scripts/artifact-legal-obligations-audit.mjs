@@ -120,7 +120,7 @@ export const REQUIRED_PRODUCT_LICENSE_SHA256 =
 // inventory and the admitted OpenAI Apps SDK UI MIT icon notices. Keep this expected digest independent of
 // the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  'f616fad3d31c19dfd6a6988c84cc97f85a07344252b933683524e4e1bd1dcd83'
+  '88203abfcb1e5976032446d5a6f19f06ba1968c5e994fbcf7d651752aad94b3a'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 

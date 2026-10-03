@@ -10,7 +10,7 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
-  Send,
+  ArrowRight as Send,
   Sparkles,
   X
 } from '../design/AnalytixUiIcons'

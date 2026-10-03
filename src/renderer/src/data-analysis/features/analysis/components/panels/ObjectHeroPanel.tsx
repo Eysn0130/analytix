@@ -1,3 +1,4 @@
+import { Calendar } from "../../../../../design/AnalytixUiIcons";
 interface ObjectHeroStat {
   tone: "in" | "out" | "net";
   label: string;
@@ -38,10 +39,7 @@ export function ObjectHeroPanel({ heroCopy, dateRangeLabel }: ObjectHeroPanelPro
       <div className="chart-object-hero__aside">
         <div className="chart-object-hero__date-pill" aria-label={`分析时间范围：${dateRangeLabel}`}>
           <span className="chart-object-hero__date-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <rect x="4.75" y="5.75" width="14.5" height="13.5" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M8 3.75v4M16 3.75v4M4.75 9.25h14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
+            <Calendar aria-hidden="true" />
           </span>
           <span className="chart-object-hero__date-text">{dateRangeLabel}</span>
         </div>

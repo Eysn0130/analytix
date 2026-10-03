@@ -1,3 +1,4 @@
+import { Sun, Moon, Bell } from "../../../design/AnalytixUiIcons";
 import type { ReactNode } from "react";
 import { useAppStore } from "../../store/app-store";
 import "./page-topbar.css";
@@ -45,48 +46,18 @@ interface PageTopBarProps {
 function ThemeIcon({ dark }: { dark: boolean }): JSX.Element {
   if (dark) {
     return (
-      <svg viewBox="0 0 20 20" fill="none" focusable="false">
-        <circle cx="10" cy="10" r="3.15" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M10 2.8V4.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M10 15.7V17.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M2.8 10H4.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M15.7 10H17.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M4.95 4.95L6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M14 14L15.05 15.05" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M14 6L15.05 4.95" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M4.95 15.05L6 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
+      <Sun aria-hidden="true" focusable="false" />
     );
   }
 
   return (
-    <svg viewBox="0 0 20 20" fill="none" focusable="false">
-      <path
-        d="M12.7 3.1A6.8 6.8 0 1 0 16.9 14.6A7.1 7.1 0 0 1 12.7 3.1Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <Moon aria-hidden="true" focusable="false" />
   );
 }
 
 function BellIcon(): JSX.Element {
   return (
-    <svg viewBox="0 0 20 20" fill="none" focusable="false">
-      <path
-        d="M10 3.3C7.93 3.3 6.25 4.98 6.25 7.05V8.86C6.25 9.45 6.05 10.03 5.69 10.49L4.86 11.57C4.3 12.29 4.81 13.35 5.73 13.35H14.27C15.19 13.35 15.7 12.29 15.14 11.57L14.31 10.49C13.95 10.03 13.75 9.45 13.75 8.86V7.05C13.75 4.98 12.07 3.3 10 3.3Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8.35 15.15C8.63 15.9 9.25 16.35 10 16.35C10.75 16.35 11.37 15.9 11.65 15.15"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
+    <Bell aria-hidden="true" focusable="false" />
   );
 }
 

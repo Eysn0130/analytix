@@ -1,7 +1,7 @@
 import type { ReactElement, RefObject } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, Hammer, ListTodo, MessageSquareQuote, RotateCcw, SearchCode, TriangleAlert } from '../../design/AnalytixUiIcons'
+import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, Hammer, ListTodo, MessageSquareQuote, RotateCcw, Search, SearchCode, TriangleAlert } from '../../design/AnalytixUiIcons'
 import type { ReviewBlock, ToolBlock } from '../../agent/types'
 import { countDiffStats, sumDiffStats } from '../../lib/diff-stats'
 import { useDeferredRender } from '../../hooks/use-deferred-render'
@@ -626,7 +626,7 @@ function WritePromptRetrievalCard({
   return (
     <div className="rounded-xl border border-black/5 bg-white/55 px-3 py-2.5 text-left shadow-sm dark:border-white/10 dark:bg-white/6">
       <div className="flex min-w-0 items-center gap-2 text-[12px] leading-5">
-        <SearchCode className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.9} />
+        <Search className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.9} />
         <span className="min-w-0 flex-1 truncate font-medium text-ds-ink">
           {t('writePromptRetrievalLabel')}
         </span>
