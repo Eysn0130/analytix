@@ -127,11 +127,12 @@ contracts.
 Local Git rule:
 
 ```text
-analytix mainline branch: main
-analytix remotes: none by default for private local development
+analytix mainline branch: main (tracks public origin/main)
+analytix product remote: origin
 upstream research sources: /Users/sun/Projects/_upstreams/*
 ```
 
+Follow [Git workflow](../git-workflow.md) for branch, push, PR, and merge rules.
 The upstream sources are research inputs, not Git remotes for analytix. Do not
 compare the analytix working tree against an upstream remote as if analytix were
 a fork of that project.

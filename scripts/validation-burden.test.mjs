@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { resolve } from 'node:path'
 import { validationPlan, derivedTaskProgress, assertTypescriptFixtureExecution } from './validation-burden.mjs'
 
 test('unmapped executable paths cannot borrow a narrow maintenance plan', () => {
@@ -60,3 +61,43 @@ test('mixed unknown scopes cannot reuse a fixture plan and skipped TS receipts f
   assert.throws(() => assertTypescriptFixtureExecution('{}'), /absent/);
   assert.throws(() => assertTypescriptFixtureExecution(JSON.stringify({ numTotalTestSuites: 1, success: true, numTotalTests: 3, numPassedTests: 0, numFailedTests: 0, numPendingTests: 3, numTodoTests: 0, testResults: [] })), /execute and pass/);
 });
+
+
+function typescriptFixtureReceipt(name) {
+  return {
+    numTotalTestSuites: 1, success: true, numTotalTests: 3, numPassedTests: 3,
+    numFailedTests: 0, numPendingTests: 0, numTodoTests: 0,
+    testResults: [{ name, assertionResults: Array.from({ length: 3 }, () => ({ status: 'passed' })) }]
+  }
+}
+
+test('Windows fixture receipts match the slash-normalized expected absolute owner', () => {
+  const expected = 'C:\\work\\analytix\\src\\shared\\gui-update-schedule.test.ts'
+  assert.doesNotThrow(() => assertTypescriptFixtureExecution(JSON.stringify(typescriptFixtureReceipt(
+    resolve('src/shared/gui-update-schedule.test.ts').replaceAll('\\', '/')
+  ))))
+  assert.doesNotThrow(() => assertTypescriptFixtureExecution(JSON.stringify(typescriptFixtureReceipt(
+    expected.replaceAll('\\', '/')
+  )), expected))
+})
+
+test('fixture receipts retain exact owner, unique file and complete passed assertions', () => {
+  const expected = 'C:\\work\\analytix\\src\\shared\\gui-update-schedule.test.ts'
+  for (const change of [
+    report => { report.testResults[0].name = 'C:/other/src/shared/gui-update-schedule.test.ts' },
+    report => { report.testResults.push(report.testResults[0]) },
+    report => { report.numPassedTests = 2 },
+    report => { report.numFailedTests = 1 },
+    report => { report.numPendingTests = 1 },
+    report => { report.numTodoTests = 1 },
+    report => { report.testResults[0].assertionResults.pop() },
+    report => { report.testResults[0].assertionResults[1].status = 'failed' },
+    report => { report.testResults[0].assertionResults[1].status = 'skipped' },
+    report => { report.testResults[0].assertionResults[1].status = 'pending' },
+    report => { report.testResults[0].assertionResults[1].status = 'todo' }
+  ]) {
+    const report = typescriptFixtureReceipt(expected.replaceAll('\\', '/'))
+    change(report)
+    assert.throws(() => assertTypescriptFixtureExecution(JSON.stringify(report), expected), /execute and pass/)
+  }
+})

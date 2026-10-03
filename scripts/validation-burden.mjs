@@ -210,14 +210,14 @@ export function derivedTaskProgress(path) {
   return { task_state: 'present', completed, total: tasks.length, remaining: tasks.length - completed }
 }
 
-export function assertTypescriptFixtureExecution(stdout) {
+export function assertTypescriptFixtureExecution(stdout, expectedAbsolutePath = resolve(root, 'src/shared/gui-update-schedule.test.ts')) {
   const marker = /\{\s*"numTotalTestSuites"\s*:/.exec(stdout)
   if (!marker) throw new Error('TypeScript fixture execution receipt is absent.')
   const report = JSON.parse(stdout.slice(marker.index).trim())
   const file = report.testResults?.[0]
   if (report.success !== true || report.numTotalTests !== 3 || report.numPassedTests !== 3 ||
     report.numFailedTests !== 0 || report.numPendingTests !== 0 || report.numTodoTests !== 0 ||
-    report.testResults.length !== 1 || file.name !== resolve(root, 'src/shared/gui-update-schedule.test.ts') ||
+    report.testResults.length !== 1 || file.name !== expectedAbsolutePath.replaceAll('\\', '/') ||
     file.assertionResults?.length !== 3 || file.assertionResults.some(result => result.status !== 'passed')) {
     throw new Error('Every selected TypeScript fixture assertion must execute and pass without skips or todos.')
   }

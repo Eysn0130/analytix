@@ -641,7 +641,12 @@ const commands = [
       'src/preload/preload-runtime-request.test.ts',
       'src/renderer/src/store/chat-store-thread-actions.test.ts',
       'src/renderer/src/store/chat-store-maintenance-actions.test.ts',
-      '--run'
+      '--run',
+      '--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'
+    ],
+    sharedVitestFiles: [
+      'src/main/ipc/register-app-ipc-handlers.test.ts',
+      'src/preload/preload-runtime-request.test.ts'
     ],
     cwd: repoRoot
   },
@@ -1118,11 +1123,13 @@ const commands = [
       'test',
       '--',
       'src/preload/preload-sandbox.test.ts',
-      'src/preload/preload-runtime-request.test.ts',
       'src/preload/preload-sse-bridge.test.ts',
       'src/main/ipc/app-ipc-schemas.test.ts',
-      'src/main/ipc/register-app-ipc-handlers.test.ts',
       '--run'
+    ],
+    reuseVitestResults: [
+      { owner: 'desktop-git-checkpoint', file: 'src/main/ipc/register-app-ipc-handlers.test.ts' },
+      { owner: 'desktop-git-checkpoint', file: 'src/preload/preload-runtime-request.test.ts' }
     ],
     cwd: repoRoot
   },
@@ -1181,7 +1188,7 @@ function commandText(item) {
   return [item.command, ...item.args].join(' ')
 }
 
-// Only these two overlapping contracts share results within this invocation.
+// Overlapping contracts share results only within this invocation.
 // Keep per-file evidence: a different file's failure must not obscure which
 // named gate owns the failed assertions. No result survives a new invocation.
 const sharedVitestResults = new Map()
