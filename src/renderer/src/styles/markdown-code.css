@@ -229,24 +229,11 @@
   box-sizing: border-box;
 }
 
-.ds-markdown .ds-plain-text-block {
-  margin: 0.12rem 0 0.48rem;
-  max-width: 100%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: inherit;
-  font: inherit;
-}
-
-.ds-markdown .ds-plain-code-block {
-  border: 1px solid color-mix(in srgb, var(--ds-border-strong) 72%, var(--ds-border));
-  border-radius: 14px;
-  background: var(--ds-code-block-bg, var(--ds-pre-bg));
-  padding: 0.64rem 0.72rem;
-  font-family: 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace;
+.ds-markdown .ds-markdown-fallback-note {
+  margin: 0.75rem 0 0;
+  color: var(--ds-text-muted);
   font-size: 12px;
-  line-height: 1.55;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ds-bg-canvas) 62%, transparent);
+  line-height: 1.5;
 }
 
 .ds-markdown .ds-code-block-header {
@@ -295,6 +282,12 @@
   background: var(--ds-surface-hover);
   color: var(--ds-text);
   opacity: 1;
+}
+
+.ds-markdown .ds-code-block-action:focus-visible,
+.ds-markdown .ds-code-block-fade:focus-visible {
+  outline: 2px solid var(--ax-border-focus);
+  outline-offset: -2px;
 }
 
 .ds-markdown .ds-code-block-action:disabled {

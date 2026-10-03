@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import i18n from '../../i18n'
 import {
+  AssistantMarkdown,
   getMarkdownFinalizationPolicy,
   nextPlainTextVisibleLength,
   shouldDeferMarkdownFinalizationForPacedText,
@@ -75,5 +80,68 @@ describe('visiblePlainTextForTypewriter', () => {
       hadStreaming: true,
       pacedCaughtUp: true
     })).toBe(false)
+  })
+})
+
+const heavyCases = [
+  ['characters', 'x'.repeat(24001)],
+  ['lines', Array.from({ length: 701 }, () => 'line').join('\n')],
+  ['five closed fences', Array.from({ length: 5 }, () => '```text\nx\n```').join('\n')],
+  ['aggregate code', '```text\n' + 'x'.repeat(16000) + '\n```']
+] as const
+
+describe('unchanged heavyweight policy boundaries', () => {
+  it.each([
+    ['characters at limit', 'x'.repeat(24000)],
+    ['lines at limit', Array.from({ length: 700 }, () => 'line').join('\n')],
+    ['eight delimiters', Array.from({ length: 4 }, () => '```text\nx\n```').join('\n')],
+    ['aggregate code at limit', '```text\n' + 'x'.repeat(15999) + '\n```']
+  ])('keeps %s eligible for deferred rich rendering', (_name, text) => {
+    expect(getMarkdownFinalizationPolicy(text).mode).toBe('defer')
+  })
+  it.each(heavyCases)('keeps %s on the bounded plain surface', (_name, text) => {
+    expect(getMarkdownFinalizationPolicy(text).mode).toBe('lightweight')
+  })
+})
+
+describe('terminal plain-text fallback on actual DOM', () => {
+  let root: Root
+  let container: HTMLDivElement
+  beforeEach(async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    await i18n.changeLanguage('en')
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+  })
+  afterEach(async () => {
+    await act(async () => root.unmount())
+    container.remove()
+    vi.unstubAllGlobals()
+    await i18n.changeLanguage('en')
+  })
+  it.each(heavyCases)('announces %s fallback and preserves its full literal payload', async (_name, text) => {
+    const finalized = vi.fn()
+    await act(async () => root.render(createElement(AssistantMarkdown, {
+      text, streaming: false, className: 'ds-markdown', onFinalized: finalized
+    })))
+    const note = container.querySelector('[role="note"]')
+    expect(note?.textContent).toBe('Displayed as plain text to keep this long reply responsive.')
+    expect(container.textContent).toContain(text)
+    expect(container.querySelector('[data-streamdown="code-block"]')).toBeNull()
+    expect(finalized).not.toHaveBeenCalled()
+  })
+  it('keeps the notice off streaming text and removes it when the public text is replaced', async () => {
+    const text = heavyCases[0][1]
+    await act(async () => root.render(createElement(AssistantMarkdown, { text, streaming: true })))
+    expect(container.querySelector('[role="note"]')).toBeNull()
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await i18n.changeLanguage('zh')
+    await act(async () => root.render(createElement(AssistantMarkdown, { text, streaming: false })))
+    expect(container.querySelector('[role="note"]')?.textContent).toBe('为保持响应，此长回复以纯文本显示。')
+    await act(async () => root.render(createElement(AssistantMarkdown, { text: '', streaming: false })))
+    expect(container.querySelector('[role="note"]')).toBeNull()
+    expect(container.textContent).not.toContain(text)
   })
 })
