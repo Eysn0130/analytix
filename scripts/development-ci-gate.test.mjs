@@ -276,6 +276,8 @@ test('filesystem transfer preserves the complete dynamic package inventory and t
   const lane = workflow.slice(workflow.indexOf('  filesystem-contracts:'), workflow.indexOf('  restart-contracts:'));
   assert.match(lane, /os: \[ubuntu-24\.04, macos-15\]/);
   assert.match(lane, /actions\/setup-node@/);
+  assert.match(lane, /^\s+node-version-file:\s*\.node-version\s*$/m);
+  assert.doesNotMatch(lane, /^\s+node-version:/m);
   assert.match(lane, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs filesystem/);
   assert.doesNotMatch(lane, /\.\/internal\/adapters\/outbound/);
 });

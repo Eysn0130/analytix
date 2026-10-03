@@ -5,15 +5,17 @@ Applies to: all sources registered in `upstream-sources.json` and every direct,
 substantial, clean-room, vendored, generated, extracted, binary, or asset reuse
 decision.
 Current as of: 2026-07-10.
+Git workflow and source-inventory routing refreshed: 2026-10-03; source-specific
+audit and benchmark dates remain tied to their recorded evidence.
 Source of truth: current Analytix code/tests, the pinned manifest, source-specific
 ledgers, `code-reuse-provenance.md`, and fresh audit/benchmark evidence.
 
 ## North Star
 
-analytix remains a private, independent desktop product on local branch `main`.
-The sources registered in `upstream-sources.json` are research inputs. The
-current intake contains eleven repositories; the manifest, not a prose count,
-is the authoritative inventory.
+analytix remains an independent desktop product. Its canonical `main` tracks
+public `origin/main`; normal work follows [Git workflow](../git-workflow.md).
+The sources registered in `upstream-sources.json` are research inputs; the
+manifest is the authoritative inventory.
 They are not analytix remotes and they do not define the public product
 surface.
 
@@ -33,8 +35,10 @@ No superiority claim is valid without benchmark evidence.
 
 ## Local Source Layout
 
+These paths illustrate the layout; the manifest defines the complete inventory.
+
 ```text
-/Users/sun/Projects/analytix                  # private product repo, branch main
+/Users/sun/Projects/analytix                  # canonical repo, main tracks origin/main
 /Users/sun/Projects/_upstreams/Kun
 /Users/sun/Projects/_upstreams/DeepSeek-Reasonix
 /Users/sun/Projects/_upstreams/opencode

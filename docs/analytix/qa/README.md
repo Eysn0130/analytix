@@ -51,8 +51,9 @@ worktree、平台、环境、命令和结果状态有效。
   Windows-access credential scan 通过；这不替代 credential rotation。
 
 历史清理不能撤销仍有效的 credential，credential rotation 也不能删除已复制的
-Git blob。2026-07-10 已完成本 checkout 的 rotation、retained-ref purge、
-redacted rescan、reflog/unreachable-object 清理及临时恢复 bundle 删除，且当前
-没有 Git remote，因此本地 incident closure 已完成。其他 owner 独立保留的重写
-前 clone、bundle、backup 或 release archive 不在本地闭环边界内；未经同等清理
-与验证不得向本仓库重新导入 refs 或 objects。
+Git blob。2026-07-10 已完成当时 checkout 的 rotation、retained-ref purge、
+redacted rescan、reflog/unreachable-object 清理及临时恢复 bundle 删除；当时该
+checkout 没有 Git remote，因此该时点的本地 incident closure 已完成。当前
+`main` 跟踪公共 `origin/main`，同步按 [Git workflow](../git-workflow.md) 执行。
+其他 owner 独立保留的重写前 clone、bundle、backup 或 release archive 不在本地
+闭环边界内；未经同等清理与验证不得向本仓库重新导入 refs 或 objects。

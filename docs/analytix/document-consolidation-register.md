@@ -2,7 +2,7 @@
 
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
-Current as of: 2026-10-02
+Current as of: 2026-10-03
 Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
@@ -75,6 +75,38 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
    整理范围。
 
 ## 5. 后续整理队列
+
+### 2026-10-03 普通维护 D1/D2/D3
+
+基线 `920417bd460df908d7ce5a0d56759d3c2e71b03c`，仅11个批准路径；
+D0已闭合，本轮不复用其lease或验收。QA/upstream入口区分历史无remote与当前
+公共 `origin/main`，源数量由manifest维护；Git路由刷新不改upstream历史验收日期。
+filesystem CI复用 `.node-version` 的22.22.1 pin，矩阵和检查保持。
+
+固定TS fixture只将期待的Windows绝对路径转为slash形式；完整绝对owner、唯一
+文件、三项passed及failed/pending/todo零值仍必需，未知scope仍unmapped。
+desktop门保留原5文件并产两份回执，preload门保留3文件实际执行并同run复用；
+两门文件执行10→8、Vitest进程2→2，59个命名gate及完整testIds保持。
+缺失、重复、pending、取消、异常退出及保留文件失败均拒绝，跨run无缓存。
+
+三个定向RED各实际失败一次后完成修复，GREEN只各一次：
+`node --test scripts/development-ci-gate.test.mjs` 9/9，
+`node --test scripts/validation-burden.test.mjs` 8/8；既有
+`src/main/runtime-go-packaged-contract-report.test.ts` 的Vitest CLI
+`-t "shares each overlapping Vitest file once"` 18/18，95项筛选未运行。
+测试使用same-shell cache helper、任务私有Vitest cache配置和只读既有依赖；
+D3的59门断言使用离线fake工具，不能据此声称正式全链或Windows-native通过。
+
+一次exact11 `validation-burden.mjs --plan … --json` 为unmapped且无执行commands；
+mapper仍只覆盖Markdown与两个固定fixture，实际变更回到上述受影响owner合同。
+四个改动Markdown的相对链接和diff whitespace检查pass；无全量测试、native、
+整包或Provider执行。Git发布与main整合由父统一排序，当前候选状态查Git。
+
+固定11文件的静态Git blob尺寸为385311→393466 bytes，净+8155 bytes，
+含新增负例和本条；这是源码几何proxy，未观测模型读取过程或修复耗时对照。
+三RED/三GREEN是实际顶层测试调用次数，文件去重是runner dispatch断言；
+实际returned stdout字节单独保留在任务receipt，不从源码字节推导效益。
+模型身份/effort、tokens、成本、时间收益均unknown，不承诺全仓净减或技术债清零。
 
 ### 2026-10-02 Windows AnyIO 冻结链修复
 
