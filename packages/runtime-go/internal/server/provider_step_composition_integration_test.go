@@ -1,24 +1,35 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	evidenceregistryadapter "analytix.local/runtime-go/internal/adapters/outbound/evidenceregistry"
+	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	controlapp "analytix.local/runtime-go/internal/app/control"
+	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
 	apploop "analytix.local/runtime-go/internal/app/loop"
 	appmodel "analytix.local/runtime-go/internal/app/model"
 	nativecomponentapp "analytix.local/runtime-go/internal/app/nativecomponent"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	nativecomponentport "analytix.local/runtime-go/internal/ports/nativecomponent"
 	provider "analytix.local/runtime-go/internal/provider"
@@ -775,6 +786,26 @@ func TestSyncTurnFinalizationPersistsOrdinaryCandidateAfterDatasetStale(t *testi
 	}).(*runtimeServerHandler)
 	configureServerCaseExecution(t, handler, workspace)
 	configureSteerTestCaseAuthorities(t, handler, durableRoot)
+	// A fixed valid installation key makes the credential-shaped collision
+	// deterministic while retaining the real file authority and finalizer.
+	signer, keyPath, encodedPublicKey := providerStepCollisionFinalAuthorityV1(t)
+	finalRoot := t.TempDir()
+	registry, err := evidenceregistryadapter.NewStore(filepath.Join(finalRoot, "evidence-registry"), signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateFinals, err := newServerTestPrivateFinalStore(t, filepath.Join(finalRoot, "accepted-finals"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	casReader, err := finalauthorityadapter.NewAcceptedFinalCASReader(durableRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.caseFinalizer = evidenceapp.NewCasePublicationFinalizerWithAuthority(
+		registry, registry, signer, privateFinals, durableAcceptedFinalEventIO(handler.store, casReader),
+		newServerTestTurnTerminalCoordinator(t, signer, privateFinals),
+	)
 	snapshot, ok := handler.turnSecurity.SnapshotAuthorityV2.(*admissionFailureSnapshotAuthority)
 	if !ok {
 		t.Fatalf("unexpected sync-finalization snapshot authority: %T", handler.turnSecurity.SnapshotAuthorityV2)
@@ -851,6 +882,86 @@ func TestSyncTurnFinalizationPersistsOrdinaryCandidateAfterDatasetStale(t *testi
 			got, wantCandidate, stringField(publicView, "variant"), stringField(publicView, "blockerCode"),
 		)
 	}
+	turnID := stringField(started, "turnId")
+	before, err := casReader.ReadAcceptedFinalCASObservation(context.Background(), threadID, turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !before.HasWinner || before.Winner.AuthorityKeyID != signer.KeyID() || before.Winner.AuthorityPublicKey != encodedPublicKey {
+		t.Fatal("durable primary lost the fixed installation authority")
+	}
+	reopenedSigner, err := finalauthorityadapter.OpenExistingFileAuthority(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedCAS, err := finalauthorityadapter.NewAcceptedFinalCASReader(durableRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary, err := reopenedCAS.ReadPrimaryThreadSnapshotV1(context.Background(), threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedTurn, found := appmodel.TurnByID(primary.Thread, turnID)
+	if !found || stringField(reopenedTurn, "status") != "completed" || acceptedFinalAssistantText(reopenedTurn) != wantCandidate {
+		t.Fatal("reopened primary lost the completed ordinary candidate")
+	}
+	after, err := reopenedCAS.ReadAcceptedFinalCASObservation(context.Background(), threadID, turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.HasWinner || !reflect.DeepEqual(after.Winner, before.Winner) {
+		t.Fatal("reopened primary changed the exact signed winner")
+	}
+	keyID, publicKey, signature, err := domainevidence.AcceptedFinalAuthorityMaterial(after.Winner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopenedSigner.VerifyTrusted(context.Background(), keyID, publicKey, domainevidence.AcceptedFinalSigningBytes(after.Winner), signature); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func providerStepCollisionFinalAuthorityV1(t *testing.T) (*finalauthorityadapter.FileAuthority, string, string) {
+	t.Helper()
+	seed := sha256.Sum256([]byte("analytix/pr46/synthetic-authority/212301"))
+	key := ed25519.NewKeyFromSeed(seed[:])
+	publicKey := key.Public().(ed25519.PublicKey)
+	encodedPublicKey := base64.RawURLEncoding.EncodeToString(publicKey)
+	if !domainsecret.ContainsCredentialV1(encodedPublicKey) {
+		t.Fatal("fixed final authority lost its credential-shaped collision")
+	}
+	record := struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		Algorithm     string `json:"algorithm"`
+		KeyID         string `json:"keyId"`
+		PublicKey     string `json:"publicKey"`
+		PrivateSeed   string `json:"privateSeed"`
+	}{1, "Ed25519", domainsecurity.SHA256Hex(publicKey), encodedPublicKey, base64.RawURLEncoding.EncodeToString(seed[:])}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(root, "authority.json")
+	if err := os.WriteFile(keyPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyPath, err = filepath.EvalSymlinks(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := finalauthorityadapter.OpenExistingFileAuthority(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.KeyID() != record.KeyID || !bytes.Equal(signer.PublicKey(), publicKey) {
+		t.Fatal("existing authority changed the fixed identity")
+	}
+	return signer, keyPath, encodedPublicKey
 }
 
 func runRestoredProviderStepLoop(

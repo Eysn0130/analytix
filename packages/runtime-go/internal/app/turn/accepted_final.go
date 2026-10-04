@@ -1,15 +1,185 @@
 package turn
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"time"
 
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
+
+// parseAcceptedFinalForPublicValidationV1 validates the original JSON-like
+// record, including its exact field spelling and binary encoding. A decoded
+// struct alone cannot detect case-folded aliases or omitted/null fields.
+func parseAcceptedFinalForPublicValidationV1(value any) (domainevidence.AcceptedFinalRecord, error) {
+	if err := domainsecret.ValidateValueLimitsV1(value); err != nil {
+		return domainevidence.AcceptedFinalRecord{}, err
+	}
+	raw, ok := value.(map[string]any)
+	if !ok || raw == nil || !acceptedFinalPlainJSONV1(raw) {
+		return domainevidence.AcceptedFinalRecord{}, errors.New("accepted final original JSON shape is invalid")
+	}
+	for key, size := range map[string]int{"authorityPublicKey": ed25519.PublicKeySize, "authoritySignature": ed25519.SignatureSize} {
+		text, ok := raw[key].(string)
+		if !ok || len(text) != base64.RawURLEncoding.EncodedLen(size) {
+			return domainevidence.AcceptedFinalRecord{}, errors.New("accepted final original binary field is invalid")
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(text)
+		if err != nil || len(decoded) != size || base64.RawURLEncoding.EncodeToString(decoded) != text {
+			return domainevidence.AcceptedFinalRecord{}, errors.New("accepted final binary encoding is not canonical")
+		}
+	}
+	record, err := domainevidence.ParseAcceptedFinalRecord(raw)
+	if err != nil {
+		// Strict decoding errors may include an untrusted unknown field name.
+		// Qualification precedes ordinary credential scanning, so keep this
+		// boundary's failure independent of raw record keys and content.
+		return domainevidence.AcceptedFinalRecord{}, errors.New("accepted final original record integrity is invalid")
+	}
+	original, err := json.Marshal(raw)
+	if err != nil {
+		return domainevidence.AcceptedFinalRecord{}, err
+	}
+	canonical, err := json.Marshal(domainevidence.AcceptedFinalRecordMap(record))
+	if err != nil || !bytes.Equal(original, canonical) {
+		return domainevidence.AcceptedFinalRecord{}, errors.New("accepted final original fields differ from its closed schema")
+	}
+	return record, nil
+}
+
+func acceptedFinalPlainJSONV1(value any) bool {
+	switch typed := value.(type) {
+	case nil, string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	case json.Number:
+		return domainjsonstrict.ValidateNumberText(string(typed), 0, 0) == nil
+	case map[string]any:
+		for _, child := range typed {
+			if !acceptedFinalPlainJSONV1(child) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, child := range typed {
+			if !acceptedFinalPlainJSONV1(child) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func acceptedFinalBinaryValidationViewV1(value map[string]any) map[string]any {
+	out := shallowAcceptedFinalMapV1(value)
+	for _, key := range []string{"authorityPublicKey", "authoritySignature"} {
+		out[key] = strings.Repeat("a", len(value[key].(string)))
+	}
+	return out
+}
+
+func shallowAcceptedFinalMapV1(value map[string]any) map[string]any {
+	out := make(map[string]any, len(value))
+	for key, child := range value {
+		out[key] = child
+	}
+	return out
+}
+
+// AcceptedFinalHistoryValidationViewV1 only changes a validation copy after
+// proving the complete original record and its unique durable item binding.
+// This is read-compatible integrity validation, not installation trust or
+// permission to mutate. Trusted projection and atomic CAS retain that authority.
+func AcceptedFinalHistoryValidationViewV1(threadID string, turn map[string]any) (map[string]any, error) {
+	if err := domainsecret.ValidateValueLimitsV1(turn); err != nil {
+		return nil, err
+	}
+	if turn["acceptedFinal"] == nil {
+		for _, raw := range listAny(turn["items"]) {
+			item, _ := raw.(map[string]any)
+			if item["acceptedFinal"] != nil {
+				return nil, errors.New("accepted final item has no turn authority")
+			}
+		}
+		return turn, nil
+	}
+	// The pre-authority V1 format has no binary signing fields. Preserve its
+	// strict historical read path with ordinary scanning and no exemption.
+	if raw, ok := turn["acceptedFinal"].(map[string]any); ok && acceptedFinalPlainJSONV1(raw) {
+		if legacy, err := domainevidence.ParseLegacyAcceptedFinalRecord(raw); err == nil {
+			original, marshalErr := json.Marshal(raw)
+			canonical, canonicalErr := json.Marshal(domainevidence.LegacyAcceptedFinalRecordMap(legacy))
+			if marshalErr == nil && canonicalErr == nil && bytes.Equal(original, canonical) {
+				return turn, nil
+			}
+		}
+	}
+	record, err := parseAcceptedFinalForPublicValidationV1(turn["acceptedFinal"])
+	if err != nil {
+		return nil, err
+	}
+	expectedStatus, statusOK := domainevidence.FinalAnswerTerminalStatus(record.TerminalReason)
+	frozen, contextErr := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+	if !statusOK || threadID != record.ThreadID || stringField(turn, "id") != record.TurnID ||
+		stringField(turn, "status") != expectedStatus || stringField(turn, "finishedAt") != record.AcceptedAt ||
+		contextErr != nil || frozen.ThreadID != record.ThreadID || frozen.TurnID != record.TurnID ||
+		frozen.ContextDigest != record.ContextDigest || frozen.ContextEpoch != record.ContextEpoch ||
+		frozen.DatasetSnapshotID != record.DatasetSnapshotID {
+		return nil, errors.New("accepted final history turn binding is invalid")
+	}
+	if value, present := turn["threadId"]; present && value != record.ThreadID {
+		return nil, errors.New("accepted final history thread identity differs")
+	}
+	items, ok := turn["items"].([]any)
+	if !ok {
+		return nil, errors.New("accepted final history items are invalid")
+	}
+	matched := -1
+	for index, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok || item == nil {
+			return nil, errors.New("accepted final history item is invalid")
+		}
+		if stringField(item, "kind") != "assistant_text" {
+			if item["acceptedFinal"] != nil {
+				return nil, errors.New("accepted final metadata is outside its assistant item")
+			}
+			continue
+		}
+		itemRecord, err := parseAcceptedFinalForPublicValidationV1(item["acceptedFinal"])
+		text, textOK := item["text"].(string)
+		if matched >= 0 || err != nil || !reflect.DeepEqual(record, itemRecord) ||
+			stringField(item, "threadId") != record.ThreadID || stringField(item, "turnId") != record.TurnID ||
+			stringField(item, "role") != "assistant" || stringField(item, "status") != "completed" ||
+			stringField(item, "finishedAt") != record.AcceptedAt ||
+			!textOK || domainsecurity.SHA256Hex([]byte(text)) != record.RenderedTextSHA256 {
+			return nil, errors.New("accepted final history assistant binding is invalid")
+		}
+		matched = index
+	}
+	if matched < 0 {
+		return nil, errors.New("accepted final history assistant is missing")
+	}
+	out := shallowAcceptedFinalMapV1(turn)
+	out["acceptedFinal"] = acceptedFinalBinaryValidationViewV1(turn["acceptedFinal"].(map[string]any))
+	viewItems := append([]any(nil), items...)
+	item := shallowAcceptedFinalMapV1(items[matched].(map[string]any))
+	item["acceptedFinal"] = acceptedFinalBinaryValidationViewV1(item["acceptedFinal"].(map[string]any))
+	viewItems[matched] = item
+	out["items"] = viewItems
+	return out, nil
+}
 
 type AcceptedFinalCompletionStore interface {
 	FinishTurnIfActiveWithItemsAndFields(threadID, turnID, status string, items []map[string]any, fields map[string]any) (bool, string, error)

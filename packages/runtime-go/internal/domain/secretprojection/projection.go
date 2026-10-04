@@ -233,11 +233,94 @@ type valueBudgetV1 struct {
 }
 
 func (budget *valueBudgetV1) consumeText(value string) bool {
-	if len(value) > maxTextBytesV1 || budget.textBytes > maxAggregateBytesV1-len(value) {
+	return budget.consumeTextBytes(len(value))
+}
+
+func (budget *valueBudgetV1) consumeTextBytes(size int) bool {
+	if size > maxTextBytesV1 || budget.textBytes > maxAggregateBytesV1-size {
 		return false
 	}
-	budget.textBytes += len(value)
+	budget.textBytes += size
 	return true
+}
+
+// ValidateValueLimitsV1 checks the complete original public record before a
+// caller parses or authenticates structural metadata. Credential material does
+// not end this resource-only traversal, including values under credential keys.
+// It uses the same record budgets and scalar semantics as ValidateValueV1.
+func ValidateValueLimitsV1(value any) error {
+	if valueLimitsExceededV1(value, &valueBudgetV1{}, 0) {
+		return ErrProjectionLimitV1
+	}
+	return nil
+}
+
+func valueLimitsExceededV1(value any, budget *valueBudgetV1, depth int) bool {
+	if depth > maxValueDepthV1 || budget.nodes >= maxValueNodesV1 {
+		return true
+	}
+	budget.nodes++
+	switch typed := value.(type) {
+	case string:
+		return !budget.consumeText(typed)
+	case map[string]any:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for key, child := range typed {
+			if !budget.consumeText(key) || valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case map[string]string:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for key, child := range typed {
+			if !budget.consumeText(key) || valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case []any:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for _, child := range typed {
+			if valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case []map[string]any:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for _, child := range typed {
+			if valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case []map[string]string:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for _, child := range typed {
+			if valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case []string:
+		if len(typed) > maxValueNodesV1 {
+			return true
+		}
+		for _, child := range typed {
+			if valueLimitsExceededV1(child, budget, depth+1) {
+				return true
+			}
+		}
+	case json.RawMessage:
+		return !budget.consumeTextBytes(len(typed))
+	}
+	return false
 }
 
 func projectValueV1(value any, budget *valueBudgetV1, depth int) (any, bool) {

@@ -8,6 +8,92 @@ import (
 	"testing"
 )
 
+func TestValidateValueLimitsV1TraversesPastCredentials(t *testing.T) {
+	oversized := strings.Repeat("x", maxTextBytesV1+1)
+	deep := any("leaf")
+	for range maxValueDepthV1 + 1 {
+		deep = []any{deep}
+	}
+	cycle := map[string]any{}
+	cycle["password"] = cycle
+	aggregate := []any{"sk-synthetic-credential-123456"}
+	for range 8 {
+		aggregate = append(aggregate, strings.Repeat("x", maxTextBytesV1))
+	}
+	for name, value := range map[string]any{
+		"credential before oversized text": []any{"sk-synthetic-credential-123456", oversized},
+		"credential before aggregate":      aggregate,
+		"credential before depth":          []any{"sk-synthetic-credential-123456", deep},
+		"credential before nodes":          []any{"sk-synthetic-credential-123456", make([]any, maxValueNodesV1)},
+		"credential key child":             map[string]any{"password": oversized},
+		"credential key depth":             map[string]any{"password": deep},
+		"credential key cycle":             cycle,
+		"oversized key":                    map[string]any{oversized: nil},
+		"string map child":                 map[string]string{"password": oversized},
+		"map slice child":                  []map[string]any{{"password": oversized}},
+		"string map slice child":           []map[string]string{{"password": oversized}},
+		"string slice child":               []string{"sk-synthetic-credential-123456", oversized},
+		"raw message bytes":                json.RawMessage(oversized),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateValueLimitsV1(value); !errors.Is(err, ErrProjectionLimitV1) {
+				t.Fatalf("resource preflight did not reject complete original value: %v", err)
+			}
+		})
+	}
+	for range 32 {
+		if err := ValidateValueLimitsV1(map[string]any{"password": "opaque", "later": oversized}); !errors.Is(err, ErrProjectionLimitV1) {
+			t.Fatalf("map order hid a later resource violation: %v", err)
+		}
+	}
+	credential := map[string]any{"password": "opaque-secret"}
+	if err := ValidateValueLimitsV1(credential); err != nil {
+		t.Fatalf("resource-only check classified credential content: %v", err)
+	}
+	if err := ValidateValueV1(credential); !errors.Is(err, ErrCredentialMaterialV1) {
+		t.Fatalf("original credential validator changed: %v", err)
+	}
+}
+
+func TestValidateValueLimitsV1KeepsOriginalBudgetBoundaries(t *testing.T) {
+	deep := any("leaf")
+	for range maxValueDepthV1 {
+		deep = []any{deep}
+	}
+	text := strings.Repeat("x", maxTextBytesV1)
+	aggregate := make([]string, 8)
+	for index := range aggregate {
+		aggregate[index] = text
+	}
+	for name, value := range map[string]any{
+		"single text": text, "aggregate": aggregate, "depth": deep,
+		"nodes": make([]any, maxValueNodesV1-1), "key": map[string]any{text: nil},
+		"raw message": json.RawMessage(text),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateValueLimitsV1(value); err != nil {
+				t.Fatalf("exact original boundary rejected: %v", err)
+			}
+			if err := ValidateValueV1(value); err != nil {
+				t.Fatalf("resource and original validator count differently: %v", err)
+			}
+		})
+	}
+	for name, value := range map[string]any{
+		"aggregate plus key": map[string]any{"x": aggregate},
+		"depth plus parent":  []any{deep}, "nodes plus one": make([]any, maxValueNodesV1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateValueLimitsV1(value); !errors.Is(err, ErrProjectionLimitV1) {
+				t.Fatalf("resource boundary was widened: %v", err)
+			}
+			if err := ValidateValueV1(value); !errors.Is(err, ErrProjectionLimitV1) {
+				t.Fatalf("original counting comparison failed: %v", err)
+			}
+		})
+	}
+}
+
 func TestProjectTextV1ClosesCommonCredentialForms(t *testing.T) {
 	secrets := []string{
 		"sk-1234567890abcdef", "bearer-value-123", "basic-value-123", "api-value-123",
