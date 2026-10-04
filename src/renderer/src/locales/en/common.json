@@ -2273,5 +2273,9 @@
   "imageRegionCoordinate_x": "Region x",
   "imageRegionCoordinate_y": "Region y",
   "imageRegionCoordinate_width": "Region width",
-  "imageRegionCoordinate_height": "Region height"
+  "imageRegionCoordinate_height": "Region height",
+  "codeBlockWrap": "Wrap code",
+  "codeBlockUnwrap": "Scroll code horizontally",
+  "markdownFootnotes": "Footnotes",
+  "imagePreviewFailed": "Image unavailable"
 }

@@ -23,6 +23,10 @@ const HASH_RE = /^[0-9a-f]{40}$/i;
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 const CLOSED_LICENSE_CONTENTS = new Map([
   [
+    "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+    { licenseId: "MIT", detectedClass: "permissive-with-notice" },
+  ],
+  [
     "dc024237821ac82056c37f8d82e3be919bd51e39a4529ec12a8ab3e2a346dc4c",
     { licenseId: "MIT", detectedClass: "permissive-with-notice" },
   ],

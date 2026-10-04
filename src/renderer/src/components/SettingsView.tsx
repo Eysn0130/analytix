@@ -49,7 +49,6 @@ import {
   BrowserSettingsSection,
   ClawSettingsSection,
   ComputerUseSettingsSection,
-  EasterEggSettingsSection,
   GeneralSettingsSection,
   ImageGenerationSettingsSection,
   KeyboardShortcutsSettingsSection,
@@ -64,7 +63,7 @@ import {
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'account' | 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'browser' | 'computerUse' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'account' | 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'browser' | 'computerUse' | 'worktree' | 'memory' | 'shortcuts' | 'claw' | 'updates' | 'debug'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type InlineNotice = {
@@ -331,10 +330,6 @@ export function SettingsView(): ReactElement {
       setCategory('shortcuts')
       return
     }
-    if (settingsSection === 'easterEgg') {
-      setCategory('easterEgg')
-      return
-    }
     if (settingsSection === 'updates') {
       setCategory('updates')
       return
@@ -343,7 +338,7 @@ export function SettingsView(): ReactElement {
       setCategory('debug')
       return
     }
-    setCategory('agents')
+    setCategory(settingsSection === 'agents' || settingsSection === 'skill' || settingsSection === 'mcp' ? 'agents' : 'general')
   }, [settingsSection])
 
   useEffect(() => {
@@ -364,7 +359,6 @@ export function SettingsView(): ReactElement {
       settingsSection === 'memory' ||
       settingsSection === 'claw' ||
       settingsSection === 'shortcuts' ||
-      settingsSection === 'easterEgg' ||
       settingsSection === 'updates' ||
       settingsSection === 'debug' ||
       category !== 'agents'
@@ -1054,7 +1048,6 @@ export function SettingsView(): ReactElement {
           {category === 'worktree' ? <WorktreeSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'memory' ? <MemorySettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'easterEgg' ? <EasterEggSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'updates' ? <UpdatesSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'debug' ? <LlmDebugSettingsSection ctx={settingsSectionContext} /> : null}

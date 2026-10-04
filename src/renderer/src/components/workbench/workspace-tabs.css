@@ -24,8 +24,8 @@
 .workspace-tool-selector button:active:not(:disabled) { background: var(--ax-toolbar-active-bg); transform: translateY(1px); }
 @media (prefers-reduced-motion: reduce) { .workspace-tool-selector button { transition: none; transform: none; } }
 
-:where(:root:not([data-mascot-mode='on'])) .workspace-tab[data-active=true] { background: var(--workspace-tab-selected-bg); }
-:where(:root[data-theme='dark']:not([data-mascot-mode='on'])) .workspace-tabs-header { --workspace-tab-selected-bg: #444445; }
+:where(:root) .workspace-tab[data-active=true] { background: var(--workspace-tab-selected-bg); }
+:where(:root[data-theme='dark']) .workspace-tabs-header { --workspace-tab-selected-bg: #444445; }
 
 /* Selected dark tabs keep a 3:1 focus edge even over their hover fill. */
-:where(:root[data-theme='dark']:not([data-mascot-mode='on'])) .workspace-tab[data-active=true] button:focus-visible { outline-color: #6eaaff; }
+:where(:root[data-theme='dark']) .workspace-tab[data-active=true] button:focus-visible { outline-color: #6eaaff; }

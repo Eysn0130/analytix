@@ -54,7 +54,6 @@ import { WorkbenchTopBar, type RightPanelMode } from './chat/WorkbenchTopBar'
 import { useWorkspaceTabsStore, workspaceObjectTabId, type WorkspaceTab } from '../store/workspace-tabs-store'
 import { useNativeOfficeStore } from '../office/native-office-store'
 import { WorkspaceTabs, WorkspaceToolSelector, workspacePanelDomId, workspaceTabDomId } from './workbench/WorkspaceTabs'
-import { MascotCameoLayer, CameoCelebrationLayer } from './chat/AnimatedWorkLogo'
 import { preloadAssistantMarkdownRenderer } from './chat/AssistantMarkdown'
 import type {
   ComposerExecutionSettings,
@@ -109,7 +108,7 @@ import {
 } from '../data-analysis/services/analysis/stats-case-overview-resource'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { useKeyboardShortcutSettings } from '../lib/keyboard-shortcut-settings'
-import { useUiModeCameosEnabled, useUiPluginStore } from '../store/ui-plugin-store'
+import { useUiPluginStore } from '../store/ui-plugin-store'
 import { readFocusModePreference, writeFocusModePreference } from '../lib/focus-mode'
 import {
   listenRuntimeDiagnosticsFocus,
@@ -694,7 +693,6 @@ export function Workbench(): ReactElement {
   const [connectPhoneSidebarOpen, setConnectPhoneSidebarOpen] = useState(false)
   const [activeDataAnalysis, setActiveDataAnalysis] = useState<ActiveDataAnalysis | null>(null)
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
-  const uiModeCameosEnabled = useUiModeCameosEnabled()
   const [focusModeEnabled, setFocusModeEnabled] = useState(readFocusModePreference)
   const [runtimeLogPath, setRuntimeLogPath] = useState('')
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
@@ -1250,9 +1248,9 @@ export function Workbench(): ReactElement {
     }
 
     const onKeyDown = (event: KeyboardEvent): void => {
-      // The permission portal owns Tab exit, including Shift+Tab.
+      // Permission menus and modal dialogs own Tab navigation, including Shift+Tab.
       if (event.key === 'Tab' && event.target instanceof Element &&
-        event.target.closest('[data-composer-execution-menu]')) return
+        event.target.closest('[data-composer-execution-menu],[role="dialog"][aria-modal="true"]')) return
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
       // Tab buttons own close-and-focus restoration; skip the desktop fallback.
@@ -3613,8 +3611,6 @@ export function Workbench(): ReactElement {
                             ) : null
                           }
                         />
-                        {uiModeCameosEnabled && !focusModeEnabled ? <MascotCameoLayer /> : null}
-                        {!focusModeEnabled ? <CameoCelebrationLayer active={busy} suppressed={Boolean(error)} /> : null}
                       </div>
                       <div ref={terminalComposerRef} className="ds-main-composer-host ds-no-drag flex shrink-0 justify-center pb-3 pt-0">
                         <div

@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
+import type { MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from '../../design/AnalytixUiIcons'
@@ -31,6 +31,8 @@ import { previewWorkspaceFile } from '../../lib/workspace-file-preview'
 import { useChatStore } from '../../store/chat-store'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
+import { DisclosureRow } from './presentation/DisclosureRow'
+import './presentation/tokens.css'
 import { MessageBubble } from './message-timeline-bubbles'
 import { blockHasPendingRuntimeWork, splitThink } from './message-timeline-turns'
 import {
@@ -298,43 +300,14 @@ export function ProcessSectionRow({
 
   return (
     <div className="flex flex-col">
-      {canToggleSection ? (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setUserExpanded(!(userExpanded ?? defaultExpanded))}
-          className={`group flex w-fit max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-[14px] font-medium transition hover:opacity-85 ${
-            hasError ? processErrorTextClass(errorTone) : 'text-ds-muted'
-          }`}
-        >
-          {showActiveError ? (
-            <span className="ds-work-logo-slot ds-work-logo-slot-sm mr-0.5">
-              <span className={`h-2 w-2 rounded-full ${processErrorDotClass(errorTone)}`} />
-            </span>
-          ) : null}
-          {SectionIcon ? <ProcessGlyph Icon={SectionIcon} /> : null}
-          <span className={active && !hasError ? 'ds-shiny-text' : ''}>{title}</span>
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-45" strokeWidth={1.8} />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition group-hover:opacity-55" strokeWidth={1.8} />
-          )}
-        </button>
-      ) : (
-        <div
-          className={`flex w-fit max-w-full items-center gap-1.5 py-0.5 text-[14px] font-medium ${
-            hasError ? processErrorTextClass(errorTone) : 'text-ds-muted'
-          }`}
-        >
-          {showActiveError ? (
-            <span className="ds-work-logo-slot ds-work-logo-slot-sm mr-0.5">
-              <span className={`h-2 w-2 rounded-full ${processErrorDotClass(errorTone)}`} />
-            </span>
-          ) : null}
-          {SectionIcon ? <ProcessGlyph Icon={SectionIcon} /> : null}
-          <span className={active && !hasError ? 'ds-shiny-text' : ''}>{title}</span>
-        </div>
-      )}
+      <DisclosureRow
+        title={title}
+        icon={showActiveError ? <span className={`h-2 w-2 rounded-full ${processErrorDotClass(errorTone)}`} /> : SectionIcon ? <ProcessGlyph Icon={SectionIcon} /> : null}
+        open={expanded} expandable={canToggleSection} expandOnRowClick
+        running={active && !hasError} error={hasError} className={hasError ? processErrorTextClass(errorTone) : undefined}
+        onToggle={() => setUserExpanded(!(userExpanded ?? defaultExpanded))}
+        rowClassName="rounded-md px-1 text-left hover:bg-ds-hover/45"
+      />
 
       {expanded ? (
         <div
@@ -481,12 +454,6 @@ function ProcessStackRows({
           event.stopPropagation()
           handleToggle()
         }
-        const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-          if (!canToggle || event.target !== event.currentTarget) return
-          if (event.key !== 'Enter' && event.key !== ' ') return
-          event.preventDefault()
-          handleToggle()
-        }
 
         return (
           <div
@@ -496,23 +463,14 @@ function ProcessStackRows({
             data-analytix-process-block-kind={block.kind}
             data-analytix-process-block-status={'status' in block ? block.status : undefined}
           >
-            <div
-              role={canToggle ? 'button' : undefined}
-              tabIndex={canToggle ? 0 : undefined}
-              aria-expanded={canToggle ? open : undefined}
-              onClick={handleToggle}
-              onKeyDown={handleKeyDown}
-              className={`group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[13.5px] leading-6 transition ${
-                isError
-                  ? processErrorTextClass(errorTone)
-                  : 'text-ds-faint hover:text-ds-muted'
-              } ${canToggle ? 'cursor-pointer hover:bg-ds-hover/45' : 'cursor-default'}`}
-            >
-              {RowIcon ? <ProcessGlyph Icon={RowIcon} /> : null}
-              <span className={`min-w-0 flex-1 truncate ${rowActive && !isError ? 'ds-shiny-text' : ''}`}>
+            <DisclosureRow title="" icon={RowIcon ? <ProcessGlyph Icon={RowIcon} /> : null}
+              open={open} expandable={canToggle} expandOnRowClick showDisclosureIcon={false}
+              onToggle={handleToggle} error={isError} className={isError ? processErrorTextClass(errorTone) : undefined} summary={
+<span className={`min-w-0 flex-1 truncate ${rowActive && !isError ? 'ds-shiny-text' : ''}`}>
                 <ProcessSummaryText block={block} summary={summary} />
               </span>
-              <RuntimeDiagnosticsLink block={block} t={t} />
+              } actions={<>
+<RuntimeDiagnosticsLink block={block} t={t} />
               {canExpand ? (
                 <button
                   type="button"
@@ -531,7 +489,7 @@ function ProcessStackRows({
                   )}
                 </button>
               ) : null}
-            </div>
+              </>} rowClassName="rounded-md px-1 text-left hover:bg-ds-hover/45" />
             {open ? (
               detail.kind === 'assistant' ? (
                 <div className="ml-1 mt-1">
@@ -590,12 +548,6 @@ function ProcessEntryRow({
     event.stopPropagation()
     handleToggle()
   }
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (!canToggle || event.target !== event.currentTarget) return
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    handleToggle()
-  }
 
   return (
     <div
@@ -604,24 +556,10 @@ function ProcessEntryRow({
       data-analytix-process-block-kind={block.kind}
       data-analytix-process-block-status={'status' in block ? block.status : undefined}
     >
-      <div
-        role={canToggle ? 'button' : undefined}
-        tabIndex={canToggle ? 0 : undefined}
-        aria-expanded={canToggle ? open : undefined}
-        onClick={handleToggle}
-        onKeyDown={handleKeyDown}
-        className={`group flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-[13.5px] leading-[1.55] transition ${
-          isError
-            ? processErrorTextClass(errorTone)
-            : 'text-ds-faint hover:text-ds-ink'
-        } ${
-          canToggle
-            ? 'cursor-pointer hover:bg-ds-hover/70'
-            : 'cursor-default'
-        }`}
-      >
-        {RowIcon ? <ProcessGlyph Icon={RowIcon} className="mt-1" /> : null}
-        <span
+      <DisclosureRow title="" icon={RowIcon ? <ProcessGlyph Icon={RowIcon} /> : null}
+        open={open} expandable={canToggle} expandOnRowClick showDisclosureIcon={false}
+        onToggle={handleToggle} error={isError} className={isError ? processErrorTextClass(errorTone) : undefined} summary={
+<span
           className={`min-w-0 flex-1 ${wrapSummary ? 'whitespace-pre-wrap break-words' : 'truncate'} ${
             rowActive && !isError ? 'ds-shiny-text' : ''
           }`}
@@ -637,7 +575,8 @@ function ProcessEntryRow({
             </span>
           ) : null}
         </span>
-        <RuntimeDiagnosticsLink block={block} t={t} />
+        } actions={<>
+<RuntimeDiagnosticsLink block={block} t={t} />
         {canExpand ? (
           <button
             type="button"
@@ -656,7 +595,7 @@ function ProcessEntryRow({
             )}
           </button>
         ) : null}
-      </div>
+        </>} rowClassName="rounded-md px-2 text-left hover:bg-ds-hover/70" />
       <RuntimeMetaBadges block={block} t={t} />
       {canExpand && open ? (
         detail.kind === 'assistant' ? (
@@ -1660,7 +1599,7 @@ function ProcessEntryDetail({
   const runtimeMetaDetail = <RuntimeMetaDetailPanel block={block} />
   if (detail.kind === 'assistant') {
     return (
-      <div className="ds-markdown text-[13.5px] leading-6 text-ds-ink">
+      <div className="text-[13.5px] leading-6 text-ds-ink">
         <AssistantMarkdown
           text={detail.text}
           streaming={processing && block.kind === 'assistant' && block.id === 'live-assistant'}

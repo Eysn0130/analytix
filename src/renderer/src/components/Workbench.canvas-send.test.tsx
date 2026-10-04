@@ -29,7 +29,6 @@ vi.mock('./workbench/FloatingComposerIsland', () => ({
 }))
 vi.mock('./chat/Sidebar', () => ({ Sidebar: () => null }))
 vi.mock('./chat/WorkbenchTopBar', () => ({ WorkbenchTopBar: () => null }))
-vi.mock('./chat/AnimatedWorkLogo', () => ({ MascotCameoLayer: () => null, CameoCelebrationLayer: () => null }))
 vi.mock('./chat/AssistantMarkdown', () => ({ preloadAssistantMarkdownRenderer: () => null }))
 vi.mock('./chat/ChatFileTreePanel', () => ({ ChatFileTreePanel: () => null }))
 vi.mock('./chat/SideConversationPanel', () => ({ SideConversationPanel: () => null }))
@@ -42,6 +41,7 @@ vi.mock('./workbench/RightPanelIslands', () => ({ ChangeInspectorIsland: () => n
 
 vi.mock('./workbench/ChatTimelineIsland', () => ({ ChatTimelineIsland: () => null, useDevPreviewUrls: () => [] }))
 import { Workbench } from './Workbench'
+import { ImagePreviewLightbox } from './chat/ImagePreviewLightbox'
 import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
 import { useChatStore } from '../store/chat-store'
 import { useNativeReferenceStore, type CanvasNativeReference } from '../office/native-reference-store'
@@ -138,6 +138,64 @@ afterEach(async () => {
 })
 
 describe('Workbench Canvas consumer path', () => {
+  it('keeps modal Tab focus in the actual lightbox without consuming the plan shortcut', async () => {
+    const modalHost = document.createElement('div'); document.body.append(modalHost)
+    const modalRoot = createRoot(modalHost), close = vi.fn()
+    let modalRootMounted = true
+    const beforeTabs = useWorkspaceTabsStore.getState()
+    const tabs = { open: beforeTabs.open, activeTabId: beforeTabs.activeTabId, ids: beforeTabs.tabs.map(tab => tab.id) }
+    const key = async (target: Element, shiftKey = false, isComposing = false) => {
+      const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, isComposing, bubbles: true, cancelable: true })
+      await act(async () => target.dispatchEvent(event))
+      return event
+    }
+    try {
+      await act(async () => modalRoot.render(createElement(ImagePreviewLightbox, { open: true,
+        src: 'data:image/png;base64,synthetic', alt: 'Synthetic modal', downloadHref: 'data:image/png;base64,synthetic', onClose: close })))
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')!
+      const download = dialog.querySelector<HTMLAnchorElement>('a[download]')!
+      const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+      const last = buttons.at(-1)!, middle = buttons[1]!, previous = buttons[0]!
+      expect(composer().mode).toBe('agent')
+      download.focus(); await key(download, true)
+      expect(document.activeElement).toBe(last)
+      expect(composer().mode).toBe('agent')
+      last.focus(); await key(last)
+      expect(document.activeElement).toBe(download)
+      // jsdom has no native sequential Tab navigation; the middle event must reach the browser unconsumed.
+      middle.focus(); const middleTab = await key(middle, true)
+      expect(middleTab.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(middle)
+      expect(previous).not.toBe(middle)
+      const composing = await key(download, true, true)
+      expect(composing.defaultPrevented).toBe(false)
+      expect(composer().mode).toBe('agent')
+      const afterTabs = useWorkspaceTabsStore.getState()
+      expect({ open: afterTabs.open, activeTabId: afterTabs.activeTabId, ids: afterTabs.tabs.map(tab => tab.id) }).toEqual(tabs)
+      await act(async () => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true })))
+      expect(close).not.toHaveBeenCalled()
+      await act(async () => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+      expect(close).toHaveBeenCalledOnce()
+      await act(async () => modalRoot.unmount())
+      modalRootMounted = false
+      await act(async () => composer().setMode('plan'))
+      const executionMenu = document.createElement('div'); executionMenu.dataset.composerExecutionMenu = ''
+      const executionButton = document.createElement('button'); executionMenu.append(executionButton); document.body.append(executionMenu)
+      try {
+        const executionTab = await key(executionButton, true)
+        expect(executionTab.defaultPrevented).toBe(false)
+        expect(composer().mode).toBe('plan')
+      } finally { executionMenu.remove() }
+      const outside = document.createElement('button'); document.body.append(outside)
+      try {
+        const ime = await key(outside, true, true)
+        expect(ime.defaultPrevented).toBe(false); expect(composer().mode).toBe('plan')
+        const ordinary = await key(outside, true)
+        expect(ordinary.defaultPrevented).toBe(true); expect(composer().mode).toBe('agent')
+      } finally { outside.remove() }
+    } finally { if (modalRootMounted) await act(async () => modalRoot.unmount()); modalHost.remove() }
+  })
+
   it('stops mounting the summary poller when the right pane closes', async () => {
     await act(async () => useWorkspaceTabsStore.getState().openTab({
       id: 'tool:summary', kind: 'tool', mode: 'summary', title: 'Summary'

@@ -23,7 +23,7 @@ async function renderSection(grouped: boolean): Promise<void> {
     section: { id: 'section-safe', kind: 'execution', blocks: grouped ? [tool('tool-a'), tool('tool-b')] : [tool('tool-a')] },
     processing: false, viewportRef: createRef<HTMLDivElement>()
   })))
-  if (grouped) await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+  if (grouped) await act(async () => container.querySelector<HTMLElement>('[data-disclosure-row][role="button"]')!.click())
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -46,7 +46,7 @@ describe('existing public process disclosure interaction', () => {
       section: { id: 'section-safe', kind: 'execution', blocks: [tool('tool-a'), tool('tool-b')] },
       processing: false, viewportRef: createRef<HTMLDivElement>()
     })))
-    const header = container.querySelector<HTMLButtonElement>('button')!
+    const header = container.querySelector<HTMLElement>('[data-disclosure-row][role="button"]')!
     expect(header.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelectorAll('[data-analytix-process-block-id]')).toHaveLength(0)
     await act(async () => header.click())

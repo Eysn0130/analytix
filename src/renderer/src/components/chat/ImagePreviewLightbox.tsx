@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, Minus, Plus, X } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
+import { useModalFocus } from '../../hooks/use-modal-focus'
 
 type ImagePreviewLightboxProps = {
   open: boolean
@@ -24,7 +25,13 @@ function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
 }
 
-export function ImagePreviewLightbox({
+export function ImagePreviewLightbox(props: ImagePreviewLightboxProps): ReactElement | null {
+  // The modal lifecycle belongs to the actual mounted dialog. Existing
+  // attachment/composer consumers keep this wrapper mounted while closed.
+  return props.open ? <MountedImagePreviewLightbox {...props} /> : null
+}
+
+function MountedImagePreviewLightbox({
   open,
   src,
   alt,
@@ -39,6 +46,7 @@ export function ImagePreviewLightbox({
   const { t } = useTranslation('common')
   const [zoom, setZoom] = useState(1)
   const titleId = useId()
+  const modalRef = useModalFocus(onClose)
   const closeLabel = t('imagePreviewClose')
   const resolvedTitle = title || alt || t('imagePreviewTitle')
   const resolvedDownloadLabel = downloadLabel ?? t('imagePreviewDownload')
@@ -48,13 +56,8 @@ export function ImagePreviewLightbox({
     setZoom(1)
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', onKeyDown)
     }
   }, [open, onClose])
 
@@ -96,7 +99,9 @@ export function ImagePreviewLightbox({
 
   return createPortal(
     <div
-      className="ds-no-drag fixed inset-0 z-[1100] bg-zinc-950/82 text-white backdrop-blur-[2px]"
+      className="ds-no-drag fixed inset-0 z-[1100] bg-zinc-950/[0.82] text-white backdrop-blur-[2px]"
+      ref={modalRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -112,6 +117,7 @@ export function ImagePreviewLightbox({
         <button
           type="button"
           onClick={onClose}
+          data-modal-autofocus
           aria-label={closeLabel}
           title={closeLabel}
           className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-zinc-700 shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition hover:bg-zinc-50 hover:text-zinc-950 dark:bg-zinc-100 dark:text-zinc-800"
@@ -120,13 +126,14 @@ export function ImagePreviewLightbox({
         </button>
       </div>
       <div className="flex h-full w-full items-center justify-center px-4 py-20 sm:px-8">
-        <div className="flex max-h-[calc(100dvh-128px)] w-full max-w-[min(1120px,calc(100vw-32px))] items-center justify-center overflow-auto rounded-[18px] border border-white/16 bg-[rgba(255,250,242,0.96)] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.42)] dark:bg-zinc-950/88 sm:max-h-[calc(100dvh-144px)]">
+        <div className="flex max-h-[calc(100dvh-128px)] w-full max-w-[min(1120px,calc(100vw-32px))] items-center justify-center overflow-auto rounded-[18px] border border-white/[0.16] bg-[rgba(255,250,242,0.96)] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.42)] dark:bg-zinc-950/[0.88] sm:max-h-[calc(100dvh-144px)]">
           <img
             src={src}
             alt={alt}
             className={imageClass}
             style={imageStyle}
             draggable={false}
+            referrerPolicy="no-referrer"
           />
         </div>
       </div>

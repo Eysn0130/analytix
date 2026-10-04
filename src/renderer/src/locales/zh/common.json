@@ -2273,5 +2273,9 @@
   "imageRegionCoordinate_x": "区域 x",
   "imageRegionCoordinate_y": "区域 y",
   "imageRegionCoordinate_width": "区域宽度",
-  "imageRegionCoordinate_height": "区域高度"
+  "imageRegionCoordinate_height": "区域高度",
+  "codeBlockWrap": "代码自动换行",
+  "codeBlockUnwrap": "代码横向滚动",
+  "markdownFootnotes": "脚注",
+  "imagePreviewFailed": "图片暂不可用"
 }

@@ -434,6 +434,13 @@ try {
     rmSync(replaceRepo, { recursive: true, force: true });
   }
 
+  // Exact official DeepSeek Harness notice; altered bytes stay unrecognized.
+  const dshLicenseBytes = Buffer.from("MIT License\n\nCopyright (c) 2026 DeepSeek\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n");
+  assert.equal(createHash("sha256").update(dshLicenseBytes).digest("hex"), "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be");
+  assert.equal(classifyPinnedLicenseBytes(dshLicenseBytes).licenseId, "MIT");
+  assert.equal(classifyPinnedLicenseBytes(dshLicenseBytes).detectedClass, "permissive-with-notice");
+  assert.notEqual(classifyPinnedLicenseBytes(Buffer.concat([dshLicenseBytes, Buffer.from("changed")])).status, "recognized");
+
   const knownLicenses = [
     {
       repo: "/Users/sun/Projects/_upstreams/DeepSeek-Reasonix",

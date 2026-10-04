@@ -19,7 +19,6 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
-  Sparkles,
   UserCircle,
   X
 } from '../design/AnalytixUiIcons'
@@ -40,7 +39,7 @@ type SettingsCategory =
   | 'worktree'
   | 'memory'
   | 'shortcuts'
-  | 'easterEgg'
+
   | 'claw'
   | 'updates'
   | 'debug'
@@ -64,12 +63,11 @@ const NAV_GROUPS: NavGroup[] = [
     headingKey: 'settingsNavPersonal',
     items: [
       { category: 'account', labelKey: 'deprecatedHubCompatibility', icon: UserCircle, keywords: ['deprecated', 'compatibility', 'account', 'login', 'hub'] },
-      { category: 'general', labelKey: 'general', icon: Globe, keywords: ['theme', 'locale', 'workspace', 'startup'] },
+      { category: 'general', labelKey: 'general', icon: Globe, keywords: ['theme', 'ui plugin', 'locale', 'workspace', 'startup'] },
       { category: 'write', labelKey: 'write', icon: PencilLine, keywords: ['editor', 'completion', 'typing'] },
       { category: 'imageGeneration', labelKey: 'imageGen', icon: ImageIcon, keywords: ['image', 'generation'] },
       { category: 'mediaGeneration', labelKey: 'mediaGeneration', icon: AudioLines, keywords: ['media', 'video', 'audio'] },
       { category: 'speechToText', labelKey: 'speechToText', icon: Mic, keywords: ['speech', 'transcription', 'voice'] },
-      { category: 'easterEgg', labelKey: 'easterEgg', icon: Sparkles, keywords: ['mascot', 'cameo', 'ui plugin'] },
       { category: 'updates', labelKey: 'updates', icon: RefreshCw, keywords: ['version', 'release', 'update'] }
     ]
   },

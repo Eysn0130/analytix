@@ -108,36 +108,31 @@ export function useValidatedFileReference(
   workspaceRoot?: string
 ): ValidationState {
   const key = useMemo(() => cacheKey(target, workspaceRoot), [target, workspaceRoot])
-  const [state, setState] = useState<ValidationState>(() => {
-    if (!target?.path.trim()) return { status: 'idle' }
+  const [entry, setEntry] = useState<{ key: string; state: ValidationState }>(() => {
     const cached = readValidationCache(key)
-    if (!cached) return { status: 'pending' }
-    if (cached instanceof Promise) return { status: 'pending' }
-    return cached
+    return { key, state: !target?.path.trim() ? { status: 'idle' } :
+      cached && !(cached instanceof Promise) ? cached : { status: 'pending' } }
   })
 
   useEffect(() => {
     if (!target?.path.trim()) {
-      setState({ status: 'idle' })
+      setEntry({ key, state: { status: 'idle' } })
       return
     }
-
     const cached = readValidationCache(key)
     if (cached && !(cached instanceof Promise)) {
-      setState(cached)
+      setEntry({ key, state: cached })
       return
     }
-
     let cancelled = false
-    setState({ status: 'pending' })
-    void validateFileReference(target, workspaceRoot).then((next) => {
-      if (!cancelled) setState(next)
+    setEntry({ key, state: { status: 'pending' } })
+    void validateFileReference(target, workspaceRoot).then(next => {
+      if (!cancelled) setEntry({ key, state: next })
     })
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [key, target, workspaceRoot])
 
-  return state
+  // A replacement path/workspace must never reuse a prior validation during
+  // the render before its effect runs (including cached asynchronous results).
+  return entry.key === key ? entry.state : target?.path.trim() ? { status: 'pending' } : { status: 'idle' }
 }

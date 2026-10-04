@@ -1,5 +1,6 @@
 import { readBrowserStorageItem, writeBrowserStorageItem } from './browser-storage'
-import { MASCOT_MODE_STORAGE_KEY } from './mascot-mode'
+// Read-only compatibility with the retired decorative preference.
+export const MASCOT_MODE_STORAGE_KEY = 'analytix.mascotMode'
 
 /**
  * 形象模式偏好:'default' | 'mascot' | <UI 插件 id>。

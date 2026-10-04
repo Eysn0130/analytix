@@ -189,6 +189,21 @@
         "class": "permissive-with-notice",
         "reusePolicy": "file-level provenance, exact nested MIT license, and packaged third-party notice required"
       }
+    },
+    {
+      "id": "deepseek-harness",
+      "directory": "DeepSeek-Harness",
+      "branch": "dsh-v0.2.1-alpha.1",
+      "commit": "5badb15009ae1756c3afe0ae0cef1faafc290ccc",
+      "remote": "https://github.com/deepseek-ai/deepseek-harness.git",
+      "ledger": "docs/analytix/upstreams/deepseek-harness-presentation-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "Only reviewed presentation leaves; exact file provenance, MIT notice and focused evidence required. DSH runtime/session/state authority is excluded."
+      }
     }
   ]
 }

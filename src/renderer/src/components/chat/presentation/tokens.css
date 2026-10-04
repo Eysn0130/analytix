@@ -1,0 +1,65 @@
+/* DSH presentation vocabulary mapped to the existing Analytix theme and system fonts. */
+:root {
+  --ds-ease-in-out: ease;
+  --ds-font-family-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --ds-transition-duration: 120ms;
+  --dsh-content-font-delta: 0px;
+  --dsh-content-font-delta-secondary: 0px;
+  --dsh-content-font-size-secondary: 13px;
+  --dsh-frame-top-clearance: var(--ds-window-controls-safe-block);
+  --dsh-hover-preview-fade: 100ms;
+  --dsh-scrollbar-width: 6px;
+  --dsw-alias-bg-base: var(--ds-bg-canvas);
+  --dsw-alias-bg-layer-1: var(--ds-surface-elevated);
+  --dsw-alias-border-l1: var(--ds-border-muted);
+  --dsw-alias-border-l2: var(--ds-border);
+  --dsw-alias-border-l3: var(--ds-border-strong);
+  --dsw-alias-divider: var(--ds-border-muted);
+  --dsw-alias-interactive-bg-hover: var(--ds-surface-hover);
+  --dsw-alias-interactive-border: var(--ds-border);
+  --dsw-alias-label-caption: var(--ds-text-faint);
+  --dsw-alias-label-primary: var(--ds-text);
+  --dsw-alias-label-quaternary: var(--ds-text-faint);
+  --dsw-alias-label-secondary: var(--ds-text-muted);
+  --dsw-alias-label-shimmer: var(--ds-text);
+  --dsw-alias-label-tertiary: var(--ds-text-faint);
+  --dsw-alias-link: var(--ds-accent);
+  --dsw-alias-markdown-code-block: var(--ds-code-block-bg);
+  --dsw-alias-markdown-code-block-banner: var(--ds-code-block-bg);
+  --dsw-alias-markdown-inline-code: var(--ds-inline-code-bg);
+  --dsw-alias-menu-bg: var(--ds-surface-elevated);
+  --dsw-alias-menu-border: var(--ds-border);
+  --dsw-alias-scrollbar-bg-l2: var(--ds-scrollbar-thumb);
+  --dsw-alias-scrollbar-hover-l2: var(--ds-scrollbar-thumb-hover);
+  --dsw-alias-state-business-primary: var(--ds-accent);
+  --dsw-alias-tooltip-bg: var(--ds-text);
+  --dsw-alias-tooltip-key-bg: var(--ds-surface-subtle);
+  --dsw-elevation-panel: var(--ax-shadow-popover);
+  --dsw-focus-ring-color: var(--ax-border-focus);
+  --dsw-focus-ring-width: 2px;
+  --dsw-font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --dsw-font-markdown-base: 15px/1.7 var(--dsw-font-family);
+  --dsw-font-markdown-base-strong: 600 15px/1.7 var(--dsw-font-family);
+  --dsw-font-markdown-code: 13px/1.6 var(--ds-font-family-code);
+  --dsw-font-markdown-code-block: 13px/1.65 var(--ds-font-family-code);
+  --dsw-font-markdown-h1: 600 28px/1.3 var(--dsw-font-family);
+  --dsw-font-markdown-h2: 600 24px/1.35 var(--dsw-font-family);
+  --dsw-font-markdown-h3: 600 20px/1.4 var(--dsw-font-family);
+  --dsw-font-markdown-h4: 600 17px/1.5 var(--dsw-font-family);
+  --dsw-font-markdown-table: 14px/1.6 var(--dsw-font-family);
+  --dsw-font-markdown-table-head: 600 14px/1.6 var(--dsw-font-family);
+  --dsw-font-sm: 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-13: 13px/20px var(--dsw-font-family);
+  --dsw-menu-backdrop-filter: none;
+  --dsw-radius-lg: 12px;
+  --dsw-radius-md: 8px;
+  --dsw-radius-sm: 6px;
+  --dsw-radius-xs: 3px;
+  --dsw-shadow-lv3: var(--ax-shadow-popover);
+  --dsw-shadow-menu: var(--ax-shadow-popover);
+  --dsw-specific-menu: var(--ds-surface-elevated);
+  --dsw-static-neutral-bluish-00: var(--ds-bg-canvas);
+}
+
+/* Public answer text remains selectable in both paced and settled arms. */
+.ds-assistant-markdown { user-select: text; -webkit-user-select: text; }
