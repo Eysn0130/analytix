@@ -2099,6 +2099,7 @@ export function PluginMarketplaceView({
               <label className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6f6f6f] dark:text-ds-faint" />
                 <input
+                  aria-label={activeKind === 'plugin' ? t('pluginSearchPlugin') : t('pluginSearchSkill')}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   className="h-11 w-full rounded-lg border border-[#dedede] bg-white pl-9 pr-4 text-[16px] leading-[18px] text-[#0d0d0d] shadow-sm outline-none transition placeholder:text-[#8f8f8f] focus:border-[#bcbcbc] dark:border-ds-border dark:bg-ds-card dark:text-ds-ink"
@@ -2109,6 +2110,7 @@ export function PluginMarketplaceView({
                 <>
                   <label className="relative w-full md:w-[184px]">
                     <select
+                      aria-label={t('pluginSourceFilterLabel')}
                       value={hubSourceFilter}
                       onChange={(event) => setHubSourceFilter(event.target.value)}
                       className="h-11 w-full appearance-none rounded-lg border border-transparent bg-black/[0.05] px-3 pr-8 text-[16px] font-normal text-[#0d0d0d] outline-none transition hover:bg-black/[0.1] dark:bg-ds-subtle dark:text-ds-ink"
@@ -2122,6 +2124,7 @@ export function PluginMarketplaceView({
                   </label>
                   <label className="relative w-full md:w-[112px]">
                     <select
+                      aria-label={t('pluginCategoryFilterLabel')}
                       value={hubCategoryFilter}
                       onChange={(event) => setHubCategoryFilter(event.target.value)}
                       className="h-11 w-full appearance-none rounded-lg border border-transparent bg-black/[0.05] px-3 pr-8 text-[16px] font-normal text-[#0d0d0d] outline-none transition hover:bg-black/[0.1] dark:bg-ds-subtle dark:text-ds-ink"
@@ -2137,6 +2140,7 @@ export function PluginMarketplaceView({
               ) : (
                 <label className="relative w-full md:w-[168px]">
                   <select
+                    aria-label={t('pluginSkillStatusFilterLabel')}
                     value={filter}
                     onChange={(event) => setFilter(event.target.value as PluginFilter)}
                     className="h-11 w-full appearance-none rounded-lg border border-transparent bg-black/[0.05] px-3 pr-8 text-[16px] font-normal text-[#0d0d0d] outline-none transition hover:bg-black/[0.1] dark:bg-ds-subtle dark:text-ds-ink"
@@ -2166,6 +2170,7 @@ export function PluginMarketplaceView({
         {activeKind === 'skill' && !resolvedSelectedDetail ? (
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
             <select
+              aria-label={t('pluginSkillRootFilterLabel')}
               value={selectedSkillRoot?.id ?? ''}
               onChange={(event) => setSkillRootId(event.target.value as SkillRootId)}
               disabled={skillRootOptions.length === 0}

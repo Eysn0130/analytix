@@ -1459,6 +1459,8 @@ describe('FloatingComposer capability controls', () => {
 
     expect(html).toContain('deepseek-v4-pro')
     expect(html).toContain('Send follow-up without stopping')
+    expect(html).toContain('aria-label="Stop"')
+    expect(html).toContain('ds-composer-secondary-stop')
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
     expect(html).not.toContain('Queue message')
     expect(html.match(/ds-composer-primary-action-button/g)?.length).toBe(1)

@@ -28,6 +28,8 @@ type Props = {
   onCollapse: () => void
   /** Fixed pixel height for the bottom-drawer layout. */
   height?: number
+  /** A retained drawer can be hidden by the viewport budget without losing its tabs. */
+  interactive?: boolean
 }
 
 type TerminalTab = {
@@ -178,7 +180,7 @@ function resolveTerminalTheme(container: HTMLElement | null) {
   }
 }
 
-export function TerminalPanel({ className = '', workspaceRoot, onCollapse, height }: Props): ReactElement {
+export function TerminalPanel({ className = '', workspaceRoot, onCollapse, height, interactive = true }: Props): ReactElement {
   const { t } = useTranslation('common')
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -194,6 +196,8 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement | null>(null)
+  const interactiveRef = useRef(interactive)
+  interactiveRef.current = interactive
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0]
 
@@ -343,6 +347,10 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   }, [workspaceRoot])
 
   useEffect(() => {
+    if (!interactive) setContextMenu(null)
+  }, [interactive])
+
+  useEffect(() => {
     aliveRef.current = true
     if (activeTab) void attachTerminal(activeTab.id)
     return () => {
@@ -378,11 +386,13 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   }, [contextMenu])
 
   useEffect(() => {
-    if (!renamingTabId) return
-    requestAnimationFrame(() => {
+    if (!renamingTabId || !interactiveRef.current) return
+    const frame = requestAnimationFrame(() => {
+      if (!interactiveRef.current) return
       renameInputRef.current?.focus()
       renameInputRef.current?.select()
     })
+    return () => cancelAnimationFrame(frame)
   }, [renamingTabId])
 
   const handleNewTab = useCallback(() => {
@@ -413,6 +423,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   const openTabContextMenu = useCallback((event: ReactMouseEvent | ReactPointerEvent, tabId: string) => {
     event.preventDefault()
     event.stopPropagation()
+    if (!interactive) return
     const tabButton = tabButtonRefs.current[tabId]
     const tabRect = tabButton?.getBoundingClientRect()
     const pointerX = event.clientX > 0 ? event.clientX : (tabRect?.left ?? 0)
@@ -423,7 +434,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
       x: Math.min(Math.max(pointerX, 8), window.innerWidth - 220),
       y: Math.min(Math.max(pointerY, 8), window.innerHeight - 132)
     })
-  }, [])
+  }, [interactive])
 
   const openActiveTabContextMenu = useCallback((event: ReactMouseEvent) => {
     if (!activeTab) return
@@ -449,14 +460,14 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   }, [getTabTitle, tabs])
 
   const commitRenameTab = useCallback(() => {
-    if (!renamingTabId) return
+    if (!renamingTabId || !interactive) return
     const nextTitle = renameValue.trim()
     setTabs((current) =>
       current.map((tab) => (tab.id === renamingTabId ? { ...tab, title: nextTitle || undefined } : tab))
     )
     setRenamingTabId(null)
     setRenameValue('')
-  }, [renameValue, renamingTabId])
+  }, [interactive, renameValue, renamingTabId])
 
   const cancelRenameTab = useCallback(() => {
     setRenamingTabId(null)
@@ -607,7 +618,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
             title={t('rightPanelCollapse')}
           />
         </div>
-        {contextMenu ? (
+        {interactive && contextMenu ? (
           createPortal(
             <TerminalTabContextMenu
               state={contextMenu}
@@ -677,6 +688,7 @@ function TerminalTabContextMenu({
   return (
     <div
       role="menu"
+      data-workbench-terminal-menu
       aria-label={t('terminalTabMenuTitle')}
       className="ds-no-drag fixed z-[1000] min-w-[196px] rounded-lg border border-ds-border bg-ds-card/98 p-1 text-[13px] text-ds-ink shadow-[0_18px_48px_rgba(2,6,16,0.28)] backdrop-blur-xl dark:bg-ds-card"
       style={{ left: state.x, top: state.y }}

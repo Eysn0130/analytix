@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, Hand, LockKeyholeOpen, Settings, ShieldQuestion } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
@@ -90,6 +90,8 @@ export function FloatingComposerExecutionPicker({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const entryFocusRef = useRef<'selected' | 'first' | 'last'>('selected')
+  const menuOpen = open && !disabled && !applying
   const permissionMode = analytixToolPermissionModeFromSettings(value)
   const currentOption = permissionOption(permissionMode)
   const currentButtonLabel = t(currentOption.buttonLabelKey ?? currentOption.labelKey)
@@ -109,11 +111,55 @@ export function FloatingComposerExecutionPicker({
     }))
   }, [])
 
+  const closeMenu = useCallback((restoreFocus = false): void => {
+    setOpen(false)
+    const button = buttonRef.current
+    if (restoreFocus && button?.isConnected && !button.disabled) {
+      button.focus({ preventScroll: true })
+    }
+  }, [])
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      closeMenu(true)
+      return
+    }
+    if (event.key === 'Tab') {
+      // Resume the toolbar's native Tab order rather than the body's portal order.
+      closeMenu(true)
+      return
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(
+      "[role='menuitemradio']:not(:disabled)"
+    ))
+    if (items.length === 0) return
+    event.preventDefault()
+    const current = items.indexOf(document.activeElement as HTMLButtonElement)
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
+    items[next]?.focus({ preventScroll: true })
+  }
+
   useEffect(() => {
     if (!open) return
+    if (disabled || applying) {
+      setOpen(false)
+      return
+    }
     updateMenuPosition()
-    const frame = window.requestAnimationFrame(updateMenuPosition)
-    const onPointerDown = (event: PointerEvent): void => {
+    const frame = window.requestAnimationFrame(() => {
+      updateMenuPosition()
+      const items = menuRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitemradio']:not(:disabled)")
+      if (!items?.length || buttonRef.current?.disabled) return
+      const item = entryFocusRef.current === 'last' ? items[items.length - 1]
+        : entryFocusRef.current === 'first' ? items[0]
+        : menuRef.current?.querySelector<HTMLButtonElement>("[role='menuitemradio'][aria-checked='true']:not(:disabled)") ?? items[0]
+      item?.focus({ preventScroll: true })
+    })
+    const onPointerDown = (event: Event): void => {
       const target = event.target
       if (target instanceof Node && rootRef.current?.contains(target)) return
       if (target instanceof Node && menuRef.current?.contains(target)) return
@@ -121,22 +167,25 @@ export function FloatingComposerExecutionPicker({
     }
     const onUpdatePosition = (): void => updateMenuPosition()
     window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('focusin', onPointerDown)
     window.addEventListener('resize', onUpdatePosition)
     window.addEventListener('scroll', onUpdatePosition, true)
     return () => {
       window.cancelAnimationFrame(frame)
       window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('focusin', onPointerDown)
       window.removeEventListener('resize', onUpdatePosition)
       window.removeEventListener('scroll', onUpdatePosition, true)
     }
-  }, [open, updateMenuPosition])
+  }, [open, disabled, applying, updateMenuPosition])
 
   const update = (patch: Partial<ComposerExecutionSettings>): void => {
+    closeMenu(true)
     onChange(patch)
-    setOpen(false)
   }
 
   const selectOption = (mode: AnalytixToolPermissionMode): void => {
+    if (disabled || applying) return
     if (mode === 'custom') {
       setOpen(false)
       onOpenPermissionSettings?.()
@@ -145,12 +194,15 @@ export function FloatingComposerExecutionPicker({
     update(analytixToolPermissionModeSettings(mode as AnalytixToolPermissionPreset))
   }
 
-  const menu = open && typeof document !== 'undefined' ? (
+  const menu = menuOpen && typeof document !== 'undefined' ? (
     <div
       ref={menuRef}
       role="menu"
+      data-composer-execution-menu
+      aria-label={t('composerPermissionButton')}
+      onKeyDown={handleMenuKeyDown}
       style={menuStyle}
-      className="fixed z-50 overflow-hidden rounded-[20px] border border-ds-border bg-white p-1.5 text-[13px] text-ds-ink shadow-[0_18px_48px_rgba(20,47,95,0.16)] dark:bg-ds-card"
+      className="fixed z-50 overflow-hidden rounded-[20px] border border-ds-border bg-ds-elevated p-1.5 text-[13px] text-ds-ink [box-shadow:var(--ax-shadow-popover)]"
     >
       {PERMISSION_OPTIONS.map((option) => (
         <ExecutionRow
@@ -172,12 +224,27 @@ export function FloatingComposerExecutionPicker({
           ref={buttonRef}
           type="button"
           disabled={disabled || applying}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => {
+            entryFocusRef.current = 'selected'
+            setOpen((current) => !current)
+          }}
+          onKeyDown={(event) => {
+            if (disabled || applying) return
+            if (event.key === 'Escape' && menuOpen) {
+              event.preventDefault()
+              event.stopPropagation()
+              closeMenu(true)
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault()
+              entryFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
+              setOpen(true)
+            }
+          }}
           className={`inline-flex h-8 max-w-[132px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-55 ${
-            open ? 'bg-ds-hover text-ds-ink' : ''
+            menuOpen ? 'bg-ds-hover text-ds-ink' : ''
           }`}
           title={title}
-          aria-expanded={open}
+          aria-expanded={menuOpen}
           aria-haspopup="menu"
           aria-label={t('composerPermissionButton')}
         >
@@ -210,6 +277,7 @@ function ExecutionRow({
     <button
       type="button"
       role="menuitemradio"
+      tabIndex={-1}
       aria-checked={selected}
       onClick={onClick}
       className={`flex w-full cursor-pointer items-start gap-3 rounded-[14px] px-3 py-2.5 text-left transition ${

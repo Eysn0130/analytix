@@ -1,5 +1,6 @@
-import { type ReactElement, useEffect, useRef, useState } from 'react'
+import { type ReactElement, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useModalFocus } from '../hooks/use-modal-focus'
 import {
   DEFAULT_MODEL_PROVIDER_ID,
   normalizeAppSettings,
@@ -169,6 +170,7 @@ export async function completeInitialSetupAfterSave(input: {
 
 export function InitialSetupDialog(): ReactElement {
   const { t } = useTranslation('settings')
+  const fieldId = useId()
   const initialSetupMode = useChatStore((s) => s.initialSetupMode)
   const closeInitialSetup = useChatStore((s) => s.closeInitialSetup)
   const applyI18n = useChatStore((s) => s.applyI18nFromSettings)
@@ -232,6 +234,8 @@ export function InitialSetupDialog(): ReactElement {
     closeInitialSetup()
     void reloadUiSettings()
   }
+
+  const dialogRef = useModalFocus(handleClose, closeAllowed)
 
   const handleOpenLocalData = () => {
     if (saving) return
@@ -313,7 +317,7 @@ export function InitialSetupDialog(): ReactElement {
   if (!form || !drafts) {
     return (
       <div className="ds-no-drag fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-md dark:bg-black/70">
-        <div className="rounded-xl border border-ds-border bg-ds-card/95 px-5 py-4 text-sm text-ds-muted shadow-panel backdrop-blur-xl">
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('loading')} tabIndex={-1} className="rounded-xl border border-ds-border bg-ds-card/95 px-5 py-4 text-sm text-ds-muted shadow-panel backdrop-blur-xl">
           {t('loading')}
         </div>
       </div>
@@ -369,6 +373,8 @@ export function InitialSetupDialog(): ReactElement {
     <div className="ds-no-drag fixed inset-0 z-50 overflow-y-auto bg-[#eef2fb]/45 p-3 backdrop-blur-[18px] dark:bg-black/62 dark:backdrop-blur-[22px] sm:p-6">
       <div className="flex min-h-full items-center justify-center">
         <section
+          ref={dialogRef}
+          tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-labelledby="initial-setup-title"
@@ -538,11 +544,13 @@ export function InitialSetupDialog(): ReactElement {
           )}
 
           <div className="space-y-2.5 sm:space-y-3.5">
-            <label className={labelClass}>
+            <label className={labelClass} htmlFor={`${fieldId}-api-key`}>
               {t('firstRunApiKeyLabel', { provider: selectedCard.name })}
             </label>
             <div className="relative">
               <input
+                id={`${fieldId}-api-key`}
+                aria-describedby={`${fieldId}-key-help`}
                 type={showApiKey ? 'text' : 'password'}
                 value={selectedDraft.apiKey}
                 onChange={(e) => updateSelectedDraft({ apiKey: e.target.value })}
@@ -556,13 +564,15 @@ export function InitialSetupDialog(): ReactElement {
               <button
                 type="button"
                 onClick={() => setShowApiKey((v) => !v)}
+                aria-label={t(showApiKey ? 'hideSecret' : 'showSecret')}
+                aria-pressed={showApiKey}
                 className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/[0.06] dark:hover:text-slate-300"
               >
                 {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
             <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-slate-50/75 px-4 py-3 text-[13px] text-slate-500 dark:border-white/10 dark:bg-white/[0.035] dark:text-slate-400 min-[560px]:grid-cols-[1fr_auto] min-[560px]:items-center">
-              <p className="min-w-0 leading-6">
+              <p id={`${fieldId}-key-help`} className="min-w-0 leading-6">
                 {t(keyHintKey(selectedCard, selection.mode))}
               </p>
               <button
@@ -588,10 +598,11 @@ export function InitialSetupDialog(): ReactElement {
           </div>
 
           <div className="space-y-2.5 sm:space-y-3.5">
-            <label className={labelClass}>
+            <label className={labelClass} htmlFor={`${fieldId}-base-url`}>
               {t('baseUrl')}
             </label>
             <input
+              id={`${fieldId}-base-url`}
               type="text"
               value={selectedDraft.baseUrl}
               onChange={(e) => updateSelectedDraft({ baseUrl: e.target.value })}

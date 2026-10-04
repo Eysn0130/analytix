@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
@@ -104,6 +104,11 @@ export function SettingsView(): ReactElement {
   const deleteThread = useChatStore((s) => s.deleteThread)
   const [category, setCategory] = useState<SettingsCategory>('general')
   const [form, setForm] = useState<AppSettingsV1 | null>(null)
+  const settingsContentRef = useRef<HTMLDivElement | null>(null)
+  const settingsLoaded = form !== null
+  useLayoutEffect(() => {
+    if (settingsContentRef.current) settingsContentRef.current.scrollTop = 0
+  }, [category, settingsLoaded])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [workspacePickerError, setWorkspacePickerError] = useState<string | null>(null)
   const [writeWorkspacePickerError, setWriteWorkspacePickerError] = useState<string | null>(null)
@@ -342,7 +347,7 @@ export function SettingsView(): ReactElement {
   }, [settingsSection])
 
   useEffect(() => {
-    if (!form) return
+    if (!settingsLoaded) return
     if (
       settingsSection === 'account' ||
       settingsSection === 'general' ||
@@ -376,10 +381,11 @@ export function SettingsView(): ReactElement {
     }
     const target = refs[settingsSection]
     if (!target) return
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
-  }, [category, form, settingsSection])
+    return () => window.cancelAnimationFrame(frame)
+  }, [category, settingsLoaded, settingsSection])
 
   useEffect(() => {
     return () => {
@@ -996,7 +1002,7 @@ export function SettingsView(): ReactElement {
       />
       <SettingsSidebar category={category} setCategory={setCategory} goBack={goBack} t={t} />
 
-      <div className="ds-settings-content ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
+      <div ref={settingsContentRef} className="ds-settings-content ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
         <div className={`mx-auto ${category === 'account' ? 'max-w-[732px]' : 'max-w-3xl'}`}>
           {category !== 'account' && category !== 'browser' && category !== 'computerUse' ? (
             <div className="mb-8 flex items-start justify-between gap-4">

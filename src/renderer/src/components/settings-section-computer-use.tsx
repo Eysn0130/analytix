@@ -527,6 +527,7 @@ export function ComputerUseChromeSettingsDetail({
             }
             control={
               <CodexSelect
+                label={t('browserApproval')}
                 value={browserUse.approvalMode}
                 options={approvalOptions}
                 onChange={(value) => onBrowserUseChange({ approvalMode: value as AnalytixBrowserApprovalMode })}
@@ -538,6 +539,7 @@ export function ComputerUseChromeSettingsDetail({
             description={t('computerUseChromeHistoryDesc')}
             control={
               <CodexSelect
+                label={t('computerUseChromeHistory')}
                 value="alwaysAsk"
                 options={askOnlyOptions}
                 onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
@@ -551,6 +553,7 @@ export function ComputerUseChromeSettingsDetail({
             description={t('computerUseChromeDownloadDesc')}
             control={
               <CodexSelect
+                label={t('computerUseChromeDownload')}
                 value="alwaysAsk"
                 options={askOnlyOptions}
                 onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
@@ -564,6 +567,7 @@ export function ComputerUseChromeSettingsDetail({
             description={t('computerUseChromeUploadDesc')}
             control={
               <CodexSelect
+                label={t('computerUseChromeUpload')}
                 value="alwaysAsk"
                 options={askOnlyOptions}
                 onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
@@ -968,6 +972,7 @@ export function ComputerUseSettingsSection({ ctx }: { ctx: Record<string, any> }
                 description={t('visionBridgeModeDesc')}
                 control={
                   <CodexSelect
+                    label={t('visionBridgeMode')}
                     value={visionBridge.mode}
                     options={[
                       { value: 'auto', label: t('computerUseModeAuto') },
@@ -983,6 +988,7 @@ export function ComputerUseSettingsSection({ ctx }: { ctx: Record<string, any> }
                 description={t('visionBridgeProviderDesc')}
                 control={
                   <CodexSelect
+                    label={t('visionBridgeProvider')}
                     value={visionBridge.providerId}
                     options={[
                       { value: '', label: t('visionBridgeProviderActive') },

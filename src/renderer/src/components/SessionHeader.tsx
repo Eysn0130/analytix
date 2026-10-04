@@ -488,6 +488,17 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
         style={menuStyle}
         onPointerLeave={() => setActionsSubmenu(null)}
       >
+        {compact ? (
+          <div className="ds-session-menu-details" role="group" aria-label={t('sessionDetails')}>
+            <div className="break-words font-medium text-ds-ink">{activeTitle}</div>
+            <div className="mt-1 break-words">{activeWorkspaceLabel}</div>
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
+              <span className="capitalize">{active.mode}</span>
+              <span>{formatRelativeTime(active.updatedAt, i18n.language)}</span>
+              {active.forkedFromThreadId ? <span title={forkLabel}>{forkLabel}</span> : null}
+            </div>
+          </div>
+        ) : null}
         <ActionMenuItem
           icon={<PinActionIcon className="h-5 w-5" />}
           label={activePinned ? t('sessionActionUnpin') : t('sessionActionPin')}
@@ -761,31 +772,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                   ) : null}
                 </div>
               ) : null}
-              <div className="session-header-compact-meta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] leading-[14px] text-ds-faint">
-                <span className="session-meta-workspace max-w-[min(42vw,240px)] truncate">{activeWorkspaceLabel}</span>
-                <span className="session-meta-workspace-separator opacity-70">·</span>
-                <span className="session-meta-mode shrink-0 capitalize">{active.mode}</span>
-                <span className="session-meta-mode-separator opacity-70">·</span>
-                <span className="session-meta-time shrink-0 tabular-nums">
-                  {formatRelativeTime(active.updatedAt, i18n.language)}
-                </span>
-                {active.forkedFromThreadId ? (
-                  <>
-                    <span className="session-meta-fork-separator opacity-70">·</span>
-                    <span
-                      className="session-meta-fork inline-flex min-w-0 max-w-[min(34vw,220px)] items-center gap-1 truncate"
-                      title={forkLabel}
-                    >
-                      <GitFork className="h-3 w-3 shrink-0" strokeWidth={1.8} />
-                      <span className="truncate">
-                        {forkedFromTitle
-                          ? t('sessionForkedFromCompact', { title: forkedFromTitle })
-                          : t('sessionForked')}
-                      </span>
-                    </span>
-                  </>
-                ) : null}
-              </div>
+
             </div>
           ) : (
             <div className="min-w-0 flex-1" aria-hidden />

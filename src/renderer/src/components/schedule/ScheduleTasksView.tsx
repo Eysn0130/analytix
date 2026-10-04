@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
+import { useModalFocus } from '../../hooks/use-modal-focus'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -873,6 +874,7 @@ function ScheduleTaskDialog({
   modelProviders: ScheduleModelProviderOption[]
   t: (key: string, values?: Record<string, unknown>) => string
 }): ReactElement {
+  const dialogRef = useModalFocus(onClose)
   const draft = dialog.draft
   const updateDraft = (patch: Partial<ScheduledTaskV1>): void => {
     onDraftChange({ ...draft, ...patch })
@@ -950,6 +952,8 @@ function ScheduleTaskDialog({
       onMouseDown={onClose}
     >
       <form
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="schedule-task-dialog-title"
@@ -987,6 +991,7 @@ function ScheduleTaskDialog({
                 <FieldLabel required>{t('scheduleTaskName')}</FieldLabel>
                 <div className="relative">
                   <input
+                    data-modal-autofocus
                     value={draft.title}
                     maxLength={50}
                     onChange={(event) => updateDraft({ title: event.target.value })}

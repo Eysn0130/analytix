@@ -16,6 +16,7 @@ import { PanelCollapseButton } from '../workbench/PanelCollapseButton'
 
 type Props = {
   className?: string
+  tabbedWorkspace?: boolean
   onCollapse: () => void
   onOpenPlan: () => void
 }
@@ -24,6 +25,7 @@ const STATUS_ORDER: ThreadTodoStatus[] = ['pending', 'in_progress', 'completed']
 
 export function TodoPanel({
   className = '',
+  tabbedWorkspace = false,
   onCollapse,
   onOpenPlan
 }: Props): ReactElement {
@@ -41,20 +43,20 @@ export function TodoPanel({
 
   return (
     <aside
-      className={`ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas ${className}`}
+      className={`ds-todo-panel ds-no-drag flex min-h-0 flex-col ${className}`} data-tabbed={tabbedWorkspace}
     >
-      <div className="shrink-0 border-b border-ds-border-muted bg-ds-card">
+      <div className="ds-todo-panel-header shrink-0">
         <div className="ds-right-panel-topbar">
-          <div className="ds-right-panel-title-group">
+          {!tabbedWorkspace ? <div className="ds-right-panel-title-group">
             <ListTodo className="ds-right-panel-title-icon" strokeWidth={1.85} />
             <span className="ds-right-panel-title">
               {t('todoPanelTitle')}
             </span>
-          </div>
-          <div className="ds-right-panel-actions">
-            <TodoStat label={t('todoStatusPending')} value={pending} />
-            <TodoStat label={t('todoStatusInProgress')} value={inProgress} />
-            <TodoStat label={t('todoStatusCompleted')} value={completed} />
+          </div> : null}
+          <div className="ds-todo-counts ds-right-panel-actions">
+            {!tabbedWorkspace || pending > 0 ? <TodoStat label={t('todoStatusPending')} value={pending} /> : null}
+            {!tabbedWorkspace || inProgress > 0 ? <TodoStat label={t('todoStatusInProgress')} value={inProgress} /> : null}
+            {!tabbedWorkspace || completed > 0 ? <TodoStat label={t('todoStatusCompleted')} value={completed} /> : null}
             {failed > 0 ? <TodoStat label={t('todoStatusFailed')} value={failed} /> : null}
             {canceled > 0 ? <TodoStat label={t('todoStatusCanceled')} value={canceled} /> : null}
             {items.length > 0 ? (
@@ -70,11 +72,11 @@ export function TodoPanel({
               </button>
             ) : null}
           </div>
-          <PanelCollapseButton
+          {!tabbedWorkspace ? <PanelCollapseButton
             onClick={onCollapse}
             ariaLabel={t('rightPanelCollapse')}
             title={t('rightPanelCollapse')}
-          />
+          /> : null}
         </div>
       </div>
 
@@ -110,7 +112,7 @@ export function TodoPanel({
 
 function TodoStat({ label, value }: { label: string; value: number }): ReactElement {
   return (
-    <span className="ds-right-panel-chip" title={`${label}: ${value}`}>
+    <span className="ds-todo-count" title={`${label}: ${value}`}>
       <span className="font-mono text-[11px] tabular-nums text-ds-ink">{value}</span>
       <span className="min-w-0 truncate">{label}</span>
     </span>
@@ -129,7 +131,7 @@ function TodoRow({
   const { t } = useTranslation('common')
   const immutable = item.status === 'completed' || item.status === 'failed' || item.status === 'canceled'
   return (
-    <div className="rounded-lg border border-ds-border-muted bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(20,47,95,0.04)] dark:bg-ds-card">
+    <div className="ds-todo-row">
       <div className="flex items-start gap-2.5">
         <button
           type="button"
@@ -137,7 +139,7 @@ function TodoRow({
             if (!immutable) onStatus('completed')
           }}
           disabled={immutable}
-          className="mt-0.5 shrink-0 rounded-full text-ds-muted transition hover:text-accent"
+          className="ds-todo-complete shrink-0 rounded-md text-ds-muted transition hover:bg-ds-hover hover:text-accent"
           aria-label={immutable ? t(`todoStatus.${item.status}`) : t('todoMarkCompleted')}
           title={immutable ? t(`todoStatus.${item.status}`) : t('todoMarkCompleted')}
         >
@@ -179,7 +181,7 @@ function TodoRow({
           ) : null}
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-1.5 pl-6">
+      <div className="mt-1 flex flex-wrap items-center gap-1 pl-8">
         {immutable ? (
           <span className="rounded-full bg-ds-surface-subtle px-2 py-1 text-[11px] font-medium text-ds-muted">
             {t(`todoStatus.${item.status}`)}
@@ -189,6 +191,7 @@ function TodoRow({
             key={status}
             type="button"
             onClick={() => onStatus(status)}
+            aria-pressed={item.status === status}
             className={`rounded-full px-2 py-1 text-[11px] font-medium transition ${
               item.status === status
                 ? 'bg-accent/12 text-accent'

@@ -133,14 +133,13 @@ export function timelineResponseSpacerHeight(live: boolean): number | string {
     : 1
 }
 
-export function goalTimelinePaddingClass(route: 'chat' | 'claw', hasActiveGoal: boolean): string {
-  return route === 'chat' && hasActiveGoal ? 'pb-32 md:pb-40' : 'pb-10'
+// The goal lives in the measured composer surface; it does not overlay the timeline.
+export function goalTimelinePaddingClass(_route: 'chat' | 'claw', _hasActiveGoal: boolean): string {
+  return 'pb-10'
 }
 
-export function liveTurnProgressClass(hasActiveGoal: boolean): string {
-  return hasActiveGoal
-    ? 'flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted mb-16 md:mb-20'
-    : 'flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted'
+export function liveTurnProgressClass(_hasActiveGoal: boolean): string {
+  return 'flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted'
 }
 
 function blockScrollStamp(block: ChatBlock | undefined): string {
