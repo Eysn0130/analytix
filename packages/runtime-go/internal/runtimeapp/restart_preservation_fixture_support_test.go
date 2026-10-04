@@ -251,6 +251,7 @@ func runtimeStoredChildCompletionFixtureV1(t *testing.T, fault string) *runtimeC
 	}
 	turn["acceptedFinal"], turn["items"] = fixture.PrivateFinal.AcceptedFinal, plan.TurnItems
 	turn["status"] = fixture.PrivateFinal.PublicationIntent.TerminalStatus
+	turn["finishedAt"] = fixture.PrivateFinal.AcceptedFinal.AcceptedAt
 	body, err := json.Marshal(childSnapshot.Thread)
 	if err != nil {
 		t.Fatal(err)
