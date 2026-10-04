@@ -1,4 +1,5 @@
-import type { ReactElement } from 'react'
+import { useId, type ReactElement } from 'react'
+import { useModalFocus } from '../hooks/use-modal-focus'
 import type { WriteInlineCompletionDebugEntry } from '@shared/write-inline-completion'
 import { Loader2, RefreshCw, Trash2 } from '../design/AnalytixUiIcons'
 
@@ -47,15 +48,17 @@ export function WriteDebugLogModal({
   onClose: () => void
   t: (key: string, values?: Record<string, unknown>) => string
 }): ReactElement {
+  const dialogRef = useModalFocus(onClose)
+  const titleId = useId()
   const completionSelected =
     completionEntries.find((entry) => entry.id === completionSelectedId) ?? completionEntries[0] ?? null
 
   return (
     <div className="ds-no-drag fixed inset-0 z-[100] flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
-      <div className="flex h-[min(86vh,820px)] w-[min(1180px,96vw)] min-w-0 flex-col overflow-hidden rounded-2xl border border-ds-border bg-ds-card shadow-[var(--ax-shadow-modal)]">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="flex h-[min(86vh,820px)] w-[min(1180px,96vw)] min-w-0 flex-col overflow-hidden rounded-2xl border border-ds-border bg-ds-card shadow-[var(--ax-shadow-modal)]">
         <div className="flex min-h-[64px] shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-4 py-3">
           <div className="min-w-0">
-            <h2 className="text-[16px] font-semibold text-ds-ink">{t('writeDebugLogTitle')}</h2>
+            <h2 id={titleId} className="text-[16px] font-semibold text-ds-ink">{t('writeDebugLogTitle')}</h2>
             <p className="mt-1 text-[12.5px] text-ds-muted">{t('writeDebugLogModalDesc')}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -67,7 +70,7 @@ export function WriteDebugLogModal({
               <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               {t('writeInlineEditDebugClear')}
             </button>
-            <button type="button" onClick={onClose} className="rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[12.5px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover">
+            <button type="button" data-modal-autofocus onClick={onClose} className="rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[12.5px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover">
               {t('close')}
             </button>
           </div>

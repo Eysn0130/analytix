@@ -772,14 +772,20 @@ describe('WorkbenchTopBar layout controls', () => {
     await i18n.changeLanguage('zh')
   })
 
-  it('keeps two layout buttons and moves the summary action into the workspace', () => {
+  it('leaves dock collapse to its header and retains one reopen entry when closed', () => {
     const html = renderToStaticMarkup(createElement(WorkbenchTopBar, {
       workspaceOpen: true, onToggleWorkspace: () => {},
       terminalOpen: false, onToggleTerminal: () => {}
     }))
 
     expect(html).not.toContain('切换置顶摘要')
-    expect(html.match(/<button /g)).toHaveLength(2)
-    expect(html).toMatch(/aria-pressed="true"[^>]*aria-controls="workbench-right-workspace"/)
+    expect(html.match(/<button /g)).toHaveLength(1)
+    expect(html).not.toContain('aria-controls="workbench-right-workspace"')
+    const closed = renderToStaticMarkup(createElement(WorkbenchTopBar, {
+      workspaceOpen: false, onToggleWorkspace: () => {},
+      terminalOpen: false, onToggleTerminal: () => {}
+    }))
+    expect(closed.match(/<button /g)).toHaveLength(2)
+    expect(closed).toMatch(/aria-expanded="false"[^>]*aria-controls="workbench-right-workspace"/)
   })
 })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react'
+import { act, createElement, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useWorkspaceTabsStore } from '../store/workspace-tabs-store'
 import { WORKSPACE_FILE_PREVIEW_EVENT } from '../lib/workspace-file-preview'
 import {
@@ -84,10 +84,20 @@ describe('workbench layout contracts', () => {
     const containerHeight = 700
 
     expect(maxWorkbenchTerminalHeight(containerHeight)).toBe(
-      containerHeight - WORKBENCH_TIMELINE_MIN_HEIGHT
+      containerHeight - WORKBENCH_TIMELINE_MIN_HEIGHT - 4
     )
-    expect(clampWorkbenchTerminalHeight(900, containerHeight)).toBe(440)
+    expect(clampWorkbenchTerminalHeight(900, containerHeight)).toBe(436)
     expect(clampWorkbenchTerminalHeight(120, containerHeight)).toBe(220)
+  })
+
+  it('temporarily hides an unfit terminal instead of overlapping the composer', () => {
+    expect(maxWorkbenchTerminalHeight(586, 315)).toBe(0)
+    expect(clampWorkbenchTerminalHeight(360, 586, 315)).toBe(0)
+    expect(clampWorkbenchTerminalHeight(360, 946, 315)).toBe(360)
+    expect(clampWorkbenchTerminalHeight(360, 700, 200)).toBe(236)
+    expect(maxWorkbenchTerminalHeight(583, 100)).toBe(0)
+    expect(maxWorkbenchTerminalHeight(584, 100)).toBe(220)
+    expect(maxWorkbenchTerminalHeight(Number.NaN, 100)).toBe(0)
   })
 
   it('prefers workspace-scoped layout values while preserving legacy fallback', () => {
@@ -120,6 +130,74 @@ describe('workbench layout contracts', () => {
 
 
 describe('workspace tab layout compatibility', () => {
+  it('refits on composer measurement, restores focus and retains the requested terminal preference', async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+    const storage = stubLocalStorage()
+    const workspace = '/synthetic/terminal-budget'
+    const scope = workbenchLayoutStorageScope(workspace)
+    const heightKey = workbenchLayoutStorageKey('analytix.layout.terminalHeight', scope)
+    const openKey = workbenchLayoutStorageKey('analytix.layout.terminalOpen', scope)
+    storage.setItem(heightKey, '360')
+    storage.setItem(openKey, '1')
+    let notify: () => void = () => {}
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { notify = callback }
+      observe() {}
+      disconnect() {}
+    })
+    let stageHeight = 946
+    let composerHeight = 315
+    let layout: ReturnType<typeof useWorkbenchLayout>
+    function Harness({ present = true }: { present?: boolean }) {
+      layout = useWorkbenchLayout({ activeThreadId: 'a', workspaceRoot: workspace,
+        latestAutoOpenDevPreviewUrl: null, latestDevPreviewUrl: null, route: 'chat', writeAssistantOpen: false })
+      const stageRef = useCallback((node: HTMLElement | null): void => {
+        if (node) Object.defineProperty(node, 'clientHeight', { configurable: true, get: () => stageHeight })
+        layout.terminalStageRef(node)
+      }, [])
+      const composerRef = useCallback((node: HTMLDivElement | null): void => {
+        if (node) Object.defineProperty(node, 'offsetHeight', { configurable: true, get: () => composerHeight })
+        layout.terminalComposerRef(node)
+      }, [])
+      return createElement('div', null,
+        createElement('button', { id: 'workbench-terminal-toggle' }, 'Terminal'),
+        present ? createElement('section', { ref: stageRef },
+          createElement('div', { ref: composerRef }),
+          createElement('div', { ref: layout.terminalPaneRef }, createElement('button', { id: 'terminal-child' }, 'Tab'))) : null)
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    document.body.append(container)
+    try {
+      await act(async () => root.render(createElement(Harness)))
+      expect(layout!.terminalHeight).toBe(360)
+      container.querySelector<HTMLButtonElement>('#terminal-child')?.focus()
+      stageHeight = 586
+      await act(async () => notify())
+      expect(layout!.terminalHeight).toBe(0)
+      expect(layout!.terminalVisible).toBe(false)
+      expect(document.activeElement?.id).toBe('workbench-terminal-toggle')
+      expect(storage.getItem(heightKey)).toBe('360')
+      expect(storage.getItem(openKey)).toBe('1')
+      stageHeight = 946
+      await act(async () => notify())
+      expect(layout!.terminalHeight).toBe(360)
+      composerHeight = 500
+      await act(async () => notify())
+      expect(layout!.terminalHeight).toBe(0)
+      await act(async () => root.render(createElement(Harness, { present: false })))
+      expect(layout!.terminalHeight).toBe(0)
+      composerHeight = 315
+      await act(async () => root.render(createElement(Harness)))
+      expect(layout!.terminalHeight).toBe(360)
+      expect(storage.getItem(heightKey)).toBe('360')
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps file identity and bottom terminal state when the right dock folds or the thread changes', async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
     useWorkspaceTabsStore.setState({ tabs: [], activeTabId: null, selectorOpen: true, open: false, focused: false })

@@ -2360,6 +2360,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   title={t('modelProviderImageCapability')}
                   action={
                     <Toggle
+                      aria-label={t('modelProviderImageCapability')}
                       checked={Boolean(activeProvider.image)}
                       onChange={(value) => {
                         if (value) {
@@ -2423,6 +2424,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   title={t('modelProviderSpeechCapability')}
                   action={
                     <Toggle
+                      aria-label={t('modelProviderSpeechCapability')}
                       checked={Boolean(activeProvider.speech)}
                       onChange={(value) => {
                         if (value) {
@@ -2486,6 +2488,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   title={t('modelProviderTextToSpeechCapability')}
                   action={
                     <Toggle
+                      aria-label={t('modelProviderTextToSpeechCapability')}
                       checked={Boolean(activeProvider.textToSpeech)}
                       onChange={(value) => {
                         if (value) {
@@ -2550,6 +2553,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   title={t('modelProviderMusicCapability')}
                   action={
                     <Toggle
+                      aria-label={t('modelProviderMusicCapability')}
                       checked={Boolean(activeProvider.music)}
                       onChange={(value) => {
                         if (value) {
@@ -2613,6 +2617,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   title={t('modelProviderVideoCapability')}
                   action={
                     <Toggle
+                      aria-label={t('modelProviderVideoCapability')}
                       checked={Boolean(activeProvider.video)}
                       onChange={(value) => {
                         if (value) {

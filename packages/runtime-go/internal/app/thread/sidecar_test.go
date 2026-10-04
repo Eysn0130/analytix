@@ -1,12 +1,295 @@
 package thread
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
+
+func signedCollisionHistoryFixtureV1(t *testing.T) map[string]any {
+	t.Helper()
+	seed := sha256.Sum256([]byte("analytix/pr46/synthetic-authority/212301"))
+	key := ed25519.NewKeyFromSeed(seed[:])
+	publicKey := key.Public().(ed25519.PublicKey)
+	authority := &projectionTestAuthority{privateKey: key, publicKey: publicKey, keyID: domainsecurity.SHA256Hex(publicKey)}
+	securityContext := newTrustedProjectionContext("thread-history-collision", "turn-history-collision", "case-history", "snapshot-history", 2)
+	fixture := newTrustedProjectionFixture(t, authority, securityContext)
+	thread := fixture.thread()
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	turn["finishedAt"] = fixture.privateRecord.AcceptedFinal.AcceptedAt
+	if err := domainevent.ValidatePublicRecord(turn); !errors.Is(err, domainevent.ErrCredentialProjection) {
+		t.Fatalf("valid signed history no longer reproduces ordinary credential collision: %v", err)
+	}
+	return thread
+}
+
+func TestAcceptedFinalHistoryCredentialCollisionPreservesOriginalValues(t *testing.T) {
+	thread := signedCollisionHistoryFixtureV1(t)
+	before, err := json.Marshal(thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublicHistory(thread); err != nil {
+		t.Fatalf("complete signed history rejected: %v", err)
+	}
+	normalized, err := NormalizeForRead(stringField(thread, "id"), thread, "2026-07-11T08:01:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublicHistory(normalized); err != nil {
+		t.Fatalf("existing normalize then validation path rejected signed history: %v", err)
+	}
+	after, err := json.Marshal(thread)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("history scan changed original signed values")
+	}
+	oldTurn := thread["turns"].([]any)[0].(map[string]any)
+	newTurn := normalized["turns"].([]any)[0].(map[string]any)
+	originalRecord, _ := json.Marshal(oldTurn["acceptedFinal"])
+	normalizedRecord, _ := json.Marshal(newTurn["acceptedFinal"])
+	if !bytes.Equal(originalRecord, normalizedRecord) {
+		t.Fatal("normalization changed the signed turn authority")
+	}
+	for _, raw := range newTurn["items"].([]any) {
+		item := raw.(map[string]any)
+		if stringField(item, "kind") == "assistant_text" {
+			itemRecord, _ := json.Marshal(item["acceptedFinal"])
+			if !bytes.Equal(originalRecord, itemRecord) {
+				t.Fatal("normalization changed the signed assistant authority")
+			}
+		}
+	}
+	// Older frozen turns remain valid after the current thread context advances.
+	thread["securityState"] = publicProjectionSecurityRecord(newTrustedProjectionContext(stringField(thread, "id"), "turn-next", "case-history", "snapshot-next", 3))
+	if err := ValidatePublicHistory(thread); err != nil {
+		t.Fatalf("history was incorrectly bound to the current epoch: %v", err)
+	}
+}
+
+func TestAcceptedFinalHistoryRejectsIncorrectBindingsAndUnqualifiedMaps(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any, map[string]any, map[string]any){
+		"outer thread":        func(h, t, i map[string]any) { h["id"] = "other-thread" },
+		"outer turn":          func(h, t, i map[string]any) { t["id"] = "other-turn" },
+		"turn thread":         func(h, t, i map[string]any) { t["threadId"] = "other-thread" },
+		"item thread":         func(h, t, i map[string]any) { i["threadId"] = "other-thread" },
+		"item turn":           func(h, t, i map[string]any) { i["turnId"] = "other-turn" },
+		"finishedAt":          func(h, t, i map[string]any) { t["finishedAt"] = "2026-07-11T08:00:01Z" },
+		"status":              func(h, t, i map[string]any) { t["status"] = "failed" },
+		"body":                func(h, t, i map[string]any) { i["text"] = "sk-synthetic-private-token-123456" },
+		"missing assistant":   func(h, t, i map[string]any) { t["items"] = []any{} },
+		"duplicate assistant": func(h, t, i map[string]any) { t["items"] = append(t["items"].([]any), i) },
+		"orphan":              func(h, t, i map[string]any) { delete(t, "acceptedFinal") },
+		"wrong frozen context": func(h, t, i map[string]any) {
+			t["securityContext"] = publicProjectionSecurityRecord(newTrustedProjectionContext(stringField(h, "id"), stringField(t, "id"), "case-history", "other-snapshot", 3))
+		},
+		"item role":       func(h, t, i map[string]any) { i["role"] = "user" },
+		"item status":     func(h, t, i map[string]any) { i["status"] = "running" },
+		"item finishedAt": func(h, t, i map[string]any) { i["finishedAt"] = "2026-07-11T08:00:01Z" },
+		"turn unknown":    func(h, t, i map[string]any) { t["acceptedFinal"].(map[string]any)["unknown"] = "safe" },
+		"item alias": func(h, t, i map[string]any) {
+			r := i["acceptedFinal"].(map[string]any)
+			r["AuthoritySignature"] = r["authoritySignature"]
+			delete(r, "authoritySignature")
+		},
+		"item alias pair": func(h, t, i map[string]any) {
+			r := i["acceptedFinal"].(map[string]any)
+			r["AuthoritySignature"] = r["authoritySignature"]
+		},
+		"optional null": func(h, t, i map[string]any) { t["acceptedFinal"].(map[string]any)["factFinalWitnessAdmission"] = nil },
+		"binary bytes": func(h, t, i map[string]any) {
+			r := i["acceptedFinal"].(map[string]any)
+			r["authorityPublicKey"] = []byte(r["authorityPublicKey"].(string))
+		},
+		"binary padding": func(h, t, i map[string]any) {
+			r := t["acceptedFinal"].(map[string]any)
+			r["authoritySignature"] = r["authoritySignature"].(string) + "="
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			thread := signedCollisionHistoryFixtureV1(t)
+			turn := thread["turns"].([]any)[0].(map[string]any)
+			item := turn["items"].([]any)[2].(map[string]any)
+			mutate(thread, turn, item)
+			if err := ValidatePublicHistory(thread); err == nil {
+				t.Fatal("malformed or incorrectly bound history acquired scan exemption")
+			}
+		})
+	}
+}
+
+func TestAcceptedFinalHistoryKeepsOrdinaryCredentialScanning(t *testing.T) {
+	for _, field := range []string{"root", "turn", "item", "nested"} {
+		t.Run(field, func(t *testing.T) {
+			thread := signedCollisionHistoryFixtureV1(t)
+			turn := thread["turns"].([]any)[0].(map[string]any)
+			switch field {
+			case "root":
+				thread["title"] = "sk-synthetic-private-token-123456"
+			case "turn":
+				turn["extra"] = "sk-synthetic-private-token-123456"
+			case "item":
+				turn["items"].([]any)[0].(map[string]any)["text"] = "sk-synthetic-private-token-123456"
+			case "nested":
+				turn["wrapper"] = map[string]any{"acceptedFinal": turn["acceptedFinal"]}
+			}
+			if err := ValidatePublicHistory(thread); !errors.Is(err, domainevent.ErrCredentialProjection) {
+				t.Fatalf("ordinary credential content was not scanned: %v", err)
+			}
+		})
+	}
+}
+
+type historyMarshalSentinelV1 struct{}
+
+func (historyMarshalSentinelV1) MarshalJSON() ([]byte, error) {
+	panic("history marshaled before resource preflight")
+}
+
+func TestPublicHistoryResourcePreflightPrecedesClassificationAndMarshal(t *testing.T) {
+	thread := signedCollisionHistoryFixtureV1(t)
+	thread["securityState"] = historyMarshalSentinelV1{}
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	turn["password"] = strings.Repeat("x", (1<<20)+1)
+	if err := ValidatePublicHistory(thread); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatalf("history resource rejection did not precede parsing: %v", err)
+	}
+	cycle := map[string]any{}
+	cycle["password"] = cycle
+	turn["password"] = cycle
+	if err := ValidatePublicHistory(thread); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatalf("credential-key cycle escaped preflight: %v", err)
+	}
+}
+
+func TestAcceptedFinalHistoryKeepsV1ContextAndSignedV3ReadCompatibility(t *testing.T) {
+	seed := sha256.Sum256([]byte("analytix/pr46/synthetic-authority/212301"))
+	key := ed25519.NewKeyFromSeed(seed[:])
+	publicKey := key.Public().(ed25519.PublicKey)
+	authority := &projectionTestAuthority{privateKey: key, publicKey: publicKey, keyID: domainsecurity.SHA256Hex(publicKey)}
+	private := newTrustedProjectionFixture(t, authority, newTrustedProjectionContext("thread-v1-history", "turn-v1-history", "case-v1-history", "snapshot-v1-history", 7)).privateRecord
+	old := private.SecurityContext
+	legacy := domainsecurity.NewTurnSecurityContext(domainsecurity.TurnSecurityContextInput{
+		ThreadID: old.ThreadID, TurnID: old.TurnID, WorkspaceRealPath: old.WorkspaceRealPath,
+		TenantID: old.TenantID, UserID: old.UserID, CaseID: old.CaseID, CaseBindingHash: old.CaseBindingHash,
+		DatasetSnapshotID:  domainsecurity.DatasetSnapshotIDPrefixV1 + domainsecurity.SHA256Hex([]byte("synthetic-v1-history")),
+		SourceManifestHash: old.SourceManifestHash, ContextEpoch: old.ContextEpoch, IssuedAt: time.Date(2026, 7, 11, 7, 59, 0, 0, time.UTC),
+	})
+	if legacy.Version != domainsecurity.TurnSecurityContextVersionV1 || domainsecurity.ValidateTurnSecurityContext(legacy) != nil {
+		t.Fatal("invalid legacy frozen context")
+	}
+	hashJSON := func(value any) string {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return domainsecurity.SHA256Hex(body)
+	}
+	private.SchemaVersion = domainevidence.BoundaryAcceptedFinalRecordVersion
+	private.SecurityContext = legacy
+	private.PublicationSnapshotProof = nil
+	private.Envelope.ContextDigest, private.Envelope.ContextEpoch, private.Envelope.DatasetSnapshotID = legacy.ContextDigest, legacy.ContextEpoch, legacy.DatasetSnapshotID
+	private.Envelope.EnvelopeDigest = ""
+	private.Envelope.EnvelopeDigest = hashJSON(private.Envelope)
+	var err error
+	private.RenderedText, err = domainevidence.RenderFinalAnswer(private.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := domainevidence.NewEvidenceReceiptRegistry(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private.RegistryHead, err = domainevidence.NewEvidenceRegistryHead(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private.PrivateRecordDigest = hashJSON(struct {
+		SchemaVersion     int                                      `json:"schemaVersion"`
+		SecurityContext   domainsecurity.TurnSecurityContext       `json:"securityContext"`
+		Envelope          domainevidence.FinalAnswerEnvelope       `json:"envelope"`
+		RenderedText      string                                   `json:"renderedText"`
+		PublicationIntent domainevidence.TerminalPublicationIntent `json:"publicationIntent"`
+	}{private.SchemaVersion, legacy, private.Envelope, private.RenderedText, private.PublicationIntent})
+	record := private.AcceptedFinal
+	record.SchemaVersion, record.FinalGateVersion = domainevidence.BoundaryAcceptedFinalRecordVersion, domainevidence.HistoricalBoundaryFinalGateVersion
+	record.PublicView, record.PublicViewDigest, record.PublicationSnapshotProofDigest = nil, "", ""
+	record.FactFinalWitnessAdmission, record.FactFinalHostLocalAdmission = nil, nil
+	record.ContextDigest, record.ContextEpoch, record.DatasetSnapshotID = legacy.ContextDigest, legacy.ContextEpoch, legacy.DatasetSnapshotID
+	record.EnvelopeDigest, record.RenderedTextSHA256 = private.Envelope.EnvelopeDigest, domainsecurity.SHA256Hex([]byte(private.RenderedText))
+	record.RegistrySequence, record.RegistryStateDigest, record.PrivateRecordDigest = private.RegistryHead.Sequence, private.RegistryHead.StateDigest, private.PrivateRecordDigest
+	record.AuthoritySignature, record.RecordDigest = "", ""
+	record.AuthoritySignature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, domainevidence.AcceptedFinalSigningBytes(record)))
+	record.RecordDigest = hashJSON(record)
+	private.AcceptedFinal = record
+	private.StoreDigest = ""
+	private.StoreDigest = hashJSON(private)
+	if err := domainevidence.ValidatePrivateAcceptedFinalRecord(private); err != nil {
+		t.Fatal(err)
+	}
+	if domainevidence.ValidateAcceptedFinalForCurrentWriteV1(record) == nil || domainevidence.ValidatePrivateAcceptedFinalPublicationAuthority(private) == nil {
+		t.Fatal("historical fixture acquired current publication authority")
+	}
+	// This is persisted read-compatible history, not a new publication plan.
+	// Reconstruct its signed storage shape without asking the audit event
+	// builder to publish credential-shaped private signing metadata.
+	turn := map[string]any{
+		"id": legacy.TurnID, "threadId": legacy.ThreadID, "status": "completed", "finishedAt": record.AcceptedAt,
+		"securityContext": publicProjectionSecurityRecord(legacy), "acceptedFinal": domainevidence.AcceptedFinalRecordMap(record),
+		"items": []any{map[string]any{
+			"id": "assistant-" + legacy.TurnID, "threadId": legacy.ThreadID, "turnId": legacy.TurnID,
+			"kind": "assistant_text", "role": "assistant", "status": "completed", "finishedAt": record.AcceptedAt,
+			"text": private.RenderedText, "acceptedFinal": domainevidence.AcceptedFinalRecordMap(record),
+		}},
+	}
+	thread := map[string]any{"id": legacy.ThreadID, "turns": []any{turn}, "securityState": publicProjectionSecurityRecord(legacy)}
+	before, _ := json.Marshal(thread)
+	if err := ValidatePublicHistory(thread); err != nil {
+		t.Fatalf("strict signed V3 with V1 frozen context was rejected: %v", err)
+	}
+	normalized, err := NormalizeForRead(legacy.ThreadID, thread, record.AcceptedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublicHistory(normalized); err != nil {
+		t.Fatalf("normalized historical record was rejected: %v", err)
+	}
+	after, _ := json.Marshal(thread)
+	if !bytes.Equal(before, after) {
+		t.Fatal("historical validation changed the signed input")
+	}
+	// The older integrity-only format receives no binary metadata exemption.
+	unsigned := domainevidence.LegacyAcceptedFinalRecord{
+		SchemaVersion: 1, EnvelopeDigest: record.EnvelopeDigest, ContextDigest: record.ContextDigest, ContextEpoch: record.ContextEpoch,
+		DatasetSnapshotID: record.DatasetSnapshotID, Variant: record.Variant, TerminalReason: record.TerminalReason,
+		RenderedTextSHA256: record.RenderedTextSHA256, AcceptedAt: record.AcceptedAt,
+	}
+	unsigned.RecordDigest = hashJSON(unsigned)
+	turn["acceptedFinal"] = domainevidence.LegacyAcceptedFinalRecordMap(unsigned)
+	turn["items"] = []any{map[string]any{"kind": "assistant_text", "text": private.RenderedText}}
+	if err := ValidatePublicHistory(thread); !errors.Is(err, domainevent.ErrAssistantDraftPersistence) {
+		t.Fatalf("legacy integrity metadata authenticated an unsigned assistant draft: %v", err)
+	}
+	turn["items"] = []any{}
+	if err := ValidatePublicHistory(thread); err != nil {
+		t.Fatalf("integrity-only V1 history did not retain ordinary scanning: %v", err)
+	}
+	turn["extra"] = "sk-synthetic-private-token-123456"
+	if err := ValidatePublicHistory(thread); !errors.Is(err, domainevent.ErrCredentialProjection) {
+		t.Fatalf("legacy record exempted ordinary credential text: %v", err)
+	}
+}
 
 func TestNormalizeForReadAppliesDurableThreadDefaults(t *testing.T) {
 	thread, err := NormalizeForRead("thr_1", map[string]any{

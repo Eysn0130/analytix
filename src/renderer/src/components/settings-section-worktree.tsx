@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { CheckCircle2, GitBranch, GitMerge, Loader2, RefreshCw, Trash2, XCircle } from '../design/AnalytixUiIcons'
 import { MAX_WORKTREE_POOL_SIZE, parseWorktreeHasChangesError } from '@shared/worktree'
@@ -11,15 +11,31 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
   const { poolStatus, loading, error, lastMergeResult, lastSyncResult, setPoolStatus, setLoading, setError, setLastMergeResult, setLastSyncResult } =
     useWorktreeStore()
   const [busyPool, setBusyPool] = useState<number | null>(null)
-  const [projectPath, setProjectPath] = useState<string>('')
+  const projectPath: string = ctx.form?.workspaceRoot || ctx.analytix?.workspaceRoot || ''
+  const [readyRequestKey, setReadyRequestKey] = useState<string | null>(null)
+  const requestVersion = useRef(0)
+  const mounted = useRef(true)
 
   // Resolve current workspace root from the settings form.
   const worktreeRoot: string | undefined = ctx.form?.worktreeRootPath || undefined
+  const requestKey = JSON.stringify([projectPath, worktreeRoot ?? ''])
+  const canAcquire = Boolean(projectPath && readyRequestKey === requestKey && !loading
+    && !error && poolStatus?.projectPath === projectPath && poolStatus.isGitRepo === true)
+  const readiness = useRef({ key: requestKey, ready: canAcquire })
+  readiness.current = { key: requestKey, ready: canAcquire }
+  const isCurrentProject = (): boolean => mounted.current && readiness.current.key === requestKey
+  const canAcquireCurrentProject = (): boolean => isCurrentProject() && readiness.current.ready
 
   const refresh = useCallback(async () => {
-    const path = ctx.form?.workspaceRoot || ctx.analytix?.workspaceRoot || ''
-    if (!path) return
-    setProjectPath(path)
+    if (!mounted.current || readiness.current.key !== requestKey) return
+    const path = projectPath
+    const version = ++requestVersion.current
+    setReadyRequestKey(null)
+    if (!path) {
+      setPoolStatus(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -27,20 +43,27 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
         projectPath: path,
         worktreeRoot
       })
+      if (version !== requestVersion.current) return
       setPoolStatus(status)
+      setReadyRequestKey(requestKey)
     } catch (err) {
+      if (version !== requestVersion.current) return
       setError(err instanceof Error ? err.message : String(err))
       setPoolStatus(null)
     } finally {
-      setLoading(false)
+      if (version === requestVersion.current) setLoading(false)
     }
-  }, [ctx.form, ctx.analytix, worktreeRoot, setLoading, setError, setPoolStatus])
+  }, [projectPath, requestKey, worktreeRoot, setLoading, setError, setPoolStatus])
 
   useEffect(() => {
+    mounted.current = true
+    setBusyPool(null)
     void refresh()
+    return () => { mounted.current = false; requestVersion.current += 1 }
   }, [refresh])
 
   const handleAcquire = async (poolIndex: number): Promise<void> => {
+    if (!canAcquireCurrentProject()) return
     setBusyPool(poolIndex)
     setError(null)
     try {
@@ -52,13 +75,15 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
       })
       await refresh()
     } catch (err) {
+      if (!isCurrentProject()) return
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusyPool(null)
+      if (isCurrentProject()) setBusyPool(null)
     }
   }
 
   const handleForceAcquire = async (poolIndex: number): Promise<void> => {
+    if (!canAcquireCurrentProject()) return
     setBusyPool(poolIndex)
     setError(null)
     try {
@@ -71,9 +96,10 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
       })
       await refresh()
     } catch (err) {
+      if (!isCurrentProject()) return
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusyPool(null)
+      if (isCurrentProject()) setBusyPool(null)
     }
   }
 
@@ -142,6 +168,7 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
   }
 
   const handleAcquireClick = async (poolIndex: number): Promise<void> => {
+    if (!canAcquireCurrentProject()) return
     setError(null)
     // Try normal acquire first; if it fails with WORKTREE_HAS_CHANGES, the UI
     // will show a confirm to force-reset.
@@ -155,6 +182,7 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
       })
       await refresh()
     } catch (err) {
+      if (!isCurrentProject()) return
       const msg = err instanceof Error ? err.message : String(err)
       const parsed = parseWorktreeHasChangesError(msg)
       if (parsed) {
@@ -168,7 +196,7 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
         setError(msg)
       }
     } finally {
-      setBusyPool(null)
+      if (isCurrentProject()) setBusyPool(null)
     }
   }
 
@@ -217,7 +245,7 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
             </div>
 
             {poolStatus?.isGitRepo === false ? (
-              <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[12px] text-amber-700 dark:border-amber-800/40 dark:bg-amber-500/10 dark:text-amber-300">
+              <div id="worktree-create-unavailable" role="status" className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[12px] text-amber-700 dark:border-amber-800/40 dark:bg-amber-500/10 dark:text-amber-300">
                 {t('worktreeNotGitRepo')}
               </div>
             ) : error ? (
@@ -279,7 +307,10 @@ export function WorktreeSettingsSection({ ctx }: { ctx: Record<string, any> }): 
                           <button
                             type="button"
                             onClick={() => void handleAcquireClick(i)}
-                            className="rounded-lg px-2 py-1 text-[12px] font-medium text-ds-ink transition hover:bg-ds-hover"
+                            disabled={!canAcquire || busyPool !== null}
+                            aria-label={`${t('worktreeCreate')} · ${t('worktreePool')} ${i}`}
+                            aria-describedby={poolStatus?.isGitRepo === false ? 'worktree-create-unavailable' : undefined}
+                            className="rounded-lg px-2 py-1 text-[12px] font-medium text-ds-ink transition hover:bg-ds-hover disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             {t('worktreeCreate')}
                           </button>

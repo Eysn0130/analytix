@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react'
+import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react'
 import { ChevronDown } from '../design/AnalytixUiIcons'
 
 export type CodexSelectOption = {
@@ -88,19 +88,27 @@ export function CodexSettingsRow({
   control?: ReactNode
   className?: string
 }): ReactElement {
+  const descriptionId = useId()
+  const describedControl = description && isValidElement(control)
+    && (control.type === CodexSelect || control.type === CodexToggle)
+    ? cloneElement(control as ReactElement<{ 'aria-describedby'?: string }>, {
+        'aria-describedby': [(control.props as { 'aria-describedby'?: string })['aria-describedby'], descriptionId].filter(Boolean).join(' ')
+      }) : control
   return (
     <div className={`flex min-h-[68px] items-center gap-3 px-3 py-4 sm:px-5 ${className}`}>
       {icon ? <div className="flex h-10 w-10 shrink-0 items-center justify-center">{icon}</div> : null}
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-semibold leading-5 tracking-normal text-ds-ink">{title}</div>
-        {description ? <div className="mt-1 text-[13px] leading-5 text-ds-muted">{description}</div> : null}
+        {description ? <div id={descriptionId} className="mt-1 text-[13px] leading-5 text-ds-muted">{description}</div> : null}
       </div>
-      {control ? <div className="ml-2 shrink-0">{control}</div> : null}
+      {control ? <div className="ml-2 shrink-0">{describedControl}</div> : null}
     </div>
   )
 }
 
 export function CodexSelect({
+  label,
+  'aria-describedby': describedBy,
   value,
   options,
   onChange,
@@ -108,6 +116,8 @@ export function CodexSelect({
   disabled = false,
   title
 }: {
+  label: string
+  'aria-describedby'?: string
   value: string
   options: CodexSelectOption[]
   onChange: (value: string) => void
@@ -118,6 +128,8 @@ export function CodexSelect({
   return (
     <label className={`relative block ${widthClassName}`} title={title}>
       <select
+        aria-label={label}
+        aria-describedby={describedBy}
         className="h-10 w-full appearance-none rounded-xl border-0 bg-ds-subtle px-3.5 pr-9 text-[14px] font-semibold text-ds-ink outline-none transition hover:bg-ds-hover focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:opacity-60"
         value={value}
         disabled={disabled}
@@ -170,11 +182,13 @@ export function CodexToggle({
   checked,
   onChange,
   label,
+  'aria-describedby': describedBy,
   disabled = false
 }: {
   checked: boolean
   onChange: (checked: boolean) => void
   label: string
+  'aria-describedby'?: string
   disabled?: boolean
 }): ReactElement {
   return (
@@ -182,6 +196,7 @@ export function CodexToggle({
       type="button"
       role="switch"
       aria-label={label}
+      aria-describedby={describedBy}
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}

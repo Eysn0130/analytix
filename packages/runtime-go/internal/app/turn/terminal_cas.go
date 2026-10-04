@@ -8,6 +8,7 @@ import (
 
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -38,12 +39,21 @@ type PreparedTerminalCAS struct {
 // adapter holds its durable thread lock. It performs no persistence itself.
 func PrepareTerminalCASMutation(input PrepareTerminalCASInput) (PreparedTerminalCAS, error) {
 	for _, item := range input.AppendItems {
-		if err := domainevent.ValidatePublicRecord(item); err != nil {
-			return PreparedTerminalCAS{}, err
+		if err := domainsecret.ValidateValueLimitsV1(item); err != nil {
+			return PreparedTerminalCAS{}, errors.Join(domainevent.ErrCredentialProjection, err)
 		}
 	}
-	if err := domainevent.ValidatePublicRecord(input.Fields); err != nil {
-		return PreparedTerminalCAS{}, err
+	if err := domainsecret.ValidateValueLimitsV1(input.Fields); err != nil {
+		return PreparedTerminalCAS{}, errors.Join(domainevent.ErrCredentialProjection, err)
+	}
+	// Qualify original types/fields before any authority parser can normalize
+	// them. All ordinary record budgets above have already been checked.
+	for _, record := range append([]map[string]any{input.Fields}, input.AppendItems...) {
+		if record["acceptedFinal"] != nil {
+			if _, err := parseAcceptedFinalForPublicValidationV1(record["acceptedFinal"]); err != nil {
+				return PreparedTerminalCAS{}, err
+			}
+		}
 	}
 	hasAcceptedFinal, err := ValidateAcceptedFinalCASAuthority(
 		input.ThreadID, input.TurnID, input.Status, input.AppendItems, input.Fields,
@@ -51,6 +61,16 @@ func PrepareTerminalCASMutation(input PrepareTerminalCASInput) (PreparedTerminal
 	)
 	if err != nil {
 		return PreparedTerminalCAS{}, err
+	}
+	for _, record := range append([]map[string]any{input.Fields}, input.AppendItems...) {
+		view := record
+		if hasAcceptedFinal && record["acceptedFinal"] != nil {
+			view = shallowAcceptedFinalMapV1(record)
+			view["acceptedFinal"] = acceptedFinalBinaryValidationViewV1(record["acceptedFinal"].(map[string]any))
+		}
+		if err := domainevent.ValidatePublicRecord(view); err != nil {
+			return PreparedTerminalCAS{}, err
+		}
 	}
 	currentStatus, found, terminal, authorityErr := InspectTerminalAuthorityV1(input.Thread, input.TurnID)
 	if !found {

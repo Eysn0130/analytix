@@ -1,23 +1,31 @@
-.workspace-tabs-header { display: flex; align-items: center; min-width: 0; height: 42px; border-left: 1px solid var(--ds-border-muted); background: transparent; }
+.workspace-tabs-header { display: flex; align-items: center; min-width: 0; height: var(--ds-shell-section-header-height); background: transparent; --workspace-tab-selected-bg: var(--ds-surface-elevated); }
 .workspace-tablist { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; container-type: inline-size; }
-.workspace-tab { display: flex; align-items: center; flex: 0 0 auto; max-width: min(210px, 100%); margin: 0 4px; border: 1px solid transparent; border-radius: 8px; }
-.workspace-tab[data-active=true] { border-color: var(--ds-border-muted); background: var(--ds-surface-hover); }
+.workspace-tab { display: flex; align-items: center; flex: 0 0 auto; max-width: min(210px, 100%); margin: 0 4px; border: 0; border-radius: 0; }
+.workspace-tab[data-active=true] { box-shadow: inset 0 -2px var(--ds-text-muted); background: transparent; }
+.workspace-tab:only-child { flex: 1; max-width: 100%; }
+.workspace-tab:only-child > [role=tab] { flex: 1; }
 .workspace-tab[data-dragging=true] { opacity: .6; }
 .workspace-tab > [role=tab] { display: flex; align-items: center; gap: 8px; min-width: 0; height: 38px; padding: 0 10px; font-size: 13px; text-align: left; touch-action: none; }
 .workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @container (max-width: 210px) { .workspace-tab > [role=tab] { gap: 4px; padding-inline: 6px; } }
 .workspace-tab svg { flex-shrink: 0; }
-.workspace-tab-close { display: grid; place-items: center; width: 26px; height: 28px; margin-right: 2px; flex-shrink: 0; border-radius: 4px; }
+.workspace-tab-close { display: grid; place-items: center; width: 28px; height: 28px; margin-right: 2px; flex-shrink: 0; border-radius: 4px; }
 .workspace-tabs-actions { display: flex; align-items: center; gap: 1px; padding: 0 4px; margin-left: auto; }
-.workspace-tabs-actions button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 4px; }
+.workspace-tabs-actions button { display: grid; place-items: center; width: 28px; height: 30px; border-radius: 4px; }
 .workspace-tab button:hover, .workspace-tabs-actions button:hover, .workspace-tool-selector button:hover { background: var(--ds-surface-hover); }
-.workspace-tabs-header button:focus-visible, .workspace-tool-selector button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.workspace-tabs-header button:focus-visible, .workspace-tool-selector button:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -3px; }
 .workspace-tab-status { font-size: 13px; }
 .workspace-tab-status[data-error=true] { color: var(--ds-danger, #b64040); }
-.workspace-tool-selector { padding: 22px 14px; overflow: auto; }
+.workspace-tool-selector { padding: 22px 14px; overflow: auto; background: var(--surface-3); }
 .workspace-tool-selector h2 { margin: 0 8px 14px; font-size: 12px; font-weight: 500; color: var(--ds-text-muted); }
 .workspace-tool-selector > div { display: grid; gap: 3px; }
-.workspace-tool-selector button { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; text-align: left; font-size: 14px; transition: background-color var(--ax-motion-hover); }
+.workspace-tool-selector button { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: var(--ds-surface-card); text-align: left; font-size: 14px; transition: background-color var(--ax-motion-hover); }
 .workspace-tool-selector button:disabled { opacity: .4; cursor: not-allowed; }
-.workspace-tool-selector button:active:not(:disabled) { transform: translateY(1px); }
+.workspace-tool-selector button:active:not(:disabled) { background: var(--ax-toolbar-active-bg); transform: translateY(1px); }
 @media (prefers-reduced-motion: reduce) { .workspace-tool-selector button { transition: none; transform: none; } }
+
+:where(:root:not([data-mascot-mode='on'])) .workspace-tab[data-active=true] { background: var(--workspace-tab-selected-bg); }
+:where(:root[data-theme='dark']:not([data-mascot-mode='on'])) .workspace-tabs-header { --workspace-tab-selected-bg: #444445; }
+
+/* Selected dark tabs keep a 3:1 focus edge even over their hover fill. */
+:where(:root[data-theme='dark']:not([data-mascot-mode='on'])) .workspace-tab[data-active=true] button:focus-visible { outline-color: #6eaaff; }

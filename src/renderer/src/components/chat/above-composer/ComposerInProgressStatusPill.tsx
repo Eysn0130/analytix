@@ -149,6 +149,7 @@ export function TodoPlanPillSegment({
   return (
     <span className="group/todo-plan relative inline-flex max-w-full min-w-0">
       <span
+        tabIndex={0}
         role="status"
         aria-describedby={tooltipId}
         aria-label={label}
@@ -162,7 +163,7 @@ export function TodoPlanPillSegment({
       <span
         id={tooltipId}
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[min(20rem,calc(100vw-16px))] -translate-x-1/2 rounded-xl border border-ds-border bg-white/95 p-2 text-ds-ink opacity-0 shadow-[0_18px_48px_rgba(20,47,95,0.18)] backdrop-blur-xl transition-opacity duration-150 before:absolute before:inset-x-0 before:-bottom-2 before:h-2 before:content-[''] group-hover/todo-plan:pointer-events-auto group-hover/todo-plan:opacity-100 dark:bg-ds-card/95"
+        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[min(20rem,calc(100vw-16px))] -translate-x-1/2 rounded-xl border border-ds-border bg-ds-elevated p-2 text-ds-ink opacity-0 [box-shadow:var(--ax-shadow-popover)] backdrop-blur-xl transition-opacity duration-150 before:absolute before:inset-x-0 before:-bottom-2 before:h-2 before:content-[''] group-hover/todo-plan:pointer-events-auto group-hover/todo-plan:opacity-100 group-focus-within/todo-plan:pointer-events-auto group-focus-within/todo-plan:opacity-100"
       >
         <span className="vertical-scroll-fade-mask flex max-h-[min(22rem,calc(100vh-16px))] min-h-0 flex-col gap-2 overflow-y-auto px-2 py-2 [--edge-fade-distance:1rem]">
           {state.steps.map((step, index) => (
@@ -263,12 +264,12 @@ export function ComposerInProgressStatusPill({
   return (
     <div
       className={[
-        'pointer-events-none relative z-20 flex w-full justify-center px-3 pb-2',
+        'ds-composer-progress-line pointer-events-none relative z-20 flex w-full justify-start px-1 pb-2',
         className
       ].filter(Boolean).join(' ')}
     >
       <div className="pointer-events-auto relative z-10 w-fit max-w-full min-w-0 overflow-visible rounded-3xl">
-        <div className="flex w-max max-w-full min-w-0 items-center gap-2 rounded-3xl border border-ds-border/80 bg-white/80 px-3 py-1.5 text-ds-ink shadow-[0_10px_26px_rgba(20,47,95,0.14)] backdrop-blur-xl dark:bg-ds-card/80">
+        <div className="flex w-max max-w-full min-w-0 items-center gap-2 py-1 text-ds-muted">
           {todoState ? (
             <TodoPlanPillSegment state={todoState} threadId={todos?.threadId ?? 'active'} />
           ) : null}

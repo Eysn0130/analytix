@@ -2955,14 +2955,14 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(html).not.toContain('列出 src/renderer')
   })
 
-  it('adds extra bottom padding only for chat timelines with an active goal banner', () => {
-    expect(goalTimelinePaddingClass('chat', true)).toBe('pb-32 md:pb-40')
+  it('uses one bottom reading inset because the real goal is inside the measured composer', () => {
+    expect(goalTimelinePaddingClass('chat', true)).toBe('pb-10')
     expect(goalTimelinePaddingClass('chat', false)).toBe('pb-10')
     expect(goalTimelinePaddingClass('claw', true)).toBe('pb-10')
   })
 
-  it('pushes the live progress row above the goal banner when a goal is active', () => {
-    expect(liveTurnProgressClass(true)).toContain('mb-16 md:mb-20')
+  it('does not double reserve space below live progress for an inline goal', () => {
+    expect(liveTurnProgressClass(true)).toBe(liveTurnProgressClass(false))
     expect(liveTurnProgressClass(false)).not.toContain('mb-16 md:mb-20')
   })
 

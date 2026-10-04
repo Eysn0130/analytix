@@ -62,4 +62,38 @@ describe('InitialSetupDialog local data path', () => {
     expect(state.probeRuntime).not.toHaveBeenCalled()
     expect(rendererRuntimeClient.setSettings).not.toHaveBeenCalled()
   })
+  it('names protected fields and keeps required Escape gated without saving', async () => {
+    await act(async () => root.render(createElement(InitialSetupDialog)))
+    const modal = container.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(modal.contains(document.activeElement)).toBe(true)
+    const key = container.querySelector<HTMLInputElement>('input[type="password"]')!
+    expect(container.querySelector(`label[for="${key.id}"]`)?.textContent).toContain('API Key')
+    const show = container.querySelector<HTMLButtonElement>('button[aria-pressed="false"][aria-label="Show value"]')!
+    expect(show).not.toBeNull()
+    await act(async () => show.click())
+    expect(key.type).toBe('text'); expect(show.getAttribute('aria-label')).toBe('Hide value')
+    const base = container.querySelector<HTMLInputElement>('input[id$="-base-url"]')!
+    expect(container.querySelector(`label[for="${base.id}"]`)?.textContent).toBeTruthy()
+    await act(async () => modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(useChatStore.getState().initialSetupOpen).toBe(true)
+    expect(rendererRuntimeClient.setSettings).not.toHaveBeenCalled()
+    expect(useChatStore.getState().probeRuntime).not.toHaveBeenCalled()
+  })
+  it('restores the preview opener with Escape and handles loading to ready without losing the opener', async () => {
+    let resolve!: (settings: AppSettingsV1) => void
+    vi.mocked(rendererRuntimeClient.getSettings).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    useChatStore.setState({ initialSetupMode: 'preview' })
+    const opener = document.createElement('button'); document.body.append(opener); opener.focus()
+    try {
+      await act(async () => root.render(createElement(InitialSetupDialog)))
+      expect(container.querySelector('[role="dialog"]')).toBe(document.activeElement)
+      await act(async () => resolve(normalizeAppSettings({ workspaceRoot: '/synthetic/a' } as AppSettingsV1)))
+      expect(container.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true)
+      await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+      expect(useChatStore.getState().initialSetupOpen).toBe(false)
+      await act(async () => root.render(null)); expect(document.activeElement).toBe(opener)
+      expect(rendererRuntimeClient.setSettings).not.toHaveBeenCalled()
+    } finally { opener.remove() }
+  })
+
 })

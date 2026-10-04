@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 
+	appturn "analytix.local/runtime-go/internal/app/turn"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
@@ -265,6 +267,31 @@ func SanitizePublicHistory(thread map[string]any) map[string]any {
 }
 
 func ValidatePublicHistory(thread map[string]any) error {
+	// Preserve the existing per-root/per-turn public budgets. This function
+	// receives ordinary history after the existing durable sanitation path;
+	// private raw history must not acquire a public budget before sanitation.
+	ordinaryContent := make(map[string]any)
+	for key, value := range thread {
+		if key != "workspace" && key != "turns" && key != domainturnterminal.GeneralTerminalPublicationArchiveFieldV1 {
+			ordinaryContent[key] = value
+		}
+	}
+	if err := domainsecret.ValidateValueLimitsV1(ordinaryContent); err != nil {
+		return errors.Join(domainevent.ErrCredentialProjection, err)
+	}
+	turns, ok := thread["turns"].([]any)
+	if !ok {
+		return errors.New("public thread turns are invalid")
+	}
+	for _, rawTurn := range turns {
+		turn, ok := rawTurn.(map[string]any)
+		if !ok || turn == nil {
+			return errors.New("public thread turn is invalid")
+		}
+		if err := domainsecret.ValidateValueLimitsV1(turn); err != nil {
+			return errors.Join(domainevent.ErrCredentialProjection, err)
+		}
+	}
 	caseSensitive, err := domainsecurity.ClassifyCaseSensitiveThread(thread)
 	if err != nil {
 		return err
@@ -272,9 +299,7 @@ func ValidatePublicHistory(thread map[string]any) error {
 	// The exact workspace path is host execution authority for every thread.
 	// Keep it byte-stable in durable state and validate only ordinary content;
 	// TrustedPublicProjector applies the public workspace projection later.
-	ordinaryContent := contracts.CloneMap(thread)
-	delete(ordinaryContent, "workspace")
-	if rawArchive, present := ordinaryContent[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1]; present {
+	if rawArchive, present := thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1]; present {
 		archive, err := domainturnterminal.ParseGeneralTerminalPublicationArchiveV1(rawArchive)
 		if err != nil {
 			return err
@@ -287,8 +312,8 @@ func ValidatePublicHistory(thread map[string]any) error {
 				return err
 			}
 		}
-		delete(ordinaryContent, domainturnterminal.GeneralTerminalPublicationArchiveFieldV1)
 	}
+	ordinaryContent["turns"] = turns
 	if caseSensitive {
 		if err := validatePublicThreadRecordChunksV1(ordinaryContent); err != nil {
 			return errors.Join(errors.New("case thread ordinary projection is unsafe"), err)
@@ -324,7 +349,11 @@ func validatePublicThreadRecordChunksV1(thread map[string]any) error {
 		if !ok || turn == nil {
 			return errors.New("public thread turn is invalid")
 		}
-		if err := domainevent.ValidatePublicRecord(turn); err != nil {
+		view, err := appturn.AcceptedFinalHistoryValidationViewV1(stringField(thread, "id"), turn)
+		if err != nil {
+			return err
+		}
+		if err := domainevent.ValidatePublicRecord(view); err != nil {
 			return err
 		}
 	}

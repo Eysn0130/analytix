@@ -1,17 +1,216 @@
 package turn
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	testsecurity "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+func collisionAcceptedFinalCASInputV1(t *testing.T) PrepareTerminalCASInput {
+	t.Helper()
+	seed := sha256.Sum256([]byte("analytix/pr46/synthetic-authority/212301"))
+	key := ed25519.NewKeyFromSeed(seed[:])
+	securityContext := acceptedFinalTestContext(t, "thread-collision", "turn-collision", 2)
+	envelope, err := domainevidence.NewFinalAnswerEnvelope(domainevidence.FinalAnswerEnvelopeInput{
+		Variant: domainevidence.SourceUnavailableAnswer, Context: securityContext, TerminalReason: "source_unavailable",
+		Blocker: "current_case_source_unavailable", AcquisitionSteps: []string{"reconnect_source"}, IssuedAt: time.Unix(2, 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := domainevidence.NewEvidenceReceiptRegistry(securityContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := domainevidence.NewEvidenceRegistryHead(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := domainevidence.RenderFinalAnswer(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := acceptedFinalIntentForTest(t, envelope.TerminalReason, time.Unix(2, 0))
+	digest, err := domainevidence.PrivateAcceptedFinalDigest(securityContext, envelope, rendered, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey := key.Public().(ed25519.PublicKey)
+	record, err := domainevidence.NewAcceptedFinalRecord(domainevidence.AcceptedFinalRecordInput{
+		Context: securityContext, Envelope: envelope, RenderedText: rendered, RegistryHead: head,
+		PrivateRecordDigest: digest, AcceptedAt: time.Unix(2, 0),
+		AuthorityKeyID: domainsecurity.SHA256Hex(publicKey), AuthorityPublicKey: publicKey,
+	}, func(message []byte) ([]byte, error) { return ed25519.Sign(key, message), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(domainsecret.ValidateValueV1(record.AuthorityPublicKey), domainsecret.ErrCredentialMaterialV1) {
+		t.Fatal("fixed valid public key no longer reproduces the credential collision")
+	}
+	privateFinal, err := domainevidence.NewPrivateAcceptedFinalRecord(securityContext, envelope, rendered, head, intent, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := BuildAcceptedFinalPublicationPlan(record, rendered, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextRecord := turnSecurityContextRecord(securityContext)
+	return PrepareTerminalCASInput{
+		Thread: map[string]any{"id": record.ThreadID, "securityState": contextRecord, "turns": []any{map[string]any{
+			"id": record.TurnID, "status": "running", "securityContext": contextRecord,
+		}}},
+		ThreadID: record.ThreadID, TurnID: record.TurnID, Status: intent.TerminalStatus,
+		AppendItems: plan.TurnItems, Fields: plan.TurnFields, PrivateFinal: privateFinal, CaseThread: true, Now: time.Unix(3, 0),
+	}
+}
+
+func TestAcceptedFinalCASCredentialCollisionPreservesOriginalAuthority(t *testing.T) {
+	input := collisionAcceptedFinalCASInputV1(t)
+	before, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields, input.PrivateFinal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := domainevent.ValidatePublicRecord(input.Fields); !errors.Is(err, domainevent.ErrCredentialProjection) {
+		t.Fatalf("ordinary scanner no longer reproduces the collision: %v", err)
+	}
+	prepared, err := PrepareTerminalCASMutation(input)
+	if err != nil || !prepared.Applied || !prepared.HasAcceptedFinal {
+		t.Fatalf("exact authorized collision was rejected: applied=%t err=%v", prepared.Applied, err)
+	}
+	after, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields, input.PrivateFinal})
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("validation changed the original CAS payload")
+	}
+	turn, found := securityTurnByID(prepared.Thread, input.TurnID)
+	if !found {
+		t.Fatal("prepared winner is missing")
+	}
+	winner, err := domainevidence.ParseAcceptedFinalRecord(turn["acceptedFinal"])
+	want, _ := json.Marshal(input.PrivateFinal.AcceptedFinal)
+	got, _ := json.Marshal(winner)
+	if err != nil || !bytes.Equal(want, got) {
+		t.Fatal("prepared mutation changed the signed winner")
+	}
+	called := false
+	if err := UseAcceptedFinalCASAuthority(input.ThreadID, input.TurnID, input.Status, input.AppendItems, input.Fields, input.PrivateFinal, nil, func() error { called = true; return nil }); err != nil || !called {
+		t.Fatalf("exact atomic callback lost its authority: called=%t err=%v", called, err)
+	}
+}
+
+type acceptedFinalMarshalSentinelV1 struct{}
+
+func (acceptedFinalMarshalSentinelV1) MarshalJSON() ([]byte, error) {
+	panic("untrusted marshaler reached before resource/type rejection")
+}
+
+func TestAcceptedFinalCASPreflightsEveryRecordBeforeParsing(t *testing.T) {
+	for _, fieldsLimit := range []bool{false, true} {
+		input := collisionAcceptedFinalCASInputV1(t)
+		input.Fields["acceptedFinal"] = acceptedFinalMarshalSentinelV1{}
+		if fieldsLimit {
+			input.Fields["later"] = strings.Repeat("x", (1<<20)+1)
+		} else {
+			input.AppendItems = append(input.AppendItems, map[string]any{"password": strings.Repeat("x", (1<<20)+1)})
+		}
+		prepared, err := PrepareTerminalCASMutation(input)
+		if prepared.Applied || !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+			t.Fatalf("resource rejection did not precede authority parsing: %v", err)
+		}
+	}
+}
+
+func TestAcceptedFinalOriginalBinaryAndSchemaCannotMasquerade(t *testing.T) {
+	mutations := map[string]func(map[string]any){
+		"public key null":      func(r map[string]any) { r["authorityPublicKey"] = nil },
+		"public key bytes":     func(r map[string]any) { r["authorityPublicKey"] = []byte(r["authorityPublicKey"].(string)) },
+		"public key marshaler": func(r map[string]any) { r["authorityPublicKey"] = acceptedFinalMarshalSentinelV1{} },
+		"signature padding":    func(r map[string]any) { r["authoritySignature"] = r["authoritySignature"].(string) + "=" },
+		"signature noncanonical pad bits": func(r map[string]any) {
+			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+			text := r["authoritySignature"].(string)
+			r["authoritySignature"] = text[:len(text)-1] + string(alphabet[strings.IndexByte(alphabet, text[len(text)-1])^1])
+		},
+		"public key RawMessage": func(r map[string]any) {
+			body, _ := json.Marshal(r["authorityPublicKey"])
+			r["authorityPublicKey"] = json.RawMessage(body)
+		},
+		"missing zero field":    func(r map[string]any) { delete(r, "registrySequence") },
+		"public key whitespace": func(r map[string]any) { r["authorityPublicKey"] = " " + r["authorityPublicKey"].(string) },
+		"signature tamper": func(r map[string]any) {
+			r["authoritySignature"] = base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+		},
+		"casefold alias": func(r map[string]any) {
+			r["AuthorityPublicKey"] = r["authorityPublicKey"]
+			delete(r, "authorityPublicKey")
+		},
+		"alias plus canonical": func(r map[string]any) { r["AuthorityPublicKey"] = r["authorityPublicKey"] },
+		"unknown":              func(r map[string]any) { r["unknown"] = "safe" },
+		"optional null":        func(r map[string]any) { r["factFinalWitnessAdmission"] = nil },
+		"nested unknown":       func(r map[string]any) { r["publicView"].(map[string]any)["unknown"] = "safe" },
+		"oversized number":     func(r map[string]any) { r["contextEpoch"] = json.Number(strings.Repeat("1", 4097)) },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			input := collisionAcceptedFinalCASInputV1(t)
+			raw := shallowAcceptedFinalMapV1(input.Fields["acceptedFinal"].(map[string]any))
+			mutate(raw)
+			if _, err := parseAcceptedFinalForPublicValidationV1(raw); err == nil {
+				t.Fatal("malformed original authority acquired scan-view qualification")
+			}
+		})
+	}
+}
+
+func TestAcceptedFinalQualificationDoesNotEchoUntrustedKeys(t *testing.T) {
+	input := collisionAcceptedFinalCASInputV1(t)
+	raw := shallowAcceptedFinalMapV1(input.Fields["acceptedFinal"].(map[string]any))
+	const unsafeKey = "sk-synthetic-private-unknown-key-123456"
+	raw[unsafeKey] = "safe"
+	_, err := parseAcceptedFinalForPublicValidationV1(raw)
+	if err == nil || strings.Contains(err.Error(), unsafeKey) {
+		t.Fatal("strict qualification echoed an untrusted key before ordinary scanning")
+	}
+}
+
+func TestAcceptedFinalCASRejectsForgedBindingAndOrdinaryCredentials(t *testing.T) {
+	for name, mutate := range map[string]func(*PrepareTerminalCASInput){
+		"missing private":     func(i *PrepareTerminalCASInput) { i.PrivateFinal = domainevidence.PrivateAcceptedFinalRecord{} },
+		"wrong thread":        func(i *PrepareTerminalCASInput) { i.ThreadID = "other-thread" },
+		"wrong turn":          func(i *PrepareTerminalCASInput) { i.TurnID = "other-turn" },
+		"wrong status":        func(i *PrepareTerminalCASInput) { i.Status = "failed" },
+		"duplicate assistant": func(i *PrepareTerminalCASInput) { i.AppendItems = append(i.AppendItems, i.AppendItems[0]) },
+		"body credential":     func(i *PrepareTerminalCASInput) { i.AppendItems[0]["text"] = "sk-synthetic-private-token-123456" },
+		"sibling credential":  func(i *PrepareTerminalCASInput) { i.Fields["extra"] = "sk-synthetic-private-token-123456" },
+		"unbound wrapper": func(i *PrepareTerminalCASInput) {
+			i.Fields = map[string]any{"wrapper": i.Fields["acceptedFinal"]}
+			i.PrivateFinal = domainevidence.PrivateAcceptedFinalRecord{}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := collisionAcceptedFinalCASInputV1(t)
+			mutate(&input)
+			prepared, err := PrepareTerminalCASMutation(input)
+			if err == nil || prepared.Applied {
+				t.Fatal("forged or unsafe mutation passed the exact authority boundary")
+			}
+		})
+	}
+}
 
 type acceptedFinalStoreStub struct {
 	items   []map[string]any

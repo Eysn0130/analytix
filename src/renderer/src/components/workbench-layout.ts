@@ -136,18 +136,17 @@ function createResizeFrameQueue<T>(commit: (value: T) => void): {
   }
 }
 
-export function maxWorkbenchTerminalHeight(containerHeight: number): number {
-  const safeContainerHeight = Number.isFinite(containerHeight)
-    ? containerHeight
-    : WORKBENCH_TIMELINE_MIN_HEIGHT + TERMINAL_HEIGHT_DEFAULT
-  return Math.max(
-    TERMINAL_HEIGHT_MIN,
-    Math.min(TERMINAL_HEIGHT_MAX, safeContainerHeight - WORKBENCH_TIMELINE_MIN_HEIGHT)
-  )
+export function maxWorkbenchTerminalHeight(containerHeight: number, composerHeight = 0): number {
+  if (!Number.isFinite(containerHeight) || !Number.isFinite(composerHeight)) return 0
+  const available = Math.floor(containerHeight - Math.max(0, composerHeight)
+    - WORKBENCH_TIMELINE_MIN_HEIGHT - TERMINAL_RESIZE_HANDLE_HEIGHT)
+  // A minimum-size terminal must not overflow the input or timeline when it cannot fit.
+  return available < TERMINAL_HEIGHT_MIN ? 0 : Math.min(TERMINAL_HEIGHT_MAX, available)
 }
 
-export function clampWorkbenchTerminalHeight(value: number, containerHeight: number): number {
-  return clampWidth(value, TERMINAL_HEIGHT_MIN, maxWorkbenchTerminalHeight(containerHeight))
+export function clampWorkbenchTerminalHeight(value: number, containerHeight: number, composerHeight = 0): number {
+  const maximum = maxWorkbenchTerminalHeight(containerHeight, composerHeight)
+  return maximum === 0 ? 0 : clampWidth(Number.isFinite(value) ? value : TERMINAL_HEIGHT_DEFAULT, TERMINAL_HEIGHT_MIN, maximum)
 }
 
 export function createWorkbenchScrollReserve({
@@ -348,7 +347,24 @@ export function useWorkbenchLayout({
   )
   const [rightSidebarWidth, setRightSidebarWidth] = useState(initialLayout.rightSidebarWidth)
   const [terminalOpen, setTerminalOpen] = useState(initialLayout.terminalOpen)
-  const [terminalHeight, setTerminalHeight] = useState(initialLayout.terminalHeight)
+  const [terminalPreferredHeight, setTerminalPreferredHeight] = useState(initialLayout.terminalHeight)
+  const [terminalStageElement, setTerminalStageElement] = useState<HTMLElement | null>(null)
+  const [terminalComposerElement, setTerminalComposerElement] = useState<HTMLDivElement | null>(null)
+  const [terminalDimensions, setTerminalDimensions] = useState({ containerHeight: 0, composerHeight: 0 })
+  const terminalPaneRef = useRef<HTMLDivElement | null>(null)
+  const terminalResizeStopRef = useRef<(() => void) | null>(null)
+  const restoreTerminalFocus = useCallback((): void => {
+    const active = document.activeElement
+    if (terminalPaneRef.current?.contains(active) || active?.closest('[data-workbench-terminal-menu]')) {
+      document.getElementById('workbench-terminal-toggle')?.focus({ preventScroll: true })
+    }
+  }, [])
+  const terminalHeight = clampWorkbenchTerminalHeight(terminalPreferredHeight,
+    terminalDimensions.containerHeight, terminalDimensions.composerHeight)
+  const terminalVisible = terminalOpen && terminalHeight > 0
+  const terminalContentHeight = terminalHeight || clampWidth(
+    Number.isFinite(terminalPreferredHeight) ? terminalPreferredHeight : TERMINAL_HEIGHT_DEFAULT,
+    TERMINAL_HEIGHT_MIN, TERMINAL_HEIGHT_MAX)
   const [leftResizing, setLeftResizing] = useState(false)
   const [rightResizing, setRightResizing] = useState(false)
   const [terminalResizing, setTerminalResizing] = useState(false)
@@ -372,7 +388,7 @@ export function useWorkbenchLayout({
     setLeftSidebarCollapsed(nextLayout.leftSidebarCollapsed)
     setRightSidebarWidth(nextLayout.rightSidebarWidth)
     setTerminalOpen(nextLayout.terminalOpen)
-    setTerminalHeight(nextLayout.terminalHeight)
+    setTerminalPreferredHeight(nextLayout.terminalHeight)
     previewThreadId.current = activeThreadId
     autoOpenedPreviewUrlRef.current = null
   }, [activeThreadId, layoutStorageScope, workspaceRoot])
@@ -401,8 +417,39 @@ export function useWorkbenchLayout({
 
   useEffect(() => {
     if (terminalResizing) return
-    persistWidth(TERMINAL_HEIGHT_KEY, terminalHeight, layoutStorageScope)
-  }, [layoutStorageScope, terminalHeight, terminalResizing])
+    persistWidth(TERMINAL_HEIGHT_KEY, terminalPreferredHeight, layoutStorageScope)
+  }, [layoutStorageScope, terminalPreferredHeight, terminalResizing])
+
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const next = {
+        containerHeight: terminalStageElement?.clientHeight ?? 0,
+        composerHeight: terminalComposerElement?.offsetHeight ?? 0
+      }
+      if (maxWorkbenchTerminalHeight(next.containerHeight, next.composerHeight) === 0) {
+        restoreTerminalFocus()
+        terminalResizeStopRef.current?.()
+      }
+      setTerminalDimensions((current) => current.containerHeight === next.containerHeight
+        && current.composerHeight === next.composerHeight ? current : next)
+    }
+    measure()
+    if (!terminalStageElement || !terminalComposerElement) return
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(terminalStageElement)
+    observer?.observe(terminalComposerElement)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [restoreTerminalFocus, terminalComposerElement, terminalStageElement])
+
+  useLayoutEffect(() => {
+    if (!terminalVisible) restoreTerminalFocus()
+  }, [restoreTerminalFocus, terminalVisible])
+
+  useEffect(() => () => terminalResizeStopRef.current?.(), [])
 
   useEffect(() => {
     const onPreview = (event: Event): void => {
@@ -470,6 +517,24 @@ export function useWorkbenchLayout({
     setRightPanelMode('browser')
   }
 
+  const resizeSidebarBy = (side: 'left' | 'right', delta: number): void => {
+    if (!Number.isFinite(delta)) return
+    const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
+    const next = fitWorkbenchWidths(containerWidth,
+      leftSidebarWidth + (side === 'left' ? delta : 0),
+      rightSidebarWidth + (side === 'right' ? delta : 0), {
+        leftPanelVisible: !leftSidebarCollapsed, rightPanelVisible
+      })
+    setLeftSidebarWidth(next.left)
+    setRightSidebarWidth(next.right)
+  }
+  const resizeTerminalBy = (delta: number): void => {
+    if (!terminalVisible || !Number.isFinite(delta)) return
+    const next = clampWorkbenchTerminalHeight(terminalHeight + delta,
+      terminalDimensions.containerHeight, terminalDimensions.composerHeight)
+    if (next) setTerminalPreferredHeight(next)
+  }
+
   const resetLeftSidebarWidth = (): void => {
     const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
     const next = fitWorkbenchWidths(containerWidth, LEFT_PANEL_DEFAULT, rightSidebarWidth, {
@@ -491,8 +556,7 @@ export function useWorkbenchLayout({
   }
 
   const resetTerminalHeight = (): void => {
-    const containerHeight = shellRef.current?.clientHeight ?? window.innerHeight
-    setTerminalHeight(clampWorkbenchTerminalHeight(TERMINAL_HEIGHT_DEFAULT, containerHeight))
+    setTerminalPreferredHeight(TERMINAL_HEIGHT_DEFAULT)
   }
 
   const applyLeftSidebarDomWidth = (width: number): void => {
@@ -656,32 +720,37 @@ export function useWorkbenchLayout({
   // Bottom terminal drawer: dragging the top edge up grows the panel. The
   // clamps keep enough chat stage visible above it.
   const beginTerminalResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 || !terminalOpen) return
+    if (event.button !== 0 || !terminalVisible) return
     event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
     const startY = scaledClientY(event)
     const startHeight = terminalHeight
     const prevCursor = document.body.style.cursor
     const prevUserSelect = document.body.style.userSelect
-    const resizeQueue = createResizeFrameQueue(setTerminalHeight)
+    const resizeQueue = createResizeFrameQueue(setTerminalPreferredHeight)
     document.body.style.cursor = 'row-resize'
     document.body.style.userSelect = 'none'
     setTerminalResizing(true)
 
-    const computeNext = (moveEvent: PointerEvent): number => {
-      const containerHeight = shellRef.current?.clientHeight ?? window.innerHeight
+    const computeNext = (moveEvent: PointerEvent): number | null => {
+      const containerHeight = terminalStageElement?.clientHeight ?? 0
+      const composerHeight = terminalComposerElement?.offsetHeight ?? 0
       const delta = startY - scaledClientY(moveEvent)
-      return clampWorkbenchTerminalHeight(startHeight + delta, containerHeight)
+      return clampWorkbenchTerminalHeight(startHeight + delta, containerHeight, composerHeight) || null
     }
 
     const onMove = (moveEvent: PointerEvent): void => {
       moveEvent.preventDefault()
-      resizeQueue.schedule(computeNext(moveEvent))
+      const next = computeNext(moveEvent)
+      if (next === null) stop()
+      else resizeQueue.schedule(next)
     }
 
     const stop = (upEvent?: PointerEvent): void => {
-      if (upEvent) resizeQueue.flush(computeNext(upEvent))
-      else resizeQueue.flush()
+      terminalResizeStopRef.current = null
+      const next = upEvent ? computeNext(upEvent) : undefined
+      if (next === null) resizeQueue.flush()
+      else resizeQueue.flush(next)
       document.body.style.cursor = prevCursor
       document.body.style.userSelect = prevUserSelect
       setTerminalResizing(false)
@@ -702,9 +771,11 @@ export function useWorkbenchLayout({
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+    terminalResizeStopRef.current = stop
   }
 
   const toggleTerminal = (): void => {
+    if (terminalOpen) restoreTerminalFocus()
     setTerminalOpen((current) => !current)
   }
 
@@ -725,6 +796,10 @@ export function useWorkbenchLayout({
     rightPaneRef,
     rightResizing,
     rightSidebarWidth,
+    resizeLeftSidebarBy: (delta: number) => resizeSidebarBy('left', delta),
+    resizeRightSidebarBy: (delta: number) => resizeSidebarBy('right', delta),
+    resizeTerminalBy,
+    terminalResizeMax: maxWorkbenchTerminalHeight(terminalDimensions.containerHeight, terminalDimensions.composerHeight),
     resetLeftSidebarWidth,
     resetRightSidebarWidth,
     resetTerminalHeight,
@@ -736,7 +811,12 @@ export function useWorkbenchLayout({
     rightTabsPaneRef,
     rightTabsContentRef,
     terminalHeight,
+    terminalContentHeight,
     terminalOpen,
+    terminalVisible,
+    terminalPaneRef,
+    terminalStageRef: setTerminalStageElement,
+    terminalComposerRef: setTerminalComposerElement,
     terminalResizing,
     toggleLeftSidebar,
     toggleRightPanelMode,

@@ -209,11 +209,12 @@ describe('manual workspace tabs', () => {
         await act(async () => root.render(createElement(WorkspaceTabs, {tabs:[a,b],activeTabId:a.id,selectorOpen:false,focused,onSelect,onClose,onReorder:vi.fn(),onAdd:vi.fn(),onToggleFocus,onCollapse})))
         const label = i18n.t(focused ? 'common:workbenchDock' : 'common:workbenchFocus')
         const focusButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === label)
-        expect(focusButtons).toHaveLength(1)
+        expect(focusButtons).toHaveLength(focused ? 1 : 0)
+        if (!focused) continue
         expect(focusButtons[0].getAttribute('aria-pressed')).toBe(String(focused))
         await act(async () => focusButtons[0].click())
       }
-      expect(onToggleFocus).toHaveBeenCalledTimes(2)
+      expect(onToggleFocus).toHaveBeenCalledTimes(1)
       const collapseButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === i18n.t('common:workbenchCollapse'))
       expect(collapseButtons).toHaveLength(1)
       await act(async () => collapseButtons[0].click())
@@ -221,6 +222,20 @@ describe('manual workspace tabs', () => {
       expect(onCollapse).toHaveBeenCalledExactlyOnceWith()
       expect(stealFocus).not.toHaveBeenCalled()
     } finally { globalToggle.remove() }
+  })
+  it('keeps the secondary focus command in the existing tool chooser', async () => {
+    const onToggleFocus = vi.fn()
+    for (const focused of [false, true]) {
+      await act(async () => root.render(createElement(WorkspaceToolSelector, {
+        onOpen: vi.fn(), filesEnabled: true, sideChatEnabled: false, planEnabled: false,
+        focused, onToggleFocus
+      })))
+      const button = container.querySelector<HTMLButtonElement>('.workspace-selector-layout')!
+      expect(button.textContent).toBe(i18n.t(focused ? 'common:workbenchDock' : 'common:workbenchFocus'))
+      expect(button.getAttribute('aria-pressed')).toBe(String(focused))
+      await act(async () => button.click())
+    }
+    expect(onToggleFocus).toHaveBeenCalledTimes(2)
   })
   it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
     const onOpen = vi.fn()

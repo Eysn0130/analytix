@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { useModalFocus } from '../../hooks/use-modal-focus'
 import { X } from '../../design/AnalytixUiIcons'
 import {
   DEFAULT_SCHEDULE_MODEL,
@@ -71,6 +72,8 @@ export function ScheduleDefaultsDialog({
   onSave: (patch: Parameters<typeof mergeScheduleSettings>[1]) => Promise<void>
   t: (key: string, values?: Record<string, unknown>) => string
 }): ReactElement {
+  const dialogRef = useModalFocus(onClose)
+  const titleId = useId()
   const [draft, setDraft] = useState({
     enabled: schedule.enabled,
     defaultWorkspaceRoot: schedule.defaultWorkspaceRoot,
@@ -125,11 +128,16 @@ export function ScheduleDefaultsDialog({
       onMouseDown={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         className="max-h-[calc(100vh-4rem)] w-full max-w-[620px] overflow-y-auto rounded-[24px] bg-ds-card p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)]"
       >
         <div className="flex items-start justify-between gap-4">
-          <h2 className="text-[16px] font-semibold text-ds-ink">
+          <h2 id={titleId} className="text-[16px] font-semibold text-ds-ink">
             {t('scheduleDefaultsTitle')}
           </h2>
           <button

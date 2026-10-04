@@ -18,7 +18,6 @@ import {
 } from '../../hooks/use-model-usage'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { combineUsageCost } from '../../agent/usage-cost'
-import { AnalytixHeroStage } from './AnalytixHeroStage'
 
 type CalendarCell = DailyUsageBucket | null
 type CalendarWeek = {
@@ -680,40 +679,25 @@ function UsageHeroToggle({
   return (
     <button
       type="button"
-      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-accent/20 bg-[radial-gradient(circle_at_34%_26%,rgba(91,128,255,0.20),transparent_46%),rgba(255,255,255,0.82)] text-accent shadow-[0_12px_28px_rgba(88,105,150,0.16)] backdrop-blur transition hover:-translate-y-0.5 hover:border-accent/35 hover:bg-white hover:text-ds-ink focus:outline-none focus:ring-2 focus:ring-accent/35 focus:ring-offset-2 focus:ring-offset-ds-bg dark:bg-white/[0.08] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]"
+      className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-[12px] text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ds-accent"
       onClick={onToggle}
       aria-label={label}
       title={label}
     >
+      <span>{label}</span>
       <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
     </button>
   )
 }
 
 function UsageHeroSection({
-  title,
-  sub,
-  showText = true
-}: {
-  title: string
-  sub: string
-  showText?: boolean
-}): ReactElement {
+  title, sub, showText = true
+}: { title: string; sub: string; showText?: boolean }): ReactElement | null {
+  if (!showText) return null
   return (
-    <div className="flex w-full min-w-0 flex-col items-center text-center">
-      <div className="ds-home-transition-stage">
-        <AnalytixHeroStage />
-      </div>
-      {showText ? (
-        <div className="ds-home-transition-copy flex flex-col items-center">
-          <h1 className="max-w-[620px] text-[28px] font-semibold leading-tight tracking-[0] text-ds-ink sm:text-[32px]">
-            {title}
-          </h1>
-          <p className="mt-3 max-w-[680px] text-[14.5px] leading-7 text-ds-muted">
-            {sub}
-          </p>
-        </div>
-      ) : null}
+    <div className="ds-home-transition-copy flex w-full min-w-0 flex-col items-center text-center">
+      <h1 className="max-w-[620px] text-[24px] font-medium leading-tight text-ds-ink">{title}</h1>
+      <p className="mt-3 max-w-[520px] text-[13px] leading-5 text-ds-muted">{sub}</p>
     </div>
   )
 }
@@ -835,7 +819,7 @@ export function InitialSessionUsageHeatmapView({
   }, [])
 
   return (
-    <div className="ds-initial-usage-heatmap ds-home-transition ds-no-drag mx-auto flex min-h-[min(620px,calc(100dvh-220px))] w-full items-center justify-center px-3 py-6 text-left sm:px-5 sm:py-8">
+    <div className="ds-initial-usage-heatmap ds-home-transition ds-no-drag mx-auto flex min-h-[min(400px,calc(100dvh-300px))] w-full items-center justify-center px-3 py-6 text-left sm:px-5 sm:py-8">
       <div className="flex w-full max-w-[980px] min-w-0 flex-col gap-5">
         {!hideHero ? (
           <UsageHeroSection

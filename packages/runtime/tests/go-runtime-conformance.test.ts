@@ -3067,18 +3067,23 @@ function rendererRouteSurfaceSovereigntyControlCase(sourceOverrides: {
   const bodyStart = workbenchSource.indexOf('<div className="ds-product-body')
   const chromeOwnsNavigation = headerStart >= 0 && headerEnd > headerStart && bodyStart > headerEnd &&
     workbenchSource.slice(headerStart, headerEnd).includes('<ShellNavigationControls')
-  const nativeRule = baseShellCssSource.match(/:root\[data-platform='darwin'\]\s*\{([^}]*)\}/)?.[1] ?? ''
-  const chromeRule = baseShellCssSource.match(/\.ds-window-chrome\s*\{([^}]*)\}/)?.[1] ?? ''
-  const navigationRule = baseShellCssSource.match(/\.ds-window-chrome-navigation\s*\{([^}]*)\}/)?.[1] ?? ''
+  const cssSource = baseShellCssSource.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rootRule = cssSource.match(/^\s*:root\s*\{([^}]*)\}/)?.[1] ?? ''
+  const nativeRule = cssSource.match(/^\s*:root\[data-platform='darwin'\]\s*\{([^}]*)\}/m)?.[1] ?? ''
+  const chromeRule = cssSource.match(/^\s*\.ds-window-chrome\s*\{([^}]*)\}/m)?.[1] ?? ''
+  const navigationRule = cssSource.match(/^\s*\.ds-window-chrome-navigation\s*\{([^}]*)\}/m)?.[1] ?? ''
   // The shared chrome now reserves the native exclusion area for every body
   // route; the old route-local plugin-tab selector is no longer its owner.
   const nativeSafeInsetCssPresent = chromeOwnsNavigation &&
+    rootRule.includes('--ds-shell-chrome-height: 40px;') &&
+    rootRule.includes('--ds-shell-rail-width: 52px;') &&
     nativeRule.includes('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))') &&
     /--ds-window-controls-safe-inset: calc\(\s*\(\s*var\(--ds-macos-traffic-light-left\) \+ var\(--ds-macos-traffic-light-width\) \+ var\(--ds-macos-traffic-light-gap\)\s*\) \/ var\(--ds-ui-scale\)\s*\);/.test(nativeRule) &&
     nativeRule.includes('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);') &&
-    chromeRule.includes('flex: 0 0 max(42px, var(--ds-window-controls-safe-block));') &&
-    chromeRule.includes('calc(var(--ds-titlebar-safe-header-left) + 152px)') &&
+    chromeRule.includes('flex: 0 0 max(var(--ds-shell-chrome-height), var(--ds-window-controls-safe-block));') &&
+    chromeRule.includes('--ds-window-chrome-navigation-width: calc(var(--ds-shell-rail-width) + var(--ds-window-chrome-sidebar-width));') &&
     navigationRule.includes('flex: 0 0 var(--ds-window-chrome-navigation-width);') &&
+    navigationRule.includes('min-width: max-content;') &&
     navigationRule.includes('padding-left: var(--ds-titlebar-safe-header-left);')
   const evidence = {
     dormantWorkflowCodeExists: workflowCreateLoopViewSource.includes('WorkflowCreateLoopView') &&
@@ -5962,15 +5967,28 @@ describe('renderer native safe area source contract', () => {
   })
 
   it.each([
-    ['safe height', { baseShellCss: css.replace('flex: 0 0 max(42px, var(--ds-window-controls-safe-block));', 'flex: 0 0 42px;') }],
+    ['root chrome height token', { baseShellCss: css.replace('--ds-shell-chrome-height: 40px;', '') }],
+    ['root rail width token', { baseShellCss: css.replace('--ds-shell-rail-width: 52px;', '') }],
+    ['unconditional root token scope', { baseShellCss: css.replace(':root {', ":root[data-theme='light'] {") }],
+    ['safe height', { baseShellCss: css.replace('flex: 0 0 max(var(--ds-shell-chrome-height), var(--ds-window-controls-safe-block));', 'flex: 0 0 var(--ds-shell-chrome-height);') }],
     ['safe padding', { baseShellCss: css.replace('padding-left: var(--ds-titlebar-safe-header-left);', 'padding-left: 0px;') }],
     ['native inset token chain', { baseShellCss: css.replace('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);', '--ds-titlebar-safe-header-left: 0px;') }],
     ['scaled safe block', { baseShellCss: css.replace('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))', '--ds-window-controls-safe-block: 0px') }],
+    ['navigation width token chain', { baseShellCss: css.replace('--ds-window-chrome-navigation-width: calc(var(--ds-shell-rail-width) + var(--ds-window-chrome-sidebar-width));', '--ds-window-chrome-navigation-width: 0px;') }],
     ['non-shrinking navigation reservation', { baseShellCss: css.replace('flex: 0 0 var(--ds-window-chrome-navigation-width);', 'flex: 1 1 auto;') }],
+    ['intrinsic width in the navigation owner', { baseShellCss: css
+      .replace('min-width: max-content;', 'min-width: 0;')
+      .concat('\n.unrelated-navigation { min-width: max-content; }\n') }],
     ['navigation owner before body', { workbench: workbench
       .replace('<ShellNavigationControls', '<LegacyMovedControl')
       .replace('<div className="ds-product-body', '<ShellNavigationControls /><div className="ds-product-body') }]
   ] as const)('rejects removal of %s', (_name, sourceOverrides) => {
+    if ('baseShellCss' in sourceOverrides) {
+      expect(sourceOverrides.baseShellCss).not.toBe(css)
+    }
+    if ('workbench' in sourceOverrides) {
+      expect(sourceOverrides.workbench).not.toBe(workbench)
+    }
     const result = rendererRouteSurfaceSovereigntyControlCase(sourceOverrides)
     expect(result.evidence.nativeSafeInsetCssPresent).toBe(false)
     expect(result.expected.nativeControlsSafeInset).toBe(false)

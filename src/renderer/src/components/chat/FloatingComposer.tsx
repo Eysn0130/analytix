@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -848,6 +849,7 @@ export function FloatingComposer({
   const [fileMentionLoading, setFileMentionLoading] = useState(false)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
+  const composerMenuId = useId()
   const [composerMenuOpen, setComposerMenuOpen] = useState(false)
   const [goalPanelOpen, setGoalPanelOpen] = useState(false)
   const [contextCapacityOpen, setContextCapacityOpen] = useState(false)
@@ -1488,6 +1490,12 @@ export function FloatingComposer({
   }, [activeAtMention, effectiveWorkspaceRoot, fileReferenceEnabled, fileReferences, showAtMentionMenu])
 
   useEffect(() => {
+    if (!composerMenuOpen) return
+    const frame = requestAnimationFrame(() => composerMenuPanelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }))
+    return () => cancelAnimationFrame(frame)
+  }, [composerMenuOpen])
+
+  useEffect(() => {
     if (!composerMenuOpen && !goalPanelOpen) return
 
     const onPointerDown = (event: PointerEvent): void => {
@@ -1502,6 +1510,7 @@ export function FloatingComposer({
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      if (composerMenuOpen) { event.preventDefault(); composerMenuButtonRef.current?.focus({ preventScroll: true }) }
       setComposerMenuOpen(false)
       setGoalPanelOpen(false)
     }
@@ -1671,7 +1680,7 @@ export function FloatingComposer({
     if (!canOpenComposerMenu) return
     setGoalPanelOpen(false)
     setComposerMenuOpen((open) => !open)
-    draft.focusComposer()
+    if (composerMenuOpen) composerMenuButtonRef.current?.focus({ preventScroll: true })
   }
 
   const handleAttachmentMenuClick = (): void => {
@@ -2112,35 +2121,13 @@ export function FloatingComposer({
 
           <AboveComposerPanelStack>
             <ComposerQueuedMessageList messages={queuedMessages} onRemove={onRemoveQueuedMessage} />
-            <ComposerGoalRow
-              goal={activeThreadGoal}
-              elapsedLabel={goalElapsedLabel}
-              onEdit={() => {
-                setGoalPanelOpen(true)
-                draft.focusComposer()
-              }}
-              onToggleStatus={() => {
-                if (activeThreadGoal) {
-                  void setActiveThreadGoalStatus(activeThreadGoal.status === 'active' ? 'paused' : 'active')
-                }
-              }}
-              onClear={() => {
-                void clearActiveThreadGoal()
-              }}
-            />
+
             <ThreadHandoffInlineProgress />
           </AboveComposerPanelStack>
         </>
       )}
 
-      {compact ? null : (
-        <div className="ds-composer-context ds-no-drag mb-1 flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3">
-          {route === 'chat' ? (
-            <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
-          ) : null}
-          <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
-        </div>
-      )}
+
 
       <div className="relative">
         {hideThreadContextPanels ? null : <ThreadHandoffProgressModal />}
@@ -2148,11 +2135,25 @@ export function FloatingComposer({
         {composerMenuOpen && slashQuery == null ? (
           <div
             ref={composerMenuPanelRef}
-            className="absolute bottom-12 left-1 z-40 w-48 overflow-hidden rounded-[18px] border border-ds-border bg-white py-1.5 text-[13px] text-ds-muted shadow-[0_18px_48px_rgba(20,47,95,0.16)] dark:bg-ds-card"
+            id={composerMenuId}
+            role="menu"
+            aria-label={t('composerMenuTitle')}
+            onKeyDown={(event) => {
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+              event.preventDefault()
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
+              if (!items.length) return
+              const current = items.indexOf(document.activeElement as HTMLButtonElement)
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
+                (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
+              items[next]?.focus({ preventScroll: true })
+            }}
+            className="absolute bottom-12 left-1 z-40 w-48 overflow-hidden rounded-[18px] border border-ds-border bg-ds-elevated py-1.5 text-[13px] text-ds-muted [box-shadow:var(--ax-shadow-popover)]"
           >
             {fileReferenceEnabled ? (
               <button
                 type="button"
+                role="menuitem"
                 disabled={!canPickLocalFileReference}
                 onClick={handleLocalFileReferenceMenuClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2164,6 +2165,7 @@ export function FloatingComposer({
             {fileReferenceEnabled ? (
               <button
                 type="button"
+                role="menuitem"
                 disabled={!canPickFileReference}
                 onClick={handleFileReferenceMenuClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2177,6 +2179,7 @@ export function FloatingComposer({
                 {fileReferenceEnabled ? <div className="my-1 h-px bg-ds-border-muted/70" /> : null}
                 <button
                   type="button"
+                role="menuitem"
                   disabled={!canPickAttachment || !onPickAttachments}
                   onClick={handleAttachmentMenuClick}
                   className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2193,6 +2196,7 @@ export function FloatingComposer({
             ) : null}
             <button
               type="button"
+                role="menuitemcheckbox" aria-checked={mode === 'plan'}
               disabled={!canTogglePlanMode}
               onClick={handlePlanToolbarClick}
               className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2200,8 +2204,7 @@ export function FloatingComposer({
               <ListTodo className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
               <span className="min-w-0 flex-1 truncate">{t('composerMenuPlanMode')}</span>
               <span
-                role="switch"
-                aria-checked={mode === 'plan'}
+                aria-hidden="true"
                 className={`relative h-5 w-9 shrink-0 rounded-full ring-1 transition ${
                   mode === 'plan'
                     ? 'bg-accent ring-accent/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.24)]'
@@ -2217,6 +2220,7 @@ export function FloatingComposer({
             </button>
             <button
               type="button"
+                role="menuitemcheckbox" aria-checked={goalMenuChecked}
               disabled={!canOpenGoalPanel}
               onClick={handleGoalMenuClick}
               className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2224,8 +2228,7 @@ export function FloatingComposer({
               <Target className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
               <span className="min-w-0 flex-1 truncate">{t('composerMenuPursueGoal')}</span>
               <span
-                role="switch"
-                aria-checked={goalMenuChecked}
+                aria-hidden="true"
                 className={`relative h-5 w-9 shrink-0 rounded-full ring-1 transition ${
                   goalMenuChecked
                     ? 'bg-accent ring-accent/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.24)]'
@@ -2242,6 +2245,7 @@ export function FloatingComposer({
             {canToggleWorktreeMode ? (
               <button
                 type="button"
+                role="menuitemcheckbox" aria-checked={useWorktreePool}
                 disabled={!canToggleWorktreeMode}
                 onClick={handleWorktreeToolbarClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2249,8 +2253,7 @@ export function FloatingComposer({
                 <GitBranch className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
                 <span className="min-w-0 flex-1 truncate">{t('composerMenuWorktreeMode')}</span>
                 <span
-                  role="switch"
-                  aria-checked={useWorktreePool}
+                  aria-hidden="true"
                   className={`relative h-5 w-9 shrink-0 rounded-full ring-1 transition ${
                     useWorktreePool
                       ? 'bg-accent ring-accent/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.24)]'
@@ -2478,6 +2481,32 @@ export function FloatingComposer({
           onDragOver={handleComposerDragOver}
           onDrop={handleComposerDrop}
         >
+          {compact || hideThreadContextPanels ? null : (
+            <ComposerGoalRow
+              goal={activeThreadGoal}
+              elapsedLabel={goalElapsedLabel}
+              onEdit={() => {
+                setGoalPanelOpen(true)
+                draft.focusComposer()
+              }}
+              onToggleStatus={() => {
+                if (activeThreadGoal) {
+                  void setActiveThreadGoalStatus(activeThreadGoal.status === 'active' ? 'paused' : 'active')
+                }
+              }}
+              onClear={() => {
+                void clearActiveThreadGoal()
+              }}
+            />
+          )}
+          {compact ? null : (
+            <div className="ds-composer-context ds-no-drag flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-1">
+              {route === 'chat' ? (
+                <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
+              ) : null}
+              <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
+            </div>
+          )}
           {showChangeSummary ? (
             <div className="ds-no-drag mb-1 rounded-2xl border border-ds-border-muted bg-ds-card/78 px-3 py-2 shadow-sm">
               <div className="flex min-w-0 items-center gap-2">
@@ -2668,6 +2697,9 @@ export function FloatingComposer({
                       className={`ds-composer-utility-button ds-no-drag flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ds-muted hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 ${
                         composerMenuOpen ? 'bg-ds-hover text-ds-ink' : ''
                       }`}
+                      aria-haspopup="menu"
+                      aria-expanded={composerMenuOpen}
+                      aria-controls={composerMenuId}
                       aria-label={t('composerMenuTitle')}
                       title={t('composerMenuTitle')}
                     >
@@ -2675,6 +2707,7 @@ export function FloatingComposer({
                     </button>
                     {executionSettings && onExecutionSettingsChange ? (
                       <FloatingComposerExecutionPicker
+                        key={activeThreadId ?? effectiveWorkspaceRoot}
                         value={executionSettings}
                         applying={executionSettingsApplying}
                         onChange={onExecutionSettingsChange}
@@ -2690,15 +2723,7 @@ export function FloatingComposer({
                         <span>{t('slashCommandPlanTitle')}</span>
                       </span>
                     ) : null}
-                    {activeThreadGoal?.status === 'active' ? (
-                      <span
-                        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ds-hover px-2.5 text-[13px] font-medium text-ds-muted"
-                        title={t('slashCommandGoalTitle')}
-                      >
-                        <Target className="h-3.5 w-3.5" strokeWidth={1.9} />
-                        <span>{t('slashCommandGoalTitle')}</span>
-                      </span>
-                    ) : null}
+
                   </>
                 ) : null}
               </div>
@@ -2834,6 +2859,12 @@ export function FloatingComposer({
                   ) : (
                     <Mic className="h-4 w-4" strokeWidth={2} />
                   )}
+                </button>
+              ) : null}
+              {busyCanSendFollowup ? (
+                <button type="button" onClick={() => onInterrupt()} className="ds-composer-secondary-stop ds-no-drag"
+                  aria-label={t('interrupt')} title={t('interrupt')}>
+                  <ComposerPrimaryStopIcon className="ds-composer-primary-action-icon" />
                 </button>
               ) : null}
               <button

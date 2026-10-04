@@ -878,6 +878,7 @@ export function Workbench(): ReactElement {
     rightPaneRef,
     rightResizing,
     rightSidebarWidth,
+    resizeLeftSidebarBy, resizeRightSidebarBy, resizeTerminalBy, terminalResizeMax,
     resetLeftSidebarWidth,
     resetRightSidebarWidth,
     resetTerminalHeight,
@@ -889,7 +890,12 @@ export function Workbench(): ReactElement {
     rightTabsPaneRef,
     rightTabsContentRef,
     terminalHeight,
+    terminalContentHeight,
     terminalOpen,
+    terminalVisible,
+    terminalPaneRef,
+    terminalStageRef,
+    terminalComposerRef,
     terminalResizing,
     toggleLeftSidebar,
     toggleTerminal,
@@ -1149,7 +1155,7 @@ export function Workbench(): ReactElement {
   const workbenchScrollReserve = useMemo(
     () =>
       createWorkbenchScrollReserve({
-        bottomPanelOpen: terminalPanelMotion.isMounted,
+        bottomPanelOpen: terminalPanelMotion.isMounted && terminalPanelMotion.animatedSize > 0,
         bottomPanelHeight: terminalPanelMotion.animatedSize
       }),
     [terminalPanelMotion.animatedSize, terminalPanelMotion.isMounted]
@@ -1244,6 +1250,9 @@ export function Workbench(): ReactElement {
     }
 
     const onKeyDown = (event: KeyboardEvent): void => {
+      // The permission portal owns Tab exit, including Shift+Tab.
+      if (event.key === 'Tab' && event.target instanceof Element &&
+        event.target.closest('[data-composer-execution-menu]')) return
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
       // Tab buttons own close-and-focus restoration; skip the desktop fallback.
@@ -3053,7 +3062,10 @@ export function Workbench(): ReactElement {
   }
   const toggleRightPanel = (): void => {
     if (useWorkspaceTabsStore.getState().open) closeRightPanel()
-    else useWorkspaceTabsStore.getState().setOpen(true)
+    else {
+      useWorkspaceTabsStore.getState().setOpen(true)
+      requestAnimationFrame(() => document.getElementById('workbench-workspace-collapse')?.focus())
+    }
   }
 
   const renderRuntimeBanner = (message: string, detail?: string | null): ReactElement => (
@@ -3205,7 +3217,7 @@ export function Workbench(): ReactElement {
         style={{
           opacity: rightPanelMotion.opacity,
           width: documentFocused ? 'auto' : rightPanelMotion.animatedSize,
-          ...(documentFocused ? { position: 'absolute', inset: `8px 8px ${terminalOpen ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
+          ...(documentFocused ? { position: 'absolute', inset: `8px 8px ${terminalVisible ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
         }}
       >
         {rightPanelDockedVisible ? (
@@ -3213,6 +3225,7 @@ export function Workbench(): ReactElement {
             edge="left"
             isResizing={rightResizing}
             onPointerDown={beginRightResize}
+            ariaLabel={t('resizeWorkspace')} value={rightSidebarWidth} min={180} max={760} onResizeDelta={resizeRightSidebarBy}
             onReset={resetRightSidebarWidth}
           />
         ) : null}
@@ -3231,6 +3244,7 @@ export function Workbench(): ReactElement {
           >
             {workspaceSelectorOpen ? <WorkspaceToolSelector filesEnabled={Boolean(fileTreeWorkspaceRoot)}
               sideChatEnabled={runtimeConnection === 'ready' && Boolean(activeThreadId)} planEnabled={Boolean(activeGuiPlan)}
+              focused={documentFocused} onToggleFocus={() => setDocumentFocused(value => !value)}
               onOpen={(action) => {
                 if (action === 'terminal') { if (!terminalOpen) toggleTerminal(); return }
                 if (action === 'sidechat') { openSideChat(); return }
@@ -3332,6 +3346,7 @@ export function Workbench(): ReactElement {
                 />
               ) : panelMode === 'todo' ? (
                 <TodoPanel
+                  tabbedWorkspace
                   className="h-full max-h-full w-full"
                   onCollapse={closeRightPanel}
                   onOpenPlan={openGuiPlanPanel}
@@ -3413,13 +3428,14 @@ export function Workbench(): ReactElement {
             <>
               <SessionHeader compact className="min-w-0 flex-1" onOpenSideChat={openSideChat} />
               {busy ? <span className="ds-window-chrome-running">{t('running')}</span> : null}
-              <WorkbenchTopBar workspaceOpen={rightPanelVisible}
-                onToggleWorkspace={toggleRightPanel}
-                terminalOpen={terminalOpen} onToggleTerminal={toggleTerminal} />
             </>
           ) : null}
+          {route === 'chat' ? <WorkbenchTopBar workspaceOpen={rightPanelVisible}
+            onToggleWorkspace={toggleRightPanel}
+            terminalOpen={terminalOpen} terminalConstrained={terminalOpen && !terminalVisible}
+            onToggleTerminal={toggleTerminal} /> : null}
         </div>
-        {route !== 'plugins' && route !== 'schedule' && (rightPanelRetained || rightPanelMotion.isMounted || documentsMounted) ? (
+        {route !== 'plugins' && route !== 'schedule' && (rightPanelDockedVisible || rightPanelRetained || rightPanelMotion.isMounted || documentsMounted) ? (
           <div ref={rightTabsPaneRef} className="ds-window-chrome-workspace ds-no-drag"
             inert={!rightPanelDockedVisible} aria-hidden={!rightPanelDockedVisible}
             data-open={rightPanelDockedVisible ? 'true' : 'false'}
@@ -3441,7 +3457,9 @@ export function Workbench(): ReactElement {
         onSchedule={openScheduleView}
         onSettings={() => openSettings('general')}
       />
-    <WorkbenchShell ref={shellRef} style={workbenchShellStyle}>
+    <WorkbenchShell ref={shellRef} style={workbenchShellStyle}
+      data-sidebar-collapsed={leftSidebarCollapsed}
+      data-workspace-open={rightPanelDockedVisible}>
       <div
         ref={leftPaneRef}
         id="workbench-project-sidebar"
@@ -3506,6 +3524,7 @@ export function Workbench(): ReactElement {
             edge="right"
             isResizing={leftResizing}
             onPointerDown={beginLeftResize}
+            ariaLabel={t('resizeProjectSidebar')} value={leftSidebarWidth} min={180} max={520} onResizeDelta={resizeLeftSidebarBy}
             onReset={resetLeftSidebarWidth}
           />
         ) : null}
@@ -3554,6 +3573,7 @@ export function Workbench(): ReactElement {
                   </Suspense>
                 ) : (
                   <section
+                    ref={terminalStageRef}
                     className="ds-chat-stage ds-no-drag relative flex min-h-0 min-w-0 flex-1 flex-col"
                     data-bottom-panel-open={workbenchScrollReserve.bottomPanelOpen ? 'true' : 'false'}
                     style={chatStageStyle}
@@ -3596,7 +3616,7 @@ export function Workbench(): ReactElement {
                         {uiModeCameosEnabled && !focusModeEnabled ? <MascotCameoLayer /> : null}
                         {!focusModeEnabled ? <CameoCelebrationLayer active={busy} suppressed={Boolean(error)} /> : null}
                       </div>
-                      <div className="ds-no-drag flex shrink-0 justify-center px-2 pb-3 pt-0 sm:px-4 md:px-6 lg:px-8">
+                      <div ref={terminalComposerRef} className="ds-main-composer-host ds-no-drag flex shrink-0 justify-center pb-3 pt-0">
                         <div
                           className={`ds-composer-return-to-bottom-shell relative flex w-full max-w-4xl flex-col `}
                         >
@@ -3701,33 +3721,40 @@ export function Workbench(): ReactElement {
                         </div>
                       </div>
                     </div>
-                    {terminalPanelMotion.isMounted ? (
+                    {terminalOpen || terminalPanelMotion.isMounted ? (
                       <div
+                        ref={terminalPaneRef}
+                        id="workbench-terminal-panel"
                         className="ds-terminal-panel-shell ds-no-drag"
-                        data-open={terminalOpen ? 'true' : 'false'}
+                        data-open={terminalVisible ? 'true' : 'false'}
+                        data-requested-open={terminalOpen ? 'true' : 'false'}
+                        inert={!terminalVisible}
+                        aria-hidden={!terminalVisible}
                         data-resizing={terminalResizing ? 'true' : 'false'}
                         style={{
                           height: terminalPanelMotion.animatedSize,
                           opacity: terminalPanelMotion.opacity
                         }}
                       >
-                        {terminalOpen ? (
+                        {terminalVisible ? (
                           <WorkbenchResizeHandle
                             edge="top"
                             isResizing={terminalResizing}
                             onPointerDown={beginTerminalResize}
+            ariaLabel={t('resizeTerminal')} value={terminalHeight} min={220} max={terminalResizeMax} onResizeDelta={resizeTerminalBy}
                             onReset={resetTerminalHeight}
                           />
                         ) : null}
                         <div className="ds-terminal-panel-clip">
                           <div
                             className="ds-terminal-panel-content"
-                            style={{ height: terminalHeight }}
+                            style={{ height: terminalContentHeight }}
                           >
                             <Suspense fallback={<WorkbenchLoadingFallback surface="surface" />}>
                               <TerminalPanel
+                                interactive={terminalVisible}
                                 workspaceRoot={workspaceRoot}
-                                height={terminalHeight}
+                                height={terminalContentHeight}
                                 className="w-full"
                                 onCollapse={toggleTerminal}
                               />

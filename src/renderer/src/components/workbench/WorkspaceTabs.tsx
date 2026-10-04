@@ -117,16 +117,17 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
       </DndContext>
       <div className="workspace-tabs-actions">
         <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={20} /></button>
-        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-        <button type="button" onClick={() => onCollapse()} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')}><PanelRightClose size={20} /></button>
+        {focused ? <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')} title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button> : null}
+        <button id="workbench-workspace-collapse" type="button" onClick={() => onCollapse()} aria-label={t('workbenchCollapse')} title={t('workbenchCollapse')} aria-controls="workbench-right-workspace" aria-expanded={true}><PanelRightClose size={20} /></button>
       </div>
     </header>
   )
 }
 
 type SelectorAction = 'files' | 'documents' | 'browser' | 'changes' | 'summary' | 'sidechat' | 'terminal' | 'todo' | 'plan'
-export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, planEnabled }: {
+export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, planEnabled, focused = false, onToggleFocus }: {
   onOpen: (action: SelectorAction) => void; sideChatEnabled: boolean; filesEnabled: boolean; planEnabled: boolean
+  focused?: boolean; onToggleFocus?: () => void
 }): ReactElement {
   const { t } = useTranslation('common')
   const items = [
@@ -143,5 +144,9 @@ export function WorkspaceToolSelector({ onOpen, sideChatEnabled, filesEnabled, p
   return <section className="workspace-tool-selector" aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })}>
     <h2>{t('workspaceSelectTool', { defaultValue: '打开工作面' })}</h2>
     <div><CanvasOpenButton enabled={filesEnabled} />{items.map(({ id, icon: Icon, label, enabled }) => <button key={id} type="button" disabled={!enabled} onClick={() => onOpen(id)}><Icon size={18} aria-hidden="true" /><span>{label}</span></button>)}</div>
+    {onToggleFocus ? <button className="workspace-selector-layout" type="button" aria-pressed={focused} onClick={onToggleFocus}>
+      {focused ? <Minimize2 size={18} aria-hidden /> : <Maximize2 size={18} aria-hidden />}
+      <span>{t(focused ? 'workbenchDock' : 'workbenchFocus')}</span>
+    </button> : null}
   </section>
 }

@@ -93,6 +93,7 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
             description={t('browserLocalUrlTargetDesc')}
             control={
               <CodexSelect
+                label={t('browserLocalUrlTarget')}
                 value={browserUse.localUrlOpenTarget}
                 disabled={!browserUse.enabled}
                 options={[
@@ -121,6 +122,7 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
             description={t('browserAnnotationScreenshotsDesc')}
             control={
               <CodexSelect
+                label={t('browserAnnotationScreenshots')}
                 value={browserUse.annotationScreenshotsMode}
                 disabled={!browserUse.enabled}
                 options={[
@@ -153,6 +155,7 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
             }
             control={
               <CodexSelect
+                label={t('browserApproval')}
                 value={browserUse.approvalMode}
                 disabled={!browserUse.enabled}
                 options={[

@@ -42,10 +42,12 @@ describe('SessionHeader', () => {
     expect(html).toContain('session-header-compact flex')
     expect(html).not.toContain('session-header-compact ds-no-drag')
     expect(html).toContain('ds-session-title-compact')
-    expect(html).toContain('Working directory')
+    expect(html).not.toContain('session-header-compact-meta')
+    expect(sessionHeaderSource).toContain('ds-session-menu-details')
+    expect(sessionHeaderSource).toContain('{activeWorkspaceLabel}')
   })
 
-  it('renders the session action menu outside topbar layout and caps compact title width', async () => {
+  it('keeps the existing portal menu and gives the title its available width', async () => {
     const baseShellSource = await readBaseShellSource()
 
     expect(sessionHeaderSource).toContain("import { createPortal } from 'react-dom'")
@@ -53,7 +55,7 @@ describe('SessionHeader', () => {
     expect(sessionHeaderSource).toContain('actionsMenuPortalRef')
     expect(sessionHeaderSource).toContain('createPortal(renderThreadActionsMenu(true), actionsMenuPortalTarget)')
     expect(sessionHeaderSource).toContain("className={`ds-session-actions-menu${floating ? ' ds-session-actions-menu-floating ds-no-drag' : ''}`}")
-    expect(baseShellSource).toMatch(/\.ds-session-title-compact \{\s+max-width: clamp\(88px, 16vw, 180px\);\s+\}/)
+    expect(baseShellSource).toMatch(/\.ds-session-title-compact \{\s+max-width: 100%;\s+\}/)
     expect(baseShellSource).toMatch(/\.ds-session-actions-menu-floating \{[\s\S]*?position: fixed;[\s\S]*?z-index: 10000;[\s\S]*?overflow: visible;/)
     const floatingMenuRule = baseShellSource.match(/\.ds-session-actions-menu-floating \{[\s\S]*?\n\}/)?.[0] ?? ''
     expect(floatingMenuRule).not.toContain('overflow-y: auto')
