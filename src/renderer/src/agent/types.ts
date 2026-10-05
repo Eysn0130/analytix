@@ -24,6 +24,14 @@ import type { PublicProjectionRevokedEvent } from '../../../../packages/runtime/
 import type { ModelReasoningEffort } from '../../../../packages/runtime/src/contracts/capabilities.js'
 import type { CostEstimateStatus, CostKnownCurrency } from './usage-cost'
 
+/** Renderer-local proof of a closed pre-commit HTTP rejection, not a rewind receipt. */
+export class RewindRequestRejectedError extends Error {
+  constructor() {
+    super('The rewind request was rejected.')
+    this.name = 'RewindRequestRejectedError'
+  }
+}
+
 export type ToolItemKind = 'tool_call' | 'command_execution' | 'file_change' | 'subagent'
 export type RuntimeErrorSeverity = 'info' | 'warning' | 'error'
 

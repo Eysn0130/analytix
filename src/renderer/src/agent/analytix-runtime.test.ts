@@ -1,3 +1,4 @@
+import { RewindRequestRejectedError } from './types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
@@ -4253,5 +4254,30 @@ describe('attachment metadata exact thread/workspace lookup', () => {
   it.each([{ ...attachment, id: `att_${'e'.repeat(24)}` }, { ...attachment, documentText: 'PRIVATE_BODY' }])('rejects mismatched or non-public metadata', async metadata => {
     installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ attachment: metadata }) })) })
     await expect(new AnalytixRuntimeProvider().getAttachmentMetadata(id, { threadId: 'thr_1', workspace: '/tmp/workspace' })).rejects.toThrow()
+  })
+})
+
+
+describe('renderer-only rewind rejection proof', () => {
+  const rejected = [
+    { status: 400, code: 'validation_error', message: 'The request did not satisfy the runtime contract.' },
+    { status: 404, code: 'not_found', message: 'The requested resource was not found.' },
+    { status: 409, code: 'conflict', message: 'The request conflicts with the current runtime state.' }
+  ]
+  it.each(rejected)('brands only canonical pre-commit HTTP $status/$code', async ({ status, code, message }) => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: false, status, body: JSON.stringify({ code, message }) })) })
+    await expect(new AnalytixRuntimeProvider().rewindThread('thread', 'turn')).rejects.toBeInstanceOf(RewindRequestRejectedError)
+  })
+  it.each([
+    { status: 500, body: { code: 'internal_error', message: 'The runtime request could not be completed safely.' } },
+    { status: 502, body: { code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.' } },
+    { status: 500, body: rejected[2] },
+    { status: 409, body: { error: 'conflict', message: rejected[2].message } },
+    { status: 409, body: { code: 'conflict', message: rejected[2].message, details: 'PRIVATE_BODY' } },
+    { status: 409, body: { code: 'conflict', message: 'PRIVATE_BODY' } }
+  ])('leaves ambiguous $status bodies unbranded', async ({ status, body }) => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: false, status, body: JSON.stringify(body) })) })
+    const result = await new AnalytixRuntimeProvider().rewindThread('thread', 'turn').catch(error => error)
+    expect(result).toBeInstanceOf(Error); expect(result).not.toBeInstanceOf(RewindRequestRejectedError)
   })
 })

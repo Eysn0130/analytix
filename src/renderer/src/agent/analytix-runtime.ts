@@ -1,3 +1,4 @@
+import { RewindRequestRejectedError } from './types'
 import type {
   AgentProvider,
   AcceptedFinalProjectionBatch,
@@ -1016,7 +1017,17 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       JSON.stringify({ turnId })
     )
     if (!response.ok) {
-      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to rewind thread'))
+      const error = readRuntimeError(response.body, 'failed to rewind thread')
+      // Only the existing route's closed canonical pre-commit rejections prove
+      // rejection. Transport, internal and response-validation failures may
+      // arrive after Core has already committed the cut.
+      let raw: unknown
+      try { raw = JSON.parse(response.body) } catch { /* unknown outcome */ }
+      const expectedCode = ({ 400: 'validation_error', 404: 'not_found', 409: 'conflict' } as Record<number, string>)[response.status]
+      if (raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 2 &&
+        'code' in raw && raw.code === expectedCode && raw.code === error.code &&
+        'message' in raw && raw.message === error.message) throw new RewindRequestRejectedError()
+      throw runtimeErrorToError(error)
     }
     return readRuntimeJson<{
       threadId: string

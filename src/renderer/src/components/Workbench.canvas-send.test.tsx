@@ -10,6 +10,7 @@ import type { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
 // Only presentation leaves and external IPC/Provider I/O are replaced. The
 // mounted Workbench, plan controller, composer draft hook and stores are real.
 const io = vi.hoisted(() => ({
+  realComposer: false,
   composer: null as ComponentProps<typeof FloatingComposerIsland> | null,
   summaryMounted: vi.fn(),
   document: null as { onSubmitPrompt: (value: string, references?: import('../office/native-reference-store').NativeReference[]) => void } | null,
@@ -19,14 +20,17 @@ const io = vi.hoisted(() => ({
 }))
 vi.mock('../agent/registry', () => ({ getProvider: () => io.provider }))
 vi.mock('react-i18next', async (importOriginal) => ({
-  ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t: io.t })
+  ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t: io.t, i18n: { language: 'en' } })
 }))
-vi.mock('./workbench/FloatingComposerIsland', () => ({
+vi.mock('./workbench/FloatingComposerIsland', async importOriginal => {
+  const actual = await importOriginal<typeof import('./workbench/FloatingComposerIsland')>()
+  return ({
   FloatingComposerIsland: (props: ComponentProps<typeof FloatingComposerIsland>) => {
     io.composer = props
-    return null
+    return io.realComposer ? createElement(actual.FloatingComposerIsland, props) : null
   }
-}))
+})
+})
 vi.mock('./chat/Sidebar', () => ({ Sidebar: () => null }))
 vi.mock('./chat/WorkbenchTopBar', () => ({ WorkbenchTopBar: () => null }))
 vi.mock('./chat/AssistantMarkdown', () => ({ preloadAssistantMarkdownRenderer: () => null }))
@@ -89,6 +93,7 @@ beforeEach(async () => {
   vi.resetAllMocks()
   streams = []
   clearActiveStream()
+  io.realComposer = false
   io.document = null
   useWorkspaceTabsStore.setState(useWorkspaceTabsStore.getInitialState(), true)
   localStorage.clear()
@@ -194,6 +199,42 @@ describe('Workbench Canvas consumer path', () => {
         expect(ordinary.defaultPrevented).toBe(true); expect(composer().mode).toBe('agent')
       } finally { outside.remove() }
     } finally { if (modalRootMounted) await act(async () => modalRoot.unmount()); modalHost.remove() }
+  })
+
+  it.each([{ key: 'Tab', shiftKey: false }, { key: 'Tab', shiftKey: true }, { key: 'Escape' }, { key: 'Tab', shiftKey: true, isComposing: true }, { key: 'Escape', isComposing: true }, { key: 'Tab', shiftKey: true, keyCode: 229 }])('lets the actual ordinary composer menu own $key through Workbench capture ($shiftKey/$isComposing/$keyCode)', async options => {
+    const rangeRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects')
+    const rangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect')
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] })
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id))
+    try {
+      io.realComposer = true
+      await act(async () => { composer().setMode('plan'); root.render(createElement(Workbench)); await new Promise(resolve => setTimeout(resolve, 20)) })
+      const trigger = element.querySelector<HTMLButtonElement>('button[aria-label="composerMenuTitle"]')!
+      expect(trigger).not.toBeNull()
+      await act(async () => { trigger.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+      const menu = element.querySelector<HTMLElement>('[role="menu"][aria-label="composerMenuTitle"]')!
+      expect(menu).not.toBeNull(); expect(menu.contains(document.activeElement)).toBe(true)
+      const event = new KeyboardEvent('keydown', { ...options, bubbles: true, cancelable: true })
+      await act(async () => document.activeElement!.dispatchEvent(event))
+      const composing = options.isComposing || options.keyCode === 229
+      expect(event.defaultPrevented).toBe(options.key === 'Escape' && !composing); expect(composer().mode).toBe('plan')
+      if (composing) expect(menu.contains(document.activeElement)).toBe(true)
+      else {
+        expect(element.querySelector('[role="menu"][aria-label="composerMenuTitle"]')).toBeNull()
+        // Native sequential navigation to the Editor is verified in the actual
+        // Workbench browser fixture; jsdom stops at the exit trigger.
+        expect(document.activeElement).toBe(trigger)
+      }
+    } finally {
+      io.realComposer = false
+      await act(async () => root.render(createElement(Workbench)))
+      vi.unstubAllGlobals()
+      if (rangeRects) Object.defineProperty(Range.prototype, 'getClientRects', rangeRects); else Reflect.deleteProperty(Range.prototype, 'getClientRects')
+      if (rangeBounds) Object.defineProperty(Range.prototype, 'getBoundingClientRect', rangeBounds); else Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect')
+    }
   })
 
   it('stops mounting the summary poller when the right pane closes', async () => {

@@ -1,4 +1,6 @@
 {
+  "rewindResendRejected": "历史回退请求被拒绝，编辑后的消息未重发。",
+  "rewindResendOutcomeUnknown": "无法确认历史回退结果，编辑后的消息未重发。请检查当前历史后再重试；可用线程中的编辑草稿会保留，你随后修改的草稿优先。",
   "rewindResendInvalidPayload": "此消息的附件或文件引用无效，未回退历史。",
   "rewindResendAttachmentUnavailable": "此线程中有附件暂时不可用，未回退消息。请检查附件后重试。",
   "rewindResendFailed": "未能完成编辑。若历史已回退，编辑后的消息已保留在草稿中；你随后修改的草稿会优先保留。",

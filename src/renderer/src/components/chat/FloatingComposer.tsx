@@ -2144,6 +2144,7 @@ export function FloatingComposer({
             ref={composerMenuPanelRef}
             id={composerMenuId}
             role="menu"
+            data-composer-menu
             aria-label={t('composerMenuTitle')}
             onKeyDown={(event) => {
               if (draft.isComposingEvent(event) || event.defaultPrevented) return

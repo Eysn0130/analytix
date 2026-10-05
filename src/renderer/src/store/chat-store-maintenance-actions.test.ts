@@ -1,3 +1,4 @@
+import { RewindRequestRejectedError } from '../agent/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import maintenanceActionsSource from './chat-store-maintenance-actions.ts?raw'
 import type { ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
@@ -1144,6 +1145,91 @@ describe('edit resend attachment continuity and ownership', () => {
     expect(draft.input).toBe(changed === 'input' ? 'new draft' : '')
     if (changed === 'attachment') expect(draft.attachments).toEqual([{ id: secondAttachmentId }])
     if (changed === 'file') expect(draft.fileReferences[0].name).toBe('new.txt')
+  })
+
+  it.each(['runtime_request_failed', 'runtime_response_schema_invalid', 'internal_error', 'uncoded', 'conflict'])('keeps the closed edit draft after real rewind SSE precedes rejected %s HTTP', async code => {
+    const h = resendHarness({ attachmentIds: [attachmentId], fileReferences: [{ path: '/workspace/analytix/a.txt', relativePath: 'a.txt', name: 'a.txt', kind: 'file' }] })
+    h.state.lastSeq = 10
+    const seq = h.state.lastSeq + 1
+    const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), h.get, { threadId: 'thr_existing' })
+    h.provider.rewindThread.mockImplementationOnce(async () => {
+      sink.onThreadRewound?.({ threadId: 'thr_existing', turnId: 'turn_edit', removedTurns: 1, remainingTurns: 0, removedTurnIds: ['turn_edit'], seq })
+      throw new Error(code === 'uncoded' ? 'PRIVATE_REWIND_RESPONSE' : JSON.stringify({ code, message: 'PRIVATE_REWIND_RESPONSE' }))
+    })
+    await h.actions.rewindAndResend('user_edit', 'edited after uncertain rewind')
+    expect(h.state.blocks).toEqual([]); expect(h.state.lastSeq).toBe(seq)
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft?.input).toBe('edited after uncertain rewind')
+    expect(draft.attachments[0].id).toBe(attachmentId); expect(draft.fileReferences[0].type).toBe('file')
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
+    expect(h.state.error).not.toContain('PRIVATE_REWIND_RESPONSE')
+  })
+
+  it('keeps an uncertain rewind draft without fabricating a local history cut when no SSE arrives', async () => {
+    const h = resendHarness()
+    h.provider.rewindThread.mockRejectedValue(new Error(JSON.stringify({ code: 'runtime_request_failed', message: 'synthetic transport failure' })))
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.state.blocks[0].id).toBe('user_edit'); expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]?.input).toBe('edited')
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
+  })
+
+  it.each(['retained', 'rewound'])('distinguishes an adapter-proven rejection with the exact target %s', async targetState => {
+    const h = resendHarness()
+    h.state.lastSeq = 10
+    const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), h.get, { threadId: 'thr_existing' })
+    h.provider.rewindThread.mockImplementationOnce(async () => {
+      if (targetState === 'rewound') sink.onThreadRewound?.({ threadId: 'thr_existing', turnId: 'turn_edit', removedTurns: 1, remainingTurns: 0, removedTurnIds: ['turn_edit'], seq: 11 })
+      throw new RewindRequestRejectedError()
+    })
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.state.error).toBe(i18n.t(targetState === 'retained' ? 'common:rewindResendRejected' : 'common:rewindResendOutcomeUnknown'))
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    if (targetState === 'retained') { expect(draft).toBeUndefined(); expect(h.state.blocks[0].id).toBe('user_edit') }
+    else { expect(draft.input).toBe('edited'); expect(h.state.blocks).toEqual([]) }
+  })
+
+  it.each(['input', 'attachment', 'file', 'deleted', 'migrated', 'case', 'navigation'])('respects %s ownership after a real rewind SSE and an uncertain HTTP receipt', async change => {
+    const h = resendHarness({ attachmentIds: [attachmentId], fileReferences: [{ path: '/workspace/analytix/a.txt', relativePath: 'a.txt', name: 'a.txt', kind: 'file' }] })
+    const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+    h.state.lastSeq = 10
+    const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), h.get, { threadId: 'thr_existing' })
+    h.provider.rewindThread.mockImplementationOnce(async () => {
+      sink.onThreadRewound?.({ threadId: 'thr_existing', turnId: 'turn_edit', removedTurns: 1, remainingTurns: 0, removedTurnIds: ['turn_edit'], seq: 11 })
+      if (change === 'input' || change === 'attachment' || change === 'file') h.state.updateComposerDraft(key, draft => ({ ...draft,
+        input: change === 'input' ? 'newer text' : draft.input, inputRevision: draft.inputRevision + 1,
+        attachments: change === 'attachment' ? [{ id: secondAttachmentId }] : draft.attachments,
+        fileReferences: change === 'file' ? [{ path: '/workspace/new.txt', relativePath: 'new.txt', name: 'new.txt' }] : draft.fileReferences }))
+      if (change === 'deleted') h.state.threads = h.state.threads.filter(thread => thread.id !== 'thr_existing')
+      if (change === 'migrated') h.state.threads[0].workspace = '/workspace/moved'
+      if (change === 'case') h.state.threads[0].historyAuthority = 'case_boundary_only_v1'
+      if (change === 'navigation') {
+        h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+        h.state.blocks = [{ kind: 'assistant', id: 'new-view', text: 'keep' }]; h.state.error = 'new view error'
+      }
+      throw new Error(JSON.stringify({ code: 'runtime_request_failed', message: 'synthetic lost response' }))
+    })
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[key]
+    if (change === 'deleted' || change === 'migrated' || change === 'case') expect(draft).toBeUndefined()
+    else if (change === 'navigation') { expect(draft.input).toBe('edited'); expect(h.state.blocks[0].id).toBe('new-view'); expect(h.state.error).toBe('new view error') }
+    else {
+      expect(draft.input).toBe(change === 'input' ? 'newer text' : '')
+      if (change === 'attachment') expect(draft.attachments).toEqual([{ id: secondAttachmentId }])
+      if (change === 'file') expect(draft.fileReferences[0].name).toBe('new.txt')
+    }
+  })
+
+  it('does not accept a forged raw JSON conflict as proof of a pre-commit rejection', async () => {
+    const h = resendHarness()
+    h.provider.rewindThread.mockRejectedValue(new Error(JSON.stringify({ code: 'conflict', message: 'The request conflicts with the current runtime state.' })))
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')].input).toBe('edited')
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown')); expect(h.state.blocks[0].id).toBe('user_edit')
+    expect(h.sendMessage).not.toHaveBeenCalled()
   })
 
   it('keeps file-context displayText turns uneditable and stops on restore or rewind failure', async () => {

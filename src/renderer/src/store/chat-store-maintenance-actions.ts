@@ -1,3 +1,4 @@
+import { RewindRequestRejectedError } from '../agent/types'
 import { captureRewindResendPayload } from './rewind-resend-payload'
 import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { AttachmentPublicMetadata } from '../../../../packages/runtime/src/contracts/attachments.js'
@@ -840,6 +841,7 @@ export function createMaintenanceActions(
     const checkpointId = typeof target.meta?.workspaceCheckpointId === 'string' ? target.meta.workspaceCheckpointId.trim() : ''
     editInFlight = true
     let rewound = false
+    let rewindOutcomeUnknown = false
     let sent = false
     try {
       // This read checks current Go authority before either destructive operation.
@@ -873,8 +875,13 @@ export function createMaintenanceActions(
         if (!restored.ok) { set({ error: i18n.t('common:rewindResendFailed') }); return }
       }
       rewindIssued = true
-      try { await provider.rewindThread(activeThreadId, turnId); rewound = true } catch {
-        if (isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
+      try { await provider.rewindThread(activeThreadId, turnId); rewound = true } catch (error) {
+        const targetStillPresent = get().blocks.some(block => block.kind === 'user' && block.id === userBlockId && block.meta?.turnId === turnId)
+        const rejected = isCurrent() && targetStillPresent && error instanceof RewindRequestRejectedError
+        rewindOutcomeUnknown = !rejected
+        if (isCurrent()) set({ error: i18n.t(rejected ? 'common:rewindResendRejected' : 'common:rewindResendOutcomeUnknown') })
+        // Neither rejection nor an uncertain acknowledgement permits a resend
+        // or a local history cut. SSE already owns any cut we have observed.
         return
       }
       if (!isCurrent()) return
@@ -903,11 +910,12 @@ export function createMaintenanceActions(
       } catch { /* Preserve a retryable draft; never expose an unsafe error body. */ }
       if (!sent && isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
     } finally {
-      // A successful rewind is irreversible locally. Preserve the original-key
-      // draft even when navigation or lost-ACK recovery replaced the subscription.
+      // Core may have committed a rewind even when its HTTP receipt fails.
+      // Preserve the original-key draft after success or an uncertain outcome,
+      // including navigation or lost-ACK recovery replacing the subscription.
       // Object identity protects newer text, attachments and file references.
       const owner = get().threads.find(thread => thread.id === activeThreadId)
-      if (rewound && !sent && owner && owner.historyAuthority !== 'case_boundary_only_v1' && normalizeWorkspaceRoot(owner.workspace) === workspace) {
+      if ((rewound || rewindOutcomeUnknown) && !sent && owner && owner.historyAuthority !== 'case_boundary_only_v1' && normalizeWorkspaceRoot(owner.workspace) === workspace) {
         get().updateComposerDraft?.(draftKey, current => current !== originalDraft ? current : ({
           ...current, input: trimmed, inputRevision: current.inputRevision + 1, attachments: payload.attachments,
           fileReferences: payload.fileReferences.map(reference => ({ path: reference.path, relativePath: reference.relativePath,
