@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactElement } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, Minus, Plus, X } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
@@ -45,34 +45,57 @@ function MountedImagePreviewLightbox({
 }: ImagePreviewLightboxProps): ReactElement | null {
   const { t } = useTranslation('common')
   const [zoom, setZoom] = useState(1)
+  const [naturalSize, setNaturalSize] = useState<{ src: string; width: number; height: number } | null>(null)
+  const [availableSize, setAvailableSize] = useState({ width: 0, height: 0 })
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
+  const currentSrc = useRef(src)
+  currentSrc.current = src
   const titleId = useId()
-  const modalRef = useModalFocus(onClose)
+  const modalRef = useModalFocus(onClose, true, true)
   const closeLabel = t('imagePreviewClose')
   const resolvedTitle = title || alt || t('imagePreviewTitle')
   const resolvedDownloadLabel = downloadLabel ?? t('imagePreviewDownload')
 
-  useEffect(() => {
-    if (!open || typeof window === 'undefined') return
+  useLayoutEffect(() => {
     setZoom(1)
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = previousOverflow
+    if (viewportRef.current) {
+      viewportRef.current.scrollLeft = 0
+      viewportRef.current.scrollTop = 0
     }
-  }, [open, onClose])
+    const image = imageRef.current
+    if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setNaturalSize({ src, width: image.naturalWidth, height: image.naturalHeight })
+    }
+  }, [src])
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const measure = (): void => {
+      const style = getComputedStyle(viewport)
+      const width = Math.max(0, viewport.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0'))
+      const height = Math.max(0, viewport.clientHeight - parseFloat(style.paddingTop || '0') - parseFloat(style.paddingBottom || '0'))
+      setAvailableSize(previous => previous.width === width && previous.height === height ? previous : { width, height })
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(viewport)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
 
   if (!open || typeof document === 'undefined') return null
 
   const zoomPercent = `${Math.round(zoom * 100)}%`
   const canDownload = !downloadDisabled && (typeof onDownload === 'function' || Boolean(downloadHref))
-  const imageClass =
-    zoom === 1
-      ? 'max-h-full max-w-full object-contain'
-      : 'max-w-none object-contain'
-  const imageStyle =
-    zoom === 1
-      ? undefined
-      : { width: `${zoom * 100}%` }
+  const natural = naturalSize?.src === src ? naturalSize : null
+  const fit = natural && availableSize.width > 0 && availableSize.height > 0
+    ? Math.min(1, availableSize.width / natural.width, availableSize.height / natural.height) : null
+  const imageStyle = natural && fit !== null ? { width: natural.width * fit * zoom, height: natural.height * fit * zoom } : undefined
 
   const downloadControl = onDownload ? (
     <button
@@ -126,15 +149,26 @@ function MountedImagePreviewLightbox({
         </button>
       </div>
       <div className="flex h-full w-full items-center justify-center px-4 py-20 sm:px-8">
-        <div className="flex max-h-[calc(100dvh-128px)] w-full max-w-[min(1120px,calc(100vw-32px))] items-center justify-center overflow-auto rounded-[18px] border border-white/[0.16] bg-[rgba(255,250,242,0.96)] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.42)] dark:bg-zinc-950/[0.88] sm:max-h-[calc(100dvh-144px)]">
+        <div ref={viewportRef} tabIndex={0} aria-label={resolvedTitle}
+          className="h-full max-h-[calc(100dvh-128px)] w-full max-w-[min(1120px,calc(100vw-32px))] overflow-auto rounded-[18px] border border-white/[0.16] bg-[rgba(255,250,242,0.96)] p-2 shadow-[0_30px_90px_rgba(0,0,0,0.42)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white dark:bg-zinc-950/[0.88] sm:max-h-[calc(100dvh-144px)]">
+          <div className="flex min-h-full min-w-full items-center justify-center" style={imageStyle}>
           <img
+            key={src}
+            ref={imageRef}
             src={src}
             alt={alt}
-            className={imageClass}
+            className={imageStyle ? 'max-w-none shrink-0 object-contain' : 'max-h-full max-w-full object-contain'}
             style={imageStyle}
+            onLoad={event => {
+              const image = event.currentTarget
+              if (currentSrc.current === src && image.naturalWidth > 0 && image.naturalHeight > 0) {
+                setNaturalSize({ src, width: image.naturalWidth, height: image.naturalHeight })
+              }
+            }}
             draggable={false}
             referrerPolicy="no-referrer"
           />
+          </div>
         </div>
       </div>
       <div className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center overflow-hidden rounded-full bg-white text-zinc-700 shadow-[0_14px_34px_rgba(0,0,0,0.24)] dark:bg-zinc-100 dark:text-zinc-800">

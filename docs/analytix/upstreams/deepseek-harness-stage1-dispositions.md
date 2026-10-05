@@ -10,7 +10,7 @@ The 31 baseline functions and 36 refinements each have a disposition. Retained m
 | 2 | Assistant生命周期 | adapted renderer presentation | AssistantMarkdown / MessageTimeline |
 | 3 | Streaming/final Markdown | adapted renderer presentation | DshAssistant / MarkdownText / finalization queue |
 | 4 | 代码块 | adapted renderer presentation | CodeBlock / CodeSourceActions |
-| 5 | 表格和数学 | adapted renderer presentation | parse / render / bounded katex |
+| 5 | 表格和数学 | adapted renderer presentation | parse / render / bounded katex; local MarkdownTable public-data copy/download/fullscreen |
 | 6 | 链接/文件引用 | adapted renderer presentation | WorkspaceMarkdown / file-reference-validation |
 | 7 | 图片/文件附件 | existing product retained | FloatingComposer attachments |
 | 8 | Markdown媒体安全 | adapted renderer presentation | WorkspaceMarkdown / ImagePreviewLightbox / existing media |
@@ -73,3 +73,9 @@ The 31 baseline functions and 36 refinements each have a disposition. Retained m
 | N34 | 稳定 node group part identity 与 replacement store 重绑 | retained | existing stable block keys/rebind + incremental parser generations |
 | N35 | 消息午夜 clock 与统计 dialog 的局部生命周期 | retained | existing time/usage owner; no DSH stats timer |
 | N36 | 所有 fallback 诊断 inspect copy search 的 DTO sink 门禁 | private/unknown JSON excluded; DTO deferred | closed existing public projection and safe leaf sinks |
+
+The table action closure, SessionHeader keyboard closure and ImagePreviewLightbox
+fit/zoom lifecycle are local adaptations of their existing owners. Evidence and
+remaining limits are in the source-bound private review bundle. Retired Streamdown
+table CSS/root dependency and the unused local ImageLightbox wrapper are cleanup;
+they do not add an upstream leaf or alter any retained Go/public producer boundary.

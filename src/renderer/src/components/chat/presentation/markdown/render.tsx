@@ -3,8 +3,8 @@
 /**
  * Direct mdast→React markdown renderer. Replaces the react-markdown /
  * remark-rehype pipeline with one switch over parsed nodes so streaming can
- * cache frozen blocks as React elements; the rendered DOM is pinned
- * byte-for-byte by `tests/fixtures/markdown-dom` and must not drift.
+ * cache frozen blocks as React elements. Local regression tests cover the
+ * visible rendering and the host-owned actions added around public content.
  *
  * External link and image destinations pass a protocol allowlist; settled
  * local file links use an explicit owner callback. Images additionally require
@@ -20,12 +20,13 @@
 
 import { Fragment, createElement } from 'react'
 import type { Key, ReactNode } from 'react'
-import clsx from 'clsx'
 import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import type { CodeToolbarLabels } from '../CodeToolbar'
 import { CodeBlock } from './CodeBlock'
+import { MarkdownTable, type MarkdownTableLabels } from './MarkdownTable'
+import { publicTableData } from './table-data'
 import { parseFileLink } from './file-link'
 import { renderTexToReact } from './katex'
 import { LinkIconMedium, classifyLinkPath } from '../LinkIcon'
@@ -49,6 +50,7 @@ export interface MarkdownCodeLabels {
 export interface MarkdownLabels {
   code: MarkdownCodeLabels
   footnotes: string
+  table: MarkdownTableLabels
 }
 
 function sanitizeUrl(url: string): string {
@@ -434,24 +436,14 @@ function renderTable(node: Md.Table, key: Key, context: MarkdownRenderContext): 
   // column and wrap instead (deepsuite chat TableWrapper parity).
   const wide = columns >= 4 && context.inBlockquote !== true
   return (
-    // Wide tables rest with overflow-x hidden (the hover-revealed bar in
-    // MarkdownText.module.css), which drops Chromium's implicit scroller
-    // focusability — the explicit tabindex keeps them keyboard-reachable,
-    // and :focus-visible restores scrolling.
-    <div
-      key={key}
-      className={clsx(css.tableScroll, wide ? 'md-table-wide' : css.tableFill)}
-      tabIndex={wide ? 0 : undefined}
-    >
-      <table>
+    <MarkdownTable key={key} data={publicTableData(node)} labels={context.labels.table} wide={wide} busy={context.streaming} table={<table>
         {headRow !== undefined && <thead>{renderTableRow(headRow, 'th', align, 0, context)}</thead>}
         {bodyRows.length > 0 && (
           <tbody>
             {bodyRows.map((row, index) => renderTableRow(row, 'td', align, index + 1, context))}
           </tbody>
         )}
-      </table>
-    </div>
+      </table>} />
   )
 }
 

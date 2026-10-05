@@ -10,7 +10,12 @@ export function DshAssistant({ text, streaming, className }: { text: string; str
   const labels = useMemo<MarkdownLabels>(() => ({ code: {
     copyLabel: t('codeBlockCopy'), copiedLabel: t('copySuccess'),
     toolbarLabels: { codeLabel: t('code'), wrapLabel: t('codeBlockWrap'), unwrapLabel: t('codeBlockUnwrap') }
-  }, footnotes: t('markdownFootnotes') }), [t, i18n.resolvedLanguage])
+  }, footnotes: t('markdownFootnotes'), table: {
+    title: t('markdownTableTitle'), copy: t('markdownTableCopy'), copied: t('copySuccess'), copyFailed: t('copyFailed'),
+    download: t('markdownTableDownload'), downloadFailed: t('markdownTableDownloadFailed'), fullscreen: t('markdownTableFullscreen'),
+    close: t('markdownTableClose'), csv: t('markdownTableCsv'), tsv: t('markdownTableTsv'), markdown: t('markdownTableMarkdown'),
+    exportHint: t('markdownTableExportHint')
+  } }), [t, i18n.resolvedLanguage])
   return <MarkdownDelegateProvider openExternalLink={href => { void window.analytix?.app?.openExternal?.(href).catch(() => undefined) }}>
     <MarkdownText text={text} streaming={streaming} labels={labels} className={['ds-assistant-markdown', className].filter(Boolean).join(' ')} />
   </MarkdownDelegateProvider>

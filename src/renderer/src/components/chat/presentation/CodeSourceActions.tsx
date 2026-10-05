@@ -5,10 +5,14 @@ import { Tooltip } from './Tooltip'
 import css from './CodeCard.module.css'
 
 export function downloadCodeSource(code: string, language = ''): void {
-  const url = URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' }))
+  downloadTextFile(code, `code.${extensionForLanguage(language)}`)
+}
+
+export function downloadTextFile(text: string, filename: string, mimeType = 'text/plain;charset=utf-8'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: mimeType }))
   const link = document.createElement('a')
   link.href = url
-  link.download = `code.${extensionForLanguage(language)}`
+  link.download = filename
   document.body.append(link)
   try { link.click() } finally { link.remove(); URL.revokeObjectURL(url) }
 }

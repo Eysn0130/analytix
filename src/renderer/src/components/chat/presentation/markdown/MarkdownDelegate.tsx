@@ -3,7 +3,6 @@
 /** Consumer-owned navigation for Markdown links. */
 import { createContext, useContext, useMemo } from 'react'
 import type { ReactNode } from 'react'
-import type { ImageLightboxLabels } from '../ImageLightbox'
 
 /**
  * Handle one sanitized absolute HTTP(S) URL selected from Markdown.
@@ -16,7 +15,7 @@ export interface MarkdownDelegate {
   /** Image previews for decoded local paths in this owner's workspace. */
   readonly fileImages?: {
     resolve: (path: string) => string | undefined
-    labels: ImageLightboxLabels & { open: string; loading: string; failed: string }
+    labels: { close?: string; download?: string; open: string; loading: string; failed: string }
   } | undefined
   /** Ordinary HTTP(S) activation; absent handlers retain native anchor behavior. */
   readonly openExternalLink?: MarkdownExternalLinkHandler | undefined

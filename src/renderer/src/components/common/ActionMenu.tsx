@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import type { ReactElement, Ref } from 'react'
 import { ChevronRight } from '../../design/AnalytixUiIcons'
 
 export function ActionMenuSeparator(): ReactElement {
@@ -13,6 +13,10 @@ export function ActionMenuItem({
   active = false,
   danger = false,
   hasSubmenu = false,
+  expanded,
+  controls,
+  tabIndex,
+  ref,
   title,
   onClick,
   onPointerEnter
@@ -24,6 +28,10 @@ export function ActionMenuItem({
   active?: boolean
   danger?: boolean
   hasSubmenu?: boolean
+  expanded?: boolean
+  controls?: string
+  tabIndex?: number
+  ref?: Ref<HTMLButtonElement>
   title?: string
   onClick?: () => void
   onPointerEnter?: () => void
@@ -32,6 +40,11 @@ export function ActionMenuItem({
     <button
       type="button"
       role="menuitem"
+      ref={ref}
+      tabIndex={tabIndex}
+      aria-haspopup={hasSubmenu ? 'menu' : undefined}
+      aria-expanded={hasSubmenu ? expanded : undefined}
+      aria-controls={controls}
       disabled={disabled}
       title={title}
       className={`ds-session-actions-menu-item${active ? ' is-active' : ''}${danger ? ' is-danger' : ''}`}

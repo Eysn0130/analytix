@@ -10,7 +10,18 @@
  * @param text - the exact text to place on the clipboard.
  * @returns true only when the host accepted the write.
  */
-export async function writeClipboard(text: string): Promise<boolean> {
+export async function writeClipboard(text: string, safeHtml?: string): Promise<boolean> {
+  if (safeHtml !== undefined && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+        'text/html': new Blob([safeHtml], { type: 'text/html' })
+      })])
+      return true
+    } catch {
+      return false
+    }
+  }
   // lib.dom types clipboard non-optional, but insecure contexts omit it —
   // that runtime gap is exactly what this guard detects.
   /* oxlint-disable-next-line typescript/no-unnecessary-condition */

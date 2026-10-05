@@ -658,29 +658,6 @@ html[data-theme='dark'] .ds-file-preview-code-html > pre span {
   border: 1px solid var(--ds-border);
 }
 
-.ds-markdown [data-streamdown='table-wrapper'] {
-  margin: 0.55rem 0 0.7rem;
-  gap: 0.3rem;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.ds-markdown [data-streamdown='table-wrapper'] > div:first-child:not(:last-child) {
-  min-height: 1.35rem;
-}
-
-.ds-markdown [data-streamdown='table-wrapper'] > div:last-child {
-  border-color: var(--ds-border);
-  border-radius: 8px;
-  background: transparent;
-}
-
-.ds-markdown [data-streamdown='table-wrapper'] [data-streamdown='table'] {
-  background: var(--ds-bg-canvas);
-}
-
 .ds-markdown th,
 .ds-markdown td {
   border-bottom: 1px solid var(--ds-border-muted);
@@ -693,86 +670,4 @@ html[data-theme='dark'] .ds-file-preview-code-html > pre span {
   color: var(--ds-text-muted);
   font-size: 13px;
   font-weight: 600;
-}
-
-/* Streamdown controls are rendered from node_modules and fullscreen tables are
-   portaled to document.body, so keep a CSS fallback independent of Tailwind. */
-[data-streamdown='table-fullscreen'] {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(18px, 4vw, 56px);
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08), transparent 34%),
-    color-mix(in srgb, #000 64%, transparent);
-  color: var(--ds-text);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-}
-
-[data-streamdown='table-fullscreen'] > div {
-  display: flex;
-  min-height: 0;
-  width: min(1120px, 100%);
-  max-width: 100%;
-  height: min(760px, 86vh);
-  max-height: 100%;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--ds-border-strong);
-  border-radius: 22px;
-  background: var(--ds-card-strong);
-  box-shadow:
-    0 34px 90px rgba(2, 6, 16, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-[data-streamdown='table-fullscreen'] > div > div:first-child {
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--ds-border-muted);
-  background: var(--ds-topbar-bg);
-  padding: 0.65rem 0.75rem;
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-
-[data-streamdown='table-fullscreen'] > div > div:nth-child(2) {
-  min-height: 0;
-  flex: 1 1 auto;
-  padding: 0.85rem;
-  background: var(--ds-card-muted);
-}
-
-[data-streamdown='table-fullscreen'] [data-streamdown='table'] {
-  width: 100%;
-  border-collapse: collapse;
-  border: 1px solid var(--ds-border);
-  border-radius: 14px;
-  background: var(--ds-bg-canvas);
-}
-
-[data-streamdown='table-fullscreen'] [data-streamdown='table-header'] {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--ds-table-head-bg);
-}
-
-[data-streamdown='table-fullscreen'] [data-streamdown='table-row'],
-[data-streamdown='table-fullscreen'] [data-streamdown='table-header'] {
-  border-bottom: 1px solid var(--ds-border-muted);
-}
-
-[data-streamdown='table-fullscreen'] [data-streamdown='table-header-cell'],
-[data-streamdown='table-fullscreen'] [data-streamdown='table-cell'] {
-  padding: 0.7rem 0.8rem;
-  text-align: left;
-  white-space: nowrap;
-}
-
-[data-streamdown='table-fullscreen'] button {
-  -webkit-app-region: no-drag;
 }

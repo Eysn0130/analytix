@@ -1019,10 +1019,6 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
   margin-inline: 0.15rem;
 }
 
-.write-assistant-panel [data-streamdown='table-wrapper'] {
-  max-width: 100%;
-}
-
 @keyframes write-inline-agent-in {
   from {
     opacity: 0;

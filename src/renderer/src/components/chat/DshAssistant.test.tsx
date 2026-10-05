@@ -44,6 +44,23 @@ it('keeps append, replacement and settle on one semantic markdown tree without d
   expect(host.textContent).toBe('Replaced\nCurrent value.')
   expect(host.textContent).not.toContain('Public')
 })
+it('retains one table action owner while append/replacement settles sanitized public cells', async () => {
+  const first = '| Name | Value |\n| --- | --- |\n| **Public** | 1 |'
+  await render(first, true)
+  expect(host.querySelectorAll('[data-markdown-table]')).toHaveLength(1)
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]')?.disabled).toBe(true)
+  await render(first + '\n| Appended | 2 |', true)
+  expect(host.querySelectorAll('[data-markdown-table]')).toHaveLength(1)
+  const replaced = '| Label | Math |\n| --- | --- |\n| [bad](javascript:alert%281%29) <img> | $x^2$ |'
+  await render(replaced, true); await render(replaced)
+  expect(host.querySelectorAll('[data-markdown-table]')).toHaveLength(1)
+  expect(host.querySelectorAll('table')).toHaveLength(1)
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]')?.disabled).toBe(false)
+  expect(host.querySelector('.katex')).not.toBeNull()
+  expect(host.querySelector('a[href^="javascript:"],td img')).toBeNull()
+  expect(host.querySelector('td')?.textContent).toContain('bad <img>')
+  expect(host.textContent).not.toContain('Appended')
+})
 it.each(['', 'text', 'typescript'])('copies and downloads original %s source including Unicode, CRLF and real trailing blank lines', async lang => {
   const code = 'const label = "安全 🙂 <tag>";\r\n\r\n'
   const writeText = vi.fn().mockResolvedValue(undefined)

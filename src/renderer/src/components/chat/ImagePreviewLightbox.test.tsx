@@ -2,8 +2,46 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import '../../i18n'
+import i18n from '../../i18n'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
+
+it.each([[400, 300, 400, 300], [1600, 1200, 800, 600], [300, 1200, 150, 600]])(
+  'uses natural dimensions and viewport fit for %sx%s, with numeric zoom, resize and src/reopen reset',
+  async (naturalWidth, naturalHeight, expectedWidth, expectedHeight) => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    let width = 800, height = 600
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => height)
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
+    const download = vi.fn(), close = vi.fn()
+    const render = (src = 'data:image/png;base64,first', open = true) => act(async () => root.render(createElement(ImagePreviewLightbox, {
+      open, src, alt: 'Geometry', onClose: close, onDownload: download
+    })))
+    const load = async () => {
+      const image = document.querySelector<HTMLImageElement>('[role="dialog"] img')!
+      Object.defineProperties(image, { naturalWidth: { configurable: true, value: naturalWidth }, naturalHeight: { configurable: true, value: naturalHeight } })
+      await act(async () => image.dispatchEvent(new Event('load')))
+      return image
+    }
+    const click = async (label: string) => act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click())
+    try {
+      await i18n.changeLanguage('en'); await render(); let image = await load()
+      expect(image.style.width).toBe(expectedWidth + 'px'); expect(image.style.height).toBe(expectedHeight + 'px')
+      await click('Zoom in'); expect(image.style.width).toBe(expectedWidth * 1.25 + 'px')
+      await click('Zoom out'); expect(image.style.width).toBe(expectedWidth + 'px')
+      await click('Zoom in'); width = 400; height = 300
+      await act(async () => window.dispatchEvent(new Event('resize')))
+      const fit = Math.min(1, width / naturalWidth, height / naturalHeight)
+      expect(image.style.width).toBe(naturalWidth * fit * 1.25 + 'px')
+      const viewport = image.closest<HTMLDivElement>('[tabindex="0"]')!; viewport.scrollLeft = 55; viewport.scrollTop = 72
+      await render('data:image/png;base64,second'); image = await load()
+      expect(image.style.width).toBe(naturalWidth * fit + 'px'); expect(viewport.scrollLeft).toBe(0); expect(viewport.scrollTop).toBe(0)
+      await click('Download image'); expect(download).toHaveBeenCalledTimes(1)
+      await click('Zoom in'); await render('data:image/png;base64,second', false); await render('data:image/png;base64,second'); image = await load()
+      expect(image.style.width).toBe(naturalWidth * fit + 'px')
+    } finally { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+  }
+)
 
 it('restores the current opener for close/reopen while the consumer keeps its wrapper mounted', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

@@ -121,3 +121,28 @@ feature/pixel parity remain unproven. Coordinator integration is pending.
 The [67-function disposition record](deepseek-harness-stage1-dispositions.md)
 and [proposed public projection plan](deepseek-harness-public-projection-plan.md)
 separate retained product behavior from stage-1 adaptation and future producer gaps.
+
+The local table adaptation uses `markdown/MarkdownTable.tsx` and `table-data.ts`
+around the existing parsed, sanitized table. These are local action owners, not
+additional pinned upstream leaves. Copy offers CSV/TSV/Markdown; download offers
+CSV/Markdown; fullscreen retains the original table node and scroll position.
+Exports use public cell labels and math source. Spreadsheet text prefixes and
+control-character escaping change the representation; arbitrary GFM round-trip
+or universal spreadsheet safety is not claimed. The existing modal focus owner
+handles nested layers, opener restoration, and opt-in body scroll locks.
+
+SessionHeader owns initial menu focus, same-level arrows, nested Escape, native
+Tab exit and its original callbacks/gates. A gate disabling the focused action
+closes its invalid submenu and returns to an enabled root action; outside and
+callback-owned focus retain precedence. ImagePreviewLightbox uses natural
+dimensions × viewport fit × zoom, preserving callbacks and resetting on src or
+reopen. Function evidence remains source-bound in the private review bundle.
+
+The unused Streamdown root edge/scan and its unproduced table CSS are retired by
+normal lock generation. Shared Tiptap `marked`, ReactMarkdown and Shiki consumers
+remain. The dead local ImageLightbox wrapper is retired; its optional label shape
+is inline in MarkdownDelegate. Existing media consumers remain authoritative.
+Four unused mascot locale keys are removed while legacy preference compatibility
+remains. Icon provenance follows current consumers; the 139 admitted SVGs and
+their license/provenance identities are unchanged. The historical 35-source
+intake and 67 disposition rows do not establish 67 fresh acceptance results.

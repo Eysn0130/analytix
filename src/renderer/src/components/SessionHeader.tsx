@@ -1,5 +1,5 @@
-import type { CSSProperties, ReactElement } from 'react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Archive,
@@ -78,6 +78,11 @@ const ACTIONS_MENU_VIEWPORT_MARGIN = 8
 const ACTIONS_MENU_TRIGGER_GAP = 6
 const useSessionHeaderLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
+function menuItems(menu: HTMLElement): HTMLButtonElement[] {
+  return [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+    .filter(item => item.closest('[role="menu"]') === menu)
+}
+
 export function SessionHeader({ compact = false, className = '', onOpenSideChat }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
   const threads = useChatStore((s) => s.threads)
@@ -111,6 +116,30 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const [pinnedThreadIds, setPinnedThreadIds] = useState(() => readPinnedThreadIds())
   const actionsMenuRef = useRef<HTMLDivElement>(null)
   const actionsMenuPortalRef = useRef<HTMLDivElement>(null)
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null)
+  const lastFocusedActionRef = useRef<HTMLButtonElement | null>(null)
+  const copyParentRef = useRef<HTMLButtonElement>(null)
+  const branchParentRef = useRef<HTMLButtonElement>(null)
+  const copyMenuRef = useRef<HTMLDivElement>(null)
+  const branchMenuRef = useRef<HTMLDivElement>(null)
+  const actionsMenuId = useId()
+  const entryFocusRef = useRef<'first' | 'last'>('first')
+  const entryFrameRef = useRef<number | null>(null)
+  const submenuFocusRef = useRef<ThreadActionsSubmenu>(null)
+  const submenuFrameRef = useRef<number | null>(null)
+  const closeActionsMenu = useCallback((restoreFocus = true): void => {
+    if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+    if (submenuFrameRef.current !== null) window.cancelAnimationFrame(submenuFrameRef.current)
+    entryFrameRef.current = submenuFrameRef.current = null
+    submenuFocusRef.current = null
+    lastFocusedActionRef.current = null
+    if (restoreFocus && actionsMenuPortalRef.current?.contains(document.activeElement) && actionsTriggerRef.current?.isConnected) {
+      actionsTriggerRef.current.focus({ preventScroll: true })
+    }
+    setActionsMenuOpen(false)
+    setActionsMenuPlacement(null)
+    setActionsSubmenu(null)
+  }, [])
   const actionsMenuPortalTarget = typeof document === 'undefined' ? null : document.body
   const localDisplayAuthority = useLocalDisplayAuthorityGeneration()
   const localDisplayAuthorityRef = useRef(localDisplayAuthority)
@@ -138,9 +167,8 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
       setDraftTitle('')
     }
     setEditing(false)
-    setActionsMenuOpen(false)
-    setActionsSubmenu(null)
-  }, [active])
+    closeActionsMenu()
+  }, [active, closeActionsMenu])
 
   useEffect(() => {
     const selector = stagedImportSelectorRef.current
@@ -178,27 +206,52 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
 
   useEffect(() => {
     if (!actionsMenuOpen) return
-    const onPointerDown = (event: PointerEvent): void => {
+    const onPointerDown = (event: Event): void => {
       const target = event.target
       if (target instanceof Node && actionsMenuRef.current?.contains(target)) return
       if (target instanceof Node && actionsMenuPortalRef.current?.contains(target)) return
-      setActionsMenuOpen(false)
-      setActionsMenuPlacement(null)
-      setActionsSubmenu(null)
+      closeActionsMenu(false)
     }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      setActionsMenuOpen(false)
-      setActionsMenuPlacement(null)
-      setActionsSubmenu(null)
-    }
+    entryFrameRef.current = window.requestAnimationFrame(() => {
+      entryFrameRef.current = null
+      const menu = actionsMenuPortalRef.current
+      const items = menu ? menuItems(menu) : []
+      ;(entryFocusRef.current === 'last' ? items.at(-1) : items[0])?.focus({ preventScroll: true })
+    })
     window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('focusin', onPointerDown)
     return () => {
+      if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+      entryFrameRef.current = null
       window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('focusin', onPointerDown)
     }
-  }, [actionsMenuOpen])
+  }, [actionsMenuOpen, closeActionsMenu])
+
+  useEffect(() => {
+    if (!actionsSubmenu || submenuFocusRef.current !== actionsSubmenu) return
+    submenuFrameRef.current = window.requestAnimationFrame(() => {
+      submenuFrameRef.current = null
+      const menu = actionsSubmenu === 'copy' ? copyMenuRef.current : branchMenuRef.current
+      if (menu) menuItems(menu)[0]?.focus({ preventScroll: true })
+      submenuFocusRef.current = null
+    })
+    return () => {
+      if (submenuFrameRef.current !== null) window.cancelAnimationFrame(submenuFrameRef.current)
+      submenuFrameRef.current = null
+    }
+  }, [actionsSubmenu])
+
+  useSessionHeaderLayoutEffect(() => {
+    const focused = lastFocusedActionRef.current
+    const menu = actionsMenuPortalRef.current
+    if (!actionsMenuOpen || !focused?.isConnected || !focused.disabled || !menu?.contains(focused)) return
+    // Chromium can blur a newly disabled button to body before the next key.
+    // Outside focus and callback-owned focus must continue to take precedence.
+    if (document.activeElement !== focused && document.activeElement !== document.body) return
+    setActionsSubmenu(null)
+    ;(menuItems(menu)[0] ?? actionsTriggerRef.current)?.focus({ preventScroll: true })
+  }, [actionsMenuOpen, busy, runtimeConnection])
 
   useEffect(() => {
     if (!sourcePreviewOpen) return
@@ -253,21 +306,68 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
     void renameActiveThread(next).finally(() => setEditing(false))
   }
 
-  const closeActionsMenu = (): void => {
-    setActionsMenuOpen(false)
-    setActionsMenuPlacement(null)
+  const openActionsMenu = (entry: 'first' | 'last' = 'first'): void => {
+    entryFocusRef.current = entry
     setActionsSubmenu(null)
-  }
-
-  const toggleActionsMenu = (): void => {
-    setActionsSubmenu(null)
-    if (actionsMenuOpen) {
-      setActionsMenuPlacement(null)
-      setActionsMenuOpen(false)
-      return
-    }
     positionActionsMenu()
     setActionsMenuOpen(true)
+  }
+  const toggleActionsMenu = (): void => {
+    if (actionsMenuOpen) closeActionsMenu()
+    else openActionsMenu()
+  }
+  const enterSubmenu = (kind: Exclude<ThreadActionsSubmenu, null>): void => {
+    if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+    entryFrameRef.current = null
+    const menu = kind === 'copy' ? copyMenuRef.current : branchMenuRef.current
+    if (actionsSubmenu === kind && menu) menuItems(menu)[0]?.focus({ preventScroll: true })
+    else { submenuFocusRef.current = kind; setActionsSubmenu(kind) }
+  }
+  const handleActionsMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.isDefaultPrevented() || event.nativeEvent.isComposing) return
+    const menu = event.target instanceof Element ? event.target.closest<HTMLElement>('[role="menu"]') : null
+    if (!menu) return
+    if (event.key === 'Tab') { closeActionsMenu(); return }
+    const submenu = menu === copyMenuRef.current ? 'copy' : menu === branchMenuRef.current ? 'branch' : null
+    if (event.key === 'Escape' || (submenu && event.key === 'ArrowLeft')) {
+      event.preventDefault(); event.stopPropagation()
+      if (submenu) {
+        setActionsSubmenu(null)
+        const parent = submenu === 'copy' ? copyParentRef.current : branchParentRef.current
+        // Runtime/busy gates may disable the parent while its child has focus.
+        const rootMenu = actionsMenuPortalRef.current
+        const fallback = rootMenu ? menuItems(rootMenu)[0] : null
+        ;(parent && !parent.disabled ? parent : fallback ?? actionsTriggerRef.current)?.focus({ preventScroll: true })
+      } else closeActionsMenu()
+      return
+    }
+    if (event.key === 'ArrowRight' && !submenu) {
+      const kind = document.activeElement === copyParentRef.current ? 'copy'
+        : branchParentRef.current && document.activeElement === branchParentRef.current && !branchParentRef.current.disabled ? 'branch' : null
+      if (kind) { event.preventDefault(); event.stopPropagation(); enterSubmenu(kind) }
+      return
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = menuItems(menu)
+    if (!items.length) return
+    event.preventDefault(); event.stopPropagation()
+    const current = items.indexOf(document.activeElement as HTMLButtonElement)
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
+    items[next]?.focus({ preventScroll: true })
+  }
+  const handleActionsTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    if (event.nativeEvent.isComposing || event.isDefaultPrevented()) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); event.stopPropagation()
+      if (!actionsMenuOpen) openActionsMenu(event.key === 'ArrowUp' ? 'last' : 'first')
+      else {
+        const items = actionsMenuPortalRef.current ? menuItems(actionsMenuPortalRef.current) : []
+        ;(event.key === 'ArrowUp' ? items.at(-1) : items[0])?.focus({ preventScroll: true })
+      }
+    } else if (event.key === 'Escape' && actionsMenuOpen) {
+      event.preventDefault(); event.stopPropagation(); closeActionsMenu()
+    }
   }
 
   const beginRename = (): void => {
@@ -469,6 +569,10 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const archived = active?.archived === true
   const threadActionsDisabled = !active || runtimeConnection !== 'ready'
   const sourcePreviewDisabled = !workspaceRoot.trim()
+  const hoverSubmenu = (next: ThreadActionsSubmenu): void => {
+    if (copyMenuRef.current?.contains(document.activeElement) || branchMenuRef.current?.contains(document.activeElement)) return
+    setActionsSubmenu(next)
+  }
 
   const renderThreadActionsMenu = (floating = false): ReactElement | null => {
     if (!active) return null
@@ -481,12 +585,20 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
       : undefined
     return (
       <div
-        ref={floating ? actionsMenuPortalRef : undefined}
+        ref={actionsMenuPortalRef}
+        id={actionsMenuId}
+        data-session-actions-menu
         role="menu"
         aria-label={t('sessionActionsMenuTitle')}
         className={`ds-session-actions-menu${floating ? ' ds-session-actions-menu-floating ds-no-drag' : ''}`}
         style={menuStyle}
-        onPointerLeave={() => setActionsSubmenu(null)}
+        onKeyDown={handleActionsMenuKeyDown}
+        onFocusCapture={event => {
+          if (event.target instanceof HTMLButtonElement) lastFocusedActionRef.current = event.target
+        }}
+        onPointerLeave={() => {
+          if (!copyMenuRef.current?.contains(document.activeElement) && !branchMenuRef.current?.contains(document.activeElement)) setActionsSubmenu(null)
+        }}
       >
         {compact ? (
           <div className="ds-session-menu-details" role="group" aria-label={t('sessionDetails')}>
@@ -505,7 +617,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           shortcut="⌥⌘P"
           active={activePinned}
           onClick={togglePin}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <ActionMenuItem
           icon={<PencilLine className="h-5 w-5" strokeWidth={1.9} />}
@@ -514,7 +626,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           disabled={threadActionsDisabled}
           title={threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}
           onClick={beginRename}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <ActionMenuItem
           icon={archived ? <RotateCcw className="h-5 w-5" strokeWidth={1.9} /> : <Archive className="h-5 w-5" strokeWidth={1.9} />}
@@ -523,7 +635,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           disabled={threadActionsDisabled}
           title={threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}
           onClick={archiveCurrentThread}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <ActionMenuSeparator />
         <ActionMenuItem
@@ -533,7 +645,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           disabled={threadActionsDisabled}
           title={threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}
           onClick={openSideChat}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <ActionMenuItem
           icon={<TableProperties className="h-5 w-5" strokeWidth={1.9} />}
@@ -541,18 +653,21 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           disabled={sourcePreviewDisabled}
           title={sourcePreviewDisabled ? t('sessionActionDataImportNeedsWorkspace') : undefined}
           onClick={openSourcePreview}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <div className="ds-session-actions-menu-submenu-anchor">
           <ActionMenuItem
             icon={<Copy className="h-5 w-5" strokeWidth={1.9} />}
             label={t('sessionActionCopy')}
             hasSubmenu
-            onClick={() => setActionsSubmenu(actionsSubmenu === 'copy' ? null : 'copy')}
-            onPointerEnter={() => setActionsSubmenu('copy')}
+            ref={copyParentRef}
+            expanded={actionsSubmenu === 'copy'}
+            controls={`${actionsMenuId}-copy`}
+            onClick={() => actionsSubmenu === 'copy' ? setActionsSubmenu(null) : enterSubmenu('copy')}
+            onPointerEnter={() => hoverSubmenu('copy')}
           />
           {actionsSubmenu === 'copy' ? (
-            <div className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionCopy')}>
+            <div ref={copyMenuRef} id={`${actionsMenuId}-copy`} className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionCopy')}>
               <ActionMenuItem
                 icon={<Copy className="h-5 w-5" strokeWidth={1.9} />}
                 label={t('sessionActionCopyMarkdown')}
@@ -587,13 +702,16 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
             icon={<GitBranch className="h-5 w-5" strokeWidth={1.9} />}
             label={t('sessionActionBranch')}
             hasSubmenu
+            ref={branchParentRef}
+            expanded={actionsSubmenu === 'branch'}
+            controls={`${actionsMenuId}-branch`}
             disabled={threadActionsDisabled || busy}
             title={busy ? t('threadActionBusy') : threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}
-            onClick={() => setActionsSubmenu(actionsSubmenu === 'branch' ? null : 'branch')}
-            onPointerEnter={() => setActionsSubmenu('branch')}
+            onClick={() => actionsSubmenu === 'branch' ? setActionsSubmenu(null) : enterSubmenu('branch')}
+            onPointerEnter={() => hoverSubmenu('branch')}
           />
           {actionsSubmenu === 'branch' ? (
-            <div className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionBranch')}>
+            <div ref={branchMenuRef} id={`${actionsMenuId}-branch`} className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionBranch')}>
               <ActionMenuItem
                 icon={<GitFork className="h-5 w-5" strokeWidth={1.9} />}
                 label={t('sessionActionForkCurrent')}
@@ -607,7 +725,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           icon={<Clock3 className="h-5 w-5" strokeWidth={1.9} />}
           label={t('sessionActionAddAutomation')}
           onClick={openAutomations}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
         <ActionMenuSeparator />
         <ActionMenuItem
@@ -616,7 +734,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           disabled={threadActionsDisabled}
           title={threadActionsDisabled ? t('runtimeActionNeedsConnection') : undefined}
           onClick={openCurrentThreadInNewWindow}
-          onPointerEnter={() => setActionsSubmenu(null)}
+          onPointerEnter={() => hoverSubmenu(null)}
         />
       </div>
     )
@@ -759,6 +877,10 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                       <button
                         type="button"
                         className="ds-session-actions-trigger"
+                        ref={actionsTriggerRef}
+                        aria-haspopup="menu"
+                        aria-controls={actionsMenuOpen ? actionsMenuId : undefined}
+                        onKeyDown={handleActionsTriggerKeyDown}
                         data-state={actionsMenuOpen ? 'open' : 'closed'}
                         aria-label={t('sessionActionsMenuTitle')}
                         aria-expanded={actionsMenuOpen}
@@ -843,6 +965,10 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                   <button
                     type="button"
                     className="ds-session-actions-trigger ds-session-actions-trigger-lg"
+                    ref={actionsTriggerRef}
+                    aria-haspopup="menu"
+                    aria-controls={actionsMenuOpen ? actionsMenuId : undefined}
+                    onKeyDown={handleActionsTriggerKeyDown}
                     data-state={actionsMenuOpen ? 'open' : 'closed'}
                     aria-label={t('sessionActionsMenuTitle')}
                     aria-expanded={actionsMenuOpen}

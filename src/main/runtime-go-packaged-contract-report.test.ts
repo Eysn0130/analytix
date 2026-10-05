@@ -1085,7 +1085,9 @@ describe('formal runtime Go packaged contract reports', () => {
         unreadableExactInputBlocked: true,
         commercialDecisionSeparated: true,
         duplicateInstancesRetained: true,
-        sourcePlanDoesNotAuthorizeExact: true
+        sourcePlanDoesNotAuthorizeExact: true,
+        sourceNoticeMissingAndOneByteDriftBlocked: true,
+        exactNoticeMissingAndOneByteDriftBlocked: true
       })
     }))
 

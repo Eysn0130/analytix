@@ -2073,6 +2073,25 @@ describe('runtime-go formal evidence admission', () => {
     expect(result.problems).toContain('exact_artifact_changed_after_legal_audit')
   })
 
+  test.each(['missing', 'one-byte'] as const)(
+    're-reads and rejects %s NOTICE after the exact legal audit',
+    (variant) => {
+      const directory = writeBundle()
+      const appPath = exactArtifactsByDirectory.get(directory)!.artifact.path
+      const notice = join(appPath, 'Contents', 'Resources', 'THIRD_PARTY_NOTICES.md')
+      if (variant === 'missing') rmSync(notice)
+      else {
+        const bytes = readFileSync(notice)
+        bytes[bytes.length - 1] ^= 1
+        writeFileSync(notice, bytes)
+      }
+      const result = evaluate(directory)
+      expect(result.accepted).toBe(false)
+      expect(result.problems).toContain('exact_artifact_changed_after_legal_audit')
+      expect(result.artifactBinding.exactArtifactRevalidated).toBe(false)
+    }
+  )
+
   test.each([
     [
       'runtime package',

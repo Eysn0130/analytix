@@ -1248,9 +1248,9 @@ export function Workbench(): ReactElement {
     }
 
     const onKeyDown = (event: KeyboardEvent): void => {
-      // Permission menus and modal dialogs own Tab navigation, including Shift+Tab.
+      // These chat menus and modal dialogs own Tab navigation, including Shift+Tab.
       if (event.key === 'Tab' && event.target instanceof Element &&
-        event.target.closest('[data-composer-execution-menu],[role="dialog"][aria-modal="true"]')) return
+        event.target.closest('[data-composer-execution-menu],[data-session-actions-menu],[data-markdown-table-menu],[role="dialog"][aria-modal="true"]')) return
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
       // Tab buttons own close-and-focus restoration; skip the desktop fallback.
