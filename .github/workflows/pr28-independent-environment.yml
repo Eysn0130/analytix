@@ -51,7 +51,7 @@ jobs:
             "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$(git rev-parse 'HEAD^{tree}')" \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$out/identity.txt"
           (cd "$out" && sha256sum head-objects.pack tree.ls-tree-z identity.txt > SHA256SUMS)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pr28-source-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pr28-source/
@@ -79,7 +79,7 @@ jobs:
           tar -C "$GOMODCACHE" -czf "$out/modules.tar.gz" .
           test "$(du -sb "$out" | cut -f1)" -le 536870912
           (cd "$out" && sha256sum go.tar.gz modules.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pr28-go-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pr28-go/
@@ -106,7 +106,7 @@ jobs:
           tar -czf "$out/dependencies.tar.gz" node_modules packages/runtime/node_modules
           test "$(du -sb "$out" | cut -f1)" -le 1073741824
           (cd "$out" && sha256sum node.tar.gz dependencies.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pr28-node-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pr28-node/
@@ -132,7 +132,7 @@ jobs:
           tar -C "$CARGO_HOME" -czf "$out/registry.tar.gz" registry
           test "$(du -sb "$out" | cut -f1)" -le 1073741824
           (cd "$out" && sha256sum rust.tar.gz registry.tar.gz toolchain.txt inputs.sha256 > SHA256SUMS)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pr28-rust-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pr28-rust/
