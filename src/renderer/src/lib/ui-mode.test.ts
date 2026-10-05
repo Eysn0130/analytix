@@ -6,7 +6,7 @@ import {
   readUiModePreference,
   writeUiModePreference
 } from './ui-mode'
-import { MASCOT_MODE_STORAGE_KEY } from './mascot-mode'
+import { MASCOT_MODE_STORAGE_KEY } from './ui-mode'
 
 class MemoryStorage {
   private values = new Map<string, string>()

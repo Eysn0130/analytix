@@ -1646,7 +1646,7 @@ function MessageBubbleImpl({
         {block.meta?.factHistoryState === 'retained_snapshot' && block.acceptedFinalProjectionReceipt ? (
           <div className="mb-1 text-xs text-ds-muted">{t('retainedSnapshotHistory')}</div>
         ) : null}
-        <div ref={answerRef} className="ds-markdown ds-chat-answer min-w-0 max-w-full text-ds-ink">
+        <div ref={answerRef} className="ds-chat-answer min-w-0 max-w-full text-ds-ink">
           <AssistantMarkdown
             text={block.text}
             streaming={streaming}

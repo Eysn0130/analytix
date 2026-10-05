@@ -152,7 +152,7 @@ function SideAssistantBubble({
 }): ReactElement | null {
   if (!text.trim()) return null
   return (
-    <div className="ds-markdown ds-chat-answer min-w-0 max-w-full text-[13px] leading-5 text-ds-ink">
+    <div className="ds-chat-answer min-w-0 max-w-full text-[13px] leading-5 text-ds-ink">
       <AssistantMarkdown text={text} streaming={streaming} rowId={rowId} />
     </div>
   )

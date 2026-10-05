@@ -103,6 +103,7 @@
       ],
       "consumers": [
         "src/renderer/src/components/DevBrowserPanel.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
         "src/renderer/src/components/sdd/SddDraftEditorView.tsx",
         "src/renderer/src/data-analysis/components/feedback/ToastCenter.tsx",
         "src/renderer/src/data-analysis/features/analysis/AnalysisPage.tsx",
@@ -480,19 +481,20 @@
         "src/renderer/src/components/chat/FloatingComposerExecutionPicker.tsx",
         "src/renderer/src/components/chat/FloatingComposerModelPicker.tsx",
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
         "src/renderer/src/components/chat/above-composer/ComposerInProgressStatusPill.tsx",
         "src/renderer/src/components/chat/above-composer/ComposerQueuedMessageList.tsx",
         "src/renderer/src/components/chat/above-composer/ProgressStepRow.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
         "src/renderer/src/components/settings-section-account.tsx",
         "src/renderer/src/components/write/WriteMarkdownPreview.tsx",
         "src/renderer/src/components/write/WriteTypographyControls.tsx",
         "src/renderer/src/data-analysis/features/analysis/AnalysisPage.tsx",
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -546,12 +548,13 @@
         "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SideConversationPanel.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
         "src/renderer/src/components/chat/message-timeline-cards.tsx",
         "src/renderer/src/components/chat/message-timeline-process.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
+        "src/renderer/src/components/chat/presentation/DisclosureRow.tsx",
         "src/renderer/src/components/schedule/ScheduleTasksView.tsx",
         "src/renderer/src/components/settings-codex-list.tsx",
         "src/renderer/src/components/settings-controls.tsx",
@@ -646,7 +649,8 @@
       ],
       "consumers": [
         "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
+        "src/renderer/src/components/chat/presentation/DisclosureRow.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteMarkdownPreview.tsx"
       ],
@@ -702,7 +706,8 @@
         "src/renderer/src/components/write/WritePdfViewer.tsx",
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
         "src/renderer/src/data-analysis/components/feedback/InsiderLoadingLottie.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/chat/presentation/ImagePreview.tsx"
       ]
     },
     {
@@ -897,12 +902,13 @@
         "src/renderer/src/components/WorkspaceFilePreviewPanel.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
         "src/renderer/src/components/write/WriteMarkdownPreview.tsx",
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -1033,13 +1039,14 @@
       ],
       "consumers": [
         "src/renderer/src/components/chat/ImagePreviewLightbox.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
         "src/renderer/src/components/settings-gui-update.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -1167,7 +1174,8 @@
       ],
       "consumers": [
         "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/interactions/FlowCanvasChrome.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/interactions/FlowCanvasChrome.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -1207,6 +1215,7 @@
         "src/renderer/src/components/PluginMarketplaceView.tsx",
         "src/renderer/src/components/WorkspaceFilePreviewPanel.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx",
         "src/renderer/src/components/plan/PlanPanel.tsx",
         "src/renderer/src/components/shell/ShellGuiUpdateAction.tsx",
         "src/renderer/src/components/summary/OutputSummaryRows.tsx",
@@ -1277,6 +1286,7 @@
       "consumers": [
         "src/renderer/src/components/chat/ThreadUserMessageNavigationRail.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx",
         "src/renderer/src/components/workbench/WorkspaceTabs.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
@@ -1489,9 +1499,9 @@
       "consumers": [
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
-        "src/renderer/src/components/settings-section-easter-egg.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
-        "src/renderer/src/components/write/WriteSidebar.tsx"
+        "src/renderer/src/components/write/WriteSidebar.tsx",
+        "src/renderer/src/components/settings-section-ui-theme.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -1607,6 +1617,7 @@
         "src/renderer/src/components/chat/FloatingComposer.tsx",
         "src/renderer/src/components/chat/ThreadUserMessageNavigationRail.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx",
         "src/renderer/src/components/settings-section-provider-models.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
@@ -2631,6 +2642,7 @@
         "TextIcon"
       ],
       "consumers": [
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
         "src/renderer/src/components/write/WriteWorkspaceView.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
       ]
@@ -2693,7 +2705,6 @@
         "src/renderer/src/components/settings-debug-log.tsx",
         "src/renderer/src/components/settings-section-agents.tsx",
         "src/renderer/src/components/settings-section-archives.tsx",
-        "src/renderer/src/components/settings-section-easter-egg.tsx",
         "src/renderer/src/components/settings-section-memory.tsx",
         "src/renderer/src/components/settings-section-provider-models.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
@@ -2702,7 +2713,8 @@
         "src/renderer/src/components/todo/TodoPanel.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
         "src/renderer/src/components/write/WriteSidebar.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/settings-section-ui-theme.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -2938,7 +2950,8 @@
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/interactions/FlowCanvasChrome.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ],
       "webMatch": "official MIT semantic selection; no current-web parity claim"
     },
@@ -3122,7 +3135,8 @@
         "src/renderer/src/components/DevBrowserPanel.tsx",
         "src/renderer/src/components/sdd/SddDraftEditorView.tsx",
         "src/renderer/src/data-analysis/features/analysis/AnalysisPage.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx"
       ]
     },
     {
@@ -3310,7 +3324,6 @@
         "src/renderer/src/components/chat/above-composer/ComposerQueuedMessageList.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/above-composer/ComposerInProgressStatusPill.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
         "src/renderer/src/components/settings-section-account.tsx",
@@ -3318,7 +3331,9 @@
         "src/renderer/src/components/write/WriteTypographyControls.tsx",
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
         "src/renderer/src/data-analysis/features/analysis/AnalysisPage.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ]
     },
     {
@@ -3358,7 +3373,6 @@
         "src/renderer/src/components/chat/FloatingComposerModelPicker.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/message-timeline-cards.tsx",
         "src/renderer/src/components/chat/message-timeline-process.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
@@ -3376,7 +3390,9 @@
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
         "src/renderer/src/data-analysis/features/analysis/AnalysisPage.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
+        "src/renderer/src/components/chat/presentation/DisclosureRow.tsx"
       ]
     },
     {
@@ -3431,9 +3447,10 @@
       "reason": "Official source preserves this control meaning.",
       "consumers": [
         "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
-        "src/renderer/src/components/write/WriteMarkdownPreview.tsx"
+        "src/renderer/src/components/write/WriteMarkdownPreview.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
+        "src/renderer/src/components/chat/presentation/DisclosureRow.tsx"
       ]
     },
     {
@@ -3552,11 +3569,12 @@
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
         "src/renderer/src/components/chat/SidebarClawDialog.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
         "src/renderer/src/components/write/WriteMarkdownPreview.tsx",
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
-        "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx"
+        "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
+        "src/renderer/src/components/chat/presentation/CodeToolbar.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ]
     },
     {
@@ -3604,13 +3622,14 @@
       "reason": "Official source preserves this control meaning.",
       "consumers": [
         "src/renderer/src/components/chat/ImagePreviewLightbox.tsx",
-        "src/renderer/src/components/chat/StreamdownCode.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
         "src/renderer/src/components/settings-gui-update.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ]
     },
     {
@@ -3620,7 +3639,8 @@
       "reason": "Official source preserves this control meaning.",
       "consumers": [
         "src/renderer/src/data-analysis/features/flow/graph/interactions/FlowCanvasChrome.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ]
     },
     {
@@ -3641,7 +3661,8 @@
         "src/renderer/src/components/summary/RuntimeDiagnosticsPanel.tsx",
         "src/renderer/src/components/summary/SubagentSummaryRows.tsx",
         "src/renderer/src/components/todo/TodoPanel.tsx",
-        "src/renderer/src/components/write/WriteImagePreview.tsx"
+        "src/renderer/src/components/write/WriteImagePreview.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx"
       ]
     },
     {
@@ -3681,7 +3702,8 @@
       "reason": "Official source preserves this control meaning.",
       "consumers": [
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
-        "src/renderer/src/components/workbench/WorkspaceTabs.tsx"
+        "src/renderer/src/components/workbench/WorkspaceTabs.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx"
       ]
     },
     {
@@ -3829,9 +3851,9 @@
       "consumers": [
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
         "src/renderer/src/components/chat/WorkspaceProjectPicker.tsx",
-        "src/renderer/src/components/settings-section-easter-egg.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
-        "src/renderer/src/components/write/WriteSidebar.tsx"
+        "src/renderer/src/components/write/WriteSidebar.tsx",
+        "src/renderer/src/components/settings-section-ui-theme.tsx"
       ]
     },
     {
@@ -3960,7 +3982,8 @@
         "src/renderer/src/components/settings-section-provider-models.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
-        "src/renderer/src/components/write/WriteImagePreview.tsx"
+        "src/renderer/src/components/write/WriteImagePreview.tsx",
+        "src/renderer/src/components/chat/presentation/LinkIcon.tsx"
       ]
     },
     {
@@ -4152,7 +4175,8 @@
         "src/renderer/src/components/summary/ThreadSummaryPanel.tsx",
         "src/renderer/src/components/write/WriteInlineAgent.tsx",
         "src/renderer/src/components/write/WritePdfViewer.tsx",
-        "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx"
+        "src/renderer/src/components/write/WriteWorkspaceToolbar.tsx",
+        "src/renderer/src/components/chat/presentation/ImagePreview.tsx"
       ]
     },
     {
@@ -5144,7 +5168,6 @@
         "src/renderer/src/components/chat/above-composer/ComposerGoalRow.tsx",
         "src/renderer/src/components/chat/above-composer/ComposerQueuedMessageList.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
-        "src/renderer/src/components/settings-section-easter-egg.tsx",
         "src/renderer/src/components/settings-debug-log.tsx",
         "src/renderer/src/components/settings-section-archives.tsx",
         "src/renderer/src/components/settings-section-memory.tsx",
@@ -5157,7 +5180,8 @@
         "src/renderer/src/components/todo/TodoPanel.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
         "src/renderer/src/components/write/WriteSidebar.tsx",
-        "src/renderer/src/data-analysis/features/import/ImportPage.tsx"
+        "src/renderer/src/data-analysis/features/import/ImportPage.tsx",
+        "src/renderer/src/components/settings-section-ui-theme.tsx"
       ]
     },
     {
@@ -5327,7 +5351,8 @@
         "src/renderer/src/data-analysis/components/workbench-ui/WorkbenchUiKit.tsx",
         "src/renderer/src/data-analysis/features/analysis/components/tree/AnalysisTreePanel.tsx",
         "src/renderer/src/data-analysis/features/flow/graph/interactions/FlowCanvasChrome.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
+        "src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx"
       ]
     },
     {

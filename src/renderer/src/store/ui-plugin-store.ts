@@ -1,8 +1,6 @@
 import { create } from 'zustand'
 import {
   buildUiPluginTokenCss,
-  resolveUiPluginFigure,
-  type UiPluginFigureSlot,
   type UiPluginLabelKey,
   type UiPluginListItem,
   type UiPluginManifestV1,
@@ -16,8 +14,7 @@ import {
 } from '../lib/ui-mode'
 
 /**
- * 形象工坊运行时:单一 uiMode('default' | 'mascot' | 插件 id),
- * 负责 DOM 属性(data-mascot-mode / data-ui-plugin)、token 样式注入与插件图集加载。
+ * Declarative UI plugin authority: saved mode, validated manifest and theme token injection.
  */
 
 export type UiPluginRuntime = {
@@ -49,7 +46,7 @@ function uiPluginApi(): Window['analytix']['app'] | null {
 function applyUiModeDom(mode: string, runtime: UiPluginRuntime | null): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  root.setAttribute('data-mascot-mode', mode === UI_MODE_MASCOT ? 'on' : 'off')
+  root.removeAttribute('data-mascot-mode')
   if (runtime && mode === runtime.manifest.id) {
     root.setAttribute('data-ui-plugin', runtime.manifest.id)
   } else {
@@ -88,7 +85,7 @@ export const useUiPluginStore = create<UiPluginState>((set, get) => ({
       void get().refreshUiPlugins()
       return
     }
-    // 插件模式(含预装的 mascot):先把 mascot 属性立即点亮避免闪烁,再异步加载图集;失败则回退默认
+    // Load the saved plugin through the existing desktop authority; failure resets to default.
     applyUiModeDom(mode === UI_MODE_MASCOT ? UI_MODE_MASCOT : UI_MODE_DEFAULT, null)
     await get().activateUiMode(mode)
     void get().refreshUiPlugins()
@@ -114,11 +111,10 @@ export const useUiPluginStore = create<UiPluginState>((set, get) => ({
       return
     }
 
-    // 'mascot' 不再特殊:它是预装插件,与第三方插件走同一条加载链路;
-    // applyUiModeDom 会在 id 为 mascot 时同时点亮 data-mascot-mode 手工机制
+    // Plugin manifests and tokens continue to come from the existing desktop authority.
     const api = uiPluginApi()
     if (typeof api?.loadUiPlugin !== 'function') {
-      // 桌面接口不可用(如纯渲染测试):mascot 仍可退化为仅属性模式
+      // Preserve the legacy mode compatibility without rendering decorative figures.
       if (normalized === UI_MODE_MASCOT) {
         writeUiModePreference(normalized)
         set({ uiMode: normalized, activeRuntime: null, lastError: null })
@@ -181,24 +177,18 @@ export const useUiPluginStore = create<UiPluginState>((set, get) => ({
     if (get().uiMode === id) {
       await get().activateUiMode(UI_MODE_DEFAULT)
     }
+    set({ busy: true, lastError: null })
     try {
-      await api.removeUiPlugin(id)
+      const result = await api.removeUiPlugin(id)
+      if (!result.ok) set({ lastError: 'UI theme removal failed' })
+    } catch (error) {
+      set({ lastError: error instanceof Error ? error.message : String(error) })
     } finally {
       await get().refreshUiPlugins()
+      set({ busy: false })
     }
   }
 }))
-
-/** 按槽位回退链取激活插件的形象;无插件或槽位缺失时返回 fallback */
-export function useUiPluginFigure(
-  slots: readonly UiPluginFigureSlot[],
-  fallback: string
-): string {
-  const figure = useUiPluginStore((state) =>
-    resolveUiPluginFigure(state.activeRuntime?.figures ?? null, slots)
-  )
-  return figure ?? fallback
-}
 
 /** 激活插件提供的进行中文案(按当前语言);未提供时返回 null */
 export function useUiPluginWorkLabel(labelKey: UiPluginLabelKey, language: string): string | null {
@@ -208,13 +198,4 @@ export function useUiPluginWorkLabel(labelKey: UiPluginLabelKey, language: strin
     const locale = language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
     return labels[locale]?.[labelKey] ?? null
   })
-}
-
-/** 是否应启用主会话出没彩蛋(mascot 内置 或 插件声明 features.cameos) */
-export function useUiModeCameosEnabled(): boolean {
-  return useUiPluginStore(
-    (state) =>
-      state.uiMode === UI_MODE_MASCOT ||
-      Boolean(state.activeRuntime && state.activeRuntime.manifest.features?.cameos)
-  )
 }

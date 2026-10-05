@@ -74,8 +74,8 @@
 }
 
 /* The rail sits on chrome, so its selected fill has its own contrast. */
-:where(:root:not([data-mascot-mode='on'])) .ds-navigation-rail-button[aria-current='page'] { background: #e8eaeb; }
-:where(:root[data-theme='dark']:not([data-mascot-mode='on'])) .ds-navigation-rail-button[aria-current='page'] { background: #444445; }
+:where(:root) .ds-navigation-rail-button[aria-current='page'] { background: #e8eaeb; }
+:where(:root[data-theme='dark']) .ds-navigation-rail-button[aria-current='page'] { background: #444445; }
 
 .ds-navigation-rail-button:active:not(:disabled) {
   background: var(--ax-toolbar-active-bg);
@@ -90,7 +90,7 @@
 .ds-navigation-rail .ds-toolbar-tooltip-anchor:hover .ds-toolbar-tooltip-bubble,
 .ds-navigation-rail .ds-toolbar-tooltip-anchor > :focus-visible ~ .ds-toolbar-tooltip-bubble {
   top: 50%;
-  left: calc(100% + 12px);
+  left: calc(100% + 12px + var(--ds-tooltip-shift, 0px));
   transform: translateY(-50%);
 }
 

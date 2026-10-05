@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactElement } from 'react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export function ToolbarTooltip({
   label,
@@ -20,19 +20,34 @@ export function ToolbarTooltip({
     const bubble = bubbleRef.current
     if (!anchor || !bubble) return
     const rect = anchor.getBoundingClientRect()
-    const width = bubble.getBoundingClientRect().width
-    if (!width || !rect.width) return
-    const centeredLeft = rect.left + rect.width / 2 - width / 2
-    const left = Math.max(12, Math.min(centeredLeft, window.innerWidth - 12 - width))
-    // Convert viewport pixels back to the existing UI zoom coordinate space.
+    const bubbleRect = bubble.getBoundingClientRect()
+    if (!bubbleRect.width || !rect.width) return
+    // Measure in viewport pixels, then return to the existing UI zoom space.
     const scale = anchor.offsetWidth ? rect.width / anchor.offsetWidth : 1
-    setShift((left - centeredLeft) / scale)
+    const currentShift = Number.parseFloat(anchor.style.getPropertyValue('--ds-tooltip-shift')) || 0
+    const unshiftedLeft = bubbleRect.left - currentShift * scale
+    const left = Math.max(12, Math.min(unshiftedLeft, window.innerWidth - 12 - bubbleRect.width))
+    const nextShift = (left - unshiftedLeft) / scale
+    setShift((previous) => Math.abs(previous - nextShift) < 0.1 ? previous : nextShift)
   }, [])
+  // Panel animation moves the anchor without changing the tooltip label or size.
+  useLayoutEffect(() => {
+    positionTooltip()
+  })
   useEffect(() => {
     positionTooltip()
     window.addEventListener('resize', positionTooltip)
     return () => window.removeEventListener('resize', positionTooltip)
   }, [label, positionTooltip, tooltipHidden])
+  useEffect(() => {
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      const anchor = anchorRef.current
+      if (event.key !== 'Escape' || event.isComposing || !anchor) return
+      if (anchor.contains(document.activeElement) || anchor.matches(':hover')) setSuppressed(true)
+    }
+    document.addEventListener('keydown', dismissOnEscape)
+    return () => document.removeEventListener('keydown', dismissOnEscape)
+  }, [])
 
   return (
     <span
@@ -44,7 +59,7 @@ export function ToolbarTooltip({
       data-tooltip-hidden={tooltipHidden ? 'true' : undefined}
       onClickCapture={() => setSuppressed(true)}
       onKeyDownCapture={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') setSuppressed(true)
+        if (!event.nativeEvent.isComposing && (event.key === 'Enter' || event.key === ' ')) setSuppressed(true)
       }}
       onBlurCapture={(event) => {
         const nextTarget = event.relatedTarget

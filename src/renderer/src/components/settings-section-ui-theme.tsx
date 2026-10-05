@@ -3,14 +3,12 @@ import { useEffect, useState } from 'react'
 import { FolderPlus, Trash2 } from '../design/AnalytixUiIcons'
 import { UI_MODE_DEFAULT, UI_MODE_MASCOT } from '../lib/ui-mode'
 import { useUiPluginStore } from '../store/ui-plugin-store'
-import xiezhiProfile from '../../../asset/img/xiezhi_profile.png'
 import { SettingsCard, SettingRow } from './settings-controls'
 
 type ModeCard = {
   mode: string
   title: string
   subtitle: string
-  preview: string | null
   removable: boolean
 }
 
@@ -41,19 +39,6 @@ function ModeCardButton({
           : 'border-ds-border bg-ds-card hover:border-accent/25 hover:bg-ds-hover'
       }`}
     >
-      <span className="flex h-16 w-16 items-center justify-center">
-        {card.preview ? (
-          <img
-            src={card.preview}
-            alt=""
-            className="max-h-16 max-w-16 object-contain"
-            draggable={false}
-            decoding="async"
-          />
-        ) : (
-          <span className="h-12 w-12 rounded-xl bg-ds-subtle" />
-        )}
-      </span>
       <span className="min-w-0">
         <span className="block truncate text-[13.5px] font-semibold text-ds-ink">{card.title}</span>
         <span className="mt-0.5 block truncate text-[11.5px] text-ds-faint">{card.subtitle}</span>
@@ -74,6 +59,7 @@ function ModeCardButton({
         <button
           type="button"
           onClick={onRemove}
+          disabled={busy}
           title={removeLabel}
           aria-label={removeLabel}
           className="absolute right-2 top-2 rounded-md p-1 text-ds-faint transition hover:bg-ds-danger-soft hover:text-ds-danger"
@@ -85,7 +71,7 @@ function ModeCardButton({
   )
 }
 
-export function EasterEggSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
+export function UiThemeSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
   const { t } = ctx
   const uiMode = useUiPluginStore((s) => s.uiMode)
   const installed = useUiPluginStore((s) => s.installed)
@@ -103,13 +89,12 @@ export function EasterEggSettingsSection({ ctx }: { ctx: Record<string, any> }):
     void refreshUiPlugins()
   }, [initUiPlugins, refreshUiPlugins])
 
-  // 内置默认形象是獬豸;旧 mascot 预装插件保留兼容,但不再作为工坊入口展示。
+  // Restore default tokens without a decorative preview; legacy mascot choices stay retired.
   const builtinCards: ModeCard[] = [
     {
       mode: UI_MODE_DEFAULT,
-      title: t('uiModeDefaultTitle'),
-      subtitle: t('uiModeDefaultSubtitle'),
-      preview: xiezhiProfile,
+      title: t('uiThemeDefaultTitle'),
+      subtitle: t('uiThemeDefaultSubtitle'),
       removable: false
     }
   ]
@@ -120,7 +105,6 @@ export function EasterEggSettingsSection({ ctx }: { ctx: Record<string, any> }):
       mode: item.manifest.id,
       title: item.manifest.name,
       subtitle: [item.manifest.author, `v${item.manifest.version}`].filter(Boolean).join(' · '),
-      preview: item.previewDataUrl,
       removable: true
     }))
 
@@ -133,10 +117,10 @@ export function EasterEggSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   return (
-    <SettingsCard title={t('easterEggSection')}>
+    <SettingsCard title={t('uiThemeSection')} className="mt-6">
       <SettingRow
-        title={t('uiModeWorkshopTitle')}
-        description={t('uiModeWorkshopDesc')}
+        title={t('uiThemeTitle')}
+        description={t('uiThemeDesc')}
         control={
           <div className="flex w-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

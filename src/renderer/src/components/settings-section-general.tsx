@@ -21,6 +21,7 @@ import {
   Toggle
 } from './settings-controls'
 import { LegacySessionImportCard } from './settings-section-general-legacy-import'
+import { UiThemeSettingsSection } from './settings-section-ui-theme'
 
 export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
   const {
@@ -224,6 +225,8 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   }
                 />
               </SettingsCard>
+
+              <UiThemeSettingsSection ctx={ctx} />
 
               <SettingsCard title={t('desktopBehavior')} className="mt-6">
                 <SettingRow

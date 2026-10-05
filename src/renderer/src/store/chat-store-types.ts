@@ -108,7 +108,7 @@ export type SettingsRouteSection =
   | 'skill'
   | 'mcp'
   | 'shortcuts'
-  | 'easterEgg'
+
   | 'claw'
   | 'updates'
   | 'debug'

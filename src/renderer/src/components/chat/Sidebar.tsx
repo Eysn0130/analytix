@@ -20,7 +20,6 @@ import {
 } from './SidebarClaw'
 import type { ClawImDialogMode } from './SidebarClawDialogHelpers'
 import { ClawAddImDialog } from './SidebarClawDialog'
-import { SidebarMascot } from './AnimatedWorkLogo'
 import { ConnectPhoneSidebarPanel } from './ConnectPhoneView'
 import { SidebarProjectsSection } from './SidebarProjectsSection'
 import {
@@ -147,11 +146,6 @@ export function Sidebar({
       footer={
         <div className="space-y-1">
           <div className="flex min-h-[42px] items-center justify-center gap-2.5 pb-1">
-            {!focusModeEnabled ? (
-              <span className="flex h-[46px] w-[56px] shrink-0 items-center justify-center">
-                <SidebarMascot />
-              </span>
-            ) : null}
             <FocusModeToggle
               enabled={focusModeEnabled}
               onToggle={() => onFocusModeChange(!focusModeEnabled)}

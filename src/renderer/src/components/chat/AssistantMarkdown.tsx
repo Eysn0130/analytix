@@ -7,13 +7,13 @@ import {
   PersistedThreadTraceSink
 } from '../../thread/tracing/thread-performance-trace'
 
-const loadStreamdownAssistant = () =>
-  import('./StreamdownAssistant').then((module) => ({ default: module.StreamdownAssistant }))
+const loadDshAssistant = () =>
+  import('./DshAssistant').then((module) => ({ default: module.DshAssistant }))
 
-const LazyStreamdownAssistant = lazy(loadStreamdownAssistant)
+const LazyDshAssistant = lazy(loadDshAssistant)
 
 export function preloadAssistantMarkdownRenderer(): void {
-  void loadStreamdownAssistant()
+  void loadDshAssistant()
 }
 
 const markdownTraceSink = new PersistedThreadTraceSink()
@@ -244,6 +244,7 @@ export function AssistantMarkdown({
   rowId?: string
   onFinalized?: () => void
 }): ReactElement {
+  const bodyClassName = ['ds-assistant-markdown', className].filter(Boolean).join(' ')
   const { t } = useTranslation('common')
   const finalizationPolicy = useMemo(() => (
     streaming ? null : getMarkdownFinalizationPolicy(text)
@@ -342,9 +343,17 @@ export function AssistantMarkdown({
     }
   }, [finalizationPolicy, finalized, onFinalized, streaming, text])
 
+  // A single presentation leaf consumes only the already-public text. Its
+  // incremental parse stays active through pacing and queued finalization.
+  if ((shouldPacePlainText || !finalized) && getMarkdownFinalizationPolicy(text).mode !== 'lightweight') {
+    return <Suspense fallback={<div className={bodyClassName}><span className="whitespace-pre-wrap break-words">{pacedPlainText.text}</span></div>}>
+      <LazyDshAssistant text={shouldPacePlainText ? pacedPlainText.text : text} streaming={true} className={bodyClassName} />
+    </Suspense>
+  }
+
   if (shouldPacePlainText || !finalized || finalizationPolicy?.mode === 'lightweight') {
     return (
-      <div className={className}>
+      <div className={bodyClassName}>
         <span className="whitespace-pre-wrap break-words">{shouldPacePlainText ? pacedPlainText.text : text}</span>
         {!streaming && pacedPlainText.caughtUp && finalizationPolicy?.mode === 'lightweight' ? (
           <p className="ds-markdown-fallback-note" role="note">{t('markdownPlainTextFallback')}</p>
@@ -356,12 +365,12 @@ export function AssistantMarkdown({
   return (
     <Suspense
       fallback={
-        <div className={className}>
+        <div className={bodyClassName}>
           {text}
         </div>
       }
     >
-      <LazyStreamdownAssistant text={text} streaming={streaming} className={className} />
+      <LazyDshAssistant text={text} streaming={streaming} className={bodyClassName} />
     </Suspense>
   )
 }

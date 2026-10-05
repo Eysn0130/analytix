@@ -8,9 +8,9 @@ Source of truth for current product behavior: current code/tests and fresh
 evidence, not a historical ledger row.
 
 This directory records how analytix studies and absorbs capability from the
-twelve repositories currently registered in `upstream-sources.json`: Kun,
+thirteen repositories currently registered in `upstream-sources.json`: Kun,
 DeepSeek-Reasonix, OpenCode, CodexDesktop-Rebuild, Hermes Agent, Claude Code,
-Claw Code, Gajae Code, LazyCodex, postgres-mcp, Instructor, and OpenClaw. It exists so analytix can keep learning
+Claw Code, Gajae Code, LazyCodex, postgres-mcp, Instructor, OpenClaw, and DeepSeek Harness. It exists so analytix can keep learning
 without becoming a patch pile, losing its product architecture, or copying
 material without a verified license and provenance chain.
 

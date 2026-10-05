@@ -117,10 +117,11 @@ export const REQUIRED_PRODUCT_LICENSE_SHA256 =
   '339d7dd55119d76a0286d2be28868671e8905ad65df2967324a1b75db8d1f7a8'
 
 // Bind the complete reviewed notice, including the Office generation
-// inventory and the admitted OpenAI Apps SDK UI MIT icon notices. Keep this expected digest independent of
+// inventory, admitted OpenAI Apps SDK UI MIT icons and DeepSeek Harness MIT
+// presentation leaves. Keep this expected digest independent of
 // the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '88203abfcb1e5976032446d5a6f19f06ba1968c5e994fbcf7d651752aad94b3a'
+  '5de82bef6e03965b797df95879b6cbeb4f677ef9e051dcd1adfb78fc71dd5fd6'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 

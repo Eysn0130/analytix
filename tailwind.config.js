@@ -4,7 +4,6 @@ export default {
   content: [
     './src/renderer/index.html',
     './src/renderer/src/**/*.{ts,tsx}',
-    './node_modules/streamdown/dist/**/*.js'
   ],
   theme: {
     extend: {
