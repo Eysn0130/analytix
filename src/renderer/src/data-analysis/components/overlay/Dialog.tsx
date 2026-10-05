@@ -1,4 +1,5 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode } from "react";
+import { useModalFocus } from "../../../hooks/use-modal-focus";
 
 interface DialogProps {
   open: boolean;
@@ -19,8 +20,11 @@ interface DialogProps {
   onClose: () => void;
 }
 
-export function Dialog({
-  open,
+export function Dialog(props: DialogProps): JSX.Element | null {
+  return props.open ? <MountedDialog {...props} /> : null;
+}
+
+function MountedDialog({
   title,
   subtitle,
   headerExtra,
@@ -37,24 +41,7 @@ export function Dialog({
   showCloseButton = true,
   onClose
 }: DialogProps): JSX.Element | null {
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) {
-    return null;
-  }
+  const dialogRef = useModalFocus(onClose, true, true);
 
   const headerContent = (
     <>
@@ -90,6 +77,8 @@ export function Dialog({
       role="presentation"
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className={`ui-dialog${className ? ` ${className}` : ""}`}
         style={{ width: `${Math.max(360, Math.min(width, window.innerWidth - 32))}px` }}
         onMouseDown={(event) => event.stopPropagation()}

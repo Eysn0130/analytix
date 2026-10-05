@@ -49,6 +49,7 @@ import {
   analytixThreadSteerPath,
   analytixThreadTurnsPath,
   analytixAttachmentContentPath,
+  analytixAttachmentPath,
   analytixUserInputPath,
   analytixMemoryRecordPath,
   analytixSessionResumePath,
@@ -118,6 +119,7 @@ import {
   ThreadSummaryTaskOutputResponse
 } from '../../../../packages/runtime/src/contracts/threads.js'
 import { threadSummaryTaskIdentityMatchesV1 } from '../../../../packages/runtime/src/contracts/task-job-output.js'
+import { AttachmentMetadataResponse } from '../../../../packages/runtime/src/contracts/attachments.js'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../../packages/runtime/src/contracts/runtime-info.js'
 import {
   AttachmentDiagnosticsResponseV2 as AttachmentDiagnosticsResponseSchema,
@@ -782,6 +784,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       attachmentIds?: string[]
       fileReferences?: Array<{ path: string; relativePath: string; name: string; kind?: 'file' | 'directory' }>
       workspaceCheckpointId?: string
+      submissionIsCurrent?: () => boolean
     }
   ): Promise<{ turnId: string; threadId: string; userMessageItemId?: string }> {
     const settings = await rendererRuntimeClient.getSettings()
@@ -836,6 +839,10 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     }
     if (options?.workspaceCheckpointId?.trim()) {
       body.workspaceCheckpointId = options.workspaceCheckpointId.trim()
+    }
+    // Settings can yield after the store's preflight. Fence the actual request too.
+    if (options?.submissionIsCurrent && !options.submissionIsCurrent()) {
+      throw new Error('Submission ownership expired')
     }
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixThreadTurnsPath(threadId),
@@ -1316,6 +1323,18 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       'runtime returned an invalid attachment diagnostics response',
       AttachmentDiagnosticsResponseSchema
     )
+  }
+
+  async getAttachmentMetadata(
+    attachmentId: string,
+    options: { threadId: string; workspace: string }
+  ): Promise<CoreAttachmentMetadataJson> {
+    const query = buildQuery({ thread_id: options.threadId, workspace: options.workspace })
+    const response = await rendererRuntimeClient.runtimeRequest(`${analytixAttachmentPath(attachmentId)}${query}`, 'GET')
+    if (!response.ok) throw runtimeErrorToError(readRuntimeError(response.body, 'failed to load attachment metadata'))
+    const { attachment } = readRuntimeSchema(response.body, 'runtime returned invalid attachment metadata', AttachmentMetadataResponse)
+    if (attachment.id !== attachmentId) throw new Error('Attachment identity mismatch')
+    return attachment
   }
 
   async getAttachmentContent(

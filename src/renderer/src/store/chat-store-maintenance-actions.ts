@@ -1,3 +1,7 @@
+import { captureRewindResendPayload } from './rewind-resend-payload'
+import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
+import { AttachmentPublicMetadata } from '../../../../packages/runtime/src/contracts/attachments.js'
+import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
 import { getThreadBinding } from './chat-store-thread-binding'
 import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
@@ -217,6 +221,7 @@ export function createMaintenanceActions(
 ): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
   const binding = getThreadBinding(sseAbortRef)
   const resolvingGates = new Set<string>()
+  let editInFlight = false
   type GateBlock = Extract<ChatBlock, { kind: 'approval' | 'user_input' }>
   const gateKey = (block: GateBlock): string =>
     `${block.kind}:${block.kind === 'approval' ? block.approvalId : block.requestId}`
@@ -797,86 +802,120 @@ export function createMaintenanceActions(
 
   rewindAndResend: async (userBlockId, newText) => {
     const trimmed = newText.trim()
-    if (!trimmed) return
+    if (!trimmed || editInFlight) return
     const state = get()
-    if (state.busy) {
-      set({ error: i18n.t('common:rewindBusyError') })
-      return
-    }
-    const idx = state.blocks.findIndex((b) => b.id === userBlockId && b.kind === 'user')
+    if (state.busy) { set({ error: i18n.t('common:rewindBusyError') }); return }
+    if (state.runtimeConnection !== 'ready') { set({ error: i18n.t('common:runtimeActionNeedsConnection') }); return }
+    const idx = state.blocks.findIndex(block => block.id === userBlockId && block.kind === 'user')
     if (idx < 0) return
     const target = state.blocks[idx]
-    const turnId = target?.kind === 'user' && typeof target.meta?.turnId === 'string'
-      ? target.meta.turnId
-      : ''
+    if (target.kind !== 'user') return
+    // File-context prompts have a separate visible text and remain uneditable.
+    if (typeof target.meta?.displayText === 'string' && target.meta.displayText.trim()) {
+      set({ error: i18n.t('common:runtimeFeatureUnsupported') }); return
+    }
+    const turnId = typeof target.meta?.turnId === 'string' ? target.meta.turnId : ''
     const activeThreadId = state.activeThreadId
     const provider = getProvider()
-    if (!activeThreadId || !turnId || typeof provider.rewindThread !== 'function') {
-      set({ error: i18n.t('common:runtimeFeatureUnsupported') })
-      return
+    const activeThread = state.threads.find(thread => thread.id === activeThreadId)
+    if (!activeThreadId || !turnId || typeof provider.rewindThread !== 'function' || activeThread?.historyAuthority === 'case_boundary_only_v1') {
+      set({ error: i18n.t('common:runtimeFeatureUnsupported') }); return
     }
-    const activeThread = state.threads.find((thread) => thread.id === activeThreadId)
-    if (activeThread?.historyAuthority === 'case_boundary_only_v1') {
-      set({ error: i18n.t('common:runtimeFeatureUnsupported') })
-      return
+    const workspace = normalizeWorkspaceRoot(activeThread?.workspace) || normalizeWorkspaceRoot(state.workspaceRoot)
+    let generation = binding.generation
+    let submissionGeneration = binding.submissionGeneration
+    let rewindIssued = false
+    let sending = false
+    const isCurrent = (): boolean => get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready' &&
+      binding.generation === generation && binding.submissionGeneration === submissionGeneration && (sending || !get().busy) &&
+      get().threads.find(thread => thread.id === activeThreadId)?.historyAuthority !== 'case_boundary_only_v1' &&
+      (rewindIssued || get().blocks.some(block => block.id === userBlockId && block.kind === 'user' && block.meta?.turnId === turnId)) &&
+      (normalizeWorkspaceRoot(get().threads.find(thread => thread.id === activeThreadId)?.workspace) || normalizeWorkspaceRoot(get().workspaceRoot)) === workspace
+    let payload: ReturnType<typeof captureRewindResendPayload>
+    try { payload = captureRewindResendPayload(target.meta) } catch {
+      set({ error: i18n.t('common:rewindResendInvalidPayload') }); return
     }
-    const checkpointId =
-      target?.kind === 'user' && typeof target.meta?.workspaceCheckpointId === 'string'
-        ? target.meta.workspaceCheckpointId.trim()
-        : ''
-    if (checkpointId) {
-      const restored = await window.analytix.workspace.restoreGitCheckpoint({ checkpointId }).catch((error) => ({
-        ok: false as const,
-        reason: 'error' as const,
-        message: error instanceof Error ? error.message : String(error)
-      }))
-      if (!restored.ok) {
-        set({ error: restored.message })
+    const draftKey = composerDraftKey(workspace, activeThreadId)
+    const originalDraft = state.composerDrafts?.[draftKey] ?? emptyComposerDraft
+    const checkpointId = typeof target.meta?.workspaceCheckpointId === 'string' ? target.meta.workspaceCheckpointId.trim() : ''
+    editInFlight = true
+    let rewound = false
+    let sent = false
+    try {
+      // This read checks current Go authority before either destructive operation.
+      // StartTurn will still plan fresh context-bound use; no old receipt is reused.
+      if (payload.attachmentIds.length) {
+        if (!workspace || typeof provider.getAttachmentMetadata !== 'function') {
+          set({ error: i18n.t('common:rewindResendAttachmentUnavailable') }); return
+        }
+        const captured = new Map(payload.attachments.map(reference => [reference.id, reference]))
+        const attachments = [] as typeof payload.attachments
+        for (const id of payload.attachmentIds) {
+          let metadata
+          try { metadata = AttachmentPublicMetadata.parse(await provider.getAttachmentMetadata(id, { threadId: activeThreadId, workspace })) } catch {
+            if (isCurrent()) set({ error: i18n.t('common:rewindResendAttachmentUnavailable') })
+            return
+          }
+          if (!isCurrent()) return
+          if (metadata.id !== id) { set({ error: i18n.t('common:rewindResendAttachmentUnavailable') }); return }
+          attachments.push(captured.get(id) ?? projectAttachmentReferencesForPublicSurfaces([metadata])[0])
+        }
+        payload = { ...payload, attachments }
+      }
+      if (!isCurrent()) return
+      if (checkpointId) {
+        let restored
+        try { restored = await window.analytix.workspace.restoreGitCheckpoint({ checkpointId }) } catch {
+          if (isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
+          return
+        }
+        if (!isCurrent()) return
+        if (!restored.ok) { set({ error: i18n.t('common:rewindResendFailed') }); return }
+      }
+      rewindIssued = true
+      try { await provider.rewindThread(activeThreadId, turnId); rewound = true } catch {
+        if (isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
         return
       }
+      if (!isCurrent()) return
+      // Our rewind SSE may already have removed the target. Mirror the captured
+      // cut only after its successful HTTP reply, without requiring it to remain.
+      const turnStartedAtByUserId = { ...get().turnStartedAtByUserId }
+      const turnDurationByUserId = { ...get().turnDurationByUserId }
+      for (const block of state.blocks.slice(idx)) {
+        if (block.kind === 'user') { delete turnStartedAtByUserId[block.id]; delete turnDurationByUserId[block.id] }
+      }
+      generation = ++binding.generation
+      sseAbortRef.current?.abort()
+      sseAbortRef.current = null
+      clearBusyWatchdog()
+      set({ blocks: state.blocks.slice(0, idx), liveAssistant: '', currentTurnId: null, currentTurnUserId: null,
+        turnStartedAtByUserId, turnDurationByUserId, queuedMessages: [], queuedMessagesPausedReason: null, error: null })
+      sending = true
+      try {
+        const pending = get().sendMessage(trimmed, undefined, { ...payload,
+          submissionGuard: { isCurrent, validateBeforeSend: async () => isCurrent() } })
+        // An existing-thread send binds its new subscription synchronously before
+        // its first await. Hand off exactly that generation; later changes revoke it.
+        generation = binding.generation
+        submissionGeneration = binding.submissionGeneration
+        sent = await pending
+      } catch { /* Preserve a retryable draft; never expose an unsafe error body. */ }
+      if (!sent && isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
+    } finally {
+      // A successful rewind is irreversible locally. Preserve the original-key
+      // draft even when navigation or lost-ACK recovery replaced the subscription.
+      // Object identity protects newer text, attachments and file references.
+      const owner = get().threads.find(thread => thread.id === activeThreadId)
+      if (rewound && !sent && owner && owner.historyAuthority !== 'case_boundary_only_v1' && normalizeWorkspaceRoot(owner.workspace) === workspace) {
+        get().updateComposerDraft?.(draftKey, current => current !== originalDraft ? current : ({
+          ...current, input: trimmed, inputRevision: current.inputRevision + 1, attachments: payload.attachments,
+          fileReferences: payload.fileReferences.map(reference => ({ path: reference.path, relativePath: reference.relativePath,
+            name: reference.name, ...(reference.kind ? { type: reference.kind } : {}) }))
+        }))
+      }
+      editInFlight = false
     }
-
-    try {
-      await provider.rewindThread(activeThreadId, turnId)
-    } catch (e) {
-      set({ error: formatRuntimeError(e) })
-      return
-    }
-
-    // The runtime has now removed the target turn and everything after it
-    // from canonical history. Mirror that cut locally before sending the
-    // edited prompt as a fresh turn.
-    const trimmedBlocks = state.blocks.slice(0, idx)
-
-    const droppedUserIds = state.blocks
-      .slice(idx)
-      .filter((b) => b.kind === 'user')
-      .map((b) => b.id)
-    const turnStartedAtByUserId = { ...state.turnStartedAtByUserId }
-    const turnDurationByUserId = { ...state.turnDurationByUserId }
-    for (const id of droppedUserIds) {
-      delete turnStartedAtByUserId[id]
-      delete turnDurationByUserId[id]
-    }
-
-    binding.generation += 1
-    sseAbortRef.current?.abort()
-    sseAbortRef.current = null
-    clearBusyWatchdog()
-
-    set({
-      blocks: trimmedBlocks,
-      liveAssistant: '',
-      currentTurnId: null,
-      currentTurnUserId: null,
-      turnStartedAtByUserId,
-      turnDurationByUserId,
-      queuedMessages: [],
-      queuedMessagesPausedReason: null,
-      error: null
-    })
-
-    await get().sendMessage(trimmed)
   },
 
   rollbackWorkspaceToCheckpoint: async (checkpointId) => {

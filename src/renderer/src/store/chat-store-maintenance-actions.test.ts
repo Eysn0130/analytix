@@ -4,6 +4,8 @@ import type { ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadT
 import type { ChatState, ChatStoreGet, ChatStoreSet, SendMessageOverrides } from './chat-store-types'
 import { readThreadForkRegistry } from '../lib/thread-fork-registry'
 import i18n from '../i18n'
+import { getThreadBinding } from './chat-store-thread-binding'
+import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { getActiveStreamSnapshotFor, resetActiveStream } from '../thread/streaming/active-stream-store'
 
 const registryMock = vi.hoisted(() => ({
@@ -39,6 +41,7 @@ type Harness = {
     interruptTurn: ReturnType<typeof vi.fn>
     getThreadDetail: ReturnType<typeof vi.fn>
     rewindThread: ReturnType<typeof vi.fn>
+    getAttachmentMetadata: ReturnType<typeof vi.fn>
     setThreadTodos: ReturnType<typeof vi.fn>
     clearThreadTodos: ReturnType<typeof vi.fn>
   }
@@ -159,6 +162,7 @@ function buildHarness(options: {
       threadStatus: 'aborted'
     })),
     rewindThread: vi.fn(async () => undefined),
+    getAttachmentMetadata: vi.fn(),
     setThreadTodos: vi.fn(async (threadId: string, items: ThreadTodoList['items']) => ({
       threadId,
       turnId: state.activeThreadTodos?.turnId,
@@ -867,7 +871,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(restoreGitCheckpoint.mock.invocationCallOrder[0]).toBeLessThan(
       provider.rewindThread.mock.invocationCallOrder[0]
     )
-    expect(sendMessage).toHaveBeenCalledWith('new text')
+    expect(sendMessage).toHaveBeenCalledWith('new text', undefined, expect.objectContaining({ attachmentIds: [], attachments: [], fileReferences: [] }))
   })
 
   it('resends unchanged text exactly once after the rewind event precedes the successful HTTP response', async () => {
@@ -911,7 +915,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
 
     expect(provider.rewindThread).toHaveBeenCalledTimes(1)
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    expect(sendMessage).toHaveBeenCalledWith(originalText)
+    expect(sendMessage).toHaveBeenCalledWith(originalText, undefined, expect.objectContaining({ attachmentIds: [], attachments: [], fileReferences: [] }))
     expect(state.blocks).toEqual([retained])
     expect(state.turnStartedAtByUserId).toEqual({ user_retained: 1 })
     expect(state.turnDurationByUserId).toEqual({})
@@ -994,5 +998,165 @@ describe('chat-store-maintenance-actions goal actions', () => {
     } finally {
       infoSpy.mockRestore()
     }
+  })
+})
+
+
+const attachmentId = `att_${'a'.repeat(24)}`
+const secondAttachmentId = `att_${'b'.repeat(24)}`
+function publicAttachment(id = attachmentId) {
+  return { id, name: 'fixture.png', kind: 'image' as const, mimeType: 'image/png', byteSize: 2,
+    scope: 'thread' as const, createdAt: '2026-10-05', updatedAt: '2026-10-05' }
+}
+function resendHarness(meta: Record<string, unknown> = {}) {
+  const harness = buildHarness()
+  Object.assign(harness.state, { busy: false, workspaceRoot: '/workspace/analytix',
+    blocks: [{ kind: 'user', id: 'user_edit', text: 'old', meta: { turnId: 'turn_edit', ...meta } }],
+    liveAssistant: '', currentTurnId: null, currentTurnUserId: null,
+    turnStartedAtByUserId: {}, turnDurationByUserId: {}, queuedMessages: [], composerDrafts: {} })
+  harness.state.updateComposerDraft = (key, update) => {
+    const current = harness.state.composerDrafts[key] ?? emptyComposerDraft
+    harness.state.composerDrafts = { ...harness.state.composerDrafts, [key]: update(current) }
+  }
+  harness.provider.getAttachmentMetadata.mockImplementation(async (id: string) => publicAttachment(id))
+  return harness
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void, reject!: (reason: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+describe('edit resend attachment continuity and ownership', () => {
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('localStorage', memoryStorage())
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('captures mixed/ids-only attachments and legal file metadata without copying private payload or old receipts', async () => {
+    const h = resendHarness({ attachmentIds: [` ${attachmentId} `, attachmentId, secondAttachmentId],
+      attachments: [{ id: attachmentId, kind: 'image', name: 'fixture.png', mimeType: 'image/png', byteSize: 2,
+        documentText: 'PRIVATE_TEXT', previewUrl: 'PRIVATE_URL', localFilePath: 'PRIVATE_PATH', receipt: 'OLD_RECEIPT' }],
+      fileReferences: [{ path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file', contents: 'PRIVATE_FILE' }],
+      guiPlan: { planId: 'OLD_PLAN' }, useReceipts: ['OLD_RECEIPT'] })
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.provider.getAttachmentMetadata.mock.calls).toEqual([
+      [attachmentId, { threadId: 'thr_existing', workspace: '/workspace/analytix' }],
+      [secondAttachmentId, { threadId: 'thr_existing', workspace: '/workspace/analytix' }]
+    ])
+    const [text, mode, overrides] = h.sendMessage.mock.calls[0]
+    expect(text).toBe('edited'); expect(mode).toBeUndefined()
+    expect(overrides.attachmentIds).toEqual([attachmentId, secondAttachmentId])
+    expect(overrides.attachments).toHaveLength(2)
+    expect(overrides.attachments.map((a: { id: string }) => a.id)).toEqual([attachmentId, secondAttachmentId])
+    expect(overrides.fileReferences).toEqual([{ path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file' }])
+    for (const field of ['PRIVATE_TEXT', 'PRIVATE_URL', 'PRIVATE_PATH', 'PRIVATE_FILE', 'OLD_RECEIPT', 'OLD_PLAN']) expect(JSON.stringify(overrides)).not.toContain(field)
+    expect(overrides.submissionGuard.isCurrent()).toBe(true)
+  })
+
+  it.each(['missing', 'denied', 'wrong-id', 'malformed'])('fails before checkpoint or rewind when attachment metadata is %s', async reason => {
+    const restoreGitCheckpoint = vi.fn(async () => ({ ok: true }))
+    vi.stubGlobal('window', { analytix: { workspace: { restoreGitCheckpoint } } })
+    const h = resendHarness({ attachmentIds: [attachmentId], workspaceCheckpointId: 'gcp_fixture' })
+    if (reason === 'wrong-id') h.provider.getAttachmentMetadata.mockResolvedValue(publicAttachment(secondAttachmentId))
+    else if (reason === 'malformed') h.provider.getAttachmentMetadata.mockResolvedValue({ ...publicAttachment(), documentText: 'PRIVATE_BODY' })
+    else h.provider.getAttachmentMetadata.mockRejectedValue(new Error(reason === 'denied' ? '403 PRIVATE_BODY' : '404 PRIVATE_BODY'))
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(restoreGitCheckpoint).not.toHaveBeenCalled(); expect(h.provider.rewindThread).not.toHaveBeenCalled()
+    expect(h.sendMessage).not.toHaveBeenCalled(); expect(h.state.blocks).toHaveLength(1)
+    expect(h.state.error).toBeTruthy(); expect(h.state.error).not.toContain('PRIVATE_BODY')
+  })
+
+  it.each([{ attachmentIds: [attachmentId], attachments: [{ id: secondAttachmentId }] }, { attachmentIds: [123] }, { attachmentIds: [attachmentId], attachments: [{ id: attachmentId, kind: '' }] }, { fileReferences: [{ path: '', name: 'bad' }] }])('rejects inconsistent or malformed captured payload instead of text-only resend', async meta => {
+    const h = resendHarness(meta)
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.state.error).toBeTruthy()
+  })
+
+  it.each(['metadata', 'restore', 'rewind'].flatMap(seam => ['A-B', 'A-B-A'].map(navigation => ({ seam, navigation }))))('revokes $navigation completion at the $seam await and preserves the new selection', async ({ seam, navigation }) => {
+    const h = resendHarness(seam === 'metadata' ? { attachmentIds: [attachmentId] } : seam === 'restore' ? { workspaceCheckpointId: 'gcp_fixture' } : {})
+    const pending = deferred<unknown>()
+    if (seam === 'metadata') h.provider.getAttachmentMetadata.mockReturnValue(pending.promise)
+    if (seam === 'restore') vi.stubGlobal('window', { analytix: { workspace: { restoreGitCheckpoint: vi.fn(() => pending.promise) } } })
+    if (seam === 'rewind') h.provider.rewindThread.mockReturnValue(pending.promise)
+    const operation = h.actions.rewindAndResend('user_edit', 'edited')
+    h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+    if (navigation === 'A-B-A') { h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++ }
+    h.state.blocks = [{ kind: 'assistant', id: 'new-selection', text: 'keep' }]
+    h.state.queuedMessages = [{ id: 'new-queue', text: 'keep' }] as ChatState['queuedMessages']
+    h.state.error = 'new error'
+    pending.resolve(seam === 'metadata' ? publicAttachment() : { ok: true })
+    await operation
+    expect(h.sendMessage).not.toHaveBeenCalled(); expect(h.state.blocks[0].id).toBe('new-selection')
+    expect(h.state.queuedMessages[0].id).toBe('new-queue'); expect(h.state.error).toBe('new error')
+    if (seam !== 'rewind') { expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.state.composerDrafts).toEqual({}) }
+    else expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')].input).toBe('edited')
+  })
+
+  it.each(['missing-capability', 'missing-workspace', 'target-removed', 'case-authority-changed'])('blocks destructive work for %s', async seam => {
+    const h = resendHarness({ attachmentIds: [attachmentId] })
+    if (seam === 'missing-capability') Object.assign(h.provider, { getAttachmentMetadata: undefined })
+    if (seam === 'missing-workspace') { h.state.workspaceRoot = ''; h.state.threads[0].workspace = '' }
+    if (seam === 'target-removed' || seam === 'case-authority-changed') {
+      h.provider.getAttachmentMetadata.mockImplementation(async () => {
+        if (seam === 'target-removed') h.state.blocks = []
+        else h.state.threads[0].historyAuthority = 'case_boundary_only_v1'
+        return publicAttachment()
+      })
+    }
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('admits only one destructive edit while validation is pending and fails closed on disconnect', async () => {
+    const h = resendHarness({ attachmentIds: [attachmentId] }), pending = deferred<unknown>()
+    h.provider.getAttachmentMetadata.mockReturnValue(pending.promise)
+    const operation = h.actions.rewindAndResend('user_edit', 'first')
+    await h.actions.rewindAndResend('user_edit', 'second')
+    expect(h.provider.getAttachmentMetadata).toHaveBeenCalledTimes(1)
+    h.state.runtimeConnection = 'offline'; pending.resolve(publicAttachment()); await operation
+    expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['false', 'throw'])('restores editable payload after rewind when sending returns %s', async outcome => {
+    const h = resendHarness({ attachmentIds: [attachmentId], fileReferences: [{ path: '/workspace/analytix/a.txt', relativePath: 'a.txt', name: 'a.txt', kind: 'file' }] })
+    if (outcome === 'false') h.sendMessage.mockResolvedValue(false)
+    else h.sendMessage.mockRejectedValue(new Error('PRIVATE_SEND_ERROR'))
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    expect(h.provider.rewindThread).toHaveBeenCalledTimes(1); expect(h.state.blocks).toEqual([])
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft.input).toBe('edited'); expect(draft.attachments[0].id).toBe(attachmentId)
+    expect(draft.fileReferences[0].type).toBe('file')
+    expect(h.state.error).toBeTruthy(); expect(h.state.error).not.toContain('PRIVATE_SEND_ERROR')
+  })
+
+  it.each(['input', 'attachment', 'file'])('does not replace a newer %s draft after failed resend', async changed => {
+    const h = resendHarness(), key = composerDraftKey('/workspace/analytix', 'thr_existing')
+    h.sendMessage.mockImplementation(async () => {
+      h.state.updateComposerDraft(key, draft => ({ ...draft, input: changed === 'input' ? 'new draft' : draft.input, inputRevision: draft.inputRevision + 1,
+        attachments: changed === 'attachment' ? [{ id: secondAttachmentId }] : draft.attachments,
+        fileReferences: changed === 'file' ? [{ path: '/workspace/new.txt', relativePath: 'new.txt', name: 'new.txt' }] : draft.fileReferences }))
+      return false
+    })
+    await h.actions.rewindAndResend('user_edit', 'edited')
+    const draft = h.state.composerDrafts[key]
+    expect(draft.input).toBe(changed === 'input' ? 'new draft' : '')
+    if (changed === 'attachment') expect(draft.attachments).toEqual([{ id: secondAttachmentId }])
+    if (changed === 'file') expect(draft.fileReferences[0].name).toBe('new.txt')
+  })
+
+  it('keeps file-context displayText turns uneditable and stops on restore or rewind failure', async () => {
+    const blocked = resendHarness({ displayText: 'public visible text', fileReferences: [{ path: '/workspace/a.txt', relativePath: 'a.txt', name: 'a.txt' }] })
+    await blocked.actions.rewindAndResend('user_edit', 'edited')
+    expect(blocked.provider.rewindThread).not.toHaveBeenCalled(); expect(blocked.sendMessage).not.toHaveBeenCalled()
+    const restoreGitCheckpoint = vi.fn(async () => ({ ok: false, message: 'PRIVATE_RESTORE' }))
+    vi.stubGlobal('window', { analytix: { workspace: { restoreGitCheckpoint } } })
+    const restored = resendHarness({ workspaceCheckpointId: 'gcp_fixture' })
+    await restored.actions.rewindAndResend('user_edit', 'edited')
+    expect(restored.provider.rewindThread).not.toHaveBeenCalled(); expect(restored.sendMessage).not.toHaveBeenCalled()
+    const rewound = resendHarness(); rewound.provider.rewindThread.mockRejectedValue(new Error('PRIVATE_REWIND'))
+    await rewound.actions.rewindAndResend('user_edit', 'edited')
+    expect(rewound.sendMessage).not.toHaveBeenCalled(); expect(rewound.state.blocks).toHaveLength(1)
   })
 })

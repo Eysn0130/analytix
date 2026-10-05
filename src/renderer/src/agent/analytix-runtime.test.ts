@@ -4238,3 +4238,20 @@ describe('registry', () => {
   })
 
 })
+
+
+describe('attachment metadata exact thread/workspace lookup', () => {
+  const id = `att_${'d'.repeat(24)}`
+  const attachment = { id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2,
+    scope: 'thread', createdAt: '2026-10-05', updatedAt: '2026-10-05' }
+  it('uses the existing metadata GET without fetching content', async () => {
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ attachment }) }))
+    installDsGui({ runtimeRequest })
+    expect(await new AnalytixRuntimeProvider().getAttachmentMetadata(id, { threadId: 'thr_1', workspace: '/tmp/workspace' })).toEqual(attachment)
+    expect(runtimeRequest.mock.calls).toEqual([[`/v1/attachments/${id}?thread_id=thr_1&workspace=%2Ftmp%2Fworkspace`, 'GET']])
+  })
+  it.each([{ ...attachment, id: `att_${'e'.repeat(24)}` }, { ...attachment, documentText: 'PRIVATE_BODY' }])('rejects mismatched or non-public metadata', async metadata => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ attachment: metadata }) })) })
+    await expect(new AnalytixRuntimeProvider().getAttachmentMetadata(id, { threadId: 'thr_1', workspace: '/tmp/workspace' })).rejects.toThrow()
+  })
+})

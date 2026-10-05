@@ -111,7 +111,8 @@ describe('chat-store navigation workspace selection', () => {
     registryMock.checkCredentialReadiness.mockReset().mockResolvedValue({ kind: 'ready', providerId: 'deepseek' })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en')
     rendererRuntimeClient.invalidateSettings()
     vi.unstubAllGlobals()
     vi.useRealTimers()
@@ -153,7 +154,7 @@ describe('chat-store navigation workspace selection', () => {
 
   it('keeps initialization intact when secure storage becomes unavailable after restart', async () => {
     registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
-    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'recovery', message: 'Saved connection unavailable; retry in Settings.' })
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'recovery', reason: 'saved_connection_unavailable' })
     vi.stubGlobal('window', { analytix: {
       settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '~/.analytix/default_workspace', runtime: { providerId: 'deepseek', model: 'deepseek-flash' } })) },
       runtime: { restartRuntime: vi.fn(async () => undefined) }
@@ -296,7 +297,7 @@ describe('chat-store navigation workspace selection', () => {
     })
     const harness = buildHarness({
       runtimeConnection: 'idle',
-      applyI18nFromSettings: vi.fn(async () => undefined)
+      applyI18nFromSettings: vi.fn(async (locale: string) => { await i18n.changeLanguage(locale) })
     } as unknown as Partial<ChatState>)
     harness.loadComposerModels.mockImplementation(async () => {
       calls.push('models')
@@ -374,7 +375,7 @@ describe('chat-store navigation workspace selection', () => {
         route: 'settings',
         initialSetupOpen: false,
         settingsSection: 'providers',
-        error: 'Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.'
+        error: '已保存的连接暂时不可用。请重试，或打开设置检查供应商。原配置已保留。'
       }
     }
   ])('routes a $name without probing the model runtime', async ({ registry, expected }) => {
@@ -414,7 +415,7 @@ describe('chat-store navigation workspace selection', () => {
     })
     const harness = buildHarness({
       runtimeConnection: 'idle',
-      applyI18nFromSettings: vi.fn(async () => undefined)
+      applyI18nFromSettings: vi.fn(async (locale: string) => { await i18n.changeLanguage(locale) })
     } as unknown as Partial<ChatState>)
     harness.state.probeRuntime = harness.actions.probeRuntime
 
@@ -432,6 +433,28 @@ describe('chat-store navigation workspace selection', () => {
       error: harness.state.error,
       runtimeErrorDetail: harness.state.runtimeErrorDetail
     })).not.toContain('api.deepseek.com')
+  })
+
+  it.each([
+    { locale: 'zh', reason: 'saved_connection_unavailable', expected: '已保存的连接暂时不可用。请重试，或打开设置检查供应商。原配置已保留。' },
+    { locale: 'en', reason: 'saved_connection_unavailable', expected: 'Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.' },
+    { locale: 'zh', reason: 'credential_reentry_required', expected: '存储方式变更后，需要在设置中重新输入一次此供应商的凭据。原配置已保留。' },
+    { locale: 'en', reason: 'credential_reentry_required', expected: 'This saved Provider credential needs to be re-entered once in Settings after the storage change. Your configuration has been kept.' }
+  ])('stores localized $reason recovery guidance in $locale without generic/raw error details', async ({ locale, reason, expected }) => {
+    await i18n.changeLanguage(locale)
+    registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'recovery', reason })
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '/workspace/fixture', runtime: {} })) },
+      providerRegistry: { request: vi.fn() }
+    } })
+    const harness = buildHarness()
+    await harness.actions.probeRuntime('user')
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.state.error).toBe(expected)
+    expect(harness.state.runtimeErrorDetail).toBeNull()
+    expect(registryMock.checkCredentialReadiness).toHaveBeenCalledTimes(1)
+    expect(harness.loadComposerModels).not.toHaveBeenCalled()
   })
 
   it('does not let a stale background probe failure overwrite a newer ready result', async () => {
@@ -1353,7 +1376,8 @@ describe('receipt-scoped navigation refresh', () => {
     rendererRuntimeClient.invalidateSettings()
     registryMock.getProvider.mockReset()
   })
-  afterEach(() => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en')
     rendererRuntimeClient.invalidateSettings()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()

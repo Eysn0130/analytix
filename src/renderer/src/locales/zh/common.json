@@ -1,4 +1,10 @@
 {
+  "rewindResendInvalidPayload": "此消息的附件或文件引用无效，未回退历史。",
+  "rewindResendAttachmentUnavailable": "此线程中有附件暂时不可用，未回退消息。请检查附件后重试。",
+  "rewindResendFailed": "未能完成编辑。若历史已回退，编辑后的消息已保留在草稿中；你随后修改的草稿会优先保留。",
+  "localProviderSavedConnectionUnavailable": "已保存的连接暂时不可用。请重试，或打开设置检查供应商。原配置已保留。",
+  "localProviderCredentialReentryRequired": "存储方式变更后，需要在设置中重新输入一次此供应商的凭据。原配置已保留。",
+  "localProviderSetupRequired": "请在设置中选择供应商以完成配置。",
   "pluginSourceFilterLabel": "插件来源",
   "pluginCategoryFilterLabel": "插件类别",
   "pluginSkillStatusFilterLabel": "技能状态",

@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedThread, ThreadEventSink } from '../agent/types'
 import type { ChatState, ChatStoreGet, ChatStoreSet, GuiPlanMessageContext, QueuedUserMessage } from './chat-store-types'
 import type { ThreadHandoffOperation } from '@shared/thread-handoff'
+import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
+import { getThreadBinding } from './chat-store-thread-binding'
+import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
+import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
@@ -23,6 +27,7 @@ vi.mock('../agent/registry', () => ({
 }))
 
 import { createThreadActions } from './chat-store-thread-actions'
+import { buildThreadEventSink } from './chat-store-runtime'
 import { createMaintenanceActions } from './chat-store-maintenance-actions'
 import {
   clearActiveStream,
@@ -2344,5 +2349,197 @@ describe('send receipt acknowledgement and housekeeping', () => {
       expect(window.analytix.logs.error).toHaveBeenCalledWith('thread-refresh', 'Post-send sidebar refresh failed')
     } else expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
     sseAbortRef.current?.abort()
+  })
+})
+
+
+describe('real edit resend to runtime request boundary', () => {
+  beforeEach(() => { rendererRuntimeClient.invalidateSettings(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => { clearActiveStream(); rendererRuntimeClient.invalidateSettings(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  function combinedHarness() {
+    const { actions, state, sseAbortRef } = buildHarness()
+    const id = `att_${'c'.repeat(24)}`
+    const metadata = { id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2,
+      scope: 'thread', createdAt: '2026-10-05', updatedAt: '2026-10-05' }
+    Object.assign(state, { busy: false, workspaceRoot: '/workspace/analytix', composerDrafts: {},
+      blocks: [{ kind: 'user', id: 'old_user', text: 'old text', meta: { turnId: 'old_turn', attachmentIds: [id],
+        attachments: [{ ...metadata, documentText: 'PRIVATE_TEXT', previewUrl: 'PRIVATE_URL' }],
+        fileReferences: [{ path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file' }] } }] })
+    state.updateComposerDraft = (key, update) => { state.composerDrafts = { ...state.composerDrafts,
+      [key]: update(state.composerDrafts[key] ?? emptyComposerDraft) } }
+    const runtimeRequest = vi.fn(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: metadata }) }
+      if (path.endsWith('/rewind')) return { ok: true, status: 200, body: JSON.stringify({ ok: true }) }
+      if (path.endsWith('/turns')) return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_existing', turnId: 'new_turn', userMessageItemId: 'new_user' }) }
+      throw new Error('unexpected fixture route')
+    })
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest }, logs: { error: vi.fn(async () => undefined) } } })
+    const settings = { workspaceRoot: '/workspace/analytix', runtime: defaultAnalytixRuntimeSettings(), codePromptPrefix: '' } as AppSettingsV1
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
+    const adapter = new AnalytixRuntimeProvider()
+    const provider = { getAttachmentMetadata: adapter.getAttachmentMetadata.bind(adapter),
+      rewindThread: vi.fn(async () => undefined), sendUserMessage: vi.fn(adapter.sendUserMessage.bind(adapter)),
+      subscribeThreadEvents: vi.fn((_threadId: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const set: ChatStoreSet = partial => Object.assign(state, typeof partial === 'function' ? partial(state) : partial)
+    const maintenance = createMaintenanceActions({ set, get: () => state, sseAbortRef })
+    return { actions, maintenance, state, sseAbortRef, provider, runtimeRequest, getSettings, settings, id }
+  }
+
+  it('keeps attachment IDs and safe display metadata through optimistic state, the actual POST and acknowledgement', async () => {
+    const h = combinedHarness()
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+    const post = h.runtimeRequest.mock.calls.find(call => call[0].endsWith('/turns'))!
+    expect(post).toBeDefined()
+    const body = JSON.parse((post as unknown as [string, string, string])[2])
+    expect(body.attachmentIds).toEqual([h.id]); expect(body.fileReferences).toEqual([
+      { path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file' }
+    ])
+    expect(body).not.toHaveProperty('submissionIsCurrent')
+    expect(body).not.toHaveProperty('attachments')
+    const block = h.state.blocks.find(block => block.id === 'new_user')!
+    expect(block.kind).toBe('user')
+    if (block.kind !== 'user') throw new Error('Expected acknowledged user message')
+    expect(block.meta?.attachmentIds).toEqual([h.id])
+    expect(block.meta?.attachments?.[0].id).toBe(h.id)
+    expect(block.meta?.turnId).toBe('new_turn')
+    for (const token of ['PRIVATE_TEXT', 'PRIVATE_URL']) expect(JSON.stringify({ body, block })).not.toContain(token)
+    expect(h.state.composerDrafts).toEqual({})
+  })
+
+  it.each(['A-B-A', 'disconnect'])('blocks the actual POST after adapter second-settings await when %s revokes ownership', async change => {
+    const h = combinedHarness()
+    let release!: (settings: AppSettingsV1) => void
+    const settingsWait = new Promise<AppSettingsV1>(resolve => { release = resolve })
+    h.getSettings.mockResolvedValueOnce(h.settings).mockReturnValueOnce(settingsWait)
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.getSettings).toHaveBeenCalledTimes(2))
+    if (change === 'A-B-A') {
+      h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+      h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++
+      h.state.blocks = [{ kind: 'assistant', id: 'fresh-view', text: 'keep' }]
+      h.state.busy = false; h.state.currentTurnId = null; h.state.currentTurnUserId = null
+      h.state.error = 'fresh error'
+    } else h.state.runtimeConnection = 'offline'
+    release(h.settings); await pending
+    expect(h.runtimeRequest.mock.calls.filter(call => call[0].endsWith('/turns'))).toEqual([])
+    if (change === 'A-B-A') { expect(h.state.blocks[0].id).toBe('fresh-view'); expect(h.state.error).toBe('fresh error') }
+    expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')].input).toBe('edited text')
+  })
+
+  it.each([{ phase: 'started', refresh: 'normal' }, { phase: 'terminal', refresh: 'normal' }, { phase: 'started', refresh: 'reject' }, { phase: 'started', refresh: 'pending' }])('recovers durable acceptance after its own $phase SSE despite $refresh refresh', async ({ phase, refresh }) => {
+    const h = combinedHarness()
+    let failPost!: () => void
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      await new Promise<void>(resolve => { failPost = resolve })
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.runtimeRequest.mock.calls.some(call => call[0].endsWith('/turns'))).toBe(true))
+    const sink = h.provider.subscribeThreadEvents.mock.calls[0][2]
+    expect(sink.onTurnStarted).toBeTypeOf('function')
+    sink.onTurnStarted!({ threadId: 'thr_existing', turnId: 'new_turn', seq: 1, createdAt: '2026-10-05T00:00:00Z' })
+    if (phase === 'terminal') await sink.onTurnComplete({ threadId: 'thr_existing', turnId: 'new_turn', seq: 2 })
+    const controller = h.sseAbortRef.current
+    const generation = getThreadBinding(h.sseAbortRef).generation
+    h.state.recoverActiveTurn = vi.fn(async () => {
+      h.state.blocks = [{ kind: 'user', id: 'accepted_user', text: 'edited text', meta: { turnId: 'new_turn', attachmentIds: [h.id] } }]
+      h.state.busy = false
+      return false
+    })
+    if (refresh === 'reject') h.state.refreshThreads = vi.fn(async () => { throw new Error('bounded synthetic sidebar failure') })
+    if (refresh === 'pending') h.state.refreshThreads = vi.fn(() => new Promise<void>(() => undefined))
+    failPost()
+    const completed = await Promise.race([pending.then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 50))])
+    expect(completed).toBe(true)
+    expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1)
+    expect(h.state.blocks[0].id).toBe('accepted_user')
+    expect(h.state.composerDrafts).toEqual({})
+    expect(controller?.signal.aborted).toBe(false)
+    expect(getThreadBinding(h.sseAbortRef).generation).toBe(generation)
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([false, true])('does not restore a checkpoint after another normal send reuses a healthy subscription (completed=%s)', async completed => {
+    const h = combinedHarness()
+    const original = h.provider.getAttachmentMetadata
+    let release!: () => void
+    const validation = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(h.provider, 'getAttachmentMetadata').mockImplementation(async (...args) => { await validation; return original(...args) })
+    const restoreGitCheckpoint = vi.fn(async () => ({ ok: true }))
+    Object.assign(window.analytix, { workspace: { restoreGitCheckpoint } })
+    const old = h.state.blocks[0]
+    if (old.kind !== 'user') throw new Error('Expected original user')
+    old.meta = { ...old.meta, workspaceCheckpointId: 'gcp_fixture' }
+    h.sseAbortRef.current = new AbortController()
+    const generation = getThreadBinding(h.sseAbortRef).generation
+    const edit = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await expect(h.actions.sendMessage('concurrent ordinary message')).resolves.toBe(true)
+    expect(getThreadBinding(h.sseAbortRef).generation).toBe(generation)
+    if (completed) {
+      Object.assign(h.provider, { getThreadDetail: vi.fn(async () => ({ blocks: h.state.blocks, latestSeq: 2, threadStatus: 'completed', latestTurnId: 'new_turn' })) })
+      const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), () => h.state, { threadId: 'thr_existing', signal: h.sseAbortRef.current!.signal })
+      await sink.onTurnComplete({ threadId: 'thr_existing', turnId: 'new_turn', seq: 2 })
+      expect(h.state.busy).toBe(false)
+    }
+    release(); await edit
+    expect(restoreGitCheckpoint).not.toHaveBeenCalled(); expect(h.provider.rewindThread).not.toHaveBeenCalled()
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not overwrite a fresh A-B-A idle view after lost-ACK recovery returns', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    let finishRecovery!: () => void
+    h.state.recoverActiveTurn = vi.fn(() => {
+      getThreadBinding(h.sseAbortRef).generation++
+      return new Promise<boolean>(resolve => { finishRecovery = () => resolve(false) })
+    })
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1))
+    h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+    h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++
+    h.state.blocks = [{ kind: 'assistant', id: 'fresh-idle', text: 'keep' }]
+    h.state.busy = false; h.state.error = null
+    finishRecovery(); await pending
+    expect(h.state.blocks[0].id).toBe('fresh-idle'); expect(h.state.error).toBeNull()
+  })
+
+  it('keeps the original editable payload after coded transport failure advances the send binding without confirming acceptance', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    const startingGeneration = getThreadBinding(h.sseAbortRef).generation
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(getThreadBinding(h.sseAbortRef).generation).toBeGreaterThan(startingGeneration + 1)
+    expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1)
+    expect(h.state.blocks).toEqual([])
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft?.input).toBe('edited text'); expect(draft.attachments[0].id).toBe(h.id)
+  })
+
+  it('recovers a retryable draft after the actual POST fails without rebuilding removed canonical history', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      throw new Error('bounded synthetic send failure')
+    })
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(h.state.blocks).toEqual([])
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft.input).toBe('edited text'); expect(draft.attachments[0].id).toBe(h.id)
+    expect(h.state.error).toBe(i18n.t('common:rewindResendFailed'))
   })
 })
