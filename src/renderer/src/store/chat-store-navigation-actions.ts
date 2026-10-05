@@ -31,7 +31,8 @@ import { parseRuntimeStatusPublicV1 } from '@shared/analytix-runtime-status'
 import {
   checkLocalProviderReadiness,
   localProviderRecoveryReadiness,
-  resolveLocalProviderReadiness
+  resolveLocalProviderReadiness,
+  type LocalProviderReadiness
 } from '../account/local-provider-readiness'
 import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
 import {
@@ -92,6 +93,12 @@ import {
   syncTurnCompletionPoll,
   watchTurnCompletionNotification
 } from './chat-store-runtime'
+
+function localProviderReadinessMessage(readiness: Exclude<LocalProviderReadiness, { kind: 'ready' }>): string {
+  if (readiness.kind === 'setup') return i18n.t('common:localProviderSetupRequired')
+  return i18n.t(readiness.reason === 'credential_reentry_required'
+    ? 'common:localProviderCredentialReentryRequired' : 'common:localProviderSavedConnectionUnavailable')
+}
 
 type SseAbortRef = { current: AbortController | null }
 
@@ -391,6 +398,7 @@ export function createNavigationActions(
   probeRuntime: async (mode = 'user', options) => {
     const probeGeneration = ++runtimeProbeGeneration
     const prev = get().runtimeConnection
+    let readinessFailure: Exclude<LocalProviderReadiness, { kind: 'ready' }> | null = null
     if (mode === 'user') {
       clearRuntimeRecovery()
       activeUserRuntimeProbeGeneration = probeGeneration
@@ -414,8 +422,8 @@ export function createNavigationActions(
         (request) => window.analytix.providerRegistry.request(request)
       )
       if (providerReadiness.kind !== 'ready') {
-        throw new Error(providerReadiness.kind === 'recovery'
-          ? providerReadiness.message : 'Choose a Provider in Settings to finish setup.')
+        readinessFailure = providerReadiness
+        throw new Error('Local Provider readiness requires recovery')
       }
       if (probeGeneration !== runtimeProbeGeneration &&
           probeGeneration !== activeUserRuntimeProbeGeneration) return
@@ -445,8 +453,8 @@ export function createNavigationActions(
       if (mode === 'user' && activeUserRuntimeProbeGeneration === probeGeneration) {
         activeUserRuntimeProbeGeneration = 0
       }
-      const msg = formatRuntimeError(e)
-      const detail = runtimeErrorDetail(e)
+      const msg = readinessFailure ? localProviderReadinessMessage(readinessFailure) : formatRuntimeError(e)
+      const detail = readinessFailure ? null : runtimeErrorDetail(e)
       const needsSettings = shouldOpenSettingsForError(e)
       if (mode === 'user') {
         invalidateCaseProjectRefresh()
@@ -585,7 +593,7 @@ export function createNavigationActions(
           clawChannels: settings.claw.channels,
           activeClawChannelId: settings.claw.channels.find((channel) => channel.enabled)?.id ?? '',
           runtimeConnection: readiness.kind === 'ready' ? get().runtimeConnection : 'idle',
-          error: needsProviderRecovery ? readiness.message : null,
+          error: readiness.kind === 'recovery' ? localProviderReadinessMessage(readiness) : null,
           runtimeErrorDetail: null
         })
         if (readiness.kind !== 'ready') return

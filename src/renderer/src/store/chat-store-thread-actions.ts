@@ -1410,6 +1410,9 @@ export function createThreadActions(
       }
       return true
     }
+    // New work revokes an older maintenance operation even if the healthy SSE
+    // subscription is reused and this turn finishes before that operation wakes.
+    binding.submissionGeneration += 1
     const receiptOwner = Symbol('send-receipt')
     const receiptGeneration = ++sendGeneration
     currentReceiptOwner = receiptOwner
@@ -1606,13 +1609,16 @@ export function createThreadActions(
             block.kind === 'user' && block.id === state.currentTurnUserId && block.meta?.turnId === receipt.turnId))
       return matchingTurn && matchingUser
     }
-    const refreshReceiptThreads = async (): Promise<void> => {
-      if (!ownsReceiptContext()) return
+    const refreshReceiptThreads = async (
+      ownsContext: () => boolean = ownsReceiptContext,
+      ownsFollowup: () => boolean = ownsFollowupContext
+    ): Promise<void> => {
+      if (!ownsContext()) return
       // Only the initiating receipt can start housekeeping. Its bounded follow-up
       // outlives send's finally, but not another send, subscription or turn snapshot.
       // Keep only primitive snapshot fields, not the entire store/draft graph.
       const { busy, currentTurnId, currentTurnUserId } = get()
-      const isCurrent = () => ownsFollowupContext() && get().busy === busy &&
+      const isCurrent = () => ownsFollowup() && get().busy === busy &&
         get().currentTurnId === currentTurnId && get().currentTurnUserId === currentTurnUserId
       if (!isCurrent()) return
       try {
@@ -1628,10 +1634,14 @@ export function createThreadActions(
     }
     const cancelPreparedSubmission = (): void => {
       const ownsState = ownsRunningReceipt()
-      submissionSubscription?.abort()
-      if (sseAbortRef.current === submissionSubscription) {
-        sseAbortRef.current = null
-        binding.generation += 1
+      const ownsSubscription = currentReceiptOwner === receiptOwner && sendGeneration === receiptGeneration &&
+        receiptBindingGeneration === binding.generation && get().activeThreadId === activeThreadId
+      if (ownsSubscription) {
+        submissionSubscription?.abort()
+        if (sseAbortRef.current === submissionSubscription) {
+          sseAbortRef.current = null
+          binding.generation += 1
+        }
       }
       if (ownsState && activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
       // A later thread/turn owns its own state. Remove only our unsent optimistic
@@ -1705,7 +1715,7 @@ export function createThreadActions(
       if (submissionGuard) {
         let admitted = false
         try { admitted = await submissionGuard.validateBeforeSend() } catch { /* fail closed */ }
-        if (!admitted || !submissionGuard.isCurrent() || get().activeThreadId !== activeThreadId || get().runtimeConnection !== 'ready') {
+        if (!admitted || !submissionGuard.isCurrent() || !ownsRunningReceipt()) {
           cancelPreparedSubmission()
           return false
         }
@@ -1719,7 +1729,8 @@ export function createThreadActions(
         ...((queued?.guiPlan ?? overrides?.guiPlan) ? { guiPlan: queued?.guiPlan ?? overrides?.guiPlan } : {}),
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(workspaceCheckpointId ? { workspaceCheckpointId } : {}),
-        ...(fileReferences.length ? { fileReferences } : {})
+        ...(fileReferences.length ? { fileReferences } : {}),
+        ...(submissionGuard ? { submissionIsCurrent: () => submissionGuard.isCurrent() && ownsRunningReceipt() } : {})
       })
       acknowledged = true
       const receipt = { turnId, userMessageItemId }
@@ -1820,6 +1831,10 @@ export function createThreadActions(
       // Post-acknowledgement housekeeping cannot turn a sent message into a
       // failed draft or roll back a turn that SSE has already established.
       if (acknowledged) return true
+      if (submissionGuard && !submissionGuard.isCurrent()) {
+        cancelPreparedSubmission()
+        return false
+      }
       // A disconnected SSE listener does not revoke our still-pending user
       // bubble. Navigation or a newer send does revoke it, including A-B-A.
       const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
@@ -1866,7 +1881,17 @@ export function createThreadActions(
         void refreshReceiptThreads()
         return false
       }
-      await get().recoverActiveTurn()
+      const recoverySubmissionGeneration = binding.submissionGeneration
+      const recovery = get().recoverActiveTurn()
+      // Recovery may synchronously bind a new stream. Its own handoff is allowed;
+      // navigation or new work while it awaits still revoke the old send's UI.
+      const recoveryBindingGeneration = binding.generation
+      const ownsRecoveryFollowup = (): boolean => sendGeneration === receiptGeneration &&
+        binding.submissionGeneration === recoverySubmissionGeneration && binding.generation === recoveryBindingGeneration &&
+        get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready'
+      const ownsRecoveryReceipt = (): boolean => currentReceiptOwner === receiptOwner && ownsRecoveryFollowup()
+      await recovery
+      if (!ownsRecoveryReceipt()) return false
       const recovered = get()
       const originalUserIds = new Set(previousBlocks.filter((block) => block.kind === 'user').map((block) => block.id))
       const durablyAccepted = recovered.activeThreadId === activeThreadId && recovered.blocks.some((block) =>
@@ -1874,7 +1899,9 @@ export function createThreadActions(
         !!block.meta?.turnId && !isPendingActiveStreamTurnId(block.meta.turnId)
       )
       if (durablyAccepted) {
-        await get().refreshThreads()
+        // Confirmed delivery outlives sidebar I/O. A failed or pending refresh
+        // cannot turn an accepted edit into a retryable draft.
+        void refreshReceiptThreads(ownsRecoveryReceipt, ownsRecoveryFollowup)
         return true
       }
       if (recovered.activeThreadId === activeThreadId && !recovered.busy && recovered.error === null) {

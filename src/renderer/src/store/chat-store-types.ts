@@ -302,7 +302,8 @@ export type ChatState = {
   closeThreadHandoffOperation: (operationId: string) => Promise<void>
   hydrateThreadHandoffOperations: () => Promise<void>
   handleThreadHandoffEvent: (operation: ThreadHandoffOperation) => void
-  rewindAndResend: (userBlockId: string, newText: string) => Promise<void>
+  /** Local payload handoff only; not a Core rewind or send acknowledgement. */
+  rewindAndResend: (userBlockId: string, newText: string, onCaptured?: () => void) => Promise<void>
   rollbackWorkspaceToCheckpoint: (checkpointId: string) => Promise<void>
   interrupt: (options?: { discard?: boolean }) => Promise<void>
   renameActiveThread: (title: string) => Promise<void>

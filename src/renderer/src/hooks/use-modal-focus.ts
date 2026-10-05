@@ -54,7 +54,7 @@ export function useModalFocus(onClose: () => void, canClose = true, lockBodyScro
     }
     if (topmost()) focusFirst()
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!topmost() || event.isComposing || event.defaultPrevented) return
+      if (!topmost() || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
       // The in-dialog format menu owns its first Escape and exit Tab.
       if ((event.key === 'Escape' || event.key === 'Tab') && event.target instanceof Element &&
         element.contains(event.target) && event.target.closest('[data-markdown-table-menu]')) return

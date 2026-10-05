@@ -1509,17 +1509,24 @@ export function FloatingComposer({
     }
 
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.key !== 'Escape') return
       if (composerMenuOpen) { event.preventDefault(); composerMenuButtonRef.current?.focus({ preventScroll: true }) }
       setComposerMenuOpen(false)
       setGoalPanelOpen(false)
     }
 
+    const onFocusIn = (event: FocusEvent): void => {
+      if (!composerMenuOpen || !(event.target instanceof Node)) return
+      if (composerMenuPanelRef.current?.contains(event.target) || composerMenuButtonRef.current?.contains(event.target)) return
+      setComposerMenuOpen(false)
+    }
     window.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('focusin', onFocusIn)
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('focusin', onFocusIn)
     }
   }, [composerMenuOpen, goalPanelOpen])
 
@@ -2137,8 +2144,16 @@ export function FloatingComposer({
             ref={composerMenuPanelRef}
             id={composerMenuId}
             role="menu"
+            data-composer-menu
             aria-label={t('composerMenuTitle')}
             onKeyDown={(event) => {
+              if (draft.isComposingEvent(event) || event.defaultPrevented) return
+              if (event.key === 'Tab') {
+                const trigger = composerMenuButtonRef.current
+                if (trigger?.isConnected && !trigger.disabled) trigger.focus({ preventScroll: true })
+                setComposerMenuOpen(false)
+                return
+              }
               if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
               event.preventDefault()
               const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
@@ -2154,6 +2169,7 @@ export function FloatingComposer({
               <button
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 disabled={!canPickLocalFileReference}
                 onClick={handleLocalFileReferenceMenuClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2166,6 +2182,7 @@ export function FloatingComposer({
               <button
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 disabled={!canPickFileReference}
                 onClick={handleFileReferenceMenuClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2179,7 +2196,8 @@ export function FloatingComposer({
                 {fileReferenceEnabled ? <div className="my-1 h-px bg-ds-border-muted/70" /> : null}
                 <button
                   type="button"
-                role="menuitem"
+                  role="menuitem"
+                  tabIndex={-1}
                   disabled={!canPickAttachment || !onPickAttachments}
                   onClick={handleAttachmentMenuClick}
                   className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2196,7 +2214,7 @@ export function FloatingComposer({
             ) : null}
             <button
               type="button"
-                role="menuitemcheckbox" aria-checked={mode === 'plan'}
+                role="menuitemcheckbox" tabIndex={-1} aria-checked={mode === 'plan'}
               disabled={!canTogglePlanMode}
               onClick={handlePlanToolbarClick}
               className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2220,7 +2238,7 @@ export function FloatingComposer({
             </button>
             <button
               type="button"
-                role="menuitemcheckbox" aria-checked={goalMenuChecked}
+                role="menuitemcheckbox" tabIndex={-1} aria-checked={goalMenuChecked}
               disabled={!canOpenGoalPanel}
               onClick={handleGoalMenuClick}
               className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
@@ -2245,7 +2263,7 @@ export function FloatingComposer({
             {canToggleWorktreeMode ? (
               <button
                 type="button"
-                role="menuitemcheckbox" aria-checked={useWorktreePool}
+                role="menuitemcheckbox" tabIndex={-1} aria-checked={useWorktreePool}
                 disabled={!canToggleWorktreeMode}
                 onClick={handleWorktreeToolbarClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"

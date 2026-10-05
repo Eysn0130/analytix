@@ -1,4 +1,11 @@
 {
+  "rewindResendOutcomeUnknown": "The rewind result could not be confirmed. The edited message was not sent. Review current history before retrying; the edited draft is kept for an available thread unless you have already changed it.",
+  "rewindResendInvalidPayload": "This message has invalid attachment or file references. It was not rewound.",
+  "rewindResendAttachmentUnavailable": "An attachment is unavailable for this thread. The message was not rewound. Review the attachments and try again.",
+  "rewindResendFailed": "The edit could not be completed. If history was rewound, the edited message is kept in your draft unless you have already changed it.",
+  "localProviderSavedConnectionUnavailable": "Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.",
+  "localProviderCredentialReentryRequired": "This saved Provider credential needs to be re-entered once in Settings after the storage change. Your configuration has been kept.",
+  "localProviderSetupRequired": "Choose a Provider in Settings to finish setup.",
   "pluginSourceFilterLabel": "Plugin source",
   "pluginCategoryFilterLabel": "Plugin category",
   "pluginSkillStatusFilterLabel": "Skill status",

@@ -1075,6 +1075,8 @@ export interface AgentProvider {
       attachmentIds?: string[]
       fileReferences?: UserFileReference[]
       workspaceCheckpointId?: string
+      /** Renderer-local final HTTP fence. Never serialized or sent to a model. */
+      submissionIsCurrent?: () => boolean
     }
   ): Promise<{ turnId: string; threadId: string; userMessageItemId?: string }>
   reviewThread?(
@@ -1105,6 +1107,10 @@ export interface AgentProvider {
     threadId: string
     workspace: string
   }): Promise<CoreAttachmentMetadataJson>
+  getAttachmentMetadata?(
+    attachmentId: string,
+    options: { threadId: string; workspace: string }
+  ): Promise<CoreAttachmentMetadataJson>
   getAttachmentContent?(
     attachmentId: string,
     options: { threadId: string; workspace: string }

@@ -121,6 +121,46 @@ function expectNoFileMatches(name, pattern) {
   }
 }
 
+// Core admission rejects these resources; it does not resolve or execute a helper.
+// Keep this classification narrower than the execution-authority path inventory.
+const coreResourceAbsencePath =
+  'packages/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs/reader.go'
+const coreResourceAbsenceFunction = [
+  'func verifyCoreResourcesAbsentV2(resources string) error {',
+  '\tfor _, name := range []string{"backend", "plugins/analytix-fund-analysis", "office-private", "runtime/document-runtime", "runtime/native-components", "runtime/analytix-native-development-build.json", "runtime/analytix-native-components-receipt.json", "runtime/analytix-import-accelerator", "runtime/analytix-cleaning-ops", "runtime/analytix-analysis-compute", "runtime/analytix-data-engine"} {',
+  '\t\tif _, err := os.Lstat(filepath.Join(resources, filepath.FromSlash(name))); !errors.Is(err, os.ErrNotExist) {',
+  '\t\t\treturn errors.New("core package contains unexpected professional resources")',
+  '\t\t}',
+  '\t}',
+  '\treturn nil',
+  '}',
+  ''
+].join('\n')
+
+function coreResourceAbsenceReferenceAllowed(line, source) {
+  const match = line.match(/^([^:]+):([1-9][0-9]*):(.*)$/)
+  if (!match || match[1] !== coreResourceAbsencePath) return false
+  const declaration = coreResourceAbsenceFunction.split('\n', 1)[0]
+  const start = source.indexOf(coreResourceAbsenceFunction)
+  if (
+    start < 0 ||
+    (start > 0 && source[start - 1] !== '\n') ||
+    source.indexOf(declaration) !== start ||
+    source.indexOf(declaration, start + declaration.length) !== -1
+  ) return false
+
+  // Preserve offsets while blanking comments and literals, so a copied function
+  // inside a comment/raw string cannot be mistaken for the actual declaration.
+  const code = source.replace(
+    /"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`[^`]*`|\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g,
+    (token) => ' '.repeat(token.length)
+  )
+  if (!code.startsWith(declaration, start)) return false
+  const resourceLine = coreResourceAbsenceFunction.split('\n')[1]
+  const lineNumber = source.slice(0, start).split('\n').length + 1
+  return Number(match[2]) === lineNumber && match[3] === resourceLine
+}
+
 function expectNativeComponentRegistry(name) {
   const violations = []
   try {
@@ -295,9 +335,13 @@ function expectNativeComponentRegistry(name) {
       'packages/runtime-go/internal/adapters/outbound/nativecomponentpublication/publisher_darwin.go',
       'packages/runtime-go/internal/domain/packagedbuildauthority/authority_v2.go'
     ])
+    const coreAbsenceSource = readTextFile(coreResourceAbsencePath)
     const undeclared = runtimeReferences.stdout.split(/\r?\n/).filter(Boolean).filter((line) => {
       const separator = line.indexOf(':')
-      return separator < 0 || !allowedGoAuthorityReferences.has(line.slice(0, separator))
+      return separator < 0 || (
+        !allowedGoAuthorityReferences.has(line.slice(0, separator)) &&
+        !coreResourceAbsenceReferenceAllowed(line, coreAbsenceSource)
+      )
     })
     if (undeclared.length > 0) {
       violations.push(`Data-plane helpers may be referenced only by the frozen Go execution authority:\n${undeclared.join('\n')}`)
@@ -748,7 +792,7 @@ const rendererEntryPaths = [
   'src/renderer/src/components/SessionHeader.tsx',
   'src/renderer/src/components/PluginMarketplaceView.tsx',
   'src/renderer/src/components/write/WriteSidebar.tsx',
-  'src/renderer/src/components/chat/WorkspaceModeTabs.tsx',
+  'src/renderer/src/components/shell/NavigationRail.tsx',
   'src/renderer/src/components/chat/SidebarProjectsSection.tsx',
   'src/renderer/src/components/chat',
   'src/renderer/src/store'
@@ -961,7 +1005,8 @@ const runtimeContractFreshnessPaths = [
  'packages/runtime-go/internal/mcp/mcp_contract_replay_handler.go',
  'packages/runtime-go/internal/conformance/g5_shadow.go',
  'packages/runtime-go/shadow_test.go',
-  'src/main/runtime/analytix-adapter.ts'
+  'src/main/runtime/analytix-adapter.ts',
+  'src/main/runtime/go-runtime-canary.ts'
 ]
 
 const runtimeRouteClientSourcePaths = [
@@ -1111,7 +1156,8 @@ const post881RuntimeContractTokenPaths = [
   'packages/runtime-go/README.md',
   'src/renderer/src/agent/analytix-mapper.test.ts',
  'packages/runtime-go/internal/conformance/g5_shadow.go',
-  'src/main/runtime/analytix-adapter.ts'
+  'src/main/runtime/analytix-adapter.ts',
+  'src/main/runtime/go-runtime-canary.ts'
 ]
 
 const runtimeDesktopBridgeContractPaths = [
@@ -1746,6 +1792,7 @@ expectNoRgMatches(
   '\\b(?:live-provider-scripted-server|live-provider-fake-server|usesLocalScriptedProviderServer|usesLocalFakeProviderServer|usesLocalFakeMCPTransport|localScriptedProviderServer|fakeMCPTransportUsed|fixtureMCPTransportUsed|fake-mcp-manager|analytix-go-d0241)\\b',
   [
     'src/main/runtime/analytix-adapter.ts',
+    'src/main/runtime/go-runtime-canary.ts',
     'src/main/runtime/analytix-adapter.test.ts',
     'packages/runtime-go/internal/conformance/livelocal/production_candidate_handler.go',
     'packages/runtime-go/internal/mcp/manager_test_double.go',

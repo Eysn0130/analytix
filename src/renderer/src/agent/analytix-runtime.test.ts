@@ -4238,3 +4238,47 @@ describe('registry', () => {
   })
 
 })
+
+
+describe('attachment metadata exact thread/workspace lookup', () => {
+  const id = `att_${'d'.repeat(24)}`
+  const attachment = { id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2,
+    scope: 'thread', createdAt: '2026-10-05', updatedAt: '2026-10-05' }
+  it('uses the existing metadata GET without fetching content', async () => {
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ attachment }) }))
+    installDsGui({ runtimeRequest })
+    expect(await new AnalytixRuntimeProvider().getAttachmentMetadata(id, { threadId: 'thr_1', workspace: '/tmp/workspace' })).toEqual(attachment)
+    expect(runtimeRequest.mock.calls).toEqual([[`/v1/attachments/${id}?thread_id=thr_1&workspace=%2Ftmp%2Fworkspace`, 'GET']])
+  })
+  it.each([{ ...attachment, id: `att_${'e'.repeat(24)}` }, { ...attachment, documentText: 'PRIVATE_BODY' }])('rejects mismatched or non-public metadata', async metadata => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ attachment: metadata }) })) })
+    await expect(new AnalytixRuntimeProvider().getAttachmentMetadata(id, { threadId: 'thr_1', workspace: '/tmp/workspace' })).rejects.toThrow()
+  })
+})
+
+
+describe('rewind errors without a durable no-commit receipt', () => {
+  const rejected = [
+    { status: 400, code: 'validation_error', message: 'The request did not satisfy the runtime contract.' },
+    { status: 404, code: 'not_found', message: 'The requested resource was not found.' },
+    { status: 409, code: 'conflict', message: 'The request conflicts with the current runtime state.' }
+  ]
+  it.each(rejected)('preserves canonical HTTP $status/$code as an ordinary error', async ({ status, code, message }) => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: false, status, body: JSON.stringify({ code, message }) })) })
+    const result = await new AnalytixRuntimeProvider().rewindThread('thread', 'turn').catch(error => error)
+    expect(result.constructor).toBe(Error)
+    expect(JSON.parse(result.message)).toMatchObject({ code, message })
+  })
+  it.each([
+    { status: 500, body: { code: 'internal_error', message: 'The runtime request could not be completed safely.' } },
+    { status: 502, body: { code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.' } },
+    { status: 500, body: rejected[2] },
+    { status: 409, body: { error: 'conflict', message: rejected[2].message } },
+    { status: 409, body: { code: 'conflict', message: rejected[2].message, details: 'PRIVATE_BODY' } },
+    { status: 409, body: { code: 'conflict', message: 'PRIVATE_BODY' } }
+  ])('preserves ambiguous $status failures without claiming a no-commit receipt', async ({ status, body }) => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: false, status, body: JSON.stringify(body) })) })
+    const result = await new AnalytixRuntimeProvider().rewindThread('thread', 'turn').catch(error => error)
+    expect(result.constructor).toBe(Error)
+  })
+})
