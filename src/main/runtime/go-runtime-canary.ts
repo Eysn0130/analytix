@@ -689,4 +689,3 @@ export async function probeGoRuntimeCanary(
     }
   }
 }
-
