@@ -120,7 +120,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@peculiar/x509": "2.0.0",
     "@shikijs/langs": "3.23.0",
-    "@tencent-weixin/openclaw-weixin": "2.4.3",
+    "@tencent-weixin/openclaw-weixin": "2.4.9",
     "@tiptap/core": "3.30.5",
     "@tiptap/extension-image": "3.30.5",
     "@tiptap/extension-list": "3.30.5",
