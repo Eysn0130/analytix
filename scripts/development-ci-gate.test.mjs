@@ -234,6 +234,29 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.doesNotMatch(platform, /continue-on-error|passWithNoTests|npm run dist|ANALYTIX_TEST_SHARED_/)
 })
 
+test('runtime scheduling interleaves every ordinary and production shard within the concurrency cap', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const runtime = workflow.slice(workflow.indexOf('  runtime-shards:'), workflow.indexOf('  runtime-platform:'))
+  assert.match(runtime, /^      max-parallel: 8$/m)
+  assert.match(runtime, /^      fail-fast: false$/m)
+  const matrix = runtime.match(/      matrix:\n([\s\S]*?)    env:/)?.[1]
+  assert.ok(matrix, 'runtime matrix must be present')
+  const dimensions = [...matrix.matchAll(/^        (\w+): \[([^\]]+)\]$/gm)]
+  assert.deepEqual(dimensions.map(match => match[1]), ['shard', 'tags'])
+  assert.equal(matrix.trim(), dimensions.map(match => match[0]).join('\n').trim())
+  assert.doesNotMatch(matrix, /include:|exclude:/)
+  const shards = dimensions[0][2].split(',').map(value => Number(value.trim()))
+  const tags = dimensions[1][2].split(',').map(value => value.trim().replace(/^'(.*)'$/, '$1'))
+  assert.deepEqual(shards, Array.from({ length: runtimeShardCount }, (_, index) => index))
+  assert.deepEqual(tags, ['', 'analytix_prod'])
+  const tuples = shards.flatMap(shard => tags.map(tags => ({ shard, tags })))
+  assert.equal(tuples.length, 32)
+  assert.equal(new Set(tuples.map(({ shard, tags }) => `${shard}:${tags}`)).size, 32)
+  assert.deepEqual(tuples, Array.from({ length: 16 }, (_, shard) => [
+    { shard, tags: '' }, { shard, tags: 'analytix_prod' }
+  ]).flat())
+})
+
 test('all complete CI job families are required for the merge gate', () => {
   assert.equal(assertDevelopmentCISuccess(success()), true)
   for (const name of requiredDevelopmentJobs) {

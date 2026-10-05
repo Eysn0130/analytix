@@ -272,10 +272,10 @@ jobs:
     timeout-minutes: 25
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix:
-        tags: ['', analytix_prod]
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        tags: ['', analytix_prod]
     env:
       GOTOOLCHAIN: local
       GOMAXPROCS: '2'
