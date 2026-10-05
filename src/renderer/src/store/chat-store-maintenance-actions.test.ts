@@ -1,4 +1,3 @@
-import { RewindRequestRejectedError } from '../agent/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import maintenanceActionsSource from './chat-store-maintenance-actions.ts?raw'
 import type { ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
@@ -1066,13 +1065,15 @@ describe('edit resend attachment continuity and ownership', () => {
     expect(restoreGitCheckpoint).not.toHaveBeenCalled(); expect(h.provider.rewindThread).not.toHaveBeenCalled()
     expect(h.sendMessage).not.toHaveBeenCalled(); expect(h.state.blocks).toHaveLength(1)
     expect(h.state.error).toBeTruthy(); expect(h.state.error).not.toContain('PRIVATE_BODY')
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft.input).toBe('edited'); expect(draft.attachments).toEqual([{ id: attachmentId }])
   })
 
   it.each([{ attachmentIds: [attachmentId], attachments: [{ id: secondAttachmentId }] }, { attachmentIds: [123] }, { attachmentIds: [attachmentId], attachments: [{ id: attachmentId, kind: '' }] }, { fileReferences: [{ path: '', name: 'bad' }] }])('rejects inconsistent or malformed captured payload instead of text-only resend', async meta => {
     const h = resendHarness(meta)
     await h.actions.rewindAndResend('user_edit', 'edited')
     expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.state.error).toBeTruthy()
+    expect(h.state.error).toBeTruthy(); expect(h.state.composerDrafts).toEqual({})
   })
 
   it.each(['metadata', 'restore', 'rewind'].flatMap(seam => ['A-B', 'A-B-A'].map(navigation => ({ seam, navigation }))))('revokes $navigation completion at the $seam await and preserves the new selection', async ({ seam, navigation }) => {
@@ -1091,8 +1092,10 @@ describe('edit resend attachment continuity and ownership', () => {
     await operation
     expect(h.sendMessage).not.toHaveBeenCalled(); expect(h.state.blocks[0].id).toBe('new-selection')
     expect(h.state.queuedMessages[0].id).toBe('new-queue'); expect(h.state.error).toBe('new error')
-    if (seam !== 'rewind') { expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.state.composerDrafts).toEqual({}) }
-    else expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')].input).toBe('edited')
+    if (seam !== 'rewind') expect(h.provider.rewindThread).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft.input).toBe('edited')
+    if (seam === 'metadata') expect(draft.attachments).toEqual([{ id: attachmentId }])
   })
 
   it.each(['missing-capability', 'missing-workspace', 'target-removed', 'case-authority-changed'])('blocks destructive work for %s', async seam => {
@@ -1175,20 +1178,21 @@ describe('edit resend attachment continuity and ownership', () => {
     expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
   })
 
-  it.each(['retained', 'rewound'])('distinguishes an adapter-proven rejection with the exact target %s', async targetState => {
+  it.each(['retained', 'rewound'])('keeps a failed rewind unknown with the exact target %s', async targetState => {
     const h = resendHarness()
     h.state.lastSeq = 10
     const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), h.get, { threadId: 'thr_existing' })
     h.provider.rewindThread.mockImplementationOnce(async () => {
       if (targetState === 'rewound') sink.onThreadRewound?.({ threadId: 'thr_existing', turnId: 'turn_edit', removedTurns: 1, remainingTurns: 0, removedTurnIds: ['turn_edit'], seq: 11 })
-      throw new RewindRequestRejectedError()
+      throw new Error(JSON.stringify({ code: 'not_found', message: 'The requested resource was not found.' }))
     })
     await h.actions.rewindAndResend('user_edit', 'edited')
     expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.state.error).toBe(i18n.t(targetState === 'retained' ? 'common:rewindResendRejected' : 'common:rewindResendOutcomeUnknown'))
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
     const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
-    if (targetState === 'retained') { expect(draft).toBeUndefined(); expect(h.state.blocks[0].id).toBe('user_edit') }
-    else { expect(draft.input).toBe('edited'); expect(h.state.blocks).toEqual([]) }
+    expect(draft.input).toBe('edited')
+    if (targetState === 'retained') expect(h.state.blocks[0].id).toBe('user_edit')
+    else expect(h.state.blocks).toEqual([])
   })
 
   it.each(['input', 'attachment', 'file', 'deleted', 'migrated', 'case', 'navigation'])('respects %s ownership after a real rewind SSE and an uncertain HTTP receipt', async change => {
@@ -1217,6 +1221,37 @@ describe('edit resend attachment continuity and ownership', () => {
     if (change === 'deleted' || change === 'migrated' || change === 'case') expect(draft).toBeUndefined()
     else if (change === 'navigation') { expect(draft.input).toBe('edited'); expect(h.state.blocks[0].id).toBe('new-view'); expect(h.state.error).toBe('new view error') }
     else {
+      expect(draft.input).toBe(change === 'input' ? 'newer text' : '')
+      if (change === 'attachment') expect(draft.attachments).toEqual([{ id: secondAttachmentId }])
+      if (change === 'file') expect(draft.fileReferences[0].name).toBe('new.txt')
+    }
+  })
+
+  it.each(['input', 'attachment', 'file', 'deleted', 'migrated', 'case', 'navigation'])('respects %s ownership when metadata preflight fails before rewind', async change => {
+    const h = resendHarness({ attachmentIds: [attachmentId] })
+    const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+    const pending = deferred<unknown>()
+    h.provider.getAttachmentMetadata.mockReturnValue(pending.promise)
+    const operation = h.actions.rewindAndResend('user_edit', 'edited')
+    if (change === 'input' || change === 'attachment' || change === 'file') h.state.updateComposerDraft(key, draft => ({ ...draft,
+      input: change === 'input' ? 'newer text' : draft.input, inputRevision: draft.inputRevision + 1,
+      attachments: change === 'attachment' ? [{ id: secondAttachmentId }] : draft.attachments,
+      fileReferences: change === 'file' ? [{ path: '/workspace/new.txt', relativePath: 'new.txt', name: 'new.txt' }] : draft.fileReferences }))
+    if (change === 'deleted') h.state.threads = []
+    if (change === 'migrated') h.state.threads[0].workspace = '/workspace/moved'
+    if (change === 'case') h.state.threads[0].historyAuthority = 'case_boundary_only_v1'
+    if (change === 'navigation') {
+      h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+      h.state.blocks = [{ kind: 'assistant', id: 'new-view', text: 'keep' }]; h.state.error = 'new view error'
+    }
+    pending.reject(new Error('PRIVATE_METADATA_BODY')); await operation
+    expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[key]
+    if (change === 'deleted' || change === 'migrated' || change === 'case') expect(draft).toBeUndefined()
+    else if (change === 'navigation') {
+      expect(draft.input).toBe('edited'); expect(draft.attachments).toEqual([{ id: attachmentId }])
+      expect(h.state.blocks[0].id).toBe('new-view'); expect(h.state.error).toBe('new view error')
+    } else {
       expect(draft.input).toBe(change === 'input' ? 'newer text' : '')
       if (change === 'attachment') expect(draft.attachments).toEqual([{ id: secondAttachmentId }])
       if (change === 'file') expect(draft.fileReferences[0].name).toBe('new.txt')

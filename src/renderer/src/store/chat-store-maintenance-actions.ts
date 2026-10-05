@@ -1,4 +1,3 @@
-import { RewindRequestRejectedError } from '../agent/types'
 import { captureRewindResendPayload } from './rewind-resend-payload'
 import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { AttachmentPublicMetadata } from '../../../../packages/runtime/src/contracts/attachments.js'
@@ -840,8 +839,6 @@ export function createMaintenanceActions(
     const originalDraft = state.composerDrafts?.[draftKey] ?? emptyComposerDraft
     const checkpointId = typeof target.meta?.workspaceCheckpointId === 'string' ? target.meta.workspaceCheckpointId.trim() : ''
     editInFlight = true
-    let rewound = false
-    let rewindOutcomeUnknown = false
     let sent = false
     try {
       // This read checks current Go authority before either destructive operation.
@@ -875,13 +872,11 @@ export function createMaintenanceActions(
         if (!restored.ok) { set({ error: i18n.t('common:rewindResendFailed') }); return }
       }
       rewindIssued = true
-      try { await provider.rewindThread(activeThreadId, turnId); rewound = true } catch (error) {
-        const targetStillPresent = get().blocks.some(block => block.kind === 'user' && block.id === userBlockId && block.meta?.turnId === turnId)
-        const rejected = isCurrent() && targetStillPresent && error instanceof RewindRequestRejectedError
-        rewindOutcomeUnknown = !rejected
-        if (isCurrent()) set({ error: i18n.t(rejected ? 'common:rewindResendRejected' : 'common:rewindResendOutcomeUnknown') })
-        // Neither rejection nor an uncertain acknowledgement permits a resend
-        // or a local history cut. SSE already owns any cut we have observed.
+      try { await provider.rewindThread(activeThreadId, turnId) } catch {
+        if (isCurrent()) set({ error: i18n.t('common:rewindResendOutcomeUnknown') })
+        // A failed reply, including a canonical 404, may follow a durable cut.
+        // Without a no-commit receipt, never resend or fabricate a history cut.
+        // SSE owns any cut we have observed.
         return
       }
       if (!isCurrent()) return
@@ -910,14 +905,16 @@ export function createMaintenanceActions(
       } catch { /* Preserve a retryable draft; never expose an unsafe error body. */ }
       if (!sent && isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
     } finally {
-      // Core may have committed a rewind even when its HTTP receipt fails.
-      // Preserve the original-key draft after success or an uncertain outcome,
-      // including navigation or lost-ACK recovery replacing the subscription.
-      // Object identity protects newer text, attachments and file references.
+      // The bubble closes before validation. Keep its captured payload on the
+      // original draft for any failed completion while that owner still exists.
+      // Core may have committed even without a reply or SSE; this draft is not
+      // history or permission to resend. Object identity protects newer drafts.
       const owner = get().threads.find(thread => thread.id === activeThreadId)
-      if ((rewound || rewindOutcomeUnknown) && !sent && owner && owner.historyAuthority !== 'case_boundary_only_v1' && normalizeWorkspaceRoot(owner.workspace) === workspace) {
+      if (!sent && owner && owner.historyAuthority !== 'case_boundary_only_v1' && normalizeWorkspaceRoot(owner.workspace) === workspace) {
+        const references = new Map(payload.attachments.map(reference => [reference.id, reference]))
         get().updateComposerDraft?.(draftKey, current => current !== originalDraft ? current : ({
-          ...current, input: trimmed, inputRevision: current.inputRevision + 1, attachments: payload.attachments,
+          ...current, input: trimmed, inputRevision: current.inputRevision + 1,
+          attachments: payload.attachmentIds.map(id => references.get(id) ?? { id }),
           fileReferences: payload.fileReferences.map(reference => ({ path: reference.path, relativePath: reference.relativePath,
             name: reference.name, ...(reference.kind ? { type: reference.kind } : {}) }))
         }))

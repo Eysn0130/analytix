@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
 import type { NormalizedThread, ThreadEventSink } from '../agent/types'
 import type { ChatState, ChatStoreGet, ChatStoreSet, GuiPlanMessageContext, QueuedUserMessage } from './chat-store-types'
 import type { ThreadHandoffOperation } from '@shared/thread-handoff'
@@ -9,12 +9,18 @@ import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
-import { runtimeErrorToError } from '@shared/runtime-error'
+import { projectPublicRuntimeHTTPError, runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { composeWritePrompt } from '../write/quoted-selection'
 import { emptySelection } from '../write/write-workspace-store-helpers'
 import { objectEditingRequestSchema, objectEditingResponseSchema, type ObjectEditingRequest } from '../../../../packages/runtime/src/contracts/object-editing'
+
+declare module 'vitest' {
+  export interface ProvidedContext {
+    auditRewindFailure?: { ok: boolean; status: number; body: string; primaryCommitted: boolean; rewindSSE: boolean }
+  }
+}
 
 vi.mock('electron', () => ({ clipboard: {} }))
 
@@ -2379,13 +2385,41 @@ describe('real edit resend to runtime request boundary', () => {
     const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
     const adapter = new AnalytixRuntimeProvider()
     const provider = { getAttachmentMetadata: adapter.getAttachmentMetadata.bind(adapter),
-      rewindThread: vi.fn(async () => undefined), sendUserMessage: vi.fn(adapter.sendUserMessage.bind(adapter)),
+      rewindThread: vi.fn(async (_threadId: string, _turnId: string): Promise<unknown> => undefined), sendUserMessage: vi.fn(adapter.sendUserMessage.bind(adapter)),
       subscribeThreadEvents: vi.fn((_threadId: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)) }
     registryMock.getProvider.mockReturnValue(provider)
     const set: ChatStoreSet = partial => Object.assign(state, typeof partial === 'function' ? partial(state) : partial)
     const maintenance = createMaintenanceActions({ set, get: () => state, sseAbortRef })
     return { actions, maintenance, state, sseAbortRef, provider, runtimeRequest, getSettings, settings, id }
   }
+
+  it('keeps the closed edit payload for a postcommit canonical 404 without rewind SSE', async () => {
+    const h = combinedHarness()
+    // The audit supplies this packet from the actual durable Go owner/HTTP
+    // fault fixture. Ordinary CI also exercises the identical public contract.
+    const fixture = inject('auditRewindFailure') ?? {
+      ok: false, status: 404, primaryCommitted: true, rewindSSE: false,
+      body: JSON.stringify({ code: 'not_found', message: 'The requested resource was not found.' })
+    }
+    expect(fixture).toMatchObject({ ok: false, status: 404, primaryCommitted: true, rewindSSE: false })
+    const failure = { ok: false, status: fixture.status,
+      body: JSON.stringify(projectPublicRuntimeHTTPError(fixture.status, JSON.parse(fixture.body))) }
+    const originalRequest = h.runtimeRequest.getMockImplementation()!
+    h.runtimeRequest.mockImplementation(async path => path.endsWith('/rewind') ? failure : originalRequest(path))
+    const adapter = new AnalytixRuntimeProvider()
+    h.provider.rewindThread.mockImplementation(adapter.rewindThread.bind(adapter))
+    await h.maintenance.rewindAndResend('old_user', 'edited after postcommit 404')
+    expect(h.state.blocks[0].id).toBe('old_user')
+    expect(h.runtimeRequest.mock.calls.filter(call => call[0].endsWith('/rewind'))).toHaveLength(1)
+    expect(h.runtimeRequest.mock.calls.some(call => call[0].endsWith('/turns'))).toBe(false)
+    expect(h.provider.sendUserMessage).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft?.input).toBe('edited after postcommit 404')
+    expect(draft.attachments.map(item => item.id)).toEqual([h.id])
+    expect(draft.fileReferences[0].name).toBe('fixture.txt')
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
+    expect(JSON.stringify(draft)).not.toMatch(/PRIVATE_TEXT|PRIVATE_URL/)
+  })
 
   it('keeps attachment IDs and safe display metadata through optimistic state, the actual POST and acknowledgement', async () => {
     const h = combinedHarness()
