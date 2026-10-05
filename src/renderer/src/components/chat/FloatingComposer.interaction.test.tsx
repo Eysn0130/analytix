@@ -36,7 +36,11 @@ afterEach(async () => {
 const trigger = () => host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:composerMenuTitle')}"]`)!
 const menu = () => host.querySelector<HTMLElement>('[role="menu"]')
 async function open() {
-  await act(async () => { trigger().click(); await new Promise(resolve => window.setTimeout(resolve, 10)) })
+  // Commit the menu before waiting for its autofocus frame.
+  await act(async () => { trigger().click() })
+  await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())) })
+  expect(menu()).not.toBeNull()
+  expect(document.activeElement).toBe(menu()!.querySelector('button:not(:disabled)'))
 }
 async function key(target: HTMLElement, value: string, options: KeyboardEventInit = {}) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...options })

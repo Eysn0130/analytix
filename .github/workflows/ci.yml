@@ -91,6 +91,13 @@ jobs:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
       - run: npm ci
+      - name: Install pinned scanner dependency
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          ripgrep_root="$RUNNER_TEMP/analytix-ripgrep"
+          cargo +1.94.1 install ripgrep --version 14.1.1 --locked --root "$ripgrep_root"
+          "$ripgrep_root/bin/rg" --version
+          printf '%s\n' "$ripgrep_root/bin" >> "$GITHUB_PATH"
       # vitest.config.ts already bounds workers; do not suppress failing assertions.
       - run: |
           # Private-authority fixtures require owner-only creation, matching the
